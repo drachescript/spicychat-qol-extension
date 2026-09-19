@@ -1,0 +1,201 @@
+{
+  "manifest_version": 3,
+  "name": "SpicyChat QoL",
+  "version": "0.2.0",
+  "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://spicychat.ai/*",
+    "https://www.spicychat.ai/*",
+    "https://ts-lb.nd-api.com/*",
+    "https://prod.nd-api.com/*",
+    "https://cdn.nd-api.com/*",
+    "https://cms.cdn.nd-api.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://spicychat.ai/*",
+        "https://www.spicychat.ai/*"
+      ],
+      "js": [
+        "content/generation-metadata-loader.js",
+        "content/card-token-auth-loader.js",
+        "content/exact-message-counts-loader.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://spicychat.ai/*",
+        "https://www.spicychat.ai/*"
+      ],
+      "js": [
+        "content/build-profile.js",
+        "content/core.js",
+        "content/compatibility.js",
+        "content/auto-afk.js",
+        "content/dom.js",
+        "content/runtime-kernel.js",
+        "content/runtime-plan.js",
+        "content/diagnostic-protocol.js",
+        "content/tab-diagnostics.js",
+        "content/quick-panel.js",
+        "content/accessibility.js",
+        "content/command-palette.js",
+        "content/tag-aliases.js",
+        "content/rc87-panel-position.js",
+        "content/soundscapes.js",
+        "content/opened-chats.js",
+        "content/tags-nsfw.js",
+        "content/premium-notifications.js",
+        "content/rc83-ui.js",
+        "content/top-bar.js",
+        "content/chat-topbar.js",
+        "content/model-selector.js",
+        "content/generation-profiles.js",
+        "content/ad-banners.js",
+        "content/language-filter.js",
+        "content/creator-favorites.js",
+        "content/creator-following.js",
+        "content/favorite-bots.js",
+        "content/saved-lists-overlay.js",
+        "content/later-bots.js",
+        "content/recommendation-helpers.js",
+        "content/native-rating-helpers.js",
+        "content/cards.js",
+        "content/card-token-info.js",
+        "content/exact-message-counts.js",
+        "content/bot-archive.js",
+        "content/profile-export.js",
+        "content/bot-backup.js",
+        "content/creator-workspace.js",
+        "content/lorebook-filter.js",
+        "content/lorebook-search-filter.js",
+        "content/lorebook-tags.js",
+        "content/wiki-lorebook-importer.js",
+        "content/lorebook-backup.js",
+        "content/lorebook-workflow.js",
+        "content/smart-filter-presets.js",
+        "content/my-creations-view-memory.js",
+        "content/my-creations-filters.js",
+        "content/creation-audit.js",
+        "content/creator-writing-assistant.js",
+        "content/animation-control.js",
+        "content/rc86-bulk-block.js",
+        "content/bot-blocking.js",
+        "content/bot-organizer.js",
+        "content/card-workflow.js",
+        "content/chat-tags.js",
+        "content/chat-ui.js",
+        "content/chat-bookmarks.js",
+        "content/chat-search.js",
+        "content/focus-mode.js",
+        "content/character-qol-profiles.js",
+        "content/android-app.js",
+        "content/chat-bubbles.js",
+        "content/chat-backgrounds.js",
+        "content/formatting-toolbar.js",
+        "content/alternate-dialogue.js",
+        "content/lorebook-consistency.js",
+        "content/reply-instructions.js",
+        "content/rp-format-repair.js",
+        "content/auto-voice.js",
+        "content/bot-editor-snippets.js",
+        "content/bot-editor-history.js",
+        "content/bot-editor-actions.js",
+        "content/bot-editor-memory.js",
+        "content/creation-bulk-input.js",
+        "content/saved-snippets.js",
+        "content/story-day-tracker.js",
+        "content/rp-state-tracker.js",
+        "content/context-keeper.js",
+        "content/chat-nudges.js",
+        "content/selection-memory.js",
+        "content/message-options.js",
+        "content/memory-manager.js",
+        "content/text-replacements.js",
+        "content/translation.js",
+        "content/composer-control.js",
+        "content/rc88-chat-stability.js",
+        "content/delete-guard.js",
+        "content/failed-message-helper.js",
+        "content/performance-mode.js",
+        "content/scroll-to-top.js",
+        "content/sidebar.js",
+        "content/footer-manager.js",
+        "content/chat-list.js",
+        "content/chat-organizer.js",
+        "content/saved-chat-actions.js",
+        "content/list-fill.js",
+        "content/rc87-fixes.js",
+        "content/personas.js",
+        "content/persona-organizer.js",
+        "content/lorebook-entries.js",
+        "content/moderation-warnings.js",
+        "content/chat-export.js",
+        "content/ooc.js",
+        "content/generation-metadata.js",
+        "content/update-toast.js",
+        "content/main.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "SpicyChat QoL",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/generation-metadata-bridge.js",
+        "content/card-token-main.js",
+        "content/exact-message-counts-bridge.js"
+      ],
+      "matches": [
+        "https://spicychat.ai/*",
+        "https://www.spicychat.ai/*"
+      ]
+    }
+  ],
+  "optional_host_permissions": [
+    "https://api-free.deepl.com/*",
+    "https://api.deepl.com/*",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "browser_specific_settings": {
+    "gecko_android": {}
+  },
+  "author": "DragonScript / DragonGRaf",
+  "homepage_url": "https://spicychatqol.drache.uk/",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "optional_permissions": [
+    "downloads",
+    "notifications"
+  ],
+  "version_name": "0.2.0"
+}

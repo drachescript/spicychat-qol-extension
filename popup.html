@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+
+  <title>SpicyChat QoL</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      width: 280px;
+      margin: 0;
+      padding: 12px;
+      background: #111;
+      color: #eee;
+    }
+
+    .popup-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: 16px;
+      margin: 0;
+    }
+
+    .version {
+      color: #aaa;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    label {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #555;
+      background: #24262b;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #2e333a;
+    }
+
+    #blockCurrentBot {
+      display: none;
+      border-color: #7a3030;
+      background: #321616;
+    }
+
+    #blockCurrentBot:hover {
+      background: #4a1d1d;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.35;
+    }
+
+    .status {
+      color: #8dffb0;
+      font-size: 12px;
+      min-height: 16px;
+    }
+
+    .piper-shortcut {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: center;
+      margin: 0 0 10px;
+      padding: 8px;
+      border: 1px solid #4a3b35;
+      border-radius: 10px;
+      background: #181411;
+      color: #eee;
+      text-decoration: none;
+    }
+
+    .piper-shortcut:hover {
+      background: #231915;
+      border-color: #6f4637;
+    }
+
+    .piper-shortcut img {
+      width: 38px;
+      height: 38px;
+      object-fit: cover;
+      border-radius: 9px;
+    }
+
+    .piper-shortcut span { min-width: 0; }
+    .piper-shortcut strong { display: block; font-size: 12px; }
+    .piper-shortcut small { display: block; margin-top: 2px; color: #b8a59d; font-size: 10px; }
+    .piper-shortcut .piper-arrow { color: #d68c6a; font-size: 17px; }
+
+    .release-notice {
+      margin: 0 0 10px;
+      padding: 10px;
+      border: 1px solid #315f98;
+      border-radius: 9px;
+      background: #14243a;
+    }
+
+    .release-notice strong { display: block; margin-bottom: 4px; }
+    .release-notice p { margin: 4px 0 8px; color: #c8d8eb; font-size: 12px; line-height: 1.35; }
+    .release-actions { display: flex; gap: 6px; }
+    .release-actions button { margin: 0; padding: 6px 8px; font-size: 12px; }
+    .storage-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 8px;
+      margin: 8px 0;
+      font-size: 11px;
+      color: #bbb;
+    }
+    .storage-details span { overflow-wrap: anywhere; }
+
+    .tab-toggle-row {
+      margin-bottom: 4px;
+      padding: 7px 8px;
+      border: 1px solid #3b4652;
+      border-radius: 8px;
+      background: #171b20;
+    }
+
+    .tab-toggle-row.paused {
+      border-color: #7a5a30;
+      background: #2c2113;
+    }
+
+    .context-actions {
+      margin: 8px 0 10px;
+      padding: 8px;
+      border: 1px solid #3b4652;
+      border-radius: 9px;
+      background: #171b20;
+    }
+    .context-actions[hidden] { display: none !important; }
+    .context-actions strong { display: block; margin-bottom: 6px; font-size: 12px; }
+    .context-actions .context-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .context-actions button { width: auto; margin: 0; padding: 6px 8px; font-size: 11px; }
+  </style>
+</head>
+
+<body>
+  <div class="popup-head">
+    <h1>SpicyChat QoL</h1>
+    <span class="version" id="version">v...</span>
+  </div>
+
+  <a class="piper-shortcut" href="https://spicychat.ai/chatbot/98ebe0d7-625d-4196-a7a5-ebfd4f262367" target="_blank" rel="noopener noreferrer" title="Open Piper QoL on SpicyChat">
+    <img src="icons/icon.jpg" alt="Piper">
+    <span><strong>Ask Piper</strong><small>QoL mascot + resident UI critic</small></span>
+    <span class="piper-arrow">&gt;</span>
+  </a>
+
+  <div id="releaseNotice" class="release-notice" hidden>
+    <strong id="releaseNoticeTitle"></strong>
+    <p id="releaseNoticeText"></p>
+    <div class="release-actions">
+      <button id="viewChanges" type="button">View changes</button>
+      <button id="dismissReleaseNotice" type="button">Dismiss</button>
+    </div>
+  </div>
+
+  <label>
+    <input type="checkbox" id="enabled">
+    Enabled globally
+  </label>
+
+  <label id="tabQolRow" class="tab-toggle-row">
+    <input type="checkbox" id="tabQolEnabled">
+    QoL in this tab
+  </label>
+  <p class="hint" id="tabQolHint"></p>
+
+  <label id="miniPanelRow">
+    <input type="checkbox" id="miniPanelThisTab">
+    Mini panel in this tab
+  </label>
+
+  <p class="hint" id="miniPanelHint"></p>
+
+  <p class="hint" id="summary"></p>
+  <div class="storage-details" id="storageDetails" hidden></div>
+
+  <button id="blockCurrentBot">
+    Block this bot
+  </button>
+
+  <div id="contextActions" class="context-actions" hidden>
+    <strong id="contextActionsTitle">This page</strong>
+    <div id="contextActionButtons" class="context-buttons"></div>
+  </div>
+
+  <button id="options">
+    Open settings
+  </button>
+
+  <p class="status" id="status"></p>
+
+  <script src="popup.js"></script>
+  <script src="popup-version.js"></script>
+</body>
+</html>

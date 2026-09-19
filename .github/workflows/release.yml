@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build, for example v0.2.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag: $TAG"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Verify manifest version matches tag
+        shell: bash
+        run: |
+          MANIFEST_VERSION="$(python3 - <<'PY'
+          import json
+          with open("manifest.json", "r", encoding="utf-8") as fh:
+              print(json.load(fh)["version"])
+          PY
+          )"
+
+          EXPECTED="${{ steps.release.outputs.version }}"
+
+          if [ "$MANIFEST_VERSION" != "$EXPECTED" ]; then
+            echo "manifest.json version is $MANIFEST_VERSION but the release tag is v$EXPECTED."
+            exit 1
+          fi
+
+      - name: Build Chrome and Firefox release ZIPs
+        run: python3 scripts/build_extension.py
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum \
+            "spicychat-qol-v${{ steps.release.outputs.version }}-chrome.zip" \
+            "spicychat-qol-v${{ steps.release.outputs.version }}-firefox.zip" \
+            > SHA256SUMS.txt
+
+      - name: Keep workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spicychat-qol-v${{ steps.release.outputs.version }}
+          path: |
+            dist/spicychat-qol-v${{ steps.release.outputs.version }}-chrome.zip
+            dist/spicychat-qol-v${{ steps.release.outputs.version }}-firefox.zip
+            dist/SHA256SUMS.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Create GitHub release and attach browser ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Uploading/replacing generated assets."
+            gh release upload "$TAG" \
+              "dist/spicychat-qol-v${VERSION}-chrome.zip" \
+              "dist/spicychat-qol-v${VERSION}-firefox.zip" \
+              "dist/SHA256SUMS.txt" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "dist/spicychat-qol-v${VERSION}-chrome.zip" \
+              "dist/spicychat-qol-v${VERSION}-firefox.zip" \
+              "dist/SHA256SUMS.txt" \
+              --verify-tag \
+              --title "SpicyChat QoL v${VERSION}" \
+              --generate-notes \
+              --latest
+          fi

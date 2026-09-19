@@ -1,0 +1,38 @@
+# Local build/test output
+*.crx
+*.xpi
+*.bak
+build/
+release/
+release_build/
+
+# Generated extension staging folders
+dev_build/spicychat-qol-dev/
+dev_build/spicychat-qol-dev-firefox/
+dev_build/spicychat-qol-chrome/
+dev_build/spicychat-qol-firefox/
+
+# Dragon local live-reload helpers / generated manifest snapshots
+manifest.before-dragon-reload.json
+dragon-dev-reload.config.json
+dragon-dev-reload.js
+dragon-dev-worker.js
+dragon-dev-server.js
+
+# Local developer helpers / generated files
+tools/
+Tools/
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local saved SpicyChat pages / diagnostics
+*.html.bak
+*_diagnostic*.json
+*_diagnostic*.txt
+/dev_build
+SETUP-NOTES.md

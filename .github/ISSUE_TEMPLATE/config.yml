@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Discord support / general questions
+    url: https://discord.gg/XTMdWvuVSU
+    about: The DragonScript Discord server is one of the best places to reach DragonGRaf directly.
+
+  - name: SpicyChat QoL Extension thread
+    url: https://discord.com/channels/1108377954389594236/1535324675524137121
+    about: Use the QoL Extension thread in the official SpicyChat Discord server for extension discussion and support.

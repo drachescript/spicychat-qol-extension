@@ -1,0 +1,67 @@
+name: Feature request
+description: Suggest an improvement or new optional QoL feature.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature ideas are welcome. New behavior should remain optional where practical and should avoid breaking existing local data.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like QoL to add or change?
+      description: Describe the idea in plain language.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Explain what is difficult, repetitive or missing today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: How should it work?
+      description: Describe the behavior or UI you have in mind.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Main area
+      options:
+        - Discovery / bot listings
+        - Saved Bots / organization
+        - Chats list
+        - Chat / roleplay tools
+        - Personas / Memory
+        - Creator tools
+        - Lorebooks
+        - Appearance / interface
+        - Browser / tabs
+        - Backup / data
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Examples or extra details
+      description: Add screenshots, mockups, links or other context if useful.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked for an existing request for the same feature.
+          required: true

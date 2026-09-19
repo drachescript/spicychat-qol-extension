@@ -1,0 +1,96 @@
+name: Development builds
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spicychat-qol-dev-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build rolling development packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build Chrome and Firefox development ZIPs
+        run: python3 scripts/build_extension.py --dev
+
+      - name: Keep workflow artifacts for testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: spicychat-qol-dev-${{ github.sha }}
+          path: |
+            dist/spicychat-qol-dev-chrome.zip
+            dist/spicychat-qol-dev-firefox.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Create development release notes
+        shell: bash
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          cat > dev-release-notes.md <<EOF
+          This is an automatically generated development build of SpicyChat QoL containing the latest changes from the \`main\` branch.
+
+          ⚠️ **This is a testing build. It may contain unfinished changes, regressions or bugs.**
+          Use it at your own risk.
+
+          - **Last build:** ${BUILD_DATE}
+          - **Reference commit:** [\`${SHORT_SHA}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})
+
+          ### Development downloads
+
+          - \`spicychat-qol-dev-chrome.zip\`
+          - \`spicychat-qol-dev-firefox.zip\`
+
+          For normal/stable installs, use the Chrome Web Store or Firefox Add-ons release instead.
+          EOF
+
+      - name: Move rolling dev tag to this commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f dev-build "$GITHUB_SHA"
+          git push origin refs/tags/dev-build --force
+
+      - name: Create or update rolling development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view dev-build >/dev/null 2>&1; then
+            gh release edit dev-build \
+              --title "Development build" \
+              --notes-file dev-release-notes.md \
+              --prerelease \
+              --latest=false
+
+            gh release upload dev-build \
+              dist/spicychat-qol-dev-chrome.zip \
+              dist/spicychat-qol-dev-firefox.zip \
+              --clobber
+          else
+            gh release create dev-build \
+              dist/spicychat-qol-dev-chrome.zip \
+              dist/spicychat-qol-dev-firefox.zip \
+              --verify-tag \
+              --title "Development build" \
+              --notes-file dev-release-notes.md \
+              --prerelease \
+              --latest=false
+          fi

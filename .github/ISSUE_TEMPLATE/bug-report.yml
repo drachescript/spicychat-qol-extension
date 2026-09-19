@@ -1,0 +1,109 @@
+name: Bug report
+description: Report something in SpicyChat QoL that is not working correctly.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Please do **not** include authentication tokens, API keys, Discord webhook URLs, private chat exports, Persona text, Memories, or other sensitive information.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe what went wrong and what you saw.
+      placeholder: "Example: Bots disappear from creator profiles while QoL is enabled."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      description: Describe the behavior you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Give the shortest reliable steps you know.
+      placeholder: |
+        1. Open ...
+        2. Enable ...
+        3. Go to ...
+        4. See ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Home / bot listings
+        - Creator profile
+        - Saved Bots / lists
+        - Chats list
+        - Chat
+        - My Creations / chatbot editor
+        - Personas / Memory
+        - Lorebooks
+        - Settings / popup
+        - Backup / restore
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser / platform
+      options:
+        - Chrome / Chromium
+        - Brave
+        - Firefox
+        - Opera
+        - Android wrapper
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SpicyChat QoL version
+      description: "Example: 0.2.0"
+      placeholder: "0.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: support-info
+    attributes:
+      label: QoL support information
+      description: |
+        If useful, paste the safe support/diagnostic information from QoL Settings.
+        Do not paste private content or secrets.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, logs or extra details
+      description: Add anything else that may help reproduce or understand the problem.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked for an existing issue describing the same problem.
+          required: true
+        - label: I have removed or hidden any private information from screenshots/logs.
+          required: true
