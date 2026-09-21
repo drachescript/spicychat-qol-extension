@@ -342,6 +342,7 @@
     if (state.observer) return;
     state.observer = new MutationObserver(mutations => {
       if (!mutations.some(m => m.addedNodes?.length || m.removedNodes?.length)) return;
+      if (!DS.mutationsHaveNativeChanges?.(mutations)) return;
       schedule();
     });
     state.observer.observe(document.body, { childList: true, subtree: true });

@@ -50,10 +50,14 @@
 
     if (textarea.disabled) textarea.disabled = false;
     if (textarea.hasAttribute("disabled")) textarea.removeAttribute("disabled");
-    if (textarea.getAttribute("aria-disabled") === "true") {
-      textarea.setAttribute("aria-disabled", "false");
-    }
+    if (textarea.readOnly) textarea.readOnly = false;
+    if (textarea.hasAttribute("readonly")) textarea.removeAttribute("readonly");
+    if (textarea.getAttribute("aria-disabled") === "true") textarea.setAttribute("aria-disabled", "false");
+    if (textarea.getAttribute("aria-readonly") === "true") textarea.setAttribute("aria-readonly", "false");
 
+    // This only keeps drafting/editing available. It deliberately does not
+    // click or re-enable SpicyChat's send/generate buttons while another text
+    // or image generation is in flight.
     DS.setClassState?.(textarea, "ds-composer-forced-enabled", true);
   }
 
@@ -172,7 +176,7 @@
       state.observedTextareas.add(textarea);
       state.composerObserver.observe(textarea, {
         attributes: true,
-        attributeFilter: ["disabled", "aria-disabled"]
+        attributeFilter: ["disabled", "readonly", "aria-disabled", "aria-readonly"]
       });
     }
   }

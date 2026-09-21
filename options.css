@@ -1886,3 +1886,21 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
     width: 100%;
   }
 }
+
+/* v0.2.2: per-favorite-creator discovery overrides */
+.favorite-creator-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+.favorite-creator-override {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.favorite-creator-override input {
+  margin: 0;
+}

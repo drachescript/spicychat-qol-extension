@@ -47,6 +47,19 @@ const CHAT_BACKGROUNDS_KEY = "chatBackgroundMediaV1";
 const QUICK_DISLIKE_HISTORY_KEY = "quickDislikeHistoryV1";
 const QUICK_DISLIKE_BULK_STATE_KEY = "quickDislikeBulkStateV1";
 const BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD = 3;
+const BULK_DISLIKE_RETRY_LIMIT = 2;
+const BULK_DISLIKE_RETRY_BASE_MS = 1200;
+const BULK_DISLIKE_TRANSIENT_STATUSES = new Set([
+  "worker-timeout",
+  "worker-tab-failed",
+  "worker-closed",
+  "rating-button-not-found",
+  "rating-modal-not-found",
+  "done-button-not-ready",
+  "submit-not-confirmed",
+  "worker-error",
+  "failed"
+]);
 const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
 const BACKUP_FORMAT_VERSION = 11;
@@ -129,12 +142,16 @@ function applyOptionsAccessibilityPreview(settings = {}) {
 }
 
 const OLD_DEFAULT_OOC_TEMPLATE = "[OOC: Never control Lukas or the user in any way. Do not speak for Lukas. Do not describe what Lukas thinks, feels, wants, notices, decides, does, or how he reacts. Do not move Lukas forward in the scene. Only the user may write Lukas's words, actions, thoughts, emotions, expressions, and decisions. You may control only your character, NPCs, side characters, enemies, and the environment. End every response in a way that leaves Lukas free to respond.]";
+const DEFAULT_OOC_TEMPLATE_ID = "builtin-strict-no-control";
+const HARD_OOC_TEMPLATE_ID = "builtin-hard-no-control";
 const DEFAULT_OOC_TEMPLATE = "[OOC: Never control {user} or the user in any way. Do not speak for {user}. Do not describe what {user} thinks, feels, wants, notices, decides, does, or how {user} reacts. Do not move {user} forward in the scene. Only the user may write {user}'s words, actions, thoughts, emotions, expressions, and decisions. You may control only your character, NPCs, side characters, enemies, and the environment. End every response in a way that leaves {user} free to respond.]";
+const HARD_OOC_TEMPLATE = "[OOC: Never control {user} or the user in any way. Do not speak for {user}. Do not describe what {user} thinks, feels, wants, notices, decides, remembers, assumes, understands, intends, or how {user} reacts. Do not describe {user}'s facial expressions, body language, physical reactions, involuntary reactions, attention, focus, attraction, arousal, fear, embarrassment, surprise, discomfort, pleasure, or any other internal or external response unless the user explicitly wrote it first. Do not move {user} forward in the scene. Do not make {user} walk, sit, stand, turn, look, nod, shake their head, smile, laugh, sigh, blush, tense, relax, freeze, tremble, touch someone, pull away, approach, leave, eat, drink, sleep, wake, or perform any other action unless the user explicitly wrote that action first. If the user begins an action, do not continue, complete, alter, or finish that action for them. Characters may touch, speak to, approach, flirt with, question, or interact with {user}, but only describe the character's actions and stop before describing {user}'s response. NPCs may form opinions or assumptions about {user}, but those assumptions must remain clearly the NPC's perspective and must never be treated as confirmed narration or fact. Never use narration such as {user} can't help but, {user} finds themselves, {user} realizes, {user} notices, {user} feels, {user} wants, {user} knows, despite themselves, or before {user} can react unless the user explicitly established it. Do not move or control {user} during time skips. You may control only your character, NPCs, side characters, enemies, animals, crowds, and the environment. For formatting, write all narration, actions, environmental description, and nonverbal behavior in italics. Write dialogue in the format Character Name: dialogue. Do not use quotation marks around dialogue. Do not bold character names. Do not put narration in parentheses. Use a new paragraph when the speaker changes. Keep replies medium-length, cohesive, concrete, and story-focused. Avoid repetitive exposition, artificial cliffhangers, and cutting scenes short just to force continuation. End every response in a way that leaves {user} completely free to respond.]";
 
 const DEFAULT_SETTINGS = {
   enabled: true,
   globalNsfwMode: "ignore",
   saiToolkitCompatibility: false,
+  spicyChatBetaAccess: false,
 
   autoAfkEnabled: false,
   autoAfkHours: 12,
@@ -532,7 +549,10 @@ const DEFAULT_SETTINGS = {
   chatExportDefaultFormat: "text",
   chatExportHtmlLayout: "bubbles",
   showOocTools: false,
-  oocTemplates: [{ name: "Strict no-control", text: DEFAULT_OOC_TEMPLATE }],
+  oocTemplates: [
+    { id: DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DEFAULT_OOC_TEMPLATE, builtIn: true },
+    { id: HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: HARD_OOC_TEMPLATE, builtIn: true }
+  ],
 
   enableReplyInstructions: false,
   replyInstructionText: "",
@@ -1426,6 +1446,7 @@ const PAGE_INTROS = {
 };
 
 const FEATURE_CHANGE_MARKERS = {
+  spicyChatBetaAccess: { version: "0.2.11", label: "New" },
   saiToolkitCompatibility: { version: "0.1.8.76", label: "Updated" },
   enableSmartFilterPresets: { version: "0.1.9.105", label: "Updated" },
   enableCreationAudit: { version: "0.1.9.111", label: "Updated" },
@@ -4767,7 +4788,10 @@ function normalizeOocTemplates(input) {
   }
 
   if (!items.length) {
-    items = [{ name: "Strict no-control", text: DEFAULT_OOC_TEMPLATE }];
+    items = [
+      { id: DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: HARD_OOC_TEMPLATE, builtIn: true }
+    ];
   }
 
   return items
@@ -4793,7 +4817,8 @@ function normalizeOocTemplates(input) {
       return {
         id: String(item.id || `ooc-${Date.now()}-${index}`),
         name: String(item.name || item.title || "").trim() || oocNameFromText(text, index),
-        text
+        text,
+        builtIn: item.builtIn === true
       };
     })
     .filter(Boolean);
@@ -4809,6 +4834,24 @@ function oocTemplatesFromPage() {
       text: row.querySelector(".ooc-template-text")?.value?.trim() || ""
     }))
   );
+}
+
+function oocInnerBody(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^\[OOC\s*:\s*([\s\S]*?)\]$/i);
+  return match ? match[1].trim() : text;
+}
+
+function appendOocRules(baseValue, additionValue) {
+  const base = String(baseValue || "").trim();
+  const additionBody = oocInnerBody(additionValue);
+  if (!additionBody) return base;
+  const baseBody = oocInnerBody(base);
+  const norm = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (norm(baseBody).includes(norm(additionBody))) return base;
+  if (!baseBody) return `[OOC: ${additionBody}]`;
+  if (/^\[OOC\s*:/i.test(base) && /\]$/.test(base)) return `[OOC: ${baseBody} ${additionBody}]`;
+  return `${base}\n\n[OOC: ${additionBody}]`;
 }
 
 function renderOocTemplates(templates) {
@@ -4831,12 +4874,19 @@ function renderOocTemplates(templates) {
     nameInput.value = template.name;
     nameLabel.appendChild(nameInput);
 
+    const appendHard = makeElement("button", {
+      className: "ooc-template-append-hard",
+      text: "+ Hard rules",
+      attrs: { type: "button", title: "Append the built-in hard no-control and formatting rules without replacing this OOC" }
+    });
+    if (template.id === HARD_OOC_TEMPLATE_ID || template.text === HARD_OOC_TEMPLATE) appendHard.hidden = true;
+
     const remove = makeElement("button", {
       className: "ooc-template-remove",
       text: "×",
       attrs: { type: "button", title: "Remove this OOC" }
     });
-    head.append(nameLabel, remove);
+    head.append(nameLabel, appendHard, remove);
 
     const textLabel = makeElement("label", {}, [document.createTextNode("Text")]);
     const textarea = makeElement("textarea", {
@@ -4851,6 +4901,22 @@ function renderOocTemplates(templates) {
   });
 
   host.replaceChildren(...cards);
+
+  host.querySelectorAll(".ooc-template-append-hard").forEach(button => {
+    button.addEventListener("click", () => {
+      const card = button.closest(".ooc-template-card");
+      const textarea = card?.querySelector(".ooc-template-text");
+      if (!textarea) return;
+      const next = appendOocRules(textarea.value, HARD_OOC_TEMPLATE);
+      if (next === textarea.value) {
+        showSettingsToast("Those hard OOC rules are already present.");
+        return;
+      }
+      textarea.value = next;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      showSettingsToast("Hard OOC rules appended without replacing your existing text.");
+    });
+  });
 
   host.querySelectorAll(".ooc-template-remove").forEach(button => {
     button.addEventListener("click", () => {
@@ -7487,6 +7553,17 @@ function creatorNotificationAllowed(handleValue) {
   return !!normalizeCreatorHandle(handleValue);
 }
 
+function normalizeFavoriteCreatorPreferences(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    showOpenedBots: !!raw.showOpenedBots,
+    showLaterBots: !!raw.showLaterBots,
+    ignoreLanguageFilter: !!raw.ignoreLanguageFilter,
+    ignoreTagWordFilters: !!raw.ignoreTagWordFilters,
+    showAllBots: !!raw.showAllBots
+  };
+}
+
 function normalizeCreatorStore(store) {
   const raw = store && typeof store === "object" ? store : {};
   const handles = uniqueClean(Array.isArray(raw.handles) ? raw.handles.map(normalizeCreatorHandle) : []);
@@ -7495,7 +7572,8 @@ function normalizeCreatorStore(store) {
   for (const [rawKey, item] of Object.entries(rawMeta)) {
     const key = normalizeCreatorHandle(rawKey || item?.handle || "");
     if (!key) continue;
-    meta[key] = { ...(item && typeof item === "object" ? item : {}), handle: key };
+    const sourceItem = item && typeof item === "object" ? item : {};
+    meta[key] = { ...sourceItem, handle: key, preferences: normalizeFavoriteCreatorPreferences(sourceItem.preferences) };
   }
   return { handles, meta };
 }
@@ -7641,7 +7719,8 @@ function creatorEntriesFromStore(store) {
       handle,
       name: item.name || `@${handle}`,
       url: item.url || `https://spicychat.ai/creator/${encodeURIComponent(handle)}`,
-      savedAt: item.savedAt || 0
+      savedAt: item.savedAt || 0,
+      preferences: normalizeFavoriteCreatorPreferences(item.preferences)
     };
   });
 }
@@ -7722,6 +7801,51 @@ function renderFavoriteCreators() {
     buttonText: "Remove"
   })));
 
+  const prefDefs = [
+    ["showOpenedBots", "Show opened bots"],
+    ["showLaterBots", "Show Saved for Later bots"],
+    ["ignoreLanguageFilter", "Ignore language filter"],
+    ["ignoreTagWordFilters", "Ignore tag / blocked-word filters"],
+    ["showAllBots", "Always show all bots from this creator"]
+  ];
+
+  for (const row of host.querySelectorAll(".ds-creator-fav-row")) {
+    const handle = normalizeCreatorHandle(row.dataset.handle || "");
+    if (!handle) continue;
+    const meta = favoriteCreatorState.meta?.[handle] || {};
+    const prefs = normalizeFavoriteCreatorPreferences(meta.preferences);
+    const main = row.querySelector(".bot-manager-main") || row;
+    const box = makeElement("div", { className: "favorite-creator-overrides" });
+    for (const [key, labelText] of prefDefs) {
+      const label = makeElement("label", { className: "favorite-creator-override" });
+      const input = makeElement("input", { attrs: { type: "checkbox", "data-pref": key } });
+      input.checked = !!prefs[key];
+      label.append(input, document.createTextNode(labelText));
+      box.appendChild(label);
+    }
+    const note = makeElement("div", {
+      className: "bot-manager-note",
+      text: "Blocked bots always stay hidden. These switches only override softer discovery filters for this creator."
+    });
+    main.append(box, note);
+  }
+
+  host.querySelectorAll(".favorite-creator-overrides input[data-pref]").forEach(input => {
+    input.addEventListener("change", async () => {
+      const row = input.closest(".ds-creator-fav-row");
+      const handle = normalizeCreatorHandle(row?.dataset.handle || "");
+      const key = String(input.dataset.pref || "");
+      if (!handle || !key) return;
+      favoriteCreatorState = normalizeCreatorStore(favoriteCreatorState);
+      const meta = favoriteCreatorState.meta[handle] || { handle };
+      const prefs = normalizeFavoriteCreatorPreferences(meta.preferences);
+      prefs[key] = !!input.checked;
+      favoriteCreatorState.meta[handle] = { ...meta, preferences: prefs };
+      await persistFavoriteCreatorsNow();
+      showSettingsToast(`Updated @${handle} visibility overrides.`);
+    });
+  });
+
   host.querySelectorAll(".favorite-creator-remove").forEach(button => {
     button.addEventListener("click", async () => {
       const handle = button.closest(".ds-creator-fav-row")?.dataset.handle || "";
@@ -7754,7 +7878,8 @@ async function addFavoriteCreator() {
     handle,
     name,
     url: `https://spicychat.ai/creator/${encodeURIComponent(handle)}`,
-    savedAt: Date.now()
+    savedAt: Date.now(),
+    preferences: normalizeFavoriteCreatorPreferences(favoriteCreatorState.meta[handle]?.preferences)
   };
 
   if (handleInput) handleInput.value = "";
@@ -9134,18 +9259,40 @@ function blockedQuickDislikeCounts() {
 function updateBlockedDislikeStatus(text = "") {
   const status = $("blockedBotDislikeStatus");
   if (!status) return;
-  if (text) {
-    status.textContent = text;
-    return;
-  }
   const counts = blockedQuickDislikeCounts();
   const suffix = counts.nameOnly ? ` · ${counts.nameOnly} name-only skipped` : "";
-  status.textContent = `${counts.handled} handled · ${counts.remaining} remaining${suffix}`;
+  const next = text || `${counts.handled} handled · ${counts.remaining} remaining${suffix}`;
+  if (status.textContent !== next) status.textContent = next;
 }
 
 function optionsLooksMobile() {
   if (navigator.userAgentData?.mobile) return true;
   return /Android|iPhone|iPad|iPod|Mobile/i.test(String(navigator.userAgent || ""));
+}
+
+function quickDislikeResponseIsTransient(response) {
+  const status = String(response?.status || (response ? "failed" : "worker-error"));
+  return !response?.ok && BULK_DISLIKE_TRANSIENT_STATUSES.has(status);
+}
+
+async function runQuickDislikeWithBackoff(payload, label = "") {
+  let response = null;
+  for (let attempt = 0; attempt <= BULK_DISLIKE_RETRY_LIMIT; attempt += 1) {
+    if (navigator.onLine === false) return { ok: false, status: "offline-paused" };
+    if (attempt > 0) {
+      const wait = Math.min(8000, BULK_DISLIKE_RETRY_BASE_MS * (2 ** (attempt - 1)));
+      updateBlockedDislikeStatus(`Retrying ${label || payload.botName || payload.botId} in ${(wait / 1000).toFixed(wait >= 2000 ? 0 : 1)}s · attempt ${attempt + 1}/${BULK_DISLIKE_RETRY_LIMIT + 1}`);
+      await new Promise(resolve => setTimeout(resolve, wait));
+      if (navigator.onLine === false) return { ok: false, status: "offline-paused" };
+    }
+    try {
+      response = await runtimeMessage({ ...payload, retryAttempt: attempt });
+    } catch (error) {
+      response = { ok: false, status: "worker-error", error: String(error?.message || error || "Quick Dislike worker failed") };
+    }
+    if (!quickDislikeResponseIsTransient(response) || attempt >= BULK_DISLIKE_RETRY_LIMIT) return response || { ok: false, status: "worker-error" };
+  }
+  return response || { ok: false, status: "worker-error" };
 }
 
 function applyQuickDislikeResponseToLocalHistory(id, name, response) {
@@ -9291,17 +9438,28 @@ async function runBlockedBulkDislike(mode = "remaining") {
       });
       updateBlockedDislikeStatus(`Processing ${processed}/${candidates.length} · ${name}`);
 
-      let response = null;
-      try {
-        response = await runtimeMessage({
-          type: "DS_QUICK_DISLIKE_BOT",
-          botId: id,
-          botName: name,
-          chatUrl: meta.chatUrl || `https://spicychat.ai/chat/${id}`,
-          bulkRunId: runId
+      const response = await runQuickDislikeWithBackoff({
+        type: "DS_QUICK_DISLIKE_BOT",
+        botId: id,
+        botName: name,
+        chatUrl: meta.chatUrl || `https://spicychat.ai/chat/${id}`,
+        bulkRunId: runId
+      }, name);
+
+      // If connectivity drops, keep the current bot and everything after it
+      // pending instead of turning an offline period into a wall of failures.
+      if (response?.status === "offline-paused") {
+        blockedBulkDislikeStopRequested = true;
+        await persistQuickDislikeBulkState({
+          ...quickDislikeBulkState,
+          status: "paused",
+          currentId: "",
+          pendingIds: candidates.slice(index),
+          runId,
+          stopRequested: true
         });
-      } catch (error) {
-        response = { ok: false, status: "failed", error: String(error?.message || error || "Quick Dislike worker failed") };
+        updateBlockedDislikeStatus("Bulk Dislike paused because the browser is offline. Resume when the connection is back.");
+        break;
       }
 
       // A canceled request means Stop won the race before this item began.
@@ -9365,6 +9523,9 @@ async function runBlockedBulkDislike(mode = "remaining") {
     blockedBulkDislikeStopRequested = false;
     activeBlockedBulkDislikeRunId = "";
 
+    if (runId) {
+      await runtimeMessage({ type: "DS_QUICK_DISLIKE_RELEASE_BULK", bulkRunId: runId }).catch?.(() => null);
+    }
     await refreshQuickDislikeHistoryState();
     const unfinished = stopped ? blockedBulkCandidateIds("resume") : [];
     const finalFailed = uniqueClean([...(quickDislikeBulkState.failedIds || []), ...failedIds]).filter(id => !quickDislikeHistoryEntry(id));
@@ -10433,7 +10594,8 @@ async function load() {
     CREATOR_BOT_WEBHOOK_KEY,
     "generationMetadataDefaultsMigrationV01841",
     "backupOptInMigrationV01990",
-    "quickDislikeOptInMigrationV019119"
+    "quickDislikeOptInMigrationV019119",
+    "oocHardPresetMigrationV022"
   ]);
 
   const rawSettings = result.settings || {};
@@ -10512,6 +10674,24 @@ async function load() {
     Array.isArray(result[OOC_TEMPLATES_KEY]) ? result[OOC_TEMPLATES_KEY] : settings.oocTemplates
   );
 
+  if (result.oocHardPresetMigrationV022 !== true) {
+    const templates = normalizeOocTemplates(settings.oocTemplates);
+    const hasHard = templates.some(item =>
+      String(item?.id || "") === HARD_OOC_TEMPLATE_ID ||
+      String(item?.text || "").trim() === HARD_OOC_TEMPLATE
+    );
+    if (!hasHard) {
+      templates.push({
+        id: HARD_OOC_TEMPLATE_ID,
+        name: "Hard no-control + formatting",
+        text: HARD_OOC_TEMPLATE,
+        builtIn: true
+      });
+    }
+    settings.oocTemplates = templates;
+    await storageSet({ [OOC_TEMPLATES_KEY]: templates, oocHardPresetMigrationV022: true });
+  }
+
   currentPersonas = uniqueClean([
     ...(Array.isArray(result[PERSONAS_KEY]) ? result[PERSONAS_KEY].map(p => p?.name || p?.id || "") : []),
     ...(Array.isArray(result[LEGACY_PERSONAS_KEY]) ? result[LEGACY_PERSONAS_KEY].map(p => p?.name || p?.id || "") : [])
@@ -10521,6 +10701,7 @@ async function load() {
   renderChatBackgroundOptions();
 
   setChecked("enabled", settings.enabled);
+  setChecked("spicyChatBetaAccess", !!settings.spicyChatBetaAccess);
   setChecked("saiToolkitCompatibility", !!settings.saiToolkitCompatibility);
   setValue("globalNsfwMode", settings.globalNsfwMode || "ignore");
 
@@ -11167,6 +11348,7 @@ function readSettingsFromPage() {
 
   return {
     enabled: checked("enabled"),
+    spicyChatBetaAccess: checked("spicyChatBetaAccess", false),
     saiToolkitCompatibility: checked("saiToolkitCompatibility", false),
     globalNsfwMode: value("globalNsfwMode", "ignore"),
 
@@ -14243,6 +14425,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : "unavailable — no open SpicyChat tab responded to diagnostics; runtime counters below are omitted or unavailable"}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
+    `SpicyChat beta access declared: ${settings.spicyChatBetaAccess ? "yes" : "no"}`,
     `S.AI compatibility enabled: ${settings.saiToolkitCompatibility ? "yes" : "no"}`,
     Number.isFinite(bytes) ? `QoL storage: ${(bytes / 1024).toFixed(1)} KB` : "QoL storage: unavailable",
     `Backup schema supported: v${BACKUP_FORMAT_VERSION}`,
@@ -15881,7 +16064,7 @@ function reorderOptionsUi() {
   }
 
   const cardOrders = {
-    general: ["Extension", "Settings layout", "SpicyChat NSFW switch", "Quick setup", "S.AI Toolkit compatibility", "Android app settings"],
+    general: ["Extension", "SpicyChat beta access", "Settings layout", "SpicyChat NSFW switch", "Quick setup", "S.AI Toolkit compatibility", "Android app settings"],
     saved: ["Favorite bots", "Later bots", "Favorite creators", "Followed creators", "Saved Bots Hub", "Bot Organizer", "Bot Status Center"],
     writing: ["OOC presets", "Composer and draft helpers", "Model quick menu", "Saved Text / Snippets", "Reply Instructions", "Translation (DeepL)", "Generation profiles", "Timestamps and generation details"],
     "personas-memory": ["Memory manager", "Persona helpers", "Context Keeper", "Chat Nudges"],

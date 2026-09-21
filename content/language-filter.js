@@ -36,7 +36,7 @@
   const LATIN_WORDS = {
     en: ["the","and","you","your","with","for","from","this","that","are","was","have","has","they","their","about","into","would","could","should","when","where"],
     de: ["der","die","das","und","ist","nicht","mit","für","ich","du","sie","wir","ein","eine","auf","aus","dem","den","aber","auch","oder","wenn"],
-    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus"],
+    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","puede","siempre","nunca","solo","sola"],
     fr: ["le","la","les","des","une","un","avec","pour","dans","est","vous","tu","elle","il","mais","comme","quand","où","sur","pas","son"],
     it: ["il","lo","la","gli","le","una","uno","con","per","che","sei","è","sono","ma","come","quando","dove","non","suo","sua","nel"],
     pt: ["o","a","os","as","uma","um","com","para","que","você","voce","está","esta","não","nao","mas","como","quando","onde","seu","sua"],
@@ -153,7 +153,11 @@
     const secondScore = scored[1]?.[1] || 0;
     const letterCount = (value.match(/[\p{L}]/gu) || []).length;
     if (bestScore >= 3 && bestScore >= secondScore + 1) return { code: bestCode, confidence: Math.min(0.98, 0.55 + bestScore * 0.07), source: "words" };
-    if (bestScore >= 2 && letterCount >= 80 && bestScore >= secondScore + 2) return { code: bestCode, confidence: 0.68, source: "words" };
+    // Short listing descriptions are often only one sentence. Requiring ~80
+    // letters let obvious non-English blurbs slip through (for example short
+    // Spanish descriptions with several distinctive words). Two unambiguous
+    // lexical hits are enough once there is a real sentence-sized sample.
+    if (bestScore >= 2 && letterCount >= 28 && bestScore >= secondScore + 2) return { code: bestCode, confidence: Math.min(0.9, 0.62 + bestScore * 0.06), source: "words-short" };
     return { code: "", confidence: 0 };
   }
 

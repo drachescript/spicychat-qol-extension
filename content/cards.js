@@ -472,26 +472,27 @@
       return null;
     }
 
-    if (settings.protectFavoriteCreatorsFromFiltering !== false) {
-      // On a creator profile, all listed cards belong to the creator in the
-      // route. Protect the whole page when that creator is favorited. This is
-      // more reliable than depending only on each card's creator link and also
-      // restores already-hidden opened-chat cards immediately after favoriting.
-      const pageCreator = DS.currentCreatorHandle?.();
-      if (pageCreator && DS.isFavoriteCreator?.(pageCreator)) {
-        return null;
-      }
+    // Explicit bot blocks always win. Favorite-creator visibility overrides
+    // are intentionally evaluated only after this hard block check so a
+    // followed/favorite creator can never resurrect a bot the user blocked.
+    const blockedReason = DS.shouldHideBlockedBot(card, anchor, preparedText, getPreparedFields);
+    if (blockedReason) return blockedReason;
 
-      if (DS.cardHasFavoriteCreator?.(card)) {
-        return null;
-      }
-    }
+    const favoriteCreator = DS.favoriteCreatorContextForCard?.(card) || null;
+    const favoritePrefs = favoriteCreator?.preferences || {};
+    const legacyProtectAll = !!favoriteCreator && settings.protectFavoriteCreatorsFromFiltering === true;
+    const favoriteShowAll = !!favoriteCreator && (legacyProtectAll || favoritePrefs.showAllBots === true);
+
+    // "Show all bots" is the per-creator master override for soft discovery
+    // filters only. Explicit bot blocks above remain authoritative.
+    if (favoriteShowAll) return null;
 
     const isSavedForLater = !!DS.cardIsSavedForLater?.(card, anchor);
 
     if (
       settings.hideLaterBotsFromListings &&
       !context.ignoreLater &&
+      favoritePrefs.showLaterBots !== true &&
       isSavedForLater &&
       (!DS.isChatListPage() || discoveryContext)
     ) {
@@ -518,11 +519,10 @@
       return "group chat / multiple participants";
     }
 
-    const languageReason = DS.shouldHideByLanguage?.(card);
-    if (languageReason) return languageReason;
-
-    const blockedReason = DS.shouldHideBlockedBot(card, anchor, preparedText, getPreparedFields);
-    if (blockedReason) return blockedReason;
+    if (favoritePrefs.ignoreLanguageFilter !== true) {
+      const languageReason = DS.shouldHideByLanguage?.(card);
+      if (languageReason) return languageReason;
+    }
 
     const notInterestedReason = DS.shouldHideNotInterestedBot?.(card, anchor);
     if (notInterestedReason) return notInterestedReason;
@@ -533,6 +533,7 @@
     if (
       settings.hideOpenedChats &&
       !context.ignoreOpened &&
+      favoritePrefs.showOpenedBots !== true &&
       (!DS.isChatListPage() || discoveryContext) &&
       !DS.isMyCreationsChatbotsPage?.() &&
       id &&
@@ -541,7 +542,7 @@
       return "opened chat";
     }
 
-    if (settings.blockCards) {
+    if (settings.blockCards && favoritePrefs.ignoreTagWordFilters !== true) {
       const fields = getPreparedFields();
       const tagMatch = findPreparedMatch(fields.all, DS.state.preparedMatchers?.blockedTags || []);
       if (tagMatch) return `blocked tag: ${tagMatch.raw}`;
@@ -945,12 +946,36 @@
     }
   };
 
-  DS.applyCardHiding = async function applyCardHiding() {
+  function cardHidingPassKey() {
+    return [
+      location.href,
+      Number(DS.state?.domRevision || 0),
+      Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hiddenCardMode || "hide",
+      DS.smartFilterWantsOpened?.() ? 1 : 0,
+      DS.smartFilterWantsFavorites?.() ? 1 : 0,
+      DS.smartFilterWantsLater?.() ? 1 : 0
+    ].join("|");
+  }
+
+  function hasPendingLanguageUnhideVerification() {
+    return !!document.querySelector("[data-ds-language-allowed-passes='1'], [data-ds-language-allowed-passes=\"1\"]");
+  }
+
+  DS.applyCardHiding = async function applyCardHiding(options = {}) {
     if (!DS.state.settings.enabled) return;
 
     DS.recoverAccidentalCardPageHide?.();
 
     if (DS.isSingleChatPage?.() || DS.isBotProfilePage()) {
+      return;
+    }
+
+    const passKey = cardHidingPassKey();
+    const pendingLanguagePass = hasPendingLanguageUnhideVerification();
+    if (!options.force && !pendingLanguagePass && DS.state.cardHidingLastPassKey === passKey) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.cardHidingStablePassSkips = Number(perf.cardHidingStablePassSkips || 0) + 1;
       return;
     }
 
@@ -1045,6 +1070,14 @@
 
     if (hidden > 0) {
       DS.updateQuickPanel?.();
+    }
+
+    // Cache only fully-settled passes. Language-hidden cards intentionally need
+    // one follow-up confirmation before being unhidden, so leave that pass dirty.
+    if (!hasPendingLanguageUnhideVerification()) {
+      DS.state.cardHidingLastPassKey = cardHidingPassKey();
+    } else {
+      DS.state.cardHidingLastPassKey = "";
     }
   };
 })();

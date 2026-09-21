@@ -13,6 +13,14 @@
   let editQueue = Promise.resolve();
   let savedModeTimer = null;
   const dirtyRoots = new Set();
+  const selfWrittenTextNodes = new WeakSet();
+
+  function writeTextNode(node, value) {
+    if (!node || node.nodeValue === value) return false;
+    selfWrittenTextNodes.add(node);
+    node.nodeValue = value;
+    return true;
+  }
 
   function cleanRules(value) {
     return String(value || "")
@@ -166,7 +174,7 @@
   function restoreNode(node) {
     const saved = nodeState.get(node);
     if (!saved) return;
-    if (node.nodeValue === saved.applied) node.nodeValue = saved.original;
+    if (node.nodeValue === saved.applied) writeTextNode(node, saved.original);
     nodeState.delete(node);
   }
 
@@ -200,14 +208,14 @@
         nodeState.delete(node);
       }
 
-      if (signatureChanged && saved && node.nodeValue === saved.applied) node.nodeValue = original;
+      if (signatureChanged && saved && node.nodeValue === saved.applied) writeTextNode(node, original);
 
       const applied = applyRules(original, rules);
       if (applied !== original) {
-        if (node.nodeValue !== applied) node.nodeValue = applied;
+        if (node.nodeValue !== applied) writeTextNode(node, applied);
         nodeState.set(node, { original, applied });
       } else {
-        if (saved && node.nodeValue === saved.applied) node.nodeValue = original;
+        if (saved && node.nodeValue === saved.applied) writeTextNode(node, original);
         nodeState.delete(node);
       }
     }
@@ -510,10 +518,17 @@
 
     let affectsMessage = false;
     for (const mutation of mutations) {
+      if (DS.mutationIsQolOnly?.(mutation)) continue;
+      if (mutation.type === "characterData" && selfWrittenTextNodes.has(mutation.target)) {
+        selfWrittenTextNodes.delete(mutation.target);
+        continue;
+      }
+
       const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
       const root = target?.closest?.("div[id^='message-']");
       if (root) { dirtyRoots.add(root); affectsMessage = true; }
       for (const node of mutation.addedNodes) {
+        if (DS.isQolOwnedNode?.(node)) continue;
         const el = node instanceof Element ? node : node.parentElement;
         const direct = el?.closest?.("div[id^='message-']");
         if (direct) { dirtyRoots.add(direct); affectsMessage = true; }

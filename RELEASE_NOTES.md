@@ -1,143 +1,35 @@
-# SpicyChat QoL v0.2.0
+# SpicyChat QoL v0.2.11
 
-SpicyChat QoL v0.2 is the first main public release built from the long 0.1.9.x DEV/testing cycle.
-
-The extension that was previously released as **DragonScript - SpicyChat QoL DEV** is now simply **SpicyChat QoL** and is the actively maintained main version going forward.
-
-## Updating
-
-Existing DEV users do **not** need to reinstall the extension or reset QoL.
-
-Existing settings and supported local QoL data are intended to carry over normally.
-
-If you have a large setup you care about, making an **Everything backup** from **Settings → Data & Backup** before updating is still recommended.
+This update builds on the v0.2 main release with creator/history improvements, listing and language-filter fixes, mobile compatibility work, Lorebook/Context Keeper upgrades, and a large Diagnostic Extension-driven performance pass.
 
 ## Highlights
 
-### Discovery, saved bots and organization
+- Added meaningful Bot Version History with field-level compare/restore tools.
+- Added persona-group filtering/sorting in the in-chat persona picker.
+- Hardened Listing Refill against stale filters and SpicyChat's newer moving pagination.
+- Improved short-description language detection and per-favorite-creator discovery overrides.
+- Added a stricter second built-in OOC preset without overwriting user-edited/custom OOCs.
+- Kept the chat composer usable for drafting while generation is busy without forcing Send.
+- Improved mobile/WebView model-picker behavior and narrow Bot Hub layouts.
+- Added fuller Lorebook JSON export across Details + Entries, including expanded keyword capture.
+- Added Context Keeper Remove all and category selection for manual entries.
+- Reduced active-use DOM churn, repeated listing/sidebar writes, broad observer rescans, and Bulk Dislike helper overhead.
+- Cleaned store packages so repository/build-only tooling is not shipped.
+- Added an opt-in SpicyChat beta-access flag for future beta-only compatibility helpers.
+- Added Windows one-click build helpers under `dev_build` and direct build output to that folder.
 
-- Saved Bots Hub
-- Bot Organizer with folders, tags, notes and bulk tools
-- Favorite, Later, Opened, Recently Seen, Blocked and Not Interested tools
-- Smart Filter Presets
-- Expanded listing filters
-- Language include/exclude filtering
-- Exact public message counts
-- Card density and comparison helpers
-- Bot Status Center and local bot/profile copies
+## Updating
 
-### Chat and roleplay tools
+Existing settings and supported local QoL data are intended to carry over normally. User-edited OOC presets are preserved.
 
-- Chat search
-- Message bookmarks
-- Saved-chat actions and exports
-- OOC presets and formatting tools
-- Reply Instructions and optional Chat Nudges
-- Context Keeper
-- Internal Day Tracker / Storydate
-- RP State Tracker
-- RP Format Repair
-- Long-chat performance and stability improvements
+## Browser packages
 
-Storydate and RP State are now scoped per conversation rather than being shared between separate chats with the same bot.
+The normal Full build remains the reference/default package. Recommended Lite is still a draft profile and remains intentionally blocked until its package contents are ready for public use.
 
-### Personas, Memory and Lorebooks
+## Support
 
-- Persona saving and quick switching
-- Persona Organizer
-- Local Persona Library
-- Persona backup/restore tools
-- Memory Manager export/import tools
-- Lorebook search/filtering
-- Lorebook backups/history
-- Multi-entry Lorebook tools
-- Wiki / Web Lorebook Importer
-- Additional consistency and editing helpers
-
-### Creator tools
-
-- Creator Backup Manager
-- Revisioned chatbot backups
-- Draft History
-- Save & Stay
-- Save & Chat
-- Creation Audit
-- Creation snippets/history
-- My Creations tools
-- Optional Creator Writing Assistant / supported browser AI integrations
-
-Backup restores fill the normal SpicyChat editor for review instead of silently saving or publishing changes.
-
-### Data and backup
-
-- Selective backups
-- Everything backups
-- Import preview
-- Merge / Replace restore choices
-- Local recovery snapshots
-- Storage/data-health tools
-- Safer migration handling
-- Improved diagnostics/support information
-
-Sensitive service credentials such as DeepL API keys and Discord webhook URLs remain outside normal portable QoL backups.
-
-### Performance and browser compatibility
-
-- Reduced repeated DOM work and unnecessary page rescans
-- Improved behavior on large listings
-- Improved long-chat loading behavior
-- Chrome / Chromium compatibility work
-- Firefox compatibility work
-- Opera-specific handling
-- Additional support and diagnostic tooling
-
-## Firefox
-
-Firefox continues to use the existing Firefox Add-ons listing:
-
-https://addons.mozilla.org/en-US/firefox/addon/dragonscript-spicychat-qol-dev/
-
-The URL still contains `-dev` because v0.2 continues from the existing Firefox testing listing. This is intentional.
-
-## Chrome / Chromium
-
-The former DEV Chrome Web Store listing is now the normal SpicyChat QoL release:
-
-https://chromewebstore.google.com/detail/dragonscript-spicychat-qo/jdbhnaohfjnmkfpfddnjilmpaemkmabh
-
-The older Chrome listing remains available separately as **DragonScript - SpicyChat QoL Legacy**.
-
-## Known limitations
-
-- Some wiki/article sites block extension requests. The Lorebook importer supports pasted text/HTML as a fallback.
-- Browser AI availability depends on the browser and may require its own model download.
-- Very large chats are still limited by what SpicyChat itself loads and exposes.
-- The Android APK remains a separate wrapper project even though shared QoL page code is synchronized with it.
-
-## Bug reports and support
-
-If something breaks, especially after a SpicyChat site update, please report it with:
-
-- browser/platform
-- affected SpicyChat page
-- what you did
-- what happened
-- what you expected
-
-Screenshots and **Settings → Advanced → diagnostics/support** information are especially useful for harder issues.
-
-Best ways to reach me:
-
-- Discord server: https://discord.gg/XTMdWvuVSU
-- SpicyChat QoL Extension thread: https://discord.com/channels/1108377954389594236/1535324675524137121
+- Website: https://spicychatqol.drache.uk/
+- Discord: https://discord.gg/XTMdWvuVSU
 - GitHub Issues: https://github.com/drachescript/spicychat-qol-extension/issues/new
-
-## Source and license
-
-Source code:
-
-https://github.com/drachescript/spicychat-qol-extension
-
-SpicyChat QoL is licensed under **GNU GPL v3.0**.
 
 SpicyChat QoL is an independent community project and is not affiliated with, endorsed by, or sponsored by SpicyChat.

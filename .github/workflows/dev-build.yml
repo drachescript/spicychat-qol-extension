@@ -24,8 +24,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify Full modular build metadata
+        run: python3 scripts/build_extension.py --profile full --verify-only
+
       - name: Build Chrome and Firefox development ZIPs
-        run: python3 scripts/build_extension.py --dev
+        run: python3 scripts/build_extension.py --profile full --dev
 
       - name: Keep workflow artifacts for testing
         uses: actions/upload-artifact@v4

@@ -13,6 +13,10 @@
   let lastSignature = "";
   let listenersInstalled = false;
   let lastPanelAutoState = null;
+  let helperRunning = false;
+  const EXPORT_HELPER_PARAM = "dsQolLorebookExport";
+  const EXPORT_TARGET_PARAM = "dsQolLorebookTarget";
+  const EXPORT_JOB_PREFIX = "dsLorebookExportJob:";
 
   function clean(value, max = 24000) {
     return String(value ?? "")
@@ -291,6 +295,120 @@
     return ok;
   }
 
+  async function updateStoredEntries(id, entries, reason = "Full Lorebook export") {
+    if (!id || !Array.isArray(entries)) return false;
+    const result = await DS.storageGet?.([KEY]) || {};
+    const store = normalizeStore(result[KEY]);
+    const previous = store.meta[id] || { id, name: currentLorebookDisplayName() || id, entries: {} };
+    const next = {
+      ...previous,
+      id,
+      firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
+      lastSavedAt: Date.now(),
+      source: reason,
+      entries: { ...(previous.entries || {}) }
+    };
+    for (const entry of entries) {
+      if (!entry?.name) continue;
+      const incoming = {
+        key: clean(entry.key || entry.name, 600).toLowerCase(),
+        name: clean(entry.name, 500),
+        keywords: unique(entry.keywords || [], 12),
+        keywordsComplete: entry.keywordsComplete !== false,
+        hiddenKeywordCount: entry.keywordsComplete === false ? Math.max(0, Number(entry.hiddenKeywordCount) || 0) : 0,
+        content: clean(entry.content, 24000),
+        capturedAt: Number(entry.capturedAt) || Date.now()
+      };
+      next.entries[incoming.key] = mergeEntry(next.entries[incoming.key], incoming);
+    }
+    if (!next.name) next.name = currentLorebookDisplayName() || id;
+    return !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
+  }
+
+  async function captureFullEntriesHere() {
+    const info = routeInfo();
+    if (!info?.id || info.page !== "entries") return false;
+    const capture = DS.captureLorebookEntriesFully;
+    if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
+    const result = await capture({ progress: state => setStatus(state?.message || "Reading Lorebook entries…") });
+    if (!result?.entries?.length && !captureListEntries().length) return false;
+    return updateStoredEntries(info.id, result.entries || [], "Full Lorebook export");
+  }
+
+  function jobKey(token) { return `${EXPORT_JOB_PREFIX}${clean(token, 140)}`; }
+
+  async function setExportJob(token, value) {
+    if (!token) return false;
+    return !!(await DS.storageSet?.({ [jobKey(token)]: value }));
+  }
+
+  async function getExportJob(token) {
+    const result = await DS.storageGet?.([jobKey(token)]) || {};
+    return result[jobKey(token)] || null;
+  }
+
+  async function removeExportJob(token) {
+    if (!token) return;
+    try { await chrome.storage.local.remove(jobKey(token)); } catch {}
+  }
+
+  async function requestOppositePageCapture(info) {
+    if (!info?.id) return false;
+    const target = info.page === "entries" ? "details" : "entries";
+    const token = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const path = target === "entries" ? `/lorebook/edit/${encodeURIComponent(info.id)}/entries` : `/lorebook/edit/${encodeURIComponent(info.id)}`;
+    const url = new URL(path, location.origin);
+    url.searchParams.set(EXPORT_HELPER_PARAM, token);
+    url.searchParams.set(EXPORT_TARGET_PARAM, target);
+    await setExportJob(token, { status: "pending", id: info.id, target, startedAt: Date.now() });
+    const opened = await new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage({ type: "DS_LOREBOOK_EXPORT_HELPER", url: url.href }, response => {
+          if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
+          else resolve(response || { ok: false });
+        });
+      } catch (error) { resolve({ ok: false, error: error?.message || String(error) }); }
+    });
+    if (!opened?.ok) {
+      await removeExportJob(token);
+      throw new Error(opened?.error || "Could not open the Lorebook export helper tab.");
+    }
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const job = await getExportJob(token);
+      if (job?.status === "done") { await removeExportJob(token); return true; }
+      if (job?.status === "error") {
+        await removeExportJob(token);
+        throw new Error(job.error || "Lorebook export helper failed.");
+      }
+    }
+    await removeExportJob(token);
+    throw new Error("Timed out while collecting the other Lorebook tab.");
+  }
+
+  async function maybeRunExportHelper(info) {
+    if (helperRunning || !info?.id) return false;
+    const params = new URLSearchParams(location.search || "");
+    const token = clean(params.get(EXPORT_HELPER_PARAM), 140);
+    const target = clean(params.get(EXPORT_TARGET_PARAM), 20);
+    if (!token || !["details", "entries"].includes(target) || target !== info.page) return false;
+    helperRunning = true;
+    try {
+      await new Promise(resolve => setTimeout(resolve, 900));
+      await saveCapture("Lorebook full export helper");
+      if (target === "entries") await captureFullEntriesHere();
+      await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
+    } catch (error) {
+      await setExportJob(token, { status: "error", id: info.id, target, error: error?.message || String(error), finishedAt: Date.now() });
+    } finally {
+      setTimeout(() => {
+        try { chrome.runtime.sendMessage({ type: "DS_CLOSE_CURRENT_TAB" }, () => void chrome.runtime.lastError); } catch {}
+      }, 250);
+    }
+    return true;
+  }
+
   function safeFilename(value) {
     return (clean(value, 100) || "spicychat-lorebook").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 90) || "spicychat-lorebook";
   }
@@ -308,18 +426,25 @@
   }
 
   async function exportCurrent() {
-    await saveCapture("Manual Lorebook backup");
     const info = routeInfo();
     if (!info?.id) return false;
+    setStatus("Collecting full Lorebook data…");
+    await saveCapture("Manual Lorebook backup");
+    if (info.page === "entries") await captureFullEntriesHere();
+    await requestOppositePageCapture(info);
     const result = await DS.storageGet?.([KEY]) || {};
     const item = normalizeStore(result[KEY]).meta[info.id];
     if (!item) return false;
+    const entries = Object.values(item.entries || {});
+    const incompleteKeywords = entries.filter(entry => !entry.keywordsComplete).length;
     downloadJson({
       format: "spicychat-qol-lorebook-backup",
       version: 1,
       exportedAt: new Date().toISOString(),
+      completeness: { details: true, entries: true, keywords: incompleteKeywords === 0 },
       lorebook: item
     }, `${safeFilename(item.name)}-lorebook-backup.json`);
+    if (incompleteKeywords) setStatus(`Lorebook JSON downloaded, but ${incompleteKeywords} entr${incompleteKeywords === 1 ? "y has" : "ies have"} incomplete keyword data.`);
     return true;
   }
 
@@ -408,11 +533,12 @@
     });
     const exp = document.createElement("button");
     exp.type = "button";
-    exp.textContent = "Export Lorebook JSON";
+    exp.textContent = "Export full Lorebook JSON";
     exp.addEventListener("click", async () => {
       exp.disabled = true;
       const ok = await exportCurrent();
-      setStatus(ok ? "Lorebook backup JSON downloaded." : "No Lorebook backup was available yet.");
+      if (ok && !/downloaded/i.test(document.querySelector(`#${PANEL_ID} [data-role='status']`)?.textContent || "")) setStatus("Full Lorebook JSON downloaded.");
+      else if (!ok) setStatus("No Lorebook backup was available yet.");
       exp.disabled = false;
     });
     const info = routeInfo();
@@ -504,6 +630,7 @@
       return;
     }
     DS.state.lorebookBackupWasActive = true;
+    maybeRunExportHelper(info).catch(() => {});
 
     if (cfg.lorebookBackupsEnabled) installListeners();
     else {

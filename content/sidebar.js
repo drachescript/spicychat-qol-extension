@@ -335,15 +335,78 @@
     });
   }
 
-  function resetSidebarCleanup() {
-    const nav = getNav();
-    if (!nav) return;
+  function sidebarReasonStillWanted(reason, settings = {}) {
+    const key = String(reason || "");
+    if (!key.startsWith("sidebar:")) return false;
 
+    const wanted = {
+      "sidebar:logo": !!settings.hideSidebarLogo,
+      "sidebar:home": !!settings.hideSidebarHome,
+      "sidebar:home-text": !!settings.hideSidebarHome,
+      "sidebar:chats": !!settings.hideSidebarChats,
+      "sidebar:chats-text": !!settings.hideSidebarChats,
+      "sidebar:personas": !!settings.hideSidebarPersonas,
+      "sidebar:personas-text": !!settings.hideSidebarPersonas,
+      "sidebar:create-menu": !!settings.hideSidebarCreateMenu,
+      "sidebar:create-chatbot": !!settings.hideSidebarCreateChatbot,
+      "sidebar:create-chatbot-link": !!settings.hideSidebarCreateChatbot,
+      "sidebar:create-lorebook": !!settings.hideSidebarCreateLorebook,
+      "sidebar:create-lorebook-link": !!settings.hideSidebarCreateLorebook,
+      "sidebar:create-group": !!settings.hideSidebarCreateGroup,
+      "sidebar:create-group-link": !!settings.hideSidebarCreateGroup,
+      "sidebar:create-voice": !!settings.hideSidebarCreateVoice,
+      "sidebar:my-creations-menu": !!settings.hideSidebarMyCreationsMenu,
+      "sidebar:my-chatbots": !!settings.hideSidebarMyChatbots,
+      "sidebar:my-chatbots-link": !!settings.hideSidebarMyChatbots,
+      "sidebar:my-lorebooks": !!settings.hideSidebarMyLorebooks,
+      "sidebar:my-lorebooks-link": !!settings.hideSidebarMyLorebooks,
+      "sidebar:my-groups": !!settings.hideSidebarMyGroups,
+      "sidebar:my-groups-link": !!settings.hideSidebarMyGroups,
+      "sidebar:my-voices": !!settings.hideSidebarMyVoices,
+      "sidebar:favorites": !!settings.hideSidebarFavorites,
+      "sidebar:favorites-text": !!settings.hideSidebarFavorites,
+      "sidebar:recommendations": !!settings.hideSidebarRecommendations,
+      "sidebar:recommendations-text": !!settings.hideSidebarRecommendations,
+      "sidebar:leaderboard": !!settings.hideSidebarLeaderboard,
+      "sidebar:leaderboard-text": !!settings.hideSidebarLeaderboard,
+      "sidebar:blocked-creators": !!settings.hideSidebarBlockedCreators,
+      "sidebar:blocked-creators-text": !!settings.hideSidebarBlockedCreators,
+      "sidebar:subscribe": !!settings.hideSidebarSubscribe,
+      "sidebar:subscribe-text": !!settings.hideSidebarSubscribe,
+      "sidebar:help-text": !!settings.hideSidebarHelp,
+      "sidebar:social-discord": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialDiscord,
+      "sidebar:social-x": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialX,
+      "sidebar:social-reddit": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialReddit,
+      "sidebar:social-links-wrapper": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialDiscord || !!settings.hideSidebarSocialX || !!settings.hideSidebarSocialReddit,
+      "sidebar:footer-terms": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterTerms,
+      "sidebar:footer-privacy": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterPrivacy,
+      "sidebar:footer-refunds": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterRefunds,
+      "sidebar:footer-reporting": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterReporting,
+      "sidebar:footer-guidelines": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterGuidelines,
+      "sidebar:footer-support": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterSupport,
+      "sidebar:footer-affiliates": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterAffiliates,
+      "sidebar:app-download-google-play": !!settings.hideSidebarAppDownload || !!settings.hideSidebarAppDownloadGooglePlay,
+      "sidebar:app-download-app-store": !!settings.hideSidebarAppDownload || !!settings.hideSidebarAppDownloadAppStore,
+      "sidebar:app-download-generic": !!settings.hideSidebarAppDownload || !!settings.hideSidebarAppDownloadGeneric,
+      "sidebar:web-version": !!settings.hideSidebarWebVersion,
+      "sidebar:sign-out": !!settings.hideSidebarSignOut
+    };
+
+    return !!wanted[key];
+  }
+
+  function restoreNoLongerRequestedSidebarElements(settings) {
+    const nav = getNav();
+    if (!nav) return 0;
+
+    let restored = 0;
     DS.qsa("[data-ds-reason]", nav).forEach(el => {
-      if (String(el.dataset.dsReason || "").startsWith("sidebar:")) {
-        DS.unhideElement(el);
-      }
+      const reason = String(el.dataset.dsReason || "");
+      if (!reason.startsWith("sidebar:") || sidebarReasonStillWanted(reason, settings)) return;
+      DS.unhideElement(el);
+      restored += 1;
     });
+    return restored;
   }
 
   function keepNativeNavigationToggleVisible() {
@@ -367,7 +430,11 @@
   DS.applySidebarCleanup = function applySidebarCleanup() {
     const { settings } = DS.state;
 
-    resetSidebarCleanup();
+    // Do not unhide every managed row and immediately hide it again on every
+    // reconciliation pass. That old restore/reapply loop fought React and was a
+    // major source of same-state sidebar mutations in active-use diagnostics.
+    // Only restore controls whose corresponding preference was actually turned off.
+    restoreNoLongerRequestedSidebarElements(settings);
     keepSignInVisible();
     keepNativeNavigationToggleVisible();
 

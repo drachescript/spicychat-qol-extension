@@ -586,8 +586,11 @@
 
     const manual = make("div", { className: "ds-tool-editor" });
     const manualText = make("textarea", { rows: "3", placeholder: "Add an important continuity detail manually..." });
+    const manualCategory = make("select", { "aria-label": "Category for manually added Context Keeper detail" });
+    manualCategory.append(make("option", { value: "auto" }, "Category: Auto-detect"));
+    for (const [value, label] of Object.entries(CATEGORY_LABELS)) manualCategory.append(make("option", { value }, `Category: ${label}`));
     const addManual = make("button", { type: "button" }, "Add detail");
-    manual.append(manualText, addManual);
+    manual.append(manualText, manualCategory, addManual);
 
     const savedTitle = make("h3", {}, "Saved details");
     const savedFilters = make("div", { className: "ds-context-saved-filters" });
@@ -604,8 +607,9 @@
     const savedTools = make("div", { className: "ds-tool-actions" });
     const enableAll = make("button", { type: "button" }, "Use all in recap");
     const removeDisabled = make("button", { type: "button" }, "Remove excluded");
+    const removeAll = make("button", { type: "button", className: "ds-danger" }, "Remove all");
     const copyRecap = make("button", { type: "button" }, "Copy OOC recap");
-    savedTools.append(enableAll, removeDisabled, copyRecap);
+    savedTools.append(enableAll, removeDisabled, removeAll, copyRecap);
     savedFilters.append(savedSearch, categoryFilter, sourceFilter);
     const savedList = make("div", { className: "ds-tool-list" });
     const suggestionTitle = make("h3", {}, "Scan suggestions");
@@ -770,6 +774,18 @@
       await writeStore(latest, "Removed excluded Context Keeper details");
       await refreshEntry();
     });
+    removeAll.addEventListener("click", async () => {
+      const count = entry.details.length;
+      if (!count) { DS.setQuickStatus?.("Context Keeper has no saved details to remove."); return; }
+      if (!window.confirm(`Remove all ${count} Context Keeper detail${count === 1 ? "" : "s"} from this chat? This cannot be undone from Context Keeper.`)) return;
+      const latest = await readStore();
+      if (latest[id]) latest[id].details = [];
+      await writeStore(latest, "Removed all Context Keeper details");
+      candidates = [];
+      await refreshEntry();
+      renderSuggestions();
+      DS.setQuickStatus?.("Removed all Context Keeper details for this chat.");
+    });
     copyRecap.addEventListener("click", async () => {
       const recap = recapText(entry.details);
       const timelineOnly = DS.getStoryDayContextLine?.({ includeNotes: true }) || "";
@@ -813,7 +829,9 @@
     addManual.addEventListener("click", async () => {
       const value = clean(manualText.value);
       if (!value) return;
-      const added = await addDetail(value, { category: categoryFor(value), source: "manual", score: Math.max(8, scoreSentence(value)) });
+      const selectedCategory = String(manualCategory.value || "auto");
+      const category = selectedCategory === "auto" ? categoryFor(value) : normalizeCategory(selectedCategory);
+      const added = await addDetail(value, { category, source: "manual", score: Math.max(8, scoreSentence(value)) });
       if (added) {
         manualText.value = "";
         await refreshEntry();

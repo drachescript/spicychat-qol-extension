@@ -6,6 +6,7 @@ Windows examples:
   python scripts/build_extension.py
   python scripts/build_extension.py --dev
   python scripts/build_extension.py --profile full --dev
+  python scripts/build_extension.py --output-dir dev_build
   python scripts/build_extension.py --list-profiles
   python scripts/build_extension.py --verify-only
 
@@ -37,6 +38,8 @@ EXCLUDED_TOP_LEVEL = {
     ".vscode",
     "build",
     "dist",
+    "dev_build",
+    "release_build",
     "node_modules",
     "scripts",
 }
@@ -47,6 +50,35 @@ EXCLUDED_ROOT_FILES = {
     "CONTRIBUTING.md",
     "RELEASE_CHECKLIST.md",
     "android-CHANGELOG.md",
+    "README.md",
+    "RELEASE_NOTES.md",
+    "SECURITY.md",
+    "PERMISSIONS.md",
+    "PRIVACY.md",
+    "features.md",
+}
+
+# Keep CHANGELOG.md in the package: the Options page loads it at runtime.
+# LICENSE and THIRD-PARTY-NOTICES.md also stay in distributed packages.
+FORBIDDEN_PACKAGE_PREFIXES = {
+    ".git",
+    ".github",
+    ".idea",
+    ".vscode",
+    "build",
+    "dist",
+    "dev_build",
+    "release_build",
+    "node_modules",
+    "scripts",
+}
+
+FORBIDDEN_TOOL_SUFFIXES = {
+    ".bat",
+    ".cmd",
+    ".ps1",
+    ".py",
+    ".sh",
 }
 
 EXCLUDED_SUFFIXES = {
@@ -301,6 +333,7 @@ def verify_required_files() -> None:
         "popup.js",
         "options.html",
         "options.js",
+        "CHANGELOG.md",
         "icons/icon16.png",
         "icons/icon32.png",
         "icons/icon48.png",
@@ -309,6 +342,34 @@ def verify_required_files() -> None:
     missing = [rel for rel in required if not (ROOT / rel).exists()]
     if missing:
         raise SystemExit("required package files are missing:\n  " + "\n  ".join(missing))
+
+
+def verify_package_contents(stage: Path) -> None:
+    problems: list[str] = []
+
+    for path in stage.rglob("*"):
+        if not path.is_file():
+            continue
+
+        rel = path.relative_to(stage)
+        rel_posix = rel.as_posix()
+
+        if rel.parts and rel.parts[0] in FORBIDDEN_PACKAGE_PREFIXES:
+            problems.append(rel_posix)
+            continue
+
+        if len(rel.parts) == 1 and rel.name in EXCLUDED_ROOT_FILES:
+            problems.append(rel_posix)
+            continue
+
+        if path.suffix.lower() in FORBIDDEN_TOOL_SUFFIXES:
+            problems.append(rel_posix)
+
+    if problems:
+        raise SystemExit(
+            "Repository/build-only files leaked into the extension package:\n  "
+            + "\n  ".join(sorted(set(problems)))
+        )
 
 
 def copy_source(
@@ -379,9 +440,10 @@ def build(
     modules: dict,
     profile: dict,
     dev: bool,
+    output_dir: Path,
 ) -> Path:
     version = str(source_manifest["version"])
-    output = DIST / output_name(version, profile, dev, target)
+    output = output_dir / output_name(version, profile, dev, target)
     tracked_runtime = set(manifest_runtime_files(source_manifest))
     selected_runtime = selected_runtime_files(modules, profile)
 
@@ -398,6 +460,7 @@ def build(
             else firefox_manifest(filtered_source, dev, profile)
         )
         write_manifest(stage, manifest)
+        verify_package_contents(stage)
         make_zip(stage, output)
 
     return output
@@ -432,6 +495,11 @@ def main() -> int:
         action="store_true",
         help="Validate manifest/module/profile coverage without creating ZIPs.",
     )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directory for generated ZIPs. Relative paths are resolved from the repository root; defaults to dist.",
+    )
     args = parser.parse_args()
 
     source_manifest = load_manifest()
@@ -465,16 +533,24 @@ def main() -> int:
         print_profiles(profiles)
         return 0
 
-    DIST.mkdir(exist_ok=True)
+    output_dir = Path(args.output_dir).expanduser() if args.output_dir else DIST
+    if not output_dir.is_absolute():
+        output_dir = ROOT / output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     outputs = [
-        build("chrome", source_manifest, modules, profile, args.dev),
-        build("firefox", source_manifest, modules, profile, args.dev),
+        build("chrome", source_manifest, modules, profile, args.dev, output_dir),
+        build("firefox", source_manifest, modules, profile, args.dev, output_dir),
     ]
 
     print(f"Profile: {profile.get('label', profile.get('id'))} ({profile.get('id')})")
     print("Built:")
     for output in outputs:
-        print(f"  {output.relative_to(ROOT)}")
+        try:
+            shown = output.relative_to(ROOT)
+        except ValueError:
+            shown = output
+        print(f"  {shown}")
 
     return 0
 

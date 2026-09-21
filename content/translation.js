@@ -508,10 +508,11 @@
     if (!settings.enabled || !settings.enableTranslation || !DS.isSingleChatPage?.()) return;
     let relevant = false;
     for (const mutation of mutations) {
+      if (DS.mutationIsQolOnly?.(mutation)) continue;
       const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
       if (target?.closest?.(".ds-translation-block")) continue;
 
-      const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+      const nodes = [...mutation.addedNodes, ...mutation.removedNodes].filter(node => !DS.isQolOwnedNode?.(node));
       if (nodes.length && nodes.every(node => {
         const el = node instanceof Element ? node : node.parentElement;
         return !!el?.closest?.(".ds-translation-block") || !!el?.matches?.(".ds-translation-block");

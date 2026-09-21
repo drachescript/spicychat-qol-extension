@@ -157,7 +157,10 @@
 
   function startObserver() {
     if (observer || !isActive()) return;
-    observer = new MutationObserver(scheduleRefresh);
+    observer = new MutationObserver(mutations => {
+      if (!DS.mutationsHaveNativeChanges?.(mutations)) return;
+      scheduleRefresh();
+    });
     observer.observe(document.body, { childList: true, subtree: true });
   }
 

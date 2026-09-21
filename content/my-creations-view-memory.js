@@ -292,8 +292,9 @@
       DS.state.myCreationsViewToolbarObserver?.disconnect?.();
     } catch {}
 
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver(mutations => {
       if (!DS.state.myCreationsNativeSortReady) return;
+      if (!DS.mutationsHaveNativeChanges?.(mutations)) return;
       scheduleCapture();
     });
     observer.observe(host, { childList: true, subtree: true, characterData: true });

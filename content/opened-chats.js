@@ -127,7 +127,7 @@
 
     if (!button) return;
 
-    button.textContent = state.running ? "Stop loading" : "Load all";
+    DS.setTextIfChanged?.(button, state.running ? "Stop loading" : "Load all");
   }
 
   function setLoadAllStatus(text, sticky = true) {
@@ -167,12 +167,18 @@
         resolve(DS.qsa("a[href*='/chat/']").length);
       };
 
-      const observer = new MutationObserver(() => {
-        const now = DS.qsa("a[href*='/chat/']").length;
+      const observer = new MutationObserver(mutations => {
+        const addedChatLink = mutations.some(mutation => {
+          if (DS.mutationIsQolOnly?.(mutation)) return false;
+          return [...(mutation.addedNodes || [])].some(node => {
+            if (!(node instanceof Element) || DS.isQolOwnedNode?.(node)) return false;
+            return node.matches?.("a[href*='/chat/']") || !!node.querySelector?.("a[href*='/chat/']");
+          });
+        });
+        if (!addedChatLink) return;
 
-        if (now > beforeCount) {
-          finish();
-        }
+        const now = DS.qsa("a[href*='/chat/']").length;
+        if (now > beforeCount) finish();
       });
 
       observer.observe(document.body, {

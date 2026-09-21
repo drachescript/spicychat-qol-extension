@@ -97,7 +97,10 @@
         .filter(item => item.text);
     }
 
-    return [{ name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE }];
+    return [
+      { id: DS.DEFAULT_OOC_TEMPLATE_ID || "builtin-strict-no-control", name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DS.HARD_OOC_TEMPLATE_ID || "builtin-hard-no-control", name: "Hard no-control + formatting", text: DS.HARD_OOC_TEMPLATE, builtIn: true }
+    ];
   };
 
   function isBadArea(el) {
@@ -315,6 +318,11 @@
         : template;
 
     return String(text || DS.DEFAULT_OOC_TEMPLATE)
+      .replaceAll("{{user}}", user)
+      .replaceAll("{{persona}}", user)
+      .replaceAll("{{player}}", user)
+      .replaceAll("{{bot}}", bot)
+      .replaceAll("{{character}}", bot)
       .replaceAll("{user}", user)
       .replaceAll("{persona}", user)
       .replaceAll("{player}", user)

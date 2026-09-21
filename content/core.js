@@ -125,8 +125,12 @@
     return host;
   };
 
+  DS.DEFAULT_OOC_TEMPLATE_ID = "builtin-strict-no-control";
+  DS.HARD_OOC_TEMPLATE_ID = "builtin-hard-no-control";
   DS.DEFAULT_OOC_TEMPLATE =
     "[OOC: Never control {user} or the user in any way. Do not speak for {user}. Do not describe what {user} thinks, feels, wants, notices, decides, does, or how {user} reacts. Do not move {user} forward in the scene. Only the user may write {user}'s words, actions, thoughts, emotions, expressions, and decisions. You may control only your character, NPCs, side characters, enemies, and the environment. End every response in a way that leaves {user} free to respond.]";
+  DS.HARD_OOC_TEMPLATE =
+    "[OOC: Never control {user} or the user in any way. Do not speak for {user}. Do not describe what {user} thinks, feels, wants, notices, decides, remembers, assumes, understands, intends, or how {user} reacts. Do not describe {user}'s facial expressions, body language, physical reactions, involuntary reactions, attention, focus, attraction, arousal, fear, embarrassment, surprise, discomfort, pleasure, or any other internal or external response unless the user explicitly wrote it first. Do not move {user} forward in the scene. Do not make {user} walk, sit, stand, turn, look, nod, shake their head, smile, laugh, sigh, blush, tense, relax, freeze, tremble, touch someone, pull away, approach, leave, eat, drink, sleep, wake, or perform any other action unless the user explicitly wrote that action first. If the user begins an action, do not continue, complete, alter, or finish that action for them. Characters may touch, speak to, approach, flirt with, question, or interact with {user}, but only describe the character's actions and stop before describing {user}'s response. NPCs may form opinions or assumptions about {user}, but those assumptions must remain clearly the NPC's perspective and must never be treated as confirmed narration or fact. Never use narration such as {user} can't help but, {user} finds themselves, {user} realizes, {user} notices, {user} feels, {user} wants, {user} knows, despite themselves, or before {user} can react unless the user explicitly established it. Do not move or control {user} during time skips. You may control only your character, NPCs, side characters, enemies, animals, crowds, and the environment. For formatting, write all narration, actions, environmental description, and nonverbal behavior in italics. Write dialogue in the format Character Name: dialogue. Do not use quotation marks around dialogue. Do not bold character names. Do not put narration in parentheses. Use a new paragraph when the speaker changes. Keep replies medium-length, cohesive, concrete, and story-focused. Avoid repetitive exposition, artificial cliffhangers, and cutting scenes short just to force continuation. End every response in a way that leaves {user} completely free to respond.]";
 
   DS.DEFAULT_SETTINGS = {
     enabled: true,
@@ -525,7 +529,10 @@
     chatExportDefaultFormat: "text",
     chatExportHtmlLayout: "bubbles",
     showOocTools: false,
-    oocTemplates: [DS.DEFAULT_OOC_TEMPLATE],
+    oocTemplates: [
+      { id: DS.DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DS.HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: DS.HARD_OOC_TEMPLATE, builtIn: true }
+    ],
 
     enableReplyInstructions: false,
     replyInstructionText: "",
@@ -975,6 +982,11 @@
     DS.state.cardCache = null;
     DS.state.cardCacheRevision = -1;
     DS.state.cardCacheUrl = "";
+  };
+
+  DS.bumpCardFilterStateRevision = function bumpCardFilterStateRevision() {
+    DS.state.cardFilterStateRevision = Number(DS.state.cardFilterStateRevision || 0) + 1;
+    DS.state.cardHidingLastPassKey = "";
   };
 
   function prepareMatcherList(values) {
@@ -1528,7 +1540,10 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
   }
 
   if (!items.length) {
-    items = [{ name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE }];
+    items = [
+      { id: DS.DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DS.HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: DS.HARD_OOC_TEMPLATE, builtIn: true }
+    ];
   }
 
   return items
@@ -1556,7 +1571,8 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       return {
         id: String(item.id || `ooc-${Date.now()}-${index}`),
         name,
-        text
+        text,
+        builtIn: item.builtIn === true
       };
     })
     .filter(Boolean);
@@ -1619,7 +1635,8 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       DS.CHARACTER_QOL_PROFILES_KEY,
       "generationMetadataDefaultsMigrationV01841",
       "backupOptInMigrationV01990",
-      "quickDislikeOptInMigrationV019119"
+      "quickDislikeOptInMigrationV019119",
+      "oocHardPresetMigrationV022"
     ]);
 
     const rawSettings = result.settings || {};
@@ -1719,6 +1736,30 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         ? result[DS.OOC_TEMPLATES_KEY]
         : settings.oocTemplates
     );
+
+    // v0.2.2: add the second built-in hard OOC exactly once. Existing OOC
+    // entries are left byte-for-byte alone; in particular an edited first
+    // default is never replaced with a newer canonical copy.
+    if (result.oocHardPresetMigrationV022 !== true) {
+      const templates = DS.normalizeOocTemplates(settings.oocTemplates);
+      const hasHard = templates.some(item =>
+        String(item?.id || "") === DS.HARD_OOC_TEMPLATE_ID ||
+        String(item?.text || "").trim() === DS.HARD_OOC_TEMPLATE
+      );
+      if (!hasHard) {
+        templates.push({
+          id: DS.HARD_OOC_TEMPLATE_ID,
+          name: "Hard no-control + formatting",
+          text: DS.HARD_OOC_TEMPLATE,
+          builtIn: true
+        });
+      }
+      settings.oocTemplates = templates;
+      await DS.storageSet({
+        [DS.OOC_TEMPLATES_KEY]: templates,
+        oocHardPresetMigrationV022: true
+      });
+    }
 
     const savedBlocked = result[DS.BLOCKED_BOTS_KEY] || {};
     const savedNotInterested = result[DS.NOT_INTERESTED_KEY] || {};
@@ -1863,6 +1904,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
   // change, which is especially noticeable on Android/WebView installs.
   DS.applyStorageChanges = function applyStorageChanges(changes = {}) {
     let refreshLookups = false;
+    let cardFilterStateChanged = false;
 
     if (changes.settings) {
       const rawSettings = changes.settings.newValue || {};
@@ -1878,6 +1920,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       );
       rebuildBlockedStateFromCache();
       refreshLookups = true;
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.OOC_TEMPLATES_KEY] && !changes.settings) {
@@ -1886,6 +1929,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
 
     if (changes[DS.OPENED_KEY]) {
       DS.state.openedChats = new Set(Array.isArray(changes[DS.OPENED_KEY].newValue) ? changes[DS.OPENED_KEY].newValue : []);
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.OPENED_META_KEY]) {
@@ -1902,6 +1946,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       };
       rebuildBlockedStateFromCache();
       refreshLookups = true;
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.NOT_INTERESTED_KEY]) {
@@ -1911,6 +1956,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         meta: next.meta && typeof next.meta === "object" ? next.meta : {}
       };
       refreshLookups = true;
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.FAVORITE_CREATORS_KEY]) {
@@ -1921,6 +1967,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
             handles: DS.uniqueClean(Array.isArray(next.handles) ? next.handles : []),
             meta: next.meta && typeof next.meta === "object" ? next.meta : {}
           };
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.FOLLOWED_CREATORS_KEY]) {
@@ -1938,6 +1985,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         meta: next.meta && typeof next.meta === "object" ? next.meta : {}
       };
       refreshLookups = true;
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.LATER_BOTS_KEY]) {
@@ -1947,6 +1995,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         meta: next.meta && typeof next.meta === "object" ? next.meta : {}
       };
       refreshLookups = true;
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.BOT_ORGANIZER_KEY]) {
@@ -1969,6 +2018,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       DS.state.recentlySeenBots = {
         entries: Array.isArray(next.entries) ? next.entries : []
       };
+      cardFilterStateChanged = true;
     }
 
     if (changes[DS.CHARACTER_QOL_PROFILES_KEY]) {
@@ -1989,6 +2039,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     }
 
     if (refreshLookups) DS.refreshFastLookupCaches?.();
+    if (cardFilterStateChanged) DS.bumpCardFilterStateRevision?.();
 
     // Opened-history writes are already filtered at capture time and during
     // state load. Re-running the full blocked-vs-opened sweep for every opened

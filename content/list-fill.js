@@ -398,7 +398,7 @@
     const seenExtraIds = new Set();
     let removed = 0;
     for (const extra of extras) {
-      extra.classList.add("ds-autofill-extra-card");
+      if (!extra.classList.contains("ds-autofill-extra-card")) extra.classList.add("ds-autofill-extra-card");
       const identity = extra.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
       const id = botIdFromLink(identity);
       if (!id) continue;
@@ -903,6 +903,8 @@
     stats.metadataExtracted += wrappers.filter(item => item.meta && typeof item.meta === "object").length;
     stats.lastPage = Number(page) || 0;
     stats.lastError = "";
+    DS.state.autoFillHelperHasNext = response.hasNextPage !== false;
+    if (response.hasNextPage === false) DS.state.autoFillReachedEnd = true;
 
     const host = extraGrid();
     if (!host || !wrappers.length) return 0;
@@ -1010,6 +1012,8 @@
     DS.state.autoFillLastClickAt = 0;
     DS.state.autoFillNextPage = currentPage() + 1;
     DS.state.autoFillLoadedPages = [];
+    DS.state.autoFillReachedEnd = false;
+    DS.state.autoFillHelperHasNext = true;
     DS.state.autoFillStopRequested = false;
     DS.state.autoFillPausedByUser = false;
     resetRunStats();
@@ -1110,22 +1114,31 @@
       return result.grew;
     }
 
-    if (paginationNextButton()) {
-      const nextPage = Math.max(currentPage() + 1, Number(DS.state.autoFillNextPage || (currentPage() + 1)));
-      const lastPage = lastKnownPage();
-      if (lastPage > 1 && nextPage > lastPage) {
+    if (paginationNextButton() || Number(DS.state.autoFillNextPage || 0) > currentPage()) {
+      if (DS.state.autoFillReachedEnd) {
         if (manual) DS.setQuickStatus?.("Auto-fill reached the last listing page.");
         return false;
       }
 
+      const nextPage = Math.max(currentPage() + 1, Number(DS.state.autoFillNextPage || (currentPage() + 1)));
       DS.state.autoFillClicks = (DS.state.autoFillClicks || 0) + 1;
       DS.state.autoFillNextPage = nextPage + 1;
       DS.setQuickStatus?.(`Auto-fill fetching page ${nextPage}... ${DS.state.autoFillClicks}/${maxClicks}`, true);
       try {
         const appended = await appendNextPaginationPage(nextPage);
         DS.state.autoFillLoadedPages = [...new Set([...(DS.state.autoFillLoadedPages || []), nextPage])];
-        if (!appended && manual) DS.setQuickStatus?.(`Page ${nextPage} loaded, but it had no new cards to add.`);
-        return appended > 0;
+        if (!appended && manual) {
+          const more = DS.state.autoFillHelperHasNext !== false && !DS.state.autoFillReachedEnd;
+          DS.setQuickStatus?.(more
+            ? `Page ${nextPage} had no new visible cards; continuing to the next page...`
+            : `Page ${nextPage} had no new cards and appears to be the end of the listing.`);
+        }
+        // A successfully loaded page is progress even when every card on it is
+        // duplicate/filtered. Older refill logic returned false here, causing
+        // manual and automatic refill to stop after the first "empty" page.
+        // Keep walking the server-side page sequence until target/max attempts
+        // or until the helper page says there is no Next page.
+        return appended > 0 || (DS.state.autoFillHelperHasNext !== false && !DS.state.autoFillReachedEnd);
       } catch (error) {
         runStats().helperFailures += 1;
         runStats().lastError = error?.message || String(error);
@@ -1179,6 +1192,8 @@
       DS.resetAutoFillIfUrlChanged?.();
       DS.state.autoFillClicks = 0;
       DS.state.autoFillNextPage = currentPage() + 1;
+      DS.state.autoFillReachedEnd = false;
+      DS.state.autoFillHelperHasNext = true;
       DS.state.autoFillStopRequested = false;
       DS.state.autoFillPausedByUser = false;
       resetRunStats();
@@ -1370,6 +1385,10 @@
       status: "ready",
       page: actual,
       lastPage: lastKnownPage(),
+      // SpicyChat now exposes pagination in moving windows (for example only
+      // ten page buttons at once), so lastKnownPage() is not a reliable end.
+      // The actual Next button on the rendered helper page is authoritative.
+      hasNextPage: !!paginationNextButton(),
       baseUrl: location.href,
       cards: wrappers.slice(0, 120).map(wrapper => {
         const clean = wrapper.cloneNode(true);

@@ -1,3 +1,28 @@
+## 0.2.11
+
+- Added a General **SpicyChat beta access** switch for users whose accounts can see beta-only SpicyChat features. It is off by default and does not enable beta access by itself; it only gives QoL a clean opt-in gate for future beta-specific integrations.
+- Added one-click Windows build helpers in `dev_build\` for Full release/DEV builds, profile verification/listing, and future Recommended Lite builds. Generated ZIPs can now be written directly to `dev_build` through the builder's new `--output-dir` option.
+
+- Context Keeper now has a **Remove all** action for the current chat and lets manually added continuity details use an explicit category instead of always relying on auto-detection.
+- Lorebook JSON export is now a **full export** from either Details or Entries: QoL collects the opposite editor tab automatically, opens each loaded entry to capture all keywords (not only the visible 3 +N summary), and merges details + entries into one file.
+- Restored the modular build metadata required by the Full profile and hardened the rolling development workflow with a Full-profile verification step before packaging, fixing the Actions failure caused by missing `build/modules.json`.
+- Added another Diagnostic Extension follow-up: stable listing/card-filter passes now short-circuit when neither the card DOM nor filter state changed, reducing active Home/listing rescans.
+- Stopped Sidebar cleanup from restoring and immediately re-hiding the same native rows on every pass; only preferences that were actually turned off are restored now.
+- Reduced more same-state UI writes (including Load all/list-refill decoration) and exposed the new stable-pass skip counter to diagnostics.
+- Diagnostic attribution now records the clean native baseline for SpicyChat `/queue`, duplicate `/cms/banners`, and currently-unconfirmed `isPartner_*` storage churn so these are not misclassified as QoL regressions.
+- Fixed Listing Refill stopping after one or two helper pages when a page contained only duplicates/filtered cards. Refill now keeps walking later pages until the visible-card target, configured attempt limit, explicit stop, or the rendered helper page actually has no Next page.
+- Updated Listing Refill for SpicyChat's moving pagination windows: the highest currently visible page button (often only a 10-page window) is no longer treated as the end of the listing.
+- Improved short Latin-language detection so obvious one-sentence Spanish descriptions are filtered correctly when only English/German (or other selected languages) are allowed, including short descriptions with distinctive Spanish vocabulary.
+- Added per-favorite-creator discovery overrides for showing opened bots, showing Saved for Later bots, ignoring the language filter, ignoring tag/blocked-word filters, or always showing all bots from that creator. Explicitly blocked bots always remain hidden and take priority over every favorite-creator override.
+- Added a second built-in **Hard no-control + formatting** OOC preset. Existing OOC/default text is never overwritten during migration, even when the user edited it. Custom OOCs can append the hard rules without replacing their existing text.
+- Hardened **Keep the message box usable while the AI is responding** so image/text generation states that use `readonly`/`aria-readonly` are unlocked for drafting too; QoL still does not force-enable Send while SpicyChat is busy.
+- Cleaned generated Chrome/Firefox store packages so repository-only build/tooling files are no longer shipped, while keeping runtime-required/legal files such as the in-extension changelog and third-party notices.
+- Added another Diagnostic Extension-driven performance hardening pass: broad feature observers now ignore QoL-owned mutations more consistently, and several high-frequency UI updates avoid unchanged writes.
+- Scoped Bulk Block selection refreshes to newly changed card subtrees instead of rescanning the whole listing for every React mutation.
+- Creator/editor local-memory helpers now wait for a real editor form, coalesce mount/rerender scans, and skip unchanged audit/image-prompt storage work.
+- Bulk Dislike now reuses one hidden helper tab during a run, retries transient helper failures with backoff, and pauses cleanly while offline instead of creating repeated full-app helper boots/failure storms.
+- Reduced extra chat/list work from Focus Mode, text replacements, translation, RP Format Repair, chat-stability repair, My Creations view memory, and older-chat growth observers reacting to unrelated QoL-owned DOM changes.
+
 ## 0.2.1
 
 - Added **Persona group filtering and sorting inside the in-chat persona picker**, reusing the same local Persona Manager folders/favorites/custom order used on `/personas`.

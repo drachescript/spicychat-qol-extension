@@ -1644,6 +1644,7 @@
   }
 
   function mutationIsOnlyQolUi(mutation) {
+    if (typeof DS.mutationIsQolOnly === "function") return DS.mutationIsQolOnly(mutation);
     const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
     if (target?.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return true;
     if (target && (nodeLooksQolOwned(target) || target.closest?.("[data-ds-owned='1']"))) return true;

@@ -229,7 +229,7 @@
       ]),
       listing: pick([
         "listingNonCardCriticalSkips", "listingScheduleDeferrals", "slowStepThrottleSkips",
-        "blockedBotMutationSkips", "blockedBotRefreshDeferrals", "blockedBotRefreshFlushes",
+        "cardHidingStablePassSkips", "blockedBotMutationSkips", "blockedBotRefreshDeferrals", "blockedBotRefreshFlushes",
         "cardTokenBackgroundAuthSkips", "cardTokenHiddenQueuePauses"
       ]),
       chat: pick([
@@ -258,6 +258,11 @@
     return {
       reason,
       state: runState(),
+      attributionNotes: {
+        nativeQueuePolling: "SpicyChat /queue polling is site-owned; do not attribute it to QoL without direct QoL network markers.",
+        nativeBannerBursts: "Repeated /cms/banners requests reproduce without QoL and are site-owned baseline traffic.",
+        nativePartnerStorage: "isPartner_* storage writes are currently treated as native/unconfirmed, not QoL-owned."
+      },
       routeType: page.routeType,
       runtimePlan: page.runtimePlan,
       counters: selectedRuntimeCounters()

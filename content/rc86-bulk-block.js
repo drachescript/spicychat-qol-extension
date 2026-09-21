@@ -275,14 +275,15 @@
     const clear = toolbar.querySelector("[data-action='clear']");
     const all = toolbar.querySelector("[data-action='all']");
     const done = toolbar.querySelector("[data-action='done']");
-    if (countNode) countNode.textContent = `${count} selected`;
+    if (countNode) DS.setTextIfChanged?.(countNode, `${count} selected`);
     if (block) {
-      block.textContent = `Block selected (${count})`;
-      block.disabled = !count || state.bulkBlocking;
+      DS.setTextIfChanged?.(block, `Block selected (${count})`);
+      const disabled = !count || state.bulkBlocking;
+      if (block.disabled !== disabled) block.disabled = disabled;
     }
-    if (clear) clear.disabled = !count || state.bulkBlocking;
-    if (all) all.disabled = state.bulkBlocking;
-    if (done) done.disabled = state.bulkBlocking;
+    if (clear && clear.disabled !== (!count || state.bulkBlocking)) clear.disabled = !count || state.bulkBlocking;
+    if (all && all.disabled !== state.bulkBlocking) all.disabled = state.bulkBlocking;
+    if (done && done.disabled !== state.bulkBlocking) done.disabled = state.bulkBlocking;
     syncLaunchers();
   }
 
@@ -356,6 +357,26 @@
     for (const card of selectableCards()) syncSelectionVisual(card);
   }
 
+  function decorateSelectionSubtree(root) {
+    if (!state.selectionMode || !supportedListingRoute() || !(root instanceof Element) || DS.isQolOwnedNode?.(root)) return;
+    const cards = new Set();
+    const direct = cardFromTarget(root);
+    if (direct) cards.add(direct);
+    root.querySelectorAll?.(".ds-card-block-button").forEach(button => {
+      const card = cardForBlockButton(button);
+      if (card) cards.add(card);
+    });
+    root.querySelectorAll?.("a[href*='/chat/'],a[href*='/chatbot/']").forEach(anchor => {
+      const card = cardFromAnchor(anchor);
+      if (card) cards.add(card);
+    });
+    for (const card of cards) syncSelectionVisual(card);
+    if (cards.size) {
+      const perf = counters();
+      perf.bulkBlockScopedCardDecorations = Number(perf.bulkBlockScopedCardDecorations || 0) + cards.size;
+    }
+  }
+
   function removeSelectionDecorations() {
     document.querySelectorAll(`.${CARD_SELECT_CLASS}`).forEach(node => node.remove());
     document.querySelectorAll(`.${SELECTED_CLASS}`).forEach(node => node.classList.remove(SELECTED_CLASS));
@@ -373,8 +394,20 @@
   function startSelectionObserver() {
     if (state.selectionObserver || !document.body) return;
     state.selectionObserver = new MutationObserver(mutations => {
-      if (!state.selectionMode || !mutations.some(m => m.addedNodes?.length)) return;
-      scheduleDecorate();
+      if (!state.selectionMode) return;
+      let decorated = false;
+      for (const mutation of mutations) {
+        if (DS.mutationIsQolOnly?.(mutation)) continue;
+        for (const node of mutation.addedNodes || []) {
+          if (!(node instanceof Element) || DS.isQolOwnedNode?.(node)) continue;
+          decorateSelectionSubtree(node);
+          decorated = true;
+        }
+      }
+      // If React replaced a wrapper without exposing card descendants in the
+      // added subtree, keep one debounced fallback instead of rescanning on
+      // every mutation record.
+      if (!decorated && mutations.some(m => m.addedNodes?.length)) scheduleDecorate();
     });
     state.selectionObserver.observe(document.body, { childList: true, subtree: true });
   }

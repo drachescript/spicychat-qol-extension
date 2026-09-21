@@ -31,6 +31,18 @@
     return match ? normalizeHandle(decodeURIComponent(match[1])) : "";
   }
 
+
+  function normalizePreferences(value) {
+    const raw = value && typeof value === "object" ? value : {};
+    return {
+      showOpenedBots: !!raw.showOpenedBots,
+      showLaterBots: !!raw.showLaterBots,
+      ignoreLanguageFilter: !!raw.ignoreLanguageFilter,
+      ignoreTagWordFilters: !!raw.ignoreTagWordFilters,
+      showAllBots: !!raw.showAllBots
+    };
+  }
+
   function normalizeFavoriteStore(value) {
     const source = value && typeof value === "object" ? value : {};
     const handles = DS.uniqueClean(
@@ -44,7 +56,8 @@
     for (const [rawKey, item] of Object.entries(rawMeta)) {
       const key = normalizeHandle(rawKey || item?.handle || "");
       if (!key) continue;
-      meta[key] = { ...(item && typeof item === "object" ? item : {}), handle: key };
+      const sourceItem = item && typeof item === "object" ? item : {};
+      meta[key] = { ...sourceItem, handle: key, preferences: normalizePreferences(sourceItem.preferences) };
     }
 
     return { handles, meta };
@@ -108,7 +121,8 @@
         handle,
         name: label,
         url: `https://spicychat.ai/creator/${encodeURIComponent(handle)}`,
-        savedAt: Date.now()
+        savedAt: Date.now(),
+        preferences: normalizePreferences(store.meta[handle]?.preferences)
       };
     }
 
@@ -126,6 +140,30 @@
   DS.normalizeCreatorStore = normalizeFavoriteStore;
   DS.creatorHandleFromHref = creatorHandleFromHref;
   DS.currentCreatorHandle = currentCreatorHandle;
+
+  DS.getFavoriteCreatorPreferences = function getFavoriteCreatorPreferences(handleOrHref) {
+    const handle = normalizeHandle(
+      String(handleOrHref || "").includes("/creator/")
+        ? creatorHandleFromHref(handleOrHref)
+        : handleOrHref
+    );
+    if (!handle || !getStore().handles.includes(handle)) return null;
+    return normalizePreferences(getStore().meta?.[handle]?.preferences);
+  };
+
+  DS.favoriteCreatorContextForCard = function favoriteCreatorContextForCard(card) {
+    if (!card) return null;
+    const pageHandle = currentCreatorHandle();
+    if (pageHandle && DS.isFavoriteCreator?.(pageHandle)) {
+      return { handle: pageHandle, preferences: DS.getFavoriteCreatorPreferences(pageHandle) || normalizePreferences(null) };
+    }
+    for (const anchor of DS.qsa("a[href*='/creator/']", card)) {
+      const handle = normalizeHandle(creatorHandleFromHref(anchor.href || ""));
+      if (!handle || !DS.isFavoriteCreator?.(handle)) continue;
+      return { handle, preferences: DS.getFavoriteCreatorPreferences(handle) || normalizePreferences(null) };
+    }
+    return null;
+  };
 
   DS.isFavoriteCreator = function isFavoriteCreator(handleOrHref) {
     const handle = normalizeHandle(

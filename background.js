@@ -71,6 +71,7 @@ let creatorBotScanChain = Promise.resolve();
 let tabCleanupWorkerTabId = null;
 const tabCleanupWorkerTabIds = new Set();
 const quickDislikeWorkerTabIds = new Set();
+const quickDislikeBulkWorkerTabs = new Map();
 const listingRefillWorkerTabIds = new Set();
 const personaRefreshWorkerTabIds = new Set();
 const canceledQuickDislikeBulkRuns = new Map();
@@ -124,6 +125,45 @@ function isQuickDislikeBulkRunCanceled(runId) {
     return false;
   }
   return true;
+}
+
+async function releaseQuickDislikeBulkWorker(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  const tabId = Number(quickDislikeBulkWorkerTabs.get(id));
+  quickDislikeBulkWorkerTabs.delete(id);
+  if (!Number.isFinite(tabId)) return false;
+  quickDislikeWorkerTabIds.delete(tabId);
+  await tabsRemove(tabId).catch?.(() => null);
+  return true;
+}
+
+async function prepareQuickDislikeWorkerTab(url, bulkRunId = "") {
+  const runId = String(bulkRunId || "").trim();
+  if (runId) {
+    const existingId = Number(quickDislikeBulkWorkerTabs.get(runId));
+    if (Number.isFinite(existingId)) {
+      const existing = await tabsGet(existingId);
+      if (existing) {
+        const updated = await tabsUpdate(existingId, { url: url.href, active: false });
+        if (updated?.ok) {
+          quickDislikeWorkerTabIds.add(existingId);
+          return { ok: true, tabId: existingId, reusable: true };
+        }
+      }
+      quickDislikeBulkWorkerTabs.delete(runId);
+      quickDislikeWorkerTabIds.delete(existingId);
+    }
+  }
+
+  const created = await tabsCreate({ url: url.href, active: false });
+  const tabId = Number(created?.tab?.id);
+  if (!created.ok || !Number.isFinite(tabId)) {
+    return { ok: false, tabId: null, reusable: !!runId, error: created.error || "" };
+  }
+  quickDislikeWorkerTabIds.add(tabId);
+  if (runId) quickDislikeBulkWorkerTabs.set(runId, tabId);
+  return { ok: true, tabId, reusable: !!runId };
 }
 
 function alarmName(tabId) {
@@ -636,17 +676,23 @@ async function runQuickDislikeBot(message) {
   if (!isSpicyChatUrl(url.href) || !/^\/chat\//i.test(url.pathname)) return { ok: false, status: "invalid-url" };
   url.searchParams.set("dsQuickDislike", "1");
 
-  const created = await tabsCreate({ url: url.href, active: false });
-  const tabId = Number(created?.tab?.id);
-  if (!created.ok || !Number.isFinite(tabId)) return { ok: false, status: "worker-tab-failed", error: created.error || "" };
+  const worker = await prepareQuickDislikeWorkerTab(url, message?.bulkRunId || "");
+  const tabId = Number(worker?.tabId);
+  if (!worker?.ok || !Number.isFinite(tabId)) return { ok: false, status: "worker-tab-failed", error: worker?.error || "" };
 
-  quickDislikeWorkerTabIds.add(tabId);
   let result = { ok: false, status: "worker-timeout" };
   try {
     const started = Date.now();
     while (Date.now() - started < 30000) {
+      if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) {
+        result = { ok: false, status: "bulk-canceled" };
+        break;
+      }
       const tab = await tabsGet(tabId);
-      if (!tab) return { ok: false, status: "worker-closed" };
+      if (!tab) {
+        result = { ok: false, status: "worker-closed" };
+        break;
+      }
       const response = await tabsSendMessage(tabId, { type: "DS_QUICK_DISLIKE_RUN", botId });
       if (response?.status && response.status !== "not-worker") {
         result = response;
@@ -655,8 +701,15 @@ async function runQuickDislikeBot(message) {
       await new Promise(resolve => setTimeout(resolve, 420));
     }
   } finally {
-    await tabsRemove(tabId);
-    quickDislikeWorkerTabIds.delete(tabId);
+    // Bulk runs reuse one hidden helper tab instead of booting a fresh full
+    // SpicyChat app for every bot. A failed helper is discarded so the next
+    // retry starts clean; successful bulk helpers are released explicitly when
+    // the run finishes.
+    if (!worker.reusable || !result?.ok) {
+      if (worker.reusable && message?.bulkRunId) quickDislikeBulkWorkerTabs.delete(String(message.bulkRunId));
+      await tabsRemove(tabId);
+      quickDislikeWorkerTabIds.delete(tabId);
+    }
   }
 
   if (result?.ok && [
@@ -2934,6 +2987,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
 
+  if (message?.type === "DS_LOREBOOK_EXPORT_HELPER") {
+    const url = String(message.url || "");
+    if (!/^https:\/\/(?:www\.)?spicychat\.ai\/lorebook\/edit\//i.test(url)) {
+      sendResponse({ ok: false, error: "Invalid Lorebook helper URL." });
+      return false;
+    }
+    tabsCreate({ url, active: false })
+      .then(result => sendResponse({ ok: !!result?.ok, tabId: result?.tab?.id || 0, error: result?.error || "" }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_WIKI_REQUEST_PERMISSION") {
     const origin = wikiOriginPattern(message.url);
     if (!origin) {
@@ -2974,6 +3039,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "DS_QUICK_DISLIKE_CANCEL_BULK") {
     sendResponse({ ok: markQuickDislikeBulkRunCanceled(message.bulkRunId) });
     return;
+  }
+
+  if (message?.type === "DS_QUICK_DISLIKE_RELEASE_BULK") {
+    releaseQuickDislikeBulkWorker(message.bulkRunId)
+      .then(released => sendResponse({ ok: true, released }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
   }
 
   if (message?.type === "DS_QUICK_DISLIKE_BOT") {
@@ -3435,6 +3507,9 @@ chrome.tabs.onRemoved.addListener(tabId => {
   if (Number(tabId) === Number(tabCleanupWorkerTabId)) tabCleanupWorkerTabId = null;
   tabCleanupWorkerTabIds.delete(Number(tabId));
   quickDislikeWorkerTabIds.delete(Number(tabId));
+  for (const [runId, workerTabId] of quickDislikeBulkWorkerTabs.entries()) {
+    if (Number(workerTabId) === Number(tabId)) quickDislikeBulkWorkerTabs.delete(runId);
+  }
   listingRefillWorkerTabIds.delete(Number(tabId));
   personaRefreshWorkerTabIds.delete(Number(tabId));
   removeAutoAfkActivity(tabId);

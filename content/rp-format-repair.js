@@ -410,12 +410,13 @@
       const s = settings();
       if (!s.enabled || !s.enableRpFormatRepair || !DS.isSingleChatPage?.()) return;
       for (const mutation of mutations) {
+        if (DS.mutationIsQolOnly?.(mutation)) continue;
         const targetElement = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
         if (targetElement?.closest?.(`.${OUTPUT_CLASS}, .${BUTTON_CLASS}`)) continue;
         const ownMessage = messageFromNode(targetElement);
         if (ownMessage) queueMessage(ownMessage);
         mutation.addedNodes.forEach(node => {
-          if (!(node instanceof Element) || node.closest?.(`.${OUTPUT_CLASS}, .${BUTTON_CLASS}`)) return;
+          if (!(node instanceof Element) || DS.isQolOwnedNode?.(node) || node.closest?.(`.${OUTPUT_CLASS}, .${BUTTON_CLASS}`)) return;
           const direct = messageFromNode(node);
           if (direct) queueMessage(direct);
           node.querySelectorAll?.(MESSAGE_SELECTOR).forEach(queueMessage);
