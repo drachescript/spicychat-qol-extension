@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "recommended-lite",
+  "label": "Recommended Lite",
+  "description": "Draft starting point for a smaller recommended SpicyChat QoL package.",
+  "buildable": false,
+  "generated": true,
+  "extensionName": "SpicyChat QoL Lite",
+  "devExtensionName": "SpicyChat QoL Lite DEV",
+  "filenameSuffix": "lite",
+  "bundles": [
+    "core",
+    "interface",
+    "chat",
+    "chatList",
+    "listings",
+    "profiles",
+    "personas"
+  ],
+  "settingsPreset": "recommended-lite",
+  "notes": [
+    "Preparation only: this profile is intentionally blocked from packaging for now.",
+    "The exact Lite contents will be refined only after the generated Full build has been verified against the current Full extension.",
+    "Creator and Lorebook bundles are the first provisional omissions; this is not yet a final Lite recipe."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "full",
+  "label": "Full",
+  "description": "Complete SpicyChat QoL build. This remains the default/reference package.",
+  "buildable": true,
+  "generated": false,
+  "extensionName": "SpicyChat QoL",
+  "devExtensionName": "SpicyChat QoL DEV",
+  "filenameSuffix": "",
+  "bundles": [
+    "core",
+    "interface",
+    "chat",
+    "chatList",
+    "listings",
+    "creator",
+    "lorebook",
+    "profiles",
+    "personas"
+  ],
+  "settingsPreset": null,
+  "notes": [
+    "Full is the reference build and must preserve the current extension behavior.",
+    "The builder validates that Full still contains every manifest runtime file."
+  ]
+}

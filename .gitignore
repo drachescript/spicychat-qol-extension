@@ -2,7 +2,6 @@
 *.crx
 *.xpi
 *.bak
-build/
 release/
 release_build/
 

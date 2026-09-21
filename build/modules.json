@@ -1,0 +1,234 @@
+{
+  "schema": 1,
+  "status": "preparation",
+  "bundleOrder": [
+    "core",
+    "interface",
+    "chat",
+    "chatList",
+    "listings",
+    "creator",
+    "lorebook",
+    "profiles",
+    "personas"
+  ],
+  "notes": [
+    "These boundaries formalize the runtime bundles already used by SpicyChat QoL.",
+    "The Full profile must remain behaviorally identical to the normal extension.",
+    "Recommended Lite is a draft profile only and is intentionally not buildable yet."
+  ],
+  "bundles": {
+    "core": {
+      "label": "Core",
+      "description": "Always-required runtime, compatibility, routing, diagnostics and shared helpers.",
+      "required": true,
+      "dependsOn": [],
+      "files": [
+        "content/auto-afk.js",
+        "content/build-profile.js",
+        "content/compatibility.js",
+        "content/core.js",
+        "content/diagnostic-protocol.js",
+        "content/dom.js",
+        "content/main.js",
+        "content/rc87-fixes.js",
+        "content/runtime-kernel.js",
+        "content/runtime-plan.js",
+        "content/tab-diagnostics.js",
+        "content/tag-aliases.js",
+        "content/update-toast.js"
+      ]
+    },
+    "interface": {
+      "label": "Interface",
+      "description": "Shared top bar, sidebar, panel, accessibility and interface helpers.",
+      "required": false,
+      "dependsOn": [
+        "core"
+      ],
+      "files": [
+        "content/accessibility.js",
+        "content/ad-banners.js",
+        "content/animation-control.js",
+        "content/command-palette.js",
+        "content/footer-manager.js",
+        "content/premium-notifications.js",
+        "content/quick-panel.js",
+        "content/rc83-ui.js",
+        "content/rc87-panel-position.js",
+        "content/scroll-to-top.js",
+        "content/sidebar.js",
+        "content/soundscapes.js",
+        "content/top-bar.js"
+      ]
+    },
+    "chat": {
+      "label": "Chat",
+      "description": "Single-chat message, composer, generation, memory and roleplay tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/alternate-dialogue.js",
+        "content/android-app.js",
+        "content/auto-voice.js",
+        "content/character-qol-profiles.js",
+        "content/chat-backgrounds.js",
+        "content/chat-bookmarks.js",
+        "content/chat-bubbles.js",
+        "content/chat-export.js",
+        "content/chat-nudges.js",
+        "content/chat-search.js",
+        "content/chat-topbar.js",
+        "content/chat-ui.js",
+        "content/composer-control.js",
+        "content/context-keeper.js",
+        "content/delete-guard.js",
+        "content/failed-message-helper.js",
+        "content/focus-mode.js",
+        "content/formatting-toolbar.js",
+        "content/generation-metadata-bridge.js",
+        "content/generation-metadata-loader.js",
+        "content/generation-metadata.js",
+        "content/generation-profiles.js",
+        "content/lorebook-consistency.js",
+        "content/memory-manager.js",
+        "content/message-options.js",
+        "content/model-selector.js",
+        "content/native-rating-helpers.js",
+        "content/ooc.js",
+        "content/performance-mode.js",
+        "content/rc88-chat-stability.js",
+        "content/reply-instructions.js",
+        "content/rp-format-repair.js",
+        "content/rp-state-tracker.js",
+        "content/saved-snippets.js",
+        "content/selection-memory.js",
+        "content/story-day-tracker.js",
+        "content/text-replacements.js",
+        "content/translation.js"
+      ]
+    },
+    "chatList": {
+      "label": "Chat List",
+      "description": "Chats-list organization, opened-history and saved-chat tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/chat-list.js",
+        "content/chat-organizer.js",
+        "content/chat-tags.js",
+        "content/opened-chats.js",
+        "content/saved-chat-actions.js"
+      ]
+    },
+    "listings": {
+      "label": "Listings & Discovery",
+      "description": "Discovery, saved-bot, filtering, card, blocking and refill tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/bot-blocking.js",
+        "content/bot-organizer.js",
+        "content/card-token-auth-loader.js",
+        "content/card-token-info.js",
+        "content/card-token-main.js",
+        "content/card-workflow.js",
+        "content/cards.js",
+        "content/creator-favorites.js",
+        "content/exact-message-counts-bridge.js",
+        "content/exact-message-counts-loader.js",
+        "content/exact-message-counts.js",
+        "content/favorite-bots.js",
+        "content/language-filter.js",
+        "content/later-bots.js",
+        "content/list-fill.js",
+        "content/rc86-bulk-block.js",
+        "content/recommendation-helpers.js",
+        "content/saved-lists-overlay.js",
+        "content/smart-filter-presets.js",
+        "content/tags-nsfw.js"
+      ]
+    },
+    "creator": {
+      "label": "Creator",
+      "description": "Chatbot editor, creation history, backups, audit and creator tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/bot-backup.js",
+        "content/bot-editor-actions.js",
+        "content/bot-editor-history.js",
+        "content/bot-editor-memory.js",
+        "content/bot-editor-snippets.js",
+        "content/creation-audit.js",
+        "content/creation-bulk-input.js",
+        "content/creator-workspace.js",
+        "content/creator-writing-assistant.js",
+        "content/moderation-warnings.js",
+        "content/my-creations-filters.js",
+        "content/my-creations-view-memory.js"
+      ]
+    },
+    "lorebook": {
+      "label": "Lorebooks",
+      "description": "Lorebook editor, import, backup, filtering and entry tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/lorebook-backup.js",
+        "content/lorebook-entries.js",
+        "content/lorebook-filter.js",
+        "content/lorebook-search-filter.js",
+        "content/lorebook-tags.js",
+        "content/lorebook-workflow.js",
+        "content/wiki-lorebook-importer.js"
+      ]
+    },
+    "profiles": {
+      "label": "Profiles",
+      "description": "Public character/profile helpers and profile-side organization tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/bot-archive.js",
+        "content/bot-organizer.js",
+        "content/card-workflow.js",
+        "content/creator-favorites.js",
+        "content/creator-following.js",
+        "content/later-bots.js",
+        "content/profile-export.js"
+      ]
+    },
+    "personas": {
+      "label": "Personas",
+      "description": "Persona page, persona saving and organizer tools.",
+      "required": false,
+      "dependsOn": [
+        "core",
+        "interface"
+      ],
+      "files": [
+        "content/persona-organizer.js",
+        "content/personas.js"
+      ]
+    }
+  }
+}
