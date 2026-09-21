@@ -1,3 +1,20 @@
+## 0.2.1
+
+- Added **Persona group filtering and sorting inside the in-chat persona picker**, reusing the same local Persona Manager folders/favorites/custom order used on `/personas`.
+- Fixed the mobile/WebView **model picker** being able to collapse into only “Available models / Explore all models / Generation settings”. Compact mobile model menus now fail safe to SpicyChat's native rows instead of reordering/hiding them.
+- Animated bot images now keep animating when the user explicitly opens the full-size image viewer, while normal card/chat/profile animation-reduction settings still apply outside the viewer.
+- The extension popup can now **Block this bot** directly from a `/chatbot/<id>` profile page as well as from an active chat.
+- Clarified the existing opt-in **Bot Profile Snapshot/history** setting: visiting a chatbot profile can preserve all bot data SpicyChat actually exposes to QoL, without pretending hidden/private definition fields were captured.
+- Tightened a few remaining high-frequency QoL DOM updates found by **Dragon's SpicyChat Diagnostic Extension**, especially Listing Refill favorite-state writes and the message-action bridge.
+- Hardened **Listing Refill** against stale-filter races. Helper-page results are discarded when the native listing query changes while they load, and filled cards are rechecked against the current native include/exclude tag filters before they are shown.
+- Added Listing Refill diagnostics for stale helper responses and cards rejected by active native tag filters. Rejected cards no longer leak through just because they came from a previously started refill request.
+- Added meaningful local **Bot Version History** for your own chatbots, separate from rotating safety revisions and manual checkpoints. Versions are created only when creator-controlled content changes, including Name/Title, Greeting, Personality, Scenario, Example Dialogue, sorted Tags, Avatar, and learned Lorebook association metadata.
+- Bot versions now show changed-field summaries and support View, field-level Compare, Rename, Delete, and safe Restore into the normal SpicyChat editor. Restore never presses Save or publishes automatically, and Lorebook association metadata is not auto-attached/restored.
+- Kept visibility/review state separate from version-driving content, so visibility/review changes, message counts, ratings/likes, and other stats do not create new bot versions by themselves.
+- Creator Workspace and Backup Manager now distinguish meaningful bot versions from rotating safety revisions and manual checkpoints.
+- Corrected the in-extension Help/GitHub links to the renamed `drachescript/spicychat-qol-extension` repository.
+- Started internal **Lite build preparation** by formalizing build modules/profiles and routing the normal Full package through the profile-aware builder; no Lite build is public yet and Full behavior is intended to stay unchanged.
+
 ## 0.2.0
 
 This is the first v0.2 release after the long 0.1.9.x testing cycle. The detailed test-build notes are still kept below.

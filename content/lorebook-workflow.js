@@ -1191,17 +1191,39 @@
 
   async function rememberChatbotLorebookLink() {
     const chatbotId=chatbotEditId(); const card=document.querySelector("[data-testid='lorebook-card']");
-    if(!chatbotId||!card)return;
-    const lore=await resolveLorebookFromCard(card); if(!lore?.name&&!lore?.id)return;
-    const result=await DS.storageGet?.([LINK_KEY])||{}; const store=result[LINK_KEY]&&typeof result[LINK_KEY]==="object"?result[LINK_KEY]:{};
-    store[chatbotId]={chatbotId,lorebookId:lore.id||"",lorebookName:lore.name||"",updatedAt:Date.now()};
+    if(!chatbotId||!card)return false;
+    const lore=await resolveLorebookFromCard(card); if(!lore?.name&&!lore?.id)return false;
+    const result=await DS.storageGet?.([LINK_KEY])||{};
+    const store=result[LINK_KEY]&&typeof result[LINK_KEY]==="object"?result[LINK_KEY]:{};
+    const previous=store[chatbotId]&&typeof store[chatbotId]==="object"?store[chatbotId]:{};
+    const nextId=clean(lore.id||"",240);
+    const nextName=clean(lore.name||"",500);
+    if(clean(previous.lorebookId||"",240)===nextId&&clean(previous.lorebookName||"",500)===nextName)return false;
+
+    store[chatbotId]={chatbotId,lorebookId:nextId,lorebookName:nextName,updatedAt:Date.now()};
     await DS.storageSet?.({[LINK_KEY]:store});
+
+    // Bot Version History treats the learned Lorebook association as creator
+    // content. When automatic own-bot backups are enabled, capture the changed
+    // relation through the normal backup pipeline. The restore path remains
+    // editor-only; this does not attach/detach Lorebooks automatically.
+    const cfg=settings();
+    if(cfg.botBackupToolsEnabled&&cfg.botArchiveOwnEditorBackups&&typeof DS.saveCurrentOwnBotBackup==="function"){
+      Promise.resolve(DS.saveCurrentOwnBotBackup("Lorebook association changed",{manual:false})).catch(()=>{});
+    }
+    return true;
   }
 
   async function ensureEditPageShortcut() {
-    if(!settings().lorebookEditShortcuts)return document.querySelectorAll(".ds-lb-edit-page-shortcut").forEach(n=>n.remove());
-    const card=document.querySelector("[data-testid='lorebook-card']"); if(!card)return;
-    await rememberChatbotLorebookLink();
+    const cfg=settings();
+    const card=document.querySelector("[data-testid='lorebook-card']");
+    // Learn an attached relation for Bot Version History even when the optional
+    // Edit Lorebook shortcut itself is disabled, but only when chatbot backup
+    // tools are enabled. No-card states are not treated as a detach because the
+    // native editor may still be mounting.
+    if(card&&(cfg.lorebookEditShortcuts||cfg.botBackupToolsEnabled))await rememberChatbotLorebookLink();
+    if(!cfg.lorebookEditShortcuts)return document.querySelectorAll(".ds-lb-edit-page-shortcut").forEach(n=>n.remove());
+    if(!card)return;
     if(card.parentElement?.querySelector(".ds-lb-edit-page-shortcut"))return;
     const lore=await resolveLorebookFromCard(card);
     const b=document.createElement("button");b.type="button";b.className="ds-lb-edit-page-shortcut ds-lb-shortcut";b.textContent="Edit Lorebook";

@@ -447,7 +447,7 @@ Testing"></textarea></label>
 <fieldset>
 <legend>Local Bot Archive</legend>
 <label class="row"><input id="botArchiveRememberSeenPublic" type="checkbox"/><span>Remember the last public bot data QoL sees (including Greeting when available)</span></label>
-<label class="row"><input id="botArchiveOnProfileVisit" type="checkbox"/><span>Save accessible bot data when I visit a chatbot profile</span></label>
+<label class="row"><input id="botArchiveOnProfileVisit" type="checkbox"/><span>Automatically save a Bot Profile Snapshot/history when I visit a chatbot profile</span></label>
 <label class="row"><input id="botArchiveOnChatOpen" type="checkbox"/><span>Refresh the saved bot copy when I open one of its chats</span></label>
 <label>Chat-open refresh interval
             <select id="botArchiveRefreshHours">
@@ -457,7 +457,7 @@ Testing"></textarea></label>
 <option value="168">7 days</option>
 </select>
 </label>
-<p class="hint"><strong>Last-seen preservation:</strong> when QoL already reads public card/profile data for an enabled feature, it can keep the newest accessible copy locally instead of throwing it away. Opening a profile also preserves its public Greeting/description when available. QoL never unlocks private/hidden definition fields.</p>
+<p class="hint"><strong>Bot Profile Snapshots:</strong> when enabled, opening a chatbot profile stores the bot ID, name/title, creator, image, tags, Greeting, description and any definition/scenario/example fields, stats or other metadata that SpicyChat actually exposes to QoL. Meaningful profile changes are kept in profile history; stats-only observations stay separate where possible. QoL never unlocks or guesses private/hidden definition fields.</p>
 <p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh uses a normal SpicyChat profile request only when the saved copy is older than this interval.</p>
 <p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
 </fieldset>
@@ -1023,7 +1023,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 Roleplay
 Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="personaShowLocalMetaInPicker" type="checkbox"/><span>Show QoL folder/note labels in the in-chat persona picker</span></label>
-<p class="hint">Persona organization is local to QoL. Use the persona three-dot menu for notes, local copies, duplication and move controls, or drag the ↕ handle for a custom order. The Local Persona Library shows whether text and the avatar were actually saved, can preview/copy the stored persona text, and can restore a saved copy into SpicyChat when you have a free persona slot. It does not bypass SpicyChat's active persona limit.</p>
+<p class="hint">Persona organization is local to QoL. Use the persona three-dot menu for notes, local copies, duplication and move controls, or drag the ↕ handle for a custom order. The in-chat persona picker can filter by the same folders/favorites and use SpicyChat, custom, name, or favorites-first sorting. The Local Persona Library shows whether text and the avatar were actually saved, can preview/copy the stored persona text, and can restore a saved copy into SpicyChat when you have a free persona slot. It does not bypass SpicyChat's active persona limit.</p>
 <label class="row"><input id="showPersonaQuickSwitch" type="checkbox"/><span>Show persona quick-switch in the mini panel</span></label>
 <label class="row"><input id="autoAcceptPersonaChange" type="checkbox"/><span>Automatically press Yes on the Change Persona warning</span></label>
 <label>Max persona quick buttons<input id="personaQuickSwitchLimit" max="12" min="1" step="1" type="number"/></label>
@@ -1770,14 +1770,16 @@ cash =&gt; Bingo Coins
 <section class="card" id="creatorBackupCard">
 <h2>Bot &amp; Lorebook backups</h2>
 <div class="sub-card">
-<strong>Chatbot backups</strong>
-<label class="row"><input id="botBackupToolsEnabled" type="checkbox"/><span>Enable compact Save / Export / History backup controls on my chatbot editor</span></label>
-<label class="row"><input id="botArchiveOwnEditorBackups" type="checkbox"/><span>Automatically save changed chatbot revisions while I edit</span></label>
-<label>Automatic bot backups to keep per bot
+<strong>Chatbot backups &amp; version history</strong>
+<label class="row"><input id="botBackupToolsEnabled" type="checkbox"/><span>Enable compact Save / Export / Version history controls on my chatbot editor</span></label>
+<label class="row"><input id="botArchiveOwnEditorBackups" type="checkbox"/><span>Automatically save changed chatbot backups while I edit</span></label>
+<label>Bot history / safety revisions to keep per bot
 <input id="botArchiveOwnRevisionLimit" type="number" min="1" max="50" step="1" value="10"/>
 </label>
-<p class="hint">When chatbot backup tools are enabled for the first time, automatic backups default to On. The default retention is 10 per bot and can be changed from 1–50. Manual checkpoints are kept separately and are never removed by this automatic-retention limit.</p>
-<p class="hint">With backup controls enabled and automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too. Lorebook associations are intentionally not part of chatbot backups.</p>
+<p class="hint">When chatbot backup tools are enabled for the first time, automatic backups default to On. The default retention is 10 per bot and can be changed from 1–50. Manual checkpoints are kept separately and are never removed by this retention limit.</p>
+<p class="hint"><strong>Bot Version History</strong> is separate from rotating safety revisions and manual checkpoints. A new version is recorded only when creator-controlled content actually changes: Name/Title, Greeting, Personality, Scenario, Example Dialogue, sorted Tags, Avatar, or a learned attached Lorebook association. Unchanged saves, message/like/rating changes, and visibility/review-state changes do not create a new version.</p>
+<p class="hint">Visibility/review state is recorded separately for context. Compare shows field-level differences; Restore fills selected normal editor fields for review and never presses Save or publishes anything. Lorebook association is version metadata only and Restore does not automatically attach or detach a Lorebook.</p>
+<p class="hint">With automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too.</p>
 </div>
 <div class="sub-card">
 <strong>Lorebook backups</strong>
@@ -1794,7 +1796,7 @@ cash =&gt; Bingo Coins
 </section>
 <section class="card" id="creatorBackupManagerCard">
 <h2>Backup manager</h2>
-<p class="hint">Search your own chatbot backups, optional visited-profile snapshots, and Lorebook backups. Restore fills the normal SpicyChat editor for review and never presses Save for you; QoL creates a manual safety checkpoint before applying restored fields. Profile snapshots appear here when “Save accessible bot data when I visit a chatbot profile” is enabled under Local Bot Archive.</p>
+<p class="hint">Search your own chatbot backups, Bot Version History, manual checkpoints, rotating safety revisions, optional visited-profile snapshots, and Lorebook backups. Restore fills the normal SpicyChat editor for review and never presses Save for you; QoL creates a manual safety checkpoint before applying restored fields. Profile snapshots appear here when “Automatically save a Bot Profile Snapshot/history when I visit a chatbot profile” is enabled under Local Bot Archive.</p>
 <div class="creator-backup-toolbar">
 <input id="creatorBackupSearch" type="search" placeholder="Search bot, profile, or Lorebook backups"/>
 <select id="creatorBackupType"><option value="all">Bots + profiles + Lorebooks</option><option value="bots">My chatbots only</option><option value="profiles">Bot profiles only</option><option value="lorebooks">Lorebooks only</option></select>
@@ -2382,7 +2384,7 @@ myth => Fantasy | ✨"></textarea></label>
 </div>
 <p>An independent quality-of-life project for SpicyChat focused on optional tools, local-first data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>
 <p class="hint">The extension uses normal SpicyChat pages/actions or information already available to the signed-in user. It does not unlock private character fields or publish creations automatically.</p>
-<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extention" rel="noopener noreferrer" target="_blank"><span><strong>Project &amp; source</strong><small>Source code, releases, issues and project updates.</small></span><span class="help-arrow">&gt;</span></a>
+<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension" rel="noopener noreferrer" target="_blank"><span><strong>Project &amp; source</strong><small>Source code, releases, issues and project updates.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://spicychatqol.drache.uk/" rel="noopener noreferrer" target="_blank"><span><strong>Project website</strong><small>Feature information, releases and install links.</small></span><span class="help-arrow">&gt;</span></a></section><section class="card help-card" id="developerCard">
 <h2>About the developer</h2>
 <p>SpicyChat QoL is currently developed and maintained by DragonGRaf under DragonScript.</p>
@@ -2433,7 +2435,7 @@ myth => Fantasy | ✨"></textarea></label>
 <details><summary>Creator tools &amp; backups</summary>
 <div class="eli5-grid">
 <div><strong>Chatbot Editor Draft History</strong><span>Takes local snapshots while you edit so you can recover older field text without publishing anything automatically.</span></div>
-<div><strong>Chatbot backups</strong><span>Adds manual Save/Export/History controls for your own bots. Automatic revision saves are a separate opt-in switch.</span></div>
+<div><strong>Chatbot backups &amp; versions</strong><span>Adds manual Save/Export/Version history controls for your own bots. Meaningful versions are kept separate from rotating safety revisions and manual checkpoints.</span></div>
 <div><strong>Lorebook backups</strong><span>Does the same for Lorebooks and keeps Lorebook data separate from chatbot JSON.</span></div>
 <div><strong>Lorebook Entry Manager</strong><span>Adds optional token/keyword info plus rename, copy, duplicate and bulk entry tools. Each helper can be turned on separately.</span></div>
 <div><strong>Creation Audit</strong><span>Checks a loaded creation for things you may have forgotten or want to review before publishing.</span></div>
@@ -2453,9 +2455,9 @@ myth => Fantasy | ✨"></textarea></label>
 <section class="card help-card">
 <h2>Need help?</h2>
 <p>If something broke or SpicyChat changed, the bug-report links below are the fastest way to send useful details. You can also use the QoL Discord server or DM @dragongraf on Discord.</p>
-<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extention/issues/new?labels=bug" rel="noopener noreferrer" target="_blank"><span><strong>Report a bug</strong><small>Something is broken or not working right.</small></span><span class="help-arrow">&gt;</span></a>
-<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extention/issues/new?labels=enhancement" rel="noopener noreferrer" target="_blank"><span><strong>Suggest something</strong><small>Got another QoL idea or something annoying that should be fixed?</small></span><span class="help-arrow">&gt;</span></a>
-<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extention" rel="noopener noreferrer" target="_blank"><span><strong>Open GitHub</strong><small>Source code, releases, issues and updates.</small></span><span class="help-arrow">&gt;</span></a>
+<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension/issues/new?labels=bug" rel="noopener noreferrer" target="_blank"><span><strong>Report a bug</strong><small>Something is broken or not working right.</small></span><span class="help-arrow">&gt;</span></a>
+<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension/issues/new?labels=enhancement" rel="noopener noreferrer" target="_blank"><span><strong>Suggest something</strong><small>Got another QoL idea or something annoying that should be fixed?</small></span><span class="help-arrow">&gt;</span></a>
+<a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension" rel="noopener noreferrer" target="_blank"><span><strong>Open GitHub</strong><small>Source code, releases, issues and updates.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://discord.gg/XTMdWvuVSU" rel="noopener noreferrer" target="_blank"><span><strong>SpicyChat QoL Discord server</strong><small>Project help, ideas, suggestions and feedback.</small></span><span class="help-arrow">&gt;</span></a></section>
 <section class="card" id="diagnosticsCard">
 <h2>Quick diagnostics</h2>

@@ -46,6 +46,9 @@
       helperFailures: 0,
       metadataExtracted: 0,
       tagsRestored: 0,
+      staleResponses: 0,
+      nativeRejected: 0,
+      lastRejectReason: "",
       lastError: "",
       lastPage: 0,
       startedAt: Date.now()
@@ -261,6 +264,78 @@
     return FALLBACK_PAGE_KEY;
   }
 
+  function canonicalListingSignature(urlLike = location.href) {
+    let url;
+    try { url = new URL(urlLike, location.href); }
+    catch { return ""; }
+
+    const entries = [];
+    for (const [key, value] of url.searchParams.entries()) {
+      if (/\[page\]$/i.test(key)) continue;
+      if (key === "dsListingRefill") continue;
+      entries.push([key, value]);
+    }
+
+    entries.sort((left, right) => {
+      const keyOrder = String(left[0]).localeCompare(String(right[0]));
+      return keyOrder || String(left[1]).localeCompare(String(right[1]));
+    });
+
+    return JSON.stringify(entries);
+  }
+
+  function nativeTagRulesFromUrl(urlLike = location.href) {
+    let url;
+    try { url = new URL(urlLike, location.href); }
+    catch { return { include: [], exclude: [] }; }
+
+    const include = [];
+    const exclude = [];
+    for (const [key, rawValue] of url.searchParams.entries()) {
+      if (!/\[refinementList\]\[tags\](?:\[\d+\])?$/i.test(key)) continue;
+      const value = String(rawValue || "").trim();
+      if (!value) continue;
+      if (value.startsWith("-") && value.length > 1) exclude.push(value.slice(1));
+      else include.push(value);
+    }
+
+    const unique = values => [...new Map(values
+      .map(value => [String(value).trim().toLocaleLowerCase(), String(value).trim()])
+      .filter(([key]) => key))
+      .values()];
+
+    return { include: unique(include), exclude: unique(exclude) };
+  }
+
+  function currentNativeTagRules() {
+    return nativeTagRulesFromUrl(location.href);
+  }
+
+  function metadataTagSet(meta, wrapper) {
+    const values = [];
+    if (Array.isArray(meta?.tags)) values.push(...meta.tags);
+    if (!values.length && wrapper) {
+      values.push(...[...wrapper.querySelectorAll("button")]
+        .filter(isNativeTagPillButton)
+        .map(button => String(button.getAttribute("aria-label") || button.textContent || "").trim()));
+    }
+    return new Set(values.map(value => String(value || "").trim().toLocaleLowerCase()).filter(Boolean));
+  }
+
+  function nativeTagRejection(meta, wrapper, rules = currentNativeTagRules()) {
+    const tags = metadataTagSet(meta, wrapper);
+    if (!tags.size) return "";
+
+    const excluded = (rules.exclude || []).find(tag => tags.has(String(tag).toLocaleLowerCase()));
+    if (excluded) return `excluded tag "${excluded}"`;
+
+    const includes = rules.include || [];
+    if (includes.length && !includes.some(tag => tags.has(String(tag).toLocaleLowerCase()))) {
+      return `missing included tag (${includes.join(" / ")})`;
+    }
+    return "";
+  }
+
   function currentPage() {
     try {
       const url = new URL(location.href);
@@ -286,9 +361,10 @@
       .filter(Number.isFinite));
   }
 
-  function listingUrlForPage(page) {
-    const url = new URL(location.href);
+  function listingUrlForPage(page, sourceHref = location.href) {
+    const url = new URL(sourceHref, location.href);
     url.searchParams.set(pageKeyForUrl(url), String(page));
+    url.searchParams.delete("dsListingRefill");
     return url.href;
   }
 
@@ -534,22 +610,29 @@
 
   function setRefillFavoriteVisual(button, active, statusText = "") {
     if (!button) return;
-    button.dataset.dsRefillFavoriteActive = active ? "1" : "0";
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-    button.setAttribute("aria-label", active ? "unfavorite" : "favorite");
+    const activeValue = active ? "1" : "0";
+    const pressedValue = active ? "true" : "false";
+    const ariaValue = active ? "unfavorite" : "favorite";
+    const tooltipValue = active ? "Unlike" : "Like";
+    const titleValue = statusText || (active ? "Favorited on SpicyChat" : "Favorite this bot on SpicyChat");
+
+    DS.setDatasetIfChanged?.(button, "dsRefillFavoriteActive", activeValue);
+    DS.setAttributeIfChanged?.(button, "aria-pressed", pressedValue);
+    DS.setAttributeIfChanged?.(button, "aria-label", ariaValue);
 
     const tooltip = button.closest?.("[data-tooltip-content]");
-    if (tooltip) tooltip.setAttribute("data-tooltip-content", active ? "Unlike" : "Like");
+    if (tooltip) DS.setAttributeIfChanged?.(tooltip, "data-tooltip-content", tooltipValue);
 
     const svg = button.querySelector("svg");
     if (svg) {
-      svg.classList.toggle("text-red-9", !!active);
-      svg.classList.toggle("fill-red-9", !!active);
-      svg.classList.toggle("text-white", !active);
-      svg.classList.toggle("fill-transparent", !active);
-      svg.style.fill = active ? "currentColor" : "transparent";
+      DS.setClassState?.(svg, "text-red-9", !!active);
+      DS.setClassState?.(svg, "fill-red-9", !!active);
+      DS.setClassState?.(svg, "text-white", !active);
+      DS.setClassState?.(svg, "fill-transparent", !active);
+      const fill = active ? "currentColor" : "transparent";
+      if (svg.style.fill !== fill) svg.style.fill = fill;
     }
-    button.title = statusText || (active ? "Favorited on SpicyChat" : "Favorite this bot on SpicyChat");
+    if (button.title !== titleValue) button.title = titleValue;
   }
 
   async function rememberRefillFavoriteLocally(id, card, anchor) {
@@ -778,13 +861,32 @@
   }
 
   async function appendNextPaginationPage(page) {
-    const url = listingUrlForPage(page);
+    const requestSourceUrl = location.href;
+    const requestSignature = canonicalListingSignature(requestSourceUrl);
+    const requestTagRules = nativeTagRulesFromUrl(requestSourceUrl);
+    const url = listingUrlForPage(page, requestSourceUrl);
     DS.setQuickStatus?.(`Auto-fill opening helper page ${page}...`, true);
+
     const response = await runtimeMessage({
       type: "DS_LISTING_REFILL_PAGE",
       url,
       expectedPage: page
     });
+
+    const stats = runStats();
+
+    const currentSignature = canonicalListingSignature(location.href);
+    if (requestSignature !== currentSignature) {
+      stats.staleResponses = Number(stats.staleResponses || 0) + 1;
+      stats.lastRejectReason = "listing filters changed while helper page was loading";
+      DS.runtimeLog?.("info", "listing-refill", "Discarded stale helper-page response", {
+        page,
+        requestSignature,
+        currentSignature
+      });
+      return 0;
+    }
+
     if (!response?.ok) {
       throw new Error(response?.error || response?.status || "helper page failed");
     }
@@ -795,21 +897,36 @@
     const wrappers = payloads
       .map(item => ({ wrapper: wrapperFromHtml(item.html), meta: item.meta }))
       .filter(item => item.wrapper);
-    const stats = runStats();
+
     stats.pages += 1;
     stats.received += wrappers.length;
     stats.metadataExtracted += wrappers.filter(item => item.meta && typeof item.meta === "object").length;
     stats.lastPage = Number(page) || 0;
     stats.lastError = "";
+
     const host = extraGrid();
     if (!host || !wrappers.length) return 0;
 
     const known = currentBotIds();
     let appended = 0;
+
     for (const payload of wrappers) {
+      const liveSignature = canonicalListingSignature(location.href);
+      if (liveSignature !== requestSignature) {
+        stats.staleResponses = Number(stats.staleResponses || 0) + 1;
+        stats.lastRejectReason = "listing filters changed while helper cards were being inserted";
+        DS.runtimeLog?.("info", "listing-refill", "Stopped stale helper-card insertion", {
+          page,
+          requestSignature,
+          currentSignature: liveSignature
+        });
+        break;
+      }
+
       const wrapper = payload.wrapper;
       const meta = payload.meta || extractCardMetadata(wrapper, response.baseUrl || url);
       stripWorkerArtifacts(wrapper);
+
       const link = wrapper.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
       const id = botIdFromLink(link);
       if (!id) continue;
@@ -817,36 +934,43 @@
         stats.duplicates += 1;
         continue;
       }
+
+      const rejection = nativeTagRejection(meta, wrapper, requestTagRules);
+      if (rejection) {
+        stats.filtered += 1;
+        stats.nativeRejected = Number(stats.nativeRejected || 0) + 1;
+        stats.lastRejectReason = rejection;
+        DS.runtimeLog?.("info", "listing-refill", "Rejected helper card against current native tag filters", {
+          page,
+          botId: id,
+          rejection,
+          tags: Array.isArray(meta?.tags) ? meta.tags.slice(0, 20) : []
+        });
+        continue;
+      }
+
       known.add(id);
 
       const clone = document.importNode(wrapper, true);
       clone.setAttribute(EXTRA_CARD_ATTR, "1");
       clone.classList.add("ds-autofill-extra-card");
       clone.dataset.dsAutofillPage = String(page);
+      clone.dataset.dsAutofillSignature = requestSignature;
       normalizeCloneUrls(clone, response.baseUrl || url);
 
-      // Native React handlers do not survive serialization from the helper tab.
-      // Keep normal links usable. Remove dead native action buttons, but keep
-      // the heart and rebind it to a temporary rendered SpicyChat helper page
-      // so filled cards can still be favorited normally.
       const favoriteButton = findFavoriteActionButton(clone);
       clone.querySelectorAll("button").forEach(button => {
-        // Tag pills are display-only in SpicyChat (cursor-default) and do not
-        // depend on React handlers. Keep them so filled cards retain the same
-        // tag metadata/visuals and filtering can inspect those tags immediately.
         if (button === favoriteButton || isNativeTagPillButton(button)) return;
         button.remove();
       });
       stats.tagsRestored += ensureTagPillsFromMetadata(clone, meta);
-      // SpicyChat's three-dot card menu is React-only too. After serialization
-      // it looks clickable but has no handler, so remove the dead shell and let
-      // QoL's Later / Not Interested / Block / organizer controls provide the
-      // supported filled-card actions instead. Normal chat/profile links remain.
+
       clone.querySelectorAll("svg.lucide-ellipsis-vertical").forEach(svg => {
         const shell = svg.closest("div.relative");
         if (shell && !shell.querySelector("a[href]") && !shell.querySelector("button")) shell.remove();
         else svg.remove();
       });
+
       wireRefillFavoriteButton(clone, id, response.baseUrl || url);
       host.appendChild(clone);
       appended++;
@@ -858,7 +982,7 @@
       await DS.applyCardHiding?.();
       const afterVisible = visibleCardCount();
       const afterHidden = hiddenCardCount();
-      stats.filtered = afterHidden;
+      stats.filtered = Math.max(Number(stats.filtered || 0), afterHidden);
       DS.applyCardBlockButtons?.();
       DS.updateLaterBotButtons?.();
       DS.updateCreatorFavoriteButtons?.();
@@ -866,7 +990,13 @@
       DS.applyCardDisplayNormalization?.();
       DS.updateQuickPanel?.();
       DS.runtimeLog?.("info", "listing-refill", "Added rendered helper-page cards", {
-        page, appended, visible: afterVisible, hidden: afterHidden, duplicates: stats.duplicates
+        page,
+        appended,
+        visible: afterVisible,
+        hidden: afterHidden,
+        duplicates: stats.duplicates,
+        nativeRejected: stats.nativeRejected || 0,
+        staleResponses: stats.staleResponses || 0
       });
     }
     return appended;
@@ -902,6 +1032,9 @@
       helperFailures: stats.helperFailures || 0,
       metadataExtracted: stats.metadataExtracted || 0,
       tagsRestored: stats.tagsRestored || 0,
+      staleResponses: stats.staleResponses || 0,
+      nativeRejected: stats.nativeRejected || 0,
+      lastRejectReason: stats.lastRejectReason || "",
       lastError: stats.lastError || "",
       lastPage: stats.lastPage || 0,
       running: !!DS.state.autoFillRunning,

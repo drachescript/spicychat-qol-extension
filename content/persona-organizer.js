@@ -1499,9 +1499,10 @@ ${description}`);
   }
 
   function cleanupPickerOrganization() {
-    document.querySelectorAll(".ds-persona-picker-meta").forEach(el => el.remove());
+    document.querySelectorAll(".ds-persona-picker-meta, .ds-persona-picker-org-toolbar").forEach(el => el.remove());
     const byParent = new Map();
     document.querySelectorAll("[data-ds-persona-picker-original-index]").forEach(label => {
+      label.classList.remove("ds-persona-picker-group-hidden");
       const parent = label.parentElement;
       if (parent) {
         if (!byParent.has(parent)) byParent.set(parent, []);
@@ -1516,6 +1517,118 @@ ${description}`);
     document.querySelectorAll("[data-ds-persona-picker-original-index]").forEach(label => {
       delete label.dataset.dsPersonaPickerOriginalIndex;
     });
+  }
+
+  function pickerFolderOptions(items, settings) {
+    const configured = parseFolders(settings);
+    const seen = new Set(configured);
+    for (const item of items) {
+      const folder = cleanText(org.meta[item.id]?.folder || "");
+      if (folder && !seen.has(folder)) {
+        configured.push(folder);
+        seen.add(folder);
+      }
+    }
+    return configured;
+  }
+
+  function ensurePickerToolbar(parent, items, settings) {
+    if (!parent) return null;
+    let toolbar = [...parent.children].find(child => child.classList?.contains("ds-persona-picker-org-toolbar"));
+    if (!toolbar) {
+      toolbar = document.createElement("div");
+      toolbar.className = "ds-persona-picker-org-toolbar";
+      toolbar.dataset.dsOwned = "1";
+
+      const showLabel = document.createElement("label");
+      showLabel.append("Show ");
+      const filter = document.createElement("select");
+      filter.className = "ds-persona-picker-filter";
+      filter.setAttribute("aria-label", "Filter personas by QoL group");
+      filter.addEventListener("change", event => {
+        DS.state.personaPickerFilter = event.target.value || "all";
+        DS.applyPersonaPickerOrganization?.();
+      });
+      showLabel.appendChild(filter);
+
+      const sortLabel = document.createElement("label");
+      sortLabel.append("Sort ");
+      const sort = document.createElement("select");
+      sort.className = "ds-persona-picker-sort";
+      sort.setAttribute("aria-label", "Sort personas in the picker");
+      sort.addEventListener("change", event => {
+        DS.state.personaPickerSort = event.target.value || "native";
+        DS.applyPersonaPickerOrganization?.();
+      });
+      sortLabel.appendChild(sort);
+
+      toolbar.append(showLabel, sortLabel);
+      parent.insertBefore(toolbar, parent.firstChild);
+    }
+
+    const folders = pickerFolderOptions(items, settings);
+    const filterOptions = [
+      ["all", "All personas"],
+      ["favorites", "Favorites"],
+      ["unsorted", "Unsorted"],
+      ...folders.map(folder => [`folder:${folder}`, folder])
+    ];
+    const filter = toolbar.querySelector(".ds-persona-picker-filter");
+    const filterSignature = JSON.stringify(filterOptions);
+    if (filter && filter.dataset.dsSignature !== filterSignature) {
+      filter.dataset.dsSignature = filterSignature;
+      fillSelect(filter, filterOptions, DS.state.personaPickerFilter || "all");
+    } else if (filter) {
+      const wanted = DS.state.personaPickerFilter || "all";
+      filter.value = filterOptions.some(([value]) => value === wanted) ? wanted : "all";
+    }
+
+    const sortOptions = [["native", "SpicyChat order"], ["custom", "Custom order"], ["name", "Name A-Z"], ["favorites", "Favorites first"]];
+    const sort = toolbar.querySelector(".ds-persona-picker-sort");
+    const sortSignature = JSON.stringify(sortOptions);
+    if (sort && sort.dataset.dsSignature !== sortSignature) {
+      sort.dataset.dsSignature = sortSignature;
+      fillSelect(sort, sortOptions, DS.state.personaPickerSort || (org.customOrder ? "custom" : "native"));
+    } else if (sort) {
+      const wanted = DS.state.personaPickerSort || (org.customOrder ? "custom" : "native");
+      sort.value = sortOptions.some(([value]) => value === wanted) ? wanted : "native";
+    }
+
+    return { toolbar, folders };
+  }
+
+  function applyPickerFilterAndSort(parent, items, folders) {
+    const filterMode = DS.state.personaPickerFilter || "all";
+    const sortMode = DS.state.personaPickerSort || (org.customOrder ? "custom" : "native");
+    const configuredFolders = new Set((folders || []).map(cleanText));
+
+    const sorted = [...items].sort((a, b) => {
+      if (sortMode === "custom") {
+        return rankFor(a.id) - rankFor(b.id) || Number(a.label.dataset.dsPersonaPickerOriginalIndex || 0) - Number(b.label.dataset.dsPersonaPickerOriginalIndex || 0);
+      }
+      if (sortMode === "name") {
+        return cleanText(a.persona?.name || a.label.textContent).localeCompare(cleanText(b.persona?.name || b.label.textContent), undefined, { sensitivity: "base" });
+      }
+      if (sortMode === "favorites") {
+        const af = !!org.meta[a.id]?.favorite;
+        const bf = !!org.meta[b.id]?.favorite;
+        if (af !== bf) return af ? -1 : 1;
+        return cleanText(a.persona?.name || a.label.textContent).localeCompare(cleanText(b.persona?.name || b.label.textContent), undefined, { sensitivity: "base" });
+      }
+      return Number(a.label.dataset.dsPersonaPickerOriginalIndex || 0) - Number(b.label.dataset.dsPersonaPickerOriginalIndex || 0);
+    });
+
+    sorted.forEach(item => parent.appendChild(item.label));
+
+    for (const item of sorted) {
+      const data = org.meta[item.id] || {};
+      const folder = cleanText(data.folder || "");
+      let show = true;
+      if (filterMode === "favorites") show = !!data.favorite;
+      else if (filterMode === "unsorted") show = !folder || !configuredFolders.has(folder);
+      else if (filterMode.startsWith("folder:")) show = folder === filterMode.slice(7);
+      item.label.classList.toggle("ds-persona-picker-group-hidden", !show);
+    }
   }
 
   function addPickerMeta(label, id, settings) {
@@ -1556,25 +1669,29 @@ ${description}`);
     }
 
     await ensureLoaded();
-    const items = pickerLabels();
-    if (!items.length) return;
+    const rawItems = pickerLabels();
+    if (!rawItems.length) return;
+
+    DS.state.personaPickerFilter ||= "all";
+    DS.state.personaPickerSort ||= org.customOrder ? "custom" : "native";
 
     const byParent = new Map();
-    for (const item of items) {
+    for (const item of rawItems) {
       const id = cleanText(item.input.value);
-      if (!item.label.dataset.dsPersonaPickerOriginalIndex) {
-        item.label.dataset.dsPersonaPickerOriginalIndex = String(byParent.get(item.label.parentElement)?.length || 0);
-      }
+      const persona = typeof DS.extractPersonaFromModalLabel === "function" ? DS.extractPersonaFromModalLabel(item.label) : null;
       if (!byParent.has(item.label.parentElement)) byParent.set(item.label.parentElement, []);
-      byParent.get(item.label.parentElement).push({ ...item, id });
+      const group = byParent.get(item.label.parentElement);
+      if (!item.label.dataset.dsPersonaPickerOriginalIndex) {
+        item.label.dataset.dsPersonaPickerOriginalIndex = String(group.length);
+      }
+      group.push({ ...item, id, persona });
       addPickerMeta(item.label, id, settings);
     }
 
-    if (!org.customOrder) return;
     for (const [parent, group] of byParent) {
       if (!parent) continue;
-      group.sort((a, b) => rankFor(a.id) - rankFor(b.id) || Number(a.label.dataset.dsPersonaPickerOriginalIndex || 0) - Number(b.label.dataset.dsPersonaPickerOriginalIndex || 0));
-      group.forEach(item => parent.appendChild(item.label));
+      const { folders } = ensurePickerToolbar(parent, group, settings) || { folders: [] };
+      applyPickerFilterAndSort(parent, group, folders);
     }
   };
 

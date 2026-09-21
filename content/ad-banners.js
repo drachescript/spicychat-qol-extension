@@ -384,9 +384,9 @@
       if (typeof DS.hideElement === "function") {
         DS.hideElement(root, reason);
       } else {
-        root.classList.add("ds-hidden");
-        root.dataset.dsHidden = "1";
-        root.dataset.dsReason = reason;
+        if (!root.classList.contains("ds-hidden")) root.classList.add("ds-hidden");
+        if (root.dataset.dsHidden !== "1") root.dataset.dsHidden = "1";
+        if (root.dataset.dsReason !== reason) root.dataset.dsReason = reason;
       }
     }
   };

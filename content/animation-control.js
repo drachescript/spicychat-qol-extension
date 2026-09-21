@@ -42,8 +42,30 @@
     return false;
   }
 
+  function isExplicitImageViewer(el) {
+    if (!el) return false;
+    if (el.closest?.("[role='dialog'], [aria-modal='true']")) return true;
+
+    const cls = String(el.className || "");
+    const looksViewerImage = cls.includes("object-contain") && cls.includes("max-w-full") && cls.includes("max-h-full");
+    if (!looksViewerImage) return false;
+
+    let node = el.parentElement;
+    for (let i = 0; node && node !== document.body && i < 8; i++, node = node.parentElement) {
+      if (!String(node.className || "").includes("fixed")) continue;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect) continue;
+      if (rect.width >= window.innerWidth * 0.6 && rect.height >= window.innerHeight * 0.6) return true;
+    }
+    return false;
+  }
+
   function eligible(el, settings) {
     if (!el || el.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return false;
+    // Opening an image is an explicit request to view it. Never replace that
+    // full-screen/modal image with a frozen canvas, even when avatar animation
+    // reduction is enabled elsewhere on the page.
+    if (el.tagName === "IMG" && isExplicitImageViewer(el)) return false;
     if (el.tagName === "IMG" && !sourceLooksAnimated(el)) return false;
 
     if (DS.isSingleChatPage?.()) {

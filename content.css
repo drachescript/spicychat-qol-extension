@@ -2230,6 +2230,43 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
   background: rgba(172, 118, 28, 0.13);
 }
 
+.ds-persona-picker-org-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.24);
+  background: rgba(28, 28, 31, 0.88);
+  color: inherit;
+  font-size: 12px;
+}
+
+.ds-persona-picker-org-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ds-persona-picker-org-toolbar select {
+  min-height: 30px;
+  max-width: min(190px, 46vw);
+  border: 1px solid rgba(128, 128, 128, 0.38);
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.92);
+  color: inherit;
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+.ds-persona-picker-group-hidden {
+  display: none !important;
+}
+
 .ds-persona-picker-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2259,6 +2296,21 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
 }
 
 @media (max-width: 640px) {
+  .ds-persona-picker-org-toolbar {
+    gap: 7px;
+    padding: 7px 8px;
+  }
+
+  .ds-persona-picker-org-toolbar label {
+    flex: 1 1 140px;
+    justify-content: space-between;
+  }
+
+  .ds-persona-picker-org-toolbar select {
+    min-width: 0;
+    max-width: 60%;
+  }
+
   .ds-persona-org-actions {
     max-width: calc(100% - 34px);
   }

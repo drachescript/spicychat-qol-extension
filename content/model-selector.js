@@ -23,6 +23,18 @@
     return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
   }
 
+  function isMobileLike() {
+    const env = DS.getAndroidEnvironment?.();
+    if (env?.android) return true;
+    const ua = String(navigator.userAgent || "");
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+    try {
+      return window.matchMedia?.("(pointer: coarse)")?.matches && window.innerWidth <= 900;
+    } catch {
+      return window.innerWidth <= 700;
+    }
+  }
+
   const NON_MODEL_NAMES = new Set([
     "available models",
     "premium ai models",
@@ -164,7 +176,18 @@
     DS.qsa("[role='dialog'], [aria-modal='true'], div.fixed").forEach(el => {
       if (!isVisible(el)) return;
       const text = norm(textOf(el));
-      if (text.includes("upgrade") && (text.includes("model") || text.includes("premium") || text.includes("subscribe")) && !text.includes("select a model")) {
+      const isNativeModelPickerShell =
+        text.includes("available models") ||
+        text.includes("explore all models") ||
+        text.includes("generation settings") ||
+        text.includes("select a model");
+
+      // Never hide a container that is itself SpicyChat's model picker. On mobile
+      // the compact picker can be a fixed/modal surface and also contain Upgrade
+      // text, which previously made it look like an upgrade popup.
+      if (isNativeModelPickerShell) return;
+
+      if (text.includes("upgrade") && (text.includes("model") || text.includes("premium") || text.includes("subscribe"))) {
         DS.hideElement?.(el, "model-selector:upgrade-popup");
       }
     });
@@ -195,7 +218,7 @@
 
   function findModelRows(root) {
     const candidates = [...root.querySelectorAll("div[class*='cursor-pointer']")]
-      .filter(row => row !== root && isVisible(row))
+      .filter(row => row !== root && (isVisible(row) || row.classList.contains("ds-model-quick-hidden")))
       .filter(row => !row.querySelector("div[class*='cursor-pointer']"))
       .map(row => ({ row, name: modelNameFromRow(row) }))
       .filter(entry => !!entry.name);
@@ -319,7 +342,26 @@
     }
   }
 
+  function leaveCompactMobileMenuNative(root) {
+    if (!root) return;
+    const entries = findModelRows(root);
+    entries.forEach(entry => entry.row.classList.remove("ds-model-quick-hidden"));
+    root.querySelectorAll(".ds-model-favorite-button").forEach(button => button.remove());
+    restoreModelOrder(entries);
+
+    const perf = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
+    perf.modelQuickMenuMobileSafePasses = Number(perf.modelQuickMenuMobileSafePasses || 0) + 1;
+  }
+
   function applyModelMenu(surface, settings) {
+    // SpicyChat's mobile/WebView quick model menu is re-mounted asynchronously and
+    // does not tolerate rows being re-parented/reordered by an extension. Keep that
+    // compact surface native on mobile. Explore All can still receive QoL model tools.
+    if (surface.kind !== "explore" && isMobileLike()) {
+      leaveCompactMobileMenuNative(surface.root);
+      return;
+    }
+
     const entries = findModelRows(surface.root);
     if (!entries.length) return;
 
@@ -329,13 +371,29 @@
     const hidden = parseNameList(settings.modelHiddenNames).map(norm);
     const compactMenu = surface.kind !== "explore";
 
-    entries.forEach(entry => {
+    const rowStates = entries.map(entry => {
       const favorite = ensureFavoriteButton(entry, favorites);
       const hiddenByName = compactMenu && hidden.includes(norm(entry.name));
       const hiddenByFavoritesOnly = compactMenu && !!settings.modelQuickFavoritesOnly && !favorite;
-      entry.row.classList.toggle("ds-model-quick-hidden", hiddenByName || hiddenByFavoritesOnly);
-      entry.row.dataset.dsModelSurface = surface.kind;
+      return { entry, hidden: hiddenByName || hiddenByFavoritesOnly };
     });
+
+    // Mobile/WebView model menus can mount a slightly different compact row shape and
+    // then re-render a moment later. Never let QoL turn a successfully opened native
+    // picker into an empty shell ("Available models / Explore all models / Generation
+    // settings" only). If every detected model would be hidden, fail open and leave the
+    // native rows visible. This also makes stale favorite/hidden-name settings recoverable.
+    const wouldHideEveryModel = compactMenu && rowStates.length > 0 && rowStates.every(state => state.hidden);
+
+    rowStates.forEach(({ entry, hidden }) => {
+      entry.row.classList.toggle("ds-model-quick-hidden", !wouldHideEveryModel && hidden);
+      DS.setDatasetIfChanged?.(entry.row, "dsModelSurface", surface.kind);
+    });
+
+    if (wouldHideEveryModel) {
+      const perf = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.modelQuickMenuFailOpen = Number(perf.modelQuickMenuFailOpen || 0) + 1;
+    }
 
     // Favorites are kept at the top in every model picker. Explore All remains complete,
     // so hidden/favorites-only quick-menu settings can never make a model impossible to recover.

@@ -202,15 +202,17 @@
   };
 
   DS.blockCurrentBot = async function blockCurrentBot() {
-    if (!DS.isSingleChatPage()) {
-      DS.setQuickStatus?.("Open a specific chat first.");
+    const onChat = !!DS.isSingleChatPage?.();
+    const onProfile = !!DS.isBotProfilePage?.();
+    if (!onChat && !onProfile) {
+      DS.setQuickStatus?.("Open a specific chat or chatbot profile first.");
       return {
         ok: false,
-        error: "not-chat"
+        error: "not-bot-page"
       };
     }
 
-    const id = DS.chatIdFromHref(location.href);
+    const id = DS.botIdFromHref?.(location.href) || DS.chatIdFromHref?.(location.href);
     const name = DS.getCurrentBotName();
     const { blockedBots } = DS.state;
     const beforeBlocked = JSON.parse(JSON.stringify(blockedBots));
@@ -461,15 +463,19 @@
     if (message?.type === "DS_GET_PAGE_INFO") {
       const path = String(location.pathname || "");
       const isSingleChatPage = !!DS.isSingleChatPage();
+      const isBotProfilePage = !!DS.isBotProfilePage?.();
+      const botPage = isSingleChatPage || isBotProfilePage;
       sendResponse({
         ok: true,
         path,
         isSingleChatPage,
+        isBotProfilePage,
         isChatListPage: !!DS.isChatListPage?.(),
         isChatbotEditor: /^\/chatbot\/(?:edit\/[^/]+|[^/]+\/edit)(?:\/|$)/i.test(path),
         isLorebookEditor: /^\/lorebook\/(?:edit\/[^/]+|[^/]+\/edit)(?:\/|$)/i.test(path),
         isLorebookEntriesPage: /^\/lorebook\/[^/]+\/entries(?:\/|$)/i.test(path),
-        botName: isSingleChatPage ? DS.getCurrentBotName() : "",
+        botName: botPage ? DS.getCurrentBotName() : "",
+        botId: botPage ? (DS.botIdFromHref?.(location.href) || DS.chatIdFromHref?.(location.href) || null) : null,
         chatId: isSingleChatPage ? DS.chatIdFromHref(location.href) : null
       });
 

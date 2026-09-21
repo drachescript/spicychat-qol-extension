@@ -352,7 +352,7 @@ async function load() {
   const blockButton =
     document.getElementById("blockCurrentBot");
 
-  if (pageInfo?.isSingleChatPage) {
+  if (pageInfo?.isSingleChatPage || pageInfo?.isBotProfilePage) {
     blockButton.style.display = "block";
     blockButton.textContent = pageInfo.botName
       ? `Block ${pageInfo.botName}`

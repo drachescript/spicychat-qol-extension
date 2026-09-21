@@ -5081,6 +5081,18 @@ const BOT_ARCHIVE_FIELDS = [
   "exampleDialogues", "tags", "visibility", "creator", "image",
   "messageCount", "rating", "tokenCount"
 ];
+const BOT_VERSION_FIELDS = ["name", "title", "greeting", "personality", "scenario", "exampleDialogues", "tags", "image"];
+const BOT_VERSION_LABELS = {
+  name: "Name",
+  title: "Title",
+  greeting: "Greeting",
+  personality: "Personality",
+  scenario: "Scenario",
+  exampleDialogues: "Example Dialogues",
+  tags: "Tags",
+  image: "Avatar / image",
+  lorebook: "Lorebook"
+};
 const BOT_ARCHIVE_LABELS = {
   name: "Name",
   title: "Title",
@@ -5160,6 +5172,60 @@ function cleanBotArchiveText(value, max = 14000) {
     .slice(0, max);
 }
 
+function normalizeBotVersionTags(value) {
+  const values = String(value || "")
+    .split(/\s*,\s*/g)
+    .map(tag => cleanBotArchiveText(tag, 120))
+    .filter(Boolean);
+  const deduped = [...new Map(values.map(tag => [tag.toLocaleLowerCase(), tag])).values()];
+  deduped.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return deduped.join(", ");
+}
+
+function normalizeBotVersionContent(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const content = {};
+  for (const field of BOT_VERSION_FIELDS) {
+    if (field === "image") content[field] = canonicalBotImage(source[field] || "");
+    else if (field === "tags") content[field] = normalizeBotVersionTags(source[field]);
+    else content[field] = cleanBotArchiveText(source[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000);
+  }
+  const lorebookRaw = source.lorebook && typeof source.lorebook === "object" ? source.lorebook : {};
+  content.lorebook = {
+    id: cleanBotArchiveText(lorebookRaw.id || source.lorebookId || "", 240),
+    name: cleanBotArchiveText(lorebookRaw.name || source.lorebookName || "", 500)
+  };
+  return content;
+}
+
+function normalizeBotVersionState(raw = {}) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    visibility: cleanBotArchiveText(source.visibility || "", 80),
+    moderation: cleanBotArchiveText(source.moderation || "", 80),
+    capturedAt: Number(source.capturedAt) || 0
+  };
+}
+
+function normalizeBotVersion(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const content = normalizeBotVersionContent(raw.content || raw.fields || raw);
+  const hasContent = BOT_VERSION_FIELDS.some(field => String(content[field] || "")) || content.lorebook.id || content.lorebook.name;
+  if (!hasContent) return null;
+  return {
+    id: cleanBotArchiveText(raw.id || "", 120),
+    number: Math.max(1, Number(raw.number) || 1),
+    capturedAt: Number(raw.capturedAt) || Number(raw.savedAt) || 0,
+    source: cleanBotArchiveText(raw.source || "", 120),
+    label: cleanBotArchiveText(raw.label || "", 160),
+    content,
+    state: normalizeBotVersionState(raw.state),
+    changedFields: Array.isArray(raw.changedFields)
+      ? [...new Set(raw.changedFields.map(field => cleanBotArchiveText(field, 80)).filter(Boolean))]
+      : []
+  };
+}
+
 function normalizeBotArchiveRevision(raw) {
   if (!raw || typeof raw !== "object") return null;
   const rawFields = raw.fields && typeof raw.fields === "object" ? raw.fields : raw;
@@ -5223,6 +5289,8 @@ function normalizeBotArchive(value) {
       profileBackup: !!raw.profileBackup,
       revisions: Array.isArray(raw.revisions) ? raw.revisions.map(normalizeBotArchiveRevision).filter(Boolean).slice(0, 50) : [],
       manualBackups: Array.isArray(raw.manualBackups) ? raw.manualBackups.map(normalizeBotManualBackup).filter(Boolean).sort((a, b) => b.capturedAt - a.capturedAt) : [],
+      versions: Array.isArray(raw.versions) ? raw.versions.map(normalizeBotVersion).filter(Boolean).sort((a, b) => b.number - a.number || b.capturedAt - a.capturedAt).slice(0, 50) : [],
+      versionState: normalizeBotVersionState(raw.versionState),
       fields,
       coverage
     };
@@ -5252,6 +5320,10 @@ function mergeBotArchiveEntry(previousValue, incomingValue) {
     profileBackup: !!(incoming.profileBackup || previous?.profileBackup),
     revisions: Array.isArray(incoming.revisions) && incoming.revisions.length ? incoming.revisions : (previous?.revisions || []),
     manualBackups: Array.isArray(incoming.manualBackups) && incoming.manualBackups.length ? incoming.manualBackups : (previous?.manualBackups || []),
+    versions: Array.isArray(incoming.versions) && incoming.versions.length ? incoming.versions : (previous?.versions || []),
+    versionState: Number(incoming.versionState?.capturedAt || 0) >= Number(previous?.versionState?.capturedAt || 0)
+      ? normalizeBotVersionState(incoming.versionState)
+      : normalizeBotVersionState(previous?.versionState),
     fields,
     coverage: BOT_ARCHIVE_FIELDS.filter(field => fields[field])
   };
@@ -6517,6 +6589,152 @@ async function copyBackupJson(bot, revision) {
   }
 }
 
+function botVersionFieldValue(content, field) {
+  if (field === "lorebook") {
+    const id = String(content?.lorebook?.id || "");
+    const name = String(content?.lorebook?.name || "");
+    return name && id ? `${name} (${id})` : (name || id || "None");
+  }
+  return String(content?.[field] || "");
+}
+
+function botVersionAsRevision(version) {
+  const content = normalizeBotVersionContent(version?.content || {});
+  return {
+    capturedAt: Number(version?.capturedAt) || 0,
+    source: version?.source || `Bot version v${version?.number || "?"}`,
+    fields: {
+      name: content.name || "",
+      title: content.title || "",
+      greeting: content.greeting || "",
+      personality: content.personality || "",
+      scenario: content.scenario || "",
+      exampleDialogues: content.exampleDialogues || "",
+      tags: content.tags || "",
+      image: content.image || ""
+    },
+    coverage: BOT_VERSION_FIELDS.filter(field => String(content[field] || ""))
+  };
+}
+
+function creatorBotVersionDiff(previousVersion, version) {
+  const before = normalizeBotVersionContent(previousVersion?.content || {});
+  const after = normalizeBotVersionContent(version?.content || {});
+  const fields = [...BOT_VERSION_FIELDS, "lorebook"];
+  return fields.map(field => {
+    const previousValue = botVersionFieldValue(before, field);
+    const nextValue = botVersionFieldValue(after, field);
+    if (previousValue === nextValue) return null;
+    return { field, before: previousValue, after: nextValue };
+  }).filter(Boolean);
+}
+
+function shortVersionValue(value, max = 700) {
+  const text = String(value || "");
+  if (text.length <= max) return text || "(empty)";
+  return `${text.slice(0, max)}\n… (${text.length - max} more characters)`;
+}
+
+function creatorBackupVersionRow(bot, version, olderVersion) {
+  const row = makeElement("div", { className: "creator-backup-revision" });
+  const number = Math.max(1, Number(version?.number) || 1);
+  const changed = Array.isArray(version?.changedFields) && version.changedFields.length
+    ? version.changedFields
+    : creatorBotVersionDiff(olderVersion, version).map(item => item.field);
+  const changedText = changed.length
+    ? changed.map(field => BOT_VERSION_LABELS[field] || field).join(", ")
+    : (number === 1 ? "Initial captured version" : "Meaningful creator content changed");
+  const label = version?.label ? ` · ${version.label}` : "";
+  const stateBits = [];
+  if (version?.state?.visibility) stateBits.push(version.state.visibility);
+  if (version?.state?.moderation) stateBits.push(version.state.moderation);
+  const stateText = stateBits.length ? ` · state: ${stateBits.join(" / ")}` : "";
+
+  const text = makeElement("span", {
+    text: `v${number} · ${creatorBackupDate(version?.capturedAt)}${label} · changed: ${changedText}${stateText}`
+  });
+  const actions = makeElement("span", { className: "creator-backup-row-actions" });
+
+  const view = makeElement("button", { text: "View", attrs: { type: "button" } });
+  view.addEventListener("click", () => {
+    let box = row.querySelector(":scope > .creator-backup-compare[data-mode='view']");
+    if (box) { box.remove(); return; }
+    row.querySelectorAll(":scope > .creator-backup-compare").forEach(node => node.remove());
+    box = makeElement("div", { className: "creator-backup-compare" });
+    box.dataset.mode = "view";
+    const content = normalizeBotVersionContent(version?.content || {});
+    box.textContent = [...BOT_VERSION_FIELDS, "lorebook"]
+      .map(field => `${BOT_VERSION_LABELS[field] || field}:\n${shortVersionValue(botVersionFieldValue(content, field))}`)
+      .join("\n\n");
+    row.appendChild(box);
+  });
+
+  const compare = makeElement("button", { text: "Compare", attrs: { type: "button" } });
+  compare.addEventListener("click", () => {
+    let box = row.querySelector(":scope > .creator-backup-compare[data-mode='version-compare']");
+    if (box) { box.remove(); return; }
+    row.querySelectorAll(":scope > .creator-backup-compare").forEach(node => node.remove());
+    box = makeElement("div", { className: "creator-backup-compare" });
+    box.dataset.mode = "version-compare";
+    if (!olderVersion) {
+      box.textContent = "This is the first locally recorded bot version, so there is no older version to compare against.";
+    } else {
+      const diff = creatorBotVersionDiff(olderVersion, version);
+      box.textContent = diff.length
+        ? diff.map(item => `${BOT_VERSION_LABELS[item.field] || item.field}\n--- v${olderVersion.number || "?"}\n${shortVersionValue(item.before)}\n+++ v${number}\n${shortVersionValue(item.after)}`).join("\n\n")
+        : "No creator-content differences from the previous recorded version.";
+    }
+    row.appendChild(box);
+  });
+
+  const restore = makeElement("button", { text: "Restore fields", attrs: { type: "button" } });
+  restore.addEventListener("click", () => {
+    let box = row.querySelector(":scope > .creator-backup-restore-fields");
+    if (box) { box.remove(); return; }
+    const revision = botVersionAsRevision(version);
+    const restorable = ["name", "title", "greeting", "personality", "scenario", "exampleDialogues", "tags"]
+      .filter(field => String(revision.fields?.[field] || "").length > 0);
+    box = makeElement("div", { className: "creator-backup-restore-fields" });
+    if (!restorable.length) {
+      box.appendChild(makeElement("span", { className: "hint", text: "This version has no editor fields available to restore." }));
+      row.appendChild(box);
+      return;
+    }
+    for (const field of restorable) {
+      const input = makeElement("input", { attrs: { type: "checkbox", value: field } });
+      input.checked = true;
+      box.appendChild(makeElement("label", {}, [input, document.createTextNode(BOT_VERSION_LABELS[field] || field)]));
+    }
+    const go = makeElement("button", { text: "Open editor with selected fields", attrs: { type: "button" } });
+    go.addEventListener("click", () => queueBotFieldRestore(bot, revision, [...box.querySelectorAll("input:checked")].map(input => input.value)));
+    box.appendChild(go);
+    row.appendChild(box);
+  });
+
+  const rename = makeElement("button", { text: "Rename", attrs: { type: "button" } });
+  rename.addEventListener("click", async () => {
+    const next = prompt(`Name bot version v${number}:`, version?.label || "");
+    if (next == null) return;
+    const labelValue = cleanBotArchiveText(next, 160);
+    await mutateCreatorBotBackup(bot.id, entry => {
+      const item = (entry.versions || []).find(candidate => String(candidate.id || "") === String(version.id || "") || Number(candidate.number) === number);
+      if (item) item.label = labelValue;
+    }, labelValue ? `Renamed bot version v${number}.` : `Cleared the name for bot version v${number}.`);
+  });
+
+  const del = makeElement("button", { text: "Delete", attrs: { type: "button" } });
+  del.addEventListener("click", async () => {
+    if (!confirm(`Delete bot version v${number}? Safety revisions/manual checkpoints are separate and will not be deleted.`)) return;
+    await mutateCreatorBotBackup(bot.id, entry => {
+      entry.versions = (entry.versions || []).filter(item => !(String(item.id || "") === String(version.id || "") || Number(item.number) === number));
+    }, `Deleted bot version v${number}.`);
+  });
+
+  actions.append(view, compare, restore, rename, del);
+  row.append(text, actions);
+  return row;
+}
+
 function creatorBackupRevisionRow(bot, revision, index, options = {}) {
   const isManual = options.manual === true;
   const allowRestore = options.allowRestore !== false && !!bot.ownBot;
@@ -6631,10 +6849,12 @@ function creatorBackupBotRow(bot, kind = "bot") {
   main.appendChild(makeElement("div", { className: "creator-backup-row-title", text: bot.name || bot.id }));
   const revisions = Array.isArray(bot.revisions) ? bot.revisions : [];
   const manuals = Array.isArray(bot.manualBackups) ? bot.manualBackups : [];
+  const versions = Array.isArray(bot.versions) ? [...bot.versions].sort((a, b) => b.number - a.number || b.capturedAt - a.capturedAt) : [];
   const details = [
     isProfile ? "Bot profile" : "My chatbot",
     `last backup ${creatorBackupAge(bot.lastSavedAt)}`,
-    `${revisions.length} auto revision${revisions.length === 1 ? "" : "s"}`
+    ...(isProfile ? [] : [`${versions.length} bot version${versions.length === 1 ? "" : "s"}`]),
+    `${revisions.length} safety revision${revisions.length === 1 ? "" : "s"}`
   ];
   if (!isProfile) details.push(`${manuals.length} manual backup${manuals.length === 1 ? "" : "s"}`);
   const visibility = cleanBotArchiveText(bot.fields?.visibility || "", 40);
@@ -6661,16 +6881,28 @@ function creatorBackupBotRow(bot, kind = "bot") {
     actions.appendChild(restoreLatest);
   }
   if (revisions.length) {
-    const clearAuto = makeElement("button", { text: "Clear auto history", attrs: { type: "button" } });
+    const clearAuto = makeElement("button", { text: "Clear safety history", attrs: { type: "button" } });
     clearAuto.addEventListener("click", async () => {
-      if (!confirm("Delete all rotating automatic/profile revisions for this bot? Manual backups and the latest copy will remain.")) return;
-      await mutateCreatorBotBackup(bot.id, entry => { entry.revisions = []; }, "Cleared the automatic revision history.");
+      if (!confirm("Delete all rotating safety/profile revisions for this bot? Bot Version History, manual backups and the latest copy will remain.")) return;
+      await mutateCreatorBotBackup(bot.id, entry => { entry.revisions = []; }, "Cleared the safety revision history.");
     });
     actions.appendChild(clearAuto);
   }
   actions.appendChild(del);
   head.append(main, actions);
   row.appendChild(head);
+
+  if (versions.length && !isProfile) {
+    const versionHistory = makeElement("details", { className: "creator-backup-revisions" });
+    versionHistory.appendChild(makeElement("summary", { text: `Bot Version History (${versions.length})` }));
+    const list = makeElement("div", { className: "creator-backup-revision-list" });
+    versions.forEach((version, index) => {
+      const olderVersion = versions[index + 1] || null;
+      list.appendChild(creatorBackupVersionRow(bot, version, olderVersion));
+    });
+    versionHistory.appendChild(list);
+    row.appendChild(versionHistory);
+  }
 
   if (manuals.length && !isProfile) {
     const manualHistory = makeElement("details", { className: "creator-backup-revisions" });
@@ -6683,7 +6915,7 @@ function creatorBackupBotRow(bot, kind = "bot") {
 
   if (revisions.length) {
     const history = makeElement("details", { className: "creator-backup-revisions" });
-    history.appendChild(makeElement("summary", { text: `${isProfile ? "Profile" : "Automatic"} history (${revisions.length})` }));
+    history.appendChild(makeElement("summary", { text: `${isProfile ? "Profile" : "Safety revision"} history (${revisions.length})` }));
     const list = makeElement("div", { className: "creator-backup-revision-list" });
     revisions.forEach((revision, index) => list.appendChild(creatorBackupRevisionRow(bot, revision, index, { allowRestore: !isProfile })));
     history.appendChild(list);
@@ -13605,12 +13837,13 @@ async function renderCreatorWorkspace() {
   const botList = Object.values(bots);
   const bookList = Object.values(books);
   const ownBots = botList.filter(bot => bot.ownBot);
-  const revisionCount = botList.reduce((n, bot) => n + (Array.isArray(bot.revisions) ? bot.revisions.length : 0), 0);
+  const versionCount = ownBots.reduce((n, bot) => n + (Array.isArray(bot.versions) ? bot.versions.length : 0), 0);
+  const revisionCount = ownBots.reduce((n, bot) => n + (Array.isArray(bot.revisions) ? bot.revisions.length : 0), 0);
   const draftCount = Object.values(drafts).reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0);
   const staleBots = cfg.botBackupToolsEnabled && cfg.botArchiveOwnEditorBackups ? ownBots.filter(bot => Number(bot.lastSavedAt || 0) && Date.now() - Number(bot.lastSavedAt) > CREATOR_BACKUP_STALE_MS).length : 0;
   const staleBooks = cfg.lorebookBackupToolsEnabled && cfg.lorebookBackupsEnabled ? bookList.filter(book => Number(book.lastSavedAt || 0) && Date.now() - Number(book.lastSavedAt) > CREATOR_BACKUP_STALE_MS).length : 0;
   const cards = [
-    ["Own bot backups", ownBots.length, `${revisionCount} previous revision${revisionCount === 1 ? "" : "s"}${staleBots ? ` · ${staleBots} stale` : ""}`],
+    ["Own bot backups", ownBots.length, `${versionCount} recorded bot version${versionCount === 1 ? "" : "s"} · ${revisionCount} safety revision${revisionCount === 1 ? "" : "s"}${staleBots ? ` · ${staleBots} stale` : ""}`],
     ["Lorebook backups", bookList.length, `${bookList.reduce((n, book) => n + Object.keys(book.entries || {}).length, 0)} saved entries${staleBooks ? ` · ${staleBooks} stale` : ""}`],
     ["Editor drafts", draftCount, `${Object.keys(drafts).length} bot/draft workspace${Object.keys(drafts).length === 1 ? "" : "s"}`],
     ["Known bot ↔ Lorebook links", Object.keys(links).length, "Learned when attached Lorebooks are visible on Edit Chatbot"]

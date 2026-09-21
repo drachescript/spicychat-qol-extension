@@ -143,12 +143,12 @@
   }
 
   function beginSilentBridge() {
-    document.documentElement.setAttribute(BRIDGE_ATTR, "1");
+    DS.setAttributeIfChanged?.(document.documentElement, BRIDGE_ATTR, "1");
   }
 
   function endSilentBridge(delay = 0) {
     window.setTimeout(() => {
-      document.documentElement.removeAttribute(BRIDGE_ATTR);
+      if (document.documentElement.hasAttribute(BRIDGE_ATTR)) document.documentElement.removeAttribute(BRIDGE_ATTR);
     }, delay);
   }
 

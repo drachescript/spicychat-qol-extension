@@ -6,6 +6,7 @@
 
   const PANEL_ID = "ds-bot-backup-tools";
   const STYLE_ID = "ds-bot-backup-style";
+  const CHATBOT_LOREBOOK_LINKS_KEY = "chatbotLorebookLinks";
   let activeForm = null;
   let saveTimer = null;
   let lastSavedSignature = "";
@@ -243,6 +244,57 @@
     return JSON.stringify(sanitizeBackupFields(profile.fields));
   }
 
+  function normalizedVersionTags(value) {
+    const values = String(value || "")
+      .split(/\s*,\s*/g)
+      .map(tag => clean(tag, 120))
+      .filter(Boolean);
+    const deduped = [...new Map(values.map(tag => [tag.toLocaleLowerCase(), tag])).values()];
+    deduped.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return deduped.join(", ");
+  }
+
+  async function versionSnapshot(profile, reason = "Own bot editor") {
+    if (!profile?.info?.id) return null;
+    const fields = sanitizeBackupFields(profile.fields);
+    const result = await DS.storageGet?.([CHATBOT_LOREBOOK_LINKS_KEY]) || {};
+    const relations = result[CHATBOT_LOREBOOK_LINKS_KEY] && typeof result[CHATBOT_LOREBOOK_LINKS_KEY] === "object"
+      ? result[CHATBOT_LOREBOOK_LINKS_KEY]
+      : {};
+    const relation = relations[profile.info.id] && typeof relations[profile.info.id] === "object"
+      ? relations[profile.info.id]
+      : {};
+
+    return {
+      capturedAt: Date.now(),
+      source: reason,
+      content: {
+        name: fields.name || "",
+        title: fields.title || "",
+        greeting: fields.greeting || "",
+        personality: fields.personality || "",
+        scenario: fields.scenario || "",
+        exampleDialogues: fields.exampleDialogues || "",
+        tags: normalizedVersionTags(fields.tags),
+        image: fields.image || "",
+        lorebook: {
+          id: clean(relation.lorebookId || "", 240),
+          name: clean(relation.lorebookName || "", 500)
+        }
+      },
+      state: {
+        visibility: fields.visibility || "",
+        moderation: profile.readOnlyReview ? "under-review" : "",
+        capturedAt: Date.now()
+      }
+    };
+  }
+
+  function versionSnapshotSignature(snapshot) {
+    if (!snapshot?.content) return "";
+    return JSON.stringify(snapshot.content);
+  }
+
   function portableJson(profile) {
     const fields = sanitizeBackupFields(profile?.fields || {});
     const info = profile?.info || { id: "", mode: "create" };
@@ -317,12 +369,16 @@
   async function saveOwnBackup(reason = "Own bot editor", options = {}) {
     const profile = captureProfile();
     if (!profile?.info?.id || profile.info.mode !== "edit") return false;
-    const nextSignature = signature(profile);
+
+    const version = await versionSnapshot(profile, reason);
+    const nextSignature = `${signature(profile)}|${versionSnapshotSignature(version)}`;
+
     if (!options.manual && profile.readOnlyEditor) {
       if (nextSignature) lastSavedSignature = nextSignature;
       return false;
     }
     if (!options.manual && nextSignature && nextSignature === lastSavedSignature) return false;
+
     const fields = sanitizeBackupFields(profile.fields);
     const snapshot = {
       id: profile.info.id,
@@ -338,11 +394,14 @@
       fields,
       coverage: profile.coverage
     };
+
     const ok = await DS.saveBotArchiveSnapshot?.(snapshot, {
       trackRevision: true,
       manual: !!options.manual,
-      label: clean(options.label || (options.manual ? "Manual backup" : ""), 160)
+      label: clean(options.label || (options.manual ? "Manual backup" : ""), 160),
+      versionSnapshot: version
     });
+
     if (ok) {
       lastSavedSignature = nextSignature;
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
@@ -416,11 +475,13 @@
     const entry = result[DS.BOT_ARCHIVE_KEY || "botArchive"]?.meta?.[info.id] || null;
     const revisions = Array.isArray(entry?.revisions) ? entry.revisions.length : 0;
     const manuals = Array.isArray(entry?.manualBackups) ? entry.manualBackups.length : 0;
+    const versions = Array.isArray(entry?.versions) ? entry.versions.length : 0;
     const readOnly = editorReadOnlyState();
     const parts = [
       `Automatic backup: ${automatic ? "On" : "Off"}`,
       `Last backup: ${relativeAge(entry?.lastSavedAt)}`,
-      `${revisions} auto revision${revisions === 1 ? "" : "s"}`,
+      `${versions} bot version${versions === 1 ? "" : "s"}`,
+      `${revisions} safety revision${revisions === 1 ? "" : "s"}`,
       `${manuals} manual backup${manuals === 1 ? "" : "s"}`
     ];
     if (readOnly) parts.push("editor is read-only; automatic revisions are paused; manual backup still works");
@@ -607,7 +668,7 @@
     if (info?.mode === "edit" && info.id) {
       const history = document.createElement("button");
       history.type = "button";
-      history.textContent = "History";
+      history.textContent = "Version history";
       history.addEventListener("click", () => openBackupHistory(info));
       actions.appendChild(history);
     }
@@ -678,9 +739,11 @@
     if (!document.getElementById(PANEL_ID)) buildPanel(form);
     if (lastPanelAutoState !== !!cfg.botArchiveOwnEditorBackups) refreshPanelStatus().catch(() => {});
 
-    // Automatic backups are opt-in. Manual Save/Export/History stay available
-    // on every supported edit page. A read-only editor only establishes a
-    // baseline so native rerenders cannot create fake automatic revisions.
+    // Automatic backups are opt-in. Manual Save/Export/Version history stay
+    // available on every supported edit page. Meaningful bot versions are
+    // stored separately from rotating safety revisions/manual checkpoints. A
+    // read-only editor only establishes a baseline so native rerenders cannot
+    // create fake automatic revisions.
     if (cfg.botArchiveOwnEditorBackups && info.mode === "edit" && info.id && !lastSavedSignature) {
       if (readOnly) {
         lastSavedSignature = signature(captureProfile());

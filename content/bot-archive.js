@@ -8,6 +8,14 @@
     "exampleDialogues", "tags", "visibility", "creator", "image",
     "messageCount", "rating", "tokenCount"
   ];
+  const VERSION_CONTENT_FIELDS = [
+    "name", "title", "greeting", "personality", "scenario",
+    "exampleDialogues", "tags", "image"
+  ];
+  const PROFILE_REVISION_FIELDS = [
+    "name", "title", "description", "greeting", "personality", "scenario",
+    "exampleDialogues", "tags", "visibility", "creator", "image"
+  ];
 
   let inflight = false;
   let lastRouteKey = "";
@@ -45,10 +53,89 @@
     }
   }
 
-  function sameArchiveFields(a, b) {
+  function sameArchiveFieldsFor(a, b, fields = FIELDS) {
     const left = a && typeof a === "object" ? a : {};
     const right = b && typeof b === "object" ? b : {};
-    return FIELDS.every(field => clean(left[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000) === clean(right[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000));
+    return fields.every(field => clean(left[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000) === clean(right[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000));
+  }
+
+  function sameArchiveFields(a, b) {
+    return sameArchiveFieldsFor(a, b, FIELDS);
+  }
+
+  function sameProfileRevisionFields(a, b) {
+    return sameArchiveFieldsFor(a, b, PROFILE_REVISION_FIELDS);
+  }
+
+  function normalizedVersionTags(value) {
+    const values = String(value || "")
+      .split(/\s*,\s*/g)
+      .map(tag => clean(tag, 120))
+      .filter(Boolean);
+    const deduped = [...new Map(values.map(tag => [tag.toLocaleLowerCase(), tag])).values()];
+    deduped.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return deduped.join(", ");
+  }
+
+  function normalizeVersionContent(raw = {}) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const content = {};
+    for (const field of VERSION_CONTENT_FIELDS) {
+      if (field === "image") content[field] = imageUrl(source[field] || "");
+      else if (field === "tags") content[field] = normalizedVersionTags(source[field]);
+      else content[field] = clean(source[field], field === "personality" || field === "exampleDialogues" ? 18000 : 12000);
+    }
+    const lorebookRaw = source.lorebook && typeof source.lorebook === "object" ? source.lorebook : {};
+    content.lorebook = {
+      id: clean(lorebookRaw.id || source.lorebookId || "", 240),
+      name: clean(lorebookRaw.name || source.lorebookName || "", 500)
+    };
+    return content;
+  }
+
+  function versionContentSignature(raw) {
+    return JSON.stringify(normalizeVersionContent(raw));
+  }
+
+  function versionChangedFields(previousRaw, nextRaw) {
+    const previous = normalizeVersionContent(previousRaw);
+    const next = normalizeVersionContent(nextRaw);
+    const changed = [];
+    for (const field of VERSION_CONTENT_FIELDS) {
+      if (String(previous[field] || "") !== String(next[field] || "")) changed.push(field);
+    }
+    if (String(previous.lorebook?.id || "") !== String(next.lorebook?.id || "") ||
+        String(previous.lorebook?.name || "") !== String(next.lorebook?.name || "")) changed.push("lorebook");
+    return changed;
+  }
+
+  function normalizeVersionState(raw = {}) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    return {
+      visibility: clean(source.visibility || "", 80),
+      moderation: clean(source.moderation || "", 80),
+      capturedAt: Number(source.capturedAt) || 0
+    };
+  }
+
+  function normalizeBotVersion(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const content = normalizeVersionContent(raw.content || raw.fields || raw);
+    const hasContent = VERSION_CONTENT_FIELDS.some(field => String(content[field] || "")) || content.lorebook.id || content.lorebook.name;
+    if (!hasContent) return null;
+    const changedFields = Array.isArray(raw.changedFields)
+      ? [...new Set(raw.changedFields.map(field => clean(field, 80)).filter(Boolean))]
+      : [];
+    return {
+      id: clean(raw.id || "", 120),
+      number: Math.max(1, Number(raw.number) || 1),
+      capturedAt: Number(raw.capturedAt) || Number(raw.savedAt) || 0,
+      source: clean(raw.source || "", 120),
+      label: clean(raw.label || "", 160),
+      content,
+      state: normalizeVersionState(raw.state),
+      changedFields
+    };
   }
 
   function revisionLimit() {
@@ -117,6 +204,10 @@
         manualBackups: Array.isArray(raw.manualBackups)
           ? raw.manualBackups.map(normalizeManualBackup).filter(Boolean).sort((a, b) => b.capturedAt - a.capturedAt)
           : [],
+        versions: Array.isArray(raw.versions)
+          ? raw.versions.map(normalizeBotVersion).filter(Boolean).sort((a, b) => b.number - a.number || b.capturedAt - a.capturedAt).slice(0, revisionLimit())
+          : [],
+        versionState: normalizeVersionState(raw.versionState),
         fields,
         coverage: FIELDS.filter(field => fields[field])
       };
@@ -146,6 +237,10 @@
       profileBackup: !!(incoming.profileBackup || previous?.profileBackup),
       revisions: Array.isArray(incoming.revisions) && incoming.revisions.length ? incoming.revisions : (previous?.revisions || []),
       manualBackups: Array.isArray(incoming.manualBackups) && incoming.manualBackups.length ? incoming.manualBackups : (previous?.manualBackups || []),
+      versions: Array.isArray(incoming.versions) && incoming.versions.length ? incoming.versions : (previous?.versions || []),
+      versionState: Number(incoming.versionState?.capturedAt || 0) >= Number(previous?.versionState?.capturedAt || 0)
+        ? normalizeVersionState(incoming.versionState)
+        : normalizeVersionState(previous?.versionState),
       fields,
       coverage: FIELDS.filter(field => fields[field])
     };
@@ -319,7 +414,12 @@
       const merged = mergeEntry(previous, snapshot);
       if (!merged) return false;
 
-      if (options.trackRevision && previous && !sameArchiveFields(previous.fields, merged.fields)) {
+      const profileRevision = options.kind === "profile";
+      const historyChanged = previous && (profileRevision
+        ? !sameProfileRevisionFields(previous.fields, merged.fields)
+        : !sameArchiveFields(previous.fields, merged.fields));
+
+      if (options.trackRevision && historyChanged) {
         const priorRevision = normalizeRevision({
           capturedAt: Number(previous.lastSavedAt) || Date.now(),
           source: previous.source || "Previous automatic backup",
@@ -331,7 +431,9 @@
         // live in manualBackups and are never trimmed by this limit.
         const unique = [];
         for (const revision of revisions) {
-          if (unique.some(item => sameArchiveFields(item.fields, revision.fields))) continue;
+          if (unique.some(item => (profileRevision
+            ? sameProfileRevisionFields(item.fields, revision.fields)
+            : sameArchiveFields(item.fields, revision.fields)))) continue;
           unique.push(revision);
           if (unique.length >= revisionLimit()) break;
         }
@@ -352,6 +454,55 @@
         if (manual) manualBackups.unshift(manual);
       }
       merged.manualBackups = manualBackups;
+
+      // Meaningful Bot Version History is separate from rotating safety
+      // revisions/manual checkpoints. Only creator-controlled content and the
+      // learned Lorebook association can create a new version. Visibility and
+      // moderation state are recorded separately and never create a version by
+      // themselves.
+      if (options.versionSnapshot && snapshot.ownBot) {
+        const incomingVersion = normalizeBotVersion(options.versionSnapshot);
+        if (incomingVersion) {
+          const state = normalizeVersionState({
+            ...(incomingVersion.state || {}),
+            capturedAt: incomingVersion.capturedAt || Date.now()
+          });
+          merged.versionState = state;
+
+          const existing = Array.isArray(previous?.versions)
+            ? previous.versions.map(normalizeBotVersion).filter(Boolean).sort((a, b) => b.number - a.number || b.capturedAt - a.capturedAt)
+            : [];
+          const latest = existing[0] || null;
+          const changed = !latest || versionContentSignature(latest.content) !== versionContentSignature(incomingVersion.content);
+
+          if (changed) {
+            const maxNumber = existing.reduce((max, item) => Math.max(max, Number(item.number) || 0), 0);
+            incomingVersion.number = maxNumber + 1;
+            incomingVersion.id = incomingVersion.id || `version-${incomingVersion.number}-${(incomingVersion.capturedAt || Date.now()).toString(36)}`;
+            incomingVersion.changedFields = latest
+              ? versionChangedFields(latest.content, incomingVersion.content)
+              : [...VERSION_CONTENT_FIELDS.filter(field => String(incomingVersion.content?.[field] || "")), ...(incomingVersion.content?.lorebook?.id || incomingVersion.content?.lorebook?.name ? ["lorebook"] : [])];
+
+            const versions = [incomingVersion, ...existing];
+            const unique = [];
+            const seen = new Set();
+            for (const version of versions) {
+              const sig = versionContentSignature(version.content);
+              if (seen.has(sig)) continue;
+              seen.add(sig);
+              unique.push(version);
+              if (unique.length >= revisionLimit()) break;
+            }
+            merged.versions = unique;
+          } else {
+            merged.versions = existing.slice(0, revisionLimit());
+          }
+        }
+      } else if (previous?.versions?.length) {
+        merged.versions = previous.versions.map(normalizeBotVersion).filter(Boolean).slice(0, revisionLimit());
+        merged.versionState = normalizeVersionState(previous.versionState);
+      }
+
       merged.ownBot = !!(snapshot.ownBot || previous?.ownBot);
       store.meta[snapshot.id] = merged;
       const ok = !!(await DS.storageSet?.({ [KEY]: normalize(store) }));
