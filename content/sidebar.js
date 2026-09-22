@@ -3,6 +3,56 @@
 
   const DS = window.DragonScriptQoL;
 
+  let sidebarObserver = null;
+  let observedSidebarNav = null;
+  let sidebarDirty = true;
+  let lastSidebarSettingsSignature = "";
+
+  function sidebarSettingsSignature(settings = {}) {
+    return Object.keys(settings)
+      .filter(key => key.startsWith("hideSidebar"))
+      .sort()
+      .map(key => `${key}:${settings[key] ? 1 : 0}`)
+      .join("|") + `|enabled:${settings.enabled ? 1 : 0}`;
+  }
+
+  function ensureSidebarObserver() {
+    const nav = getNav();
+    if (!nav) {
+      sidebarObserver?.disconnect?.();
+      sidebarObserver = null;
+      observedSidebarNav = null;
+      sidebarDirty = true;
+      return;
+    }
+    if (sidebarObserver && observedSidebarNav === nav) return;
+
+    sidebarObserver?.disconnect?.();
+    observedSidebarNav = nav;
+    sidebarDirty = true;
+    sidebarObserver = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        if (
+          mutation.type === "attributes" &&
+          ["class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"].includes(String(mutation.attributeName || "")) &&
+          (String(mutation.target?.dataset?.dsReason || "").startsWith("sidebar:") ||
+           mutation.target?.classList?.contains?.("ds-hidden"))
+        ) {
+          continue;
+        }
+        if (DS.mutationIsQolOnly?.(mutation)) continue;
+        sidebarDirty = true;
+        return;
+      }
+    });
+    sidebarObserver.observe(nav, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["href", "aria-label", "data-tooltip-content", "id", "class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"]
+    });
+  }
+
   function getNav() {
     return document.querySelector("nav") || document.querySelector('[role="navigation"]');
   }
@@ -429,6 +479,17 @@
 
   DS.applySidebarCleanup = function applySidebarCleanup() {
     const { settings } = DS.state;
+
+    ensureSidebarObserver();
+    const settingsSignature = sidebarSettingsSignature(settings);
+    if (!sidebarDirty && settingsSignature === lastSidebarSettingsSignature) {
+      if (DS.state?.runtimeCounters) {
+        DS.state.runtimeCounters.sidebarStablePassSkips = Number(DS.state.runtimeCounters.sidebarStablePassSkips || 0) + 1;
+      }
+      return;
+    }
+    sidebarDirty = false;
+    lastSidebarSettingsSignature = settingsSignature;
 
     // Do not unhide every managed row and immediately hide it again on every
     // reconciliation pass. That old restore/reapply loop fought React and was a

@@ -1,3 +1,9 @@
+## 0.2.12
+- Reduced active-use QoL churn from sidebar reconciliation and Lorebook export helper pages using dirty/signature gating, helper-mode UI suppression, and diff-before-write updates.
+
+- Fixed **Export full Lorebook JSON** sometimes finishing its hidden full-data crawl without starting a file download. Full export now reports helper progress, allows longer entry crawls, surfaces real failures instead of silently stopping, uses the Android/system saver when available, prefers the browser download manager when its optional permission is already granted, and keeps the normal permission-free JSON download as fallback.
+- Fixed the Lorebook full-export helper timing out while waiting for the opposite editor tab. The background worker now explicitly tells the hidden Lorebook tab to run the export collector after its content script is ready instead of relying on query parameters surviving SpicyChat navigation, and it closes the helper tab after the collector reports success or failure.
+
 ## 0.2.11
 
 - Added a General **SpicyChat beta access** switch for users whose accounts can see beta-only SpicyChat features. It is off by default and does not enable beta access by itself; it only gives QoL a clean opt-in gate for future beta-specific integrations.

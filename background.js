@@ -2983,18 +2983,119 @@ async function fetchExactMessageCounts(message) {
   }
 }
 
+async function setLorebookExportJob(token, value) {
+  const safe = String(token || "").trim().slice(0, 140);
+  if (!safe) return false;
+  return new Promise(resolve => {
+    chrome.storage.local.set({ [`dsLorebookExportJob:${safe}`]: value }, () => {
+      resolve(!chrome.runtime.lastError);
+    });
+  });
+}
+
+async function runLorebookExportHelperTab(tabId, message) {
+  const token = String(message?.token || "").trim().slice(0, 140);
+  const target = String(message?.target || "").trim().slice(0, 20);
+  const id = String(message?.id || "").trim().slice(0, 200);
+  if (!Number.isFinite(Number(tabId)) || !token || !["details", "entries"].includes(target)) return;
+
+  const deadline = Date.now() + 90_000;
+  let response = null;
+  try {
+    while (Date.now() < deadline) {
+      const tab = await tabsGet(Number(tabId));
+      if (!tab) throw new Error("Lorebook export helper tab closed before collection finished.");
+      response = await tabsSendMessage(Number(tabId), {
+        type: "DS_LOREBOOK_EXPORT_RUN",
+        token,
+        target,
+        id
+      });
+      if (response) break;
+      await new Promise(resolve => setTimeout(resolve, 350));
+    }
+
+    if (!response) throw new Error("QoL could not start the Lorebook export helper in the other tab.");
+    if (!response.ok) throw new Error(response.error || "Lorebook export helper failed.");
+  } catch (error) {
+    await setLorebookExportJob(token, {
+      status: "error",
+      id,
+      target,
+      error: error?.message || String(error),
+      finishedAt: Date.now()
+    });
+  } finally {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await tabsRemove(Number(tabId)).catch?.(() => null);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
 
+  if (message?.type === "DS_DOWNLOAD_TEXT_FILE") {
+    const text = String(message.text ?? "");
+    const filename = String(message.filename || "spicychat-qol-export.json")
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/^\.+|\.+$/g, "")
+      .slice(0, 180) || "spicychat-qol-export.json";
+    const mimeType = String(message.mimeType || "application/octet-stream").slice(0, 120);
+    if (!text || text.length > 12_000_000) {
+      sendResponse({ ok: false, error: "Export payload is empty or too large." });
+      return false;
+    }
+    if (!chrome.permissions?.contains || !chrome.downloads?.download) {
+      sendResponse({ ok: false, status: "download-manager-unavailable" });
+      return false;
+    }
+    chrome.permissions.contains({ permissions: ["downloads"] }, allowed => {
+      if (chrome.runtime.lastError || !allowed) {
+        sendResponse({ ok: false, status: "downloads-permission-not-granted" });
+        return;
+      }
+      try {
+        const bytes = new TextEncoder().encode(text);
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        const url = `data:${mimeType};base64,${btoa(binary)}`;
+        chrome.downloads.download({ url, filename, conflictAction: "uniquify", saveAs: false }, id => {
+          if (chrome.runtime.lastError || !Number.isFinite(Number(id))) {
+            sendResponse({ ok: false, error: chrome.runtime.lastError?.message || "Download manager rejected the file." });
+          } else {
+            sendResponse({ ok: true, downloadId: Number(id) });
+          }
+        });
+      } catch (error) {
+        sendResponse({ ok: false, error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
+
   if (message?.type === "DS_LOREBOOK_EXPORT_HELPER") {
     const url = String(message.url || "");
-    if (!/^https:\/\/(?:www\.)?spicychat\.ai\/lorebook\/edit\//i.test(url)) {
-      sendResponse({ ok: false, error: "Invalid Lorebook helper URL." });
+    const token = String(message.token || "").trim().slice(0, 140);
+    const target = String(message.target || "").trim().slice(0, 20);
+    const id = String(message.id || "").trim().slice(0, 200);
+    if (!/^https:\/\/(?:www\.)?spicychat\.ai\/lorebook\/edit\//i.test(url) || !token || !["details", "entries"].includes(target)) {
+      sendResponse({ ok: false, error: "Invalid Lorebook helper request." });
       return false;
     }
     tabsCreate({ url, active: false })
-      .then(result => sendResponse({ ok: !!result?.ok, tabId: result?.tab?.id || 0, error: result?.error || "" }))
+      .then(result => {
+        const helperTabId = Number(result?.tab?.id || 0);
+        if (!result?.ok || !helperTabId) {
+          sendResponse({ ok: false, tabId: 0, error: result?.error || "Could not create Lorebook helper tab." });
+          return;
+        }
+        sendResponse({ ok: true, tabId: helperTabId });
+        runLorebookExportHelperTab(helperTabId, { token, target, id }).catch(() => {});
+      })
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }

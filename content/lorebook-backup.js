@@ -325,12 +325,28 @@
     return !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
   }
 
-  async function captureFullEntriesHere() {
+  async function captureFullEntriesHere(exportToken = "") {
     const info = routeInfo();
     if (!info?.id || info.page !== "entries") return false;
     const capture = DS.captureLorebookEntriesFully;
     if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
-    const result = await capture({ progress: state => setStatus(state?.message || "Reading Lorebook entries…") });
+    const result = await capture({
+      progress: state => {
+        const message = state?.message || "Reading Lorebook entries…";
+        setStatus(message);
+        if (exportToken) {
+          setExportJob(exportToken, {
+            status: "working",
+            id: info.id,
+            target: "entries",
+            current: Number(state?.current) || 0,
+            total: Number(state?.total) || 0,
+            message,
+            updatedAt: Date.now()
+          }).catch(() => {});
+        }
+      }
+    });
     if (!result?.entries?.length && !captureListEntries().length) return false;
     return updateStoredEntries(info.id, result.entries || [], "Full Lorebook export");
   }
@@ -358,12 +374,16 @@
     const token = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     const path = target === "entries" ? `/lorebook/edit/${encodeURIComponent(info.id)}/entries` : `/lorebook/edit/${encodeURIComponent(info.id)}`;
     const url = new URL(path, location.origin);
-    url.searchParams.set(EXPORT_HELPER_PARAM, token);
-    url.searchParams.set(EXPORT_TARGET_PARAM, target);
     await setExportJob(token, { status: "pending", id: info.id, target, startedAt: Date.now() });
     const opened = await new Promise(resolve => {
       try {
-        chrome.runtime.sendMessage({ type: "DS_LOREBOOK_EXPORT_HELPER", url: url.href }, response => {
+        chrome.runtime.sendMessage({
+          type: "DS_LOREBOOK_EXPORT_HELPER",
+          url: url.href,
+          token,
+          target,
+          id: info.id
+        }, response => {
           if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
           else resolve(response || { ok: false });
         });
@@ -373,10 +393,15 @@
       await removeExportJob(token);
       throw new Error(opened?.error || "Could not open the Lorebook export helper tab.");
     }
-    const deadline = Date.now() + 60000;
+    const deadline = Date.now() + 5 * 60_000;
+    let lastMessage = "";
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 250));
       const job = await getExportJob(token);
+      if (job?.message && job.message !== lastMessage) {
+        lastMessage = job.message;
+        setStatus(job.message);
+      }
       if (job?.status === "done") { await removeExportJob(token); return true; }
       if (job?.status === "error") {
         await removeExportJob(token);
@@ -384,8 +409,75 @@
       }
     }
     await removeExportJob(token);
-    throw new Error("Timed out while collecting the other Lorebook tab.");
+    throw new Error("Timed out while collecting the other Lorebook tab. Try again after the Lorebook Entries page has fully loaded.");
   }
+
+  async function waitForExportHelperReady(target, timeout = 30_000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeout) {
+      const info = routeInfo();
+      if (info?.id && info.page === target) {
+        if (target === "details" && document.querySelector("form")) return info;
+        if (target === "entries" && document.querySelector("[data-testid='EntriesListServer-Header']")) return info;
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    throw new Error(`The Lorebook ${target === "entries" ? "Entries" : "Details"} page did not become ready in time.`);
+  }
+
+  async function runExportHelperCommand(message) {
+    const token = clean(message?.token, 140);
+    const target = clean(message?.target, 20);
+    const expectedId = clean(message?.id, 200);
+    if (!token || !["details", "entries"].includes(target)) {
+      return { ok: false, error: "Invalid Lorebook export helper request." };
+    }
+    helperRunning = true;
+    document.documentElement.dataset.dsLorebookExportHelper = "1";
+    try {
+      const info = await waitForExportHelperReady(target);
+      if (expectedId && info.id !== expectedId) {
+        throw new Error("The helper opened a different Lorebook than the one being exported.");
+      }
+      await setExportJob(token, {
+        status: "working",
+        id: info.id,
+        target,
+        message: target === "entries" ? "Reading Lorebook entries…" : "Reading Lorebook details…",
+        updatedAt: Date.now()
+      });
+      await saveCapture("Lorebook full export helper");
+      if (target === "entries") {
+        const listed = captureListEntries();
+        if (listed.length) await captureFullEntriesHere(token);
+      }
+      await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
+      return { ok: true };
+    } catch (error) {
+      const messageText = error?.message || String(error);
+      await setExportJob(token, {
+        status: "error",
+        id: expectedId,
+        target,
+        error: messageText,
+        finishedAt: Date.now()
+      });
+      return { ok: false, error: messageText };
+    } finally {
+      delete document.documentElement.dataset.dsLorebookExportHelper;
+      helperRunning = false;
+    }
+  }
+
+  try {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "DS_LOREBOOK_EXPORT_RUN") return false;
+      runExportHelperCommand(message)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    });
+  } catch {}
 
   async function maybeRunExportHelper(info) {
     if (helperRunning || !info?.id) return false;
@@ -397,7 +489,7 @@
     try {
       await new Promise(resolve => setTimeout(resolve, 900));
       await saveCapture("Lorebook full export helper");
-      if (target === "entries") await captureFullEntriesHere();
+      if (target === "entries") await captureFullEntriesHere(token);
       await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
     } catch (error) {
       await setExportJob(token, { status: "error", id: info.id, target, error: error?.message || String(error), finishedAt: Date.now() });
@@ -413,16 +505,67 @@
     return (clean(value, 100) || "spicychat-lorebook").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 90) || "spicychat-lorebook";
   }
 
-  function downloadJson(payload, filename) {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
+  async function downloadJson(payload, filename) {
+    const text = JSON.stringify(payload, null, 2);
+
+    // Android wrapper: use the native/system saver when available.
+    try {
+      if (typeof window._dsRequestExport === "function") {
+        window._dsRequestExport(text, filename);
+        return { ok: true, method: "android" };
+      }
+    } catch {}
+    try {
+      const bridge = window.flutter_inappwebview;
+      if (bridge?.callHandler) {
+        try {
+          await bridge.callHandler("exportChat", JSON.stringify({ text, filename }));
+          return { ok: true, method: "android" };
+        } catch {}
+        try {
+          await bridge.callHandler("saveFile", JSON.stringify({
+            text, content: text, filename, fileName: filename, mimeType: "application/json"
+          }));
+          return { ok: true, method: "android" };
+        } catch {}
+      }
+    } catch {}
+
+    // If the optional browser download-manager permission has already been
+    // granted, prefer it. This stays reliable after the long async full-export
+    // crawl has consumed the original click/user activation.
+    try {
+      const managed = await new Promise(resolve => {
+        chrome.runtime.sendMessage({
+          type: "DS_DOWNLOAD_TEXT_FILE",
+          text,
+          filename,
+          mimeType: "application/json;charset=utf-8"
+        }, response => {
+          if (chrome.runtime.lastError) resolve(null);
+          else resolve(response || null);
+        });
+      });
+      if (managed?.ok) return { ok: true, method: "browser-manager" };
+    } catch {}
+
+    // Permission-free desktop fallback.
+    try {
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.rel = "noopener";
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return { ok: true, method: "link" };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
   }
 
   async function exportCurrent() {
@@ -437,14 +580,16 @@
     if (!item) return false;
     const entries = Object.values(item.entries || {});
     const incompleteKeywords = entries.filter(entry => !entry.keywordsComplete).length;
-    downloadJson({
+    const download = await downloadJson({
       format: "spicychat-qol-lorebook-backup",
       version: 1,
       exportedAt: new Date().toISOString(),
       completeness: { details: true, entries: true, keywords: incompleteKeywords === 0 },
       lorebook: item
     }, `${safeFilename(item.name)}-lorebook-backup.json`);
-    if (incompleteKeywords) setStatus(`Lorebook JSON downloaded, but ${incompleteKeywords} entr${incompleteKeywords === 1 ? "y has" : "ies have"} incomplete keyword data.`);
+    if (!download?.ok) throw new Error(download?.error || "The Lorebook JSON could not be handed to the browser download system.");
+    if (incompleteKeywords) setStatus(`Lorebook JSON download started, but ${incompleteKeywords} entr${incompleteKeywords === 1 ? "y has" : "ies have"} incomplete keyword data.`);
+    else setStatus("Full Lorebook JSON download started.");
     return true;
   }
 
@@ -536,10 +681,15 @@
     exp.textContent = "Export full Lorebook JSON";
     exp.addEventListener("click", async () => {
       exp.disabled = true;
-      const ok = await exportCurrent();
-      if (ok && !/downloaded/i.test(document.querySelector(`#${PANEL_ID} [data-role='status']`)?.textContent || "")) setStatus("Full Lorebook JSON downloaded.");
-      else if (!ok) setStatus("No Lorebook backup was available yet.");
-      exp.disabled = false;
+      try {
+        const ok = await exportCurrent();
+        if (!ok) setStatus("No Lorebook backup was available yet.");
+      } catch (error) {
+        console.error("[SpicyChat QoL] Full Lorebook export failed", error);
+        setStatus(`Export failed: ${error?.message || String(error)}`);
+      } finally {
+        exp.disabled = false;
+      }
     });
     const info = routeInfo();
     const history = document.createElement("button");

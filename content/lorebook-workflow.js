@@ -101,7 +101,8 @@
 
   function setManagerStatus(message) {
     const node = document.querySelector(`#${TOOLBAR_ID} .ds-lb-manager-status`);
-    if (node) node.textContent = message || "";
+    const next = message || "";
+    if (node && node.textContent !== next) node.textContent = next;
   }
 
   function saveSettingsPatch(patch) {
@@ -343,15 +344,19 @@
       if (cfg.lorebookEntryShowHiddenKeywordCount !== false && hiddenKeywordCount) bits.push(`+${hiddenKeywordCount} hidden keywords`);
       if (cfg.lorebookEntryShowNoKeywordsWarning !== false && !keys.length && !hiddenKeywordCount) bits.push("no keywords");
       if (cfg.lorebookEntryShowCharacterCount !== false && contentLength >= 1800) bits.push(`${contentLength.toLocaleString()}/2,000 chars`);
-      label.textContent = bits.join(" · ");
-      label.hidden = !bits.length;
+      const nextText = bits.join(" · ");
+      if (label.textContent !== nextText) label.textContent = nextText;
+      const nextHidden = !bits.length;
+      if (label.hidden !== nextHidden) label.hidden = nextHidden;
       const bad = cfg.lorebookEntryShowCharacterCount !== false && contentLength > 2000;
       const warn = (cfg.lorebookEntryShowNoKeywordsWarning !== false && !keys.length && !hiddenKeywordCount) ||
         (cfg.lorebookEntryShowCharacterCount !== false && contentLength >= 1800);
-      label.className = bad ? "ds-lb-entry-bad" : (warn ? "ds-lb-entry-warn" : "");
+      const nextClass = bad ? "ds-lb-entry-bad" : (warn ? "ds-lb-entry-warn" : "");
+      if (label.className !== nextClass) label.className = nextClass;
     } else if (label) {
-      label.hidden = true;
-      label.textContent = "";
+      if (!label.hidden) label.hidden = true;
+      if (label.textContent) label.textContent = "";
+      if (label.className) label.className = "";
     }
     return tools;
   }
@@ -1279,6 +1284,10 @@
   };
 
   DS.applyLorebookWorkflowTools = async function applyLorebookWorkflowTools(){
+    if (document.documentElement.dataset.dsLorebookExportHelper === "1") {
+      DS.removeLorebookWorkflowTools?.();
+      return;
+    }
     ensureStyle(); installTabIntentListener(); installHistoryGuard(); maybeDefaultToEntries();
     await applyPreferredSort().catch(()=>{});
     ensureManagerToolbar();
