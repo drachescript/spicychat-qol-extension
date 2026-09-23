@@ -9,7 +9,7 @@
   const GROUPS = {
     "Underage": [
       "child", "children", "childhood", "young", "baby", "boy", "girl", "short", "small", "petite", "tiny",
-      "loli", "minor", "kid", "kids", "underage", "teen", "innocent", "infant", "little",
+      "loli", "minor", "kid", "kids", "kitten", "underage", "teen", "innocent", "infant", "little",
       "school", "teacher", "student", "adolescent", "juvenile", "brat", "youth",
       "backpack", "runaway", "insecure", "fragile", "uniform", "prodigy",
       "pupil", "born", "birth", "hatchling"

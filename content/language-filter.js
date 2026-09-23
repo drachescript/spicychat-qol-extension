@@ -36,7 +36,7 @@
   const LATIN_WORDS = {
     en: ["the","and","you","your","with","for","from","this","that","are","was","have","has","they","their","about","into","would","could","should","when","where"],
     de: ["der","die","das","und","ist","nicht","mit","für","ich","du","sie","wir","ein","eine","auf","aus","dem","den","aber","auch","oder","wenn"],
-    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","puede","siempre","nunca","solo","sola"],
+    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","quiero","quieres","puede","puedo","puedes","tengo","tienes","dormir","contigo","conmigo","temo","miedo","oscuridad","porque","porqué","siempre","nunca","solo","sola"],
     fr: ["le","la","les","des","une","un","avec","pour","dans","est","vous","tu","elle","il","mais","comme","quand","où","sur","pas","son"],
     it: ["il","lo","la","gli","le","una","uno","con","per","che","sei","è","sono","ma","come","quando","dove","non","suo","sua","nel"],
     pt: ["o","a","os","as","uma","um","com","para","que","você","voce","está","esta","não","nao","mas","como","quando","onde","seu","sua"],
@@ -159,6 +159,17 @@
     // lexical hits are enough once there is a real sentence-sized sample.
     if (bestScore >= 2 && letterCount >= 28 && bestScore >= secondScore + 2) return { code: bestCode, confidence: Math.min(0.9, 0.62 + bestScore * 0.06), source: "words-short" };
     return { code: "", confidence: 0 };
+  }
+
+  function detectSentenceLikeTitleLanguage(title) {
+    const value = cleanText(title);
+    if (!value) return { code: "", confidence: 0 };
+    const words = value.match(/[\p{L}]{2,}/gu) || [];
+    const letters = (value.match(/[\p{L}]/gu) || []).length;
+    const sentenceLike = words.length >= 4 && letters >= 18 && (/[¿¡!?…,:;.]/u.test(value) || value.length >= 30);
+    if (!sentenceLike) return { code: "", confidence: 0 };
+    const detected = detectLikelyLanguage(value);
+    return detected.code ? { ...detected, source: `title-${detected.source || "text"}` } : detected;
   }
 
   const languageReasonCache = new WeakMap();
@@ -354,7 +365,7 @@
       host.appendChild(badge);
     }
     badge.textContent = `QoL: ${LANGUAGE_NAMES[code] || code}`;
-    badge.title = "Language detected locally from the bot description/greeting; this does not edit the creator's SpicyChat tags.";
+    badge.title = "Language detected locally from the bot title/description/greeting; this does not edit the creator's SpicyChat tags.";
   }
 
   function getDescriptionCandidates(card) {
@@ -425,27 +436,31 @@
     }
 
     const description = DS.getCardDescriptionText(card);
+    const title = getCardTitle(card);
     const explicit = explicitLanguageCode(card);
     const localDetected = detectLikelyLanguage(description);
+    const titleDetected = localDetected.code ? { code: "", confidence: 0 } : detectSentenceLikeTitleLanguage(title);
     const id = cardBotId(card);
     if (id && localDetected.code && !explicit) cacheLanguage(id, localDetected.code, "description");
+    else if (id && titleDetected.code && !explicit) cacheLanguage(id, titleDetected.code, "title");
     const cachedCode = id ? languageCache.get(id)?.code || "" : "";
-    const code = explicit || localDetected.code || cachedCode;
+    const code = explicit || localDetected.code || titleDetected.code || cachedCode;
     let reason = "";
     if (code && selectedLanguageShouldHide(code, allowed)) {
       const modeLabel = getLanguageSelectionMode() === "exclude" ? "excluded" : "outside selected languages";
       reason = `language: likely ${LANGUAGE_NAMES[code] || code}${explicit ? " tag" : " (QoL detected)"} · ${modeLabel}`;
     }
 
-    if (!explicit && !localDetected.code && !cachedCode) {
+    if (!explicit && !localDetected.code && !titleDetected.code && !cachedCode) {
       ensureLanguageCacheLoaded().then(() => DS.scheduleRun?.()).catch(() => {});
       queueLanguageProfileCheck(card);
     }
-    applyDetectedLanguageBadge(card, !explicit ? (localDetected.code || cachedCode) : "");
+    applyDetectedLanguageBadge(card, !explicit ? (localDetected.code || titleDetected.code || cachedCode) : "");
 
     if (card?.dataset) {
       card.dataset.dsLanguageDescriptionPresent = description ? "1" : "0";
       card.dataset.dsLanguageDescriptionSignature = description ? `${description.length}:${description.slice(0, 90)}` : "";
+      card.dataset.dsLanguageTitleSignature = titleDetected.code ? `${title.length}:${title.slice(0, 90)}` : "";
       card.dataset.dsDetectedLanguage = code || "";
     }
 

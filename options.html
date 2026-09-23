@@ -97,9 +97,11 @@
 <label class="row"><input id="enabled" type="checkbox"/><span>Enable QoL features on SpicyChat</span></label>
 </section>
 <section class="card" id="spicyChatBetaAccessCard">
-<h2>SpicyChat beta access</h2>
-<label class="row"><input id="spicyChatBetaAccess" type="checkbox"/><span>I have access to SpicyChat beta features</span></label>
-<p class="hint">Only enable this if beta/testing features are actually available on your SpicyChat account. QoL can use this later to expose compatibility helpers for beta-only pages and features without adding extra checks for everyone else.</p>
+<h2>SpicyChat beta / experimental access</h2>
+<p class="hint">Detected automatically from the SpicyChat UI available to this browser profile. QoL does not grant beta access and does not probe private APIs just to test entitlement.</p>
+<p id="spicyChatBetaStatus"><strong>Status:</strong> Not detected yet.</p>
+<p class="hint" id="spicyChatBetaCapabilities">Public Lorebooks: unknown · Story Mode: unknown</p>
+<p class="hint">Detection updates when QoL sees beta-only controls such as Lorebook Explore/Public visibility, Switch to Story Mode, or a Story Mode route. Normal accounts are left on production behavior.</p>
 </section>
 <section class="card" id="settingsLayoutCard">
 <h2>Settings layout</h2>
@@ -1981,6 +1983,15 @@ cash =&gt; Bingo Coins
 
 <div class="tab-page" data-page="blocking"><p class="page-intro">Discovery filters, bot blocking and dislikes, recommendation helpers, listing refill, language cleanup, and Not Interested entries.</p>
 <section class="card">
+<h2>Tag defaults</h2>
+<label class="row"><input id="autoTags" type="checkbox"/><span>Automatically include/exclude tags</span></label>
+<label class="row"><input id="showTagTemplateButton" type="checkbox"/><span>Show Copy button beside Narrow by tag Reset to apply this saved template</span></label>
+<p class="hint">Exact spelling matters. Leave empty unless you really want tags preselected. The in-page Copy button applies this saved include/exclude template on demand.</p>
+<label>Include tags, one per line<textarea id="includeTags" placeholder="English
+Fantasy" spellcheck="false"></textarea></label>
+<label>Exclude tags, one per line<textarea id="excludeTags" placeholder="Low Quality" spellcheck="false"></textarea></label>
+</section>
+<section class="card">
 <h2>Card filters</h2>
 <label class="row"><input id="hideHomeForYouCards" type="checkbox"/><span>Hide cards tagged "For You" on the Home page only</span></label>
 <label class="row"><input id="expandLongCardDescriptions" type="checkbox"/><span>Expand longer card descriptions</span></label>
@@ -2026,7 +2037,7 @@ Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
 <label>Blocked creators, one per line<textarea id="blockedCreators" placeholder="@creatorname" spellcheck="false"></textarea></label>
-<p class="hint">Blocked tag/word/creator lists are used when <strong>Block character cards by text</strong> is enabled. Word matching is case-insensitive, ignores common quote/punctuation/spacing differences, recognizes compact forms such as TF141 / TF 141 / TaskForce 141, and can match multi-word name entries such as Ghost Simon against Simon “Ghost” Riley. Creator blocking checks both the visible creator name and the @handle from the profile link when available.</p>
+<p class="hint">Blocked tag/word/creator lists are used when <strong>Block character cards by text</strong> is enabled. Word matching is always case-insensitive (for example enigma = Enigma = ENIGMA), ignores common quote/punctuation/spacing differences, recognizes compact forms such as TF141 / TF 141 / TaskForce 141, and can match multi-word name entries such as Ghost Simon against Simon “Ghost” Riley. Creator blocking checks both the visible creator name and the @handle from the profile link when available.</p>
 <div class="sub-card blocker-test-card">
 <h3>Blocker tester</h3>
 <p class="hint">Test the rules currently typed above without saving first. This is also useful for checking why a title/creator/tag is not being caught.</p>
@@ -2193,9 +2204,9 @@ NTR"></textarea></label>
 <label class="row"><input class="allowed-language" type="checkbox" value="pl"/><span>Polish</span></label>
 <label class="row"><input class="allowed-language" type="checkbox" value="tr"/><span>Turkish</span></label>
 </div>
-<label class="row"><input id="languageAutoDetectUntagged" type="checkbox"/><span>Auto-detect untagged bots from their description + greeting when needed</span></label>
+<label class="row"><input id="languageAutoDetectUntagged" type="checkbox"/><span>Auto-detect untagged bots from their title + description + greeting when needed</span></label>
 <label class="row"><input id="languageShowDetectedBadge" type="checkbox"/><span>Show a small local “QoL: language” badge on detected cards</span></label>
-<p class="hint">Detected languages act like local QoL-only tags for filtering. QoL never edits the creator's actual SpicyChat tags. Obvious language can be detected from the card text immediately; ambiguous untagged cards are checked gradually from public greeting/description data and cached locally so listings are not hammered with requests.</p>
+<p class="hint">Detected languages act like local QoL-only tags for filtering. QoL never edits the creator's actual SpicyChat tags. Obvious language can be detected from sentence-like titles or card descriptions immediately; ambiguous untagged cards are checked gradually from public greeting/description data and cached locally so listings are not hammered with requests.</p>
 <input id="languageFilterMode" type="hidden" value="conservative"/>
 </section>
 <section class="card">
@@ -2232,15 +2243,7 @@ NTR"></textarea></label>
 <button id="notInterestedBotCollapse" type="button">Show 100</button>
 </div>
 </section>
-<section class="card">
-<h2>Tag defaults</h2>
-<label class="row"><input id="autoTags" type="checkbox"/><span>Automatically include/exclude tags</span></label>
-<label class="row"><input id="showTagTemplateButton" type="checkbox"/><span>Show Copy button beside Narrow by tag Reset to apply this saved template</span></label>
-<p class="hint">Exact spelling matters. Leave empty unless you really want tags preselected. The in-page Copy button applies this saved include/exclude template on demand.</p>
-<label>Include tags, one per line<textarea id="includeTags" placeholder="English
-Fantasy" spellcheck="false"></textarea></label>
-<label>Exclude tags, one per line<textarea id="excludeTags" placeholder="Low Quality" spellcheck="false"></textarea></label>
-</section><section class="card" id="tagAliasesCard">
+<section class="card" id="tagAliasesCard">
 <h2>Local tag aliases / emoji</h2>
 <label class="row"><input id="enableTagAliases" type="checkbox"/><span>Enable local tag aliases and emoji display helpers</span></label>
 <label class="row"><input id="tagAliasShowDisplay" type="checkbox"/><span>Show alias mapping beside matching visible tag chips</span></label>

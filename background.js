@@ -73,6 +73,7 @@ const tabCleanupWorkerTabIds = new Set();
 const quickDislikeWorkerTabIds = new Set();
 const quickDislikeBulkWorkerTabs = new Map();
 const listingRefillWorkerTabIds = new Set();
+const listingRefillPageWorkerTabs = new Map();
 const personaRefreshWorkerTabIds = new Set();
 const canceledQuickDislikeBulkRuns = new Map();
 
@@ -770,6 +771,45 @@ async function runListingRefillFavoriteWorker(message) {
   return result;
 }
 
+async function releaseListingRefillPageWorker(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  const tabId = Number(listingRefillPageWorkerTabs.get(id));
+  listingRefillPageWorkerTabs.delete(id);
+  if (!Number.isFinite(tabId)) return false;
+  listingRefillWorkerTabIds.delete(tabId);
+  await tabsRemove(tabId).catch?.(() => null);
+  return true;
+}
+
+async function prepareListingRefillPageWorker(url, runId = "") {
+  const id = String(runId || "").trim();
+  if (id) {
+    const existingId = Number(listingRefillPageWorkerTabs.get(id));
+    if (Number.isFinite(existingId)) {
+      const existing = await tabsGet(existingId);
+      if (existing) {
+        const updated = await tabsUpdate(existingId, { url: url.href, active: false });
+        if (updated?.ok) {
+          listingRefillWorkerTabIds.add(existingId);
+          return { ok: true, tabId: existingId, reusable: true, reused: true };
+        }
+      }
+      listingRefillPageWorkerTabs.delete(id);
+      listingRefillWorkerTabIds.delete(existingId);
+    }
+  }
+
+  const created = await tabsCreate({ url: url.href, active: false });
+  const tabId = Number(created?.tab?.id);
+  if (!created.ok || !Number.isFinite(tabId)) {
+    return { ok: false, status: "worker-tab-failed", error: created.error || "" };
+  }
+  listingRefillWorkerTabIds.add(tabId);
+  if (id) listingRefillPageWorkerTabs.set(id, tabId);
+  return { ok: true, tabId, reusable: !!id, reused: false };
+}
+
 async function runListingRefillPageWorker(message) {
   let url;
   try {
@@ -780,36 +820,46 @@ async function runListingRefillPageWorker(message) {
   if (!isSpicyChatUrl(url.href)) return { ok: false, status: "invalid-url" };
   url.searchParams.set("dsListingRefill", "1");
 
-  const created = await tabsCreate({ url: url.href, active: false });
-  const tabId = Number(created?.tab?.id);
-  if (!created.ok || !Number.isFinite(tabId)) {
-    return { ok: false, status: "worker-tab-failed", error: created.error || "" };
-  }
+  const runId = String(message?.runId || "").trim();
+  const worker = await prepareListingRefillPageWorker(url, runId);
+  if (!worker?.ok || !Number.isFinite(Number(worker.tabId))) return worker || { ok: false, status: "worker-tab-failed" };
 
-  listingRefillWorkerTabIds.add(tabId);
+  const tabId = Number(worker.tabId);
   let result = { ok: false, status: "worker-timeout" };
   try {
     const started = Date.now();
     while (Date.now() - started < 25000) {
       const tab = await tabsGet(tabId);
-      if (!tab) return { ok: false, status: "worker-closed" };
+      if (!tab) {
+        result = { ok: false, status: "worker-closed" };
+        break;
+      }
       const response = await tabsSendMessage(tabId, {
         type: "DS_LISTING_REFILL_EXTRACT",
         expectedPage: Number(message?.expectedPage || 0) || 0
       });
       if (response?.ok) {
-        result = response;
+        result = { ...response, reused: !!worker.reused };
         break;
       }
-      if (response?.status && !["not-ready", "not-worker"].includes(response.status)) {
+      // Reused tabs can briefly answer from the previous page while tabs.update
+      // is navigating. page-mismatch is therefore a transient readiness state,
+      // not a reason to discard the whole refill run.
+      if (response?.status && !["not-ready", "not-worker", "page-mismatch"].includes(response.status)) {
         result = response;
         break;
       }
       await new Promise(resolve => setTimeout(resolve, 420));
     }
   } finally {
-    await tabsRemove(tabId);
-    listingRefillWorkerTabIds.delete(tabId);
+    // Manual/automatic refill runs keep one rendered helper tab and navigate it
+    // through later pages. One-shot callers and failed workers are still closed
+    // immediately so dead helper pages cannot accumulate.
+    if (!worker.reusable || !result?.ok) {
+      if (worker.reusable && runId) listingRefillPageWorkerTabs.delete(runId);
+      await tabsRemove(tabId);
+      listingRefillWorkerTabIds.delete(tabId);
+    }
   }
   return result;
 }
@@ -3035,6 +3085,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
 
+  if (message?.type === "DS_REQUEST_DOWNLOAD_PERMISSION") {
+    if (!chrome.permissions?.contains || !chrome.permissions?.request) {
+      sendResponse({ ok: false, status: "permissions-api-unavailable" });
+      return false;
+    }
+    chrome.permissions.contains({ permissions: ["downloads"] }, allowed => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, status: "permission-check-failed", error: chrome.runtime.lastError.message });
+        return;
+      }
+      if (allowed) {
+        sendResponse({ ok: true, alreadyGranted: true });
+        return;
+      }
+      try {
+        chrome.permissions.request({ permissions: ["downloads"] }, granted => {
+          const error = chrome.runtime.lastError?.message || "";
+          sendResponse({
+            ok: !!granted && !error,
+            granted: !!granted,
+            status: granted ? "granted" : "not-granted",
+            error
+          });
+        });
+      } catch (error) {
+        sendResponse({ ok: false, status: "request-failed", error: error?.message || String(error) });
+      }
+    });
+    return true;
+  }
+
   if (message?.type === "DS_DOWNLOAD_TEXT_FILE") {
     const text = String(message.text ?? "");
     const filename = String(message.filename || "spicychat-qol-export.json")
@@ -3160,6 +3241,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     runListingRefillPageWorker(message)
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_LISTING_REFILL_RELEASE") {
+    releaseListingRefillPageWorker(message.runId)
+      .then(released => sendResponse({ ok: true, released }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 
@@ -3612,6 +3700,9 @@ chrome.tabs.onRemoved.addListener(tabId => {
     if (Number(workerTabId) === Number(tabId)) quickDislikeBulkWorkerTabs.delete(runId);
   }
   listingRefillWorkerTabIds.delete(Number(tabId));
+  for (const [runId, workerTabId] of listingRefillPageWorkerTabs.entries()) {
+    if (Number(workerTabId) === Number(tabId)) listingRefillPageWorkerTabs.delete(runId);
+  }
   personaRefreshWorkerTabIds.delete(Number(tabId));
   removeAutoAfkActivity(tabId);
   storageGet([OPTIONS_SOURCE_TAB_KEY]).then(result => {

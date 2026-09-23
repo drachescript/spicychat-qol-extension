@@ -76,7 +76,7 @@
     return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(d.name)}</title><style>body{max-width:900px;margin:40px auto;padding:0 20px;background:#111;color:#eee;font:16px/1.55 system-ui}a{color:#8ab4ff}.tags{display:flex;gap:6px;flex-wrap:wrap}.tags span{padding:3px 8px;background:#26262b;border-radius:999px}section{border-top:1px solid #333;margin-top:22px;padding-top:10px}.text{white-space:pre-wrap}</style></head><body><h1>${esc(d.name)}</h1>${d.creator?`<p>${esc(d.creator)}</p>`:""}<p><a href="${esc(d.profileUrl)}">Original SpicyChat profile</a></p>${d.tags.length?`<div class="tags">${d.tags.map(t=>`<span>${esc(t)}</span>`).join("")}</div>`:""}${block("Description",d.description)}${block("Greeting",d.greeting)}${block("Personality",d.personality)}${block("Scenario",d.scenario)}${block("Example Dialogue",d.exampleDialogue)}<p><small>Exported ${esc(d.exportedAt)}</small></p></body></html>`;
   }
   function filename(name, ext) { return `${clean(name||"spicychat-bot").replace(/[^a-z0-9._-]+/gi,"-").replace(/^-+|-+$/g,"") || "spicychat-bot"}.${ext}`; }
-  function download(text, name, type) { const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000); }
+  function download(text, name, type) { DS.downloadTextFile?.(text, name, type, { requestPermission: true }); }
   function open() {
     document.getElementById(MODAL_ID)?.remove();
     const d=collect(); const modal=document.createElement("div"); modal.id=MODAL_ID;

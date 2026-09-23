@@ -370,6 +370,45 @@
   DS.smartFilterWantsFavorites = () => smartFilterMembershipOverride("favorite");
   DS.smartFilterWantsLater = () => smartFilterMembershipOverride("later");
 
+  // Listing Refill uses this before a helper card ever enters the live page.
+  // Keeping the decision here means refill and the visible Smart Filter share
+  // the same local membership/index logic instead of duplicating it.
+  DS.getSmartFilterRefillRejection = function getSmartFilterRefillRejection(card, anchor) {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !settings.enableSmartFilterPresets || !isListingPage() || !card || !anchor) return "";
+
+    const filters = currentFilters();
+    const entry = { card, anchor, target: card };
+    const indexes = {
+      opened: membershipIndex("opened"),
+      later: membershipIndex("later"),
+      favorite: membershipIndex("favorite")
+    };
+
+    const hasLorebook = !!DS.cardHasLorebook?.(card);
+    const opened = entryMembership(entry, indexes.opened);
+    const favorite = entryMembership(entry, indexes.favorite);
+    const savedLater = entryMembership(entry, indexes.later);
+
+    if (filters.lorebook === "has" && !hasLorebook) return "smart filter: requires Lorebook";
+    if (filters.lorebook === "none" && hasLorebook) return "smart filter: excludes Lorebook";
+    if (filters.opened === "opened" && !opened) return "smart filter: opened only";
+    if (filters.opened === "unopened" && opened) return "smart filter: unopened only";
+    if (filters.favorites === "favorites" && !favorite) return "smart filter: favorites only";
+    if (filters.favorites === "not-favorites" && favorite) return "smart filter: excludes favorites";
+    if (filters.later === "later" && !savedLater) return "smart filter: Later only";
+    if (filters.later === "not-later" && savedLater) return "smart filter: excludes Later";
+
+    if (filters.followed !== "any") {
+      const handle = creatorHandle(card);
+      const followed = !!(handle && DS.isFollowedCreator?.(handle));
+      if (filters.followed === "followed" && !followed) return "smart filter: followed creators only";
+      if (filters.followed === "not-followed" && followed) return "smart filter: excludes followed creators";
+    }
+
+    return "";
+  };
+
   function currentPresetId() {
     return clean(DS.state.smartFilterPresetId || "");
   }

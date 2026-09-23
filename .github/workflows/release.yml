@@ -6,8 +6,8 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Existing release tag to build, for example v0.2.1"
+      version:
+        description: "Version to release from the selected ref, for example 0.2.13 or v0.2.13"
         required: true
         type: string
 
@@ -20,31 +20,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Resolve release tag
+      - name: Resolve release context
         id: release
         shell: bash
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
+            RAW_VERSION="${{ inputs.version }}"
+            VERSION="${RAW_VERSION#v}"
+            TAG="v${VERSION}"
+            SOURCE_REF="${GITHUB_SHA}"
+            MODE="manual"
           else
             TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            SOURCE_REF="${TAG}"
+            MODE="tag"
           fi
 
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid tag: $TAG"
+            echo "Invalid release version/tag: $TAG"
+            echo "Use a semantic version such as 0.2.13 or v0.2.13."
             exit 1
           fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
-      - name: Check out tagged source
+      - name: Check out release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release.outputs.tag }}
+          ref: ${{ steps.release.outputs.source_ref }}
           fetch-depth: 0
 
-      - name: Verify manifest version matches tag
+      - name: Verify manifest version matches release version
         shell: bash
         run: |
           MANIFEST_VERSION="$(python3 - <<'PY'
@@ -57,12 +67,23 @@ jobs:
           EXPECTED="${{ steps.release.outputs.version }}"
 
           if [ "$MANIFEST_VERSION" != "$EXPECTED" ]; then
-            echo "manifest.json version is $MANIFEST_VERSION but the release tag is v$EXPECTED."
+            echo "manifest.json version is $MANIFEST_VERSION but you are trying to release v$EXPECTED."
+            echo "Prepare/bump the extension version before publishing the release."
             exit 1
           fi
 
+      - name: Verify Full modular build metadata
+        run: python3 scripts/build_extension.py --profile full --verify-only
+
       - name: Build Chrome and Firefox release ZIPs
-        run: python3 scripts/build_extension.py
+        run: python3 scripts/build_extension.py --profile full
+
+      - name: Verify release artifacts
+        shell: bash
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          test -s "dist/spicychat-qol-v${VERSION}-chrome.zip"
+          test -s "dist/spicychat-qol-v${VERSION}-firefox.zip"
 
       - name: Generate SHA-256 checksums
         shell: bash
@@ -84,27 +105,68 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Create GitHub release and attach browser ZIPs
+      - name: Validate existing tag target
+        id: tagcheck
+        shell: bash
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+            TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+            if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
+              echo "Tag $TAG already exists, but it points to $TAG_SHA instead of the release source $HEAD_SHA."
+              echo "Refusing to publish from the wrong commit. Delete/recreate the bad tag or run the release from the commit it should point to."
+              exit 1
+            fi
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           TAG="${{ steps.release.outputs.tag }}"
           VERSION="${{ steps.release.outputs.version }}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          CHROME="dist/spicychat-qol-v${VERSION}-chrome.zip"
+          FIREFOX="dist/spicychat-qol-v${VERSION}-firefox.zip"
+          CHECKSUMS="dist/SHA256SUMS.txt"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Uploading/replacing generated assets."
+            echo "Release $TAG already exists. Updating title/assets and marking it latest."
+            gh release edit "$TAG" \
+              --title "SpicyChat QoL v${VERSION}" \
+              --latest
+
             gh release upload "$TAG" \
-              "dist/spicychat-qol-v${VERSION}-chrome.zip" \
-              "dist/spicychat-qol-v${VERSION}-firefox.zip" \
-              "dist/SHA256SUMS.txt" \
+              "$CHROME" \
+              "$FIREFOX" \
+              "$CHECKSUMS" \
               --clobber
-          else
+          elif [ "${{ steps.tagcheck.outputs.exists }}" = "true" ]; then
             gh release create "$TAG" \
-              "dist/spicychat-qol-v${VERSION}-chrome.zip" \
-              "dist/spicychat-qol-v${VERSION}-firefox.zip" \
-              "dist/SHA256SUMS.txt" \
+              "$CHROME" \
+              "$FIREFOX" \
+              "$CHECKSUMS" \
               --verify-tag \
+              --title "SpicyChat QoL v${VERSION}" \
+              --generate-notes \
+              --latest
+          else
+            # Manual releases can create the tag at the exact checked-out commit.
+            # GitHub-token-created tags do not recursively start another workflow run.
+            gh release create "$TAG" \
+              "$CHROME" \
+              "$FIREFOX" \
+              "$CHECKSUMS" \
+              --target "$HEAD_SHA" \
               --title "SpicyChat QoL v${VERSION}" \
               --generate-notes \
               --latest

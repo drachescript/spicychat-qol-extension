@@ -381,15 +381,10 @@
   }
 
   function downloadJson(payload, filename) {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
+    const text = JSON.stringify(payload, null, 2);
+    if (typeof DS.downloadTextFile === "function") {
+      return DS.downloadTextFile(text, filename, "application/json;charset=utf-8", { requestPermission: true });
+    }
   }
 
   async function saveOwnBackup(reason = "Own bot editor", options = {}) {

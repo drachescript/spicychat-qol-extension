@@ -243,23 +243,52 @@
   function findEntryRows() {
     const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
     if (!root) return [];
+
     return [...root.querySelectorAll("button[type='button']")]
       .filter(button => button.offsetParent !== null)
       .filter(button => !button.dataset.testid)
       .filter(button => {
         if (button.closest(`#${TOOLBAR_ID},.ds-lb-row-tools,.ds-lorebook-entry-toggle-wrap`)) return false;
-        const ps = [...button.querySelectorAll("p")];
-        return ps.some(p => clean(p.textContent, 200).length > 0) && ps.some(p => clean(p.textContent, 5000).length > 30);
+
+        // Native Lorebook entry cards can contain extremely short content.
+        // Do not use content length as an entry detector: it made valid rows
+        // disappear from the crawler and produced “No Lorebook entries…” in
+        // Firefox/Opera even while the rows were visibly loaded.
+        const nativeShape = button.classList.contains("w-full") &&
+          button.classList.contains("items-start") &&
+          button.classList.contains("justify-between");
+        if (!nativeShape) return false;
+
+        const nameNode = button.querySelector(
+          "[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1"
+        );
+        const name = clean(nameNode?.textContent, 200);
+        if (!name) return false;
+
+        // Entry cards expose at least the name plus keyword/content metadata.
+        const metaNodes = button.querySelectorAll("p.text-label-sm,[data-tooltip-content]");
+        return metaNodes.length > 0;
       });
   }
 
   function rowInfo(row) {
     if (!row) return null;
     const ps = [...row.querySelectorAll("p")];
-    const name = clean(ps.find(p => /line-clamp-1/.test(String(p.className || "")) && clean(p.textContent, 100).length > 0)?.textContent || ps[0]?.textContent, 50);
-    const contentNode = ps.filter(p => clean(p.textContent, 5000).length > 30).sort((a,b) => clean(b.textContent,5000).length-clean(a.textContent,5000).length)[0];
-    const content = clean(contentNode?.textContent, 12000);
-    const keywordLine = ps.find(p => /line-clamp-1/.test(String(p.className || "")) && p !== ps[0] && /,/.test(clean(p.textContent, 500)));
+    const nameNode = row.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1") || ps[0];
+    const name = clean(nameNode?.textContent, 50);
+
+    const tooltipValues = [...row.querySelectorAll("[data-tooltip-content]")]
+      .map(node => clean(node.getAttribute("data-tooltip-content"), 12000))
+      .filter(Boolean);
+    const content = tooltipValues
+      .filter(value => value !== name)
+      .sort((a, b) => b.length - a.length)[0] || "";
+
+    const keywordLine = ps.find(p =>
+      p !== nameNode &&
+      /line-clamp-1/.test(String(p.className || "")) &&
+      /,/.test(clean(p.textContent, 500))
+    );
     const keywords = unique(String(keywordLine?.textContent || "").split(/\s*,\s*/g), 12);
     const hidden = Number(ps.find(p => /^\+\d+$/.test(clean(p.textContent, 20)))?.textContent?.replace("+", "")) || 0;
     return { name, content, keywords, hiddenKeywordCount: hidden, tokens: approxTokens(content) };
@@ -1085,10 +1114,17 @@
 
   async function exportRows(rows) {
     if (!rows?.length) return setManagerStatus("Select at least one entry first.");
+    try { await DS.requestDownloadPermission?.(); } catch {}
     const payload = [];
     for (const row of rows) payload.push(await captureRow(row));
-    const blob = new Blob([JSON.stringify({format:"spicychat-qol-lorebook-selected",version:1,exportedAt:new Date().toISOString(),entries:payload}, null, 2)], {type:"application/json"});
-    const url = URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`lorebook-selected-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const text = JSON.stringify({format:"spicychat-qol-lorebook-selected",version:1,exportedAt:new Date().toISOString(),entries:payload}, null, 2);
+    const result = await DS.downloadTextFile?.(
+      text,
+      `lorebook-selected-${Date.now()}.json`,
+      "application/json;charset=utf-8",
+      { requestPermission: false }
+    );
+    if (result && !result.ok) return setManagerStatus(`Export failed: ${result.error || "browser download failed"}`);
     setManagerStatus(`Exported ${payload.length} selected entr${payload.length===1?'y':'ies'}.`);
   }
 

@@ -507,49 +507,11 @@
 
   async function downloadJson(payload, filename) {
     const text = JSON.stringify(payload, null, 2);
+    if (typeof DS.downloadTextFile === "function") {
+      return DS.downloadTextFile(text, filename, "application/json;charset=utf-8", { requestPermission: false });
+    }
 
-    // Android wrapper: use the native/system saver when available.
-    try {
-      if (typeof window._dsRequestExport === "function") {
-        window._dsRequestExport(text, filename);
-        return { ok: true, method: "android" };
-      }
-    } catch {}
-    try {
-      const bridge = window.flutter_inappwebview;
-      if (bridge?.callHandler) {
-        try {
-          await bridge.callHandler("exportChat", JSON.stringify({ text, filename }));
-          return { ok: true, method: "android" };
-        } catch {}
-        try {
-          await bridge.callHandler("saveFile", JSON.stringify({
-            text, content: text, filename, fileName: filename, mimeType: "application/json"
-          }));
-          return { ok: true, method: "android" };
-        } catch {}
-      }
-    } catch {}
-
-    // If the optional browser download-manager permission has already been
-    // granted, prefer it. This stays reliable after the long async full-export
-    // crawl has consumed the original click/user activation.
-    try {
-      const managed = await new Promise(resolve => {
-        chrome.runtime.sendMessage({
-          type: "DS_DOWNLOAD_TEXT_FILE",
-          text,
-          filename,
-          mimeType: "application/json;charset=utf-8"
-        }, response => {
-          if (chrome.runtime.lastError) resolve(null);
-          else resolve(response || null);
-        });
-      });
-      if (managed?.ok) return { ok: true, method: "browser-manager" };
-    } catch {}
-
-    // Permission-free desktop fallback.
+    // Legacy fallback in case this module is loaded without the current Core.
     try {
       const blob = new Blob([text], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -558,7 +520,7 @@
       anchor.download = filename;
       anchor.rel = "noopener";
       anchor.style.display = "none";
-      document.body.appendChild(anchor);
+      (document.body || document.documentElement).appendChild(anchor);
       anchor.click();
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -682,6 +644,10 @@
     exp.addEventListener("click", async () => {
       exp.disabled = true;
       try {
+        // Request the optional downloads permission before the long Lorebook
+        // crawl consumes the original click. This makes Firefox/Opera exports
+        // use the reliable extension download manager when permission is given.
+        try { await DS.requestDownloadPermission?.(); } catch {}
         const ok = await exportCurrent();
         if (!ok) setStatus("No Lorebook backup was available yet.");
       } catch (error) {

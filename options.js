@@ -29,6 +29,7 @@ const GENERATION_PROFILES_KEY = "generationProfiles";
 const AUTO_AFK_STATUS_KEY = "dsAutoAfkLastScan";
 const DUPLICATE_TAB_STATUS_KEY = "dsDuplicateTabLastScan";
 const SAI_TOOLKIT_PRESENCE_KEY = "dsSaiToolkitPresence";
+const SPICYCHAT_BETA_CAPABILITIES_KEY = "dsSpicyChatBetaCapabilitiesV1";
 const RELEASE_NOTICE_KEY = "dsReleaseNotice";
 const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
 const SMART_FILTER_PRESETS_KEY = "dsSmartFilterPresets";
@@ -151,7 +152,6 @@ const DEFAULT_SETTINGS = {
   enabled: true,
   globalNsfwMode: "ignore",
   saiToolkitCompatibility: false,
-  spicyChatBetaAccess: false,
 
   autoAfkEnabled: false,
   autoAfkHours: 12,
@@ -1446,7 +1446,6 @@ const PAGE_INTROS = {
 };
 
 const FEATURE_CHANGE_MARKERS = {
-  spicyChatBetaAccess: { version: "0.2.11", label: "New" },
   saiToolkitCompatibility: { version: "0.1.8.76", label: "Updated" },
   enableSmartFilterPresets: { version: "0.1.9.105", label: "Updated" },
   enableCreationAudit: { version: "0.1.9.111", label: "Updated" },
@@ -10586,6 +10585,7 @@ async function load() {
     AUTO_AFK_STATUS_KEY,
     DUPLICATE_TAB_STATUS_KEY,
     SAI_TOOLKIT_PRESENCE_KEY,
+    SPICYCHAT_BETA_CAPABILITIES_KEY,
     LAST_SEEN_VERSION_KEY,
     RELEASE_NOTICE_KEY,
     PENDING_OPTIONS_NAV_KEY,
@@ -10701,7 +10701,17 @@ async function load() {
   renderChatBackgroundOptions();
 
   setChecked("enabled", settings.enabled);
-  setChecked("spicyChatBetaAccess", !!settings.spicyChatBetaAccess);
+  const betaStatus = $("spicyChatBetaStatus");
+  const betaDetails = $("spicyChatBetaCapabilities");
+  if (betaStatus || betaDetails) {
+    const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {};
+    const caps = beta.capabilities || {};
+    const pub = caps.publicLorebooks || "unknown";
+    const story = caps.storyMode || "unknown";
+    const statusText = beta.detected ? "Detected on this browser profile" : (pub === "unavailable" ? "Not detected on this browser profile" : "Not detected yet");
+    if (betaStatus) betaStatus.innerHTML = `<strong>Status:</strong> ${statusText}${beta.lastCheckedAt ? ` · checked ${new Date(Number(beta.lastCheckedAt)).toLocaleString()}` : ""}`;
+    if (betaDetails) betaDetails.textContent = `Public Lorebooks: ${pub} · Story Mode: ${story}`;
+  }
   setChecked("saiToolkitCompatibility", !!settings.saiToolkitCompatibility);
   setValue("globalNsfwMode", settings.globalNsfwMode || "ignore");
 
@@ -11348,7 +11358,6 @@ function readSettingsFromPage() {
 
   return {
     enabled: checked("enabled"),
-    spicyChatBetaAccess: checked("spicyChatBetaAccess", false),
     saiToolkitCompatibility: checked("saiToolkitCompatibility", false),
     globalNsfwMode: value("globalNsfwMode", "ignore"),
 
@@ -14371,7 +14380,7 @@ function sanitizeDiagnosticPath(url) {
   try {
     const parsed = new URL(url || "");
     return parsed.pathname
-      .replace(/\/(chat|chats|chatbot)\/[0-9a-f-]{8,}/ig, "/$1/:id")
+      .replace(/\/(chat|chats|chatbot|story|lorebook)\/[0-9a-f-]{8,}/ig, "/$1/:id")
       .replace(/\/(creator|profile)\/[^/]+/ig, "/$1/:name");
   } catch {
     return "unknown";
@@ -14406,6 +14415,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     CHAT_BOOKMARKS_KEY,
     RECOVERY_SNAPSHOT_KEY,
     SAI_TOOLKIT_PRESENCE_KEY,
+    SPICYCHAT_BETA_CAPABILITIES_KEY,
     "cardTokenFetchDiagnosticsV1"
   ]);
   const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
@@ -14425,7 +14435,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : "unavailable — no open SpicyChat tab responded to diagnostics; runtime counters below are omitted or unavailable"}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
-    `SpicyChat beta access declared: ${settings.spicyChatBetaAccess ? "yes" : "no"}`,
+    (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}`; })(),
     `S.AI compatibility enabled: ${settings.saiToolkitCompatibility ? "yes" : "no"}`,
     Number.isFinite(bytes) ? `QoL storage: ${(bytes / 1024).toFixed(1)} KB` : "QoL storage: unavailable",
     `Backup schema supported: v${BACKUP_FORMAT_VERSION}`,
@@ -16064,7 +16074,7 @@ function reorderOptionsUi() {
   }
 
   const cardOrders = {
-    general: ["Extension", "SpicyChat beta access", "Settings layout", "SpicyChat NSFW switch", "Quick setup", "S.AI Toolkit compatibility", "Android app settings"],
+    general: ["Extension", "SpicyChat beta / experimental access", "Settings layout", "SpicyChat NSFW switch", "Quick setup", "S.AI Toolkit compatibility", "Android app settings"],
     saved: ["Favorite bots", "Later bots", "Favorite creators", "Followed creators", "Saved Bots Hub", "Bot Organizer", "Bot Status Center"],
     writing: ["OOC presets", "Composer and draft helpers", "Model quick menu", "Saved Text / Snippets", "Reply Instructions", "Translation (DeepL)", "Generation profiles", "Timestamps and generation details"],
     "personas-memory": ["Memory manager", "Persona helpers", "Context Keeper", "Chat Nudges"],

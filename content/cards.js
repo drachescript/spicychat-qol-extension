@@ -286,10 +286,10 @@
   };
 
   function compactTokenWindowMatch(preparedHaystack, matcher) {
-    const target = String(matcher?.compact || "");
+    const target = String(matcher?.compact || "").toLocaleLowerCase();
     if (!preparedHaystack || target.length < 3) return false;
 
-    const hayTokens = String(preparedHaystack).split(" ").filter(Boolean);
+    const hayTokens = String(preparedHaystack).toLocaleLowerCase().split(" ").filter(Boolean);
     if (!hayTokens.length) return false;
 
     // Compare joined token windows instead of doing a raw substring check. This
@@ -313,14 +313,15 @@
   function findPreparedMatch(preparedHaystack, matchers) {
     if (!preparedHaystack || !Array.isArray(matchers) || !matchers.length) return null;
 
-    const padded = ` ${preparedHaystack} `;
+    const normalizedHaystack = String(preparedHaystack).toLocaleLowerCase();
+    const padded = ` ${normalizedHaystack} `;
     for (const matcher of matchers) {
-      const variants = [matcher?.needle, matcher?.flexibleNeedle].filter(Boolean);
+      const variants = [matcher?.needle, matcher?.flexibleNeedle].filter(Boolean).map(value => String(value).toLocaleLowerCase());
       if (variants.some(needle => padded.includes(` ${needle} `))) {
         return matcher;
       }
 
-      if (compactTokenWindowMatch(preparedHaystack, matcher)) {
+      if (compactTokenWindowMatch(normalizedHaystack, matcher)) {
         return matcher;
       }
     }
@@ -359,7 +360,7 @@
   }
 
   function preparedCardFields(card, fallbackPreparedText = "") {
-    const prepare = value => DS.searchableTextForMatching?.(value || "") || DS.normalize(value || "");
+    const prepare = value => String(DS.searchableTextForMatching?.(value || "") || DS.normalize(value || "") || "").toLocaleLowerCase();
     const title = prepare(DS.getCardTitle?.(card) || "");
     const description = prepare(DS.getCardDescriptionText?.(card) || "");
     const creatorCandidates = [];
@@ -411,6 +412,21 @@
       card
     ).forEach(el => addCandidate(el?.textContent || el?.getAttribute?.("aria-label") || el?.getAttribute?.("title") || ""));
 
+    const descriptiveCandidates = [];
+    const descriptiveSeen = new Set();
+    const tagValues = new Set((DS.getCardTags?.(card) || []).map(prepare));
+    const addDescriptiveCandidate = (rawValue, el = null) => {
+      if (el?.closest?.("a[href*='/creator/'], a[aria-label*='creator' i], nav, aside, header, footer")) return;
+      const value = prepare(String(rawValue || "").replace(/\s+/g, " ").trim());
+      if (!value || value.length < 2 || descriptiveSeen.has(value) || tagValues.has(value) || creatorSeen.has(value)) return;
+      descriptiveSeen.add(value);
+      descriptiveCandidates.push(value);
+    };
+    DS.qsa("p, [data-tooltip-content]", card).forEach(el => {
+      if (el.closest?.("button[aria-label]") && tagValues.has(prepare(el.textContent || el.getAttribute?.("data-tooltip-content") || ""))) return;
+      addDescriptiveCandidate(el.getAttribute?.("data-tooltip-content") || el.textContent || "", el);
+    });
+
     return {
       title,
       description,
@@ -418,7 +434,8 @@
       creatorCandidates,
       all,
       nameCandidates,
-      nameDescriptionCandidates: [...nameCandidates, description].filter(Boolean)
+      descriptionCandidates: descriptiveCandidates,
+      nameDescriptionCandidates: [...nameCandidates, description, ...descriptiveCandidates].filter(Boolean)
     };
   }
 

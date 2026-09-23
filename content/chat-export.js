@@ -920,13 +920,10 @@
   }
 
   function downloadText(text, mime, filename) {
-    const blob = new Blob([text], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (typeof DS.downloadTextFile === "function") {
+      DS.downloadTextFile(text, filename, mime, { requestPermission: true });
+      return;
+    }
   }
 
   function printHtml(html) {

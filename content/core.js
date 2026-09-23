@@ -2213,6 +2213,104 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     DS.updateQuickPanel?.();
   };
 
+
+  DS.requestDownloadPermission = function requestDownloadPermission() {
+    return new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage({ type: "DS_REQUEST_DOWNLOAD_PERMISSION" }, response => {
+          if (chrome.runtime.lastError) return resolve(false);
+          resolve(!!response?.ok);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  };
+
+  DS.downloadTextFile = async function downloadTextFile(
+    text,
+    filename = "spicychat-qol-export.txt",
+    mimeType = "text/plain;charset=utf-8",
+    options = {}
+  ) {
+    const value = String(text ?? "");
+    const safeName = String(filename || "spicychat-qol-export.txt")
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/^\.+|\.+$/g, "")
+      .slice(0, 180) || "spicychat-qol-export.txt";
+    const safeMime = String(mimeType || "application/octet-stream").slice(0, 120);
+    if (!value) return { ok: false, error: "Export payload is empty." };
+
+    // Android wrappers should keep using the native/system saver when exposed.
+    try {
+      if (typeof window._dsRequestExport === "function") {
+        window._dsRequestExport(value, safeName);
+        return { ok: true, method: "android" };
+      }
+    } catch {}
+    try {
+      const bridge = window.flutter_inappwebview;
+      if (bridge?.callHandler) {
+        try {
+          await bridge.callHandler("saveFile", JSON.stringify({
+            text: value,
+            content: value,
+            filename: safeName,
+            fileName: safeName,
+            mimeType: safeMime
+          }));
+          return { ok: true, method: "android" };
+        } catch {}
+      }
+    } catch {}
+
+    // Ask for the optional downloads permission while the initiating click is
+    // still fresh. Firefox/Opera can be stricter about downloads started after
+    // a long async crawl, so the background download manager is preferred when
+    // permission is available. Denial is harmless: the Blob fallback remains.
+    if (options.requestPermission !== false) {
+      try { await DS.requestDownloadPermission?.(); } catch {}
+    }
+
+    try {
+      const managed = await new Promise(resolve => {
+        chrome.runtime.sendMessage({
+          type: "DS_DOWNLOAD_TEXT_FILE",
+          text: value,
+          filename: safeName,
+          mimeType: safeMime
+        }, response => {
+          if (chrome.runtime.lastError) resolve(null);
+          else resolve(response || null);
+        });
+      });
+      if (managed?.ok) return { ok: true, method: "browser-manager", downloadId: managed.downloadId };
+    } catch {}
+
+    // Permission-free fallback for Chromium/Opera/Firefox. Keep the object URL
+    // alive long enough for browsers that consume the click asynchronously.
+    try {
+      const blob = new Blob([value], { type: safeMime });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = safeName;
+      anchor.rel = "noopener";
+      anchor.style.display = "none";
+      (document.body || document.documentElement).appendChild(anchor);
+      try {
+        anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      } catch {
+        anchor.click();
+      }
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return { ok: true, method: "blob-link" };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
+  };
+
   DS.savePersonas = async function savePersonas(personas) {
     DS.state.savedPersonas = DS.cleanPersonas(personas);
 
