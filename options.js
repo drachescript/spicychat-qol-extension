@@ -10709,7 +10709,14 @@ async function load() {
     const pub = caps.publicLorebooks || "unknown";
     const story = caps.storyMode || "unknown";
     const statusText = beta.detected ? "Detected on this browser profile" : (pub === "unavailable" ? "Not detected on this browser profile" : "Not detected yet");
-    if (betaStatus) betaStatus.innerHTML = `<strong>Status:</strong> ${statusText}${beta.lastCheckedAt ? ` · checked ${new Date(Number(beta.lastCheckedAt)).toLocaleString()}` : ""}`;
+    if (betaStatus) {
+      const label = document.createElement("strong");
+      label.textContent = "Status:";
+      const checkedText = beta.lastCheckedAt
+        ? ` · checked ${new Date(Number(beta.lastCheckedAt)).toLocaleString()}`
+        : "";
+      betaStatus.replaceChildren(label, document.createTextNode(` ${statusText}${checkedText}`));
+    }
     if (betaDetails) betaDetails.textContent = `Public Lorebooks: ${pub} · Story Mode: ${story}`;
   }
   setChecked("saiToolkitCompatibility", !!settings.saiToolkitCompatibility);

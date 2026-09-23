@@ -1,4 +1,5 @@
 ## 0.2.13
+- Firefox/AMO validation: removed the remaining direct `innerHTML` assignment from the beta-capability status UI and replaced it with explicit DOM nodes / `replaceChildren`.
 
 - Redesigned **Listing Refill** around pre-insert validation: helper-page cards are checked against explicit bot blocks, blocked words/tags/creators, language/discovery rules, native tag filters, active Smart Filters and duplicate IDs before they can enter the live listing. Refill now removes any safety-pass reject immediately, keeps walking pages that contain zero usable survivors, stops at the visible-card target, records blocked/filter/duplicate/stale/DOM telemetry, and reuses one hidden rendered helper tab for a refill run instead of booting a fresh SpicyChat page for every page.
 - Added community-reported moderation term **kitten** to Creator Moderation Warnings. Matching remains case-insensitive and advisory only; it never blocks or rewrites creator text.
