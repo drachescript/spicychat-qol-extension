@@ -2442,10 +2442,7 @@ html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][cla
 
 /* v0.1.8.83 - local bot organizer */
 .ds-bot-organizer-inline-host {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  flex-wrap: wrap;
+  display: revert !important;
 }
 
 .ds-bot-organizer-button,

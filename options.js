@@ -14834,7 +14834,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const diagnosticLines = [
     "SpicyChat QoL diagnostics",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${chrome.runtime.getManifest?.().version_name || displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")} (technical ${chrome.runtime.getManifest?.().version || "unknown"})`,
+    `Version: ${chrome.runtime.getManifest?.().version_name || displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -14992,14 +14992,14 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
   const perf = Array.isArray(context?.pageDiagnostics?.performance) ? context.pageDiagnostics.performance.slice(0, 20) : [];
-  const env = context?.pageDiagnostics?.androidEnvironment || {};
+  const env = context?.pageDiagnostics?.androidEnvironment || detectSettingsEnvironment();
   const warnings = runtimeAvailable ? performanceWarningLines(context, settings) : [];
   const readAvg = OPTIONS_PERFORMANCE.storageReads ? OPTIONS_PERFORMANCE.storageReadTotalMs / OPTIONS_PERFORMANCE.storageReads : 0;
   const writeAvg = OPTIONS_PERFORMANCE.storageWrites ? OPTIONS_PERFORMANCE.storageWriteTotalMs / OPTIONS_PERFORMANCE.storageWrites : 0;
   let lines = [
     "SpicyChat QoL performance report",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")} (technical ${manifest.version || "unknown"})`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -15082,7 +15082,7 @@ async function buildPerformanceSelfCheckText() {
   const lines = [
     "SpicyChat QoL performance self-check",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")} (technical ${manifest.version || "unknown"})`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,

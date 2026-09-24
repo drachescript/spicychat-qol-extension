@@ -203,6 +203,9 @@
     card?.querySelector?.(".ds-bot-organizer-button")?.remove();
     card?.querySelector?.(".ds-bot-local-meta")?.remove();
     card?.querySelector?.(".ds-bot-bulk-select")?.remove();
+    card?.querySelectorAll?.(".ds-bot-organizer-inline-host")?.forEach(host => {
+      host.classList.remove("ds-bot-organizer-inline-host");
+    });
     card?.classList?.remove("ds-bot-org-filter-hidden", "ds-bot-org-selected", "ds-bot-org-mobile-bulk");
     if (card?.dataset) {
       delete card.dataset.dsBotOrganizerCard;
@@ -243,7 +246,7 @@
     const button = makeOrganizeButton(entry);
     const inline = findInlineHost(entry.card);
     if (inline?.host) {
-      inline.host.classList.add("ds-bot-organizer-inline-host");
+      inline.host.classList.remove("ds-bot-organizer-inline-host");
       inline.after.insertAdjacentElement("afterend", button);
       return;
     }
