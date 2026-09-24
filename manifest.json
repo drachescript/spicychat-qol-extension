@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -194,5 +194,5 @@
     "downloads",
     "notifications"
   ],
-  "version_name": "0.2.14"
+  "version_name": "0.2.15"
 }
