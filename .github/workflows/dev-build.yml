@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build rolling development packages
+    name: Validate and build rolling development packages
     runs-on: ubuntu-latest
 
     steps:
@@ -24,11 +24,137 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node.js for syntax and Firefox checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate version and changelog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          version = str(manifest.get("version") or "").strip()
+          version_name = str(manifest.get("version_name") or version).strip()
+
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
+
+          if version_name != version:
+              raise SystemExit(
+                  f"manifest.json version_name ({version_name}) does not match version ({version})."
+              )
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
+              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+
+          print(f"Version/changelog OK: {version}")
+          PY
+
       - name: Verify Full modular build metadata
         run: python3 scripts/build_extension.py --profile full --verify-only
 
+      - name: Check runtime JavaScript syntax
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          files = {"background.js", "options.js", "popup.js"}
+
+          for content_script in manifest.get("content_scripts", []):
+              files.update(content_script.get("js", []))
+
+          for entry in manifest.get("web_accessible_resources", []):
+              for rel in entry.get("resources", []):
+                  if rel.endswith(".js") and "*" not in rel:
+                      files.add(rel)
+
+          missing = [rel for rel in sorted(files) if not Path(rel).is_file()]
+          if missing:
+              raise SystemExit("Runtime JS files are missing:\n  " + "\n  ".join(missing))
+
+          for rel in sorted(files):
+              subprocess.run(["node", "--check", rel], check=True)
+
+          print(f"JavaScript syntax OK: {len(files)} runtime files")
+          PY
+
       - name: Build Chrome and Firefox development ZIPs
         run: python3 scripts/build_extension.py --profile full --dev
+
+      - name: Validate development package structure
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          expected = json.loads(Path("manifest.json").read_text(encoding="utf-8"))["version"]
+
+          packages = {
+              "chrome": Path("dist/spicychat-qol-dev-chrome.zip"),
+              "firefox": Path("dist/spicychat-qol-dev-firefox.zip"),
+          }
+
+          for target, path in packages.items():
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"Missing/empty {target} package: {path}")
+
+              with zipfile.ZipFile(path) as zf:
+                  names = zf.namelist()
+                  if len(names) != len(set(names)):
+                      raise SystemExit(f"{path}: duplicate ZIP entries detected")
+                  if "manifest.json" not in names:
+                      raise SystemExit(f"{path}: manifest.json is missing")
+
+                  manifest = json.loads(zf.read("manifest.json"))
+                  if manifest.get("version") != expected:
+                      raise SystemExit(
+                          f"{path}: manifest version {manifest.get('version')} != {expected}"
+                      )
+
+                  required = {"background.js", "options.html", "options.js", "popup.html", "popup.js"}
+                  missing = sorted(required - set(names))
+                  if missing:
+                      raise SystemExit(f"{path}: missing required files: {', '.join(missing)}")
+
+                  for content_script in manifest.get("content_scripts", []):
+                      for rel in content_script.get("js", []) + content_script.get("css", []):
+                          if rel not in names:
+                              raise SystemExit(f"{path}: manifest references missing file {rel}")
+
+                  if target == "chrome":
+                      if manifest.get("background", {}).get("service_worker") != "background.js":
+                          raise SystemExit(f"{path}: Chrome service worker is not background.js")
+                      if manifest.get("browser_specific_settings"):
+                          raise SystemExit(f"{path}: Chrome package unexpectedly contains browser_specific_settings")
+                  else:
+                      if "background.js" not in manifest.get("background", {}).get("scripts", []):
+                          raise SystemExit(f"{path}: Firefox background scripts do not include background.js")
+                      gecko = manifest.get("browser_specific_settings", {}).get("gecko", {})
+                      if not gecko.get("id"):
+                          raise SystemExit(f"{path}: Firefox gecko extension id is missing")
+
+              print(f"{target.capitalize()} package structure OK: {path}")
+          PY
+
+      - name: Lint Firefox development package
+        shell: bash
+        run: |
+          rm -rf /tmp/spicychat-qol-firefox-dev
+          mkdir -p /tmp/spicychat-qol-firefox-dev
+          unzip -q dist/spicychat-qol-dev-firefox.zip -d /tmp/spicychat-qol-firefox-dev
+          npx --yes web-ext lint --source-dir /tmp/spicychat-qol-firefox-dev
 
       - name: Keep workflow artifacts for testing
         uses: actions/upload-artifact@v4

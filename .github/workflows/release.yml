@@ -7,85 +7,296 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release from the selected ref, for example 0.2.13 or v0.2.13"
+        description: "Version to release from the selected ref, for example 0.2.14 or v0.2.14"
         required: true
         type: string
+  workflow_run:
+    workflows:
+      - "Development builds"
+    types:
+      - completed
 
 permissions:
   contents: write
 
+concurrency:
+  group: spicychat-qol-stable-release
+  cancel-in-progress: false
+
 jobs:
   release:
-    name: Build and publish release
+    name: Build and publish stable release
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
     runs-on: ubuntu-latest
 
     steps:
-      - name: Resolve release context
-        id: release
+      - name: Resolve source ref
+        id: source
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            RAW_VERSION="${{ inputs.version }}"
-            VERSION="${RAW_VERSION#v}"
-            TAG="v${VERSION}"
-            SOURCE_REF="${GITHUB_SHA}"
-            MODE="manual"
-          else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
-            SOURCE_REF="${TAG}"
-            MODE="tag"
-          fi
-
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid release version/tag: $TAG"
-            echo "Use a semantic version such as 0.2.13 or v0.2.13."
-            exit 1
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "source_ref=$SOURCE_REF" >> "$GITHUB_OUTPUT"
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          case "$EVENT_NAME" in
+            workflow_dispatch)
+              echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+              echo "mode=manual" >> "$GITHUB_OUTPUT"
+              ;;
+            push)
+              echo "ref=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+              echo "mode=tag" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_run)
+              echo "ref=$WORKFLOW_RUN_SHA" >> "$GITHUB_OUTPUT"
+              echo "mode=auto" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported event: $EVENT_NAME"
+              exit 1
+              ;;
+          esac
 
       - name: Check out release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release.outputs.source_ref }}
+          ref: ${{ steps.source.outputs.ref }}
           fetch-depth: 0
 
-      - name: Verify manifest version matches release version
+      - name: Set up Node.js for syntax and Firefox checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve and validate release version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.source.outputs.mode }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          EVENT_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
-          MANIFEST_VERSION="$(python3 - <<'PY'
+          python3 - <<'PY'
           import json
-          with open("manifest.json", "r", encoding="utf-8") as fh:
-              print(json.load(fh)["version"])
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          mode = os.environ["MODE"]
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          version = str(manifest.get("version") or "").strip()
+          version_name = str(manifest.get("version_name") or version).strip()
+
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
+          if version_name != version:
+              raise SystemExit(
+                  f"manifest.json version_name ({version_name}) does not match version ({version})."
+              )
+
+          tag = f"v{version}"
+          publish = True
+          reason = ""
+
+          if mode == "manual":
+              requested = os.environ.get("REQUESTED_VERSION", "").strip()
+              requested = requested[1:] if requested.startswith("v") else requested
+              if requested != version:
+                  raise SystemExit(
+                      f"Requested release {requested!r} does not match manifest version {version}."
+                  )
+
+          elif mode == "tag":
+              event_tag = os.environ.get("EVENT_TAG", "").strip()
+              if event_tag != tag:
+                  raise SystemExit(
+                      f"Pushed tag {event_tag!r} does not match manifest version {version} ({tag})."
+                  )
+
+          elif mode == "auto":
+              # Only the newest main commit is allowed to auto-release. If a newer
+              # push arrived while the dev build was running, that newer build gets
+              # the chance instead.
+              subprocess.run(["git", "fetch", "origin", "main", "--tags", "--force"], check=True)
+              head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+              current_main = subprocess.check_output(
+                  ["git", "rev-parse", "origin/main"], text=True
+              ).strip()
+
+              if head != current_main:
+                  publish = False
+                  reason = "A newer main commit exists; this successful dev build was superseded."
+              else:
+                  tags = subprocess.check_output(
+                      ["git", "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"], text=True
+                  ).splitlines()
+
+                  def parsed(value):
+                      match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", value.strip())
+                      return tuple(map(int, match.groups())) if match else None
+
+                  current_tuple = tuple(map(int, version.split(".")))
+                  stable = [(parsed(value), value) for value in tags]
+                  stable = [(parts, value) for parts, value in stable if parts is not None]
+
+                  if tag in tags:
+                      publish = False
+                      reason = f"{tag} already exists, so this version is already released/tagged."
+                  elif stable:
+                      latest_tuple, latest_tag = max(stable)
+                      if current_tuple < latest_tuple:
+                          raise SystemExit(
+                              f"Manifest version {version} is older than latest stable tag {latest_tag}."
+                          )
+                      if current_tuple == latest_tuple:
+                          publish = False
+                          reason = f"{tag} is not newer than the latest stable version."
+                      else:
+                          reason = f"{tag} is newer than {latest_tag}; automatic stable release enabled."
+                  else:
+                      reason = f"No stable version tag exists yet; {tag} can be released."
+          else:
+              raise SystemExit(f"Unknown release mode: {mode}")
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if publish and not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
+              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+              out.write(f"tag={tag}\n")
+              out.write(f"publish={'true' if publish else 'false'}\n")
+              out.write(f"reason={reason}\n")
+
+          print(reason or f"Release context OK: {tag}")
           PY
-          )"
 
-          EXPECTED="${{ steps.release.outputs.version }}"
-
-          if [ "$MANIFEST_VERSION" != "$EXPECTED" ]; then
-            echo "manifest.json version is $MANIFEST_VERSION but you are trying to release v$EXPECTED."
-            echo "Prepare/bump the extension version before publishing the release."
-            exit 1
-          fi
+      - name: Show automatic release decision
+        shell: bash
+        run: |
+          echo "Mode: ${{ steps.source.outputs.mode }}"
+          echo "Version: ${{ steps.release.outputs.version }}"
+          echo "Publish: ${{ steps.release.outputs.publish }}"
+          echo "Reason: ${{ steps.release.outputs.reason }}"
 
       - name: Verify Full modular build metadata
+        if: steps.release.outputs.publish == 'true'
         run: python3 scripts/build_extension.py --profile full --verify-only
 
-      - name: Build Chrome and Firefox release ZIPs
-        run: python3 scripts/build_extension.py --profile full
-
-      - name: Verify release artifacts
+      - name: Check runtime JavaScript syntax
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         run: |
-          VERSION="${{ steps.release.outputs.version }}"
-          test -s "dist/spicychat-qol-v${VERSION}-chrome.zip"
-          test -s "dist/spicychat-qol-v${VERSION}-firefox.zip"
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          files = {"background.js", "options.js", "popup.js"}
+
+          for content_script in manifest.get("content_scripts", []):
+              files.update(content_script.get("js", []))
+
+          for entry in manifest.get("web_accessible_resources", []):
+              for rel in entry.get("resources", []):
+                  if rel.endswith(".js") and "*" not in rel:
+                      files.add(rel)
+
+          missing = [rel for rel in sorted(files) if not Path(rel).is_file()]
+          if missing:
+              raise SystemExit("Runtime JS files are missing:\n  " + "\n  ".join(missing))
+
+          for rel in sorted(files):
+              subprocess.run(["node", "--check", rel], check=True)
+
+          print(f"JavaScript syntax OK: {len(files)} runtime files")
+          PY
+
+      - name: Build Chrome and Firefox release ZIPs
+        if: steps.release.outputs.publish == 'true'
+        run: python3 scripts/build_extension.py --profile full
+
+      - name: Validate release package structure
+        if: steps.release.outputs.publish == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          packages = {
+              "chrome": Path(f"dist/spicychat-qol-v{version}-chrome.zip"),
+              "firefox": Path(f"dist/spicychat-qol-v{version}-firefox.zip"),
+          }
+
+          for target, path in packages.items():
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"Missing/empty {target} package: {path}")
+
+              with zipfile.ZipFile(path) as zf:
+                  names = zf.namelist()
+                  if len(names) != len(set(names)):
+                      raise SystemExit(f"{path}: duplicate ZIP entries detected")
+                  if "manifest.json" not in names:
+                      raise SystemExit(f"{path}: manifest.json is missing")
+
+                  manifest = json.loads(zf.read("manifest.json"))
+                  if manifest.get("version") != version:
+                      raise SystemExit(
+                          f"{path}: manifest version {manifest.get('version')} != {version}"
+                      )
+
+                  required = {"background.js", "options.html", "options.js", "popup.html", "popup.js"}
+                  missing = sorted(required - set(names))
+                  if missing:
+                      raise SystemExit(f"{path}: missing required files: {', '.join(missing)}")
+
+                  for content_script in manifest.get("content_scripts", []):
+                      for rel in content_script.get("js", []) + content_script.get("css", []):
+                          if rel not in names:
+                              raise SystemExit(f"{path}: manifest references missing file {rel}")
+
+                  if target == "chrome":
+                      if manifest.get("background", {}).get("service_worker") != "background.js":
+                          raise SystemExit(f"{path}: Chrome service worker is not background.js")
+                      if manifest.get("browser_specific_settings"):
+                          raise SystemExit(f"{path}: Chrome package unexpectedly contains browser_specific_settings")
+                  else:
+                      if "background.js" not in manifest.get("background", {}).get("scripts", []):
+                          raise SystemExit(f"{path}: Firefox background scripts do not include background.js")
+                      gecko = manifest.get("browser_specific_settings", {}).get("gecko", {})
+                      if not gecko.get("id"):
+                          raise SystemExit(f"{path}: Firefox gecko extension id is missing")
+
+              print(f"{target.capitalize()} package structure OK: {path}")
+          PY
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+
+      - name: Lint Firefox release package
+        if: steps.release.outputs.publish == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          rm -rf /tmp/spicychat-qol-firefox-release
+          mkdir -p /tmp/spicychat-qol-firefox-release
+          unzip -q "dist/spicychat-qol-v${VERSION}-firefox.zip" -d /tmp/spicychat-qol-firefox-release
+          npx --yes web-ext lint --source-dir /tmp/spicychat-qol-firefox-release
 
       - name: Generate SHA-256 checksums
+        if: steps.release.outputs.publish == 'true'
         shell: bash
         run: |
           cd dist
@@ -95,6 +306,7 @@ jobs:
             > SHA256SUMS.txt
 
       - name: Keep workflow artifacts
+        if: steps.release.outputs.publish == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: spicychat-qol-v${{ steps.release.outputs.version }}
@@ -106,6 +318,7 @@ jobs:
           if-no-files-found: error
 
       - name: Validate existing tag target
+        if: steps.release.outputs.publish == 'true'
         id: tagcheck
         shell: bash
         run: |
@@ -118,7 +331,7 @@ jobs:
             TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
             if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
               echo "Tag $TAG already exists, but it points to $TAG_SHA instead of the release source $HEAD_SHA."
-              echo "Refusing to publish from the wrong commit. Delete/recreate the bad tag or run the release from the commit it should point to."
+              echo "Refusing to publish from the wrong commit."
               exit 1
             fi
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -127,6 +340,7 @@ jobs:
           fi
 
       - name: Create or update GitHub release
+        if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -160,8 +374,6 @@ jobs:
               --generate-notes \
               --latest
           else
-            # Manual releases can create the tag at the exact checked-out commit.
-            # GitHub-token-created tags do not recursively start another workflow run.
             gh release create "$TAG" \
               "$CHROME" \
               "$FIREFOX" \
@@ -171,3 +383,10 @@ jobs:
               --generate-notes \
               --latest
           fi
+
+      - name: Skip stable release
+        if: steps.release.outputs.publish != 'true'
+        shell: bash
+        run: |
+          echo "No stable release was created."
+          echo "${{ steps.release.outputs.reason }}"
