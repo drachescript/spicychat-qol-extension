@@ -12,6 +12,8 @@
   const MAX_SERIALIZED_CARD_HTML = 500000;
   const REFILL_CANDIDATE_CACHE_TTL_MS = 20 * 60 * 1000;
   const REFILL_CANDIDATE_CACHE_MAX = 600;
+  const REFILL_AUTO_STEP_COOLDOWN_MS = 900;
+  const REFILL_POOR_YIELD_STREAK_LIMIT = 2;
   let refillFavoriteFrame = null;
   let refillFavoriteFrameUrl = "";
   let refillFavoriteFrameLoad = null;
@@ -69,6 +71,8 @@
       cacheCandidatesStored: 0,
       cacheCandidatesUsed: 0,
       cacheCandidatesExpired: 0,
+      poorYieldStreak: 0,
+      backpressurePauses: 0,
       metadataExtracted: 0,
       tagsRestored: 0,
       staleResponses: 0,
@@ -177,13 +181,15 @@
       host.appendChild(button);
     }
     const status = DS.getListingAutoFillStatus?.() || {};
-    button.classList.toggle(REFILL_STOP_BUTTON_CLASS, !!DS.state.autoFillRunning);
-    button.textContent = DS.state.autoFillRunning
+    DS.setClassState?.(button, REFILL_STOP_BUTTON_CLASS, !!DS.state.autoFillRunning);
+    const text = DS.state.autoFillRunning
       ? (DS.state.autoFillStopRequested ? "Stopping..." : "Stop refill")
       : "Refill";
-    button.title = DS.state.autoFillRunning
+    const title = DS.state.autoFillRunning
       ? "Finish the current helper page, then stop listing refill"
       : `Refill listing up to ${Number(settings.autoFillTargetCards || 50)} visible cards (${Number(status.visible || 0)} visible now)`;
+    DS.setTextIfChanged?.(button, text);
+    DS.setAttributeIfChanged?.(button, "title", title);
   }
 
   function isVisible(el) {
@@ -294,6 +300,12 @@
     const button = document.querySelector("button[aria-label='next-page']");
     if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return null;
     return button;
+  }
+
+  function listingNoResults() {
+    const listing = document.querySelector("[data-testid='SearchClientCharacterListing']");
+    if (!listing) return false;
+    return /\bNo Results Found\b/i.test(listing.textContent || "");
   }
 
   function pageKeyForUrl(url) {
@@ -1061,6 +1073,49 @@
     });
   }
 
+  function fastMetadataRejection(meta, known, rejectedIds, nativeRules) {
+    const id = String(meta?.id || "").trim();
+    if (id && (known.has(id) || rejectedIds.has(id))) return { kind: "duplicate", reason: "duplicate bot id", id };
+    if (id && DS.state.blockedBotIdSet?.has(id)) return { kind: "blocked", reason: `blocked bot id: ${id}`, id };
+
+    const nativeReason = nativeTagRejection(meta, null, nativeRules);
+    if (nativeReason) return { kind: "native", reason: nativeReason, id };
+    return null;
+  }
+
+  function notePageYield(received, appended) {
+    const stats = runStats();
+    const poor = received >= 24 && appended <= 2 && DS.state.autoFillHelperHasNext !== false;
+    stats.poorYieldStreak = poor ? Number(stats.poorYieldStreak || 0) + 1 : 0;
+    return stats.poorYieldStreak;
+  }
+
+  function pauseForPoorYield() {
+    const stats = runStats();
+    if (Number(stats.poorYieldStreak || 0) < REFILL_POOR_YIELD_STREAK_LIMIT) return false;
+
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const step = Math.max(360, Math.round(window.innerHeight * 0.55));
+    DS.state.autoFillPausedByYield = true;
+    DS.state.autoFillResumeAfterScrollY = Math.min(maxScroll, window.scrollY + step);
+    stats.backpressurePauses = Number(stats.backpressurePauses || 0) + 1;
+    DS.setQuickStatus?.("Refill paused after repeated low-yield pages. Scroll farther to continue.", true);
+    return true;
+  }
+
+  function installRefillScrollResume() {
+    if (DS.state.listingRefillScrollResumeInstalled) return;
+    DS.state.listingRefillScrollResumeInstalled = true;
+    window.addEventListener("scroll", () => {
+      if (!DS.state.autoFillPausedByYield) return;
+      if (window.scrollY + 4 < Number(DS.state.autoFillResumeAfterScrollY || 0)) return;
+      DS.state.autoFillPausedByYield = false;
+      DS.state.autoFillResumeAfterScrollY = 0;
+      runStats().poorYieldStreak = 0;
+      DS.scheduleRun?.({ priority: "slow", source: "listing-refill-scroll-resume" });
+    }, { passive: true });
+  }
+
   function preflightRefillCard(wrapper, link, meta, nativeRules) {
     const nativeReason = nativeTagRejection(meta, wrapper, nativeRules);
     if (nativeReason) return { kind: "native", reason: nativeReason };
@@ -1176,9 +1231,24 @@
         continue;
       }
 
+      const meta = payload.meta || null;
+      const fast = fastMetadataRejection(meta, known, rejectedIds, requestTagRules);
+      if (fast) {
+        if (fast.kind === "duplicate") stats.duplicates = Number(stats.duplicates || 0) + 1;
+        else if (fast.kind === "native") {
+          stats.nativeRejected = Number(stats.nativeRejected || 0) + 1;
+          noteRefillRejection(stats, "filter", fast.reason);
+          if (fast.id) rejectedIds.add(fast.id);
+        } else {
+          noteRefillRejection(stats, fast.kind, fast.reason);
+          if (fast.id) rejectedIds.add(fast.id);
+        }
+        continue;
+      }
+
       const wrapper = wrapperFromHtml(payload.html);
       if (!wrapper) continue;
-      const meta = payload.meta || extractCardMetadata(wrapper, payload.baseUrl || location.href);
+      const resolvedMeta = meta || extractCardMetadata(wrapper, payload.baseUrl || location.href);
       stripWorkerArtifacts(wrapper);
 
       const link = wrapper.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
@@ -1189,7 +1259,7 @@
         continue;
       }
 
-      const rejection = preflightRefillCard(wrapper, link, meta, requestTagRules);
+      const rejection = preflightRefillCard(wrapper, link, resolvedMeta, requestTagRules);
       if (rejection) {
         rejectedIds.add(id);
         if (rejection.kind === "native") {
@@ -1214,7 +1284,7 @@
         if (button === favoriteButton || isNativeTagPillButton(button)) return;
         button.remove();
       });
-      stats.tagsRestored += ensureTagPillsFromMetadata(clone, meta);
+      stats.tagsRestored += ensureTagPillsFromMetadata(clone, resolvedMeta);
       clone.querySelectorAll("svg.lucide-ellipsis-vertical").forEach(svg => {
         const shell = svg.closest("div.relative");
         if (shell && !shell.querySelector("a[href]") && !shell.querySelector("button")) shell.remove();
@@ -1326,21 +1396,20 @@
     const payloads = (Array.isArray(response.cards) ? response.cards : [])
       .map(item => typeof item === "string" ? { html: item, meta: null } : { html: item?.html || "", meta: item?.meta || null })
       .filter(item => item.html);
-    const wrappers = payloads
-      .map(item => ({ wrapper: wrapperFromHtml(item.html), meta: item.meta, html: item.html }))
-      .filter(item => item.wrapper);
 
     stats.pages += 1;
-    stats.received += wrappers.length;
-    stats.metadataExtracted += wrappers.filter(item => item.meta && typeof item.meta === "object").length;
+    stats.received += payloads.length;
+    stats.metadataExtracted += payloads.filter(item => item.meta && typeof item.meta === "object").length;
     stats.lastPage = Number(page) || 0;
     stats.lastError = "";
+    DS.state.autoFillPaginationStarted = true;
     DS.state.autoFillHelperHasNext = response.hasNextPage !== false;
     if (response.hasNextPage === false) DS.state.autoFillReachedEnd = true;
 
     const host = extraGrid();
-    if (!host || !wrappers.length) {
-      if (wrappers.length === 0) stats.pagesWithNoSurvivors = Number(stats.pagesWithNoSurvivors || 0) + 1;
+    if (!host || !payloads.length) {
+      if (!payloads.length) stats.pagesWithNoSurvivors = Number(stats.pagesWithNoSurvivors || 0) + 1;
+      notePageYield(payloads.length, 0);
       return 0;
     }
 
@@ -1348,6 +1417,7 @@
     const slots = Math.max(0, target - visibleCardCount());
     if (!slots) {
       cacheRefillCandidates(requestSignature, page, response.baseUrl || url, payloads);
+      notePageYield(payloads.length, 0);
       return 0;
     }
 
@@ -1358,17 +1428,12 @@
     const insertedThisPage = [];
     let appended = 0;
 
-    for (let payloadIndex = 0; payloadIndex < wrappers.length; payloadIndex++) {
+    for (let payloadIndex = 0; payloadIndex < payloads.length; payloadIndex++) {
       if (appended >= slots) {
-        cacheRefillCandidates(
-          requestSignature,
-          page,
-          response.baseUrl || url,
-          wrappers.slice(payloadIndex).map(item => ({ html: item.html, meta: item.meta }))
-        );
+        cacheRefillCandidates(requestSignature, page, response.baseUrl || url, payloads.slice(payloadIndex));
         break;
       }
-      const payload = wrappers[payloadIndex];
+      const payload = payloads[payloadIndex];
 
       const liveSignature = canonicalListingSignature(location.href);
       if (liveSignature !== requestSignature) {
@@ -1382,7 +1447,22 @@
         break;
       }
 
-      const wrapper = payload.wrapper;
+      const fast = fastMetadataRejection(payload.meta, known, rejectedIds, requestTagRules);
+      if (fast) {
+        if (fast.kind === "duplicate") stats.duplicates = Number(stats.duplicates || 0) + 1;
+        else if (fast.kind === "native") {
+          stats.nativeRejected = Number(stats.nativeRejected || 0) + 1;
+          noteRefillRejection(stats, "filter", fast.reason);
+          if (fast.id) rejectedIds.add(fast.id);
+        } else {
+          noteRefillRejection(stats, fast.kind, fast.reason);
+          if (fast.id) rejectedIds.add(fast.id);
+        }
+        continue;
+      }
+
+      const wrapper = wrapperFromHtml(payload.html);
+      if (!wrapper) continue;
       const meta = payload.meta || extractCardMetadata(wrapper, response.baseUrl || url);
       stripWorkerArtifacts(wrapper);
 
@@ -1452,11 +1532,12 @@
       stats.pagesWithNoSurvivors = Number(stats.pagesWithNoSurvivors || 0) + 1;
       DS.runtimeLog?.("info", "listing-refill", "Helper page had no usable refill survivors", {
         page,
-        received: wrappers.length,
+        received: payloads.length,
         blockedRejected: stats.blockedRejected || 0,
         filterRejected: stats.filterRejected || 0,
         duplicates: stats.duplicates || 0
       });
+      notePageYield(payloads.length, 0);
       return 0;
     }
 
@@ -1498,6 +1579,8 @@
     await DS.applyCardWorkflow?.();
     DS.applyCardDisplayNormalization?.();
     DS.updateQuickPanel?.();
+    notePageYield(payloads.length, appended);
+
     DS.runtimeLog?.("info", "listing-refill", "Processed rendered helper-page cards", {
       page,
       received: wrappers.length,
@@ -1545,11 +1628,14 @@
     // refresh inside an active refill step to make a second refill look idle.
     DS.state.autoFillLastClickAt = 0;
     DS.state.autoFillNextPage = currentPage() + 1;
+    DS.state.autoFillPaginationStarted = false;
     DS.state.autoFillLoadedPages = [];
     DS.state.autoFillReachedEnd = false;
     DS.state.autoFillHelperHasNext = true;
     DS.state.autoFillStopRequested = false;
     DS.state.autoFillPausedByUser = false;
+    DS.state.autoFillPausedByYield = false;
+    DS.state.autoFillResumeAfterScrollY = 0;
     resetRunStats();
     removeExtraCards();
   };
@@ -1597,6 +1683,9 @@
       running: !!DS.state.autoFillRunning,
       stopping: !!DS.state.autoFillStopRequested,
       paused: !!DS.state.autoFillPausedByUser,
+      pausedByYield: !!DS.state.autoFillPausedByYield,
+      poorYieldStreak: Number(stats.poorYieldStreak || 0),
+      backpressurePauses: Number(stats.backpressurePauses || 0),
       hasLoadMore: !!DS.findListingLoadMoreButton?.(),
       hasPagination: !!paginationNextButton(),
       mobileDisabled: mobileFillBlocked()
@@ -1632,7 +1721,7 @@
 
     if (!settings.enabled) return false;
     if (DS.state.autoFillStopRequested) return false;
-    if (!manual && DS.state.autoFillPausedByUser) return false;
+    if (!manual && (DS.state.autoFillPausedByUser || DS.state.autoFillPausedByYield)) return false;
     if (!manual && !settings.autoFillListings) return false;
     if (!isGoodPageForFill()) return false;
     if (mobileFillBlocked()) {
@@ -1677,7 +1766,13 @@
       return result.grew;
     }
 
-    if (paginationNextButton() || Number(DS.state.autoFillNextPage || 0) > currentPage()) {
+    const nativeNext = paginationNextButton();
+    const continuingPagination =
+      DS.state.autoFillPaginationStarted === true &&
+      DS.state.autoFillHelperHasNext !== false &&
+      !DS.state.autoFillReachedEnd;
+
+    if (nativeNext || continuingPagination) {
       if (DS.state.autoFillReachedEnd) {
         if (manual) DS.setQuickStatus?.("Auto-fill reached the last listing page.");
         return false;
@@ -1701,6 +1796,7 @@
         // manual and automatic refill to stop after the first "empty" page.
         // Keep walking the server-side page sequence until target/max attempts
         // or until the helper page says there is no Next page.
+        if (!manual && pauseForPoorYield()) return false;
         return appended > 0 || (DS.state.autoFillHelperHasNext !== false && !DS.state.autoFillReachedEnd);
       } catch (error) {
         runStats().helperFailures += 1;
@@ -1734,7 +1830,7 @@
       const maxClicks = Math.max(1, Math.min(30, Number(DS.state.settings.autoFillMaxClicks || 8)));
       continuing = !!(clicked && !DS.state.autoFillStopRequested && visibleCardCount() < target && (DS.state.autoFillClicks || 0) < maxClicks);
       if (continuing) {
-        setTimeout(() => DS.applyListingAutoFill?.(), 320);
+        setTimeout(() => DS.applyListingAutoFill?.(), REFILL_AUTO_STEP_COOLDOWN_MS);
       } else {
         await releaseRefillPageWorker();
       }
@@ -1764,10 +1860,13 @@
       DS.state.autoFillRejectedBotIds = new Set();
       DS.state.autoFillClicks = 0;
       DS.state.autoFillNextPage = currentPage() + 1;
+      DS.state.autoFillPaginationStarted = false;
       DS.state.autoFillReachedEnd = false;
       DS.state.autoFillHelperHasNext = true;
       DS.state.autoFillStopRequested = false;
       DS.state.autoFillPausedByUser = false;
+      DS.state.autoFillPausedByYield = false;
+      DS.state.autoFillResumeAfterScrollY = 0;
       resetRunStats();
       removeExtraCards();
       await DS.applyCardHiding?.();
@@ -1778,6 +1877,9 @@
         if (DS.state.autoFillStopRequested) break;
         const clicked = await runOneAutoFillStep({ manual: true });
         if (!clicked || DS.state.autoFillStopRequested) break;
+        if (i + 1 < maxClicks && visibleCardCount() < target) {
+          await new Promise(resolve => setTimeout(resolve, 450));
+        }
       }
 
       const stats = runStats();
@@ -1941,17 +2043,29 @@
       return false;
     }
 
-    const grid = cardGridInDocument(document);
-    const wrappers = grid ? wrappersFromFetchedDocument(document) : [];
-    if (!grid || wrappers.length < 1) {
-      sendResponse({ ok: false, status: "not-ready" });
-      return false;
-    }
-
     const requested = Math.max(0, Number(message.expectedPage || 0) || 0);
     const actual = currentPage();
     if (requested && actual !== requested) {
       sendResponse({ ok: false, status: "page-mismatch", requestedPage: requested, actualPage: actual });
+      return false;
+    }
+
+    const grid = cardGridInDocument(document);
+    const wrappers = grid ? wrappersFromFetchedDocument(document) : [];
+    if (!grid || wrappers.length < 1) {
+      if (listingNoResults()) {
+        sendResponse({
+          ok: true,
+          status: "ready-empty",
+          page: actual,
+          lastPage: lastKnownPage(),
+          hasNextPage: false,
+          baseUrl: location.href,
+          cards: []
+        });
+        return false;
+      }
+      sendResponse({ ok: false, status: "not-ready" });
       return false;
     }
 
@@ -1979,4 +2093,5 @@
 
   DS.applyListingRefillButton = ensureListingRefillButton;
   DS.removeListingRefillButton = removeListingRefillButton;
+  installRefillScrollResume();
 })();

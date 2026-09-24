@@ -31,15 +31,24 @@
   }
 
   function parseConfiguredCollections() {
-    return unique(String(DS.state.settings?.botCollections || "")
-      .split(/[\n,]+/g));
+    const settingsCollections = String(DS.state.settings?.botCollections || "").split(/[\n,]+/g);
+    const storedCollections = Array.isArray(DS.state.botOrganization?.collections)
+      ? DS.state.botOrganization.collections
+      : [];
+    return unique([...settingsCollections, ...storedCollections]);
   }
 
   async function saveConfiguredCollections(collections) {
     const next = unique(collections);
     const settings = { ...(DS.state.settings || {}), botCollections: next.join("\n") };
+    const organizer = normalizeStore(DS.state.botOrganization);
+    organizer.collections = next;
     DS.state.settings = settings;
-    await DS.storageSet?.({ settings });
+    DS.state.botOrganization = organizer;
+    await DS.storageSet?.({
+      settings,
+      [DS.BOT_ORGANIZER_KEY || "botOrganization"]: organizer
+    });
     return next;
   }
 
@@ -132,7 +141,10 @@
       };
     }
 
-    return { meta: output };
+    return {
+      collections: unique(source.collections),
+      meta: output
+    };
   }
 
   function store() {
@@ -157,6 +169,15 @@
     return match?.[1] ? `@${decodeURIComponent(match[1])}` : clean(link.textContent);
   }
 
+  function cardTitle(card) {
+    const links = [...(card?.querySelectorAll?.("a[aria-label^='chat-with-'][title], a[href*='/chat/'][title]") || [])];
+    for (const link of links) {
+      const title = clean(link.getAttribute("title"));
+      if (title) return title;
+    }
+    return "";
+  }
+
   function entryFrom(card, anchor) {
     const id = DS.botIdFromHref?.(anchor?.href || "") || "";
     if (!id) return null;
@@ -166,7 +187,7 @@
       id,
       card,
       anchor,
-      name: clean(base.name || DS.getCardTitle?.(card) || id),
+      name: clean(cardTitle(card) || base.name || DS.getCardTitle?.(card) || id),
       image: clean(base.image || DS.getCardImageUrl?.(card) || ""),
       creator: clean(base.creator || cardCreator(card)),
       chatUrl: clean(base.chatUrl || anchor?.href || `${location.origin}/chat/${id}`),
@@ -206,6 +227,9 @@
     card?.querySelectorAll?.(".ds-bot-organizer-inline-host")?.forEach(host => {
       host.classList.remove("ds-bot-organizer-inline-host");
     });
+    card?.querySelectorAll?.(".ds-bot-organizer-meta-body")?.forEach(host => {
+      host.classList.remove("ds-bot-organizer-meta-body");
+    });
     card?.classList?.remove("ds-bot-org-filter-hidden", "ds-bot-org-selected", "ds-bot-org-mobile-bulk");
     if (card?.dataset) {
       delete card.dataset.dsBotOrganizerCard;
@@ -221,6 +245,37 @@
     if (title?.parentElement) return { host: title.parentElement, after: title };
 
     return null;
+  }
+
+  function findImageHost(card) {
+    const chatLink = card?.querySelector?.("a[aria-label^='chat-with-']");
+    const host = chatLink?.parentElement;
+    if (host?.classList?.contains("relative") && host.classList.contains("aspect-square")) return host;
+    return [...(card?.children || [])].find(node =>
+      node instanceof Element &&
+      node.classList.contains("relative") &&
+      node.classList.contains("aspect-square")
+    ) || null;
+  }
+
+  function findCardBody(card) {
+    return [...(card?.children || [])].find(node =>
+      node instanceof Element &&
+      node.classList.contains("flex") &&
+      node.classList.contains("flex-col") &&
+      node.classList.contains("grow")
+    ) || null;
+  }
+
+  function placeLocalMeta(card, host) {
+    const body = findCardBody(card);
+    if (!body || !host) return false;
+    const footer = [...body.children].find(node =>
+      node !== host && node.classList?.contains("mt-auto") && node.classList?.contains("flex-col")
+    ) || null;
+    if (host.parentElement !== body || host.nextElementSibling !== footer) body.insertBefore(host, footer);
+    if (!body.classList.contains("ds-bot-organizer-meta-body")) body.classList.add("ds-bot-organizer-meta-body");
+    return true;
   }
 
   function makeOrganizeButton(entry) {
@@ -241,19 +296,26 @@
   }
 
   function ensureOrganizeButton(entry) {
-    if (!entry?.card || entry.card.querySelector(".ds-bot-organizer-button")) return;
+    if (!entry?.card) return;
 
-    const button = makeOrganizeButton(entry);
-    const inline = findInlineHost(entry.card);
-    if (inline?.host) {
-      inline.host.classList.remove("ds-bot-organizer-inline-host");
-      inline.after.insertAdjacentElement("afterend", button);
+    let button = entry.card.querySelector(".ds-bot-organizer-button");
+    if (!button) button = makeOrganizeButton(entry);
+
+    const label = `Organize ${entry.name || "bot"} / folders`;
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+
+    const imageHost = findImageHost(entry.card);
+    if (imageHost) {
+      button.classList.remove("ds-bot-organizer-button-floating");
+      button.classList.add("ds-bot-organizer-button-image");
+      if (button.parentElement !== imageHost) imageHost.appendChild(button);
       return;
     }
 
+    button.classList.remove("ds-bot-organizer-button-image");
     if (getComputedStyle(entry.card).position === "static") entry.card.style.position = "relative";
     button.classList.add("ds-bot-organizer-button-floating");
-    entry.card.appendChild(button);
+    if (button.parentElement !== entry.card) entry.card.appendChild(button);
   }
 
   function makeChip(text, cls = "") {
@@ -267,31 +329,40 @@
     const settings = DS.state.settings || {};
     let host = entry.card.querySelector(".ds-bot-local-meta");
     const data = dataFor(entry.id);
+    const body = findCardBody(entry.card);
 
     if (!settings.botOrganizerShowCardMeta || !hasLocalData(data)) {
       host?.remove();
+      if (body?.classList.contains("ds-bot-organizer-meta-body")) body.classList.remove("ds-bot-organizer-meta-body");
       return;
     }
 
     if (!host) {
       host = document.createElement("div");
       host.className = "ds-bot-local-meta";
-      const inline = findInlineHost(entry.card);
-      if (inline?.host) inline.host.insertAdjacentElement("afterend", host);
-      else entry.card.appendChild(host);
     }
+    placeLocalMeta(entry.card, host);
 
+    const visible = {
+      status: data.status || "",
+      collections: (data.collections || []).slice(0, 2),
+      tags: (data.tags || []).slice(0, 2),
+      note: data.note || ""
+    };
+    const signature = JSON.stringify(visible);
+    if (host.dataset.dsMetaSignature === signature) return;
+    host.dataset.dsMetaSignature = signature;
     host.replaceChildren();
 
-    if (data.status) host.appendChild(makeChip(STATUS_LABELS[data.status] || data.status, `ds-bot-status-${data.status}`));
-    for (const collection of (data.collections || []).slice(0, 2)) host.appendChild(makeChip(`📁 ${collection}`));
-    for (const tag of (data.tags || []).slice(0, 2)) host.appendChild(makeChip(`#${tag}`));
+    if (visible.status) host.appendChild(makeChip(STATUS_LABELS[visible.status] || visible.status, `ds-bot-status-${visible.status}`));
+    for (const collection of visible.collections) host.appendChild(makeChip(`📁 ${collection}`));
+    for (const tag of visible.tags) host.appendChild(makeChip(`#${tag}`));
 
-    if (data.note) {
+    if (visible.note) {
       const note = document.createElement("span");
       note.className = "ds-bot-local-note";
-      note.textContent = data.note;
-      note.title = data.note;
+      note.textContent = visible.note;
+      note.title = visible.note;
       host.appendChild(note);
     }
   }

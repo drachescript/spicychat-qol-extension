@@ -318,6 +318,7 @@
     const current = languageCache.get(id);
     if (current?.code === code && Date.now() - Number(current.updatedAt || 0) < 6 * 60 * 60 * 1000) return;
     languageCache.set(id, { code, source, updatedAt: Date.now() });
+    DS.bumpCardFilterStateRevision?.();
     scheduleLanguageCacheSave();
   }
 

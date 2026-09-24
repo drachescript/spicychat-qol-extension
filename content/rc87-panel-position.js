@@ -23,7 +23,10 @@
 
   function syncRouteClass() {
     ensureStyle();
-    document.documentElement.classList.toggle(ROOT_CLASS, supportedListingRoute());
+    const enabled = supportedListingRoute();
+    if (document.documentElement.classList.contains(ROOT_CLASS) !== enabled) {
+      document.documentElement.classList.toggle(ROOT_CLASS, enabled);
+    }
   }
 
   // Runs immediately after quick-panel.js in the manifest, before the heavier

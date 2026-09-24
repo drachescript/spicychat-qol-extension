@@ -1003,7 +1003,9 @@
 
   DS.compactLayouts = function compactLayouts(cards) {
     if (!DS.state.settings.compactAfterHiding) {
-      DS.qsa?.(".ds-grid-dense").forEach(parent => parent.classList.remove("ds-grid-dense"));
+      DS.qsa?.(".ds-grid-dense").forEach(parent => {
+        if (parent.classList.contains("ds-grid-dense")) parent.classList.remove("ds-grid-dense");
+      });
       return;
     }
 
@@ -1023,10 +1025,10 @@
     for (const parent of parents) {
       if (!DS.classText(parent).includes("grid")) continue;
       if (parent.querySelector?.("nav, [role='navigation']")) {
-        parent.classList.remove("ds-grid-dense");
+        if (parent.classList.contains("ds-grid-dense")) parent.classList.remove("ds-grid-dense");
         continue;
       }
-      parent.classList.add("ds-grid-dense");
+      if (!parent.classList.contains("ds-grid-dense")) parent.classList.add("ds-grid-dense");
     }
   };
 
@@ -1046,6 +1048,44 @@
     return !!document.querySelector("[data-ds-language-allowed-passes='1'], [data-ds-language-allowed-passes=\"1\"]");
   }
 
+  function cardFilterKey() {
+    return [
+      Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hiddenCardMode || "hide",
+      DS.smartFilterWantsOpened?.() ? 1 : 0,
+      DS.smartFilterWantsFavorites?.() ? 1 : 0,
+      DS.smartFilterWantsLater?.() ? 1 : 0
+    ].join("|");
+  }
+
+  DS.markListingDirtyCards = function markListingDirtyCards(mutations) {
+    const dirty = DS.state.listingDirtyCards instanceof Set
+      ? DS.state.listingDirtyCards
+      : (DS.state.listingDirtyCards = new Set());
+
+    const addNode = node => {
+      const el = node instanceof Element ? node : node?.parentElement;
+      if (!el) return;
+
+      const direct = el.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group']");
+      if (direct && DS.isRecommendationCardRoot?.(direct)) dirty.add(direct);
+
+      const anchors = [];
+      if (el.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) anchors.push(el);
+      el.querySelectorAll?.("a[href*='/chat/'], a[href*='/chatbot/']").forEach(anchor => anchors.push(anchor));
+      for (const anchor of anchors) {
+        const card = DS.getCardFromChatLink?.(anchor);
+        if (card?.isConnected) dirty.add(card);
+      }
+    };
+
+    for (const mutation of mutations || []) {
+      addNode(mutation.target);
+      for (const node of mutation.addedNodes || []) addNode(node);
+    }
+    return dirty.size;
+  };
+
   DS.applyCardHiding = async function applyCardHiding(options = {}) {
     if (!DS.state.settings.enabled) return;
 
@@ -1057,25 +1097,55 @@
 
     const passKey = cardHidingPassKey();
     const pendingLanguagePass = hasPendingLanguageUnhideVerification();
-    if (!options.force && !pendingLanguagePass && DS.state.cardHidingLastPassKey === passKey) {
-      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
-      perf.cardHidingStablePassSkips = Number(perf.cardHidingStablePassSkips || 0) + 1;
-      return;
+    const filterKey = cardFilterKey();
+    const routeKey = location.href;
+    const dirty = DS.state.listingDirtyCards instanceof Set
+      ? DS.state.listingDirtyCards
+      : (DS.state.listingDirtyCards = new Set());
+    const canUseDirty =
+      !options.force &&
+      !pendingLanguagePass &&
+      DS.state.cardHidingHasFullPass === true &&
+      DS.state.cardHidingLastFilterKey === filterKey &&
+      DS.state.cardHidingLastRouteKey === routeKey;
+
+    let cards;
+    if (canUseDirty) {
+      cards = [...dirty]
+        .filter(card => card?.isConnected)
+        .map(card => ({
+          card,
+          anchor: card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']")
+        }))
+        .filter(item => item.anchor);
+      dirty.clear();
+
+      if (!cards.length) {
+        const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+        perf.cardHidingStablePassSkips = Number(perf.cardHidingStablePassSkips || 0) + 1;
+        DS.state.cardHidingLastPassKey = passKey;
+        return;
+      }
+    } else {
+      cards = DS.collectCards();
+      dirty.clear();
     }
 
-    const cards = DS.collectCards();
     DS.applyCardDisplayNormalization?.(cards);
 
     if (DS.isFavoriteBotsPage() && DS.state.settings.neverHideFavorites !== false) {
+      DS.state.cardHidingLastFilterKey = filterKey;
+      DS.state.cardHidingLastRouteKey = routeKey;
+      DS.state.cardHidingHasFullPass = true;
       return;
     }
     let hidden = 0;
     let processed = 0;
-    const chunkLargeListing = cards.length >= 80;
+    const chunkLargeListing = cards.length >= 60;
 
     for (const { card, anchor } of cards) {
       processed += 1;
-      if (chunkLargeListing && processed > 1 && processed % 36 === 0) {
+      if (chunkLargeListing && processed > 1 && processed % 24 === 0) {
         // A 100-200 card grid can otherwise become one long synchronous task.
         // Yield between small chunks so Brave/Chrome can paint and process input.
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -1160,8 +1230,12 @@
     // one follow-up confirmation before being unhidden, so leave that pass dirty.
     if (!hasPendingLanguageUnhideVerification()) {
       DS.state.cardHidingLastPassKey = cardHidingPassKey();
+      DS.state.cardHidingLastFilterKey = filterKey;
+      DS.state.cardHidingLastRouteKey = routeKey;
+      DS.state.cardHidingHasFullPass = true;
     } else {
       DS.state.cardHidingLastPassKey = "";
+      DS.state.cardHidingHasFullPass = false;
     }
   };
 })();

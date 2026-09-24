@@ -279,11 +279,11 @@
 
     button.dataset.dsModelName = entry.name;
     const favorite = favoriteNames.some(name => norm(name) === norm(entry.name));
-    button.textContent = favorite ? "♥" : "♡";
-    button.classList.toggle("is-favorite", favorite);
+    DS.setTextIfChanged?.(button, favorite ? "♥" : "♡");
+    DS.setClassState?.(button, "is-favorite", favorite);
     button.title = favorite ? `Unfavorite ${entry.name}` : `Favorite ${entry.name}`;
     button.setAttribute("aria-label", favorite ? `Unfavorite model ${entry.name}` : `Favorite model ${entry.name}`);
-    button.setAttribute("aria-pressed", favorite ? "true" : "false");
+    DS.setAttributeIfChanged?.(button, "aria-pressed", favorite ? "true" : "false");
     return favorite;
   }
 

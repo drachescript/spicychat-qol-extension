@@ -5,6 +5,8 @@
   if (!DS) return;
 
   const FALLBACK_PAGE_KEY = "public_characters_alias/sort/_text_match(buckets: 3):desc,num_messages_24h:desc[page]";
+  const ABSOLUTE_MAX_PAGE = 20000;
+  const NATIVE_PAGE_SIZE = 48;
 
   function pageLimit(settings = DS.state?.settings || {}) {
     return Math.max(100, Math.min(20000, Number(settings.paginationMaxPage) || 20000));
@@ -56,8 +58,8 @@
   }
 
   function navigateToPage(page, settings = DS.state?.settings || {}) {
-    const max = pageLimit(settings);
-    let target = Math.max(1, Math.floor(Number(page) || 1));
+    const max = Math.min(ABSOLUTE_MAX_PAGE, pageLimit(settings));
+    let target = Math.min(ABSOLUTE_MAX_PAGE, Math.max(1, Math.floor(Number(page) || 1)));
     if (settings.paginationHardCap !== false) target = Math.min(target, max);
 
     try {
@@ -68,112 +70,102 @@
     } catch {}
   }
 
-  function closeJumpForms() {
+  function resultCount() {
+    const text = document.querySelector("[data-testid='search-stats'] .ais-Stats-text, .ais-Stats-text")?.textContent || "";
+    const match = text.replace(/,/g, "").match(/(\d+)\s+results?\b/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function estimatedPageCount() {
+    const count = resultCount();
+    if (!count) return 0;
+    return Math.min(ABSOLUTE_MAX_PAGE, Math.max(1, Math.ceil(count / NATIVE_PAGE_SIZE)));
+  }
+
+  function restoreJumpInputs() {
     document.querySelectorAll(".ds-pagination-jump-form").forEach(form => {
       const ownerId = form.getAttribute("data-owner-id");
-      if (ownerId) {
-        const owner = document.querySelector(`button[data-ds-pagination-owner='${CSS.escape(ownerId)}']`);
-        if (owner) owner.hidden = false;
+      const button = ownerId
+        ? document.querySelector(`button[data-ds-pagination-owner='${CSS.escape(ownerId)}']`)
+        : null;
+      if (button) {
+        button.hidden = false;
+        delete button.dataset.dsPaginationOwner;
       }
       form.remove();
     });
   }
 
-  function openJumpForm(button, settings) {
+  function ensureJumpInput(button) {
     if (!button?.isConnected) return;
-    const existing = button.parentElement?.querySelector(".ds-pagination-jump-form");
-    if (existing) {
-      existing.querySelector("input")?.focus();
+    const ownerId = button.dataset.dsPaginationOwner;
+    if (ownerId && document.querySelector(`.ds-pagination-jump-form[data-owner-id='${CSS.escape(ownerId)}']`)) {
       return;
     }
 
-    closeJumpForms();
-    const max = pageLimit(settings);
-    const ownerId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    button.dataset.dsPaginationOwner = ownerId;
+    const id = `jump-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    button.dataset.dsPaginationOwner = id;
     button.hidden = true;
 
     const form = document.createElement("form");
     form.className = "ds-pagination-jump-form";
-    form.dataset.ownerId = ownerId;
-    form.title = `Jump to page 1-${max.toLocaleString()}`;
+    form.dataset.ownerId = id;
+    form.title = "Type a page from 1 to 20,000 and press Enter";
 
     const input = document.createElement("input");
+    input.className = "ds-pagination-jump-input";
     input.type = "number";
     input.min = "1";
-    input.max = String(max);
+    input.max = String(ABSOLUTE_MAX_PAGE);
     input.step = "1";
     input.inputMode = "numeric";
-    input.placeholder = "Page";
-    input.setAttribute("aria-label", `Jump to page, maximum ${max}`);
+    input.placeholder = "...";
+    input.autocomplete = "off";
+    input.setAttribute("aria-label", "Jump to page 1 through 20,000");
 
-    const go = document.createElement("button");
-    go.type = "submit";
-    go.textContent = "Go";
-    go.setAttribute("aria-label", "Go to page");
-
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.textContent = "×";
-    cancel.setAttribute("aria-label", "Cancel page jump");
-    cancel.addEventListener("click", () => closeJumpForms());
-
-    form.append(input, go, cancel);
+    form.appendChild(input);
     button.insertAdjacentElement("afterend", form);
 
     form.addEventListener("submit", event => {
       event.preventDefault();
       const requested = Math.floor(Number(input.value));
-      if (!Number.isFinite(requested) || requested < 1) {
-        input.setCustomValidity("Enter a page number of 1 or higher.");
-        input.reportValidity();
-        return;
-      }
-      if (settings.paginationHardCap !== false && requested > max) {
-        input.setCustomValidity(`The configured maximum page is ${max.toLocaleString()}.`);
+      if (!Number.isFinite(requested) || requested < 1 || requested > ABSOLUTE_MAX_PAGE) {
+        input.setCustomValidity("Enter a page number from 1 to 20,000.");
         input.reportValidity();
         return;
       }
       input.setCustomValidity("");
-      navigateToPage(requested, settings);
+      navigateToPage(requested, { ...DS.state?.settings, paginationMaxPage: ABSOLUTE_MAX_PAGE });
     });
 
     input.addEventListener("input", () => input.setCustomValidity(""));
-    input.addEventListener("keydown", event => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeJumpForms();
-      }
-    });
-
-    requestAnimationFrame(() => input.focus());
   }
 
-  function attachJumpButton(button, settings) {
-    if (!button || button.__dsPaginationJumpHandler) return;
-    const handler = event => {
+  function restoreEstimatedLastPage() {
+    document.querySelectorAll(".ds-pagination-estimated-last").forEach(button => button.remove());
+  }
+
+  function syncEstimatedLastPage() {
+    restoreEstimatedLastPage();
+    const total = estimatedPageCount();
+    if (total <= 10) return;
+
+    const jump = document.querySelector(".ds-pagination-jump-form");
+    const parent = jump?.parentElement;
+    if (!parent) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ds-pagination-estimated-last";
+    button.setAttribute("aria-label", `page-${total}`);
+    button.title = `Estimated last page from ${resultCount().toLocaleString()} results`;
+    button.textContent = total.toLocaleString();
+    button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
-      openJumpForm(button, DS.state?.settings || settings);
-    };
-    button.__dsPaginationJumpHandler = handler;
-    button.dataset.dsPaginationJumpReady = "1";
-    button.title = "Jump to a page number";
-    button.classList.add("ds-pagination-jump-button");
-    button.addEventListener("click", handler, true);
-  }
-
-  function detachJumpButton(button) {
-    const handler = button?.__dsPaginationJumpHandler;
-    if (handler) button.removeEventListener("click", handler, true);
-    if (button) {
-      delete button.__dsPaginationJumpHandler;
-      delete button.dataset.dsPaginationJumpReady;
-      delete button.dataset.dsPaginationOwner;
-      button.classList.remove("ds-pagination-jump-button");
-      button.removeAttribute("title");
-      button.hidden = false;
-    }
+      navigateToPage(total, { ...DS.state?.settings, paginationMaxPage: ABSOLUTE_MAX_PAGE });
+    }, true);
+    jump.insertAdjacentElement("afterend", button);
   }
 
   function restoreNextButton(button) {
@@ -229,8 +221,8 @@
   }
 
   function cleanup() {
-    closeJumpForms();
-    document.querySelectorAll("button[data-ds-pagination-jump-ready='1']").forEach(detachJumpButton);
+    restoreJumpInputs();
+    restoreEstimatedLastPage();
     document.querySelectorAll(".ds-pagination-over-cap").forEach(button => button.classList.remove("ds-pagination-over-cap"));
     document.querySelectorAll("button[data-ds-pagination-capped='1']").forEach(restoreNextButton);
   }
@@ -252,9 +244,12 @@
     applyHardCap(settings);
 
     document.querySelectorAll("button[aria-label='page-...']").forEach(button => {
-      if (settings.paginationJumpInput !== false) attachJumpButton(button, settings);
-      else detachJumpButton(button);
+      if (settings.paginationJumpInput !== false) ensureJumpInput(button);
+      else if (button.dataset.dsPaginationOwner) restoreJumpInputs();
     });
+
+    if (settings.paginationJumpInput !== false) syncEstimatedLastPage();
+    else restoreEstimatedLastPage();
   };
 
   DS.removePaginationTools = cleanup;

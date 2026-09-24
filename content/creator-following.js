@@ -85,10 +85,10 @@
   function updateButton(button) {
     const handle = normalizeHandle(button.dataset.dsCreatorHandle);
     const following = DS.isFollowedCreator(handle);
-    button.textContent = following ? "Following" : "Follow";
-    button.classList.toggle("is-following", following);
+    DS.setTextIfChanged?.(button, following ? "Following" : "Follow");
+    DS.setClassState?.(button, "is-following", following);
     button.classList.remove("is-consent-pending");
-    button.setAttribute("aria-pressed", following ? "true" : "false");
+    DS.setAttributeIfChanged?.(button, "aria-pressed", following ? "true" : "false");
     button.title = following
       ? `Unfollow @${handle}`
       : `Follow @${handle} locally with SpicyChat QoL and optionally watch for new public bots`;

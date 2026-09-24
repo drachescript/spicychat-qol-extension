@@ -772,8 +772,8 @@
       }
       button.classList.add("ds-listing-header-action");
       if (button.parentElement !== host) host.appendChild(button);
-      button.textContent = state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots";
-      button.setAttribute("aria-pressed", state.selectionMode ? "true" : "false");
+      DS.setTextIfChanged?.(button, state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots");
+      DS.setAttributeIfChanged?.(button, "aria-pressed", state.selectionMode ? "true" : "false");
       return;
     }
 
@@ -804,8 +804,8 @@
     button.classList.remove("ds-listing-header-action");
 
     if (groupSize.nextElementSibling !== wrapper) groupSize.after(wrapper);
-    button.textContent = state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots";
-    button.setAttribute("aria-pressed", state.selectionMode ? "true" : "false");
+    DS.setTextIfChanged?.(button, state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots");
+    DS.setAttributeIfChanged?.(button, "aria-pressed", state.selectionMode ? "true" : "false");
     cleanupListingHeaderActionHost();
   }
 
@@ -829,8 +829,8 @@
       if (normalRow) normalRow.before(row);
       else body.prepend(row);
     }
-    button.textContent = state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots";
-    button.setAttribute("aria-pressed", state.selectionMode ? "true" : "false");
+    DS.setTextIfChanged?.(button, state.selectionMode ? `Selecting (${state.selectedIds.size})` : "Select bots");
+    DS.setAttributeIfChanged?.(button, "aria-pressed", state.selectionMode ? "true" : "false");
   }
 
   function syncLaunchers() {

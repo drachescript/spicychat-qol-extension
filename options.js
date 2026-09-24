@@ -63,7 +63,7 @@ const BULK_DISLIKE_TRANSIENT_STATUSES = new Set([
 ]);
 const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
-const BACKUP_FORMAT_VERSION = 12;
+const BACKUP_FORMAT_VERSION = 13;
 
 const OPTIONS_PERFORMANCE = {
   bootStartedAt: typeof performance !== "undefined" ? performance.now() : 0,
@@ -12306,7 +12306,19 @@ function buildExportPayload(scopes, result) {
   if (has("creatorBotWatch")) payload.creatorBotWatch = normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]);
   if (has("favoriteBots")) payload.favoriteBots = result[FAVORITE_BOTS_KEY] || { ids: [], meta: {} };
   if (has("laterBots")) payload.laterBots = result[LATER_BOTS_KEY] || { ids: [], meta: {} };
-  if (has("botOrganization")) payload.botOrganization = result[BOT_ORGANIZER_KEY] || { meta: {} };
+  if (has("botOrganization")) {
+    const organizer = normalizeBotOrganization(result[BOT_ORGANIZER_KEY]);
+    organizer.collections = uniqueClean([
+      ...(organizer.collections || []),
+      ...String(settings.botCollections || "").split(/[\n,]+/g)
+    ]);
+    organizer.config = {
+      enableBotOrganizer: !!settings.enableBotOrganizer,
+      botOrganizerShowCardMeta: settings.botOrganizerShowCardMeta !== false,
+      botOrganizerBulkTools: settings.botOrganizerBulkTools !== false
+    };
+    payload.botOrganization = organizer;
+  }
   if (has("chatOrganization")) payload.chatOrganization = normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]);
   if (has("characterQolProfiles")) payload.characterQolProfiles = normalizeCharacterQolProfiles(result[CHARACTER_QOL_PROFILES_KEY]);
   if (has("botAvailability")) payload.botAvailability = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
@@ -12917,7 +12929,14 @@ const BACKUP_DATA_SCOPE_DEFS = {
   creatorBotWatch: { count: result => Object.keys(normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]).creators || {}).length },
   favoriteBots: { count: result => uniqueClean(result[FAVORITE_BOTS_KEY]?.ids || []).length },
   laterBots: { count: result => uniqueClean(result[LATER_BOTS_KEY]?.ids || []).length },
-  botOrganization: { count: result => Object.keys(result[BOT_ORGANIZER_KEY]?.meta || {}).length },
+  botOrganization: { count: result => {
+    const organizer = normalizeBotOrganization(result[BOT_ORGANIZER_KEY]);
+    const folders = uniqueClean([
+      ...(organizer.collections || []),
+      ...String(result.settings?.botCollections || "").split(/[\n,]+/g)
+    ]);
+    return Object.keys(organizer.meta || {}).length + folders.length;
+  } },
   chatOrganization: { count: result => Object.keys(normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]).meta).length },
   characterQolProfiles: { count: result => Object.keys(normalizeCharacterQolProfiles(result[CHARACTER_QOL_PROFILES_KEY])).length },
   botAvailability: { count: result => Object.keys(normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]).meta).length },
@@ -13178,7 +13197,16 @@ function normalizeBotOrganization(value) {
       status: ["needs-work", "testing", "finished"].includes(raw.status) ? raw.status : ""
     };
   }
-  return { meta: out };
+  const config = source.config && typeof source.config === "object" ? {
+    enableBotOrganizer: source.config.enableBotOrganizer !== false,
+    botOrganizerShowCardMeta: source.config.botOrganizerShowCardMeta !== false,
+    botOrganizerBulkTools: source.config.botOrganizerBulkTools !== false
+  } : null;
+  return {
+    collections: uniqueClean(source.collections || []),
+    ...(config ? { config } : {}),
+    meta: out
+  };
 }
 
 function mergeBotOrganizations(current, incoming) {
@@ -13194,7 +13222,11 @@ function mergeBotOrganizations(current, incoming) {
       tags: uniqueClean([...(previous.tags || []), ...(raw.tags || [])]).slice(0, 40)
     };
   }
-  return { meta };
+  return {
+    collections: uniqueClean([...(left.collections || []), ...(right.collections || [])]),
+    ...(right.config ? { config: right.config } : (left.config ? { config: left.config } : {})),
+    meta
+  };
 }
 
 function normalizeChatOrganization(value) {
@@ -13355,7 +13387,10 @@ function importCategoryEntries(parsed) {
   if (source.creatorBotWatch && typeof source.creatorBotWatch === "object") add("creatorBotWatch", "Creator follow/watch history", Object.keys(normalizeCreatorBotWatchState(source.creatorBotWatch).creators || {}).length);
   if (source.favoriteBots && typeof source.favoriteBots === "object") add("favoriteBots", "Favorite bots", uniqueClean(source.favoriteBots.ids || []).length);
   if (source.laterBots && typeof source.laterBots === "object") add("laterBots", "Later bots", uniqueClean(source.laterBots.ids || []).length);
-  if (source.botOrganization && typeof source.botOrganization === "object") add("botOrganization", "Bot organization", Object.keys(source.botOrganization.meta || {}).length);
+  if (source.botOrganization && typeof source.botOrganization === "object") {
+    const organizer = normalizeBotOrganization(source.botOrganization);
+    add("botOrganization", "Bot organization", Object.keys(organizer.meta || {}).length + (organizer.collections || []).length);
+  }
   if (source.chatOrganization && typeof source.chatOrganization === "object") add("chatOrganization", "Chat organization", Object.keys(normalizeChatOrganization(source.chatOrganization).meta).length);
   if (source.chatBookmarks && typeof source.chatBookmarks === "object") add("chatBookmarks", "Message bookmarks", Object.values(source.chatBookmarks).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0));
   if (source.characterQolProfiles && typeof source.characterQolProfiles === "object") add("characterQolProfiles", "Character QoL profiles", Object.keys(normalizeCharacterQolProfiles(source.characterQolProfiles)).length);
@@ -13705,9 +13740,29 @@ async function importSettings() {
     }
 
     if (hasImportScope("botOrganization") && parsed.botOrganization && typeof parsed.botOrganization === "object") {
+      const incomingOrganizer = normalizeBotOrganization(parsed.botOrganization);
       payload[BOT_ORGANIZER_KEY] = mode === "replace"
-        ? normalizeBotOrganization(parsed.botOrganization)
-        : mergeBotOrganizations(current[BOT_ORGANIZER_KEY], parsed.botOrganization);
+        ? incomingOrganizer
+        : mergeBotOrganizations(current[BOT_ORGANIZER_KEY], incomingOrganizer);
+
+      const hasFolderDefinitions = Array.isArray(parsed.botOrganization.collections);
+      const hasOrganizerConfig = parsed.botOrganization.config && typeof parsed.botOrganization.config === "object";
+      if (hasFolderDefinitions || hasOrganizerConfig) {
+        const settings = { ...DEFAULT_SETTINGS, ...(current.settings || {}), ...(payload.settings || {}) };
+        if (hasFolderDefinitions) {
+          const currentFolders = uniqueClean(String(current.settings?.botCollections || "").split(/[\n,]+/g));
+          const importedFolders = incomingOrganizer.collections || [];
+          settings.botCollections = (mode === "replace"
+            ? importedFolders
+            : uniqueClean([...currentFolders, ...importedFolders])).join("\n");
+        }
+        if (hasOrganizerConfig) {
+          settings.enableBotOrganizer = incomingOrganizer.config?.enableBotOrganizer !== false;
+          settings.botOrganizerShowCardMeta = incomingOrganizer.config?.botOrganizerShowCardMeta !== false;
+          settings.botOrganizerBulkTools = incomingOrganizer.config?.botOrganizerBulkTools !== false;
+        }
+        payload.settings = settings;
+      }
     }
 
     if (hasImportScope("chatOrganization") && parsed.chatOrganization && typeof parsed.chatOrganization === "object") {

@@ -166,9 +166,9 @@
     }
 
     const selected = selectedKeys.has(entry.key);
-    button.textContent = selected ? "✓" : "";
-    button.setAttribute("aria-pressed", selected ? "true" : "false");
-    entry.row.classList.toggle("ds-chat-org-selected", selected);
+    DS.setTextIfChanged?.(button, selected ? "✓" : "");
+    DS.setAttributeIfChanged?.(button, "aria-pressed", selected ? "true" : "false");
+    DS.setClassState?.(entry.row, "ds-chat-org-selected", selected);
   }
 
   function applySelectionState(entries) {

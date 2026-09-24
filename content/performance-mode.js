@@ -60,7 +60,7 @@
 
 
   function clearListingClasses() {
-    document.documentElement.classList.remove("ds-listing-performance");
+    DS.setClassState?.(document.documentElement, "ds-listing-performance", false);
     // Only touch cards this helper marked. A document-wide cleanup scan on a
     // large My Creations page defeats the point of the paint guard.
     for (const card of listingPaintCards) {
@@ -91,7 +91,7 @@
     const cards = DS.collectCards?.() || [];
     const strongMode = configured === "aggressive" || configured === "maximum";
     const active = cards.length >= 60 && (strongMode || (configured === "adaptive" && cards.length >= 120));
-    document.documentElement.classList.toggle("ds-listing-performance", active);
+    DS.setClassState?.(document.documentElement, "ds-listing-performance", active);
     if (!active) {
       for (const card of listingPaintCards) {
         if (card?.classList) card.classList.remove("ds-listing-card-lite");
@@ -127,10 +127,10 @@
     const active = isActiveChatPerformance();
     const hiddenPaused = !!(s.enabled && s.pauseQolInHiddenTabs && document.hidden);
 
-    document.documentElement.classList.toggle("ds-qol-hidden-tab-paused", hiddenPaused);
+    DS.setClassState?.(document.documentElement, "ds-qol-hidden-tab-paused", hiddenPaused);
 
     if (!active) {
-      document.documentElement.classList.remove("ds-chat-performance");
+      DS.setClassState?.(document.documentElement, "ds-chat-performance", false);
       if (DS.state.performanceModeApplied || document.querySelector(".ds-chat-message-lite, .ds-chat-message-far")) {
         clearMessageClasses();
       }
@@ -151,7 +151,7 @@
     const roots = messageRoots();
     const threshold = desktopAppGuardActive() ? DESKTOP_APP_LONG_CHAT_THRESHOLD : LONG_CHAT_THRESHOLD;
     const longChat = roots.length >= threshold;
-    document.documentElement.classList.toggle("ds-chat-performance", longChat);
+    DS.setClassState?.(document.documentElement, "ds-chat-performance", longChat);
 
     if (longChat) {
       applyStaticLightweightClasses(roots);

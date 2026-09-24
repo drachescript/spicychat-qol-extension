@@ -475,6 +475,7 @@
     if (!settings.enabled) {
       teardownNotificationGuard();
       unhideIfReason("notifications");
+      unhideIfReason("topbar:notifications");
       return;
     }
 
@@ -494,8 +495,9 @@
       DS.qsa(".announcekit-widget-badge, [data-announcekit-mode]").forEach(el => {
         DS.hideElement(el, "notifications");
       });
-    } else {
+    } else if (!settings.hideTopBarNotifications) {
       unhideIfReason("notifications");
+      unhideIfReason("topbar:notifications");
     }
   };
 })();

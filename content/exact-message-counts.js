@@ -55,6 +55,9 @@
 
   function removeCreationDate(card) {
     card?.querySelectorAll?.(".ds-bot-created-date").forEach(node => node.remove());
+    card?.querySelectorAll?.(".ds-card-created-date-body").forEach(node => {
+      if (node.classList.contains("ds-card-created-date-body")) node.classList.remove("ds-card-created-date-body");
+    });
   }
 
   function removeProfileCreationDate() {
@@ -148,6 +151,7 @@
 
     let node = card.querySelector(".ds-bot-created-date");
     const text = `Created: ${formatted}`;
+    const raw = String(value);
     if (!node) {
       const anchor = creationDateAnchor(card);
       if (!anchor?.parentElement) return false;
@@ -156,9 +160,27 @@
       node.dataset.dsOwned = "1";
       anchor.insertAdjacentElement("afterend", node);
     }
+
+    let body = node.parentElement;
+    while (body && body !== card) {
+      const cls = String(body.className || "");
+      if (cls.includes("h-[180px]") && cls.includes("flex-col")) break;
+      body = body.parentElement;
+    }
+
+    const stable =
+      node.textContent === text &&
+      node.dataset.dsCreatedAt === raw &&
+      node.dataset.dsBotId === id &&
+      (!body || body === card || body.classList.contains("ds-card-created-date-body"));
+    if (stable) return true;
+
     if (node.textContent !== text) node.textContent = text;
-    const raw = String(value);
     if (node.dataset.dsCreatedAt !== raw) node.dataset.dsCreatedAt = raw;
+    if (node.dataset.dsBotId !== id) node.dataset.dsBotId = id;
+    if (body && body !== card && !body.classList.contains("ds-card-created-date-body")) {
+      body.classList.add("ds-card-created-date-body");
+    }
     return true;
   }
 

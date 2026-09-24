@@ -815,7 +815,7 @@
     followedCreators: { handles: [], meta: {} },
     favoriteBots: { ids: [], meta: {} },
     laterBots: { ids: [], meta: {} },
-    botOrganization: { meta: {} },
+    botOrganization: { collections: [], meta: {} },
     chatOrganization: { meta: {} },
     recentlySeenBots: { entries: [] },
     characterQolProfiles: {},
@@ -1850,6 +1850,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     };
 
     DS.state.botOrganization = {
+      collections: DS.uniqueClean(Array.isArray(savedBotOrganization.collections) ? savedBotOrganization.collections : []),
       meta: savedBotOrganization.meta && typeof savedBotOrganization.meta === "object"
         ? savedBotOrganization.meta
         : {}
@@ -2007,6 +2008,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     if (changes[DS.BOT_ORGANIZER_KEY]) {
       const next = changes[DS.BOT_ORGANIZER_KEY].newValue || {};
       DS.state.botOrganization = {
+        collections: DS.uniqueClean(Array.isArray(next.collections) ? next.collections : []),
         meta: next.meta && typeof next.meta === "object" ? next.meta : {}
       };
     }
@@ -2170,8 +2172,9 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
   };
 
   DS.saveBotOrganization = async function saveBotOrganization(store = DS.state.botOrganization) {
-    const next = store && typeof store === "object" ? store : { meta: {} };
+    const next = store && typeof store === "object" ? store : { collections: [], meta: {} };
     DS.state.botOrganization = {
+      collections: DS.uniqueClean(Array.isArray(next.collections) ? next.collections : []),
       meta: next.meta && typeof next.meta === "object" ? next.meta : {}
     };
     await DS.storageSet({

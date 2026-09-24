@@ -1,3 +1,15 @@
+## 0.2.16
+- Fixed Bot Organizer folders/status/notes and its organize button crowding native card titles and creator names.
+- Fixed Bot Organizer sometimes using the card description instead of the bot name.
+- Bot Organizer backups now include folder definitions and its organizer settings, including empty folders.
+- Fixed Listing Refill repeatedly opening later pages when the current listing has no next page.
+- Fixed bot creation dates getting cut off on some cards and stopped the date layout fix from being reapplied to the same cards over and over.
+- The `...` pagination control is now a page-number box. Type any page from 1 to 20,000 and press Enter.
+- Added an estimated last-page shortcut when SpicyChat reports more results than its normal pagination shows.
+- Reduced repeated card/listing work, notification state changes and profile-name rewrites found with the Diagnostic Extension.
+- Listing Refill now rejects obvious blocked/duplicate cards before building them, spaces out page loads more, and pauses after repeated very low-yield pages until you scroll farther.
+- Reduced more same-value button, grid and performance-class writes.
+
 ## 0.2.15
 - Fixed bot names disappearing on Android/WebView when Bot Organizer was enabled.
 - Cleaned up Support Information so it only shows the normal QoL version and correctly detects Android/WebView when the page runtime does not answer.

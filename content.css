@@ -2442,7 +2442,7 @@ html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][cla
 
 /* v0.1.8.83 - local bot organizer */
 .ds-bot-organizer-inline-host {
-  display: revert !important;
+  position: relative;
 }
 
 .ds-bot-organizer-button,
@@ -2482,16 +2482,33 @@ html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][cla
   z-index: 12;
 }
 
+.ds-bot-organizer-button-image {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 12;
+  width: 22px;
+  height: 22px;
+  background: rgba(20, 22, 26, 0.88);
+  backdrop-filter: blur(4px);
+}
+
+.ds-bot-organizer-meta-body {
+  height: auto !important;
+  min-height: 180px !important;
+  overflow: visible !important;
+}
+
 .ds-bot-local-meta {
   display: flex;
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  margin-top: 4px;
   width: 100%;
   min-width: 0;
-  flex: 1 0 100%;
+  flex: 0 0 auto;
   box-sizing: border-box;
+  padding-top: 2px;
   font-size: 11px;
   line-height: 1.2;
 }
@@ -2770,7 +2787,7 @@ html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][cla
     width: 100%;
   }
 
-  [data-ds-bot-organizer-card="1"] .ds-bot-local-meta {
+  [data-ds-bot-organizer-card="1"].ds-bot-local-meta {
     align-items: flex-start;
     gap: 3px 4px;
     max-height: 48px;
@@ -3468,6 +3485,7 @@ html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] 
 .ds-card-token-info { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:5px 8px 7px; max-width:calc(100% - 16px); pointer-events:none; }
 .ds-card-token-chip { display:inline-flex; align-items:center; width:max-content; max-width:100%; padding:3px 7px; border:1px solid rgba(255,255,255,.18); border-radius:999px; background:rgba(0,0,0,.45); color:rgba(255,255,255,.86); font-size:11px; line-height:1.2; white-space:nowrap; }
 .ds-bot-created-date { align-self:flex-start; margin:-2px 0 0; max-width:100%; font-size:10px; line-height:1.2; opacity:.72; white-space:nowrap; pointer-events:none; }
+.ds-card-created-date-body { height:auto!important; min-height:180px!important; overflow:visible!important; }
 .ds-bot-profile-created-date { display:inline-flex; align-items:center; width:max-content; max-width:100%; font:inherit; line-height:inherit; color:inherit; white-space:nowrap; pointer-events:none; }
 
 
@@ -5331,4 +5349,46 @@ html.ds-listing-performance .ds-listing-card-lite {
   align-items: center;
   font-size: 12px;
   opacity: .82;
+}
+
+
+.ds-pagination-jump-form {
+  display:inline-flex;
+  align-items:center;
+  flex:0 0 auto;
+}
+
+.ds-pagination-jump-input {
+  width:58px;
+  height:36px;
+  box-sizing:border-box;
+  border:1px solid var(--gray-8, #4b5563);
+  border-radius:6px;
+  background:transparent;
+  color:inherit;
+  padding:0 6px;
+  text-align:center;
+  font:500 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  outline:none;
+}
+
+.ds-pagination-jump-input:focus {
+  border-color:var(--blue-10, #3b82f6);
+}
+
+.ds-pagination-estimated-last {
+  min-width:36px;
+  height:36px;
+  padding:0 8px;
+  border:1px solid var(--gray-8, #4b5563);
+  border-radius:6px;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  font:500 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+
+@media (max-width:760px) {
+  .ds-pagination-jump-input { width:52px; height:32px; }
+  .ds-pagination-estimated-last { min-width:32px; height:32px; padding:0 6px; }
 }

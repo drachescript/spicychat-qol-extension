@@ -1401,7 +1401,7 @@
       if (listing) {
         // Recommendation helpers load local creator identity before the final
         // card pass so own-bot filtering can work without extra page requests.
-        await runFeatureStep("recommendation helpers", !!settings.enableRecommendationHelpers || !!document.querySelector("[data-ds-recommendation-helper]"), () => DS.applyRecommendationHelpers?.());
+        await runThrottledFeatureStep("recommendation helpers", !!settings.enableRecommendationHelpers || !!document.querySelector("[data-ds-recommendation-helper]"), listingMaintenanceInterval, () => DS.applyRecommendationHelpers?.(), !!options.force);
         // Description expansion runs only after promo/banner cleanup and a fresh
         // blocking/opened-card pass so hidden cards do not expand first and flash.
         await runThrottledFeatureStep("card hiding settled", cardFilteringWanted(settings) || !!document.querySelector("[data-ds-hidden-card],.ds-card-hidden,.ds-card-dimmed"), listingCardInterval, () => DS.applyCardHiding?.(), !!options.force);
@@ -2109,6 +2109,7 @@
       // and other structure caches refresh, while text edits use messageTextRevision.
       const cardListing = !isChatPage && isCardListingContext();
       const affectsCards = cardListing ? mutationsMayAffectCards(mutations) : false;
+      if (cardListing && affectsCards) DS.markListingDirtyCards?.(mutations);
       if (chatLocal) {
         if (messageRootsChanged) DS.bumpDomRevision?.();
       } else if (!cardListing || affectsCards) {
