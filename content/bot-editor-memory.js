@@ -118,30 +118,61 @@
     return { fields, present: [...present] };
   }
 
-  async function saveAuditCache(id, fields, presentKeys = []) {
+  async function saveAuditCache(id, fields, presentKeys = [], trustedEmptyKeys = []) {
     const present = new Set(Array.isArray(presentKeys) ? presentKeys : []);
-    if (!id || (!Object.keys(fields || {}).length && !present.size)) return;
+    const trustedEmpty = new Set(Array.isArray(trustedEmptyKeys) ? trustedEmptyKeys : []);
+    if (!id || (!Object.keys(fields || {}).length && !present.size && !trustedEmpty.size)) return;
+
     const result = await DS.storageGet?.([AUDIT_KEY]) || {};
     const cache = result[AUDIT_KEY] && typeof result[AUDIT_KEY] === "object" ? result[AUDIT_KEY] : { meta: {} };
     cache.meta ||= {};
+
     const previous = cache.meta[id] && typeof cache.meta[id] === "object" ? cache.meta[id] : {};
     const merged = { ...(previous.fields || {}) };
-    const empty = new Set(Array.isArray(previous.emptyKeys) ? previous.emptyKeys : []);
+
+    // Older builds stored temporarily blank mounted controls in emptyKeys.
+    // On slower React/WebView hydration that can falsely turn a filled field
+    // into "Missing". Only a trusted user edit may prove an intentional blank.
+    const knownEmpty = new Set(
+      Array.isArray(previous.trustedEmptyKeys) ? previous.trustedEmptyKeys : []
+    );
     let changed = false;
 
     for (const key of present) {
       const next = clean(fields?.[key], key === "personality" || key === "examples" ? 18000 : 12000);
+
       if (next) {
         if (merged[key] !== next) { merged[key] = next; changed = true; }
-        if (empty.delete(key)) changed = true;
-      } else {
-        if (Object.prototype.hasOwnProperty.call(merged, key)) { delete merged[key]; changed = true; }
-        if (!empty.has(key)) { empty.add(key); changed = true; }
+        if (knownEmpty.delete(key)) changed = true;
+        continue;
+      }
+
+      // Passive scans are not evidence of a genuinely empty field.
+      if (!trustedEmpty.has(key)) continue;
+
+      if (Object.prototype.hasOwnProperty.call(merged, key)) {
+        delete merged[key];
+        changed = true;
+      }
+      if (!knownEmpty.has(key)) {
+        knownEmpty.add(key);
+        changed = true;
       }
     }
 
-    if (!changed && previous.updatedAt) return;
-    cache.meta[id] = { id, fields: merged, emptyKeys: [...empty], updatedAt: Date.now() };
+    const hadLegacyEmpty = Array.isArray(previous.emptyKeys) && previous.emptyKeys.length > 0;
+    if (!changed && previous.updatedAt && !hadLegacyEmpty) return;
+
+    const nextEntry = {
+      ...previous,
+      id,
+      fields: merged,
+      trustedEmptyKeys: [...knownEmpty],
+      updatedAt: Date.now()
+    };
+    delete nextEntry.emptyKeys;
+
+    cache.meta[id] = nextEntry;
     const ids = Object.keys(cache.meta).sort((a, b) => Number(cache.meta[b]?.updatedAt || 0) - Number(cache.meta[a]?.updatedAt || 0));
     for (const oldId of ids.slice(MAX_AUDIT)) delete cache.meta[oldId];
     await DS.storageSet?.({ [AUDIT_KEY]: cache });
@@ -321,7 +352,22 @@
         }, 500);
       }
     }
-    if (settings.enableCreationAudit && semanticKey(event.target)) scheduleScan(450);
+    if (settings.enableCreationAudit) {
+      const auditKey = semanticKey(event.target);
+      if (auditKey) {
+        // Only a real user edit may prove an intentionally empty creator field.
+        // Synthetic hydration/change events never create a Missing result.
+        if (event.isTrusted) {
+          const limit = auditKey === "personality" || auditKey === "examples" ? 18000 : 12000;
+          const value = clean(event.target?.value, limit);
+          if (!value) {
+            const id = editorId();
+            if (id) saveAuditCache(id, {}, [auditKey], [auditKey]).catch(() => {});
+          }
+        }
+        scheduleScan(450);
+      }
+    }
   }
 
   function install() {
@@ -379,15 +425,22 @@
     const result = await DS.storageGet?.([AUDIT_KEY, DS.BOT_ARCHIVE_KEY || "botArchive"]) || {};
     const cacheEntry = result[AUDIT_KEY]?.meta?.[id] || {};
     const cacheFields = cacheEntry.fields || {};
-    const knownEmpty = new Set(Array.isArray(cacheEntry.emptyKeys) ? cacheEntry.emptyKeys : []);
+    // Ignore legacy emptyKeys: passive scans could write them before React
+    // hydrated the real field values. Only trustedEmptyKeys can suppress a
+    // stale archive value and count as verified-empty.
+    const knownEmpty = new Set(
+      Array.isArray(cacheEntry.trustedEmptyKeys) ? cacheEntry.trustedEmptyKeys : []
+    );
     const archive = result[DS.BOT_ARCHIVE_KEY || "botArchive"]?.meta?.[id];
     const archiveFields = archive?.fields || {};
     const out = {};
     const verified = {};
     for (const key of ["greeting", "description", "personality", "scenario", "examples"]) {
       const archiveKey = key === "examples" ? "exampleDialogues" : key;
-      const cached = clean(cacheFields[key] || "", key === "personality" || key === "examples" ? 18000 : 12000);
-      const value = cached || (!knownEmpty.has(key) ? clean(archiveFields[archiveKey] || "", key === "personality" || key === "examples" ? 18000 : 12000) : "");
+      const limit = key === "personality" || key === "examples" ? 18000 : 12000;
+      const cached = clean(cacheFields[key] || "", limit);
+      const archived = clean(archiveFields[archiveKey] || "", limit);
+      const value = cached || (!knownEmpty.has(key) ? archived : "");
       if (value) out[key] = value;
       if (cached || knownEmpty.has(key)) verified[key] = true;
     }

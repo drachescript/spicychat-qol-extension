@@ -823,6 +823,39 @@
     return text.length >= 78;
   }
 
+  function descriptionCardBody(card, block) {
+    if (!card || !block) return null;
+    let node = block.parentElement;
+    for (let i = 0; node && node !== card && i < 6; i += 1, node = node.parentElement) {
+      const cls = DS.classText?.(node) || String(node.className || "");
+      if (cls.includes("px-2") && cls.includes("py-3") && (cls.includes("h-[180px]") || cls.includes("flex-col"))) return node;
+    }
+    return null;
+  }
+
+  function clearDescriptionBodyExpansion(root) {
+    const host = root || document;
+    const bodies = [];
+    if (host.matches?.("[data-ds-description-body-expanded='1']")) bodies.push(host);
+    bodies.push(...(DS.qsa?.("[data-ds-description-body-expanded='1']", host) || []));
+    for (const body of bodies) {
+      body.removeAttribute("data-ds-description-body-expanded");
+      if (body.style.getPropertyValue("height") === "auto") body.style.removeProperty("height");
+      if (body.style.getPropertyValue("min-height") === "180px") body.style.removeProperty("min-height");
+      if (body.style.getPropertyValue("overflow") === "visible") body.style.removeProperty("overflow");
+    }
+  }
+
+  function lockDescriptionBodyExpansion(card, block) {
+    const body = descriptionCardBody(card, block);
+    if (!body) return null;
+    body.dataset.dsDescriptionBodyExpanded = "1";
+    body.style.setProperty("height", "auto", "important");
+    body.style.setProperty("min-height", "180px", "important");
+    body.style.setProperty("overflow", "visible", "important");
+    return body;
+  }
+
   function clearDescriptionExpansion(root) {
     const host = root || document;
     const items = [];
@@ -881,6 +914,7 @@
         delete card.dataset.dsDescriptionLong;
       });
       clearDescriptionExpansion(document);
+      clearDescriptionBodyExpansion(document);
       return;
     }
 
@@ -895,6 +929,7 @@
         delete card.dataset.dsDescriptionSignature;
         delete card.dataset.dsDescriptionLong;
         clearDescriptionExpansion(card);
+        clearDescriptionBodyExpansion(card);
         continue;
       }
 
@@ -907,6 +942,7 @@
         // measuring SpicyChat's normal two-line description.
         card.classList.remove("ds-card-long-description");
         clearDescriptionExpansion(card);
+        clearDescriptionBodyExpansion(card);
         shouldExpand = isLongDescription(block);
         card.dataset.dsDescriptionSignature = signature;
         card.dataset.dsDescriptionLong = shouldExpand ? "1" : "0";
@@ -921,8 +957,10 @@
       if (shouldExpand) {
         activeBlocks.add(block);
         lockDescriptionExpansion(block);
+        lockDescriptionBodyExpansion(card, block);
       } else {
         clearDescriptionExpansion(block);
+        clearDescriptionBodyExpansion(card);
       }
     }
 
@@ -933,6 +971,35 @@
     });
   };
 
+
+  function installCardBlockDiagnosticListener() {
+    if (DS.state.cardBlockDiagnosticListenerInstalled) return;
+    DS.state.cardBlockDiagnosticListenerInstalled = true;
+    document.addEventListener("click", event => {
+      const button = event.target?.closest?.(".ds-card-block-button");
+      if (!button || !/^block/i.test(String(button.getAttribute("aria-label") || button.title || ""))) return;
+      const card = button.closest?.("[class*='rounded-xl']") || button.parentElement;
+      const link = card?.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+      const id = String(DS.botIdFromHref?.(link?.href || "") || DS.chatIdFromHref?.(link?.href || "") || "");
+      const token = DS.diagOperationStart?.("block-card", "block-card", { source: "card-button", hasBotId: !!id });
+      if (!token) return;
+      const started = performance.now();
+      const finish = () => {
+        const blocked = !!(id && DS.state.blockedBotIdSet?.has(id));
+        if (!blocked && performance.now() - started < 2600) {
+          setTimeout(finish, 120);
+          return;
+        }
+        DS.diagOperationEnd?.(token, {
+          outcome: blocked ? "ok" : "timeout",
+          counts: { scanned: 1, changed: blocked ? 1 : 0, skipped: blocked ? 0 : 1, errors: 0 }
+        });
+      };
+      setTimeout(finish, 80);
+    }, true);
+  }
+
+  installCardBlockDiagnosticListener();
 
   DS.compactLayouts = function compactLayouts(cards) {
     if (!DS.state.settings.compactAfterHiding) {

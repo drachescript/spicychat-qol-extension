@@ -1058,10 +1058,14 @@
     return cleanText(control ? (("value" in control ? control.value : control.textContent) || "") : "");
   }
 
-  function parseOwnerEditor(html) {
+  function parseOwnerEditor(html, botId = "") {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     const pageText = cleanText(doc.body?.textContent || "").toLowerCase();
+    const scripted = extractFromScripts(
+      doc,
+      String(botId || "").trim().toLowerCase()
+    ) || {};
     if (/not allowed to access this page|do not have permission|access denied/.test(pageText)) {
       throw new Error("owner editor access denied");
     }
@@ -1089,7 +1093,7 @@
       return "";
     };
 
-    const fields = {
+    const controlFields = {
       greeting: greetingHolder ? editorControlValue(greetingHolder, ["textarea[name='greeting']", "textarea", "input[name='greeting']"]) : direct(["textarea[name='greeting']", "textarea[name='first_message']"]),
       // SpicyChat currently calls the short public description "Title" in the
       // editor, which is the same field the existing audit/API path labels as
@@ -1098,6 +1102,16 @@
       personality: personalityHolder ? editorControlValue(personalityHolder, ["textarea[name='persona']", "textarea[name='personality']", "textarea[name='definition']", "textarea"]) : direct(["textarea[name='persona']", "textarea[name='personality']", "textarea[name='definition']"]),
       scenario: scenarioHolder ? editorControlValue(scenarioHolder, ["textarea[name='scenario']", "textarea"]) : direct(["textarea[name='scenario']"]),
       examples: examplesHolder ? editorControlValue(examplesHolder, ["textarea[name='dialogue']", "textarea[name='example_dialogue']", "textarea[name='exampleDialogues']", "textarea"]) : direct(["textarea[name='dialogue']", "textarea[name='example_dialogue']", "textarea[name='exampleDialogues']"])
+    };
+
+    // The owner editor can return blank SSR controls before React hydrates
+    // their real values. Embedded page state is useful positive evidence.
+    const fields = {
+      greeting: cleanText(controlFields.greeting || scripted.greeting || ""),
+      description: cleanText(controlFields.description || scripted.description || ""),
+      personality: cleanText(controlFields.personality || scripted.personality || ""),
+      scenario: cleanText(controlFields.scenario || scripted.scenario || ""),
+      examples: cleanText(controlFields.examples || scripted.examples || "")
     };
 
     const tags = [];
@@ -1113,12 +1127,14 @@
       ...fields,
       tags: [...new Set(tags)],
       verified: {
-        greeting: !!greetingHolder || !!doc.querySelector("textarea[name='greeting'],textarea[name='first_message']"),
-        description: !!descriptionHolder || !!doc.querySelector("textarea[name='title'],input[name='title'],textarea[name='description'],input[name='description']"),
-        personality: !!personalityHolder || !!doc.querySelector("textarea[name='persona'],textarea[name='personality'],textarea[name='definition']"),
-        scenario: !!scenarioHolder || !!doc.querySelector("textarea[name='scenario']"),
-        examples: !!examplesHolder || !!doc.querySelector("textarea[name='dialogue'],textarea[name='example_dialogue'],textarea[name='exampleDialogues']"),
-        tags: !!tagsHolder
+        // Non-empty data is positive evidence. A blank SSR control is unknown,
+        // not Missing. Explicit creator-cleared blanks come from trusted cache.
+        greeting: !!fields.greeting,
+        description: !!fields.description,
+        personality: !!fields.personality,
+        scenario: !!fields.scenario,
+        examples: !!fields.examples,
+        tags: tags.length > 0
       }
     };
   }
@@ -1140,7 +1156,7 @@
       if (!response.ok) throw new Error(`owner editor HTTP ${response.status}`);
       const html = await response.text();
       if (!html || html.length > MAX_PROFILE_BYTES) throw new Error("owner editor HTML unavailable or too large");
-      return parseOwnerEditor(html);
+      return parseOwnerEditor(html, botId);
     } catch (error) {
       if (!networkEnded) DS.diagNetworkEnd?.(network, { status: 0, ok: false, outcome: error?.name === "AbortError" ? "timeout" : "network-failed" });
       if (error?.name === "AbortError") throw new Error("owner editor HTML timeout");

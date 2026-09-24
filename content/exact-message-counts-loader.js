@@ -54,15 +54,15 @@
   }
 
   function applySettings(settings) {
-    setEnabled(!!(settings?.enabled && settings?.showExactMessageCounts));
+    setEnabled(!!(settings?.enabled && (settings?.showExactMessageCounts || settings?.showBotCreationDates)));
   }
 
   // Install the MAIN-world bridge immediately at document_start. Waiting for
   // chrome.storage.local.get() creates a race with SpicyChat's initial
   // Typesense request, which can leave the exact-count cache empty until the
   // page performs another search. The bridge only observes Typesense responses
-  // that SpicyChat already fetched; the setting still controls whether counts
-  // are displayed.
+  // that SpicyChat already fetched; the settings still control whether exact
+  // counts and/or creation dates are displayed.
   injectBridge();
 
   try {

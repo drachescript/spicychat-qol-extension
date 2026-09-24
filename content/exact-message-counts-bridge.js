@@ -62,6 +62,10 @@
     return null;
   }
 
+  function createdAtValue(document) {
+    return document?.createdAt ?? document?.created_at ?? null;
+  }
+
   function collectHits(data) {
     const rows = [];
     const pushHit = hit => {
@@ -69,7 +73,12 @@
       if (!document || typeof document !== "object") return;
       const id = botId(document);
       const count = exactCount(document);
-      if (id && count != null) rows.push({ id, count });
+      if (id && count != null) {
+        const createdAt = createdAtValue(document);
+        const row = { id, count };
+        if (createdAt != null) row.createdAt = createdAt;
+        rows.push(row);
+      }
     };
 
     const visitResult = result => {
@@ -86,8 +95,14 @@
     visitResult(data);
 
     const deduped = new Map();
-    for (const row of rows) deduped.set(row.id, row.count);
-    return [...deduped.entries()].map(([id, count]) => ({ id, count }));
+    for (const row of rows) {
+      const previous = deduped.get(row.id);
+      const merged = { id: row.id, count: row.count };
+      const createdAt = row.createdAt ?? previous?.createdAt;
+      if (createdAt != null) merged.createdAt = createdAt;
+      deduped.set(row.id, merged);
+    }
+    return [...deduped.values()];
   }
 
   function emitFromData(data) {

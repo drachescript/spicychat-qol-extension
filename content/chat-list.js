@@ -4,6 +4,43 @@
   const DS = window.DragonScriptQoL;
 
   const classText = el => DS.classText?.(el) || String(el?.className || "");
+  const normalizedRowTextCache = new WeakMap();
+  const messageCountCache = new WeakMap();
+
+  function normalizedRowText(row) {
+    if (!(row instanceof Element)) return "";
+    const raw = String(row.textContent || "");
+    const cached = normalizedRowTextCache.get(row);
+    if (cached?.raw === raw) return cached.normalized;
+    const normalized = DS.normalize(raw);
+    normalizedRowTextCache.set(row, { raw, normalized });
+    return normalized;
+  }
+
+  function setRowClass(row, className, enabled) {
+    if (typeof DS.setClassState === "function") return DS.setClassState(row, className, !!enabled);
+    const has = row?.classList?.contains?.(className);
+    if (has === !!enabled) return false;
+    row?.classList?.toggle?.(className, !!enabled);
+    return true;
+  }
+
+  function setRowDataset(row, key, value) {
+    if (typeof DS.setDatasetIfChanged === "function") return DS.setDatasetIfChanged(row, key, value);
+    if (!row?.dataset) return false;
+    const next = String(value ?? "");
+    if (row.dataset[key] === next) return false;
+    row.dataset[key] = next;
+    return true;
+  }
+
+  function setText(node, value) {
+    if (typeof DS.setTextIfChanged === "function") return DS.setTextIfChanged(node, value);
+    const next = String(value ?? "");
+    if (!node || node.textContent === next) return false;
+    node.textContent = next;
+    return true;
+  }
 
   function hasChatLink(el) {
     return DS.qsa("a[href*='/chat/']", el).some(link => DS.chatIdFromHref(link.href));
@@ -179,6 +216,12 @@
   };
 
   DS.getChatRowMessageCount = function getChatRowMessageCount(row) {
+    if (!(row instanceof Element)) return null;
+    const rawText = String(row.textContent || "");
+    const cached = messageCountCache.get(row);
+    if (cached?.rawText === rawText) return cached.count;
+
+    let count = null;
     const icons = DS.qsa("svg.lucide-message-square-text", row);
 
     for (const icon of icons) {
@@ -189,25 +232,35 @@
           .map(el => numberFromText(el.textContent))
           .filter(value => value !== null);
 
-        if (numbers.length) return numbers[numbers.length - 1];
+        if (numbers.length) {
+          count = numbers[numbers.length - 1];
+          break;
+        }
+      }
+      if (count !== null) break;
+    }
+
+    if (count === null) {
+      const text = rawText.replace(/\s+/g, " ");
+
+      const afterTime = text.match(/(?:ago|yesterday|today)\s*[•·]\s*(\d{1,6})\b/i);
+      if (afterTime) count = Number(afterTime[1]);
+
+      if (count === null) {
+        const bulletNumbers = [...text.matchAll(/[•·]\s*(\d{1,6})\b/g)]
+          .map(match => Number(match[1]))
+          .filter(Number.isFinite);
+        if (bulletNumbers.length) count = bulletNumbers[bulletNumbers.length - 1];
+      }
+
+      if (count === null) {
+        const messageWords = text.match(/(\d{1,6})\s+(?:messages?|msgs?)\b/i);
+        if (messageWords) count = Number(messageWords[1]);
       }
     }
 
-    const text = String(row.textContent || "").replace(/\s+/g, " ");
-
-    const afterTime = text.match(/(?:ago|yesterday|today)\s*[•·]\s*(\d{1,6})\b/i);
-    if (afterTime) return Number(afterTime[1]);
-
-    const bulletNumbers = [...text.matchAll(/[•·]\s*(\d{1,6})\b/g)]
-      .map(match => Number(match[1]))
-      .filter(Number.isFinite);
-
-    if (bulletNumbers.length) return bulletNumbers[bulletNumbers.length - 1];
-
-    const messageWords = text.match(/(\d{1,6})\s+(?:messages?|msgs?)\b/i);
-    if (messageWords) return Number(messageWords[1]);
-
-    return null;
+    messageCountCache.set(row, { rawText, count });
+    return count;
   };
 
   DS.applyChatListSearch = function applyChatListSearch(rows) {
@@ -215,14 +268,8 @@
     const query = DS.normalize(input?.value || "");
 
     for (const { row } of rows) {
-      row.classList.remove("ds-chat-row-hidden-by-search");
-
-      if (!query) continue;
-
-      const haystack = DS.normalize(row.textContent);
-      if (!haystack.includes(query)) {
-        row.classList.add("ds-chat-row-hidden-by-search");
-      }
+      const hidden = !!query && !normalizedRowText(row).includes(query);
+      setRowClass(row, "ds-chat-row-hidden-by-search", hidden);
     }
   };
 
@@ -266,14 +313,15 @@
       const messagesMatch = matchesMessageFilter(count, messageFilter);
       const savedMatches = matchesSavedFilter(item.id, savedFilter);
       const blockedMatches = blockedFilter === "all" || (blockedFilter === "blocked" ? blocked : !blocked);
-      item.row.classList.toggle("ds-qol-chat-row-blocked", blocked);
-      item.row.dataset.dsQolBlocked = blocked ? "1" : "0";
-      item.row.classList.toggle("ds-chat-row-hidden-by-filter", !(openedMatches && messagesMatch && savedMatches && blockedMatches));
-      if (openedMatches && messagesMatch && savedMatches && blockedMatches && !item.row.classList.contains("ds-chat-row-hidden-by-search")) visible += 1;
+      const matches = openedMatches && messagesMatch && savedMatches && blockedMatches;
+      setRowClass(item.row, "ds-qol-chat-row-blocked", blocked);
+      setRowDataset(item.row, "dsQolBlocked", blocked ? "1" : "0");
+      setRowClass(item.row, "ds-chat-row-hidden-by-filter", !matches);
+      if (matches && !item.row.classList.contains("ds-chat-row-hidden-by-search")) visible += 1;
     }
 
     const summary = document.getElementById("ds-qol-chat-filter-summary");
-    if (summary) summary.textContent = `Showing ${visible}/${rows.length}`;
+    if (summary) setText(summary, `Showing ${visible}/${rows.length}`);
   };
 
   DS.findDirectChildUnder = function findDirectChildUnder(parent, descendant) {

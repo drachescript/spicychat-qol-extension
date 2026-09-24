@@ -25,6 +25,14 @@ const RELEASE_NOTICE_KEY = "dsReleaseNotice";
 const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
 const INSTALLED_VERSION_KEY = "dsLastInstalledVersion";
 const QUICK_DISLIKE_HISTORY_KEY = "quickDislikeHistoryV1";
+const QUICK_DISLIKE_ACTIVE_JOBS_KEY = "quickDislikeActiveJobsV1";
+const HELPER_LIFECYCLE_DIAG_KEY = "helperLifecycleDiagnosticsV1";
+const HELPER_RUNTIME_SESSION_KEY = "dsHelperRuntimeSessionIdV1";
+const QUICK_DISLIKE_GC_ALARM = "ds-quick-dislike-worker-gc";
+const HELPER_SESSION_GRACE_ALARM = "ds-helper-session-grace-cleanup";
+const QUICK_DISLIKE_INTERRUPTED_GRACE_MS = 60 * 1000;
+const QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS = 2 * 60 * 1000;
+const QUICK_DISLIKE_RECOVERY_MAX_AGE_MS = 10 * 60 * 1000;
 const AUTO_AFK_SCAN_MINUTES = 1;
 const CHAT_NUDGE_SCAN_MINUTES = 15;
 
@@ -74,16 +82,50 @@ const quickDislikeWorkerTabIds = new Set();
 const quickDislikeBulkWorkerTabs = new Map();
 const listingRefillWorkerTabIds = new Set();
 const listingRefillPageWorkerTabs = new Map();
+const listingRefillSourceTabs = new Map();
+const LISTING_REFILL_GC_ALARM = "ds-listing-refill-worker-gc";
+const LISTING_REFILL_WORKER_MAX_AGE_MS = 30 * 60 * 1000;
+const LISTING_REFILL_WORKER_RESPONSE_MAX_MS = 45 * 1000;
 const personaRefreshWorkerTabIds = new Set();
 const canceledQuickDislikeBulkRuns = new Map();
+let helperRuntimeSessionPromise = null;
+let helperLifecycleInitPromise = null;
 
-function isQuickDislikeWorkerUrl(url) {
+function quickDislikeWorkerUrlInfo(url) {
   try {
     const parsed = new URL(String(url || ""));
-    return isSpicyChatUrl(parsed.href) && parsed.searchParams.get("dsQuickDislike") === "1";
+    if (!isSpicyChatUrl(parsed.href) || parsed.searchParams.get("dsQuickDislike") !== "1") return null;
+    return {
+      jobId: String(parsed.searchParams.get("dsQuickJobId") || "").trim(),
+      botId: String(parsed.searchParams.get("dsQuickBotId") || "").trim().toLowerCase(),
+      bulkRunId: String(parsed.searchParams.get("dsQuickBulkRunId") || "").trim(),
+      startedAt: Number(parsed.searchParams.get("dsQuickStartedAt") || 0) || 0,
+      sessionId: String(parsed.searchParams.get("dsHelperSession") || "").trim()
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isQuickDislikeWorkerUrl(url) {
+  return !!quickDislikeWorkerUrlInfo(url);
+}
+
+function stampQuickDislikeWorkerUrl(url, { jobId = "", botId = "", bulkRunId = "", startedAt = Date.now(), sessionId = "" } = {}) {
+  const next = new URL(String(url));
+  next.searchParams.set("dsQuickDislike", "1");
+  const values = {
+    dsQuickJobId: String(jobId || "").trim(),
+    dsQuickBotId: String(botId || "").trim().toLowerCase(),
+    dsQuickBulkRunId: String(bulkRunId || "").trim(),
+    dsHelperSession: String(sessionId || "").trim()
+  };
+  for (const [key, value] of Object.entries(values)) {
+    if (value) next.searchParams.set(key, value);
+    else next.searchParams.delete(key);
+  }
+  next.searchParams.set("dsQuickStartedAt", String(Number(startedAt) || Date.now()));
+  return next;
 }
 
 function isPersonaRefreshWorkerUrl(url) {
@@ -102,6 +144,79 @@ function isListingRefillWorkerUrl(url) {
   } catch {
     return false;
   }
+}
+
+function listingRefillWorkerUrlInfo(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!isSpicyChatUrl(parsed.href) || parsed.searchParams.get("dsListingRefill") !== "1") return null;
+    return {
+      runId: String(parsed.searchParams.get("dsRefillRunId") || "").trim(),
+      startedAt: Number(parsed.searchParams.get("dsRefillStartedAt") || 0) || 0,
+      sessionId: String(parsed.searchParams.get("dsHelperSession") || "").trim()
+    };
+  } catch { return null; }
+}
+
+function stampListingRefillWorkerUrl(url, runId = "", startedAt = Date.now(), sessionId = "") {
+  const next = new URL(String(url));
+  next.searchParams.set("dsListingRefill", "1");
+  const id = String(runId || "").trim();
+  if (id) next.searchParams.set("dsRefillRunId", id);
+  else next.searchParams.delete("dsRefillRunId");
+  const session = String(sessionId || "").trim();
+  if (session) next.searchParams.set("dsHelperSession", session);
+  else next.searchParams.delete("dsHelperSession");
+  next.searchParams.set("dsRefillStartedAt", String(Number(startedAt) || Date.now()));
+  return next;
+}
+
+async function cleanupStaleListingRefillWorkers({ preserveRunId = "", closeLegacy = true } = {}) {
+  const keep = String(preserveRunId || "").trim();
+  const now = Date.now();
+  let closed = 0;
+  const tabs = await tabsQuery({});
+  for (const tab of tabs) {
+    const info = listingRefillWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
+    if (!info || !tab?.id) continue;
+    const legacyOrOrphan = !info.runId || !info.startedAt;
+    const stale = info.startedAt > 0 && now - info.startedAt >= LISTING_REFILL_WORKER_MAX_AGE_MS;
+    if (keep && info.runId === keep && !stale) continue;
+    if (!(stale || (closeLegacy && legacyOrOrphan))) continue;
+    await tabsRemove(Number(tab.id));
+    listingRefillWorkerTabIds.delete(Number(tab.id));
+    for (const [runId, workerTabId] of listingRefillPageWorkerTabs.entries()) {
+      if (Number(workerTabId) === Number(tab.id)) listingRefillPageWorkerTabs.delete(runId);
+    }
+    closed += 1;
+  }
+  return closed;
+}
+
+async function findListingRefillWorkersForRun(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return [];
+  const tabs = await tabsQuery({});
+  return tabs.filter(tab => listingRefillWorkerUrlInfo(tab?.url || tab?.pendingUrl || "")?.runId === id);
+}
+
+async function findListingRefillWorkerForRun(runId) {
+  const tabs = await findListingRefillWorkersForRun(runId);
+  if (!tabs.length) return null;
+  tabs.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  return tabs[0] || null;
+}
+
+async function closeDuplicateListingRefillWorkers(runId, keepTabId) {
+  const tabs = await findListingRefillWorkersForRun(runId);
+  let closed = 0;
+  for (const tab of tabs) {
+    if (!tab?.id || Number(tab.id) === Number(keepTabId)) continue;
+    await tabsRemove(Number(tab.id));
+    listingRefillWorkerTabIds.delete(Number(tab.id));
+    closed += 1;
+  }
+  return closed;
 }
 
 
@@ -131,25 +246,74 @@ function isQuickDislikeBulkRunCanceled(runId) {
 async function releaseQuickDislikeBulkWorker(runId) {
   const id = String(runId || "").trim();
   if (!id) return false;
-  const tabId = Number(quickDislikeBulkWorkerTabs.get(id));
+  const tabIds = new Set();
+  const mapped = Number(quickDislikeBulkWorkerTabs.get(id));
+  if (Number.isFinite(mapped)) tabIds.add(mapped);
   quickDislikeBulkWorkerTabs.delete(id);
-  if (!Number.isFinite(tabId)) return false;
-  quickDislikeWorkerTabIds.delete(tabId);
-  await tabsRemove(tabId).catch?.(() => null);
-  return true;
+  for (const tab of await tabsQuery({})) {
+    const info = quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
+    if (info?.bulkRunId === id && tab?.id) tabIds.add(Number(tab.id));
+  }
+  for (const tabId of tabIds) {
+    quickDislikeWorkerTabIds.delete(tabId);
+    await tabsRemove(tabId);
+  }
+  return tabIds.size > 0;
 }
 
-async function prepareQuickDislikeWorkerTab(url, bulkRunId = "") {
+async function findQuickDislikeWorkersForBulkRun(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return [];
+  const tabs = await tabsQuery({});
+  return tabs.filter(tab => quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "")?.bulkRunId === id);
+}
+
+async function closeDuplicateQuickDislikeWorkers(runId, keepTabId) {
+  const tabs = await findQuickDislikeWorkersForBulkRun(runId);
+  let closed = 0;
+  for (const tab of tabs) {
+    if (!tab?.id || Number(tab.id) === Number(keepTabId)) continue;
+    await tabsRemove(Number(tab.id));
+    quickDislikeWorkerTabIds.delete(Number(tab.id));
+    closed += 1;
+  }
+  if (closed) await recordHelperLifecycle("quickDislikeDuplicateClosed", { bulkRunId: String(runId || ""), closed });
+  return closed;
+}
+
+async function prepareQuickDislikeWorkerTab(url, bulkRunId = "", job = {}) {
   const runId = String(bulkRunId || "").trim();
+  const runtimeSession = await getHelperRuntimeSession();
+  const jobId = String(job?.jobId || "").trim();
+  const botId = String(job?.botId || "").trim().toLowerCase();
+  const startedAt = Number(job?.startedAt || 0) || Date.now();
+  const stampedFor = source => stampQuickDislikeWorkerUrl(source, {
+    jobId,
+    botId,
+    bulkRunId: runId,
+    startedAt,
+    sessionId: runtimeSession.id
+  });
+
   if (runId) {
-    const existingId = Number(quickDislikeBulkWorkerTabs.get(runId));
+    let existingId = Number(quickDislikeBulkWorkerTabs.get(runId));
+    let recovered = false;
+    if (!Number.isFinite(existingId)) {
+      const existingTabs = await findQuickDislikeWorkersForBulkRun(runId);
+      existingTabs.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+      existingId = Number(existingTabs[0]?.id);
+      recovered = Number.isFinite(existingId);
+      if (recovered) quickDislikeBulkWorkerTabs.set(runId, existingId);
+    }
     if (Number.isFinite(existingId)) {
       const existing = await tabsGet(existingId);
       if (existing) {
-        const updated = await tabsUpdate(existingId, { url: url.href, active: false });
+        const updated = await tabsUpdate(existingId, { url: stampedFor(url).href, active: false });
         if (updated?.ok) {
           quickDislikeWorkerTabIds.add(existingId);
-          return { ok: true, tabId: existingId, reusable: true };
+          const duplicateClosed = await closeDuplicateQuickDislikeWorkers(runId, existingId);
+          if (recovered) await recordHelperLifecycle("quickDislikeHelperRecovered", { bulkRunId: runId, jobId, tabId: existingId });
+          return { ok: true, tabId: existingId, reusable: true, reused: true, recovered, duplicateClosed };
         }
       }
       quickDislikeBulkWorkerTabs.delete(runId);
@@ -157,14 +321,14 @@ async function prepareQuickDislikeWorkerTab(url, bulkRunId = "") {
     }
   }
 
-  const created = await tabsCreate({ url: url.href, active: false });
+  const created = await tabsCreate({ url: stampedFor(url).href, active: false });
   const tabId = Number(created?.tab?.id);
   if (!created.ok || !Number.isFinite(tabId)) {
     return { ok: false, tabId: null, reusable: !!runId, error: created.error || "" };
   }
   quickDislikeWorkerTabIds.add(tabId);
   if (runId) quickDislikeBulkWorkerTabs.set(runId, tabId);
-  return { ok: true, tabId, reusable: !!runId };
+  return { ok: true, tabId, reusable: !!runId, reused: false, recovered: false, duplicateClosed: 0 };
 }
 
 function alarmName(tabId) {
@@ -204,6 +368,106 @@ function storageGet(keys) {
 
 function storageSet(values) {
   return new Promise(resolve => chrome.storage.local.set(values, resolve));
+}
+
+function storageSessionGet(keys) {
+  return new Promise(resolve => {
+    try {
+      if (!chrome.storage?.session?.get) return resolve({});
+      chrome.storage.session.get(keys, result => resolve(result || {}));
+    } catch { resolve({}); }
+  });
+}
+
+function storageSessionSet(values) {
+  return new Promise(resolve => {
+    try {
+      if (!chrome.storage?.session?.set) return resolve(false);
+      chrome.storage.session.set(values, () => resolve(!chrome.runtime.lastError));
+    } catch { resolve(false); }
+  });
+}
+
+async function getHelperRuntimeSession() {
+  if (helperRuntimeSessionPromise) return helperRuntimeSessionPromise;
+  helperRuntimeSessionPromise = (async () => {
+    if (!chrome.storage?.session?.get || !chrome.storage?.session?.set) return { id: "", created: false, supported: false };
+    const stored = await storageSessionGet([HELPER_RUNTIME_SESSION_KEY]);
+    let id = String(stored[HELPER_RUNTIME_SESSION_KEY] || "").trim();
+    if (id) return { id, created: false, supported: true };
+    id = `hs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    await storageSessionSet({ [HELPER_RUNTIME_SESSION_KEY]: id });
+    return { id, created: true, supported: true };
+  })();
+  return helperRuntimeSessionPromise;
+}
+
+function normalizeActiveQuickDislikeJobs(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const jobs = source.jobs && typeof source.jobs === "object" ? source.jobs : {};
+  const normalized = {};
+  for (const [jobId, value] of Object.entries(jobs)) {
+    const botId = String(value?.botId || "").trim().toLowerCase();
+    if (!jobId || !/^[0-9a-f-]{20,}$/i.test(botId)) continue;
+    normalized[jobId] = {
+      jobId,
+      botId,
+      botName: String(value?.botName || "").slice(0, 160),
+      chatUrl: String(value?.chatUrl || `https://spicychat.ai/chat/${botId}`),
+      bulkRunId: String(value?.bulkRunId || "").trim(),
+      createdAt: Number(value?.createdAt || value?.startedAt || 0) || Date.now(),
+      startedAt: Number(value?.startedAt || 0) || Date.now(),
+      tabId: Number(value?.tabId || 0) || 0,
+      recoveryCount: Math.max(0, Number(value?.recoveryCount || 0) || 0),
+      status: String(value?.status || "active").slice(0, 80)
+    };
+  }
+  return { version: 1, jobs: normalized };
+}
+
+async function getActiveQuickDislikeJobs() {
+  const stored = await storageGet([QUICK_DISLIKE_ACTIVE_JOBS_KEY]);
+  return normalizeActiveQuickDislikeJobs(stored[QUICK_DISLIKE_ACTIVE_JOBS_KEY]);
+}
+
+async function upsertActiveQuickDislikeJob(job) {
+  const jobId = String(job?.jobId || "").trim();
+  if (!jobId) return null;
+  const active = await getActiveQuickDislikeJobs();
+  active.jobs[jobId] = { ...(active.jobs[jobId] || {}), ...job, jobId };
+  const rows = Object.values(active.jobs);
+  if (rows.length > 40) {
+    rows.sort((a, b) => Number(b.startedAt || 0) - Number(a.startedAt || 0));
+    active.jobs = Object.fromEntries(rows.slice(0, 40).map(row => [row.jobId, row]));
+  }
+  await storageSet({ [QUICK_DISLIKE_ACTIVE_JOBS_KEY]: active });
+  return active.jobs[jobId] || null;
+}
+
+async function removeActiveQuickDislikeJob(jobId) {
+  const id = String(jobId || "").trim();
+  if (!id) return false;
+  const active = await getActiveQuickDislikeJobs();
+  if (!active.jobs[id]) return false;
+  delete active.jobs[id];
+  await storageSet({ [QUICK_DISLIKE_ACTIVE_JOBS_KEY]: active });
+  return true;
+}
+
+async function recordHelperLifecycle(event, detail = {}) {
+  const name = String(event || "unknown").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "unknown";
+  const stored = await storageGet([HELPER_LIFECYCLE_DIAG_KEY]);
+  const diag = stored[HELPER_LIFECYCLE_DIAG_KEY] && typeof stored[HELPER_LIFECYCLE_DIAG_KEY] === "object"
+    ? stored[HELPER_LIFECYCLE_DIAG_KEY]
+    : { version: 1, counts: {} };
+  diag.version = 1;
+  diag.counts = diag.counts && typeof diag.counts === "object" ? diag.counts : {};
+  diag.counts[name] = Number(diag.counts[name] || 0) + 1;
+  diag.lastEvent = name;
+  diag.lastAt = Date.now();
+  diag.lastDetail = Object.fromEntries(Object.entries(detail || {}).slice(0, 12).map(([key, value]) => [String(key).slice(0, 60), typeof value === "number" || typeof value === "boolean" ? value : String(value ?? "").slice(0, 180)]));
+  await storageSet({ [HELPER_LIFECYCLE_DIAG_KEY]: diag });
+  return diag;
 }
 
 function tabsGet(tabId) {
@@ -648,8 +912,173 @@ async function rememberQuickDislike(botId, botName, status) {
   return history.bots[botId];
 }
 
+function makeQuickDislikeJobId(botId) {
+  return `qd-${String(botId || "").slice(0, 12)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+async function quickDislikeWorkerTabs() {
+  const tabs = await tabsQuery({});
+  return tabs.filter(tab => tab?.id && isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl || ""));
+}
+
+async function closeQuickDislikeTab(tabId, event = "quickDislikeOrphanClosed", detail = {}) {
+  const id = Number(tabId);
+  if (!Number.isFinite(id)) return false;
+  const result = await tabsRemove(id);
+  quickDislikeWorkerTabIds.delete(id);
+  for (const [runId, workerTabId] of quickDislikeBulkWorkerTabs.entries()) {
+    if (Number(workerTabId) === id) quickDislikeBulkWorkerTabs.delete(runId);
+  }
+  if (result?.ok) await recordHelperLifecycle(event, { tabId: id, ...detail });
+  return !!result?.ok;
+}
+
+async function cleanupStaleQuickDislikeWorkers() {
+  const runtimeSession = await getHelperRuntimeSession();
+  const active = await getActiveQuickDislikeJobs();
+  const history = await getQuickDislikeHistory();
+  const now = Date.now();
+  let closed = 0;
+  for (const tab of await quickDislikeWorkerTabs()) {
+    const tabId = Number(tab.id);
+    const info = quickDislikeWorkerUrlInfo(tab.url || tab.pendingUrl || "");
+    if (!info || !Number.isFinite(tabId)) continue;
+    quickDislikeWorkerTabIds.add(tabId);
+    const activeJob = info.jobId ? active.jobs[info.jobId] : null;
+    const age = info.startedAt ? now - info.startedAt : Number.POSITIVE_INFINITY;
+    const priorSession = !!(runtimeSession.id && info.sessionId && info.sessionId !== runtimeSession.id);
+    const confirmed = !!(info.botId && history.bots[info.botId]);
+    const legacy = !info.jobId || !info.botId || !info.startedAt;
+    const stale = age >= QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS || (priorSession && age >= QUICK_DISLIKE_INTERRUPTED_GRACE_MS);
+    if (confirmed || legacy || (!activeJob && stale) || (activeJob && age >= QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS)) {
+      const event = confirmed ? "quickDislikeConfirmedHelperClosed" : (priorSession ? "quickDislikeInterruptedGcClosed" : "quickDislikeGcClosed");
+      if (await closeQuickDislikeTab(tabId, event, { jobId: info.jobId, botId: info.botId, ageMs: Number.isFinite(age) ? age : -1 })) closed += 1;
+    }
+  }
+  return closed;
+}
+
+async function cleanupPriorHelperSessionTabs() {
+  const runtimeSession = await getHelperRuntimeSession();
+  if (!runtimeSession.id) return { quickDislike: 0, listingRefill: 0 };
+  let quickClosed = 0;
+  let refillClosed = 0;
+  for (const tab of await tabsQuery({})) {
+    const rawUrl = tab?.url || tab?.pendingUrl || "";
+    const quick = quickDislikeWorkerUrlInfo(rawUrl);
+    if (quick && tab?.id && (!quick.sessionId || quick.sessionId !== runtimeSession.id)) {
+      if (await closeQuickDislikeTab(Number(tab.id), "quickDislikePriorSessionClosed", { jobId: quick.jobId, botId: quick.botId })) quickClosed += 1;
+      continue;
+    }
+    const refill = listingRefillWorkerUrlInfo(rawUrl);
+    if (refill && tab?.id && (!refill.sessionId || refill.sessionId !== runtimeSession.id)) {
+      const result = await tabsRemove(Number(tab.id));
+      if (result?.ok) {
+        listingRefillWorkerTabIds.delete(Number(tab.id));
+        for (const [runId, workerTabId] of listingRefillPageWorkerTabs.entries()) {
+          if (Number(workerTabId) === Number(tab.id)) listingRefillPageWorkerTabs.delete(runId);
+        }
+        refillClosed += 1;
+        await recordHelperLifecycle("listingRefillPriorSessionClosed", { tabId: Number(tab.id), runId: refill.runId });
+      }
+    }
+  }
+  return { quickDislike: quickClosed, listingRefill: refillClosed };
+}
+
+async function recoverInterruptedQuickDislikeJobs() {
+  const runtimeSession = await getHelperRuntimeSession();
+  const active = await getActiveQuickDislikeJobs();
+  const jobRows = Object.values(active.jobs);
+  const helpers = await quickDislikeWorkerTabs();
+  const history = await getQuickDislikeHistory();
+  const now = Date.now();
+
+  const byJob = new Map();
+  for (const tab of helpers) {
+    const info = quickDislikeWorkerUrlInfo(tab.url || tab.pendingUrl || "");
+    if (!info) continue;
+    quickDislikeWorkerTabIds.add(Number(tab.id));
+    if (!info.jobId) continue;
+    const list = byJob.get(info.jobId) || [];
+    list.push({ tab, info });
+    byJob.set(info.jobId, list);
+  }
+
+  for (const [jobId, rows] of byJob.entries()) {
+    if (rows.length <= 1) continue;
+    rows.sort((a, b) => Number(b.tab.lastAccessed || 0) - Number(a.tab.lastAccessed || 0));
+    for (const duplicate of rows.slice(1)) {
+      await closeQuickDislikeTab(Number(duplicate.tab.id), "quickDislikeDuplicateClosed", { jobId, botId: duplicate.info.botId });
+    }
+  }
+
+  for (const job of jobRows) {
+    const jobId = String(job.jobId || "");
+    const botId = String(job.botId || "").toLowerCase();
+    const rows = byJob.get(jobId) || [];
+    if (history.bots[botId]) {
+      for (const row of rows) await closeQuickDislikeTab(Number(row.tab.id), "quickDislikeRecoveredConfirmed", { jobId, botId });
+      await removeActiveQuickDislikeJob(jobId);
+      continue;
+    }
+
+    const age = now - Number(job.createdAt || job.startedAt || now);
+    const recoveryCount = Number(job.recoveryCount || 0);
+    if (age > QUICK_DISLIKE_RECOVERY_MAX_AGE_MS || recoveryCount >= 2) {
+      for (const row of rows) await closeQuickDislikeTab(Number(row.tab.id), "quickDislikeRecoveryAbandoned", { jobId, botId, ageMs: age, recoveryCount });
+      await removeActiveQuickDislikeJob(jobId);
+      await recordHelperLifecycle("quickDislikeRecoveryAbandoned", { jobId, botId, ageMs: age, recoveryCount });
+      continue;
+    }
+
+    for (const row of rows) await closeQuickDislikeTab(Number(row.tab.id), "quickDislikeReloadInterrupted", { jobId, botId });
+    await recordHelperLifecycle("quickDislikeReloadInterrupted", { jobId, botId, recoveryCount });
+    await upsertActiveQuickDislikeJob({ ...job, recoveryCount: recoveryCount + 1, status: "recovering", tabId: 0, startedAt: Date.now() });
+    queueQuickDislikeBot({
+      type: "DS_QUICK_DISLIKE_BOT",
+      botId,
+      botName: job.botName || botId,
+      chatUrl: job.chatUrl || `https://spicychat.ai/chat/${botId}`,
+      quickDislikeJobId: jobId,
+      recoveryCount: recoveryCount + 1,
+      recoveredAfterReload: true,
+      force: false
+    }).then(result => recordHelperLifecycle(result?.ok ? "quickDislikeRecoveryCompleted" : "quickDislikeRecoveryFailed", {
+      jobId,
+      botId,
+      status: result?.status || "no-response"
+    })).catch(() => recordHelperLifecycle("quickDislikeRecoveryFailed", { jobId, botId, status: "exception" }));
+  }
+
+  // Legacy/orphan helpers that have no persisted active job are not allowed to
+  // live forever. Same-session helpers get a short grace; prior-session helpers
+  // are handled by the one-minute session cleanup alarm.
+  await cleanupStaleQuickDislikeWorkers();
+  return { activeJobs: jobRows.length, helperTabs: helpers.length, sessionId: runtimeSession.id || "" };
+}
+
+async function initializeHelperLifecycleRecovery() {
+  // The background bootstrap plus onInstalled/onStartup can fire very close
+  // together. Reuse one initialization promise per service-worker lifetime so
+  // the same persisted interrupted job cannot be recovered twice in parallel.
+  if (helperLifecycleInitPromise) return helperLifecycleInitPromise;
+  helperLifecycleInitPromise = (async () => {
+    const runtimeSession = await getHelperRuntimeSession();
+    await recoverInterruptedQuickDislikeJobs();
+    await cleanupStaleListingRefillWorkers({ closeLegacy: true });
+    chrome.alarms.create(QUICK_DISLIKE_GC_ALARM, { periodInMinutes: 1 });
+    chrome.alarms.create(LISTING_REFILL_GC_ALARM, { periodInMinutes: 30 });
+    if (runtimeSession.created) {
+      chrome.alarms.create(HELPER_SESSION_GRACE_ALARM, { delayInMinutes: 1 });
+      await recordHelperLifecycle("helperRuntimeSessionStarted", { sessionId: runtimeSession.id });
+    }
+  })();
+  return helperLifecycleInitPromise;
+}
+
 async function runQuickDislikeBot(message) {
-  const botId = String(message?.botId || "").trim();
+  const botId = String(message?.botId || "").trim().toLowerCase();
   if (!/^[0-9a-f-]{20,}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
   if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) {
     return { ok: false, status: "bulk-canceled" };
@@ -675,11 +1104,33 @@ async function runQuickDislikeBot(message) {
     return { ok: false, status: "invalid-url" };
   }
   if (!isSpicyChatUrl(url.href) || !/^\/chat\//i.test(url.pathname)) return { ok: false, status: "invalid-url" };
-  url.searchParams.set("dsQuickDislike", "1");
 
-  const worker = await prepareQuickDislikeWorkerTab(url, message?.bulkRunId || "");
+  const jobId = String(message?.quickDislikeJobId || "").trim() || makeQuickDislikeJobId(botId);
+  const createdAt = Number(message?.createdAt || 0) || Date.now();
+  const recoveryCount = Math.max(0, Number(message?.recoveryCount || 0) || 0);
+  const jobBase = {
+    jobId,
+    botId,
+    botName: String(message?.botName || "").slice(0, 160),
+    chatUrl: url.href,
+    bulkRunId: String(message?.bulkRunId || "").trim(),
+    createdAt,
+    startedAt: Date.now(),
+    tabId: 0,
+    recoveryCount,
+    status: message?.recoveredAfterReload ? "recovery-starting" : "starting"
+  };
+  await upsertActiveQuickDislikeJob(jobBase);
+  await recordHelperLifecycle(message?.recoveredAfterReload ? "quickDislikeRecoveryStart" : "quickDislikeStart", { jobId, botId, recoveryCount });
+
+  const worker = await prepareQuickDislikeWorkerTab(url, message?.bulkRunId || "", jobBase);
   const tabId = Number(worker?.tabId);
-  if (!worker?.ok || !Number.isFinite(tabId)) return { ok: false, status: "worker-tab-failed", error: worker?.error || "" };
+  if (!worker?.ok || !Number.isFinite(tabId)) {
+    await removeActiveQuickDislikeJob(jobId);
+    await recordHelperLifecycle("quickDislikeWorkerCreateFailed", { jobId, botId, error: worker?.error || "" });
+    return { ok: false, status: "worker-tab-failed", error: worker?.error || "" };
+  }
+  await upsertActiveQuickDislikeJob({ ...jobBase, tabId, status: "worker-open" });
 
   let result = { ok: false, status: "worker-timeout" };
   try {
@@ -694,7 +1145,7 @@ async function runQuickDislikeBot(message) {
         result = { ok: false, status: "worker-closed" };
         break;
       }
-      const response = await tabsSendMessage(tabId, { type: "DS_QUICK_DISLIKE_RUN", botId });
+      const response = await tabsSendMessage(tabId, { type: "DS_QUICK_DISLIKE_RUN", botId, jobId });
       if (response?.status && response.status !== "not-worker") {
         result = response;
         break;
@@ -703,9 +1154,9 @@ async function runQuickDislikeBot(message) {
     }
   } finally {
     // Bulk runs reuse one hidden helper tab instead of booting a fresh full
-    // SpicyChat app for every bot. A failed helper is discarded so the next
-    // retry starts clean; successful bulk helpers are released explicitly when
-    // the run finishes.
+    // SpicyChat app for every bot. Failed helpers are discarded so retry starts
+    // clean. Active job storage is cleared only after this invocation finishes;
+    // if the extension reloads mid-run the persisted job remains recoverable.
     if (!worker.reusable || !result?.ok) {
       if (worker.reusable && message?.bulkRunId) quickDislikeBulkWorkerTabs.delete(String(message.bulkRunId));
       await tabsRemove(tabId);
@@ -720,9 +1171,20 @@ async function runQuickDislikeBot(message) {
     "unavailable-private-or-deleted",
     "unavailable-creator-blocked"
   ].includes(result.status)) {
+    await upsertActiveQuickDislikeJob({ ...jobBase, tabId, status: `terminal:${result.status}` });
     await rememberQuickDislike(botId, message?.botName || "", result.status);
   }
-  return result;
+
+  await removeActiveQuickDislikeJob(jobId);
+  await recordHelperLifecycle(result?.ok ? "quickDislikeCompleted" : "quickDislikeFailed", {
+    jobId,
+    botId,
+    status: result?.status || "unknown",
+    reused: !!worker.reused,
+    recovered: !!worker.recovered,
+    recoveryCount
+  });
+  return { ...result, jobId, helperReused: !!worker.reused, helperRecovered: !!worker.recovered };
 }
 
 async function runListingRefillFavoriteWorker(message) {
@@ -735,9 +1197,11 @@ async function runListingRefillFavoriteWorker(message) {
   if (!isSpicyChatUrl(url.href)) return { ok: false, status: "invalid-url" };
   const botId = String(message?.botId || "").trim();
   if (!botId) return { ok: false, status: "missing-bot-id" };
-  url.searchParams.set("dsListingRefill", "1");
+  const favoriteRunId = `favorite-${botId.slice(0, 12)}-${Date.now().toString(36)}`;
+  const runtimeSession = await getHelperRuntimeSession();
+  const stamped = stampListingRefillWorkerUrl(url, favoriteRunId, Date.now(), runtimeSession.id);
 
-  const created = await tabsCreate({ url: url.href, active: false });
+  const created = await tabsCreate({ url: stamped.href, active: false });
   const tabId = Number(created?.tab?.id);
   if (!created.ok || !Number.isFinite(tabId)) {
     return { ok: false, status: "worker-tab-failed", error: created.error || "" };
@@ -774,25 +1238,45 @@ async function runListingRefillFavoriteWorker(message) {
 async function releaseListingRefillPageWorker(runId) {
   const id = String(runId || "").trim();
   if (!id) return false;
-  const tabId = Number(listingRefillPageWorkerTabs.get(id));
+  let tabId = Number(listingRefillPageWorkerTabs.get(id));
   listingRefillPageWorkerTabs.delete(id);
-  if (!Number.isFinite(tabId)) return false;
-  listingRefillWorkerTabIds.delete(tabId);
-  await tabsRemove(tabId).catch?.(() => null);
+  listingRefillSourceTabs.delete(id);
+  const matching = await findListingRefillWorkersForRun(id);
+  const ids = new Set(matching.map(tab => Number(tab?.id)).filter(Number.isFinite));
+  if (Number.isFinite(tabId)) ids.add(tabId);
+  if (!ids.size) return false;
+  for (const idToClose of ids) {
+    listingRefillWorkerTabIds.delete(idToClose);
+    await tabsRemove(idToClose).catch?.(() => null);
+  }
   return true;
 }
 
 async function prepareListingRefillPageWorker(url, runId = "") {
   const id = String(runId || "").trim();
+  const runtimeSession = await getHelperRuntimeSession();
+  const gcClosed = await cleanupStaleListingRefillWorkers({ preserveRunId: id, closeLegacy: true });
   if (id) {
-    const existingId = Number(listingRefillPageWorkerTabs.get(id));
+    let existingId = Number(listingRefillPageWorkerTabs.get(id));
+    let recovered = false;
+    if (!Number.isFinite(existingId)) {
+      const existingTab = await findListingRefillWorkerForRun(id);
+      existingId = Number(existingTab?.id);
+      recovered = Number.isFinite(existingId);
+      if (recovered) listingRefillPageWorkerTabs.set(id, existingId);
+    }
     if (Number.isFinite(existingId)) {
       const existing = await tabsGet(existingId);
       if (existing) {
-        const updated = await tabsUpdate(existingId, { url: url.href, active: false });
+        const info = listingRefillWorkerUrlInfo(existing.url || existing.pendingUrl || "");
+        const priorSession = !!(runtimeSession.id && info?.sessionId && info.sessionId !== runtimeSession.id);
+        const stamped = stampListingRefillWorkerUrl(url, id, info?.startedAt || Date.now(), runtimeSession.id);
+        const updated = await tabsUpdate(existingId, { url: stamped.href, active: false });
         if (updated?.ok) {
           listingRefillWorkerTabIds.add(existingId);
-          return { ok: true, tabId: existingId, reusable: true, reused: true };
+          const duplicateClosed = await closeDuplicateListingRefillWorkers(id, existingId);
+          if (recovered || priorSession) await recordHelperLifecycle("listingRefillHelperRecovered", { runId: id, tabId: existingId, priorSession });
+          return { ok: true, tabId: existingId, reusable: true, reused: true, recovered: recovered || priorSession, gcClosed: gcClosed + duplicateClosed };
         }
       }
       listingRefillPageWorkerTabs.delete(id);
@@ -800,14 +1284,15 @@ async function prepareListingRefillPageWorker(url, runId = "") {
     }
   }
 
-  const created = await tabsCreate({ url: url.href, active: false });
+  const stamped = stampListingRefillWorkerUrl(url, id, Date.now(), runtimeSession.id);
+  const created = await tabsCreate({ url: stamped.href, active: false });
   const tabId = Number(created?.tab?.id);
   if (!created.ok || !Number.isFinite(tabId)) {
-    return { ok: false, status: "worker-tab-failed", error: created.error || "" };
+    return { ok: false, status: "worker-tab-failed", error: created.error || "", gcClosed };
   }
   listingRefillWorkerTabIds.add(tabId);
   if (id) listingRefillPageWorkerTabs.set(id, tabId);
-  return { ok: true, tabId, reusable: !!id, reused: false };
+  return { ok: true, tabId, reusable: !!id, reused: false, recovered: false, gcClosed };
 }
 
 async function runListingRefillPageWorker(message) {
@@ -821,6 +1306,8 @@ async function runListingRefillPageWorker(message) {
   url.searchParams.set("dsListingRefill", "1");
 
   const runId = String(message?.runId || "").trim();
+  const sourceTabId = Number(message?.sourceTabId);
+  if (runId && Number.isFinite(sourceTabId)) listingRefillSourceTabs.set(runId, sourceTabId);
   const worker = await prepareListingRefillPageWorker(url, runId);
   if (!worker?.ok || !Number.isFinite(Number(worker.tabId))) return worker || { ok: false, status: "worker-tab-failed" };
 
@@ -828,7 +1315,7 @@ async function runListingRefillPageWorker(message) {
   let result = { ok: false, status: "worker-timeout" };
   try {
     const started = Date.now();
-    while (Date.now() - started < 25000) {
+    while (Date.now() - started < LISTING_REFILL_WORKER_RESPONSE_MAX_MS) {
       const tab = await tabsGet(tabId);
       if (!tab) {
         result = { ok: false, status: "worker-closed" };
@@ -839,7 +1326,7 @@ async function runListingRefillPageWorker(message) {
         expectedPage: Number(message?.expectedPage || 0) || 0
       });
       if (response?.ok) {
-        result = { ...response, reused: !!worker.reused };
+        result = { ...response, reused: !!worker.reused, recovered: !!worker.recovered, gcClosed: Number(worker.gcClosed || 0) };
         break;
       }
       // Reused tabs can briefly answer from the previous page while tabs.update
@@ -2596,8 +3083,9 @@ function sendTabMessage(tabId, message) {
 }
 
 async function getReachableDiagnosticContext() {
-  const stored = await storageGet([OPTIONS_SOURCE_TAB_KEY]);
+  const stored = await storageGet([OPTIONS_SOURCE_TAB_KEY, HELPER_LIFECYCLE_DIAG_KEY]);
   const storedId = Number(stored[OPTIONS_SOURCE_TAB_KEY]);
+  const helperLifecycleDiagnostics = stored[HELPER_LIFECYCLE_DIAG_KEY] || null;
   const tabs = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
   const candidates = tabs.filter(tab => tab?.id).sort((a, b) => {
     if (Number(a.id) === storedId && Number(b.id) !== storedId) return -1;
@@ -2609,10 +3097,10 @@ async function getReachableDiagnosticContext() {
     const pageDiagnostics = await sendTabMessage(tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" });
     if (!pageDiagnostics) continue;
     await storageSet({ [OPTIONS_SOURCE_TAB_KEY]: tab.id });
-    return { ok: true, runtimeAvailable: true, url: tab.url || "", title: tab.title || "", pageDiagnostics, tabId: tab.id };
+    return { ok: true, runtimeAvailable: true, url: tab.url || "", title: tab.title || "", pageDiagnostics, helperLifecycleDiagnostics, tabId: tab.id };
   }
   const fallback = candidates[0] || null;
-  return { ok: !!fallback, runtimeAvailable: false, url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null, tabId: fallback?.id || 0 };
+  return { ok: !!fallback, runtimeAvailable: false, url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null, helperLifecycleDiagnostics, tabId: fallback?.id || 0 };
 }
 
 async function relayQuickPanelStateToOptions(message) {
@@ -2976,7 +3464,7 @@ async function fetchExactMessageCounts(message) {
     q: "*",
     query_by: EXACT_MESSAGE_TYPESENSE_QUERY_BY,
     filter_by: `application_ids:spicychat && character_id:=${id}`,
-    include_fields: "character_id,num_messages",
+    include_fields: "character_id,num_messages,createdAt",
     per_page: 1
   }));
 
@@ -3012,7 +3500,11 @@ async function fetchExactMessageCounts(message) {
       const id = normalizeExactMessageBotId(doc?.character_id || requestedId);
       const count = Number(doc?.num_messages);
       if (!id || !Number.isFinite(count) || count < 0) continue;
-      counts.push({ id, count: Math.round(count) });
+      counts.push({
+        id,
+        count: Math.round(count),
+        createdAt: doc?.createdAt ?? null
+      });
       found.add(requestedId);
     }
 
@@ -3238,7 +3730,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_LISTING_REFILL_PAGE") {
-    runListingRefillPageWorker(message)
+    runListingRefillPageWorker({ ...message, sourceTabId: tabId })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
     return true;
@@ -3581,6 +4073,21 @@ chrome.alarms.onAlarm.addListener(alarm => {
     return;
   }
 
+  if (alarm.name === LISTING_REFILL_GC_ALARM) {
+    cleanupStaleListingRefillWorkers({ closeLegacy: true });
+    return;
+  }
+
+  if (alarm.name === QUICK_DISLIKE_GC_ALARM) {
+    cleanupStaleQuickDislikeWorkers();
+    return;
+  }
+
+  if (alarm.name === HELPER_SESSION_GRACE_ALARM) {
+    cleanupPriorHelperSessionTabs();
+    return;
+  }
+
   const tabId = tabIdFromAlarm(alarm.name);
 
   if (!tabId || !activeLoaders.has(tabId)) return;
@@ -3693,6 +4200,13 @@ chrome.windows.onFocusChanged.addListener(windowId => {
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
+  // Close any refill helper that belongs to a source tab the user just closed.
+  for (const [runId, sourceTabId] of [...listingRefillSourceTabs.entries()]) {
+    if (Number(sourceTabId) !== Number(tabId)) continue;
+    listingRefillSourceTabs.delete(runId);
+    releaseListingRefillPageWorker(runId).catch(() => {});
+  }
+
   if (Number(tabId) === Number(tabCleanupWorkerTabId)) tabCleanupWorkerTabId = null;
   tabCleanupWorkerTabIds.delete(Number(tabId));
   quickDislikeWorkerTabIds.delete(Number(tabId));
@@ -3777,6 +4291,7 @@ chrome.runtime.onInstalled.addListener(details => {
   });
   configureChatNudgeAlarm(true);
   configureCreatorBotWatchAlarm(true);
+  initializeHelperLifecycleRecovery();
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -3786,6 +4301,7 @@ chrome.runtime.onStartup.addListener(() => {
   });
   configureChatNudgeAlarm(true);
   configureCreatorBotWatchAlarm(false).finally(() => queueCreatorBotScan({ force: false, reason: "startup" }));
+  initializeHelperLifecycleRecovery();
 });
 
 configureAutoAfkAlarm(false);
@@ -3794,3 +4310,4 @@ getDuplicateTabSettings().then(settings => {
 });
 configureChatNudgeAlarm(false);
 configureCreatorBotWatchAlarm(false);
+initializeHelperLifecycleRecovery();

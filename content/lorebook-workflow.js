@@ -676,7 +676,10 @@
 
   function flashDraftStatus(message) {
     const node = lastDraftModal?.root?.querySelector?.(".ds-lb-draft-status");
-    if (node) node.textContent = message || "";
+    const next = message || "";
+    if (!node) return;
+    if (typeof DS.setTextIfChanged === "function") DS.setTextIfChanged(node, next);
+    else if (node.textContent !== next) node.textContent = next;
   }
 
   async function restoreDraft(parts, draft) {

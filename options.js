@@ -63,7 +63,7 @@ const BULK_DISLIKE_TRANSIENT_STATUSES = new Set([
 ]);
 const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
-const BACKUP_FORMAT_VERSION = 11;
+const BACKUP_FORMAT_VERSION = 12;
 
 const OPTIONS_PERFORMANCE = {
   bootStartedAt: typeof performance !== "undefined" ? performance.now() : 0,
@@ -386,6 +386,7 @@ const DEFAULT_SETTINGS = {
   expandLongCardDescriptions: false,
   showCardGreetingTokenInfo: false,
   showExactMessageCounts: false,
+  showBotCreationDates: false,
   cardTokenShowGreeting: true,
   cardTokenShowDescription: false,
   cardTokenShowPersonality: false,
@@ -467,6 +468,8 @@ const DEFAULT_SETTINGS = {
 
   autoFillListings: false,
   showListingRefillButton: false,
+  showListingFilterStats: false,
+  showListingFilterStatsDetails: false,
   autoFillTargetCards: 50,
   autoFillMaxClicks: 8,
 
@@ -690,6 +693,9 @@ const DEFAULT_SETTINGS = {
   pauseQolWhileMessageEditing: true,
   reduceQolAnimations: false,
   reduceOptionsAnimations: false,
+  settingsNavigationStyle: "classic",
+  settingsContentLayout: "single",
+  settingsPageWidth: "comfortable",
   collapseSettingsSectionsByDefault: false,
   enableCommandPalette: false,
   commandPaletteShortcut: "ctrl-k",
@@ -1529,6 +1535,7 @@ const FEATURE_CHANGE_MARKERS = {
   personaShowLocalMetaInPicker: { version: "0.1.8.79", label: "New" },
   showCardGreetingTokenInfo: { version: "0.1.8.97", label: "Updated" },
   showExactMessageCounts: { version: "0.1.9.112", label: "New" },
+  showBotCreationDates: { version: "0.2.14", label: "New" },
   cardTokenShowGreeting: { version: "0.1.8.97", label: "New" },
   cardTokenShowPersonality: { version: "0.1.8.97", label: "New" },
   cardTokenShowScenario: { version: "0.1.8.97", label: "New" },
@@ -1592,6 +1599,8 @@ const FEATURE_CHANGE_MARKERS = {
   quickDislikeIdleMinutes: { version: "0.1.9.86", label: "New" },
   blockedBulkDislikeDelayMs: { version: "0.1.9.92", label: "Updated" },
   autoFillListings: { version: "0.1.9.62", label: "Updated" },
+  showListingFilterStats: { version: "0.2.14", label: "New" },
+  showListingFilterStatsDetails: { version: "0.2.14", label: "New" },
   textNormalizationEnabled: { version: "0.1.9.61", label: "Updated" },
   scrollNavOnHome: { version: "0.1.9.31", label: "New" },
   scrollNavOnChats: { version: "0.1.9.31", label: "New" },
@@ -1788,6 +1797,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "expandLongCardDescriptions",
   "showCardGreetingTokenInfo",
   "showExactMessageCounts",
+  "showBotCreationDates",
   "hideGroupChats",
   "showLorebookFilters",
   "enableSmartFilterPresets",
@@ -1822,6 +1832,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "normalizeInvisibleCharacters",
   "normalizeDecorativeSymbols",
   "autoFillListings",
+  "showListingFilterStats",
+  "showListingFilterStatsDetails",
   "trackOpenedChats",
   "importOpenedFromChatsPage",
   "hideOpenedChats",
@@ -4283,6 +4295,8 @@ function setupSettingsSearch() {
   const SEARCH_ALIASES = {
     autoFillListings: "refill fill page listing autofill hidden cards",
     showListingRefillButton: "refill fill now manual listing",
+    showListingFilterStats: "bot blocking filters blocked filtered bots result count stats results found listing statistics",
+    showListingFilterStatsDetails: "bot blocking filters blocked filtered breakdown details language tags words creators listing statistics",
     autoLoadMyCreations: "my creations automatic auto load more bots pages creator",
     myCreationsAutoLoadPages: "my creations auto load more pages batches count",
     enableChatBackgrounds: "background wallpaper image custom chat",
@@ -4304,7 +4318,10 @@ function setupSettingsSearch() {
     enableBulkCardBlocking: "select bots bulk blocking multi select bot cards home recommendations creator pages",
     bulkCardBlockingSidebarLauncher: "select bots placement narrow by group size sidebar",
     rememberBotImagePrompt: "remember save restore chatbot character image generation prompt edit editor refresh",
-    collapseSettingsSectionsByDefault: "settings sections collapsed collapse options dropdown dropdowns accordion accordions less scrolling compact settings",
+    settingsNavigationStyle: "settings layout navigation tabs classic grouped categories options appearance",
+  settingsContentLayout: "settings layout cards single column adaptive columns two column options appearance",
+  settingsPageWidth: "settings layout width comfortable wide full page options appearance",
+  collapseSettingsSectionsByDefault: "settings sections collapsed collapse options dropdown dropdowns accordion accordions less scrolling compact settings",
     enableCommandPalette: "command palette ctrl k shortcut quick search navigation actions control center",
     commandPaletteShortcut: "keyboard shortcut hotkey ctrl k command palette",
     commandPaletteShowSavedItems: "command palette saved bots lorebooks personas favorites later",
@@ -10985,6 +11002,7 @@ async function load() {
   setChecked("expandLongCardDescriptions", settings.expandLongCardDescriptions);
   setChecked("showCardGreetingTokenInfo", !!settings.showCardGreetingTokenInfo);
   setChecked("showExactMessageCounts", !!settings.showExactMessageCounts);
+  setChecked("showBotCreationDates", !!settings.showBotCreationDates);
   setChecked("cardTokenShowGreeting", settings.cardTokenShowGreeting !== false);
   setChecked("cardTokenShowPersonality", !!settings.cardTokenShowPersonality);
   setChecked("cardTokenShowScenario", !!settings.cardTokenShowScenario);
@@ -10992,6 +11010,8 @@ async function load() {
 
   setChecked("autoFillListings", settings.autoFillListings);
   setChecked("showListingRefillButton", !!settings.showListingRefillButton);
+  setChecked("showListingFilterStats", !!settings.showListingFilterStats);
+  setChecked("showListingFilterStatsDetails", !!settings.showListingFilterStatsDetails);
   setValue("autoFillTargetCards", String(settings.autoFillTargetCards || 50));
   setValue("autoFillMaxClicks", String(settings.autoFillMaxClicks || 8));
 
@@ -11180,6 +11200,10 @@ async function load() {
   setChecked("pauseQolWhileMessageEditing", settings.pauseQolWhileMessageEditing !== false);
   setChecked("reduceQolAnimations", !!settings.reduceQolAnimations);
   setChecked("reduceOptionsAnimations", !!settings.reduceOptionsAnimations);
+  setValue("settingsNavigationStyle", ["classic", "grouped"].includes(settings.settingsNavigationStyle) ? settings.settingsNavigationStyle : "classic");
+  setValue("settingsContentLayout", ["single", "adaptive"].includes(settings.settingsContentLayout) ? settings.settingsContentLayout : "single");
+  setValue("settingsPageWidth", ["comfortable", "wide"].includes(settings.settingsPageWidth) ? settings.settingsPageWidth : "comfortable");
+  applyOptionsLayoutPreferences(settings);
   setChecked("collapseSettingsSectionsByDefault", !!settings.collapseSettingsSectionsByDefault);
   setChecked("enableCommandPalette", !!settings.enableCommandPalette);
   setValue("commandPaletteShortcut", ["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(settings.commandPaletteShortcut) ? settings.commandPaletteShortcut : "ctrl-k");
@@ -11355,6 +11379,7 @@ async function load() {
   applySettingsSectionDefault(settings);
   applySettingsEnabledOnlyFilter();
   refreshSettingsSectionShortcuts();
+  initializeExportScopeSelection().catch(() => {});
 
   dirtySavedStores.clear();
   if (loadStarted && typeof performance !== "undefined") OPTIONS_PERFORMANCE.loadMs = Math.max(0, performance.now() - loadStarted);
@@ -11602,6 +11627,8 @@ function readSettingsFromPage() {
 
     autoFillListings: checked("autoFillListings"),
     showListingRefillButton: checked("showListingRefillButton"),
+    showListingFilterStats: checked("showListingFilterStats"),
+    showListingFilterStatsDetails: checked("showListingFilterStatsDetails"),
     autoFillTargetCards: Math.max(1, Math.min(200, Number(value("autoFillTargetCards", "50")) || 50)),
     autoFillMaxClicks: Math.max(1, Math.min(30, Number(value("autoFillMaxClicks", "8")) || 8)),
 
@@ -11783,6 +11810,9 @@ function readSettingsFromPage() {
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
     reduceOptionsAnimations: checked("reduceOptionsAnimations"),
+    settingsNavigationStyle: ["classic", "grouped"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic",
+    settingsContentLayout: ["single", "adaptive"].includes(value("settingsContentLayout")) ? value("settingsContentLayout") : "single",
+    settingsPageWidth: ["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable",
     collapseSettingsSectionsByDefault: checked("collapseSettingsSectionsByDefault"),
     enableCommandPalette: checked("enableCommandPalette", false),
     commandPaletteShortcut: ["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(value("commandPaletteShortcut")) ? value("commandPaletteShortcut") : "ctrl-k",
@@ -11880,6 +11910,7 @@ function readSettingsFromPage() {
     expandLongCardDescriptions: checked("expandLongCardDescriptions"),
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
     showExactMessageCounts: checked("showExactMessageCounts"),
+    showBotCreationDates: checked("showBotCreationDates"),
     cardTokenShowGreeting: checked("cardTokenShowGreeting", true),
     cardTokenShowDescription: false,
     cardTokenShowPersonality: checked("cardTokenShowPersonality"),
@@ -12252,7 +12283,14 @@ function buildExportPayload(scopes, result) {
     }
   };
 
-  if (has("settings")) payload.settings = settings;
+  const selectedSettingScopes = new Set([...selected].filter(isSettingsBackupScope));
+  if (has("settings")) {
+    payload.settings = settings;
+    payload._qolBackup.settingsScopes = ["settings"];
+  } else if (selectedSettingScopes.size) {
+    payload.settings = settingsSubsetForScopes(settings, selectedSettingScopes);
+    payload._qolBackup.settingsScopes = [...selectedSettingScopes];
+  }
   if (has("opened")) {
     payload.openedChats = Array.isArray(result[OPENED_KEY]) ? result[OPENED_KEY] : [];
     payload.openedChatMeta = result[OPENED_META_KEY] || {};
@@ -12265,6 +12303,7 @@ function buildExportPayload(scopes, result) {
   if (has("notInterested")) payload.notInterestedBots = result[NOT_INTERESTED_KEY] || { ids: [], meta: {} };
   if (has("favoriteCreators")) payload.favoriteCreators = result[FAVORITE_CREATORS_KEY] || { handles: [], meta: {} };
   if (has("followedCreators")) payload.followedCreators = result[FOLLOWED_CREATORS_KEY] || { handles: [], meta: {} };
+  if (has("creatorBotWatch")) payload.creatorBotWatch = normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]);
   if (has("favoriteBots")) payload.favoriteBots = result[FAVORITE_BOTS_KEY] || { ids: [], meta: {} };
   if (has("laterBots")) payload.laterBots = result[LATER_BOTS_KEY] || { ids: [], meta: {} };
   if (has("botOrganization")) payload.botOrganization = result[BOT_ORGANIZER_KEY] || { meta: {} };
@@ -12273,6 +12312,7 @@ function buildExportPayload(scopes, result) {
   if (has("botAvailability")) payload.botAvailability = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
   if (has("botArchive")) payload.botArchive = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
   if (has("lorebookBackups")) payload.lorebookBackups = normalizeLorebookBackups(result[LOREBOOK_BACKUPS_KEY]);
+  if (has("chatbotLorebookLinks")) payload.chatbotLorebookLinks = result[CHATBOT_LOREBOOK_LINKS_KEY] && typeof result[CHATBOT_LOREBOOK_LINKS_KEY] === "object" ? result[CHATBOT_LOREBOOK_LINKS_KEY] : {};
   if (has("savedTextSnippets")) payload.savedTextSnippets = Array.isArray(result[SAVED_TEXT_SNIPPETS_KEY]) ? result[SAVED_TEXT_SNIPPETS_KEY] : [];
   if (has("contextKeeperData")) payload.contextKeeperData = result[CONTEXT_KEEPER_DATA_KEY] && typeof result[CONTEXT_KEEPER_DATA_KEY] === "object" ? result[CONTEXT_KEEPER_DATA_KEY] : {};
   if (has("storyDayTrackerData")) payload.storyDayTrackerData = result[STORY_DAY_TRACKER_KEY] && typeof result[STORY_DAY_TRACKER_KEY] === "object" ? result[STORY_DAY_TRACKER_KEY] : {};
@@ -12295,6 +12335,17 @@ function buildExportPayload(scopes, result) {
   if (has("botEditorDraftHistory")) payload.botEditorDraftHistory = normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]);
   if (has("chatBookmarks")) payload.chatBookmarks = result[CHAT_BOOKMARKS_KEY] && typeof result[CHAT_BOOKMARKS_KEY] === "object" ? result[CHAT_BOOKMARKS_KEY] : {};
   if (has("recentlySeenBots")) payload.recentlySeenBots = result[RECENTLY_SEEN_BOTS_KEY] && typeof result[RECENTLY_SEEN_BOTS_KEY] === "object" ? result[RECENTLY_SEEN_BOTS_KEY] : { entries: [] };
+  if (has("soundscapes")) payload.soundscapes = normalizeSoundscapeScenes(result[SOUNDSCAPES_KEY]);
+  if (has("tabCleanupSessions")) payload.tabCleanupSessions = normalizeTabCleanupSessions(result[TAB_CLEANUP_SESSIONS_KEY]);
+  if (has("tabCleanupTopics")) payload.tabCleanupTopics = normalizeTabCleanupTopics(result[TAB_CLEANUP_TOPICS_KEY]);
+  if (has("tabCleanupEnrichment")) payload.tabCleanupEnrichment = result[TAB_CLEANUP_ENRICHMENT_KEY] && typeof result[TAB_CLEANUP_ENRICHMENT_KEY] === "object" ? result[TAB_CLEANUP_ENRICHMENT_KEY] : { meta: {} };
+  if (has("localChangeHistory")) payload.localChangeHistory = Array.isArray(result[LOCAL_CHANGE_HISTORY_KEY]) ? result[LOCAL_CHANGE_HISTORY_KEY] : [];
+  if (has("localMedia")) {
+    payload.localMedia = {
+      soundscapeAudio: normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]),
+      chatBackgroundMedia: normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY])
+    };
+  }
 
   return payload;
 }
@@ -12738,25 +12789,211 @@ function setupModerationTermManager() {
   renderModerationTermManager();
 }
 
+const SETTINGS_BACKUP_GROUPS = {
+  settingsGeneral: { label: "General & Control Center", pages: ["general", "control", "features"] },
+  settingsDiscovery: { label: "Discovery & Filters", pages: ["blocking"] },
+  settingsSavedBots: { label: "Saved Bots & Lists", pages: ["saved"] },
+  settingsChatList: { label: "Chat List", pages: ["chat-list"] },
+  settingsChat: { label: "Chat", pages: ["chat-ui"] },
+  settingsWriting: { label: "Writing & Generation", pages: ["writing"] },
+  settingsPersonas: { label: "Personas & Memory", pages: ["personas-memory"] },
+  settingsCreator: { label: "Creator Tools", pages: ["bot-tools"] },
+  settingsAppearance: { label: "Appearance & Interface", pages: ["appearance"] },
+  settingsBrowser: { label: "Browser, Tabs & Mobile", pages: ["browser", "android"] },
+  settingsAdvanced: { label: "Advanced & Compatibility", pages: ["advanced"] }
+};
+const SETTINGS_BACKUP_SCOPE_IDS = Object.keys(SETTINGS_BACKUP_GROUPS);
+const SETTINGS_BACKUP_OVERRIDES = {
+  autoAfkAction: "settingsBrowser",
+  botEditorSnippets: "settingsCreator",
+  blockedBotIds: "settingsDiscovery",
+  blockedBotNames: "settingsDiscovery",
+  cardTokenShowDescription: "settingsDiscovery",
+  cardTokenShowCombined: "settingsDiscovery",
+  allowedLanguages: "settingsDiscovery",
+  showListingRefillButton: "settingsDiscovery",
+  quickPanelCustomX: "settingsGeneral",
+  quickPanelCustomY: "settingsGeneral",
+  showBlockCurrentBotButton: "settingsDiscovery",
+  quickDislikeIdleEnabled: "settingsDiscovery",
+  chatListSearchMode: "settingsChatList",
+  autoLoadAllOpenedChats: "settingsChatList",
+  deepImportMaxPages: "settingsChatList",
+  oocTemplates: "settingsWriting",
+  replyInstructionBotOverrides: "settingsWriting",
+  chatBubblePreserveActionColors: "settingsAppearance",
+  hideSidebarSocialLinks: "settingsAppearance",
+  hideSidebarFooterLinks: "settingsAppearance",
+  hideSidebarAppDownload: "settingsAppearance",
+  enableMainFooterManagement: "settingsAppearance",
+  hideMainFooterEntirely: "settingsAppearance",
+  hideMainFooterCompany: "settingsAppearance",
+  hideMainFooterResources: "settingsAppearance",
+  hideMainFooterCommunity: "settingsAppearance",
+  hideMainFooterJoinUs: "settingsAppearance",
+  hideMainFooterAppDownload: "settingsAppearance",
+  hideMainFooter2257: "settingsAppearance",
+  enablePersonalUsageSummary: "settingsGeneral",
+  enableLocalChangeHistory: "settingsAdvanced",
+  showUpdateNotifications: "settingsGeneral",
+  debug: "settingsAdvanced"
+};
+
+function settingBackupScopeForKey(key) {
+  if (SETTINGS_BACKUP_OVERRIDES[key]) return SETTINGS_BACKUP_OVERRIDES[key];
+  const element = $(key);
+  const page = element?.closest?.(".tab-page[data-page]")?.dataset?.page || "";
+  for (const [scope, def] of Object.entries(SETTINGS_BACKUP_GROUPS)) {
+    if (def.pages.includes(page)) return scope;
+  }
+  return "settingsGeneral";
+}
+
+function settingKeysForBackupScope(scope) {
+  return Object.keys(DEFAULT_SETTINGS).filter(key => settingBackupScopeForKey(key) === scope);
+}
+
+function isSettingsBackupScope(scope) {
+  return SETTINGS_BACKUP_SCOPE_IDS.includes(String(scope || ""));
+}
+
+function settingsSubsetForScopes(settingsValue, scopes) {
+  const source = { ...DEFAULT_SETTINGS, ...(settingsValue || {}) };
+  const selected = scopes instanceof Set ? scopes : new Set(scopes || []);
+  const out = {};
+  for (const scope of SETTINGS_BACKUP_SCOPE_IDS) {
+    if (!selected.has(scope)) continue;
+    for (const key of settingKeysForBackupScope(scope)) out[key] = source[key];
+  }
+  return out;
+}
+
+function settingsPresentSubsetForScopes(settingsValue, scopes) {
+  const source = settingsValue && typeof settingsValue === "object" ? settingsValue : {};
+  const selected = scopes instanceof Set ? scopes : new Set(scopes || []);
+  const out = {};
+  for (const scope of SETTINGS_BACKUP_SCOPE_IDS) {
+    if (!selected.has(scope)) continue;
+    for (const key of settingKeysForBackupScope(scope)) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) out[key] = source[key];
+    }
+  }
+  return out;
+}
+
+function settingsScopeUsageCount(settingsValue, scope) {
+  const source = { ...DEFAULT_SETTINGS, ...(settingsValue || {}) };
+  return settingKeysForBackupScope(scope).reduce((count, key) => (
+    JSON.stringify(source[key]) === JSON.stringify(DEFAULT_SETTINGS[key]) ? count : count + 1
+  ), 0);
+}
+
 const BACKUP_STORAGE_KEYS = [
   "settings", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY,
   NOT_INTERESTED_KEY, PERSONAS_KEY, LEGACY_PERSONAS_KEY, PERSONA_ORG_KEY, OOC_TEMPLATES_KEY, FAVORITE_CREATORS_KEY,
-  FOLLOWED_CREATORS_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY, BOT_ORGANIZER_KEY, CHAT_ORGANIZER_KEY, CHARACTER_QOL_PROFILES_KEY,
-  BOT_AVAILABILITY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_BACKUPS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY, STORY_DAY_TRACKER_KEY, RP_STATE_TRACKER_KEY, CHAT_NUDGE_STORE_KEY,
-  GENERATION_PROFILES_KEY, SMART_FILTER_PRESETS_KEY, SMART_FILTER_PINNED_KEY, BOT_EDITOR_DRAFT_HISTORY_KEY,
-  CHAT_BOOKMARKS_KEY, RECENTLY_SEEN_BOTS_KEY
+  FOLLOWED_CREATORS_KEY, CREATOR_BOT_WATCH_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY, BOT_ORGANIZER_KEY, CHAT_ORGANIZER_KEY, CHARACTER_QOL_PROFILES_KEY,
+  BOT_AVAILABILITY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_BACKUPS_KEY, CHATBOT_LOREBOOK_LINKS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY,
+  STORY_DAY_TRACKER_KEY, RP_STATE_TRACKER_KEY, CHAT_NUDGE_STORE_KEY, GENERATION_PROFILES_KEY, SMART_FILTER_PRESETS_KEY, SMART_FILTER_PINNED_KEY,
+  BOT_EDITOR_DRAFT_HISTORY_KEY, CHAT_BOOKMARKS_KEY, RECENTLY_SEEN_BOTS_KEY, SOUNDSCAPES_KEY, SOUNDSCAPE_AUDIO_KEY, CHAT_BACKGROUNDS_KEY,
+  TAB_CLEANUP_SESSIONS_KEY, TAB_CLEANUP_TOPICS_KEY, TAB_CLEANUP_ENRICHMENT_KEY, LOCAL_CHANGE_HISTORY_KEY
 ];
 const BACKUP_SCOPE_IDS = [
-  "settings", "opened", "blocked", "notInterested", "favoriteCreators", "followedCreators", "favoriteBots", "laterBots",
-  "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookBackups", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData",
-  "chatNudges", "personas", "personaOrganization", "ooc", "generationProfiles", "smartFilterPresets", "smartFilterPins",
-  "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots"
+  ...SETTINGS_BACKUP_SCOPE_IDS,
+  "settings",
+  "opened", "blocked", "notInterested", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots",
+  "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookBackups", "chatbotLorebookLinks",
+  "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization",
+  "ooc", "generationProfiles", "smartFilterPresets", "smartFilterPins", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots",
+  "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"
 ];
+const LIGHTWEIGHT_BACKUP_SCOPE_IDS = BACKUP_SCOPE_IDS.filter(scope => scope !== "localMedia");
+
+const BACKUP_DATA_SCOPE_DEFS = {
+  opened: { count: result => Array.isArray(result[OPENED_KEY]) ? result[OPENED_KEY].length : 0 },
+  blocked: { count: result => uniqueClean([...(result[BLOCKED_BOTS_KEY]?.ids || []), ...(result[BLOCKED_BOTS_KEY]?.names || [])]).length },
+  notInterested: { count: result => uniqueClean(result[NOT_INTERESTED_KEY]?.ids || []).length },
+  favoriteCreators: { count: result => uniqueClean(result[FAVORITE_CREATORS_KEY]?.handles || []).length },
+  followedCreators: { count: result => uniqueClean(result[FOLLOWED_CREATORS_KEY]?.handles || []).length },
+  creatorBotWatch: { count: result => Object.keys(normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]).creators || {}).length },
+  favoriteBots: { count: result => uniqueClean(result[FAVORITE_BOTS_KEY]?.ids || []).length },
+  laterBots: { count: result => uniqueClean(result[LATER_BOTS_KEY]?.ids || []).length },
+  botOrganization: { count: result => Object.keys(result[BOT_ORGANIZER_KEY]?.meta || {}).length },
+  chatOrganization: { count: result => Object.keys(normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]).meta).length },
+  characterQolProfiles: { count: result => Object.keys(normalizeCharacterQolProfiles(result[CHARACTER_QOL_PROFILES_KEY])).length },
+  botAvailability: { count: result => Object.keys(normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]).meta).length },
+  botArchive: { count: result => Object.keys(normalizeBotArchive(result[BOT_ARCHIVE_KEY]).meta).length },
+  lorebookBackups: { count: result => Object.keys(normalizeLorebookBackups(result[LOREBOOK_BACKUPS_KEY]).meta).length },
+  chatbotLorebookLinks: { count: result => Object.keys(result[CHATBOT_LOREBOOK_LINKS_KEY] && typeof result[CHATBOT_LOREBOOK_LINKS_KEY] === "object" ? result[CHATBOT_LOREBOOK_LINKS_KEY] : {}).length },
+  savedTextSnippets: { count: result => Array.isArray(result[SAVED_TEXT_SNIPPETS_KEY]) ? result[SAVED_TEXT_SNIPPETS_KEY].length : 0 },
+  contextKeeperData: { count: result => Object.keys(result[CONTEXT_KEEPER_DATA_KEY] && typeof result[CONTEXT_KEEPER_DATA_KEY] === "object" ? result[CONTEXT_KEEPER_DATA_KEY] : {}).length },
+  storyDayTrackerData: { count: result => Object.keys(result[STORY_DAY_TRACKER_KEY] && typeof result[STORY_DAY_TRACKER_KEY] === "object" ? result[STORY_DAY_TRACKER_KEY] : {}).length },
+  rpStateTrackerData: { count: result => Object.keys(result[RP_STATE_TRACKER_KEY] && typeof result[RP_STATE_TRACKER_KEY] === "object" ? result[RP_STATE_TRACKER_KEY] : {}).length },
+  chatNudges: { count: result => normalizeChatNudgeStore(result[CHAT_NUDGE_STORE_KEY]).length },
+  personas: { count: result => Array.isArray(result[PERSONAS_KEY]) ? result[PERSONAS_KEY].length : (Array.isArray(result[LEGACY_PERSONAS_KEY]) ? result[LEGACY_PERSONAS_KEY].length : 0) },
+  personaOrganization: { count: result => Object.keys(result[PERSONA_ORG_KEY]?.meta || {}).length },
+  ooc: { count: result => normalizeOocTemplates(result[OOC_TEMPLATES_KEY]).length },
+  generationProfiles: { count: result => Object.keys(normalizeGenerationProfiles(result[GENERATION_PROFILES_KEY])).length },
+  smartFilterPresets: { count: result => normalizeSmartFilterPresets(result[SMART_FILTER_PRESETS_KEY]).length },
+  smartFilterPins: { count: result => normalizeSmartFilterPins(result[SMART_FILTER_PINNED_KEY], result[SMART_FILTER_PRESETS_KEY]).length },
+  botEditorDraftHistory: { count: result => Object.values(normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]).entries).reduce((n, list) => n + list.length, 0) },
+  chatBookmarks: { count: result => Object.values(result[CHAT_BOOKMARKS_KEY] || {}).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0) },
+  recentlySeenBots: { count: result => Array.isArray(result[RECENTLY_SEEN_BOTS_KEY]?.entries) ? result[RECENTLY_SEEN_BOTS_KEY].entries.length : 0 },
+  soundscapes: { count: result => normalizeSoundscapeScenes(result[SOUNDSCAPES_KEY]).scenes.length },
+  tabCleanupSessions: { count: result => normalizeTabCleanupSessions(result[TAB_CLEANUP_SESSIONS_KEY]).sessions.length },
+  tabCleanupTopics: { count: result => normalizeTabCleanupTopics(result[TAB_CLEANUP_TOPICS_KEY]).topics.length },
+  tabCleanupEnrichment: { count: result => Object.keys(result[TAB_CLEANUP_ENRICHMENT_KEY]?.meta || {}).length },
+  localChangeHistory: { count: result => Array.isArray(result[LOCAL_CHANGE_HISTORY_KEY]) ? result[LOCAL_CHANGE_HISTORY_KEY].length : 0 },
+  localMedia: { count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).global ? 1 : 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).chats || {}).length, large: true }
+};
 
 async function readBackupSourceData() {
   const result = await storageGetChecked(BACKUP_STORAGE_KEYS);
   if (!result.ok) throw new Error(result.error || "Browser storage could not be read");
   return result.data;
+}
+
+let exportScopesInitialized = false;
+
+function setExportScopeCount(scope, count, suffix = "saved") {
+  document.querySelectorAll(`[data-export-count-for="${CSS.escape(scope)}"]`).forEach(node => {
+    const numeric = Number(count) || 0;
+    node.textContent = numeric ? `(${numeric.toLocaleString()} ${suffix})` : "";
+  });
+}
+
+function refreshExportScopeCounts(result) {
+  for (const scope of SETTINGS_BACKUP_SCOPE_IDS) {
+    setExportScopeCount(scope, settingsScopeUsageCount(result.settings, scope), "active/customized");
+  }
+  for (const [scope, def] of Object.entries(BACKUP_DATA_SCOPE_DEFS)) {
+    setExportScopeCount(scope, def.count(result), "saved");
+  }
+}
+
+async function selectActiveUsedExportScopes({ initialize = false } = {}) {
+  let result;
+  try {
+    result = await readBackupSourceData();
+  } catch {
+    if (!initialize) showSettingsToast("Could not read local data to build the Active / Used selection.");
+    return;
+  }
+  refreshExportScopeCounts(result);
+  document.querySelectorAll("[data-export-scope]").forEach(input => {
+    const scope = String(input.dataset.exportScope || "");
+    if (isSettingsBackupScope(scope)) {
+      input.checked = settingsScopeUsageCount(result.settings, scope) > 0;
+      return;
+    }
+    const def = BACKUP_DATA_SCOPE_DEFS[scope];
+    input.checked = !!def && !def.large && def.count(result) > 0;
+  });
+  exportScopesInitialized = true;
+}
+
+async function initializeExportScopeSelection() {
+  if (exportScopesInitialized) return;
+  await selectActiveUsedExportScopes({ initialize: true });
 }
 
 async function exportSettings() {
@@ -12783,6 +13020,7 @@ function normalizeRecoverySnapshot(value) {
     createdAt: Number(raw.createdAt) || 0,
     reason: String(raw.reason || "manual"),
     extensionVersion: String(raw.extensionVersion || ""),
+    scopes: Array.isArray(raw.scopes) ? raw.scopes.map(String) : [],
     backup: raw.backup
   };
 }
@@ -12797,7 +13035,10 @@ async function refreshRecoverySnapshotStatus() {
     return;
   }
   const when = snapshot.createdAt ? new Date(snapshot.createdAt).toLocaleString() : "unknown time";
-  host.textContent = `Last snapshot: ${when} · ${snapshot.reason}. Lightweight QoL data only; local media bytes and API keys stay device-local and are not copied.`;
+  const mediaNote = snapshot.scopes.includes("localMedia")
+    ? " Local media was included because that category was part of the protected action."
+    : " Local media bytes are not included.";
+  host.textContent = `Last snapshot: ${when} · ${snapshot.reason}.${mediaNote} API keys/webhook URLs are never copied.`;
 }
 
 let pendingImportSafetyDownload = null;
@@ -12819,13 +13060,14 @@ async function createRecoverySnapshot(reason = "manual", sourceData = null, scop
   const requestedScopes = scopes instanceof Set ? scopes : new Set(scopes || []);
   const selectedScopes = requestedScopes.size
     ? new Set([...requestedScopes].filter(scope => BACKUP_SCOPE_IDS.includes(scope)))
-    : new Set(BACKUP_SCOPE_IDS);
+    : new Set(LIGHTWEIGHT_BACKUP_SCOPE_IDS);
   if (!selectedScopes.size) throw new Error("No recovery data was selected");
 
   const snapshot = {
     createdAt: Date.now(),
     reason: String(reason || "manual"),
     extensionVersion: chrome.runtime.getManifest()?.version || "",
+    scopes: [...selectedScopes],
     backup: buildExportPayload(selectedScopes, result)
   };
   const ok = await storageSetVerified({ [RECOVERY_SNAPSHOT_KEY]: snapshot });
@@ -12895,6 +13137,28 @@ function replaceSettingsForImport(importedSettings) {
   next.replyInstructionBotOverrides = normalizeReplyInstructionOverrides(imported.replyInstructionBotOverrides);
 
   return next;
+}
+
+function selectedSettingsScopesForImport(importScopes) {
+  const selected = new Set([...importScopes].filter(isSettingsBackupScope));
+  if (importScopes.has("settings")) return new Set(["settings"]);
+  return selected;
+}
+
+function mergeSettingsGroupsForImport(currentSettings, importedSettings, selectedScopes) {
+  if (selectedScopes.has("settings")) return mergeSettingsForImport(currentSettings, importedSettings);
+  const subset = settingsPresentSubsetForScopes(importedSettings, selectedScopes);
+  return mergeSettingsForImport(currentSettings, subset);
+}
+
+function replaceSettingsGroupsForImport(currentSettings, importedSettings, selectedScopes) {
+  if (selectedScopes.has("settings")) return replaceSettingsForImport(importedSettings);
+  const current = { ...DEFAULT_SETTINGS, ...(currentSettings || {}) };
+  const replacement = replaceSettingsForImport(settingsSubsetForScopes(importedSettings, selectedScopes));
+  for (const scope of selectedScopes) {
+    for (const key of settingKeysForBackupScope(scope)) current[key] = replacement[key];
+  }
+  return current;
 }
 
 
@@ -13063,15 +13327,32 @@ function importCategoryEntries(parsed) {
     !source.botAvailability && !source.botArchive && !source.lorebookBackups && !source.savedTextSnippets &&
     !source.contextKeeperData && !source.storyDayTrackerData && !source.rpStateTrackerData && !source.chatNudges && !source.personas && !source.personaOrganization &&
     !source.oocTemplates && !source.generationProfiles && !source.smartFilterPresets && !source.smartFilterPinnedPresets &&
-    !source.botEditorDraftHistory && !source.chatBookmarks && !source.recentlySeenBots && !source._qolBackup
+    !source.botEditorDraftHistory && !source.chatBookmarks && !source.recentlySeenBots && !source.creatorBotWatch &&
+    !source.chatbotLorebookLinks && !source.soundscapes && !source.tabCleanupSessions && !source.tabCleanupTopics &&
+    !source.tabCleanupEnrichment && !source.localChangeHistory && !source.localMedia && !source._qolBackup
   ));
   const add = (scope, label, count) => entries.push({ scope, label, count: Number(count) || 0 });
-  if (settingsLike) add("settings", "Settings", Object.keys(source.settings || source || {}).filter(k => k !== "_qolBackup").length);
+  if (settingsLike) {
+    const settingsSource = source.settings || source || {};
+    const declaredScopes = Array.isArray(source?._qolBackup?.settingsScopes)
+      ? source._qolBackup.settingsScopes.map(String)
+      : [];
+    const grouped = declaredScopes.filter(isSettingsBackupScope);
+    if (grouped.length) {
+      for (const scope of grouped) {
+        const keys = settingKeysForBackupScope(scope).filter(key => Object.prototype.hasOwnProperty.call(settingsSource, key));
+        add(scope, SETTINGS_BACKUP_GROUPS[scope]?.label || scope, keys.length);
+      }
+    } else {
+      add("settings", "Settings (legacy/all)", Object.keys(settingsSource).filter(k => k !== "_qolBackup").length);
+    }
+  }
   if (Array.isArray(source.openedChats)) add("opened", "Bot Status Center opened history", source.openedChats.length);
   if (source.blockedBots && typeof source.blockedBots === "object") add("blocked", "Blocked bots", uniqueClean([...(source.blockedBots.ids || []), ...(source.blockedBots.names || [])]).length);
   if (source.notInterestedBots && typeof source.notInterestedBots === "object") add("notInterested", "Not interested", uniqueClean(source.notInterestedBots.ids || []).length);
   if (source.favoriteCreators && typeof source.favoriteCreators === "object") add("favoriteCreators", "Favorite creators", uniqueClean(source.favoriteCreators.handles || []).length);
   if (source.followedCreators && typeof source.followedCreators === "object") add("followedCreators", "Followed creators", uniqueClean(source.followedCreators.handles || []).length);
+  if (source.creatorBotWatch && typeof source.creatorBotWatch === "object") add("creatorBotWatch", "Creator follow/watch history", Object.keys(normalizeCreatorBotWatchState(source.creatorBotWatch).creators || {}).length);
   if (source.favoriteBots && typeof source.favoriteBots === "object") add("favoriteBots", "Favorite bots", uniqueClean(source.favoriteBots.ids || []).length);
   if (source.laterBots && typeof source.laterBots === "object") add("laterBots", "Later bots", uniqueClean(source.laterBots.ids || []).length);
   if (source.botOrganization && typeof source.botOrganization === "object") add("botOrganization", "Bot organization", Object.keys(source.botOrganization.meta || {}).length);
@@ -13081,6 +13362,7 @@ function importCategoryEntries(parsed) {
   if (source.botAvailability && typeof source.botAvailability === "object") add("botAvailability", "Bot availability checks", Object.keys(normalizeBotAvailability(source.botAvailability).meta).length);
   if (source.botArchive && typeof source.botArchive === "object") add("botArchive", "Saved bot copies", Object.keys(normalizeBotArchive(source.botArchive).meta).length);
   if (source.lorebookBackups && typeof source.lorebookBackups === "object") add("lorebookBackups", "Lorebook backups", Object.keys(normalizeLorebookBackups(source.lorebookBackups).meta).length);
+  if (source.chatbotLorebookLinks && typeof source.chatbotLorebookLinks === "object") add("chatbotLorebookLinks", "Chatbot ↔ Lorebook links", Object.keys(source.chatbotLorebookLinks).length);
   if (Array.isArray(source.savedTextSnippets)) add("savedTextSnippets", "Saved snippets", source.savedTextSnippets.length);
   if (source.contextKeeperData && typeof source.contextKeeperData === "object") add("contextKeeperData", "Context Keeper chats", Object.keys(source.contextKeeperData).length);
   if (source.storyDayTrackerData && typeof source.storyDayTrackerData === "object") add("storyDayTrackerData", "Internal Day Tracker chats", Object.keys(source.storyDayTrackerData).length);
@@ -13094,6 +13376,16 @@ function importCategoryEntries(parsed) {
   if (Array.isArray(source.smartFilterPinnedPresets)) add("smartFilterPins", "Pinned Smart Filter presets", normalizeSmartFilterPins(source.smartFilterPinnedPresets, source.smartFilterPresets).length);
   if (source.botEditorDraftHistory && typeof source.botEditorDraftHistory === "object") add("botEditorDraftHistory", "Chatbot editor draft history", Object.values(normalizeBotEditorDraftHistory(source.botEditorDraftHistory).entries).reduce((n, list) => n + list.length, 0));
   if (source.recentlySeenBots && typeof source.recentlySeenBots === "object") add("recentlySeenBots", "Recently seen bots", Array.isArray(source.recentlySeenBots.entries) ? source.recentlySeenBots.entries.length : 0);
+  if (source.soundscapes && typeof source.soundscapes === "object") add("soundscapes", "Soundscape scene configuration", normalizeSoundscapeScenes(source.soundscapes).scenes.length);
+  if (source.tabCleanupSessions && typeof source.tabCleanupSessions === "object") add("tabCleanupSessions", "Saved tab sessions", normalizeTabCleanupSessions(source.tabCleanupSessions).sessions.length);
+  if (source.tabCleanupTopics && typeof source.tabCleanupTopics === "object") add("tabCleanupTopics", "Tab Cleanup topics", normalizeTabCleanupTopics(source.tabCleanupTopics).topics.length);
+  if (source.tabCleanupEnrichment && typeof source.tabCleanupEnrichment === "object") add("tabCleanupEnrichment", "Tab Cleanup profile metadata", Object.keys(source.tabCleanupEnrichment.meta || {}).length);
+  if (Array.isArray(source.localChangeHistory)) add("localChangeHistory", "Recent QoL change history", source.localChangeHistory.length);
+  if (source.localMedia && typeof source.localMedia === "object") {
+    const audioCount = normalizeSoundscapeAudio(source.localMedia.soundscapeAudio).items.length;
+    const backgrounds = normalizeChatBackgroundMediaStore(source.localMedia.chatBackgroundMedia);
+    add("localMedia", "Local media", audioCount + (backgrounds.global ? 1 : 0) + Object.keys(backgrounds.chats || {}).length);
+  }
   return entries;
 }
 
@@ -13108,7 +13400,7 @@ function validateBackupObject(parsed) {
   const migration = migrateBackupPayload(parsed);
   const source = migration.payload;
   const entries = importCategoryEntries(source);
-  const known = new Set(["_qolBackup", "settings", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookBackups", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots"]);
+  const known = new Set(["_qolBackup", "settings", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"]);
   const warnings = Object.keys(source).filter(key => !known.has(key)).map(key => `Unknown top-level field: ${key}`);
   const meta = source._qolBackup && typeof source._qolBackup === "object" ? source._qolBackup : null;
   if (!meta) warnings.push("Legacy backup: no QoL backup metadata found (still importable after preview). ");
@@ -13142,10 +13434,8 @@ function importPreviewDetails(parsed, validation) {
     details.push(`Personas: ${personas.length} total · ${withText} with text · ${withAvatar} with local avatar data`);
   }
 
-  // Chat-background media intentionally remains device-local and is excluded
-  // from normal lightweight backup payloads because base64 images can dwarf
-  // the rest of the settings/data JSON.
-  details.push("Local chat-background image bytes are not included in normal backups");
+  if (parsed?.localMedia) details.push("Local media is included in this backup and may make the file much larger");
+  else details.push("Local soundscape audio and chat-background image bytes are not included unless Local media is selected");
   return details;
 }
 
@@ -13282,7 +13572,16 @@ async function importSettings() {
       SMART_FILTER_PINNED_KEY,
       BOT_EDITOR_DRAFT_HISTORY_KEY,
       CHAT_BOOKMARKS_KEY,
-      RECENTLY_SEEN_BOTS_KEY
+      RECENTLY_SEEN_BOTS_KEY,
+      CREATOR_BOT_WATCH_KEY,
+      CHATBOT_LOREBOOK_LINKS_KEY,
+      SOUNDSCAPES_KEY,
+      SOUNDSCAPE_AUDIO_KEY,
+      CHAT_BACKGROUNDS_KEY,
+      TAB_CLEANUP_SESSIONS_KEY,
+      TAB_CLEANUP_TOPICS_KEY,
+      TAB_CLEANUP_ENRICHMENT_KEY,
+      LOCAL_CHANGE_HISTORY_KEY
     ]);
     if (!currentRead.ok) throw new Error(currentRead.error || "Current QoL data could not be read safely");
     const current = currentRead.data;
@@ -13317,12 +13616,21 @@ async function importSettings() {
         !parsed.smartFilterPinnedPresets &&
         !parsed.botEditorDraftHistory &&
         !parsed.chatBookmarks &&
-        !parsed.recentlySeenBots);
+        !parsed.recentlySeenBots &&
+        !parsed.creatorBotWatch &&
+        !parsed.chatbotLorebookLinks &&
+        !parsed.soundscapes &&
+        !parsed.tabCleanupSessions &&
+        !parsed.tabCleanupTopics &&
+        !parsed.tabCleanupEnrichment &&
+        !parsed.localChangeHistory &&
+        !parsed.localMedia);
 
-    if (parsedLooksLikeSettings && hasImportScope("settings")) {
+    const selectedSettingsScopes = selectedSettingsScopesForImport(importScopes);
+    if (parsedLooksLikeSettings && selectedSettingsScopes.size) {
       payload.settings = mode === "replace"
-        ? replaceSettingsForImport(parsed.settings || parsed)
-        : mergeSettingsForImport(current.settings, parsed.settings || parsed);
+        ? replaceSettingsGroupsForImport(current.settings, parsed.settings || parsed, selectedSettingsScopes)
+        : mergeSettingsGroupsForImport(current.settings, parsed.settings || parsed, selectedSettingsScopes);
     }
 
     if (hasImportScope("opened") && Array.isArray(parsed.openedChats)) {
@@ -13368,6 +13676,20 @@ async function importSettings() {
       payload[FOLLOWED_CREATORS_KEY] = mode === "replace"
         ? normalizeCreatorStore(parsed.followedCreators)
         : mergeCreatorStores(current[FOLLOWED_CREATORS_KEY], parsed.followedCreators);
+    }
+
+    if (hasImportScope("creatorBotWatch") && parsed.creatorBotWatch && typeof parsed.creatorBotWatch === "object") {
+      const incoming = normalizeCreatorBotWatchState(parsed.creatorBotWatch);
+      if (mode === "replace") payload[CREATOR_BOT_WATCH_KEY] = incoming;
+      else {
+        const existing = normalizeCreatorBotWatchState(current[CREATOR_BOT_WATCH_KEY]);
+        payload[CREATOR_BOT_WATCH_KEY] = normalizeCreatorBotWatchState({
+          ...existing,
+          ...incoming,
+          creators: { ...(existing.creators || {}), ...(incoming.creators || {}) },
+          recent: [...(existing.recent || []), ...(incoming.recent || [])]
+        });
+      }
     }
 
     if (hasImportScope("favoriteBots") && parsed.favoriteBots && typeof parsed.favoriteBots === "object") {
@@ -13416,6 +13738,11 @@ async function importSettings() {
       payload[LOREBOOK_BACKUPS_KEY] = mode === "replace"
         ? normalizeLorebookBackups(parsed.lorebookBackups)
         : mergeLorebookBackups(current[LOREBOOK_BACKUPS_KEY], parsed.lorebookBackups);
+    }
+
+    if (hasImportScope("chatbotLorebookLinks") && parsed.chatbotLorebookLinks && typeof parsed.chatbotLorebookLinks === "object") {
+      const existing = current[CHATBOT_LOREBOOK_LINKS_KEY] && typeof current[CHATBOT_LOREBOOK_LINKS_KEY] === "object" ? current[CHATBOT_LOREBOOK_LINKS_KEY] : {};
+      payload[CHATBOT_LOREBOOK_LINKS_KEY] = mode === "replace" ? parsed.chatbotLorebookLinks : { ...existing, ...parsed.chatbotLorebookLinks };
     }
 
     if (hasImportScope("savedTextSnippets") && Array.isArray(parsed.savedTextSnippets)) {
@@ -13547,6 +13874,79 @@ async function importSettings() {
       payload[BOT_EDITOR_DRAFT_HISTORY_KEY] = mode === "replace"
         ? normalizeBotEditorDraftHistory(parsed.botEditorDraftHistory)
         : mergeBotEditorDraftHistory(current[BOT_EDITOR_DRAFT_HISTORY_KEY], parsed.botEditorDraftHistory);
+    }
+
+    if (hasImportScope("soundscapes") && parsed.soundscapes && typeof parsed.soundscapes === "object") {
+      if (mode === "replace") payload[SOUNDSCAPES_KEY] = normalizeSoundscapeScenes(parsed.soundscapes);
+      else {
+        const existing = normalizeSoundscapeScenes(current[SOUNDSCAPES_KEY]);
+        const incoming = normalizeSoundscapeScenes(parsed.soundscapes);
+        const byId = new Map(existing.scenes.map(scene => [String(scene.id || scene.name || ""), scene]));
+        for (const scene of incoming.scenes) byId.set(String(scene.id || scene.name || ""), scene);
+        payload[SOUNDSCAPES_KEY] = { ...existing, ...incoming, scenes: [...byId.values()] };
+      }
+    }
+
+    if (hasImportScope("tabCleanupSessions") && parsed.tabCleanupSessions && typeof parsed.tabCleanupSessions === "object") {
+      if (mode === "replace") payload[TAB_CLEANUP_SESSIONS_KEY] = normalizeTabCleanupSessions(parsed.tabCleanupSessions);
+      else {
+        const existing = normalizeTabCleanupSessions(current[TAB_CLEANUP_SESSIONS_KEY]);
+        const incoming = normalizeTabCleanupSessions(parsed.tabCleanupSessions);
+        const byId = new Map(existing.sessions.map(session => [String(session.id || session.createdAt || ""), session]));
+        for (const session of incoming.sessions) byId.set(String(session.id || session.createdAt || ""), session);
+        payload[TAB_CLEANUP_SESSIONS_KEY] = { version: 2, sessions: [...byId.values()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).slice(0, 40) };
+      }
+    }
+
+    if (hasImportScope("tabCleanupTopics") && parsed.tabCleanupTopics && typeof parsed.tabCleanupTopics === "object") {
+      if (mode === "replace") payload[TAB_CLEANUP_TOPICS_KEY] = normalizeTabCleanupTopics(parsed.tabCleanupTopics);
+      else {
+        const existing = normalizeTabCleanupTopics(current[TAB_CLEANUP_TOPICS_KEY]);
+        const incoming = normalizeTabCleanupTopics(parsed.tabCleanupTopics);
+        const byId = new Map(existing.topics.map(topic => [String(topic.id || topic.name || ""), topic]));
+        for (const topic of incoming.topics) byId.set(String(topic.id || topic.name || ""), topic);
+        payload[TAB_CLEANUP_TOPICS_KEY] = { version: 1, topics: [...byId.values()] };
+      }
+    }
+
+    if (hasImportScope("tabCleanupEnrichment") && parsed.tabCleanupEnrichment && typeof parsed.tabCleanupEnrichment === "object") {
+      const existing = current[TAB_CLEANUP_ENRICHMENT_KEY] && typeof current[TAB_CLEANUP_ENRICHMENT_KEY] === "object" ? current[TAB_CLEANUP_ENRICHMENT_KEY] : { meta: {} };
+      payload[TAB_CLEANUP_ENRICHMENT_KEY] = mode === "replace"
+        ? parsed.tabCleanupEnrichment
+        : { ...existing, ...parsed.tabCleanupEnrichment, meta: { ...(existing.meta || {}), ...(parsed.tabCleanupEnrichment.meta || {}) } };
+    }
+
+    if (hasImportScope("localChangeHistory") && Array.isArray(parsed.localChangeHistory)) {
+      if (mode === "replace") payload[LOCAL_CHANGE_HISTORY_KEY] = parsed.localChangeHistory.slice(0, 100);
+      else {
+        const existing = Array.isArray(current[LOCAL_CHANGE_HISTORY_KEY]) ? current[LOCAL_CHANGE_HISTORY_KEY] : [];
+        const byId = new Map();
+        for (const item of [...existing, ...parsed.localChangeHistory]) {
+          const key = String(item?.id || `${item?.at || ""}:${item?.label || ""}`);
+          if (key) byId.set(key, item);
+        }
+        payload[LOCAL_CHANGE_HISTORY_KEY] = [...byId.values()].sort((a, b) => Number(b?.at || 0) - Number(a?.at || 0)).slice(0, 100);
+      }
+    }
+
+    if (hasImportScope("localMedia") && parsed.localMedia && typeof parsed.localMedia === "object") {
+      const incomingAudio = normalizeSoundscapeAudio(parsed.localMedia.soundscapeAudio);
+      const incomingBackgrounds = normalizeChatBackgroundMediaStore(parsed.localMedia.chatBackgroundMedia);
+      if (mode === "replace") {
+        payload[SOUNDSCAPE_AUDIO_KEY] = incomingAudio;
+        payload[CHAT_BACKGROUNDS_KEY] = incomingBackgrounds;
+      } else {
+        const existingAudio = normalizeSoundscapeAudio(current[SOUNDSCAPE_AUDIO_KEY]);
+        const audioById = new Map(existingAudio.items.map(item => [String(item.id || item.name || ""), item]));
+        for (const item of incomingAudio.items) audioById.set(String(item.id || item.name || ""), item);
+        payload[SOUNDSCAPE_AUDIO_KEY] = { ...existingAudio, ...incomingAudio, items: [...audioById.values()] };
+
+        const existingBackgrounds = normalizeChatBackgroundMediaStore(current[CHAT_BACKGROUNDS_KEY]);
+        payload[CHAT_BACKGROUNDS_KEY] = {
+          global: incomingBackgrounds.global || existingBackgrounds.global || null,
+          chats: { ...(existingBackgrounds.chats || {}), ...(incomingBackgrounds.chats || {}) }
+        };
+      }
     }
 
     if (!Object.keys(payload).length) throw new Error("Nothing importable found");
@@ -14080,7 +14480,7 @@ async function collectDataHealth() {
   rows.push({ state: "ok", label: "Browser storage", detail: `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} used` : ""}.` });
 
   try {
-    const payload = buildExportPayload(new Set(BACKUP_SCOPE_IDS), result);
+    const payload = buildExportPayload(new Set(LIGHTWEIGHT_BACKUP_SCOPE_IDS), result);
     const roundTrip = JSON.parse(JSON.stringify(payload));
     const validation = validateBackupObject(roundTrip);
     rows.push({ state: validation.ok ? "ok" : "bad", label: "Backup schema", detail: validation.ok ? `Current local data produces a valid schema v${BACKUP_FORMAT_VERSION} backup.` : validation.warnings.join(" · ") });
@@ -14152,7 +14552,7 @@ async function runMigrationDryRun() {
   const host = $("controlHealthResults");
   try {
     const result = await readBackupSourceData();
-    const payload = buildExportPayload(new Set(BACKUP_SCOPE_IDS), result);
+    const payload = buildExportPayload(new Set(LIGHTWEIGHT_BACKUP_SCOPE_IDS), result);
     const serialized = JSON.stringify(payload);
     const parsed = JSON.parse(serialized);
     const validation = validateBackupObject(parsed);
@@ -14493,7 +14893,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
 
   const refill = context?.pageDiagnostics?.listingRefill;
   if (refill) {
-    diagnosticLines.push(`Listing refill: ${Number(refill.visible || 0)}/${Number(refill.target || settings.autoFillTargetCards || 50)} visible; ${Number(refill.hidden || 0)} hidden; ${Number(refill.pagesLoaded || 0)} helper pages; ${Number(refill.received || 0)} cards received; ${Number(refill.metadataExtracted || 0)} metadata records; ${Number(refill.tagsRestored || 0)} tag rows rebuilt; ${Number(refill.appended || 0)} added; ${Number(refill.duplicates || 0)} duplicates; ${Number(refill.helperFailures || 0)} helper failures; last page ${Number(refill.lastPage || 0) || "—"}; ${refill.running ? (refill.stopping ? "stopping" : "running") : (refill.paused ? "paused" : "idle")}${refill.lastError ? `; last error: ${refill.lastError}` : ""}`);
+    diagnosticLines.push(`Listing refill: ${Number(refill.visible || 0)}/${Number(refill.target || settings.autoFillTargetCards || 50)} visible; ${Number(refill.hidden || 0)} hidden; ${Number(refill.pagesLoaded || 0)} helper pages; ${Number(refill.received || 0)} cards received; ${Number(refill.metadataExtracted || 0)} metadata records; ${Number(refill.tagsRestored || 0)} tag rows rebuilt; ${Number(refill.appended || 0)} added; ${Number(refill.duplicates || 0)} duplicates; ${Number(refill.blockedRejected || 0)} blocked rejects (${Number(refill.blockedBotRejected || 0)} explicit bots, ${Number(refill.blockedCreatorRejected || 0)} creators, ${Number(refill.blockedTagRejected || 0)} tags, ${Number(refill.blockedWordRejected || 0)} words); ${Number(refill.languageRejected || 0)} language rejects; ${Number(refill.smartFilterRejected || 0)} Smart Filter rejects; ${Number(refill.helperFailures || 0)} helper failures; ${Number(refill.helperReuses || 0)} helper reuses; ${Number(refill.helperRecoveries || 0)} helper recoveries; ${Number(refill.helperGcClosed || 0)} stale helper tabs closed; last page ${Number(refill.lastPage || 0) || "—"}; ${refill.running ? (refill.stopping ? "stopping" : "running") : (refill.paused ? "paused" : "idle")}${refill.lastError ? `; last error: ${refill.lastError}` : ""}`);
   }
 
   if (settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.performance)) {
@@ -15299,7 +15699,7 @@ function featureRegistryState(entry) {
 }
 
 function featureChronologyParts(entry) {
-  const raw = String(entry?.added || "").trim();
+  const raw = String(entry?.updated || entry?.added || "").trim();
   if (!raw) return [0, 0, 0, 0, 0];
   const parts = raw.split(".").map(value => Number(value) || 0);
   const major = parts[0] || 0;
@@ -15415,7 +15815,18 @@ function setupFeaturesIndex() {
     }
 
     const groups = [];
-    for (const groupName of categories) {
+    const mode = sortMode?.value || "oldest";
+    const groupedCategories = [...categories];
+    if (mode === "newest" || mode === "oldest") {
+      const firstPosition = new Map();
+      ordered.forEach((entry, index) => {
+        if (!firstPosition.has(entry.category)) firstPosition.set(entry.category, index);
+      });
+      groupedCategories.sort((left, right) => (firstPosition.get(left) ?? Number.MAX_SAFE_INTEGER) - (firstPosition.get(right) ?? Number.MAX_SAFE_INTEGER));
+    } else if (mode === "name") {
+      groupedCategories.sort((left, right) => String(left).localeCompare(String(right), undefined, { sensitivity: "base" }));
+    }
+    for (const groupName of groupedCategories) {
       const groupEntries = ordered.filter(entry => entry.category === groupName);
       if (!groupEntries.length) continue;
       const section = makeElement("details", { className: "feature-index-group", attrs: { open: "" } });
@@ -15501,6 +15912,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "reduceAnimatedBotImages", name: "Animated bot images", children: ["animatedImagesListings", "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"] },
   { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols"] },
   { parent: "autoFillListings", name: "Listing refill", children: ["showListingRefillButton"] },
+  { parent: "showListingFilterStats", name: "Listing filter stats", children: ["showListingFilterStatsDetails"] },
   { parent: "showRandomChatButton", name: "Random Chat", children: ["randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites"] },
   { parent: "showChatTopBarTools", name: "Chat top-bar tools", children: ["chatTopBarInlineCreator", "hideChatTopBarRatingButton", "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell", "hideChatDropdownMemoryItem"] },
   { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview"] },
@@ -15994,6 +16406,7 @@ $("soundscapeAddScene")?.addEventListener("click", async () => {
 });
 $("clearOpened")?.addEventListener("click", clearOpened);
 $("exportSettings")?.addEventListener("click", exportSettings);
+$("selectActiveUsedExportScopes")?.addEventListener("click", () => selectActiveUsedExportScopes());
 $("selectAllExportScopes")?.addEventListener("click", () => document.querySelectorAll("[data-export-scope]").forEach(input => { input.checked = true; }));
 $("clearExportScopes")?.addEventListener("click", () => document.querySelectorAll("[data-export-scope]").forEach(input => { input.checked = false; }));
 $("validateImport")?.addEventListener("click", validateImportBackup);
@@ -16022,6 +16435,20 @@ $("undoLastLocalChange")?.addEventListener("click", undoLatestLocalChange);
 $("clearLocalChangeHistory")?.addEventListener("click", clearLocalChangeHistoryFromOptions);
 $("cleanLocalData")?.addEventListener("click", cleanLocalData);
 $("copyAllSupportInfo")?.addEventListener("click", copyAllSupportInfo);
+function applyOptionsLayoutPreferences(settings = null) {
+  const source = settings || {
+    settingsNavigationStyle: value("settingsNavigationStyle", "classic"),
+    settingsContentLayout: value("settingsContentLayout", "single"),
+    settingsPageWidth: value("settingsPageWidth", "comfortable")
+  };
+  const nav = ["classic", "grouped"].includes(source.settingsNavigationStyle) ? source.settingsNavigationStyle : "classic";
+  const layout = ["single", "adaptive"].includes(source.settingsContentLayout) ? source.settingsContentLayout : "single";
+  const width = ["comfortable", "wide"].includes(source.settingsPageWidth) ? source.settingsPageWidth : "comfortable";
+  document.body.classList.toggle("ds-options-nav-grouped", nav === "grouped");
+  document.body.classList.toggle("ds-options-layout-adaptive", layout === "adaptive");
+  document.body.classList.toggle("ds-options-width-wide", width === "wide");
+}
+
 $("downloadAllSupportInfo")?.addEventListener("click", downloadAllSupportInfo);
 $("copyDiagnostics")?.addEventListener("click", copyDiagnostics);
 $("downloadDiagnostics")?.addEventListener("click", downloadDiagnostics);
@@ -16031,6 +16458,9 @@ $("runPerformanceSelfCheck")?.addEventListener("click", runPerformanceSelfCheck)
 $("downloadPerformanceSelfCheck")?.addEventListener("click", downloadPerformanceSelfCheck);
 $("resetPerformanceCounters")?.addEventListener("click", resetPerformanceCounters);
 $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerformancePreferences({ reduceOptionsAnimations: checked("reduceOptionsAnimations") }));
+["settingsNavigationStyle", "settingsContentLayout", "settingsPageWidth"].forEach(id => {
+  $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());
+});
 $("qolInterfaceScale")?.addEventListener("change", () => applyOptionsAccessibilityPreview({ qolInterfaceScale: Number(value("qolInterfaceScale", "100")) || 100 }));
 $("collapseAllSettingsSections")?.addEventListener("click", () => setAllSettingsSectionsCollapsed(true));
 $("expandAllSettingsSections")?.addEventListener("click", () => setAllSettingsSectionsCollapsed(false));
@@ -16073,7 +16503,7 @@ function reorderOptionsUi() {
     "features", "advanced", "android", "changelog", "help"
   ];
   const tabs = document.querySelector("nav.tabs");
-  if (tabs) {
+  if (tabs && !tabs.querySelector(".tab-group")) {
     tabOrder.forEach(name => {
       const button = tabs.querySelector(`.tab-button[data-tab="${name}"]`);
       if (button) tabs.appendChild(button);
@@ -16081,13 +16511,17 @@ function reorderOptionsUi() {
   }
 
   const cardOrders = {
-    general: ["Extension", "SpicyChat beta / experimental access", "Settings layout", "SpicyChat NSFW switch", "Quick setup", "S.AI Toolkit compatibility", "Android app settings"],
-    saved: ["Favorite bots", "Later bots", "Favorite creators", "Followed creators", "Saved Bots Hub", "Bot Organizer", "Bot Status Center"],
-    writing: ["OOC presets", "Composer and draft helpers", "Model quick menu", "Saved Text / Snippets", "Reply Instructions", "Translation (DeepL)", "Generation profiles", "Timestamps and generation details"],
-    "personas-memory": ["Memory manager", "Persona helpers", "Context Keeper", "Chat Nudges"],
-    "bot-tools": ["Creation helpers", "My Creations filters", "Bot editor snippets", "Bot tags in chats", "Creation audit", "Bot & Lorebook backups", "Backup manager"],
-    blocking: ["Card filters", "Blocked bots", "Not interested", "Tag defaults", "Favorite protection", "Smart filter presets", "Recommendation helpers", "Card / discovery workflow", "Listing refill", "Language filter", "Text normalization"],
-    data: ["Backup and restore", "Recently changed / Undo", "Local storage & recovery", "What's New notification", "Settings check", "Debug"]
+    general: ["Extension", "Quick setup", "Settings layout", "SpicyChat beta / experimental access", "S.AI Toolkit compatibility", "Android app settings", "SpicyChat NSFW switch"],
+    control: ["Command Palette", "Data health & storage", "Creator Workspace", "Performance & support"],
+    blocking: ["Tag defaults", "Bot Blocking & Dislikes", "Blocked bots manager", "Not interested", "Card filters", "Language filter", "Text normalization", "Local tag aliases / emoji", "Favorite protection", "Smart filter presets", "Recommendation helpers", "Card / discovery workflow", "Listing refill"],
+    saved: ["Saved Bots Hub", "Favorite bots", "Later bots", "Favorite creators", "Followed creators", "Bot Organizer", "Bot Status Center"],
+    writing: ["Composer and draft helpers", "OOC presets", "Reply Instructions", "Saved Text / Snippets", "Model quick menu", "Generation profiles", "Timestamps and generation details", "Translation (DeepL)"],
+    "personas-memory": ["Persona helpers", "Memory manager", "Context Keeper", "Global Memory / Baseline Notes", "Internal Day Tracker", "RP State Tracker", "Chat Nudges"],
+    "chat-ui": ["Chat top bar", "Character shortcuts", "Message options", "Search inside current chat", "Message bookmarks / multiple local pins", "Scroll navigation", "Chat export", "Native rating helpers", "Chat text replacements", "Focus / Immersive Mode"],
+    "bot-tools": ["Creation helpers", "Bot editor snippets", "My Creations filters", "Creator Writing Assistant", "Creation audit", "Bot & Lorebook backups", "Backup manager", "Bot / profile export", "Bot tags in chats"],
+    appearance: ["Accessibility & text size", "Mini panel", "Panel size", "Panel items", "Layout preview", "Top bar cleanup", "Avatar name", "Sidebar cleanup", "Premium & promo cleanup", "Chat bubble customization", "Custom chat backgrounds", "RP Format Repair", "Alternate dialogue styling", "Soundscapes / Ambience", "Animated bot images"],
+    browser: ["Extension popup", "Notifications", "Inactive tab cleanup (Auto-AFK)", "Duplicate SpicyChat tab guard", "Tab cleanup & session analysis"],
+    data: ["Backup and restore", "Local storage & recovery", "Recently changed / Undo", "Personal usage & context", "What's New notification", "Settings check", "Debug"]
   };
 
   for (const [pageName, headings] of Object.entries(cardOrders)) {

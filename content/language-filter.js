@@ -36,7 +36,7 @@
   const LATIN_WORDS = {
     en: ["the","and","you","your","with","for","from","this","that","are","was","have","has","they","their","about","into","would","could","should","when","where"],
     de: ["der","die","das","und","ist","nicht","mit","für","ich","du","sie","wir","ein","eine","auf","aus","dem","den","aber","auch","oder","wenn"],
-    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","quiero","quieres","puede","puedo","puedes","tengo","tienes","dormir","contigo","conmigo","temo","miedo","oscuridad","porque","porqué","siempre","nunca","solo","sola"],
+    es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","quiero","quieres","puede","puedo","puedes","tengo","tienes","dormir","contigo","conmigo","temo","miedo","oscuridad","porque","porqué","siempre","nunca","solo","sola","corrupción","corrupcion","femenina","femenino","novio","novia","ciudad","chico","chica","hacia","desde","vida","amor"],
     fr: ["le","la","les","des","une","un","avec","pour","dans","est","vous","tu","elle","il","mais","comme","quand","où","sur","pas","son"],
     it: ["il","lo","la","gli","le","una","uno","con","per","che","sei","è","sono","ma","come","quando","dove","non","suo","sua","nel"],
     pt: ["o","a","os","as","uma","um","com","para","que","você","voce","está","esta","não","nao","mas","como","quando","onde","seu","sua"],
@@ -439,23 +439,42 @@
     const title = getCardTitle(card);
     const explicit = explicitLanguageCode(card);
     const localDetected = detectLikelyLanguage(description);
-    const titleDetected = localDetected.code ? { code: "", confidence: 0 } : detectSentenceLikeTitleLanguage(title);
+    // A confidently sentence-like title is independent language evidence.
+    // Do not suppress it just because the description was detected first: a
+    // Spanish title plus an English description still contains Spanish content
+    // and should respect an English/German-only (or Spanish-excluded) filter.
+    const titleDetected = detectSentenceLikeTitleLanguage(title);
     const id = cardBotId(card);
-    if (id && localDetected.code && !explicit) cacheLanguage(id, localDetected.code, "description");
-    else if (id && titleDetected.code && !explicit) cacheLanguage(id, titleDetected.code, "title");
+    if (id && !explicit) {
+      if (titleDetected.code) cacheLanguage(id, titleDetected.code, "title");
+      else if (localDetected.code) cacheLanguage(id, localDetected.code, "description");
+    }
     const cachedCode = id ? languageCache.get(id)?.code || "" : "";
-    const code = explicit || localDetected.code || titleDetected.code || cachedCode;
+    const currentEvidence = [
+      explicit ? { code: explicit, source: "tag" } : null,
+      titleDetected.code ? { code: titleDetected.code, source: "title" } : null,
+      localDetected.code ? { code: localDetected.code, source: "description" } : null
+    ].filter(Boolean);
+    // Cached profile/title inference is fallback evidence only. If the creator
+    // later edits the bot and the current card now gives us confident language
+    // evidence, do not let an older cached language override the live content.
+    const hiddenEvidence = currentEvidence.find(item => selectedLanguageShouldHide(item.code, allowed))
+      || (!currentEvidence.length && cachedCode && selectedLanguageShouldHide(cachedCode, allowed)
+        ? { code: cachedCode, source: "cache" }
+        : null);
+    const code = hiddenEvidence?.code || explicit || titleDetected.code || localDetected.code || cachedCode;
     let reason = "";
-    if (code && selectedLanguageShouldHide(code, allowed)) {
+    if (hiddenEvidence) {
       const modeLabel = getLanguageSelectionMode() === "exclude" ? "excluded" : "outside selected languages";
-      reason = `language: likely ${LANGUAGE_NAMES[code] || code}${explicit ? " tag" : " (QoL detected)"} · ${modeLabel}`;
+      const sourceLabel = hiddenEvidence.source === "tag" ? " tag" : hiddenEvidence.source === "title" ? " title" : hiddenEvidence.source === "description" ? " description" : " (QoL detected)";
+      reason = `language: likely ${LANGUAGE_NAMES[hiddenEvidence.code] || hiddenEvidence.code}${sourceLabel} · ${modeLabel}`;
     }
 
     if (!explicit && !localDetected.code && !titleDetected.code && !cachedCode) {
       ensureLanguageCacheLoaded().then(() => DS.scheduleRun?.()).catch(() => {});
       queueLanguageProfileCheck(card);
     }
-    applyDetectedLanguageBadge(card, !explicit ? (localDetected.code || titleDetected.code || cachedCode) : "");
+    applyDetectedLanguageBadge(card, !explicit ? (titleDetected.code || localDetected.code || cachedCode) : "");
 
     if (card?.dataset) {
       card.dataset.dsLanguageDescriptionPresent = description ? "1" : "0";

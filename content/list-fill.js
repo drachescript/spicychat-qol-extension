@@ -8,7 +8,10 @@
   const EXTRA_CARD_ATTR = "data-ds-autofill-extra";
   const REFILL_FAVORITE_CLASS = "ds-refill-favorite-button";
   const REFILL_FAVORITE_FRAME_ID = "ds-listing-refill-favorite-frame";
+  const LISTING_FILTER_STATS_CLASS = "ds-listing-filter-stats";
   const MAX_SERIALIZED_CARD_HTML = 500000;
+  const REFILL_CANDIDATE_CACHE_TTL_MS = 20 * 60 * 1000;
+  const REFILL_CANDIDATE_CACHE_MAX = 600;
   let refillFavoriteFrame = null;
   let refillFavoriteFrameUrl = "";
   let refillFavoriteFrameLoad = null;
@@ -44,12 +47,28 @@
       duplicates: 0,
       filtered: 0,
       blockedRejected: 0,
+      blockedBotRejected: 0,
+      blockedCreatorRejected: 0,
+      blockedWordRejected: 0,
+      blockedTagRejected: 0,
+      languageRejected: 0,
+      openedRejected: 0,
+      laterRejected: 0,
+      notInterestedRejected: 0,
+      otherRejected: 0,
       filterRejected: 0,
       smartFilterRejected: 0,
       postInsertRejected: 0,
       pagesWithNoSurvivors: 0,
       helperFailures: 0,
       helperReuses: 0,
+      helperRecoveries: 0,
+      helperGcClosed: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      cacheCandidatesStored: 0,
+      cacheCandidatesUsed: 0,
+      cacheCandidatesExpired: 0,
       metadataExtracted: 0,
       tagsRestored: 0,
       staleResponses: 0,
@@ -894,12 +913,152 @@
     return /^(?:blocked bot(?: id)?|blocked word|blocked tag|blocked creator):?/i.test(String(reason || ""));
   }
 
+  function rejectionBucket(reason, kind = "") {
+    const value = String(reason || "").toLowerCase();
+    if (/^blocked bot(?: id)?:/.test(value)) return "blockedBotRejected";
+    if (/^blocked creator:/.test(value)) return "blockedCreatorRejected";
+    if (/^blocked word:/.test(value)) return "blockedWordRejected";
+    if (/^blocked tag:/.test(value) || /excluded tag|missing included tag/.test(value)) return "blockedTagRejected";
+    if (/^language:/.test(value)) return "languageRejected";
+    if (/opened chat/.test(value)) return "openedRejected";
+    if (/saved for later/.test(value)) return "laterRejected";
+    if (/not interested/.test(value)) return "notInterestedRejected";
+    if (kind === "smart") return "smartFilterRejected";
+    return "otherRejected";
+  }
+
   function noteRefillRejection(stats, kind, reason) {
     stats.filtered = Number(stats.filtered || 0) + 1;
     stats.lastRejectReason = String(reason || kind || "filtered");
     if (kind === "blocked") stats.blockedRejected = Number(stats.blockedRejected || 0) + 1;
     else stats.filterRejected = Number(stats.filterRejected || 0) + 1;
     if (kind === "smart") stats.smartFilterRejected = Number(stats.smartFilterRejected || 0) + 1;
+    const bucket = rejectionBucket(reason, kind);
+    if (bucket !== "smartFilterRejected") stats[bucket] = Number(stats[bucket] || 0) + 1;
+  }
+
+  function classifyLiveHiddenReason(reason) {
+    return rejectionBucket(String(reason || "").replace(/^card:/i, "").trim());
+  }
+
+  function liveListingFilterCounts() {
+    const out = {
+      total: 0, blockedBotRejected: 0, blockedCreatorRejected: 0, blockedWordRejected: 0,
+      blockedTagRejected: 0, languageRejected: 0, openedRejected: 0, laterRejected: 0,
+      notInterestedRejected: 0, smartFilterRejected: 0, otherRejected: 0
+    };
+    const seen = new Set();
+    for (const target of document.querySelectorAll("[data-ds-hidden='1'], .ds-smart-filter-hidden")) {
+      if (target.closest?.("#ds-qol-panel")) continue;
+      const link = target.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+      if (!link) continue;
+      const id = botIdFromLink(link);
+      const key = id || target;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.total += 1;
+      if (target.classList?.contains("ds-smart-filter-hidden") && !target.dataset?.dsReason) {
+        out.smartFilterRejected += 1;
+        continue;
+      }
+      const bucket = classifyLiveHiddenReason(target.dataset?.dsReason || "");
+      out[bucket] = Number(out[bucket] || 0) + 1;
+    }
+    return out;
+  }
+
+  function removeListingFilterStats() {
+    document.querySelectorAll(`.${LISTING_FILTER_STATS_CLASS}`).forEach(node => node.remove());
+  }
+
+  function updateListingFilterStats() {
+    const settings = DS.state?.settings || {};
+    if (LISTING_REFILL_WORKER || !settings.enabled || !settings.showListingFilterStats) {
+      removeListingFilterStats();
+      return;
+    }
+    const nativeText = document.querySelector("[data-testid='search-stats'] .ais-Stats-text, .ais-Stats .ais-Stats-text");
+    if (!nativeText?.parentElement) { removeListingFilterStats(); return; }
+    let badge = nativeText.parentElement.querySelector(`:scope > .${LISTING_FILTER_STATS_CLASS}`);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = LISTING_FILTER_STATS_CLASS;
+      badge.dataset.dsOwned = "1";
+      badge.dataset.dsOwner = "qol";
+      badge.dataset.dsFeature = "listing-refill-stats";
+      nativeText.insertAdjacentElement("afterend", badge);
+    }
+    const live = liveListingFilterCounts();
+    const stats = runStats();
+    const total = live.total + Number(stats.filtered || 0);
+    let text = ` · QoL: ${total} bot${total === 1 ? "" : "s"} blocked/filtered`;
+    if (settings.showListingFilterStatsDetails) {
+      const sum = key => Number(live[key] || 0) + Number(stats[key] || 0);
+      const bots = sum("blockedBotRejected");
+      const creators = sum("blockedCreatorRejected");
+      const tagsWords = sum("blockedTagRejected") + sum("blockedWordRejected");
+      const language = sum("languageRejected");
+      const savedOpened = sum("openedRejected") + sum("laterRejected") + sum("notInterestedRejected");
+      const smartOther = sum("smartFilterRejected") + sum("otherRejected");
+      const parts = [
+        bots ? `${bots} blocked bot${bots === 1 ? "" : "s"}` : "",
+        creators ? `${creators} creator${creators === 1 ? "" : "s"}` : "",
+        tagsWords ? `${tagsWords} tag/word` : "",
+        language ? `${language} language` : "",
+        savedOpened ? `${savedOpened} opened/saved` : "",
+        smartOther ? `${smartOther} other` : ""
+      ].filter(Boolean);
+      if (parts.length) text += ` (${parts.join(", ")})`;
+    }
+    if (badge.textContent !== text) badge.textContent = text;
+    badge.title = "QoL-hidden cards currently on this listing plus Listing Refill candidates rejected before insertion.";
+  }
+
+  DS.updateListingFilterStats = updateListingFilterStats;
+
+  function refillDiagSnapshot(stats = runStats()) {
+    return {
+      received: Number(stats.received || 0), appended: Number(stats.appended || 0), duplicates: Number(stats.duplicates || 0),
+      blockedRejected: Number(stats.blockedRejected || 0), blockedBotRejected: Number(stats.blockedBotRejected || 0),
+      blockedCreatorRejected: Number(stats.blockedCreatorRejected || 0), blockedWordRejected: Number(stats.blockedWordRejected || 0),
+      blockedTagRejected: Number(stats.blockedTagRejected || 0), languageRejected: Number(stats.languageRejected || 0),
+      filterRejected: Number(stats.filterRejected || 0), smartFilterRejected: Number(stats.smartFilterRejected || 0),
+      nativeRejected: Number(stats.nativeRejected || 0), postInsertRejected: Number(stats.postInsertRejected || 0),
+      staleResponses: Number(stats.staleResponses || 0), helperFailures: Number(stats.helperFailures || 0),
+      helperReuses: Number(stats.helperReuses || 0), helperRecoveries: Number(stats.helperRecoveries || 0),
+      helperGcClosed: Number(stats.helperGcClosed || 0), cacheHits: Number(stats.cacheHits || 0),
+      cacheMisses: Number(stats.cacheMisses || 0), cacheCandidatesStored: Number(stats.cacheCandidatesStored || 0),
+      cacheCandidatesUsed: Number(stats.cacheCandidatesUsed || 0), cacheCandidatesExpired: Number(stats.cacheCandidatesExpired || 0),
+      domNodesCreated: Number(stats.domNodesCreated || 0), visibleAfter: Number(stats.visibleAfter || 0)
+    };
+  }
+
+  function emitListingRefillDiagnostic(page, before, outcome = "ok", error = "") {
+    const after = refillDiagSnapshot();
+    const delta = key => Math.max(0, Number(after[key] || 0) - Number(before?.[key] || 0));
+    const received = delta("received");
+    const inserted = delta("appended");
+    const duplicatesRejected = delta("duplicates");
+    const blockedRejected = delta("blockedRejected");
+    const tagRejected = delta("blockedTagRejected");
+    const filteredRejected = delta("filterRejected");
+    const token = DS.diagOperationStart?.("listing-refill", "listing-refill", {
+      page: Number(page || 0), outcome, received, inserted, blockedRejected, tagRejected,
+      languageRejected: delta("languageRejected"), smartFilterRejected: delta("smartFilterRejected"),
+      duplicatesRejected, postInsertRejected: delta("postInsertRejected"), helperReuses: delta("helperReuses"),
+      helperRecoveries: delta("helperRecoveries"), helperGcClosed: delta("helperGcClosed"),
+      cacheHits: delta("cacheHits"), cacheMisses: delta("cacheMisses"),
+      cacheCandidatesStored: delta("cacheCandidatesStored"), cacheCandidatesUsed: delta("cacheCandidatesUsed"),
+      visibleAfter: Number(after.visibleAfter || visibleCardCount()), error: error ? String(error).slice(0, 120) : ""
+    });
+    DS.diagOperationEnd?.(token, {
+      outcome,
+      counts: {
+        scanned: received, changed: inserted,
+        skipped: blockedRejected + filteredRejected + duplicatesRejected,
+        errors: outcome === "error" ? 1 : 0
+      }
+    });
   }
 
   function preflightRefillCard(wrapper, link, meta, nativeRules) {
@@ -922,7 +1081,213 @@
     return null;
   }
 
+  function refillCandidateCacheStore() {
+    if (!(DS.state.listingRefillCandidateCache instanceof Map)) {
+      DS.state.listingRefillCandidateCache = new Map();
+    }
+    return DS.state.listingRefillCandidateCache;
+  }
+
+  function pruneRefillCandidateCache(now = Date.now()) {
+    const store = refillCandidateCacheStore();
+    const stats = runStats();
+    let expired = 0;
+    for (const [signature, bucket] of store.entries()) {
+      const candidates = Array.isArray(bucket?.candidates) ? bucket.candidates : [];
+      const fresh = candidates.filter(item => now - Number(item?.savedAt || 0) < REFILL_CANDIDATE_CACHE_TTL_MS);
+      expired += Math.max(0, candidates.length - fresh.length);
+      if (!fresh.length) store.delete(signature);
+      else if (fresh.length !== candidates.length) store.set(signature, { ...bucket, candidates: fresh, updatedAt: now });
+    }
+    if (expired) stats.cacheCandidatesExpired = Number(stats.cacheCandidatesExpired || 0) + expired;
+
+    let total = 0;
+    const ordered = [...store.entries()].sort((a, b) => Number(a[1]?.updatedAt || 0) - Number(b[1]?.updatedAt || 0));
+    for (const [, bucket] of ordered) total += Array.isArray(bucket?.candidates) ? bucket.candidates.length : 0;
+    while (total > REFILL_CANDIDATE_CACHE_MAX && ordered.length) {
+      const [signature, bucket] = ordered.shift();
+      const count = Array.isArray(bucket?.candidates) ? bucket.candidates.length : 0;
+      store.delete(signature);
+      total -= count;
+      stats.cacheCandidatesExpired = Number(stats.cacheCandidatesExpired || 0) + count;
+    }
+    return store;
+  }
+
+  function cacheRefillCandidates(signature, page, baseUrl, payloads) {
+    const rows = (Array.isArray(payloads) ? payloads : [])
+      .filter(item => item?.html)
+      .map(item => ({
+        html: item.html,
+        meta: item.meta || null,
+        page: Number(page) || 0,
+        baseUrl: String(baseUrl || ""),
+        savedAt: Date.now()
+      }));
+    if (!signature || !rows.length) return 0;
+
+    const store = pruneRefillCandidateCache();
+    const bucket = store.get(signature) || { candidates: [], updatedAt: 0 };
+    bucket.candidates.push(...rows);
+    bucket.updatedAt = Date.now();
+    if (bucket.candidates.length > REFILL_CANDIDATE_CACHE_MAX) {
+      bucket.candidates.splice(0, bucket.candidates.length - REFILL_CANDIDATE_CACHE_MAX);
+    }
+    store.set(signature, bucket);
+
+    const stats = runStats();
+    stats.cacheCandidatesStored = Number(stats.cacheCandidatesStored || 0) + rows.length;
+    return rows.length;
+  }
+
+  async function appendCachedRefillCandidates() {
+    const signature = canonicalListingSignature(location.href);
+    const store = pruneRefillCandidateCache();
+    const bucket = store.get(signature);
+    const stats = runStats();
+    if (!bucket?.candidates?.length) {
+      stats.cacheMisses = Number(stats.cacheMisses || 0) + 1;
+      return 0;
+    }
+
+    stats.cacheHits = Number(stats.cacheHits || 0) + 1;
+    const target = Math.max(1, Math.min(200, Number(DS.state.settings?.autoFillTargetCards || 50)));
+    const slots = Math.max(0, target - visibleCardCount());
+    if (!slots) return 0;
+
+    const host = extraGrid();
+    if (!host) return 0;
+
+    const known = currentBotIds();
+    const rejectedIds = DS.state.autoFillRejectedBotIds instanceof Set
+      ? DS.state.autoFillRejectedBotIds
+      : (DS.state.autoFillRejectedBotIds = new Set());
+    const requestTagRules = currentNativeTagRules();
+    const inserted = [];
+    let appended = 0;
+    let scanned = 0;
+
+    while (bucket.candidates.length && appended < slots) {
+      const payload = bucket.candidates.shift();
+      scanned += 1;
+      if (!payload?.html) continue;
+      if (Date.now() - Number(payload.savedAt || 0) >= REFILL_CANDIDATE_CACHE_TTL_MS) {
+        stats.cacheCandidatesExpired = Number(stats.cacheCandidatesExpired || 0) + 1;
+        continue;
+      }
+
+      const wrapper = wrapperFromHtml(payload.html);
+      if (!wrapper) continue;
+      const meta = payload.meta || extractCardMetadata(wrapper, payload.baseUrl || location.href);
+      stripWorkerArtifacts(wrapper);
+
+      const link = wrapper.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
+      const id = botIdFromLink(link);
+      if (!id) continue;
+      if (known.has(id) || rejectedIds.has(id)) {
+        stats.duplicates = Number(stats.duplicates || 0) + 1;
+        continue;
+      }
+
+      const rejection = preflightRefillCard(wrapper, link, meta, requestTagRules);
+      if (rejection) {
+        rejectedIds.add(id);
+        if (rejection.kind === "native") {
+          stats.nativeRejected = Number(stats.nativeRejected || 0) + 1;
+          noteRefillRejection(stats, "filter", rejection.reason);
+        } else {
+          noteRefillRejection(stats, rejection.kind, rejection.reason);
+        }
+        continue;
+      }
+
+      known.add(id);
+      const clone = document.importNode(wrapper, true);
+      clone.setAttribute(EXTRA_CARD_ATTR, "1");
+      clone.classList.add("ds-autofill-extra-card");
+      clone.dataset.dsAutofillPage = String(payload.page || 0);
+      clone.dataset.dsAutofillSignature = signature;
+      normalizeCloneUrls(clone, payload.baseUrl || location.href);
+
+      const favoriteButton = findFavoriteActionButton(clone);
+      clone.querySelectorAll("button").forEach(button => {
+        if (button === favoriteButton || isNativeTagPillButton(button)) return;
+        button.remove();
+      });
+      stats.tagsRestored += ensureTagPillsFromMetadata(clone, meta);
+      clone.querySelectorAll("svg.lucide-ellipsis-vertical").forEach(svg => {
+        const shell = svg.closest("div.relative");
+        if (shell && !shell.querySelector("a[href]") && !shell.querySelector("button")) shell.remove();
+        else svg.remove();
+      });
+      wireRefillFavoriteButton(clone, id, payload.baseUrl || location.href);
+
+      stats.domNodesCreated = Number(stats.domNodesCreated || 0) + 1 + clone.querySelectorAll("*").length;
+      host.appendChild(clone);
+      inserted.push(clone);
+      appended += 1;
+      stats.appended = Number(stats.appended || 0) + 1;
+      stats.cacheCandidatesUsed = Number(stats.cacheCandidatesUsed || 0) + 1;
+    }
+
+    bucket.updatedAt = Date.now();
+    if (!bucket.candidates.length) store.delete(signature);
+    else store.set(signature, bucket);
+
+    if (!appended) {
+      DS.runtimeLog?.("info", "listing-refill", "Cached refill candidates had no usable survivors", {
+        scanned,
+        remaining: bucket.candidates.length
+      });
+      return 0;
+    }
+
+    DS.bumpDomRevision?.();
+    await DS.applyCardHiding?.({ force: true });
+    await DS.applySmartFilterPresets?.();
+
+    let postRejected = 0;
+    for (const clone of inserted) {
+      if (!clone?.isConnected) continue;
+      const rejected = clone.dataset.dsHidden === "1" ||
+        clone.classList.contains("ds-hidden") ||
+        clone.classList.contains("ds-smart-filter-hidden");
+      if (!rejected) continue;
+      const reason = clone.dataset.dsReason || "post-insert safety filter";
+      clone.remove();
+      postRejected += 1;
+      stats.postInsertRejected = Number(stats.postInsertRejected || 0) + 1;
+      noteRefillRejection(stats, hardBlockRefillReason(reason) ? "blocked" : "filter", reason);
+    }
+
+    if (postRejected) {
+      appended = Math.max(0, appended - postRejected);
+      stats.appended = Math.max(0, Number(stats.appended || 0) - postRejected);
+      DS.bumpDomRevision?.();
+    }
+
+    stats.visibleAfter = visibleCardCount();
+    DS.applyCardBlockButtons?.();
+    DS.updateLaterBotButtons?.();
+    DS.updateCreatorFavoriteButtons?.();
+    await DS.applyCardWorkflow?.();
+    DS.applyCardDisplayNormalization?.();
+    DS.updateQuickPanel?.();
+
+    DS.runtimeLog?.("info", "listing-refill", "Reused cached refill candidates", {
+      scanned,
+      appended,
+      remaining: bucket.candidates.length,
+      signature
+    });
+    return appended;
+  }
+
   async function appendNextPaginationPage(page) {
+    const diagBefore = refillDiagSnapshot();
+    let diagOutcome = "ok";
+    let diagError = "";
+    try {
     const requestSourceUrl = location.href;
     const requestSignature = canonicalListingSignature(requestSourceUrl);
     const requestTagRules = nativeTagRulesFromUrl(requestSourceUrl);
@@ -939,6 +1304,8 @@
 
     const stats = runStats();
     if (response?.reused) stats.helperReuses = Number(stats.helperReuses || 0) + 1;
+    if (response?.recovered) stats.helperRecoveries = Number(stats.helperRecoveries || 0) + 1;
+    if (Number(response?.gcClosed || 0) > 0) stats.helperGcClosed = Number(stats.helperGcClosed || 0) + Number(response.gcClosed || 0);
 
     const currentSignature = canonicalListingSignature(location.href);
     if (requestSignature !== currentSignature) {
@@ -960,7 +1327,7 @@
       .map(item => typeof item === "string" ? { html: item, meta: null } : { html: item?.html || "", meta: item?.meta || null })
       .filter(item => item.html);
     const wrappers = payloads
-      .map(item => ({ wrapper: wrapperFromHtml(item.html), meta: item.meta }))
+      .map(item => ({ wrapper: wrapperFromHtml(item.html), meta: item.meta, html: item.html }))
       .filter(item => item.wrapper);
 
     stats.pages += 1;
@@ -979,7 +1346,10 @@
 
     const target = Math.max(1, Math.min(200, Number(DS.state.settings?.autoFillTargetCards || 50)));
     const slots = Math.max(0, target - visibleCardCount());
-    if (!slots) return 0;
+    if (!slots) {
+      cacheRefillCandidates(requestSignature, page, response.baseUrl || url, payloads);
+      return 0;
+    }
 
     const known = currentBotIds();
     const rejectedIds = DS.state.autoFillRejectedBotIds instanceof Set
@@ -988,8 +1358,17 @@
     const insertedThisPage = [];
     let appended = 0;
 
-    for (const payload of wrappers) {
-      if (appended >= slots) break;
+    for (let payloadIndex = 0; payloadIndex < wrappers.length; payloadIndex++) {
+      if (appended >= slots) {
+        cacheRefillCandidates(
+          requestSignature,
+          page,
+          response.baseUrl || url,
+          wrappers.slice(payloadIndex).map(item => ({ html: item.html, meta: item.meta }))
+        );
+        break;
+      }
+      const payload = wrappers[payloadIndex];
 
       const liveSignature = canonicalListingSignature(location.href);
       if (liveSignature !== requestSignature) {
@@ -1126,6 +1505,15 @@
       visible: afterVisible,
       duplicates: stats.duplicates || 0,
       blockedRejected: stats.blockedRejected || 0,
+      blockedBotRejected: stats.blockedBotRejected || 0,
+      blockedCreatorRejected: stats.blockedCreatorRejected || 0,
+      blockedWordRejected: stats.blockedWordRejected || 0,
+      blockedTagRejected: stats.blockedTagRejected || 0,
+      languageRejected: stats.languageRejected || 0,
+      openedRejected: stats.openedRejected || 0,
+      laterRejected: stats.laterRejected || 0,
+      notInterestedRejected: stats.notInterestedRejected || 0,
+      otherRejected: stats.otherRejected || 0,
       filterRejected: stats.filterRejected || 0,
       smartFilterRejected: stats.smartFilterRejected || 0,
       postInsertRejected: stats.postInsertRejected || 0,
@@ -1135,6 +1523,14 @@
       helperReuses: stats.helperReuses || 0
     });
     return appended;
+    } catch (error) {
+      diagOutcome = "error";
+      diagError = error?.message || String(error);
+      throw error;
+    } finally {
+      emitListingRefillDiagnostic(page, diagBefore, diagOutcome, diagError);
+      updateListingFilterStats();
+    }
   }
 
   DS.resetAutoFillIfUrlChanged = function resetAutoFillIfUrlChanged() {
@@ -1172,12 +1568,23 @@
       duplicates: stats.duplicates || 0,
       filtered: stats.filtered || 0,
       blockedRejected: stats.blockedRejected || 0,
+      blockedBotRejected: stats.blockedBotRejected || 0,
+      blockedCreatorRejected: stats.blockedCreatorRejected || 0,
+      blockedWordRejected: stats.blockedWordRejected || 0,
+      blockedTagRejected: stats.blockedTagRejected || 0,
+      languageRejected: stats.languageRejected || 0,
+      openedRejected: stats.openedRejected || 0,
+      laterRejected: stats.laterRejected || 0,
+      notInterestedRejected: stats.notInterestedRejected || 0,
+      otherRejected: stats.otherRejected || 0,
       filterRejected: stats.filterRejected || 0,
       smartFilterRejected: stats.smartFilterRejected || 0,
       postInsertRejected: stats.postInsertRejected || 0,
       pagesWithNoSurvivors: stats.pagesWithNoSurvivors || 0,
       helperFailures: stats.helperFailures || 0,
       helperReuses: stats.helperReuses || 0,
+      helperRecoveries: stats.helperRecoveries || 0,
+      helperGcClosed: stats.helperGcClosed || 0,
       metadataExtracted: stats.metadataExtracted || 0,
       tagsRestored: stats.tagsRestored || 0,
       staleResponses: stats.staleResponses || 0,
@@ -1237,6 +1644,16 @@
     const maxClicks = Math.max(1, Math.min(30, Number(settings.autoFillMaxClicks || 8)));
     const visible = visibleCardCount();
     if (!manual && visible >= target) return false;
+
+    // Reuse unused candidates from recently rendered page 2/page 3/etc. before
+    // applying the page-attempt limit, because a cache hit does not open or
+    // navigate another helper page. Every cached card is checked against the
+    // *current* block/filter state before it is inserted.
+    const cachedAppended = await appendCachedRefillCandidates();
+    if (cachedAppended > 0) {
+      DS.setQuickStatus?.(`Auto-fill reused ${cachedAppended} cached ${cachedAppended === 1 ? "bot" : "bots"}.`, true);
+      return true;
+    }
 
     if ((DS.state.autoFillClicks || 0) >= maxClicks) {
       if (manual) DS.setQuickStatus?.(`Auto-fill stopped at max attempts (${maxClicks}).`);
@@ -1305,7 +1722,9 @@
     removeDuplicateExtraCards();
     rememberCurrentHomeDiscoveryUrl();
     ensureListingRefillButton();
+    updateListingFilterStats();
     if (DS.state.autoFillRunning) return;
+    if (!DS.state?.settings?.autoFillListings) return;
 
     DS.state.autoFillRunning = true;
     let continuing = false;
@@ -1372,6 +1791,7 @@
       DS.state.autoFillRunning = false;
       DS.state.autoFillStopRequested = false;
       ensureListingRefillButton();
+      updateListingFilterStats();
       DS.updateQuickPanel?.();
     }
   };

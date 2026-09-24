@@ -43,11 +43,26 @@
   }
 
   function setExpanded(text, toggle, expanded) {
-    text.classList.toggle("ds-lorebook-entry-text-expanded", expanded);
-    text.dataset.dsLorebookEntryExpanded = expanded ? "1" : "0";
-    toggle.dataset.dsExpanded = expanded ? "1" : "0";
-    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-    toggle.textContent = expanded ? "Show less" : "Show full text";
+    const value = expanded ? "1" : "0";
+    const aria = expanded ? "true" : "false";
+    const label = expanded ? "Show less" : "Show full text";
+
+    if (typeof DS.setClassState === "function") DS.setClassState(text, "ds-lorebook-entry-text-expanded", expanded);
+    else if (text.classList.contains("ds-lorebook-entry-text-expanded") !== !!expanded) text.classList.toggle("ds-lorebook-entry-text-expanded", !!expanded);
+
+    if (typeof DS.setDatasetIfChanged === "function") {
+      DS.setDatasetIfChanged(text, "dsLorebookEntryExpanded", value);
+      DS.setDatasetIfChanged(toggle, "dsExpanded", value);
+    } else {
+      if (text.dataset.dsLorebookEntryExpanded !== value) text.dataset.dsLorebookEntryExpanded = value;
+      if (toggle.dataset.dsExpanded !== value) toggle.dataset.dsExpanded = value;
+    }
+
+    if (typeof DS.setAttributeIfChanged === "function") DS.setAttributeIfChanged(toggle, "aria-expanded", aria);
+    else if (toggle.getAttribute("aria-expanded") !== aria) toggle.setAttribute("aria-expanded", aria);
+
+    if (typeof DS.setTextIfChanged === "function") DS.setTextIfChanged(toggle, label);
+    else if (toggle.textContent !== label) toggle.textContent = label;
   }
 
   function ensureToggle(row, text) {

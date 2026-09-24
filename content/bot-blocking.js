@@ -69,37 +69,49 @@
 
   async function runQuickDislikeWorker() {
     if (!DS.state.quickDislikeWorker) return { ok: false, status: "not-worker" };
+    const params = new URLSearchParams(location.search || "");
+    const botId = String(params.get("dsQuickBotId") || DS.chatIdFromHref?.(location.href) || "").trim().toLowerCase();
+    const jobId = String(params.get("dsQuickJobId") || "").trim();
+    const token = DS.diagOperationStart?.("quick-dislike", "helper", { botId, jobId });
+    const finish = result => {
+      DS.diagOperationEnd?.(token, {
+        scanned: 1,
+        changed: result?.status === "disliked" ? 1 : 0,
+        skipped: result?.ok && result?.status !== "disliked" ? 1 : 0,
+        status: result?.status || "unknown",
+        botId,
+        jobId
+      });
+      return result;
+    };
 
     const opening = await waitForElement(() => {
       const unavailable = unavailableChatStatus();
       if (unavailable) return { unavailable };
       const button = document.querySelector("button[aria-label='ThumbsUp-button']");
       return visibleElement(button) && !button.disabled ? { button } : null;
-    });
-    if (opening?.unavailable) return { ok: true, status: opening.unavailable };
+    }, 10000);
+    if (opening?.unavailable) return finish({ ok: true, status: opening.unavailable });
     const openButton = opening?.button || null;
     if (!openButton) {
       const unavailable = unavailableChatStatus();
-      if (unavailable) return { ok: true, status: unavailable };
-      return { ok: false, status: "rating-button-not-found" };
+      if (unavailable) return finish({ ok: true, status: unavailable });
+      return finish({ ok: false, status: "rating-button-not-found" });
     }
 
     try { openButton.click(); } catch { DS.realClick?.(openButton); }
 
-    const modal = await waitForElement(() => ratingModal(), 7000);
-    if (!modal) return { ok: false, status: "rating-modal-not-found" };
+    const modal = await waitForElement(() => ratingModal(), 6000);
+    if (!modal) return finish({ ok: false, status: "rating-modal-not-found" });
 
     const dislike = [...modal.querySelectorAll("button")].find(button =>
       !!button.querySelector("svg.lucide-thumbs-down, svg[class*='lucide-thumbs-down']")
     );
     if (!dislike || dislike.disabled || dislike.getAttribute("aria-disabled") === "true") {
-      return { ok: true, status: "already-rated-or-unavailable" };
+      return finish({ ok: true, status: "already-rated-or-unavailable" });
     }
-    // SpicyChat leaves an existing dislike button enabled, but paints it red
-    // and disables Done because there is no unsaved rating change. Clicking
-    // the selected button again would deselect it and make the worker time out.
     if (dislikeAlreadySelected(dislike)) {
-      return { ok: true, status: "already-disliked" };
+      return finish({ ok: true, status: "already-disliked" });
     }
 
     try { dislike.click(); } catch { DS.realClick?.(dislike); }
@@ -109,14 +121,12 @@
       return button && !button.disabled && button.getAttribute("aria-disabled") !== "true" ? button : null;
     }, 3500);
 
-    if (!done) {
-      return { ok: false, status: "done-button-not-ready" };
-    }
+    if (!done) return finish({ ok: false, status: "done-button-not-ready" });
 
     try { done.click(); } catch { DS.realClick?.(done); }
     const closed = await waitForElement(() => !ratingModal(), 4000).catch?.(() => null);
-    if (!closed) return { ok: false, status: "submit-not-confirmed" };
-    return { ok: true, status: "disliked" };
+    if (!closed) return finish({ ok: false, status: "submit-not-confirmed" });
+    return finish({ ok: true, status: "disliked" });
   }
 
   DS.getCurrentBotName = function getCurrentBotName() {

@@ -368,6 +368,7 @@
     expandLongCardDescriptions: false,
     showCardGreetingTokenInfo: false,
     showExactMessageCounts: false,
+    showBotCreationDates: false,
     cardTokenShowGreeting: true,
     cardTokenShowDescription: false,
     cardTokenShowPersonality: false,
@@ -447,6 +448,8 @@
 
     autoFillListings: false,
     showListingRefillButton: false,
+    showListingFilterStats: false,
+    showListingFilterStatsDetails: false,
     autoFillTargetCards: 50,
     autoFillMaxClicks: 8,
 
@@ -670,6 +673,9 @@
     pauseQolWhileMessageEditing: true,
     reduceQolAnimations: false,
     reduceOptionsAnimations: false,
+    settingsNavigationStyle: "classic",
+    settingsContentLayout: "single",
+    settingsPageWidth: "comfortable",
     deepSleepDisabledFeatures: true,
     performanceDiagnostics: false,
     enableLocalChangeHistory: false,

@@ -1372,6 +1372,15 @@
       if ((settings.botArchiveOnProfileVisit || !!settings.botArchiveRememberSeenPublic) && plan.profiles) {
         await runFeatureStep("bot archive profile capture", true, () => DS.applyBotArchive?.());
       }
+      if (plan.profiles) {
+        await runThrottledFeatureStep(
+          "bot profile creation date",
+          !!settings.showBotCreationDates || !!document.querySelector(".ds-bot-profile-created-date"),
+          listingCardInterval,
+          () => DS.applyExactMessageCounts?.(),
+          !!options.force
+        );
+      }
 
       if (singleChat) {
         await runFeatureStep("model selector", modelSelectorWanted(settings), () => DS.applyModelSelectorTools?.());
@@ -1401,7 +1410,7 @@
         await runFeatureStep("lorebook search filter", !!settings.showLorebookFilters || !!document.getElementById("ds-lorebook-search-filter") || !!document.querySelector(".ds-lorebook-search-filter-hidden"), () => DS.applyLorebookSearchFilter?.());
         await runFeatureStep("lorebook tag expansion", !!settings.lorebookExpandTags || !!document.querySelector("[data-ds-lorebook-tags-expanded]"), () => DS.applyLorebookTagExpansion?.());
         await runFeatureStep("smart filter presets", !!settings.enableSmartFilterPresets || !!document.querySelector("[data-ds-smart-filter]"), () => DS.applySmartFilterPresets?.());
-        await runThrottledFeatureStep("exact message counts", !!settings.showExactMessageCounts || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"]"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
+        await runThrottledFeatureStep("exact message counts / creation dates", !!settings.showExactMessageCounts || !!settings.showBotCreationDates || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"], .ds-bot-created-date"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
         await runFeatureStep("my creations view memory", !!settings.rememberMyCreationsView, () => DS.applyMyCreationsViewMemory?.());
         await runFeatureStep("my creations auto-load", !!settings.autoLoadMyCreations, () => DS.applyMyCreationsAutoLoad?.());
         await runThrottledFeatureStep("creation audit", !!settings.enableCreationAudit || !!document.querySelector("[data-ds-creation-audit]"), listingCardInterval, () => DS.applyCreationAudit?.(), !!options.force);
@@ -1412,7 +1421,7 @@
         await runThrottledFeatureStep("later buttons", !!settings.showLaterBotButtons || !!document.querySelector(".ds-later-bot-button"), listingCardInterval, () => DS.updateLaterBotButtons?.(), !!options.force);
         await runThrottledFeatureStep("card descriptions", !!settings.expandLongCardDescriptions || !!document.querySelector("[data-ds-description-expanded]"), listingCardInterval, () => DS.applyCardDescriptionExpansion?.(), !!options.force);
         await runThrottledFeatureStep("card greeting token info", !!settings.showCardGreetingTokenInfo || !!document.querySelector(".ds-card-token-info"), listingCardInterval, () => DS.applyCardGreetingTokenInfo?.(), !!options.force);
-        await runThrottledFeatureStep("listing auto-fill", !!settings.autoFillListings || !!settings.showListingRefillButton || !!DS.state.listingRefillWorker, listingCardInterval, () => DS.applyListingAutoFill?.(), !!options.force);
+        await runThrottledFeatureStep("listing auto-fill", !!settings.autoFillListings || !!settings.showListingRefillButton || !!settings.showListingFilterStats || !!DS.state.listingRefillWorker, listingCardInterval, () => DS.applyListingAutoFill?.(), !!options.force);
         await runStep("listing name sort", () => DS.applyListingSortTools?.());
       }
 

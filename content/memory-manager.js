@@ -400,25 +400,41 @@
       return { ok: false, reason: wantPinned ? "Pin Memory was not found." : "Unpin Memory was not found." };
     }
 
+    const scrollState = captureMemoryScrollState();
     try { action.click(); } catch { DS.realClick?.(action); }
 
-    await waitFor(() => !isVisible(menu) ? true : null, 900, 40);
-    await DS.sleep?.(140);
+    await waitFor(() => !isVisible(menu) ? true : null, 1200, 40);
 
-    const current = findMemoryRowByText(text);
-    if (!current) return { ok: false, reason: "Memory disappeared while changing its pin state." };
-
-    const verified = await getMemoryPinnedState(current);
-    if (verified !== wantPinned) {
-      return {
-        ok: false,
-        reason: verified === null
-          ? "SpicyChat did not expose the new pin state after clicking Pin Memory."
-          : "SpicyChat did not apply the requested pin state."
-      };
+    // SpicyChat can re-render the memory row a little after the menu closes.
+    // Give that native update time to settle instead of treating the first
+    // stale menu state as a hard failure.
+    const started = Date.now();
+    let verified = null;
+    let sawRow = false;
+    while (Date.now() - started < 3800) {
+      await DS.sleep?.(180);
+      const current = findMemoryRowByText(text);
+      if (!current) continue;
+      sawRow = true;
+      verified = await getMemoryPinnedState(current);
+      // Opening the native three-dot menu can make React scroll the manager to
+      // the checked row. Put the user back where they were after every probe,
+      // not only after the whole verification loop finishes.
+      restoreMemoryScrollState(scrollState);
+      if (verified === wantPinned) {
+        return { ok: true, changed: true };
+      }
+      await DS.sleep?.(120);
     }
 
-    return { ok: true, changed: true };
+    restoreMemoryScrollState(scrollState);
+    if (!sawRow) return { ok: false, reason: "Memory disappeared while changing its pin state." };
+    return {
+      ok: false,
+      reason: verified === null
+        ? "SpicyChat did not expose the new pin state after clicking Pin Memory."
+        : "SpicyChat did not apply the requested pin state."
+    };
   }
 
   async function pinSelectedMemories() {
@@ -667,6 +683,50 @@
     }
   }
 
+  function captureMemoryScrollState(manager = getManager()) {
+    const positions = [];
+    const seen = new Set();
+    let node = manager;
+    for (let depth = 0; node && node !== document.documentElement && depth < 8; depth += 1, node = node.parentElement) {
+      if (!(node instanceof HTMLElement) || seen.has(node)) continue;
+      seen.add(node);
+      if (node.scrollHeight > node.clientHeight + 2 || node.scrollWidth > node.clientWidth + 2) {
+        positions.push({ node, top: node.scrollTop, left: node.scrollLeft });
+      }
+    }
+    return {
+      positions,
+      windowX: window.scrollX,
+      windowY: window.scrollY
+    };
+  }
+
+  function restoreMemoryScrollState(state) {
+    if (!state) return;
+    for (const item of state.positions || []) {
+      if (!item.node?.isConnected) continue;
+      item.node.scrollTop = item.top;
+      item.node.scrollLeft = item.left;
+    }
+    try {
+      if (window.scrollX !== state.windowX || window.scrollY !== state.windowY) {
+        window.scrollTo(state.windowX, state.windowY);
+      }
+    } catch {}
+  }
+
+  async function waitForVisibleMemoryOrder(target, timeoutMs = 3600) {
+    const wanted = [...target];
+    const started = Date.now();
+    let last = [];
+    while (Date.now() - started < timeoutMs) {
+      last = visibleMemoryOrder(wanted);
+      if (last.length === wanted.length && last.every((text, index) => text === wanted[index])) return last;
+      await DS.sleep?.(180);
+    }
+    return last;
+  }
+
   function visibleMemoryOrder(texts) {
     const wanted = new Set(texts || []);
     return getMemoryRows().map(item => item.text).filter(text => wanted.has(text));
@@ -676,6 +736,8 @@
     const panel = manager?.querySelector(".ds-memory-pinned-order");
     if (!panel) return;
 
+    const previousListScroll = panel.querySelector(".ds-memory-pinned-order-list")?.scrollTop || 0;
+    const scrollState = captureMemoryScrollState(manager);
     panel.replaceChildren();
     panel.hidden = false;
 
@@ -686,7 +748,7 @@
 
     const note = document.createElement("div");
     note.className = "ds-memory-pinned-order-note";
-    note.textContent = "Arrange the pinned memories, then Apply order. QoL uses SpicyChat's own Unpin/Pin actions so the change is saved by SpicyChat rather than being display-only.";
+    note.textContent = "Drag memories into place or use the arrows, then Apply order. QoL uses SpicyChat's own Unpin/Pin actions so the change is saved by SpicyChat rather than being display-only.";
     panel.appendChild(note);
 
     if (!pinnedOrderDraft.length) {
@@ -698,13 +760,62 @@
       const list = document.createElement("div");
       list.className = "ds-memory-pinned-order-list";
 
+      let draggingIndex = -1;
       pinnedOrderDraft.forEach((text, index) => {
         const row = document.createElement("div");
         row.className = "ds-memory-pinned-order-row";
+        row.draggable = !applyingPinnedOrder;
+        row.dataset.dsPinnedOrderIndex = String(index);
+
+        const drag = document.createElement("span");
+        drag.className = "ds-memory-pinned-order-drag";
+        drag.textContent = "⋮⋮";
+        drag.title = "Drag to reorder";
+        drag.setAttribute("aria-hidden", "true");
 
         const label = document.createElement("span");
+        label.className = "ds-memory-pinned-order-label";
         label.textContent = text;
         label.title = text;
+
+        row.addEventListener("dragstart", event => {
+          if (applyingPinnedOrder) {
+            event.preventDefault();
+            return;
+          }
+          draggingIndex = index;
+          row.classList.add("is-dragging");
+          try {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(index));
+          } catch {}
+        });
+        row.addEventListener("dragover", event => {
+          if (draggingIndex < 0 || applyingPinnedOrder) return;
+          event.preventDefault();
+          row.classList.add("is-drag-over");
+          try { event.dataTransfer.dropEffect = "move"; } catch {}
+        });
+        row.addEventListener("dragleave", () => row.classList.remove("is-drag-over"));
+        row.addEventListener("drop", event => {
+          event.preventDefault();
+          row.classList.remove("is-drag-over");
+          let from = draggingIndex;
+          try {
+            const transferred = Number(event.dataTransfer.getData("text/plain"));
+            if (Number.isInteger(transferred)) from = transferred;
+          } catch {}
+          const to = index;
+          draggingIndex = -1;
+          if (!Number.isInteger(from) || from < 0 || from >= pinnedOrderDraft.length || from === to) return;
+          const [moved] = pinnedOrderDraft.splice(from, 1);
+          pinnedOrderDraft.splice(to, 0, moved);
+          renderPinnedOrderEditor(manager);
+        });
+        row.addEventListener("dragend", () => {
+          draggingIndex = -1;
+          list.querySelectorAll(".is-dragging,.is-drag-over").forEach(node => node.classList.remove("is-dragging", "is-drag-over"));
+        });
 
         const controls = document.createElement("span");
         controls.className = "ds-memory-pinned-order-buttons";
@@ -730,7 +841,7 @@
         });
 
         controls.append(up, down);
-        row.append(label, controls);
+        row.append(drag, label, controls);
         list.appendChild(row);
       });
       panel.appendChild(list);
@@ -773,6 +884,10 @@
 
     actions.append(refresh, apply, close);
     panel.appendChild(actions);
+
+    const nextList = panel.querySelector(".ds-memory-pinned-order-list");
+    if (nextList) nextList.scrollTop = previousListScroll;
+    restoreMemoryScrollState(scrollState);
   }
 
   async function scanPinnedOrder(manager = getManager()) {
@@ -847,8 +962,7 @@
 
       // Detect whether SpicyChat places newly pinned memories at the top or bottom.
       await repinAll(target.slice(0, 2));
-      await DS.sleep?.(180);
-      const probe = visibleMemoryOrder(target.slice(0, 2));
+      const probe = await waitForVisibleMemoryOrder(target.slice(0, 2), 3200);
 
       if (probe[0] === target[0] && probe[1] === target[1]) {
         await repinAll(target.slice(2));
@@ -866,8 +980,7 @@
         throw new Error("SpicyChat kept its own pinned display order, so QoL could not verify a different order.");
       }
 
-      await DS.sleep?.(260);
-      const finalOrder = visibleMemoryOrder(target);
+      const finalOrder = await waitForVisibleMemoryOrder(target, 4200);
       const exact = finalOrder.length === target.length && finalOrder.every((text, index) => text === target[index]);
       pinnedOrderDraft = exact ? finalOrder : target;
       setStatus(

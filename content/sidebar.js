@@ -16,6 +16,16 @@
       .join("|") + `|enabled:${settings.enabled ? 1 : 0}`;
   }
 
+  function sidebarManagedReason(el) {
+    return String(el?.dataset?.dsReason || "");
+  }
+
+  function sidebarManagedElementNeedsRepair(el) {
+    const reason = sidebarManagedReason(el);
+    if (!reason.startsWith("sidebar:")) return false;
+    return el?.dataset?.dsHidden !== "1" || !el?.classList?.contains?.("ds-hidden");
+  }
+
   function ensureSidebarObserver() {
     const nav = getNav();
     if (!nav) {
@@ -32,13 +42,24 @@
     sidebarDirty = true;
     sidebarObserver = new MutationObserver(mutations => {
       for (const mutation of mutations) {
-        if (
-          mutation.type === "attributes" &&
-          ["class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"].includes(String(mutation.attributeName || "")) &&
-          (String(mutation.target?.dataset?.dsReason || "").startsWith("sidebar:") ||
-           mutation.target?.classList?.contains?.("ds-hidden"))
-        ) {
-          continue;
+        if (mutation.type === "attributes") {
+          const attr = String(mutation.attributeName || "");
+          const target = mutation.target instanceof Element ? mutation.target : null;
+          const managed = sidebarManagedReason(target).startsWith("sidebar:");
+
+          // Ignore same-state/native attribute churn on an element that QoL has
+          // already hidden correctly. If React actually removes our hidden
+          // class/state, mark one repair pass instead of continuously
+          // hide/showing the same element.
+          if (managed && ["class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"].includes(attr)) {
+            if (!sidebarManagedElementNeedsRepair(target)) continue;
+            sidebarDirty = true;
+            if (DS.state?.runtimeCounters) {
+              DS.state.runtimeCounters.sidebarNativeStateRepairs =
+                Number(DS.state.runtimeCounters.sidebarNativeStateRepairs || 0) + 1;
+            }
+            return;
+          }
         }
         if (DS.mutationIsQolOnly?.(mutation)) continue;
         sidebarDirty = true;

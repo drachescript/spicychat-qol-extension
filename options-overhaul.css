@@ -1,0 +1,254 @@
+/* v0.2.14 Options layout refresh.
+   The familiar classic navigation + single-column cards are the defaults.
+   Grouped navigation, adaptive two-column cards, and a wider canvas are opt-in. */
+
+main {
+  width: min(1180px, calc(100vw - 40px));
+  padding-top: 24px;
+}
+
+body.ds-options-width-wide main {
+  width: min(1480px, calc(100vw - 40px));
+}
+
+header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.settings-search-card {
+  margin-bottom: 16px;
+}
+
+/* Classic tabs are intentionally the default. The grouped DOM is flattened
+   visually so the page feels like the older Options layout. */
+.tabs.tabs-grouped {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid #303236;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tabs.tabs-grouped .tab-group,
+.tabs.tabs-grouped .tab-group-buttons {
+  display: contents;
+}
+
+.tabs.tabs-grouped .tab-group-label {
+  display: none;
+}
+
+.tabs.tabs-grouped .tab-button {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 9px 14px;
+  line-height: 1.25;
+}
+
+/* Optional grouped navigation. */
+body.ds-options-nav-grouped .tabs.tabs-grouped {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  padding: 0 0 14px;
+  align-items: stretch;
+}
+
+body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group {
+  display: block;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #2d3035;
+  border-radius: 12px;
+  background: #141517;
+}
+
+body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group:has(.tab-button.active) {
+  border-color: #4e5b6c;
+  background: #181b1f;
+}
+
+body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group-label {
+  display: block;
+  margin: 0 4px 7px;
+  color: #868d96;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+body.ds-options-nav-grouped .tabs.tabs-grouped .tab-button {
+  flex: 1 1 92px;
+  padding: 8px 10px;
+}
+
+/* Familiar single-column content is the default. */
+.tab-page.active {
+  display: block;
+}
+
+.tab-page.active > .page-intro {
+  margin: 0 2px 12px;
+}
+
+.tab-page.active > .card {
+  min-width: 0;
+}
+
+/* Optional adaptive layout. auto-fit means a page with only one ordinary card
+   uses the whole row instead of leaving a pointless empty half. */
+body.ds-options-layout-adaptive .tab-page.active {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+body.ds-options-layout-adaptive .tab-page.active > .page-intro {
+  grid-column: 1 / -1;
+  margin: 0 2px 2px;
+}
+
+body.ds-options-layout-adaptive .tab-page.active > .card {
+  margin: 0;
+  height: fit-content;
+}
+
+/* Managers, libraries, help/features/changelog, and data-heavy tools should
+   always use the full available row. */
+body.ds-options-layout-adaptive .tab-page.active > .card:has(
+  .bot-manager-list,
+  .managed-list,
+  .feature-index-list,
+  .creator-backup-manager,
+  .tab-cleanup-library,
+  .tab-cleanup-session-list,
+  .backup-category-grid,
+  .backup-scope-grid,
+  .import-preview,
+  .creation-audit-list,
+  .lorebook-backup-manager,
+  .eli5-guide,
+  .changelog-list,
+  .help-link
+),
+body.ds-options-layout-adaptive #botBlockingDislikesCard,
+body.ds-options-layout-adaptive #backupRestoreCard,
+body.ds-options-layout-adaptive #tabCleanupDiagnosticCard,
+body.ds-options-layout-adaptive #savedBotsHubCard,
+body.ds-options-layout-adaptive #botAvailabilityCard,
+body.ds-options-layout-adaptive #creatorBackupManagerCard,
+body.ds-options-layout-adaptive #diagnosticsCard {
+  grid-column: 1 / -1;
+}
+
+/* Changelog should never be a half-width card. */
+.tab-page[data-page="changelog"].active,
+.tab-page[data-page="help"].active,
+.tab-page[data-page="features"].active {
+  display: block;
+}
+
+.tab-page[data-page="changelog"] > .card,
+.tab-page[data-page="help"] > .card,
+.tab-page[data-page="features"] > .card {
+  width: auto;
+  max-width: none;
+}
+
+/* Make nested/sub-options visually read as children rather than looking like
+   unrelated settings mixed into the parent card. */
+.sub-card {
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #353941;
+  border-left: 3px solid #4b607a;
+  border-radius: 10px;
+  background: #131518;
+}
+
+.sub-card > h3:first-child,
+.sub-card > strong:first-child {
+  display: block;
+  margin-top: 0;
+  color: #e8ebef;
+}
+
+.setting-dependent-inactive {
+  opacity: .72;
+}
+
+.setting-dependent-inactive .setting-dependency-note {
+  color: #c6a96a;
+}
+
+#listingFilterStatsSettings {
+  border-left-color: #5b7aa2;
+  background: #151a20;
+}
+
+/* A wide blocking section can use two columns internally only when the user
+   opted into adaptive layout. */
+body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  align-items: start;
+}
+
+body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > p.hint,
+body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .sub-card,
+body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .blocker-test-card {
+  grid-column: 1 / -1;
+}
+
+.bot-manager-toolbar,
+.saved-bots-hub-toolbar,
+.tab-cleanup-review-controls,
+.creator-backup-toolbar {
+  max-width: none;
+}
+
+.settings-quick-nav {
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+}
+
+.feature-index-item {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+@media (min-width: 1180px) {
+  .feature-index-toolbar {
+    grid-template-columns: minmax(280px, 2fr) minmax(190px, 1fr) minmax(150px, .8fr) minmax(175px, .9fr);
+  }
+}
+
+@media (max-width: 1050px) {
+  main,
+  body.ds-options-width-wide main { width: min(980px, calc(100vw - 28px)); }
+  body.ds-options-layout-adaptive .tab-page.active { grid-template-columns: 1fr; }
+  body.ds-options-layout-adaptive .tab-page.active > .card { grid-column: 1; }
+  body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body { grid-template-columns: 1fr; }
+  body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > * { grid-column: 1 !important; }
+}
+
+@media (max-width: 720px) {
+  main,
+  body.ds-options-width-wide main { width: calc(100vw - 20px); padding-top: 14px; }
+  .settings-quick-nav { grid-template-columns: 1fr; }
+  body.ds-options-nav-grouped .tabs.tabs-grouped { grid-template-columns: 1fr; }
+  body.ds-options-nav-grouped .tab-group-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.ds-options-nav-grouped .tabs.tabs-grouped .tab-button { width: 100%; }
+}
