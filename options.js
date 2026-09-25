@@ -387,6 +387,8 @@ const DEFAULT_SETTINGS = {
   showCardGreetingTokenInfo: false,
   showExactMessageCounts: false,
   showBotCreationDates: false,
+  expandBotNamesOnHover: false,
+  paginationTopJumpBox: false,
   cardTokenShowGreeting: true,
   cardTokenShowDescription: false,
   cardTokenShowPersonality: false,
@@ -491,6 +493,7 @@ const DEFAULT_SETTINGS = {
   quickPanelMaxHeightPercent: 80,
   quickPanelAutoCollapseOverlap: false,
   quickPanelShowStatus: false,
+  quickPanelShowLoadedMessageCount: false,
   quickPanelStatusShowOpened: false,
   quickPanelStatusShowBlocked: false,
   popupShowOpenedCount: false,
@@ -509,7 +512,7 @@ const DEFAULT_SETTINGS = {
   quickPanelShowAutoAsterisk: false,
   quickPanelShowTranslation: false,
   quickPanelShowPersona: false,
-  quickPanelShowExport: false,
+  quickPanelShowExport: true,
   quickPanelShowSoundscapes: false,
   quickPanelCustomX: 12,
   quickPanelCustomY: 12,
@@ -628,6 +631,12 @@ const DEFAULT_SETTINGS = {
   chatBubbleAiActionText: "#79c8f5",
   chatBubbleAiDialogueMode: "base",
   chatBubbleAiDialogueText: "#f2f2f2",
+  chatBubbleAiFont: "inherit",
+  chatBubbleAiActionFont: "inherit",
+  chatBubbleAiDialogueFont: "inherit",
+  chatBubbleAiFont: "inherit",
+  chatBubbleAiActionFont: "inherit",
+  chatBubbleAiDialogueFont: "inherit",
   chatBubbleAiBorder: "#555861",
   chatBubbleAiBorderWidth: 0,
   chatBubbleAiBorderStyle: "solid",
@@ -646,6 +655,12 @@ const DEFAULT_SETTINGS = {
   chatBubbleUserActionText: "#79c8f5",
   chatBubbleUserDialogueMode: "base",
   chatBubbleUserDialogueText: "#f5f5f5",
+  chatBubbleUserFont: "inherit",
+  chatBubbleUserActionFont: "inherit",
+  chatBubbleUserDialogueFont: "inherit",
+  chatBubbleUserFont: "inherit",
+  chatBubbleUserActionFont: "inherit",
+  chatBubbleUserDialogueFont: "inherit",
   chatBubbleUserBorder: "#52718a",
   chatBubbleUserBorderWidth: 0,
   chatBubbleUserBorderStyle: "solid",
@@ -1536,6 +1551,8 @@ const FEATURE_CHANGE_MARKERS = {
   showCardGreetingTokenInfo: { version: "0.1.8.97", label: "Updated" },
   showExactMessageCounts: { version: "0.1.9.112", label: "New" },
   showBotCreationDates: { version: "0.2.14", label: "New" },
+  expandBotNamesOnHover: { version: "0.2.17", label: "New" },
+  paginationTopJumpBox: { version: "0.2.17", label: "New" },
   cardTokenShowGreeting: { version: "0.1.8.97", label: "New" },
   cardTokenShowPersonality: { version: "0.1.8.97", label: "New" },
   cardTokenShowScenario: { version: "0.1.8.97", label: "New" },
@@ -4294,6 +4311,8 @@ function setSettingsSearchExpanded(expanded, { focus = false } = {}) {
 function setupSettingsSearch() {
   const SEARCH_ALIASES = {
     autoFillListings: "refill fill page listing autofill hidden cards",
+    paginationTopJumpBox: "page number jump go top chatbot listing pagination 20000",
+    expandBotNamesOnHover: "bot name title expander full name hover tap cut off",
     showListingRefillButton: "refill fill now manual listing",
     showListingFilterStats: "bot blocking filters blocked filtered bots result count stats results found listing statistics",
     showListingFilterStatsDetails: "bot blocking filters blocked filtered breakdown details language tags words creators listing statistics",
@@ -10001,6 +10020,7 @@ function renderMiniPanelPreview() {
   }
 
   setPreviewShown("miniPanelPreviewStatus", checked("quickPanelShowStatus", true));
+  setPreviewShown("miniPanelPreviewMessageCount", mode === "chat" && checked("quickPanelShowLoadedMessageCount"));
   setPreviewShown("miniPanelPreviewOptions", checked("quickPanelShowOptions", true));
   setPreviewShown("miniPanelPreviewFill", mode === "listing" && checked("quickPanelShowFillNow", true));
   setPreviewShown("miniPanelPreviewSmartFilters", mode === "listing" && checked("quickPanelShowSmartFilterPins"));
@@ -10046,6 +10066,7 @@ function setupMiniPanelPreview() {
     "quickPanelUiScale",
     "quickPanelMaxHeightPercent",
     "quickPanelShowStatus",
+    "quickPanelShowLoadedMessageCount",
     "quickPanelStatusShowOpened",
     "quickPanelStatusShowBlocked",
     "quickPanelShowOptions",
@@ -10946,6 +10967,7 @@ async function load() {
   setValue("quickPanelCustomYPercent", Math.min(100, Math.max(0, Number.isFinite(Number(settings.quickPanelCustomYPercent)) ? Number(settings.quickPanelCustomYPercent) : 12)));
   setChecked("quickPanelAutoCollapseOverlap", settings.quickPanelAutoCollapseOverlap !== false);
   setChecked("quickPanelShowStatus", settings.quickPanelShowStatus !== false);
+  setChecked("quickPanelShowLoadedMessageCount", !!settings.quickPanelShowLoadedMessageCount);
   setChecked("quickPanelStatusShowOpened", settings.quickPanelStatusShowOpened !== false);
   setChecked("quickPanelStatusShowBlocked", settings.quickPanelStatusShowBlocked !== false);
   setChecked("popupShowOpenedCount", !!settings.popupShowOpenedCount);
@@ -11003,6 +11025,8 @@ async function load() {
   setChecked("showCardGreetingTokenInfo", !!settings.showCardGreetingTokenInfo);
   setChecked("showExactMessageCounts", !!settings.showExactMessageCounts);
   setChecked("showBotCreationDates", !!settings.showBotCreationDates);
+  setChecked("expandBotNamesOnHover", !!settings.expandBotNamesOnHover);
+  setChecked("paginationTopJumpBox", !!settings.paginationTopJumpBox);
   setChecked("cardTokenShowGreeting", settings.cardTokenShowGreeting !== false);
   setChecked("cardTokenShowPersonality", !!settings.cardTokenShowPersonality);
   setChecked("cardTokenShowScenario", !!settings.cardTokenShowScenario);
@@ -11074,6 +11098,9 @@ async function load() {
   setValue("chatBubbleAiActionText", settings.chatBubbleAiActionText || "#79c8f5");
   setValue("chatBubbleAiDialogueMode", ["native", "base", "custom"].includes(settings.chatBubbleAiDialogueMode) ? settings.chatBubbleAiDialogueMode : "base");
   setValue("chatBubbleAiDialogueText", settings.chatBubbleAiDialogueText || settings.chatBubbleAiText || "#f2f2f2");
+  setValue("chatBubbleAiFont", settings.chatBubbleAiFont || "inherit");
+  setValue("chatBubbleAiActionFont", settings.chatBubbleAiActionFont || "inherit");
+  setValue("chatBubbleAiDialogueFont", settings.chatBubbleAiDialogueFont || "inherit");
   setValue("chatBubbleAiBorder", settings.chatBubbleAiBorder || "#555861");
   setValue("chatBubbleAiBorderWidth", String(settings.chatBubbleAiBorderWidth ?? 0));
   setValue("chatBubbleAiBorderStyle", ["solid", "dashed", "dotted", "double"].includes(settings.chatBubbleAiBorderStyle) ? settings.chatBubbleAiBorderStyle : "solid");
@@ -11092,6 +11119,9 @@ async function load() {
   setValue("chatBubbleUserActionText", settings.chatBubbleUserActionText || "#79c8f5");
   setValue("chatBubbleUserDialogueMode", ["native", "base", "custom"].includes(settings.chatBubbleUserDialogueMode) ? settings.chatBubbleUserDialogueMode : "base");
   setValue("chatBubbleUserDialogueText", settings.chatBubbleUserDialogueText || settings.chatBubbleUserText || "#f5f5f5");
+  setValue("chatBubbleUserFont", settings.chatBubbleUserFont || "inherit");
+  setValue("chatBubbleUserActionFont", settings.chatBubbleUserActionFont || "inherit");
+  setValue("chatBubbleUserDialogueFont", settings.chatBubbleUserDialogueFont || "inherit");
   setValue("chatBubbleUserBorder", settings.chatBubbleUserBorder || "#52718a");
   setValue("chatBubbleUserBorderWidth", String(settings.chatBubbleUserBorderWidth ?? 0));
   setValue("chatBubbleUserBorderStyle", ["solid", "dashed", "dotted", "double"].includes(settings.chatBubbleUserBorderStyle) ? settings.chatBubbleUserBorderStyle : "solid");
@@ -11575,6 +11605,7 @@ function readSettingsFromPage() {
     quickPanelCustomYPercent: Math.min(100, Math.max(0, Number.isFinite(Number(value("quickPanelCustomYPercent", "12"))) ? Number(value("quickPanelCustomYPercent", "12")) : 12)),
     quickPanelAutoCollapseOverlap: checked("quickPanelAutoCollapseOverlap", true),
     quickPanelShowStatus: checked("quickPanelShowStatus", true),
+    quickPanelShowLoadedMessageCount: checked("quickPanelShowLoadedMessageCount"),
     quickPanelStatusShowOpened: checked("quickPanelStatusShowOpened", true),
     quickPanelStatusShowBlocked: checked("quickPanelStatusShowBlocked", true),
     popupShowOpenedCount: checked("popupShowOpenedCount", false),
@@ -11626,6 +11657,7 @@ function readSettingsFromPage() {
     botOrganizerBulkTools: checked("botOrganizerBulkTools", true),
 
     autoFillListings: checked("autoFillListings"),
+    paginationTopJumpBox: checked("paginationTopJumpBox"),
     showListingRefillButton: checked("showListingRefillButton"),
     showListingFilterStats: checked("showListingFilterStats"),
     showListingFilterStatsDetails: checked("showListingFilterStatsDetails"),
@@ -11692,6 +11724,9 @@ function readSettingsFromPage() {
     chatBubbleAiActionText: value("chatBubbleAiActionText", "#79c8f5"),
     chatBubbleAiDialogueMode: ["native", "base", "custom"].includes(value("chatBubbleAiDialogueMode")) ? value("chatBubbleAiDialogueMode") : "base",
     chatBubbleAiDialogueText: value("chatBubbleAiDialogueText", "#f2f2f2"),
+    chatBubbleAiFont: value("chatBubbleAiFont", "inherit"),
+    chatBubbleAiActionFont: value("chatBubbleAiActionFont", "inherit"),
+    chatBubbleAiDialogueFont: value("chatBubbleAiDialogueFont", "inherit"),
     chatBubbleAiBorder: value("chatBubbleAiBorder", "#555861"),
     chatBubbleAiBorderWidth: Math.min(12, Math.max(0, Number(value("chatBubbleAiBorderWidth", "0")) || 0)),
     chatBubbleAiBorderStyle: ["solid", "dashed", "dotted", "double"].includes(value("chatBubbleAiBorderStyle")) ? value("chatBubbleAiBorderStyle") : "solid",
@@ -11710,6 +11745,9 @@ function readSettingsFromPage() {
     chatBubbleUserActionText: value("chatBubbleUserActionText", "#79c8f5"),
     chatBubbleUserDialogueMode: ["native", "base", "custom"].includes(value("chatBubbleUserDialogueMode")) ? value("chatBubbleUserDialogueMode") : "base",
     chatBubbleUserDialogueText: value("chatBubbleUserDialogueText", "#f5f5f5"),
+    chatBubbleUserFont: value("chatBubbleUserFont", "inherit"),
+    chatBubbleUserActionFont: value("chatBubbleUserActionFont", "inherit"),
+    chatBubbleUserDialogueFont: value("chatBubbleUserDialogueFont", "inherit"),
     chatBubbleUserBorder: value("chatBubbleUserBorder", "#52718a"),
     chatBubbleUserBorderWidth: Math.min(12, Math.max(0, Number(value("chatBubbleUserBorderWidth", "0")) || 0)),
     chatBubbleUserBorderStyle: ["solid", "dashed", "dotted", "double"].includes(value("chatBubbleUserBorderStyle")) ? value("chatBubbleUserBorderStyle") : "solid",
@@ -11911,6 +11949,7 @@ function readSettingsFromPage() {
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
     showExactMessageCounts: checked("showExactMessageCounts"),
     showBotCreationDates: checked("showBotCreationDates"),
+    expandBotNamesOnHover: checked("expandBotNamesOnHover"),
     cardTokenShowGreeting: checked("cardTokenShowGreeting", true),
     cardTokenShowDescription: false,
     cardTokenShowPersonality: checked("cardTokenShowPersonality"),
@@ -15958,7 +15997,7 @@ async function refreshPersonalUsageSummary() {
 const SETTING_DEPENDENCY_GROUPS = [
   { parent: "autoAfkEnabled", name: "Inactive tab cleanup (Auto-AFK)", children: ["autoAfkChats", "autoAfkHome", "autoAfkProfiles", "autoAfkProtectActive", "autoAfkResetOnActivate"] },
   { parent: "duplicateTabGuardEnabled", name: "Duplicate SpicyChat Tab Guard", children: ["duplicateTabChats", "duplicateTabHome", "duplicateTabProfiles", "duplicateTabFocusExisting"] },
-  { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
+  { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
   { parent: "showCardGreetingTokenInfo", name: "Bot card token info", children: ["cardTokenShowGreeting", "cardTokenShowPersonality", "cardTokenShowScenario", "cardTokenShowExamples"] },
   { parent: "replaceCardProfileWithBlockButton", name: "QoL card block button", children: ["quickDislikeOnBlock", "showBlockButtonOnMyCreations"] },
   { parent: "enableBulkCardBlocking", name: "Bulk card selection", children: ["bulkCardBlockingSidebarLauncher"] },
@@ -16182,8 +16221,8 @@ async function runSettingsHealthCheck() {
 
 const CHAT_BUBBLE_DEFAULTS = { ...CHAT_BUBBLE_TEXT_DEFAULTS, ...CHAT_BUBBLE_PRESETS.default, chatBubblePreserveActionColors: true };
 const CHAT_BUBBLE_FIELD_IDS = [
-  "chatBubbleAiBackground", "chatBubbleAiTextMode", "chatBubbleAiText", "chatBubbleAiActionMode", "chatBubbleAiActionText", "chatBubbleAiDialogueMode", "chatBubbleAiDialogueText", "chatBubbleAiBorder", "chatBubbleAiBorderWidth", "chatBubbleAiBorderStyle", "chatBubbleAiBorderOpacity", "chatBubbleAiOpacity", "chatBubbleAiRadius", "chatBubbleAiShape", "chatBubbleAiDecorationMode", "chatBubbleAiDecorationColor", "chatBubbleAiCatEarLayout", "chatBubbleAiShadow",
-  "chatBubbleUserBackground", "chatBubbleUserTextMode", "chatBubbleUserText", "chatBubbleUserActionMode", "chatBubbleUserActionText", "chatBubbleUserDialogueMode", "chatBubbleUserDialogueText", "chatBubbleUserBorder", "chatBubbleUserBorderWidth", "chatBubbleUserBorderStyle", "chatBubbleUserBorderOpacity", "chatBubbleUserOpacity", "chatBubbleUserRadius", "chatBubbleUserShape", "chatBubbleUserDecorationMode", "chatBubbleUserDecorationColor", "chatBubbleUserCatEarLayout", "chatBubbleUserShadow"
+  "chatBubbleAiBackground", "chatBubbleAiTextMode", "chatBubbleAiText", "chatBubbleAiFont", "chatBubbleAiActionMode", "chatBubbleAiActionText", "chatBubbleAiActionFont", "chatBubbleAiDialogueMode", "chatBubbleAiDialogueText", "chatBubbleAiDialogueFont", "chatBubbleAiBorder", "chatBubbleAiBorderWidth", "chatBubbleAiBorderStyle", "chatBubbleAiBorderOpacity", "chatBubbleAiOpacity", "chatBubbleAiRadius", "chatBubbleAiShape", "chatBubbleAiDecorationMode", "chatBubbleAiDecorationColor", "chatBubbleAiCatEarLayout", "chatBubbleAiShadow",
+  "chatBubbleUserBackground", "chatBubbleUserTextMode", "chatBubbleUserText", "chatBubbleUserFont", "chatBubbleUserActionMode", "chatBubbleUserActionText", "chatBubbleUserActionFont", "chatBubbleUserDialogueMode", "chatBubbleUserDialogueText", "chatBubbleUserDialogueFont", "chatBubbleUserBorder", "chatBubbleUserBorderWidth", "chatBubbleUserBorderStyle", "chatBubbleUserBorderOpacity", "chatBubbleUserOpacity", "chatBubbleUserRadius", "chatBubbleUserShape", "chatBubbleUserDecorationMode", "chatBubbleUserDecorationColor", "chatBubbleUserCatEarLayout", "chatBubbleUserShadow"
 ];
 
 function setControlValue(id, next) {

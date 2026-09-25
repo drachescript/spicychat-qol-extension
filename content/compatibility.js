@@ -8,7 +8,6 @@
   const DEFERRED_FEATURES = new Set([
     "generation-profiles",
     "generation-metadata",
-    "chat-export",
     "home-for-you",
     "failed-message-helper"
   ]);

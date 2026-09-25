@@ -33,6 +33,7 @@ const HELPER_SESSION_GRACE_ALARM = "ds-helper-session-grace-cleanup";
 const QUICK_DISLIKE_INTERRUPTED_GRACE_MS = 60 * 1000;
 const QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS = 2 * 60 * 1000;
 const QUICK_DISLIKE_RECOVERY_MAX_AGE_MS = 10 * 60 * 1000;
+const QUICK_DISLIKE_PERSISTENT_IDLE_MAX_AGE_MS = 15 * 60 * 1000;
 const AUTO_AFK_SCAN_MINUTES = 1;
 const CHAT_NUDGE_SCAN_MINUTES = 15;
 
@@ -80,6 +81,7 @@ let tabCleanupWorkerTabId = null;
 const tabCleanupWorkerTabIds = new Set();
 const quickDislikeWorkerTabIds = new Set();
 const quickDislikeBulkWorkerTabs = new Map();
+let quickDislikePersistentWorkerTabId = null;
 const listingRefillWorkerTabIds = new Set();
 const listingRefillPageWorkerTabs = new Map();
 const listingRefillSourceTabs = new Map();
@@ -100,7 +102,8 @@ function quickDislikeWorkerUrlInfo(url) {
       botId: String(parsed.searchParams.get("dsQuickBotId") || "").trim().toLowerCase(),
       bulkRunId: String(parsed.searchParams.get("dsQuickBulkRunId") || "").trim(),
       startedAt: Number(parsed.searchParams.get("dsQuickStartedAt") || 0) || 0,
-      sessionId: String(parsed.searchParams.get("dsHelperSession") || "").trim()
+      sessionId: String(parsed.searchParams.get("dsHelperSession") || "").trim(),
+      persistent: parsed.searchParams.get("dsQuickPersistent") === "1"
     };
   } catch {
     return null;
@@ -114,6 +117,7 @@ function isQuickDislikeWorkerUrl(url) {
 function stampQuickDislikeWorkerUrl(url, { jobId = "", botId = "", bulkRunId = "", startedAt = Date.now(), sessionId = "" } = {}) {
   const next = new URL(String(url));
   next.searchParams.set("dsQuickDislike", "1");
+  next.searchParams.set("dsQuickPersistent", "1");
   const values = {
     dsQuickJobId: String(jobId || "").trim(),
     dsQuickBotId: String(botId || "").trim().toLowerCase(),
@@ -254,11 +258,17 @@ async function releaseQuickDislikeBulkWorker(runId) {
     const info = quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
     if (info?.bulkRunId === id && tab?.id) tabIds.add(Number(tab.id));
   }
+  let released = false;
   for (const tabId of tabIds) {
+    if (Number(tabId) === Number(quickDislikePersistentWorkerTabId)) {
+      released = true;
+      continue;
+    }
     quickDislikeWorkerTabIds.delete(tabId);
     await tabsRemove(tabId);
+    released = true;
   }
-  return tabIds.size > 0;
+  return released;
 }
 
 async function findQuickDislikeWorkersForBulkRun(runId) {
@@ -266,6 +276,36 @@ async function findQuickDislikeWorkersForBulkRun(runId) {
   if (!id) return [];
   const tabs = await tabsQuery({});
   return tabs.filter(tab => quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "")?.bulkRunId === id);
+}
+
+async function findPersistentQuickDislikeWorker(sessionId = "") {
+  const mapped = Number(quickDislikePersistentWorkerTabId);
+  if (Number.isFinite(mapped)) {
+    const tab = await tabsGet(mapped);
+    const info = tab ? quickDislikeWorkerUrlInfo(tab.url || tab.pendingUrl || "") : null;
+    if (tab && info?.persistent && (!sessionId || !info.sessionId || info.sessionId === sessionId)) return tab;
+    quickDislikePersistentWorkerTabId = null;
+  }
+
+  const tabs = await quickDislikeWorkerTabs();
+  const candidates = tabs.filter(tab => {
+    const info = quickDislikeWorkerUrlInfo(tab.url || tab.pendingUrl || "");
+    return !!info?.persistent && (!sessionId || !info.sessionId || info.sessionId === sessionId);
+  });
+  candidates.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  const tab = candidates[0] || null;
+  if (tab?.id) quickDislikePersistentWorkerTabId = Number(tab.id);
+  return tab;
+}
+
+async function navigateQuickDislikeWorkerTab(tabId, targetUrl, botId, jobId) {
+  const response = await tabsSendMessage(tabId, {
+    type: "DS_QUICK_DISLIKE_NAVIGATE",
+    targetUrl: targetUrl.href,
+    botId,
+    jobId
+  });
+  return response?.ok === true;
 }
 
 async function closeDuplicateQuickDislikeWorkers(runId, keepTabId) {
@@ -295,40 +335,68 @@ async function prepareQuickDislikeWorkerTab(url, bulkRunId = "", job = {}) {
     sessionId: runtimeSession.id
   });
 
+  let existing = null;
+  let recovered = false;
+
   if (runId) {
-    let existingId = Number(quickDislikeBulkWorkerTabs.get(runId));
-    let recovered = false;
-    if (!Number.isFinite(existingId)) {
-      const existingTabs = await findQuickDislikeWorkersForBulkRun(runId);
-      existingTabs.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
-      existingId = Number(existingTabs[0]?.id);
-      recovered = Number.isFinite(existingId);
-      if (recovered) quickDislikeBulkWorkerTabs.set(runId, existingId);
+    const mappedId = Number(quickDislikeBulkWorkerTabs.get(runId));
+    if (Number.isFinite(mappedId)) existing = await tabsGet(mappedId);
+    if (!existing) {
+      const runTabs = await findQuickDislikeWorkersForBulkRun(runId);
+      runTabs.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+      existing = runTabs[0] || null;
+      recovered = !!existing;
     }
-    if (Number.isFinite(existingId)) {
-      const existing = await tabsGet(existingId);
-      if (existing) {
-        const updated = await tabsUpdate(existingId, { url: stampedFor(url).href, active: false });
-        if (updated?.ok) {
-          quickDislikeWorkerTabIds.add(existingId);
-          const duplicateClosed = await closeDuplicateQuickDislikeWorkers(runId, existingId);
-          if (recovered) await recordHelperLifecycle("quickDislikeHelperRecovered", { bulkRunId: runId, jobId, tabId: existingId });
-          return { ok: true, tabId: existingId, reusable: true, reused: true, recovered, duplicateClosed };
-        }
+  }
+
+  if (!existing) existing = await findPersistentQuickDislikeWorker(runtimeSession.id);
+
+  if (existing?.id) {
+    const existingId = Number(existing.id);
+    const target = stampedFor(url);
+    let reusedWithoutReload = false;
+    try {
+      reusedWithoutReload = await navigateQuickDislikeWorkerTab(existingId, target, botId, jobId);
+    } catch {}
+
+    if (!reusedWithoutReload) {
+      const updated = await tabsUpdate(existingId, { url: target.href, active: false });
+      if (!updated?.ok) {
+        quickDislikeWorkerTabIds.delete(existingId);
+        if (Number(quickDislikePersistentWorkerTabId) === existingId) quickDislikePersistentWorkerTabId = null;
+        if (runId) quickDislikeBulkWorkerTabs.delete(runId);
+        existing = null;
       }
-      quickDislikeBulkWorkerTabs.delete(runId);
-      quickDislikeWorkerTabIds.delete(existingId);
+    }
+
+    if (existing) {
+      quickDislikeWorkerTabIds.add(existingId);
+      quickDislikePersistentWorkerTabId = existingId;
+      if (runId) quickDislikeBulkWorkerTabs.set(runId, existingId);
+      const duplicateClosed = runId ? await closeDuplicateQuickDislikeWorkers(runId, existingId) : 0;
+      if (recovered) await recordHelperLifecycle("quickDislikeHelperRecovered", { bulkRunId: runId, jobId, tabId: existingId });
+      if (reusedWithoutReload) await recordHelperLifecycle("quickDislikeSpaReused", { bulkRunId: runId, jobId, botId, tabId: existingId });
+      return {
+        ok: true,
+        tabId: existingId,
+        reusable: true,
+        reused: true,
+        reusedWithoutReload,
+        recovered,
+        duplicateClosed
+      };
     }
   }
 
   const created = await tabsCreate({ url: stampedFor(url).href, active: false });
   const tabId = Number(created?.tab?.id);
   if (!created.ok || !Number.isFinite(tabId)) {
-    return { ok: false, tabId: null, reusable: !!runId, error: created.error || "" };
+    return { ok: false, tabId: null, reusable: true, error: created.error || "" };
   }
   quickDislikeWorkerTabIds.add(tabId);
+  quickDislikePersistentWorkerTabId = tabId;
   if (runId) quickDislikeBulkWorkerTabs.set(runId, tabId);
-  return { ok: true, tabId, reusable: !!runId, reused: false, recovered: false, duplicateClosed: 0 };
+  return { ok: true, tabId, reusable: true, reused: false, reusedWithoutReload: false, recovered: false, duplicateClosed: 0 };
 }
 
 function alarmName(tabId) {
@@ -926,6 +994,7 @@ async function closeQuickDislikeTab(tabId, event = "quickDislikeOrphanClosed", d
   if (!Number.isFinite(id)) return false;
   const result = await tabsRemove(id);
   quickDislikeWorkerTabIds.delete(id);
+  if (Number(quickDislikePersistentWorkerTabId) === id) quickDislikePersistentWorkerTabId = null;
   for (const [runId, workerTabId] of quickDislikeBulkWorkerTabs.entries()) {
     if (Number(workerTabId) === id) quickDislikeBulkWorkerTabs.delete(runId);
   }
@@ -949,8 +1018,14 @@ async function cleanupStaleQuickDislikeWorkers() {
     const priorSession = !!(runtimeSession.id && info.sessionId && info.sessionId !== runtimeSession.id);
     const confirmed = !!(info.botId && history.bots[info.botId]);
     const legacy = !info.jobId || !info.botId || !info.startedAt;
-    const stale = age >= QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS || (priorSession && age >= QUICK_DISLIKE_INTERRUPTED_GRACE_MS);
-    if (confirmed || legacy || (!activeJob && stale) || (activeJob && age >= QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS)) {
+    const persistentIdle = !!info.persistent && !priorSession && !activeJob;
+    if (persistentIdle && age < QUICK_DISLIKE_PERSISTENT_IDLE_MAX_AGE_MS) {
+      quickDislikePersistentWorkerTabId = tabId;
+      continue;
+    }
+    const stale = age >= (info.persistent ? QUICK_DISLIKE_PERSISTENT_IDLE_MAX_AGE_MS : QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS) ||
+      (priorSession && age >= QUICK_DISLIKE_INTERRUPTED_GRACE_MS);
+    if ((confirmed && !info.persistent) || (legacy && !info.persistent) || (!activeJob && stale) || (activeJob && age >= QUICK_DISLIKE_ABSOLUTE_MAX_AGE_MS)) {
       const event = confirmed ? "quickDislikeConfirmedHelperClosed" : (priorSession ? "quickDislikeInterruptedGcClosed" : "quickDislikeGcClosed");
       if (await closeQuickDislikeTab(tabId, event, { jobId: info.jobId, botId: info.botId, ageMs: Number.isFinite(age) ? age : -1 })) closed += 1;
     }
@@ -1161,6 +1236,7 @@ async function runQuickDislikeBot(message) {
       if (worker.reusable && message?.bulkRunId) quickDislikeBulkWorkerTabs.delete(String(message.bulkRunId));
       await tabsRemove(tabId);
       quickDislikeWorkerTabIds.delete(tabId);
+      if (Number(quickDislikePersistentWorkerTabId) === tabId) quickDislikePersistentWorkerTabId = null;
     }
   }
 
@@ -1181,10 +1257,11 @@ async function runQuickDislikeBot(message) {
     botId,
     status: result?.status || "unknown",
     reused: !!worker.reused,
+    reusedWithoutReload: !!worker.reusedWithoutReload,
     recovered: !!worker.recovered,
     recoveryCount
   });
-  return { ...result, jobId, helperReused: !!worker.reused, helperRecovered: !!worker.recovered };
+  return { ...result, jobId, helperReused: !!worker.reused, helperSpaReused: !!worker.reusedWithoutReload, helperRecovered: !!worker.recovered };
 }
 
 async function runListingRefillFavoriteWorker(message) {
@@ -4210,6 +4287,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
   if (Number(tabId) === Number(tabCleanupWorkerTabId)) tabCleanupWorkerTabId = null;
   tabCleanupWorkerTabIds.delete(Number(tabId));
   quickDislikeWorkerTabIds.delete(Number(tabId));
+  if (Number(quickDislikePersistentWorkerTabId) === Number(tabId)) quickDislikePersistentWorkerTabId = null;
   for (const [runId, workerTabId] of quickDislikeBulkWorkerTabs.entries()) {
     if (Number(workerTabId) === Number(tabId)) quickDislikeBulkWorkerTabs.delete(runId);
   }

@@ -230,6 +230,11 @@
     cleanupEmptyTitleActions();
   }
 
+  function cleanupChatExportButtons() {
+    DS.qsa(".ds-chat-copy-button, .ds-chat-export-button").forEach(button => button.remove());
+    cleanupEmptyTitleActions();
+  }
+
   function applyHeaderLaterButton() {
     const settings = DS.state.settings || {};
     const profile = getBotProfileAnchor();
@@ -366,6 +371,53 @@
     cleanupEmptyTitleActions();
   }
 
+  function applyChatExportButtons() {
+    const settings = DS.state.settings || {};
+    const profile = getBotProfileAnchor();
+    const host = profile?.parentElement;
+
+    if (!profile || !host || !settings.showChatExportButton) {
+      cleanupChatExportButtons();
+      return;
+    }
+
+    DS.setClassState?.(host, "ds-chat-title-actions-host", true);
+    const actions = getTitleActionsContainer(host, profile);
+    if (!actions) return;
+
+    let copy = actions.querySelector(".ds-chat-copy-button");
+    if (!copy) {
+      copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "ds-chat-title-mini-button ds-chat-copy-button";
+      copy.textContent = "Copy";
+      copy.title = "Copy this chat";
+      copy.setAttribute("aria-label", copy.title);
+      copy.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        DS.copyCurrentChat?.();
+      }, true);
+      actions.appendChild(copy);
+    }
+
+    let exp = actions.querySelector(".ds-chat-export-button");
+    if (!exp) {
+      exp = document.createElement("button");
+      exp.type = "button";
+      exp.className = "ds-chat-title-mini-button ds-chat-export-button";
+      exp.textContent = "Export";
+      exp.title = "Export this chat";
+      exp.setAttribute("aria-label", exp.title);
+      exp.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        DS.exportCurrentChat?.();
+      }, true);
+      actions.appendChild(exp);
+    }
+  }
+
   function applyInlineCreator() {
     const settings = DS.state.settings || {};
     const creator = getCreatorAnchor();
@@ -459,6 +511,7 @@
       settings.chatTopBarAddLaterButton ||
       settings.showPerCharacterChatHistory ||
       settings.showQuickNewChatButton ||
+      settings.showChatExportButton ||
       settings.showChatTopBarTools
     );
 
@@ -466,6 +519,7 @@
       if (DS.state.chatTopBarWasActive) {
         cleanupLaterButton();
         cleanupChatHistoryButtons();
+        cleanupChatExportButtons();
         cleanupTopBarTools();
       }
       DS.state.chatTopBarWasActive = false;
@@ -477,6 +531,7 @@
     // These bot actions are independent from the optional chat-header cleanup group.
     applyHeaderLaterButton();
     applyPerCharacterChatHistoryButtons();
+    applyChatExportButtons();
 
     if (!settings.showChatTopBarTools) {
       cleanupTopBarTools();

@@ -120,7 +120,7 @@ Everything is optional. Fresh installs keep the main extension switch on, while 
 - Chat composer cleanup for plus/image/voice controls and voice upsells.
 - Premium, notification, model, and advert/banner cleanup.
 - Optional browser-tab notification badge hiding and background product-update clearing.
-- Mini Panel with configurable placement, drag position, sizing, visible controls, Auto voice/Auto */translation controls, and an optional current-page feature summary.
+- Mini Panel with configurable placement, drag position, sizing, visible controls, Auto voice/Auto */translation controls, an optional current-page feature summary, and an opt-in counter for messages currently loaded in a chat.
 - Optional Mini Panel one-click shortcuts for up to three pinned Smart Filter presets on bot listings.
 - Mobile/compact-aware controls with a separate opt-in settings area, Mobile Recommended preset, and compact chat top-bar QoL menu for OOC, actions/formatting, navigation, persona, model, and optional translation. Manual enable works on Firefox/Chrome desktop, Firefox Android, installed web apps, and the Android APK. Mobile Bot Organizer bulk mode uses card-tap selection/protected touch targets so nearby native Favorite controls cannot be triggered accidentally.
 - Optional Auto-AFK cleanup for inactive SpicyChat tabs.

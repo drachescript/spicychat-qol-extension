@@ -1,3 +1,18 @@
+## 0.2.17
+- Fixed Chat Export:
+  - Fixed Copy / Export controls not appearing where enabled.
+  - Fixed older messages not automatically loading before export.
+  - Fixed exports stopping early when SpicyChat took longer to load a history batch.
+  - Improved long-chat capture, progress/cancelling and available bot info.
+  - Exporting now pauses interfering QoL message tools while the chat history is loading.
+  - Confirmed working on a 600+ message chat.
+- Added an opt-in Mini Panel counter for messages currently shown in a chat.
+- Added separate font choices for normal text, actions and dialogue in AI/user chat bubbles.
+- Added an optional horizontal expander for cut-off bot names.
+- Added an optional page-number box above chatbot listings.
+- Improved mobile message editing and fixed the oversized mobile send-button wrapper.
+- Improved Quick Dislike helper reuse.
+
 ## 0.2.16
 - Fixed Bot Organizer folders/status/notes and its organize button crowding native card titles and creator names.
 - Fixed Bot Organizer sometimes using the card description instead of the bot name.

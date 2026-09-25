@@ -446,13 +446,14 @@
     return smaller > 0 && overlap / smaller >= 0.8;
   }
 
-  function collectMessages(settings = DS.state?.settings || {}) {
+  function collectMessages(settings = DS.state?.settings || {}, rootsOverride = null) {
     const botName = getBotName();
     const seenIds = new Set();
     const renderedCopies = new Map();
     const messages = [];
+    const roots = Array.isArray(rootsOverride) ? rootsOverride : getMessageRoots();
 
-    for (const root of getMessageRoots()) {
+    for (const root of roots) {
       const rawId = String(root.id || "");
       if (rawId && seenIds.has(rawId)) continue;
       if (rawId) seenIds.add(rawId);
@@ -520,8 +521,10 @@
       .forEach(button => {
         const text = cleanText(button.textContent);
         const key = norm(text);
+        const loadPreviousKey = button.querySelector("[data-translate-key='chat:page.action.loadPreviousMessages']");
 
         if (!text || text.length > 40) return;
+        if (loadPreviousKey || key === "load previous messages") return;
         if (seen.has(key)) return;
         if (looksLikeUiText(text)) return;
         if (key === norm(botName)) return;
@@ -628,6 +631,45 @@
     return info;
   }
 
+  async function collectAvailableBotInfo() {
+    const visible = collectBotInfo();
+    const botId = String(location.pathname.match(/^\/chat\/([^/]+)/)?.[1] || "").trim();
+    let remote = null;
+
+    try {
+      if (botId && typeof DS.fetchCharacterArchiveData === "function") {
+        remote = await DS.fetchCharacterArchiveData(botId);
+      }
+    } catch {}
+
+    if (!remote) return { ...visible, source: "visible-chat" };
+
+    const pick = (a, b) => cleanText(a || b || "");
+    const list = (...values) => [...new Set(values.flat().filter(Boolean).map(item => cleanText(item)).filter(Boolean))];
+
+    return {
+      ...visible,
+      id: botId || remote.id || "",
+      name: pick(remote.name, visible.name),
+      creator: pick(remote.creator, visible.creator),
+      avatar: pick(remote.avatar, visible.avatar),
+      visibility: pick(remote.visibility, visible.visibility),
+      createdAt: remote.createdAt || visible.createdAt || null,
+      profileUrl: visible.profileUrl || (botId ? `${location.origin}/chatbot/${botId}` : ""),
+      tags: list(remote.tags || [], visible.tags || []),
+      greeting: pick(remote.greeting, visible.greeting || visible.intro),
+      alternateGreetings: Array.isArray(remote.alternateGreetings) ? remote.alternateGreetings : [],
+      intro: visible.intro,
+      description: pick(remote.description, visible.description),
+      personality: pick(remote.personality, visible.personality),
+      scenario: pick(remote.scenario, visible.scenario),
+      examples: pick(remote.examples, visible.examples),
+      lorebook: visible.lorebook,
+      definition: pick(remote.personality, visible.definition),
+      source: remote.source || "visible-chat"
+    };
+  }
+
   function formatBotInfo(botInfo) {
     const lines = ["## Bot info"];
 
@@ -635,12 +677,18 @@
     if (botInfo.creator) lines.push(`Creator: ${botInfo.creator}`);
     if (botInfo.profileUrl) lines.push(`Profile: ${botInfo.profileUrl}`);
     if (botInfo.tags.length) lines.push(`Tags: ${botInfo.tags.join(", ")}`);
+    if (botInfo.createdAt) lines.push(`Created: ${new Date(botInfo.createdAt).toLocaleString()}`);
+    if (botInfo.visibility) lines.push(`Visibility: ${botInfo.visibility}`);
+    if (botInfo.source) lines.push(`Bot info source: ${botInfo.source}`);
 
     const blocks = [
+      ["Greeting", botInfo.greeting],
+      ["Alternate greetings", (botInfo.alternateGreetings || []).join("\n\n---\n\n")],
       ["Visible intro", botInfo.intro],
       ["Description", botInfo.description],
       ["Personality", botInfo.personality],
       ["Scenario", botInfo.scenario],
+      ["Example dialogue", botInfo.examples],
       ["Lorebook", botInfo.lorebook],
       ["Definition", botInfo.definition]
     ].filter(([, value]) => value);
@@ -693,16 +741,17 @@
     }
   }
 
-  async function buildExportData(settings) {
-    const messages = collectMessages(settings);
+  async function buildExportData(settings, messageOverride = null, captureStatus = null) {
+    const messages = Array.isArray(messageOverride) ? messageOverride.map(message => ({ ...message })) : collectMessages(settings);
     const metadata = await loadGenerationMetadata();
     for (const message of messages) message.metadata = metadata[message.id] || null;
     return {
       exportedAt: new Date().toISOString(),
       chatUrl: location.href,
-      botInfo: collectBotInfo(),
+      botInfo: await collectAvailableBotInfo(),
       messages,
-      olderMessagesAvailable: !!findLoadPreviousMessagesButton()
+      olderMessagesAvailable: !!findLoadPreviousMessagesButton(),
+      captureStatus: captureStatus || null
     };
   }
 
@@ -712,7 +761,10 @@
     if (botInfo.creator) lines.push(`Creator: ${botInfo.creator}`);
     if (botInfo.profileUrl) lines.push(`Profile: ${botInfo.profileUrl}`);
     if (botInfo.tags.length) lines.push(`Tags: ${botInfo.tags.join(", ")}`);
-    for (const [label, value] of [["Visible intro", botInfo.intro], ["Description", botInfo.description], ["Personality", botInfo.personality], ["Scenario", botInfo.scenario], ["Lorebook", botInfo.lorebook], ["Definition", botInfo.definition]]) {
+    if (botInfo.createdAt) lines.push(`Created: ${new Date(botInfo.createdAt).toLocaleString()}`);
+    if (botInfo.visibility) lines.push(`Visibility: ${botInfo.visibility}`);
+    if (botInfo.source) lines.push(`Bot info source: ${botInfo.source}`);
+    for (const [label, value] of [["Greeting", botInfo.greeting], ["Alternate greetings", (botInfo.alternateGreetings || []).join("\n\n---\n\n")], ["Visible intro", botInfo.intro], ["Description", botInfo.description], ["Personality", botInfo.personality], ["Scenario", botInfo.scenario], ["Example dialogue", botInfo.examples], ["Lorebook", botInfo.lorebook], ["Definition", botInfo.definition]]) {
       if (value) lines.push(`\n${label}:\n${value}`);
     }
     return lines.join("\n").trim();
@@ -742,7 +794,10 @@
       if (data.botInfo.creator) parts.push(`**Creator:** ${escapeMd(data.botInfo.creator)}`);
       if (data.botInfo.profileUrl) parts.push(`**Profile:** ${data.botInfo.profileUrl}`);
       if (data.botInfo.tags.length) parts.push(`**Tags:** ${data.botInfo.tags.map(escapeMd).join(", ")}`);
-      for (const [label, value] of [["Visible intro", data.botInfo.intro], ["Description", data.botInfo.description], ["Personality", data.botInfo.personality], ["Scenario", data.botInfo.scenario], ["Lorebook", data.botInfo.lorebook], ["Definition", data.botInfo.definition]]) {
+      if (data.botInfo.createdAt) parts.push(`**Created:** ${escapeMd(new Date(data.botInfo.createdAt).toLocaleString())}`);
+      if (data.botInfo.visibility) parts.push(`**Visibility:** ${escapeMd(data.botInfo.visibility)}`);
+      if (data.botInfo.source) parts.push(`**Bot info source:** ${escapeMd(data.botInfo.source)}`);
+      for (const [label, value] of [["Greeting", data.botInfo.greeting], ["Alternate greetings", (data.botInfo.alternateGreetings || []).join("\n\n---\n\n")], ["Visible intro", data.botInfo.intro], ["Description", data.botInfo.description], ["Personality", data.botInfo.personality], ["Scenario", data.botInfo.scenario], ["Example dialogue", data.botInfo.examples], ["Lorebook", data.botInfo.lorebook], ["Definition", data.botInfo.definition]]) {
         if (value) parts.push(`### ${label}\n\n${value}`);
       }
     }
@@ -831,6 +886,90 @@
     return { text: makePlainText(data, opts), mime: "text/plain;charset=utf-8", ext: "txt" };
   }
 
+  function createCaptureSession(settings, initialMessages = []) {
+    const session = { settings, byId: new Map(), order: [], orderSet: new Set(), cancelled: false, clicked: 0, stalled: 0 };
+    for (const message of initialMessages) {
+      const id = message.id || `fallback:${message.speaker}:${message.text}`;
+      if (!session.byId.has(id)) {
+        session.byId.set(id, { ...message, id: message.id || "" });
+        session.order.push(id);
+        session.orderSet.add(id);
+      }
+    }
+    return session;
+  }
+
+  function mergeCapturedMessages(session, rootsOverride = null) {
+    const allRoots = getMessageRoots();
+    const parseRoots = Array.isArray(rootsOverride) ? rootsOverride : allRoots;
+    const current = collectMessages(session.settings, parseRoots);
+    const orderSet = session.orderSet instanceof Set ? session.orderSet : (session.orderSet = new Set(session.order));
+
+    for (const message of current) {
+      const id = message.id || `fallback:${message.speaker}:${message.text}`;
+      session.byId.set(id, { ...message, id: message.id || "" });
+    }
+
+    const currentIds = allRoots
+      .map(root => String(root?.id || "").replace(/^message-/, ""))
+      .filter(id => id && session.byId.has(id));
+
+    for (let i = 0; i < currentIds.length; i++) {
+      const id = currentIds[i];
+      if (orderSet.has(id)) continue;
+
+      let nextKnown = null;
+      for (let j = i + 1; j < currentIds.length; j++) {
+        if (orderSet.has(currentIds[j])) {
+          nextKnown = currentIds[j];
+          break;
+        }
+      }
+      if (nextKnown) {
+        session.order.splice(session.order.indexOf(nextKnown), 0, id);
+        orderSet.add(id);
+        continue;
+      }
+
+      let prevKnown = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (orderSet.has(currentIds[j])) {
+          prevKnown = currentIds[j];
+          break;
+        }
+      }
+      if (prevKnown) session.order.splice(session.order.indexOf(prevKnown) + 1, 0, id);
+      else session.order.push(id);
+      orderSet.add(id);
+    }
+
+    for (const message of current) {
+      if (message.id) continue;
+      const id = `fallback:${message.speaker}:${message.text}`;
+      if (orderSet.has(id)) continue;
+      session.order.push(id);
+      orderSet.add(id);
+    }
+
+    return session.order.map(id => session.byId.get(id)).filter(Boolean);
+  }
+
+  function beginExportLock() {
+    if (DS.state.chatExportLock?.active) return null;
+    const lock = { active: true, cancelled: false, url: location.href };
+    DS.state.chatExportLock = lock;
+    document.documentElement.dataset.dsChatExporting = "1";
+    return lock;
+  }
+
+  function endExportLock(lock) {
+    if (lock && DS.state.chatExportLock === lock) {
+      lock.active = false;
+      DS.state.chatExportLock = null;
+    }
+    document.documentElement.removeAttribute("data-ds-chat-exporting");
+  }
+
   function findLoadPreviousMessagesButton({ readyOnly = false } = {}) {
     return qsa("button").filter(isVisible).find(button => {
       const text = norm(button.textContent);
@@ -841,60 +980,215 @@
     }) || null;
   }
 
-  async function waitForPreviousMessageLoad(beforeCount, beforeFirstId, oldButton) {
+  async function waitForPreviousMessageLoad(beforeCount, beforeFirstId, oldButton, timeoutMs = 12000) {
     const started = Date.now();
     let sawBusyState = false;
-    while (Date.now() - started < 8000) {
+    let sawButtonReplacement = false;
+
+    while (Date.now() - started < timeoutMs) {
       const roots = getMessageRoots();
       const count = roots.length;
       const firstId = String(roots[0]?.id || "");
       const current = findLoadPreviousMessagesButton();
-      if (count > beforeCount) return true;
-      if (beforeFirstId && firstId && firstId !== beforeFirstId) return true;
-      if (!current) return true;
+
+      if (count > beforeCount) {
+        return { progressed: true, sawBusyState, sawButtonReplacement, buttonGone: false };
+      }
+      if (beforeFirstId && firstId && firstId !== beforeFirstId) {
+        return { progressed: true, sawBusyState, sawButtonReplacement, buttonGone: false };
+      }
+      if (!current) {
+        return { progressed: true, sawBusyState, sawButtonReplacement, buttonGone: true };
+      }
+
+      if (current !== oldButton) sawButtonReplacement = true;
       if (current.disabled || current.getAttribute("aria-disabled") === "true") sawBusyState = true;
-      if (current !== oldButton && !current.disabled && current.getAttribute("aria-disabled") !== "true") return true;
-      if (sawBusyState && !current.disabled && current.getAttribute("aria-disabled") !== "true") return true;
+
+      // A busy -> ready transition or a React button replacement is not proof
+      // that older messages actually reached the DOM. Wait for the message roots
+      // to change (or for the load button to disappear) before calling it progress.
       await DS.sleep(140);
     }
-    return false;
+
+    return { progressed: false, sawBusyState, sawButtonReplacement, buttonGone: false };
   }
 
-  async function loadAllPreviousMessages() {
-    let clicked = 0;
-    let stalled = 0;
 
-    for (let i = 0; i < 500; i++) {
-      let button = findLoadPreviousMessagesButton();
-      if (!button) break;
+  async function waitForMessageBatchSettle(maxMs = 4000, stableMs = 700) {
+    const started = Date.now();
+    let lastSignature = "";
+    let stableSince = 0;
 
-      if (button.disabled || button.getAttribute("aria-disabled") === "true") {
-        const ready = await waitFor(() => findLoadPreviousMessagesButton({ readyOnly: true }), 8000, 140);
-        if (!ready) break;
-        button = ready;
-      }
-
-      const beforeRoots = getMessageRoots();
-      const beforeCount = beforeRoots.length;
-      const beforeFirstId = String(beforeRoots[0]?.id || "");
-      DS.realClick?.(button, { scroll: true });
-      clicked++;
-      DS.setQuickStatus?.(`Loading older messages… ${beforeCount} loaded`, true);
-
-      const progressed = await waitForPreviousMessageLoad(beforeCount, beforeFirstId, button);
-      if (!progressed) {
-        stalled++;
-        if (stalled >= 2) break;
+    while (Date.now() - started < maxMs) {
+      const roots = getMessageRoots();
+      const signature = roots.map(root => String(root?.id || "")).join("|");
+      if (signature === lastSignature) {
+        if (!stableSince) stableSince = Date.now();
+        if (Date.now() - stableSince >= stableMs) return roots;
       } else {
-        stalled = 0;
+        lastSignature = signature;
+        stableSince = 0;
       }
+      await DS.sleep(160);
     }
 
-    return {
-      clicked,
-      complete: !findLoadPreviousMessagesButton(),
-      messageCount: getMessageRoots().length
-    };
+    return getMessageRoots();
+  }
+
+  function clickPreviousMessagesButton(button, { synthetic = false } = {}) {
+    if (!button || !button.isConnected) return false;
+
+    try {
+      if (synthetic && typeof DS.realClick === "function") {
+        DS.realClick(button, { scroll: false });
+      } else {
+        // Native .click() is the least invasive path for SpicyChat's React
+        // handler and does not move the user's scroll position.
+        button.click();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function loadAllPreviousMessages({ session = null, lock = null, onProgress = null } = {}) {
+    const settings = session?.settings || DS.state?.settings || {};
+    const capture = session || createCaptureSession(settings);
+    let messages = mergeCapturedMessages(capture);
+    onProgress?.({ count: messages.length, clicked: capture.clicked, phase: "start" });
+
+    const ownsHistoryPause = !DS.state.bulkChatHistoryLoadActive;
+    if (ownsHistoryPause) {
+      DS.state.bulkChatHistoryLoadActive = true;
+      DS.state.bulkChatHistoryLoadNeedsRefresh = false;
+      DS.setClassState?.(document.documentElement, "ds-qol-history-loading", true);
+    }
+
+    const token = DS.diagOperationStart?.("chat-export", "load-older-messages", { initialMessages: messages.length });
+    let reason = "complete";
+    let parsedRoots = 0;
+
+    try {
+      for (let i = 0; i < 500; i++) {
+        if (capture.cancelled || lock?.cancelled) {
+          reason = "cancelled";
+          break;
+        }
+
+        let button = findLoadPreviousMessagesButton();
+        if (!button) break;
+
+        if (button.disabled || button.getAttribute("aria-disabled") === "true") {
+          const ready = await waitFor(() => findLoadPreviousMessagesButton({ readyOnly: true }), 8000, 140);
+          if (!ready) {
+            reason = "stalled";
+            break;
+          }
+          button = ready;
+        }
+
+        const beforeRoots = getMessageRoots();
+        const beforeIds = new Set(beforeRoots.map(root => String(root?.id || "")).filter(Boolean));
+        const beforeCount = beforeRoots.length;
+        const beforeFirstId = String(beforeRoots[0]?.id || "");
+
+        let loadState = { progressed: false, sawBusyState: false, sawButtonReplacement: false, buttonGone: false };
+
+        for (let attempt = 0; attempt < 4 && !loadState.progressed; attempt++) {
+          if (capture.cancelled || lock?.cancelled) break;
+
+          let currentButton = findLoadPreviousMessagesButton({ readyOnly: true });
+          if (!currentButton) {
+            currentButton = await waitFor(() => findLoadPreviousMessagesButton({ readyOnly: true }), 20000, 180);
+            if (!currentButton && !findLoadPreviousMessagesButton()) {
+              loadState = { ...loadState, progressed: true, buttonGone: true };
+              break;
+            }
+          }
+          if (!currentButton) {
+            await DS.sleep(1000 + (attempt * 750));
+            continue;
+          }
+
+          const clickWorked = clickPreviousMessagesButton(currentButton, { synthetic: attempt > 0 });
+          if (clickWorked) capture.clicked++;
+          onProgress?.({ count: messages.length, clicked: capture.clicked, phase: attempt ? "retrying" : "loading" });
+
+          loadState = clickWorked
+            ? await waitForPreviousMessageLoad(beforeCount, beforeFirstId, currentButton, 14000)
+            : loadState;
+
+          if (!loadState.progressed && loadState.sawBusyState) {
+            const extended = await waitForPreviousMessageLoad(beforeCount, beforeFirstId, findLoadPreviousMessagesButton() || currentButton, 22000);
+            loadState = {
+              progressed: extended.progressed,
+              sawBusyState: true,
+              sawButtonReplacement: loadState.sawButtonReplacement || extended.sawButtonReplacement,
+              buttonGone: extended.buttonGone
+            };
+          }
+
+          if (!loadState.progressed) await DS.sleep(1000 + (attempt * 750));
+        }
+
+        const progressed = !!loadState.progressed;
+        const afterRoots = progressed ? await waitForMessageBatchSettle() : getMessageRoots();
+        let addedRoots = afterRoots.filter(root => {
+          const id = String(root?.id || "");
+          return id && !beforeIds.has(id);
+        });
+        if (progressed && !addedRoots.length) addedRoots = afterRoots;
+
+        parsedRoots += addedRoots.length;
+        if (addedRoots.length) messages = mergeCapturedMessages(capture, addedRoots);
+        onProgress?.({ count: messages.length, clicked: capture.clicked, phase: progressed ? "captured" : "stalled" });
+
+        if (!progressed) {
+          capture.stalled++;
+          reason = "stalled";
+          break;
+        }
+
+        capture.stalled = 0;
+      }
+
+      messages = mergeCapturedMessages(capture, []);
+      const complete = !findLoadPreviousMessagesButton() && reason !== "cancelled";
+      if (!complete && reason === "complete") reason = "limit";
+
+      const result = {
+        session: capture,
+        messages,
+        clicked: capture.clicked,
+        complete,
+        cancelled: reason === "cancelled",
+        reason,
+        messageCount: messages.length
+      };
+      DS.diagOperationEnd?.(token, {
+        outcome: reason,
+        counts: { scanned: parsedRoots, changed: messages.length, skipped: 0, errors: reason === "stalled" ? 1 : 0 }
+      });
+      return result;
+    } finally {
+      if (ownsHistoryPause) {
+        DS.state.bulkChatHistoryLoadActive = false;
+        DS.setClassState?.(document.documentElement, "ds-qol-history-loading", false);
+
+        // Export can temporarily mount hundreds of historical messages. They
+        // were intentionally ignored while bulk loading; do not immediately
+        // turn that into one giant catch-up reconciliation pass when export
+        // finishes. The current/latest messages were already decorated before
+        // export, and older messages can be handled incrementally later if the
+        // user actually interacts with them.
+        DS.state.bulkChatHistoryLoadNeedsRefresh = false;
+        DS.state.messageDirtyRoots?.clear?.();
+
+        const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
+        counters.chatExportHistoryCatchupSkips = Number(counters.chatExportHistoryCatchupSkips || 0) + 1;
+      }
+    }
   }
 
   async function copyTextValue(text) {
@@ -1024,7 +1318,9 @@
     const title = document.createElement("h2");
     title.textContent = "Chat export";
     const count = document.createElement("p");
-    headText.append(title, count);
+    const countNote = document.createElement("p");
+    countNote.textContent = "Note: SpicyChat's displayed chat count may include deleted or replaced messages.";
+    headText.append(title, count, countNote);
     const closeButton = makeExportButton("ds-export-close", "×", "Close");
     head.append(headText, closeButton);
 
@@ -1088,11 +1384,23 @@
     avatars.checked = settings.chatExportIncludeAvatars !== false;
 
     let workingData = data;
+    let activeLoadLock = null;
+    let activeCapture = createCaptureSession(settings, data.messages || []);
     const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked });
     const refresh = () => {
       const rendered = renderFormat(workingData, opts());
       textarea.value = rendered.text;
-      count.textContent = `${workingData.messages.length} message${workingData.messages.length === 1 ? "" : "s"} found.${workingData.olderMessagesAvailable ? " Older messages are still available." : ""}`;
+      const status = workingData.captureStatus;
+      const suffix = status?.complete
+        ? " Complete."
+        : status?.cancelled
+          ? " Export loading was cancelled."
+          : status?.reason === "stalled" && workingData.olderMessagesAvailable
+            ? " Automatic history loading did not make progress. Older messages are still available."
+            : workingData.olderMessagesAvailable
+              ? " Older messages are still available."
+              : "";
+      count.textContent = `${workingData.messages.length} message${workingData.messages.length === 1 ? "" : "s"} captured.${suffix}`;
       loadOlderButton.hidden = !workingData.olderMessagesAvailable;
       layout.disabled = format.value !== "html";
       printButton.disabled = format.value !== "html";
@@ -1109,19 +1417,44 @@
       refresh();
     });
 
-    const close = () => modal.remove();
+    const close = () => {
+      if (activeLoadLock?.active) {
+        activeLoadLock.cancelled = true;
+        activeCapture.cancelled = true;
+      }
+      modal.remove();
+    };
     backdrop.addEventListener("click", close);
     closeButton.addEventListener("click", close);
     loadOlderButton.addEventListener("click", async () => {
-      loadOlderButton.disabled = true;
-      loadOlderButton.textContent = "Loading…";
+      if (activeLoadLock?.active) {
+        activeLoadLock.cancelled = true;
+        activeCapture.cancelled = true;
+        loadOlderButton.textContent = "Cancelling…";
+        return;
+      }
+
+      activeLoadLock = beginExportLock();
+      if (!activeLoadLock) return;
+      activeCapture.cancelled = false;
+      loadOlderButton.textContent = "Cancel loading";
+
       try {
-        await loadAllPreviousMessages();
         const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked };
-        workingData = await buildExportData(nextSettings);
+        activeCapture.settings = nextSettings;
+        const result = await loadAllPreviousMessages({
+          session: activeCapture,
+          lock: activeLoadLock,
+          onProgress: progress => {
+            count.textContent = `${progress.count} unique messages captured · ${progress.clicked} older-message load${progress.clicked === 1 ? "" : "s"}`;
+          }
+        });
+        activeCapture = result.session;
+        workingData = await buildExportData(nextSettings, result.messages, result);
         refresh();
       } finally {
-        loadOlderButton.disabled = false;
+        endExportLock(activeLoadLock);
+        activeLoadLock = null;
         loadOlderButton.textContent = "Load older messages";
       }
     });
@@ -1145,28 +1478,42 @@
     }
 
     const settings = DS.state?.settings || {};
-    DS.setQuickStatus?.("Preparing chat copy…", true);
-    if (settings.chatExportLoadPreviousMessages) await loadAllPreviousMessages();
-
-    const data = await buildExportData(settings);
-    const text = makePlainText(data, {
-      includeBotInfo: !!settings.chatExportIncludeBotInfo,
-      includeGenerationDetails: settings.chatExportIncludeGenerationDetails !== false,
-      numberMessages: settings.chatExportNumberMessages !== false,
-      includeAvatars: false
-    });
-    const copied = await copyTextValue(text);
-    if (!copied) {
-      DS.setQuickStatus?.("Could not copy the chat.");
+    const lock = beginExportLock();
+    if (!lock) {
+      DS.setQuickStatus?.("A chat export is already running.");
       return false;
     }
 
-    DS.setQuickStatus?.(
-      data.olderMessagesAvailable
-        ? `Copied ${data.messages.length} loaded messages. Older messages are still available.`
-        : `Copied ${data.messages.length} message${data.messages.length === 1 ? "" : "s"}.`
-    );
-    return true;
+    const session = createCaptureSession(settings);
+    DS.setQuickStatus?.("Preparing chat copy…", true);
+    let result = { messages: mergeCapturedMessages(session), complete: !findLoadPreviousMessagesButton(), cancelled: false, reason: "loaded" };
+
+    try {
+      if (settings.chatExportLoadPreviousMessages) {
+        result = await loadAllPreviousMessages({
+          session,
+          lock,
+          onProgress: progress => DS.setQuickStatus?.(`Preparing chat copy… ${progress.count} unique messages captured`, true)
+        });
+      }
+
+      const data = await buildExportData(settings, result.messages, result);
+      const value = makePlainText(data, {
+        includeBotInfo: !!settings.chatExportIncludeBotInfo,
+        includeGenerationDetails: settings.chatExportIncludeGenerationDetails !== false,
+        numberMessages: settings.chatExportNumberMessages !== false,
+        includeAvatars: false
+      });
+      const ok = await copyTextValue(value);
+      DS.setQuickStatus?.(
+        ok
+          ? `Copied ${data.messages.length} messages${result.complete ? "." : " (older messages may remain)."}`
+          : "Could not copy chat."
+      );
+      return ok;
+    } finally {
+      endExportLock(lock);
+    }
   };
 
   DS.exportCurrentChat = async function exportCurrentChat() {
@@ -1174,11 +1521,36 @@
       DS.setQuickStatus?.("Open a chat first.");
       return;
     }
+
     const settings = DS.state?.settings || {};
+    const lock = beginExportLock();
+    if (!lock) {
+      DS.setQuickStatus?.("A chat export is already running.");
+      return;
+    }
+
+    const session = createCaptureSession(settings);
     DS.setQuickStatus?.("Preparing export…", true);
-    if (settings.chatExportLoadPreviousMessages) await loadAllPreviousMessages();
-    const data = await buildExportData(settings);
-    showExportModal(data);
-    DS.setQuickStatus?.(data.olderMessagesAvailable ? "Export ready. Older messages are still available." : "Export ready.");
+    let result = { messages: mergeCapturedMessages(session), complete: !findLoadPreviousMessagesButton(), cancelled: false, reason: "loaded" };
+
+    try {
+      if (settings.chatExportLoadPreviousMessages) {
+        result = await loadAllPreviousMessages({
+          session,
+          lock,
+          onProgress: progress => DS.setQuickStatus?.(`Preparing export… ${progress.count} unique messages captured`, true)
+        });
+      }
+
+      const data = await buildExportData(settings, result.messages, result);
+      showExportModal(data);
+      DS.setQuickStatus?.(
+        result.complete
+          ? `Export ready: ${data.messages.length} messages captured.`
+          : `Export ready: ${data.messages.length} messages captured${result.cancelled ? " (loading cancelled)." : ". Older messages may remain."}`
+      );
+    } finally {
+      endExportLock(lock);
+    }
   };
 })();

@@ -326,6 +326,12 @@
     return DS.normalize ? DS.normalize(text) : text.toLowerCase().replace(/\s+/g, " ").trim();
   }
 
+  function isLoadPreviousMessagesButton(button) {
+    if (!(button instanceof Element)) return false;
+    if (button.querySelector?.("[data-translate-key='chat:page.action.loadPreviousMessages']")) return true;
+    return normalizedText(button).includes("load previous messages");
+  }
+
   function isChatDropdownMenuElement(el) {
     if (!el || el.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return false;
     if (!isVisible(el)) return false;
@@ -352,6 +358,11 @@
     const dropdownButton = target?.closest?.("button[aria-label='chat-dropdown']");
     const dropdownAction = target?.closest?.("button");
     const label = normalizedText(dropdownAction);
+
+    if (isLoadPreviousMessagesButton(dropdownAction)) {
+      scheduleChatHistoryBatchRefresh();
+      return;
+    }
 
     if (dropdownAction && label === "save") {
       const messageRoot = dropdownAction.closest?.("div[id^='message-']");
@@ -456,6 +467,10 @@
     return chatMessageCountCache.count;
   }
 
+  // Shared by lightweight UI such as the optional Mini Panel counter so those
+  // surfaces do not need to rescan a long chat on every refresh.
+  DS.getLoadedChatMessageCount = loadedChatMessageCount;
+
   function messageQuickActionsEnabled(settings = DS.state?.settings || {}) {
     return !!(
       settings.messageQuickActionCopy ||
@@ -477,7 +492,7 @@
   function chatTopBarWanted(settings) {
     return anySetting(settings, [
       "showChatTopBarTools", "chatTopBarInlineCreator", "chatTopBarAddLaterButton",
-      "showPerCharacterChatHistory", "showQuickNewChatButton", "hideChatTopBarRatingButton",
+      "showPerCharacterChatHistory", "showQuickNewChatButton", "showChatExportButton", "hideChatTopBarRatingButton",
       "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell",
       "hideChatDropdownMemoryItem"
     ]);
@@ -699,7 +714,8 @@
     }
 
     const debug = !!DS.state?.settings?.debug;
-    const collectTiming = debug || !!DS.state?.settings?.performanceDiagnostics;
+    const inspectorConnected = !!DS.isDiagnosticInspectorConnected?.();
+    const collectTiming = debug || !!DS.state?.settings?.performanceDiagnostics || inspectorConnected;
     const started = collectTiming && typeof performance !== "undefined" ? performance.now() : 0;
 
     try {
@@ -722,6 +738,7 @@
         entry.maxMs = Math.max(entry.maxMs, elapsed);
         entry.lastMs = elapsed;
         entry.lastAt = Date.now();
+        entry.lastTrigger = String(DS.state.lastRunTrigger || "").slice(0, 120);
       }
     }
   }
@@ -736,7 +753,8 @@
         averageMs: value.calls ? Math.round((value.totalMs / value.calls) * 100) / 100 : 0,
         maxMs: Math.round((value.maxMs || 0) * 100) / 100,
         lastMs: Math.round((value.lastMs || 0) * 100) / 100,
-        lastAt: Number(value.lastAt || 0)
+        lastAt: Number(value.lastAt || 0),
+        lastTrigger: String(value.lastTrigger || "")
       }))
       .sort((a, b) => b.totalMs - a.totalMs);
   };
@@ -1178,6 +1196,7 @@
           await runFeatureStep("Android app controls", !!env.android || String(settings.androidAppControlsMode || "auto") === "always" || !!DS.state.androidAppControlsWasActive, () => DS.applyAndroidAppControls?.());
         }
         await runFeatureStep("composer", composerWanted(settings) || !!DS.state.composerControlWasActive, () => DS.applyComposerControl?.());
+        await runFeatureStep("mobile chat layout", true, () => DS.applyMobileChatLayoutFixes?.());
         if (settings.enableReplyInstructions || settings.enableGlobalMemory || settings.enableRpStateTracker || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
         if (settings.showFormattingToolbar || DS.state.formattingToolbarWasActive) await runStep("formatting toolbar", () => DS.applyFormattingToolbar?.());
         if (DS.isRpFormatRepairEnabledForCurrentCharacter?.() || settings.enableRpFormatRepair || DS.state.rpFormatRepairWasActive) await runStep("RP format repair", () => DS.applyRpFormatRepair?.());
@@ -1399,6 +1418,8 @@
       }
 
       if (listing) {
+        await runFeatureStep("pagination tools", true, () => DS.applyPaginationTools?.());
+        await runFeatureStep("bot name expander", true, () => DS.applyBotNameExpander?.());
         // Recommendation helpers load local creator identity before the final
         // card pass so own-bot filtering can work without extra page requests.
         await runThrottledFeatureStep("recommendation helpers", !!settings.enableRecommendationHelpers || !!document.querySelector("[data-ds-recommendation-helper]"), listingMaintenanceInterval, () => DS.applyRecommendationHelpers?.(), !!options.force);
@@ -1540,6 +1561,9 @@
     const profile = runtimeProfile();
     const counters = runtimeCounters();
     const messageCount = loadedChatMessageCount();
+    const source = String(options.source || "scheduled").slice(0, 120);
+    DS.state.lastRunTrigger = source;
+    counters.lastScheduleSource = source;
     counters.schedules++;
 
     let criticalDelay = immediate ? 0 : 160;
@@ -2195,7 +2219,7 @@
     try {
       if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
         const observer = new PerformanceObserver(list => {
-          if (!DS.state?.settings?.performanceDiagnostics) return;
+          if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticInspectorConnected?.()) return;
           const counters = runtimeCounters();
           for (const entry of list.getEntries()) {
             const ms = Number(entry.duration || 0);

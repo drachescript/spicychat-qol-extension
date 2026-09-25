@@ -168,6 +168,68 @@
     jump.insertAdjacentElement("afterend", button);
   }
 
+  function removeTopJumpBox() {
+    document.getElementById("ds-pagination-top-jump")?.remove();
+  }
+
+  function listingStatsHost() {
+    const stats = document.querySelector("[data-testid='search-stats'], .ais-Stats");
+    return stats?.parentElement || stats || null;
+  }
+
+  function ensureTopJumpBox(settings) {
+    if (!settings.paginationTopJumpBox) {
+      removeTopJumpBox();
+      return;
+    }
+
+    const host = listingStatsHost();
+    if (!host) {
+      removeTopJumpBox();
+      return;
+    }
+
+    let box = document.getElementById("ds-pagination-top-jump");
+    if (!box) {
+      box = document.createElement("form");
+      box.id = "ds-pagination-top-jump";
+      box.className = "ds-pagination-top-jump";
+
+      const label = document.createElement("span");
+      label.textContent = "Page";
+
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "1";
+      input.max = String(ABSOLUTE_MAX_PAGE);
+      input.step = "1";
+      input.inputMode = "numeric";
+      input.setAttribute("aria-label", "Go to chatbot page");
+
+      const go = document.createElement("button");
+      go.type = "submit";
+      go.textContent = "Go";
+
+      box.append(label, input, go);
+      box.addEventListener("submit", event => {
+        event.preventDefault();
+        const requested = Math.floor(Number(input.value));
+        if (!Number.isFinite(requested) || requested < 1 || requested > ABSOLUTE_MAX_PAGE) {
+          input.setCustomValidity("Enter a page number from 1 to 20,000.");
+          input.reportValidity();
+          return;
+        }
+        input.setCustomValidity("");
+        navigateToPage(requested, { ...DS.state?.settings, paginationMaxPage: ABSOLUTE_MAX_PAGE });
+      });
+      input.addEventListener("input", () => input.setCustomValidity(""));
+    }
+
+    const input = box.querySelector("input");
+    if (input && document.activeElement !== input) input.placeholder = String(currentPage());
+    if (box.parentElement !== host) host.appendChild(box);
+  }
+
   function restoreNextButton(button) {
     if (!button?.dataset?.dsPaginationCapped) return;
     button.disabled = button.dataset.dsPaginationOriginalDisabled === "1";
@@ -223,6 +285,7 @@
   function cleanup() {
     restoreJumpInputs();
     restoreEstimatedLastPage();
+    removeTopJumpBox();
     document.querySelectorAll(".ds-pagination-over-cap").forEach(button => button.classList.remove("ds-pagination-over-cap"));
     document.querySelectorAll("button[data-ds-pagination-capped='1']").forEach(restoreNextButton);
   }
@@ -234,9 +297,14 @@
       return;
     }
 
+    ensureTopJumpBox(settings);
+
     const paginationButtons = document.querySelectorAll("button[aria-label='previous-page'], button[aria-label='next-page'], button[aria-label^='page-']");
     if (!paginationButtons.length) {
-      cleanup();
+      restoreJumpInputs();
+      restoreEstimatedLastPage();
+      document.querySelectorAll(".ds-pagination-over-cap").forEach(button => button.classList.remove("ds-pagination-over-cap"));
+      document.querySelectorAll("button[data-ds-pagination-capped='1']").forEach(restoreNextButton);
       return;
     }
 

@@ -67,6 +67,36 @@
     return /(^|\s)bg-red-9(\s|$)/.test(cls) && !/(^|\s)bg-transparent(\s|$)/.test(cls);
   }
 
+  async function navigateQuickDislikeWorker(message) {
+    if (!DS.state.quickDislikeWorker) return { ok: false, status: "not-worker" };
+
+    let target;
+    try { target = new URL(String(message?.targetUrl || ""), location.origin); }
+    catch { return { ok: false, status: "invalid-url" }; }
+    if (target.origin !== location.origin || !/^\/chat\/[^/]+/i.test(target.pathname)) {
+      return { ok: false, status: "invalid-url" };
+    }
+
+    const botId = String(message?.botId || target.pathname.match(/^\/chat\/([^/]+)/i)?.[1] || "").trim().toLowerCase();
+    try {
+      history.pushState(history.state, "", target.href);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+    } catch {
+      return { ok: false, status: "navigation-failed" };
+    }
+
+    const ready = await waitForElement(() => {
+      const profile = document.querySelector(`a[aria-label='chatbot-profile'][href*='/chatbot/${CSS.escape(botId)}']`);
+      if (profile) return true;
+      const unavailable = unavailableChatStatus();
+      return unavailable ? true : null;
+    }, 12000, 140);
+
+    return ready
+      ? { ok: true, status: "navigated", botId }
+      : { ok: false, status: "navigation-timeout", botId };
+  }
+
   async function runQuickDislikeWorker() {
     if (!DS.state.quickDislikeWorker) return { ok: false, status: "not-worker" };
     const params = new URLSearchParams(location.search || "");
@@ -494,6 +524,11 @@
 
     if (message?.type === "DS_BLOCK_CURRENT_BOT") {
       DS.blockCurrentBot().then(sendResponse);
+      return true;
+    }
+
+    if (message?.type === "DS_QUICK_DISLIKE_NAVIGATE") {
+      navigateQuickDislikeWorker(message).then(sendResponse);
       return true;
     }
 

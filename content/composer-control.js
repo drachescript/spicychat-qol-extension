@@ -11,7 +11,11 @@
     guardTop: 0,
     guardContainer: null,
     guardRaf: 0,
-    guardTimer: 0
+    guardTimer: 0,
+    mobileObserver: null,
+    mobileListenersInstalled: false,
+    mobileResizeRaf: 0,
+    mobileActiveEditTextarea: null
   };
 
   function settings() {
@@ -185,6 +189,118 @@
     state.composerObserver?.disconnect();
     state.observedTextareas = new WeakSet();
   }
+
+  function mobileLayoutActive() {
+    try { return window.matchMedia?.("(max-width: 760px), (pointer: coarse)")?.matches ?? window.innerWidth <= 760; }
+    catch { return window.innerWidth <= 760; }
+  }
+
+  function isMessageEditTextarea(textarea) {
+    return textarea instanceof HTMLTextAreaElement && !!textarea.closest("div[id^='message-']");
+  }
+
+  function resizeMessageEditTextarea(textarea) {
+    if (!mobileLayoutActive() || !isMessageEditTextarea(textarea)) return;
+
+    state.mobileActiveEditTextarea = textarea;
+    const viewportHeight = Number(window.visualViewport?.height || window.innerHeight || 640);
+    const maxHeight = Math.max(150, Math.min(360, Math.round(viewportHeight * 0.46)));
+    const wanted = Math.max(96, Math.min(maxHeight, textarea.scrollHeight + 2));
+
+    DS.setClassState?.(textarea, "ds-mobile-message-edit-textarea", true);
+    if (textarea.style.height !== `${wanted}px`) textarea.style.height = `${wanted}px`;
+    if (textarea.style.maxHeight !== `${maxHeight}px`) textarea.style.maxHeight = `${maxHeight}px`;
+    const overflow = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    if (textarea.style.overflowY !== overflow) textarea.style.overflowY = overflow;
+
+    const root = textarea.closest("div[id^='message-']");
+    const buttons = [...(root?.querySelectorAll("button") || [])];
+    const save = buttons.find(button => /^save$/i.test(String(button.textContent || "").trim()));
+    const cancel = buttons.find(button => /^cancel$/i.test(String(button.textContent || "").trim()));
+    const actions = save?.parentElement && save.parentElement === cancel?.parentElement ? save.parentElement : null;
+    if (actions) DS.setClassState?.(actions, "ds-mobile-message-edit-actions", true);
+  }
+
+  function composerTextarea() {
+    return getMessageTextareas().find(textarea => !textarea.closest("div[id^='message-']")) || null;
+  }
+
+  function normalizeMobileSendWrapper() {
+    if (!mobileLayoutActive()) return;
+    const textarea = composerTextarea();
+    if (!textarea) return;
+
+    const scope = textarea.closest("form") || textarea.parentElement?.parentElement?.parentElement || textarea.parentElement;
+    const buttons = [...(scope?.querySelectorAll?.("button") || [])];
+    const send = buttons.find(button => {
+      const label = String(button.getAttribute("aria-label") || button.title || "").toLowerCase();
+      return button.type === "submit" || label.includes("send");
+    });
+    if (!send) return;
+
+    DS.setClassState?.(send, "ds-mobile-chat-send-button", true);
+    const wrapper = send.parentElement;
+    if (wrapper && wrapper !== scope) DS.setClassState?.(wrapper, "ds-mobile-chat-send-wrapper", true);
+  }
+
+  function processAddedMobileNode(node) {
+    if (!mobileLayoutActive()) return;
+    const el = node instanceof Element ? node : null;
+    if (!el) return;
+    if (isMessageEditTextarea(el)) resizeMessageEditTextarea(el);
+    el.querySelectorAll?.("div[id^='message-'] textarea").forEach(resizeMessageEditTextarea);
+  }
+
+  function refreshActiveMobileEditor() {
+    const textarea = state.mobileActiveEditTextarea;
+    if (textarea?.isConnected && isMessageEditTextarea(textarea)) resizeMessageEditTextarea(textarea);
+    else state.mobileActiveEditTextarea = null;
+    normalizeMobileSendWrapper();
+  }
+
+  function installMobileChatLayoutFixes() {
+    if (!mobileLayoutActive()) return;
+    if (state.mobileListenersInstalled) return;
+    state.mobileListenersInstalled = true;
+
+    document.addEventListener("focusin", event => {
+      if (!isMessageEditTextarea(event.target)) return;
+      resizeMessageEditTextarea(event.target);
+      setTimeout(() => {
+        if (event.target?.isConnected) resizeMessageEditTextarea(event.target);
+      }, 80);
+    }, true);
+
+    document.addEventListener("focusout", event => {
+      if (event.target === state.mobileActiveEditTextarea) state.mobileActiveEditTextarea = null;
+    }, true);
+
+    document.addEventListener("input", event => {
+      if (isMessageEditTextarea(event.target)) resizeMessageEditTextarea(event.target);
+    }, true);
+
+    const onViewportResize = () => {
+      cancelAnimationFrame(state.mobileResizeRaf);
+      state.mobileResizeRaf = requestAnimationFrame(refreshActiveMobileEditor);
+    };
+    window.addEventListener("resize", onViewportResize, { passive: true });
+    window.visualViewport?.addEventListener("resize", onViewportResize, { passive: true });
+
+    state.mobileObserver = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes || []) processAddedMobileNode(node);
+      }
+    });
+    state.mobileObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
+
+  DS.applyMobileChatLayoutFixes = function applyMobileChatLayoutFixes() {
+    if (!enabled() || !mobileLayoutActive()) return;
+    installMobileChatLayoutFixes();
+    const active = document.activeElement;
+    if (isMessageEditTextarea(active)) resizeMessageEditTextarea(active);
+    normalizeMobileSendWrapper();
+  };
 
   // Kept as no-ops so older helpers cannot accidentally re-enable the removed
   // automatic chat-following behaviour.

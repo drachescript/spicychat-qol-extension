@@ -16,6 +16,14 @@
   const METRICS_INTERVAL_MS = 15000;
   const PRESENCE_INTERVAL_MS = 60000;
   const ACTIVE_TTL_MS = 30 * 60 * 1000;
+  const MODULE_HASHES = Object.freeze({
+    main: "sha256-e413ec52e224c55d",
+    chatExport: "sha256-b9138e55616e693b",
+    composer: "sha256-e0468ecb983712a5",
+    quickDislikePage: "sha256-41aeff22aca12c02",
+    background: "sha256-f32c789fa73d8231",
+    listings: "sha256-b5ae7cbe1276b66b"
+  });
 
   const sessionId = (() => {
     try { return crypto.randomUUID(); } catch {}
@@ -25,7 +33,6 @@
   const state = {
     inspectorActiveUntil: 0,
     lastKnownVersion: "",
-    lastKnownTechnicalVersion: "",
     inspectorVersion: "",
     inspectorSessionId: "",
     metricsTimer: null,
@@ -49,13 +56,10 @@
       const runtime = globalThis.chrome?.runtime || globalThis.browser?.runtime || null;
       const manifest = runtime?.getManifest?.() || {};
       const version = String(manifest.version_name || manifest.version || "").trim();
-      const technicalVersion = String(manifest.version || "").trim();
       if (version && version !== "unknown") state.lastKnownVersion = version;
-      if (technicalVersion && technicalVersion !== "unknown") state.lastKnownTechnicalVersion = technicalVersion;
     } catch {}
     return {
-      version: state.lastKnownVersion || "unknown",
-      technicalVersion: state.lastKnownTechnicalVersion || "unknown"
+      version: state.lastKnownVersion || "unknown"
     };
   }
 
@@ -87,7 +91,9 @@
         id: String(build?.id || "full").slice(0, 80),
         label: String(build?.label || "Full").slice(0, 80),
         generated: !!build?.generated,
-        bundles: Array.isArray(build?.bundles) ? build.bundles.map(value => String(value).slice(0, 60)).slice(0, 20) : []
+        revision: String(build?.revision || "unknown").slice(0, 100),
+        bundles: Array.isArray(build?.bundles) ? build.bundles.map(value => String(value).slice(0, 60)).slice(0, 20) : [],
+        moduleHashes: MODULE_HASHES
       },
       activeBundles
     };
@@ -99,6 +105,22 @@
     if (settings.enabled === false) return "disabled";
     if (tabPaused) return "paused";
     return "active";
+  }
+
+  function settingsSnapshot() {
+    const settings = DS.state?.settings || {};
+    return {
+      enabled: settings.enabled !== false,
+      runtimePerformanceMode: String(settings.runtimePerformanceMode || "adaptive").slice(0, 40),
+      chatPerformanceMode: !!settings.chatPerformanceMode,
+      performanceDiagnostics: !!settings.performanceDiagnostics,
+      desktopAppPerformanceGuard: settings.desktopAppPerformanceGuard !== false,
+      pauseQolInHiddenTabs: settings.pauseQolInHiddenTabs !== false,
+      deepSleepDisabledFeatures: settings.deepSleepDisabledFeatures !== false,
+      showChatExportButton: !!settings.showChatExportButton,
+      autoFillListings: !!settings.autoFillListings,
+      quickDislikeIdleEnabled: !!settings.quickDislikeIdleEnabled
+    };
   }
 
   function safeValue(value, depth = 0) {
@@ -197,7 +219,6 @@
         type,
         feature: String(payload?.feature || "").slice(0, 80),
         version: versions.version,
-        technicalVersion: versions.technicalVersion,
         build: String(page?.build?.id || "full").slice(0, 80),
         sessionId,
         protocol: PROTOCOL,
@@ -265,6 +286,8 @@
       },
       routeType: page.routeType,
       runtimePlan: page.runtimePlan,
+      settings: settingsSnapshot(),
+      timings: DS.getPerformanceReport?.().slice(0, 30) || [],
       counters: selectedRuntimeCounters()
     };
   }
@@ -295,7 +318,6 @@
       reason,
       protocolVersion: 1,
       qolVersion: versions.version,
-      qolTechnicalVersion: versions.technicalVersion,
       browser: browserName(),
       presenceState: "present",
       runState: runState(),
@@ -303,6 +325,9 @@
       routeType: page.routeType,
       runtimePlan: page.runtimePlan,
       build: page.build,
+      buildRevision: page.build.revision,
+      moduleHashes: MODULE_HASHES,
+      settings: settingsSnapshot(),
       activeBundles: page.activeBundles,
       enabledModules: page.activeBundles,
       privacy: {
@@ -449,13 +474,17 @@
     return true;
   };
 
+  DS.isDiagnosticInspectorConnected = () => active();
+
   DS.getDiagnosticProtocolState = function getDiagnosticProtocolState() {
     const versions = manifestInfo();
     return {
       protocol: PROTOCOL,
       protocolVersion: 1,
       qolVersion: versions.version,
-      qolTechnicalVersion: versions.technicalVersion,
+      buildRevision: pageState().build.revision,
+      moduleHashes: MODULE_HASHES,
+      settings: settingsSnapshot(),
       pageSessionId: sessionId,
       inspectorConnected: active(),
       inspectorVersion: state.inspectorVersion || "",
@@ -511,8 +540,9 @@
     const page = pageState();
     DS.setDatasetIfChanged?.(root, "dsQolDiagnosticProtocol", PROTOCOL);
     if (versions.version !== "unknown" || !root.dataset.dsQolVersion) DS.setDatasetIfChanged?.(root, "dsQolVersion", versions.version);
-    if (versions.technicalVersion !== "unknown" || !root.dataset.dsQolTechnicalVersion) DS.setDatasetIfChanged?.(root, "dsQolTechnicalVersion", versions.technicalVersion);
+    if (root.hasAttribute("data-ds-qol-technical-version")) root.removeAttribute("data-ds-qol-technical-version");
     DS.setDatasetIfChanged?.(root, "dsQolBuild", String(page?.build?.id || "full"));
+    DS.setDatasetIfChanged?.(root, "dsQolRevision", String(page?.build?.revision || "unknown"));
     DS.setDatasetIfChanged?.(root, "dsQolPageSession", sessionId);
   }
 
@@ -542,7 +572,7 @@
   [250, 1000, 3000].forEach(delay => setTimeout(() => {
     const before = manifestInfo();
     publishDiscoveryMarkers();
-    if (before.version !== "unknown" || before.technicalVersion !== "unknown") sendHandshake("version-recovery");
+    if (before.version !== "unknown") sendHandshake("version-recovery");
   }, delay));
 
   // A tiny discovery marker lets the Inspector know which protocol to ask for

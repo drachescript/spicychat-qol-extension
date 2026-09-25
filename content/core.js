@@ -369,6 +369,8 @@
     showCardGreetingTokenInfo: false,
     showExactMessageCounts: false,
     showBotCreationDates: false,
+    expandBotNamesOnHover: false,
+    paginationTopJumpBox: false,
     cardTokenShowGreeting: true,
     cardTokenShowDescription: false,
     cardTokenShowPersonality: false,
@@ -471,6 +473,7 @@
     quickPanelMaxHeightPercent: 80,
     quickPanelAutoCollapseOverlap: false,
     quickPanelShowStatus: false,
+    quickPanelShowLoadedMessageCount: false,
     quickPanelStatusShowOpened: false,
     quickPanelStatusShowBlocked: false,
     popupShowOpenedCount: false,
@@ -489,7 +492,7 @@
     quickPanelShowAutoAsterisk: false,
     quickPanelShowTranslation: false,
     quickPanelShowPersona: false,
-    quickPanelShowExport: false,
+    quickPanelShowExport: true,
     quickPanelShowSoundscapes: false,
     quickPanelCustomX: 12,
     quickPanelCustomY: 12,
@@ -608,6 +611,9 @@
     chatBubbleAiActionText: "#79c8f5",
     chatBubbleAiDialogueMode: "base",
     chatBubbleAiDialogueText: "#f2f2f2",
+    chatBubbleAiFont: "inherit",
+    chatBubbleAiActionFont: "inherit",
+    chatBubbleAiDialogueFont: "inherit",
     chatBubbleAiBorder: "#555861",
     chatBubbleAiBorderWidth: 0,
     chatBubbleAiBorderStyle: "solid",
@@ -626,6 +632,9 @@
     chatBubbleUserActionText: "#79c8f5",
     chatBubbleUserDialogueMode: "base",
     chatBubbleUserDialogueText: "#f5f5f5",
+    chatBubbleUserFont: "inherit",
+    chatBubbleUserActionFont: "inherit",
+    chatBubbleUserDialogueFont: "inherit",
     chatBubbleUserBorder: "#52718a",
     chatBubbleUserBorderWidth: 0,
     chatBubbleUserBorderStyle: "solid",
@@ -1642,7 +1651,8 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       "generationMetadataDefaultsMigrationV01841",
       "backupOptInMigrationV01990",
       "quickDislikeOptInMigrationV019119",
-      "oocHardPresetMigrationV022"
+      "oocHardPresetMigrationV022",
+      "chatExportPanelMigrationV0217"
     ]);
 
     const rawSettings = result.settings || {};
@@ -1662,6 +1672,14 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
 
     let shouldSaveMigratedSettings = false;
     const migrationPayload = {};
+
+    if (result.chatExportPanelMigrationV0217 !== true) {
+      if (settings.showChatExportButton && settings.quickPanelShowExport === false) {
+        settings.quickPanelShowExport = true;
+        shouldSaveMigratedSettings = true;
+      }
+      migrationPayload.chatExportPanelMigrationV0217 = true;
+    }
 
     // v0.1.9.86: the old immediate Quick Dislike flag is migrated to the
     // idle-aware queue. Keeping the legacy key false prevents older blocking

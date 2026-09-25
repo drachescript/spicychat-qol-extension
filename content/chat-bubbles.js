@@ -62,6 +62,20 @@
     return VALID_BORDER_STYLES.has(value) ? value : "solid";
   }
 
+  function fontFamily(value) {
+    const map = {
+      inherit: "inherit",
+      system: 'system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      roboto: '"Roboto",Arial,sans-serif',
+      georgia: 'Georgia,"Times New Roman",serif',
+      times: '"Times New Roman",Times,serif',
+      trebuchet: '"Trebuchet MS",Arial,sans-serif',
+      verdana: 'Verdana,Arial,sans-serif',
+      monospace: 'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace'
+    };
+    return map[String(value || "inherit")] || map.inherit;
+  }
+
   function normalizedSegmentMode(value, fallback) {
     return VALID_SEGMENT_MODES.has(value) ? value : fallback;
   }
@@ -80,6 +94,9 @@
     root.style.setProperty("--ds-chat-bubble-ai-text", normalizeHex(settings.chatBubbleAiText, "#f2f2f2"));
     root.style.setProperty("--ds-chat-bubble-ai-action-text", normalizeHex(settings.chatBubbleAiActionText, "#79c8f5"));
     root.style.setProperty("--ds-chat-bubble-ai-dialogue-text", normalizeHex(settings.chatBubbleAiDialogueText, "#f2f2f2"));
+    root.style.setProperty("--ds-chat-bubble-ai-font", fontFamily(settings.chatBubbleAiFont));
+    root.style.setProperty("--ds-chat-bubble-ai-action-font", fontFamily(settings.chatBubbleAiActionFont));
+    root.style.setProperty("--ds-chat-bubble-ai-dialogue-font", fontFamily(settings.chatBubbleAiDialogueFont));
     root.style.setProperty("--ds-chat-bubble-ai-border", hexToRgba(settings.chatBubbleAiBorder || "#555861", settings.chatBubbleAiBorderOpacity, 0));
     root.style.setProperty("--ds-chat-bubble-ai-border-width", `${clamp(settings.chatBubbleAiBorderWidth, 0, 12, 0)}px`);
     root.style.setProperty("--ds-chat-bubble-ai-border-style", normalizedBorderStyle(settings.chatBubbleAiBorderStyle));
@@ -94,6 +111,9 @@
     root.style.setProperty("--ds-chat-bubble-user-text", normalizeHex(settings.chatBubbleUserText, "#f5f5f5"));
     root.style.setProperty("--ds-chat-bubble-user-action-text", normalizeHex(settings.chatBubbleUserActionText, "#79c8f5"));
     root.style.setProperty("--ds-chat-bubble-user-dialogue-text", normalizeHex(settings.chatBubbleUserDialogueText, "#f5f5f5"));
+    root.style.setProperty("--ds-chat-bubble-user-font", fontFamily(settings.chatBubbleUserFont));
+    root.style.setProperty("--ds-chat-bubble-user-action-font", fontFamily(settings.chatBubbleUserActionFont));
+    root.style.setProperty("--ds-chat-bubble-user-dialogue-font", fontFamily(settings.chatBubbleUserDialogueFont));
     root.style.setProperty("--ds-chat-bubble-user-border", hexToRgba(settings.chatBubbleUserBorder || "#52718a", settings.chatBubbleUserBorderOpacity, 0));
     root.style.setProperty("--ds-chat-bubble-user-border-width", `${clamp(settings.chatBubbleUserBorderWidth, 0, 12, 0)}px`);
     root.style.setProperty("--ds-chat-bubble-user-border-style", normalizedBorderStyle(settings.chatBubbleUserBorderStyle));
@@ -130,8 +150,10 @@
 
     [
       "--ds-chat-bubble-ai-bg", "--ds-chat-bubble-ai-text", "--ds-chat-bubble-ai-action-text", "--ds-chat-bubble-ai-dialogue-text",
+      "--ds-chat-bubble-ai-font", "--ds-chat-bubble-ai-action-font", "--ds-chat-bubble-ai-dialogue-font",
       "--ds-chat-bubble-ai-border", "--ds-chat-bubble-ai-border-width", "--ds-chat-bubble-ai-border-style", "--ds-chat-bubble-ai-radius", "--ds-chat-bubble-ai-decoration", "--ds-chat-bubble-ai-shadow",
       "--ds-chat-bubble-user-bg", "--ds-chat-bubble-user-text", "--ds-chat-bubble-user-action-text", "--ds-chat-bubble-user-dialogue-text",
+      "--ds-chat-bubble-user-font", "--ds-chat-bubble-user-action-font", "--ds-chat-bubble-user-dialogue-font",
       "--ds-chat-bubble-user-border", "--ds-chat-bubble-user-border-width", "--ds-chat-bubble-user-border-style", "--ds-chat-bubble-user-radius", "--ds-chat-bubble-user-decoration", "--ds-chat-bubble-user-shadow"
     ].forEach(name => root.style.removeProperty(name));
 

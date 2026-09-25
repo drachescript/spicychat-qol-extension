@@ -701,6 +701,83 @@
     delete el.dataset.dsNormalizedApplied;
   }
 
+  function botNameTitleFromTarget(target) {
+    const el = target instanceof Element ? target : target?.parentElement;
+    if (!el) return null;
+    const link = el.closest?.("a[aria-label^='chat-with-'][title], a[href*='/chat/'][title], a[href*='/chatbot/'][title]");
+    if (!link) return null;
+    const card = DS.getCardFromChatLink?.(link) || link.closest?.("div.relative.group.rounded-xl");
+    return DS.isRecommendationCardRoot?.(card) ? link : null;
+  }
+
+  function removeBotNameOverlay() {
+    document.getElementById("ds-bot-name-expander")?.remove();
+    DS.state.botNameExpandedTarget = null;
+  }
+
+  function showBotNameOverlay(link) {
+    if (!link?.isConnected) return;
+    const full = String(link.getAttribute("title") || link.textContent || "").replace(/\s+/g, " ").trim();
+    if (!full) return;
+
+    const rect = link.getBoundingClientRect();
+    if (!(link.scrollWidth > link.clientWidth + 2 || rect.width < 90)) return;
+
+    removeBotNameOverlay();
+    const overlay = document.createElement("div");
+    overlay.id = "ds-bot-name-expander";
+    overlay.textContent = full;
+    overlay.setAttribute("role", "tooltip");
+    overlay.style.left = `${Math.max(4, rect.left)}px`;
+    overlay.style.top = `${Math.max(4, rect.top - 2)}px`;
+    document.documentElement.appendChild(overlay);
+    DS.state.botNameExpandedTarget = link;
+  }
+
+  function installBotNameExpanderListeners() {
+    if (DS.state.botNameExpanderListenersInstalled) return;
+    DS.state.botNameExpanderListenersInstalled = true;
+
+    document.addEventListener("pointerover", event => {
+      if (!DS.state.settings?.expandBotNamesOnHover || event.pointerType === "touch") return;
+      const link = botNameTitleFromTarget(event.target);
+      if (link) showBotNameOverlay(link);
+    }, true);
+
+    document.addEventListener("pointerout", event => {
+      const target = DS.state.botNameExpandedTarget;
+      if (!target) return;
+      if (event.relatedTarget && target.contains?.(event.relatedTarget)) return;
+      removeBotNameOverlay();
+    }, true);
+
+    document.addEventListener("click", event => {
+      if (!DS.state.settings?.expandBotNamesOnHover) {
+        removeBotNameOverlay();
+        return;
+      }
+      const link = botNameTitleFromTarget(event.target);
+      if (!link) {
+        removeBotNameOverlay();
+        return;
+      }
+      if (window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (DS.state.botNameExpandedTarget === link) removeBotNameOverlay();
+        else showBotNameOverlay(link);
+      }
+    }, true);
+
+    window.addEventListener("scroll", removeBotNameOverlay, true);
+    window.addEventListener("resize", removeBotNameOverlay, { passive: true });
+  }
+
+  DS.applyBotNameExpander = function applyBotNameExpander() {
+    installBotNameExpanderListeners();
+    if (!DS.state.settings?.expandBotNamesOnHover) removeBotNameOverlay();
+  };
+
   DS.applyCardDisplayNormalization = function applyCardDisplayNormalization(cards = DS.collectCards?.() || []) {
     const enabled = cardDisplayNormalizationEnabled();
 

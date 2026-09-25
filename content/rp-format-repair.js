@@ -453,6 +453,7 @@
 
   DS.applyRpFormatRepair = function applyRpFormatRepair() {
     const s = settings();
+    if (DS.state?.chatExportLock?.active) return;
     if (!s.enabled || !s.enableRpFormatRepair || !DS.isSingleChatPage?.()) {
       if (DS.state.rpFormatRepairWasActive) cleanup();
       return;

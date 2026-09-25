@@ -1222,6 +1222,7 @@ Testing" spellcheck="false"></textarea></label>
 <h2>Panel items</h2>
 <p class="hint">These control what appears inside the mini panel. Auto voice and Auto * can be toggled directly from the panel; other tools still use their normal feature settings.</p>
 <label class="row"><input id="quickPanelShowStatus" type="checkbox"/><span>Show status line</span></label>
+<label class="row"><input id="quickPanelShowLoadedMessageCount" type="checkbox"/><span>Show messages currently loaded in chats</span></label>
 <label class="row"><input id="quickPanelStatusShowOpened" type="checkbox"/><span>Show opened chat count in the mini panel</span></label>
 <label class="row"><input id="quickPanelStatusShowBlocked" type="checkbox"/><span>Show blocked bot count in the mini panel</span></label>
 <label class="row"><input id="quickPanelShowFeatureSummary" type="checkbox"/><span>Show a short summary of enabled QoL features for the current page</span></label>
@@ -1294,6 +1295,7 @@ Testing" spellcheck="false"></textarea></label>
 </div>
 <div class="mini-panel-preview-body" id="miniPanelPreviewBody">
 <div class="mini-panel-preview-status" id="miniPanelPreviewStatus">350 opened stored. 3 personas saved.</div>
+<div class="mini-panel-preview-status" id="miniPanelPreviewMessageCount">Messages shown: 50</div>
 <button id="miniPanelPreviewOptions" type="button">Options</button>
 <button id="miniPanelPreviewFill" type="button">Fill now</button>
 <div class="mini-panel-preview-group" id="miniPanelPreviewSmartFilters"><span>Pinned filters</span><div class="mini-panel-preview-row"><button type="button">Fresh finds</button><button type="button">Later queue</button></div></div>
@@ -1429,7 +1431,7 @@ Testing" spellcheck="false"></textarea></label>
 <button data-chat-bubble-preset="contrast-light" type="button">High Contrast Light</button>
 <button data-chat-bubble-preset="pastel" type="button">Pastel</button>
 </div>
-<p class="hint">Normal text, narrative/actions and dialogue can use separate colors. Header names, message buttons and regenerate/rate/listen controls always keep their native colors.</p>
+<p class="hint">Normal text, narrative/actions and dialogue can use separate colors and fonts. Header names, message buttons and regenerate/rate/listen controls always keep their native styling.</p>
 <div class="sub-card">
 <div class="settings-subhead"><h3>AI messages</h3><button data-chat-bubble-reset-group="ai" type="button">Reset AI</button></div>
 <label>Background color <input id="chatBubbleAiBackground" type="color" value="#27282d"/></label>
@@ -1440,6 +1442,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Normal text color <input id="chatBubbleAiText" type="color" value="#f2f2f2"/></label>
+<label>Normal text font<select id="chatBubbleAiFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <p class="hint" id="chatBubbleAiContrast"></p>
 <label>Narrative / action text
             <select id="chatBubbleAiActionMode">
@@ -1449,6 +1459,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Narrative / action color <input id="chatBubbleAiActionText" type="color" value="#79c8f5"/></label>
+<label>Narrative / action font<select id="chatBubbleAiActionFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <label>Dialogue / quoted text
             <select id="chatBubbleAiDialogueMode">
 <option value="base">Same as normal text</option>
@@ -1457,6 +1475,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Dialogue color <input id="chatBubbleAiDialogueText" type="color" value="#f2f2f2"/></label>
+<label>Dialogue font<select id="chatBubbleAiDialogueFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <label>Border color <input id="chatBubbleAiBorder" type="color" value="#555861"/></label>
 <label>Border width (px) <input id="chatBubbleAiBorderWidth" max="12" min="0" step="0.5" type="number"/></label>
 <label>Border style
@@ -1507,6 +1533,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Normal text color <input id="chatBubbleUserText" type="color" value="#f5f5f5"/></label>
+<label>Normal text font<select id="chatBubbleUserFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <p class="hint" id="chatBubbleUserContrast"></p>
 <label>Narrative / action text
             <select id="chatBubbleUserActionMode">
@@ -1516,6 +1550,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Narrative / action color <input id="chatBubbleUserActionText" type="color" value="#79c8f5"/></label>
+<label>Narrative / action font<select id="chatBubbleUserActionFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <label>Dialogue / quoted text
             <select id="chatBubbleUserDialogueMode">
 <option value="base">Same as normal text</option>
@@ -1524,6 +1566,14 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label>Dialogue color <input id="chatBubbleUserDialogueText" type="color" value="#f5f5f5"/></label>
+<label>Dialogue font<select id="chatBubbleUserDialogueFont"><option value="inherit">SpicyChat default</option>
+<option value="system">System sans</option>
+<option value="roboto">Roboto</option>
+<option value="georgia">Georgia</option>
+<option value="times">Times New Roman</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="verdana">Verdana</option>
+<option value="monospace">Monospace</option></select></label>
 <label>Border color <input id="chatBubbleUserBorder" type="color" value="#52718a"/></label>
 <label>Border width (px) <input id="chatBubbleUserBorderWidth" max="12" min="0" step="0.5" type="number"/></label>
 <label>Border style
@@ -1772,15 +1822,15 @@ cash =&gt; Bingo Coins
 <section class="card">
 <h2>Chat export</h2>
 <label class="row"><input id="showChatExportButton" type="checkbox"/><span>Show Copy / Export chat buttons on chat pages</span></label>
-<label class="row"><input id="chatExportLoadPreviousMessages" type="checkbox"/><span>Load older messages before exporting</span></label>
-<label class="row"><input id="chatExportIncludeBotInfo" type="checkbox"/><span>Include visible bot info</span></label>
+<label class="row"><input id="chatExportLoadPreviousMessages" type="checkbox"/><span>Automatically load all older messages before exporting</span></label>
+<label class="row"><input id="chatExportIncludeBotInfo" type="checkbox"/><span>Include available bot info</span></label>
 <label class="row"><input id="chatExportIncludeOocDirectives" type="checkbox"/><span>Include OOC and directive notes</span></label>
 <label class="row"><input id="chatExportIncludeGenerationDetails" type="checkbox"/><span>Include captured timestamps/model/generation details when available</span></label>
 <label class="row"><input id="chatExportNumberMessages" type="checkbox"/><span>Number exported messages</span></label>
 <label class="row"><input id="chatExportIncludeAvatars" type="checkbox"/><span>Include avatar links in HTML/JSON exports</span></label>
 <label>Default format<select id="chatExportDefaultFormat"><option value="text">Plain text</option><option value="markdown">Markdown</option><option value="html">HTML archive</option><option value="json">JSON backup</option></select></label>
 <label>Default HTML layout<select id="chatExportHtmlLayout"><option value="bubbles">Chat bubbles</option><option value="transcript">Transcript</option></select></label>
-<p class="hint">Copy chat puts the loaded conversation straight on the clipboard. Export chat opens the format picker for TXT, Markdown, HTML or JSON. If older messages are still available, the export window tells you and can load them before you save.</p>
+<p class="hint">Copy/Export can load older messages first and captures each loaded batch by message ID, so long chats do not need every message to stay mounted at once. Available bot info is fetched from SpicyChat data sources when possible, with the visible chat page used as a fallback.</p>
 </section>
 
 
@@ -2023,6 +2073,7 @@ Fantasy" spellcheck="false"></textarea></label>
 <label class="row"><input id="showCardGreetingTokenInfo" type="checkbox"/><span>Show token counts on bot cards</span></label>
 <label class="row"><input id="showExactMessageCounts" type="checkbox"/><span>Show exact message counts on bot cards</span></label>
 <label class="row"><input id="showBotCreationDates" type="checkbox"/><span>Show bot creation dates on bot cards and profiles</span></label>
+<label class="row"><input id="expandBotNamesOnHover" type="checkbox"/><span>Expand cut-off bot names horizontally on hover / tap</span></label>
 <div class="sub-card">
 <strong>Token counts to show</strong>
 <label class="row"><input id="cardTokenShowGreeting" type="checkbox"/><span>Greeting</span></label>
@@ -2202,6 +2253,8 @@ NTR"></textarea></label>
 <h2>Listing refill</h2>
 <p class="hint">Can load extra listing pages in a temporary inactive SpicyChat helper tab (or use Load More on older layouts) after QoL hides cards so the page has enough visible results. Disabled on phone/mobile for now.</p>
 <label class="row"><input id="autoFillListings" type="checkbox"/><span>Enable Listing Refill</span></label>
+<label class="row"><input id="paginationTopJumpBox" type="checkbox"/><span>Show a page-number box above chatbot listings</span></label>
+<p class="hint">The page box accepts pages 1–20,000 and uses the same navigation as the bottom pagination jump control.</p>
 <label>Target visible cards<input id="autoFillTargetCards" max="200" min="1" step="1" type="number"/></label>
 <label>Max extra pages / Load More attempts per listing<input id="autoFillMaxClicks" max="30" min="1" step="1" type="number"/></label>
 <p class="hint">Default target is 50 visible cards; you can raise it up to 200. On current paginated listings QoL briefly opens later pages in an inactive helper tab, copies only candidates that pass the current filters back into your listing, skips duplicate bots, and closes/reuses the helper automatically. Listing filter statistics are configured separately under Bot Blocking &amp; Dislikes.</p>
@@ -2443,7 +2496,7 @@ myth => Fantasy | ✨"></textarea></label>
 <div class="tab-page" data-page="help"><p class="page-intro">Quick explanations, support links, diagnostics, credits, and the info that helps when something breaks.</p>
 <section class="card help-card" id="aboutCard"><h2>About SpicyChat QoL</h2>
 <div class="about-project-head">
-<img alt="SpicyChat QoL icon" class="about-project-icon" src="icons/icon128.png"/>
+<img alt="SpicyChat QoL icon" class="about-project-icon" src="https://spicychatqol.drache.uk/assets/icons/full_icon.jpg" onerror="this.onerror=null;this.src='icons/icon128.png';"/>
 <div><strong>SpicyChat QoL</strong><p class="hint">Developed under DragonScript by DragonGRaf.</p></div>
 </div>
 <p>An independent quality-of-life project for SpicyChat focused on optional tools, local-first data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>

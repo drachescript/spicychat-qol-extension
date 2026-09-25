@@ -760,6 +760,82 @@
     return fetchProfileApi(id, null);
   };
 
+  DS.fetchCharacterArchiveData = async function fetchCharacterArchiveData(botId) {
+    const id = String(botId || "").trim().toLowerCase();
+    if (!id) return null;
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+
+    let sc = null;
+    let fields = null;
+    let profile = null;
+    const sources = [];
+
+    try {
+      sc = await fetchAuditCharacter(id, false);
+      const direct = fieldsFromApiCharacter(sc, true);
+      const nested = deepFindCharacterFields(sc, id) || null;
+      fields = mergeAuditFields(direct, nested);
+      sources.push("character-api");
+    } catch {}
+
+    const apiTags = characterTags(sc);
+    if (auditFieldsNeedFallback(fields, true, apiTags)) {
+      try {
+        profile = await fetchProfileHtml(id);
+        fields = mergeAuditFields(fields, profile);
+        sources.push("profile-html");
+      } catch {}
+    }
+
+    const text = key => cleanText(fields?.[key] || "");
+    const list = value => {
+      const raw = Array.isArray(value) ? value : [];
+      return [...new Set(raw.map(item => cleanText(typeof item === "string" ? item : item?.greeting || item?.text || item?.message || "")).filter(Boolean))];
+    };
+    const alternateGreetings = list(
+      sc?.alternate_greetings ||
+      sc?.alternateGreetings ||
+      sc?.greetings ||
+      sc?.alternate_messages ||
+      sc?.alternateMessages
+    );
+
+    const tags = apiTags.length ? apiTags : (Array.isArray(profile?.tags) ? profile.tags : []);
+    const creator = cleanText(
+      sc?.creator_username ||
+      sc?.creatorUsername ||
+      sc?.creator?.username ||
+      sc?.creator?.name ||
+      ""
+    );
+    const avatar = cleanText(
+      sc?.avatar_url ||
+      sc?.avatarUrl ||
+      sc?.avatar ||
+      sc?.image_url ||
+      sc?.imageUrl ||
+      ""
+    );
+    const visibility = cleanText(sc?.visibility || sc?.status || sc?.privacy || "");
+
+    return {
+      id,
+      name: cleanText(sc?.name || sc?.character_name || sc?.characterName || ""),
+      creator,
+      avatar,
+      visibility,
+      createdAt: sc?.createdAt ?? sc?.created_at ?? sc?.created ?? null,
+      greeting: text("greeting"),
+      alternateGreetings,
+      description: text("description"),
+      personality: text("personality"),
+      scenario: text("scenario"),
+      examples: text("examples"),
+      tags: [...new Set((tags || []).map(cleanText).filter(Boolean))],
+      source: sources.join("+") || "unavailable"
+    };
+  };
+
   async function fetchAuditCharacter(botId, forceAuth = false) {
     const auth = await discoverSpicychatAuth(forceAuth);
     let mainError = null;

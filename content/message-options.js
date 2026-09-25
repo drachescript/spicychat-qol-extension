@@ -352,6 +352,10 @@
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
+        if (DS.state?.chatExportLock?.active) {
+          DS.setQuickStatus?.("Chat export is in progress.");
+          return;
+        }
 
         runAction(dropdownButton, action).then(success => {
           if (!success || action.label !== "Remove Image") return;
@@ -405,6 +409,7 @@
 
   DS.applyMessageOptions = function applyMessageOptions() {
     const settings = DS.state?.settings || {};
+    if (DS.state?.chatExportLock?.active) return;
 
     if (!settings.enabled || !DS.isSingleChatPage?.() || !hasAnyQuickActionEnabled(settings)) {
       if (DS.state.messageOptionsWasActive) cleanup();
