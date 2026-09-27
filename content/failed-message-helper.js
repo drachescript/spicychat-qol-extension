@@ -8,8 +8,16 @@
   const SENT_PREFIX = "dsQolLastSentDraft:";
   const INSTALL_KEY = "dsQolFailedMessageHelperInstalled";
 
-  function helperEnabled() {
+  function manualHelperEnabled() {
     return !!DS.state?.settings?.failedMessageHelper && !DS.shouldDeferToSaiToolkit?.("failed-message-helper");
+  }
+
+  function autoRetryEnabled() {
+    return !!DS.state?.settings?.autoRetryFailedMessageSends;
+  }
+
+  function helperEnabled() {
+    return manualHelperEnabled() || autoRetryEnabled();
   }
 
   function normalize(value) {
@@ -167,7 +175,7 @@
 
   function isSendButton(button) {
     const label = buttonLabel(button);
-    return label.includes("send message") || label === "send";
+    return label.includes("send message") || label.includes("send-message") || label === "send";
   }
 
   function findResubmitButton() {
@@ -198,7 +206,7 @@
   }
 
   function renderHelper() {
-    if (!helperEnabled()) {
+    if (!manualHelperEnabled()) {
       removeHelpers();
       return;
     }
@@ -254,6 +262,169 @@
     alert.appendChild(helper);
   }
 
+
+  const RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
+
+  function retryState() {
+    return DS.state.failedMessageAutoRetry || (DS.state.failedMessageAutoRetry = {
+      chatKey: "",
+      text: "",
+      attempts: 0,
+      timer: 0,
+      generation: 0,
+      sentAt: 0,
+      awaitingConfirmation: false
+    });
+  }
+
+  function currentChatIdentity() {
+    return `${location.pathname}${location.search}`;
+  }
+
+  function clearRetryState(reason = "") {
+    const state = retryState();
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = 0;
+    state.text = "";
+    state.attempts = 0;
+    state.awaitingConfirmation = false;
+    state.sentAt = 0;
+    state.generation++;
+    state.chatKey = currentChatIdentity();
+    if (reason) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.autoRetryLastStop = reason;
+    }
+  }
+
+  function findSendErrorBanner() {
+    return document.querySelector("[data-testid='ChatSendErrorBanner']");
+  }
+
+  function findSendButton() {
+    const direct = document.querySelector("button[aria-label='send-message']");
+    if (direct && isVisible(direct)) return direct;
+    return (DS.qsa?.("button") || []).find(button => isVisible(button) && isSendButton(button)) || null;
+  }
+
+  function visibleUserMessageTexts() {
+    const roots = DS.qsa?.("div[id^='message-']") || [];
+    const texts = [];
+    for (const root of roots.slice(-12)) {
+      const buttons = root.querySelectorAll("button");
+      const hasAiControls = [...buttons].some(button => /regenerate|continue|listen|rate/i.test(button.getAttribute("aria-label") || button.getAttribute("data-testid") || ""));
+      if (hasAiControls) continue;
+      const value = String(root.textContent || "").replace(/\s+/g, " ").trim();
+      if (value) texts.push(value);
+    }
+    return texts;
+  }
+
+  function messageAlreadyConfirmed(text) {
+    const wanted = String(text || "").replace(/\s+/g, " ").trim();
+    if (!wanted) return false;
+    return visibleUserMessageTexts().some(value => value === wanted || value.endsWith(wanted));
+  }
+
+  function scheduleAutoRetryFromBanner() {
+    if (!autoRetryEnabled()) {
+      clearRetryState("disabled");
+      return;
+    }
+
+    const banner = findSendErrorBanner();
+    if (!banner) return;
+
+    const textarea = findComposerTextarea();
+    const payload = readPayload(SENT_PREFIX) || readPayload(DRAFT_PREFIX);
+    const text = String(textarea?.value || payload?.value || "");
+    if (!text.trim()) return;
+
+    const state = retryState();
+    const identity = currentChatIdentity();
+    if (state.chatKey && state.chatKey !== identity) clearRetryState("navigation");
+    state.chatKey = identity;
+
+    if (messageAlreadyConfirmed(text)) {
+      clearRetryState("already-confirmed");
+      return;
+    }
+
+    if (state.text && state.text !== text) clearRetryState("draft-changed");
+    state.text = text;
+
+    if (state.timer || state.awaitingConfirmation) return;
+    if (state.attempts >= RETRY_DELAYS.length) {
+      DS.setQuickStatus?.("Auto retry stopped after 5 failed attempts.");
+      clearRetryState("max-attempts");
+      return;
+    }
+
+    const delay = RETRY_DELAYS[state.attempts];
+    const generation = state.generation;
+    DS.setQuickStatus?.(`Message send failed. Retrying in ${Math.round(delay / 1000)}s…`);
+    state.timer = setTimeout(() => {
+      state.timer = 0;
+      if (generation !== state.generation || !autoRetryEnabled()) return;
+      if (currentChatIdentity() !== state.chatKey) {
+        clearRetryState("navigation");
+        return;
+      }
+
+      const currentTextarea = findComposerTextarea();
+      if (!currentTextarea || String(currentTextarea.value || "") !== state.text) {
+        clearRetryState("draft-changed");
+        return;
+      }
+      if (messageAlreadyConfirmed(state.text)) {
+        clearRetryState("confirmed-before-retry");
+        return;
+      }
+
+      const button = findSendButton();
+      if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") {
+        scheduleAutoRetryFromBanner();
+        return;
+      }
+
+      writePayload(SENT_PREFIX, state.text, `auto retry ${state.attempts + 1}`);
+      state.attempts++;
+      state.sentAt = Date.now();
+      state.awaitingConfirmation = true;
+      button.click();
+
+      const confirmGeneration = state.generation;
+      setTimeout(() => {
+        if (confirmGeneration !== state.generation) return;
+        state.awaitingConfirmation = false;
+
+        if (messageAlreadyConfirmed(state.text)) {
+          DS.setQuickStatus?.(`Message sent after ${state.attempts} ${state.attempts === 1 ? "retry" : "retries"}.`);
+          clearRetryState("confirmed");
+          return;
+        }
+
+        const current = findComposerTextarea();
+        if (!current || String(current.value || "") !== state.text) {
+          clearRetryState("draft-changed");
+          return;
+        }
+
+        if (findSendErrorBanner()) scheduleAutoRetryFromBanner();
+        else {
+          // Give SpicyChat a little more time to render the confirmed user
+          // message. A retry is never scheduled without the native error banner.
+          setTimeout(() => {
+            if (confirmGeneration !== state.generation) return;
+            state.awaitingConfirmation = false;
+            if (messageAlreadyConfirmed(state.text)) clearRetryState("confirmed-late");
+            else if (findSendErrorBanner()) scheduleAutoRetryFromBanner();
+          }, 2500);
+        }
+      }, 1800);
+    }, delay);
+  }
+
   function installListeners() {
     if (DS.state?.[INSTALL_KEY]) return;
     if (DS.state) DS.state[INSTALL_KEY] = true;
@@ -262,6 +433,8 @@
       if (!helperEnabled()) return;
       const textarea = event.target?.closest?.("textarea");
       if (!textarea || isEditTextarea(textarea)) return;
+      const state = retryState();
+      if (state.text && String(textarea.value || "") !== state.text) clearRetryState("draft-edited");
       saveCurrentDraft("typing");
     }, true);
 
@@ -292,6 +465,7 @@
   DS.applyFailedMessageHelper = function applyFailedMessageHelper() {
     if (!helperEnabled()) {
       if (DS.state.failedMessageHelperWasActive) removeHelpers();
+      clearRetryState("disabled");
       DS.state.failedMessageHelperWasActive = false;
       return;
     }
@@ -299,5 +473,13 @@
     DS.state.failedMessageHelperWasActive = true;
     installListeners();
     renderHelper();
+
+    const state = retryState();
+    const identity = currentChatIdentity();
+    if (state.chatKey && state.chatKey !== identity) clearRetryState("navigation");
+    state.chatKey = identity;
+
+    if (autoRetryEnabled() && findSendErrorBanner()) scheduleAutoRetryFromBanner();
+    else if (!findSendErrorBanner() && state.text && messageAlreadyConfirmed(state.text)) clearRetryState("confirmed");
   };
 })();

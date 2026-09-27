@@ -51,10 +51,14 @@
       // IntersectionObserver. On very long chats that caused repeated DOM work
       // exactly while the user was trying to scroll. Keep the classification
       // static instead and let CSS content-visibility decide what to paint.
-      root.classList.toggle("ds-chat-message-lite", index < liteUntil);
-      root.classList.remove("ds-chat-message-far");
-      delete root.dataset.dsPerformanceObserved;
-      delete root.dataset.dsPerformanceNewest;
+      const shouldLite = index < liteUntil;
+      const hasLite = root.classList.contains("ds-chat-message-lite");
+      if (shouldLite && !hasLite) root.classList.add("ds-chat-message-lite");
+      else if (!shouldLite && hasLite) root.classList.remove("ds-chat-message-lite");
+
+      if (root.classList.contains("ds-chat-message-far")) root.classList.remove("ds-chat-message-far");
+      if ("dsPerformanceObserved" in root.dataset) delete root.dataset.dsPerformanceObserved;
+      if ("dsPerformanceNewest" in root.dataset) delete root.dataset.dsPerformanceNewest;
     });
   }
 

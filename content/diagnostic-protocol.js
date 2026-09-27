@@ -17,12 +17,29 @@
   const PRESENCE_INTERVAL_MS = 60000;
   const ACTIVE_TTL_MS = 30 * 60 * 1000;
   const MODULE_HASHES = Object.freeze({
-    main: "sha256-e413ec52e224c55d",
-    chatExport: "sha256-b9138e55616e693b",
+    main: "sha256-95c43dae00ec95c1",
+    chatExport: "sha256-8b304fdf58c2a666",
+    performanceMode: "sha256-083cc9cee4dab8c5",
+    failedMessageHelper: "sha256-3ef0a4001b7b450c",
+    cardTokenInfo: "sha256-e078632c82c338f1",
+    cardTokenMain: "sha256-30a170fc392cd79e",
     composer: "sha256-e0468ecb983712a5",
-    quickDislikePage: "sha256-41aeff22aca12c02",
+    quickDislikePage: "sha256-b99675fb6778476c",
     background: "sha256-f32c789fa73d8231",
-    listings: "sha256-b5ae7cbe1276b66b"
+    listings: "sha256-6f962e90cff0f8ea",
+    sidebar: "sha256-4af6e0279eed46a4",
+    core: "sha256-756f11e940bbcb79",
+    messageOptions: "sha256-31b04492a9aeeeaf",
+    generationMetadata: "sha256-2ea2eeaf12f7cda0",
+    exactMessageCounts: "sha256-15fe59ecf8e0f621",
+    topBar: "sha256-0bfe298c950c4fb0",
+    premiumNotifications: "sha256-e720417a583a38b3",
+    alternateDialogue: "sha256-f1f85fe8954d136e",
+    rpFormatRepair: "sha256-7d8d4eccc00fd171",
+    chatBookmarks: "sha256-b5bef9dc7ccc5007",
+    contextKeeper: "sha256-84cc997669a2d44d",
+    textReplacements: "sha256-50c3a17a336a277d",
+    translation: "sha256-4da617738c52b5bb",
   });
 
   const sessionId = (() => {
@@ -118,6 +135,11 @@
       pauseQolInHiddenTabs: settings.pauseQolInHiddenTabs !== false,
       deepSleepDisabledFeatures: settings.deepSleepDisabledFeatures !== false,
       showChatExportButton: !!settings.showChatExportButton,
+      chatExportLoadPreviousMessages: !!settings.chatExportLoadPreviousMessages,
+      chatExportHistoryMode: String(settings.chatExportHistoryMode || "api").slice(0, 20),
+      showQolSidebarButton: !!settings.showQolSidebarButton,
+      qolSidebarButtonPlacement: String(settings.qolSidebarButtonPlacement || "after-sai").slice(0, 40),
+      autoRetryFailedMessageSends: !!settings.autoRetryFailedMessageSends,
       autoFillListings: !!settings.autoFillListings,
       quickDislikeIdleEnabled: !!settings.quickDislikeIdleEnabled
     };
@@ -257,7 +279,12 @@
         "historyBatches", "historyBatchDeferrals", "messageCountIncrementalUpdates", "messageCountIncrementalRoots",
         "loadedMessageRootCacheHits", "loadedMessageRootCacheMisses", "messageLaneDirtyRoots",
         "rpFormatHistoryDeferrals", "rpFormatChunkPasses", "rpFormatChunkMessages",
-        "generationMetadataScopedPasses", "generationMetadataScopedMessages", "generationMetadataHistoryDeferrals"
+        "generationMetadataScopedPasses", "generationMetadataScopedMessages", "generationMetadataHistoryDeferrals",
+        "chatExportApiRuns", "chatExportApiFailures", "chatExportApiLastMessages", "chatExportApiLastExpected",
+        "chatExportApiLastPages", "chatExportApiLastMs", "chatExportApiLastNetworkMs", "chatExportApiLastRequestMs",
+        "chatExportApiLastProcessingMs", "chatExportApiLastRetries", "chatExportApiLastAuthRefreshes",
+        "chatExportNativeRuns", "chatExportNativeLastMessages", "chatExportNativeLastMounted", "chatExportNativeLastParsedRoots",
+        "chatExportNativeLastRetries", "chatExportNativeLastMs", "chatExportLastSerializeMs", "chatExportLastSerializedChars"
       ]),
       storage: pick([
         "storageWriteRequests", "storageWriteBatches", "storageWriteKeys", "storageWriteMergedKeys",

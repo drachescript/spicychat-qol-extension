@@ -173,7 +173,11 @@
       node.dataset.dsCreatedAt === raw &&
       node.dataset.dsBotId === id &&
       (!body || body === card || body.classList.contains("ds-card-created-date-body"));
-    if (stable) return true;
+    if (stable) {
+      const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.createdDateStableSkips = Number(counters.createdDateStableSkips || 0) + 1;
+      return true;
+    }
 
     if (node.textContent !== text) node.textContent = text;
     if (node.dataset.dsCreatedAt !== raw) node.dataset.dsCreatedAt = raw;

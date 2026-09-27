@@ -805,6 +805,7 @@
     counters.messageLaneRuns = Number(counters.messageLaneRuns || 0) + 1;
     try {
       const settings = DS.state?.settings || {};
+      DS.refreshMessageEnhancerConfig?.(settings);
       applyRuntimePerformancePresentation();
       if (!settings.enabled || !DS.isSingleChatPage?.() || shouldPauseHiddenTab()) return;
       if (settings.pauseQolWhileMessageEditing !== false && DS.hasActiveMessageEditor?.()) {
@@ -844,6 +845,7 @@
       if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
       if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
       await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
+      DS.markMessageEnhancerVisited?.(laneRoots);
 
       const now = Date.now();
       const quietFor = now - Number(DS.state.lastChatMutationAt || 0);
@@ -1121,7 +1123,7 @@
         // on high-latency installed/PWA sessions.
         if (!DS.hasActiveMessageEditor?.()) {
           await runFeatureStep("message removal draft guard", !!settings.protectDraftDuringMessageRemoval, () => DS.applyMessageRemovalGuard?.());
-          await runFeatureStep("failed message helper", !!settings.failedMessageHelper || !!document.querySelector(".ds-failed-message-helper,[data-ds-failed-message-helper]"), () => DS.applyFailedMessageHelper?.());
+          await runFeatureStep("failed message helper", !!settings.failedMessageHelper || !!settings.autoRetryFailedMessageSends || !!document.querySelector(".ds-failed-message-helper,[data-ds-failed-message-helper],[data-testid='ChatSendErrorBanner']"), () => DS.applyFailedMessageHelper?.());
         }
         await runStep("performance mode", () => DS.applyPerformanceMode?.());
         await runSavedOpenedLane("critical-single-chat");
@@ -1183,6 +1185,7 @@
       }
 
       if (singleChat) {
+        DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
         await runFeatureStep("chat backgrounds", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
         await runFeatureStep("chat background button placement", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
@@ -1213,6 +1216,7 @@
         await runFeatureStep("memory manager", memoryManagerWanted(settings) || !!document.querySelector("[data-ds-memory-manager],#ds-memory-manager"), () => DS.applyMemoryManagerTools?.());
         if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
         if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
+        DS.markMessageEnhancerVisited?.(DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || []);
       } else {
         if (DS.state.chatTopBarWasActive) {
           await runStep("chat top bar cleanup", () => DS.applyChatTopBarTools?.());
@@ -1356,11 +1360,11 @@
       // listing/banner work so a busy chat cannot leave SpicyChat UI elements
       // visible just because the cosmetic lane was delayed.
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
-      const sidebarWanted = Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      const sidebarWanted = !!settings.showQolSidebarButton || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       if (listing) {
-        await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:']"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);
+        await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);
       } else {
-        await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:']"), () => DS.applySidebarCleanup?.());
+        await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), () => DS.applySidebarCleanup?.());
       }
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
 
@@ -1467,6 +1471,8 @@
         settings.showRecentlySeenButton ||
         settings.enableBotComparison ||
         settings.showQuickNotInterestedButtons ||
+        settings.showQuickLessLikeButtons ||
+        settings.showQuickDislikeButtons ||
         settings.showQuickUnblockButtons ||
         DS.state.cardWorkflowWasActive
       )) {
@@ -2178,12 +2184,61 @@
     setInterval(checkRouteChange, 2000);
   };
 
+  function primeLargeChatMessageLane(source = "resume") {
+    if (!DS.isSingleChatPage?.()) return false;
+    const roots = DS.getLoadedMessageRoots?.() || [];
+    if (roots.length < 120) return false;
+
+    DS.state.messageResumeLazyUntil = Date.now() + 8000;
+    const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
+    // Hidden tabs can accumulate hundreds of stale dirty roots. On resume,
+    // discard that backlog and only enhance what the user can see plus the
+    // newest messages. Older history is picked up lazily while scrolling.
+    dirty.clear();
+    const visible = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 24, margin: 1400 }) || roots.slice(-24);
+    let queued = 0;
+    for (const root of visible) {
+      if (DS.messageEnhancerHasVisited?.(root)) continue;
+      if (DS.markMessageRootDirty?.(root)) queued++;
+    }
+
+    const counters = runtimeCounters();
+    counters.messageResumeLazyPrunes = Number(counters.messageResumeLazyPrunes || 0) + 1;
+    counters.messageResumeLazyRoots = Number(counters.messageResumeLazyRoots || 0) + queued;
+    if (queued) DS.scheduleMessageLane?.(`lazy-${source}`);
+    return true;
+  }
+
+  function scheduleLazyHistoryEnhancement() {
+    if (!DS.isSingleChatPage?.()) return;
+    clearTimeout(DS.state.messageLazyScrollTimer);
+    DS.state.messageLazyScrollTimer = window.setTimeout(() => {
+      DS.state.messageLazyScrollTimer = null;
+      const roots = DS.getLoadedMessageRoots?.() || [];
+      if (roots.length < 120) return;
+      DS.state.messageResumeLazyUntil = Math.max(Number(DS.state.messageResumeLazyUntil || 0), Date.now() + 1200);
+      const near = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 8, margin: 900 }) || [];
+      let added = 0;
+      for (const root of near) {
+        if (DS.messageEnhancerHasVisited?.(root)) continue;
+        if (DS.markMessageRootDirty?.(root)) added++;
+      }
+      if (added) {
+        const counters = runtimeCounters();
+        counters.messageLazyScrollBatches = Number(counters.messageLazyScrollBatches || 0) + 1;
+        counters.messageLazyScrollRoots = Number(counters.messageLazyScrollRoots || 0) + added;
+        DS.scheduleMessageLane?.("lazy-history-scroll");
+      }
+    }, 180);
+  }
+
   function installRefreshTrackers() {
     if (DS.state.refreshTrackersInstalled) return;
     DS.state.refreshTrackersInstalled = true;
 
     document.addEventListener("scroll", () => {
       DS.state.userScrollingUntil = Date.now() + 220;
+      scheduleLazyHistoryEnhancement();
     }, { passive: true, capture: true });
 
     document.addEventListener("visibilitychange", () => {
@@ -2194,6 +2249,7 @@
       } else {
         scheduleNonChatPresentationRecovery("visible");
         scheduleSavedOpenedLane("visible", 40);
+        primeLargeChatMessageLane("visible");
         DS.scheduleRun?.({ immediate: true, source: "visible" });
       }
     }, true);
@@ -2201,6 +2257,7 @@
     window.addEventListener("pageshow", () => {
       scheduleNonChatPresentationRecovery("pageshow");
       scheduleSavedOpenedLane("pageshow", 40);
+      primeLargeChatMessageLane("pageshow");
       DS.scheduleRun?.({ immediate: true, source: "pageshow" });
     }, true);
 

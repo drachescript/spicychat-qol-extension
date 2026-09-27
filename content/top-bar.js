@@ -28,11 +28,24 @@
     DS.hideElement?.(el, reason === "notifications" ? "notifications" : `topbar:${reason}`);
   }
 
+  function unhideNotificationVisibility() {
+    const settings = DS.state?.settings || {};
+    if (settings.hideNotifications || settings.hideTopBarNotifications) return;
+    DS.qsa("[data-ds-reason='notifications']").forEach(el => DS.unhideElement?.(el));
+
+    // v0.2.16 and earlier could leave the old `topbar:notifications`
+    // reason behind. Clean it once, then stay on the single canonical
+    // `notifications` reason so the two modules cannot ping-pong it.
+    if (!DS.state.notificationReasonMigrationDone) {
+      DS.qsa("[data-ds-reason='topbar:notifications']").forEach(el => DS.unhideElement?.(el));
+      DS.state.notificationReasonMigrationDone = true;
+    }
+  }
+  DS.unhideNotificationVisibility = unhideNotificationVisibility;
+
   function unhideTopBarReason(reason) {
     if (reason === "notifications") {
-      const settings = DS.state?.settings || {};
-      if (settings.hideNotifications || settings.hideTopBarNotifications) return;
-      DS.qsa("[data-ds-reason='notifications'], [data-ds-reason='topbar:notifications']").forEach(el => DS.unhideElement?.(el));
+      unhideNotificationVisibility();
       return;
     }
 

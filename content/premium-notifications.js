@@ -45,6 +45,21 @@
     });
   }
 
+
+  function isSidebarNavigationElement(el) {
+    return !!el?.closest?.("nav, [role='navigation']");
+  }
+
+  function restorePremiumVisibility() {
+    unhideIfReason("premium:selector");
+    unhideIfReason("premium:text");
+  }
+
+  function restorePremiumSidebarVisibility() {
+    unhideIfReason("premium:selector", isSidebarNavigationElement);
+    unhideIfReason("premium:text", isSidebarNavigationElement);
+  }
+
   function isModelSelector(el) {
     const text = normalizedText(el);
     if (!text) return false;
@@ -419,17 +434,33 @@
 
   DS.hidePremiumStuff = function hidePremiumStuff() {
     const { settings } = DS.state;
-    if (!settings.enabled) return;
+
+    if (!settings.enabled) {
+      restorePremiumVisibility();
+      unhideIfReason("premium:floating-upgrade-cta");
+      unhideIfReason("premium:floating-context-limit");
+      return;
+    }
 
     // Repair anything older versions accidentally hid.
     unhideIfReason("premium:floating-context-limit", isModelSelector);
     restoreSubscriptionPageContent();
 
+    // Sidebar visibility has its own explicit settings. `Hide premium` should
+    // not silently override the user's separate `Hide Subscribe` choice.
+    restorePremiumSidebarVisibility();
+
     if (settings.hideFloatingPremiumPopups) {
       hideFloatingPremiumPopups();
+    } else {
+      unhideIfReason("premium:floating-upgrade-cta");
+      unhideIfReason("premium:floating-context-limit");
     }
 
-    if (!settings.hidePremium) return;
+    if (!settings.hidePremium) {
+      restorePremiumVisibility();
+      return;
+    }
 
     const selectors = [
       "[data-testid='GetPremiumButton']",
@@ -441,6 +472,7 @@
     for (const selector of selectors) {
       DS.qsa(selector).forEach(el => {
         if (isSubscriptionPageContent(el)) return;
+        if (isSidebarNavigationElement(el)) return;
         if (el.closest("[data-testid='CurrentPlan-PlanCard'], [data-testid='CurrentPlan-PlanCardLink']")) {
           return;
         }
@@ -452,6 +484,7 @@
 
     DS.qsa("button, a, [role='dialog'], [class*='modal'], [class*='popup']").forEach(el => {
       if (isSubscriptionPageContent(el)) return;
+      if (isSidebarNavigationElement(el)) return;
       if (isModelSelector(el)) return;
       if (el.closest("[data-testid='CurrentPlan-PlanCard'], [data-testid='CurrentPlan-PlanCardLink']")) return;
 
@@ -474,8 +507,8 @@
 
     if (!settings.enabled) {
       teardownNotificationGuard();
-      unhideIfReason("notifications");
-      unhideIfReason("topbar:notifications");
+      if (typeof DS.unhideNotificationVisibility === "function") DS.unhideNotificationVisibility();
+      else unhideIfReason("notifications");
       return;
     }
 
@@ -496,8 +529,8 @@
         DS.hideElement(el, "notifications");
       });
     } else if (!settings.hideTopBarNotifications) {
-      unhideIfReason("notifications");
-      unhideIfReason("topbar:notifications");
+      if (typeof DS.unhideNotificationVisibility === "function") DS.unhideNotificationVisibility();
+      else unhideIfReason("notifications");
     }
   };
 })();

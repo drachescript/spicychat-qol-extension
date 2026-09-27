@@ -859,7 +859,9 @@
       return;
     }
     DS.state.contextKeeperWasActive = true;
-    document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`).forEach(root => {
+    const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-context-keeper-ready", readyValue: "1", newest: 24, margin: 1400 })
+      || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`);
+    roots.forEach(root => {
       if (root.querySelector(`.${BUTTON_CLASS}`)) { root.dataset.dsContextKeeperReady = "1"; return; }
       const text = messageText(root);
       if (!text) return;

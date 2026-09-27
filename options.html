@@ -66,7 +66,7 @@
 </div></div>
 <div class="tab-group" data-tab-group="data"><span class="tab-group-label">Data &amp; advanced</span><div class="tab-group-buttons">
 <button class="tab-button" data-tab="data" type="button">Data &amp; Backup</button>
-<button class="tab-button" data-tab="advanced" type="button">Advanced</button>
+<button class="tab-button" data-tab="advanced" type="button">Advanced / Compatibility</button>
 </div></div>
 <div class="tab-group" data-tab-group="about"><span class="tab-group-label">Project</span><div class="tab-group-buttons">
 <button class="tab-button" data-tab="changelog" type="button">Changelog <span class="tab-update-badge" hidden="" id="changelogUpdateBadge"></span></button>
@@ -903,6 +903,8 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <label class="row"><input id="keepChatPositionWhileTyping" type="checkbox"/><span>Keep my current chat position while typing</span></label>
 <label class="row"><input id="protectDraftDuringMessageRemoval" type="checkbox"/><span>Keep typed draft text when using Remove Messages</span></label>
 <label class="row"><input id="failedMessageHelper" type="checkbox"/><span>Save sent drafts for Resubmit errors</span></label>
+<label class="row"><input id="autoRetryFailedMessageSends" type="checkbox"/><span>Automatically retry failed message sends</span></label>
+<p class="hint">Auto retry watches SpicyChat's native send-error banner, retries with backoff, and stops if the message succeeds, you edit the draft, leave the chat, or five retries fail.</p>
 <p class="hint">The send button may still wait for SpicyChat to finish, but this lets you keep drafting your next message.</p>
 </section><section class="card" id="savedSnippetsCard">
 <h2>Saved Text / Snippets</h2>
@@ -1062,7 +1064,11 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint">Saved personas: <span id="personaCount">0 stored</span>. The quick-switch uses saved personas from /personas or the Change Persona picker.</p>
 </section></div>
 
-<div class="tab-page" data-page="advanced"><p class="page-intro">Performance, per-character overrides, and other settings intended for troubleshooting or specialized setups.</p><section class="card" id="characterQolProfilesCard">
+<div class="tab-page" data-page="advanced"><p class="page-intro">Compatibility fallbacks, performance controls, per-character overrides, and other settings intended for troubleshooting or specialized setups.</p><section class="card" id="chatExportCompatibilityCard">
+<h2>Chat export — Advanced / Compatibility</h2>
+<p class="hint">Normal Copy / Export always fetches the full active chat through the fast API first. There is no separate history method to choose for normal exporting.</p>
+<p class="hint">If the API fetch fails or you are specifically testing compatibility, open <strong>Advanced / Compatibility</strong> inside the Chat export window and use <strong>Load full chat through page (very slow)</strong>. That fallback uses SpicyChat's own Load Previous Messages flow and mounts old messages into the live page, so very large chats can become slow or memory-heavy until the chat is reloaded.</p>
+</section><section class="card" id="characterQolProfilesCard">
 <h2>Per-character QoL profiles</h2>
 <label class="row"><input id="enableCharacterQolProfiles" type="checkbox"/><span>Enable per-character QoL profiles</span></label>
 <p class="hint">Adds a Character profile button to the QoL panel on individual chats. A character can override RP Format Repair, RP formatting style/detection, and Auto voice on chat open while every unchanged option continues using your normal global settings.</p>
@@ -1346,6 +1352,19 @@ Testing" spellcheck="false"></textarea></label>
 </section><section class="card">
 <h2>Sidebar cleanup</h2>
 <p class="hint">Sign In is always kept visible. Sign Out only hides if you turn on that exact option.</p>
+<div class="sub-card">
+<strong>QoL sidebar button</strong>
+<label class="row"><input id="showQolSidebarButton" type="checkbox"/><span>Show SpicyChat QoL in the sidebar</span></label>
+<label>Placement
+<select id="qolSidebarButtonPlacement">
+<option value="after-sai">Below S.AI Toolkit (default)</option>
+<option value="after-recommendations">Under Recommendations</option>
+<option value="after-favorites">Under Favorites</option>
+<option value="before-help">Above Help</option>
+</select>
+</label>
+<p class="hint">Opt-in only. Clicking it opens the QoL settings. If S.AI Toolkit is not installed, the default placement falls back near Help.</p>
+</div>
 <h3>Top</h3>
 <label class="row"><input id="hideSidebarLogo" type="checkbox"/><span>Hide logo</span></label>
 <label class="row"><input id="hideSidebarHome" type="checkbox"/><span>Hide Home</span></label>
@@ -1822,15 +1841,15 @@ cash =&gt; Bingo Coins
 <section class="card">
 <h2>Chat export</h2>
 <label class="row"><input id="showChatExportButton" type="checkbox"/><span>Show Copy / Export chat buttons on chat pages</span></label>
-<label class="row"><input id="chatExportLoadPreviousMessages" type="checkbox"/><span>Automatically load all older messages before exporting</span></label>
+<p class="hint">Opening Copy / Export automatically fetches the full active chat through the fast API and keeps that history out of the live page. When the chat is ready, the export window uses the complete in-memory history; a retry button only appears if the automatic fetch did not complete.</p>
 <label class="row"><input id="chatExportIncludeBotInfo" type="checkbox"/><span>Include available bot info</span></label>
 <label class="row"><input id="chatExportIncludeOocDirectives" type="checkbox"/><span>Include OOC and directive notes</span></label>
 <label class="row"><input id="chatExportIncludeGenerationDetails" type="checkbox"/><span>Include captured timestamps/model/generation details when available</span></label>
 <label class="row"><input id="chatExportNumberMessages" type="checkbox"/><span>Number exported messages</span></label>
 <label class="row"><input id="chatExportIncludeAvatars" type="checkbox"/><span>Include avatar links in HTML/JSON exports</span></label>
 <label>Default format<select id="chatExportDefaultFormat"><option value="text">Plain text</option><option value="markdown">Markdown</option><option value="html">HTML archive</option><option value="json">JSON backup</option></select></label>
-<label>Default HTML layout<select id="chatExportHtmlLayout"><option value="bubbles">Chat bubbles</option><option value="transcript">Transcript</option></select></label>
-<p class="hint">Copy/Export can load older messages first and captures each loaded batch by message ID, so long chats do not need every message to stay mounted at once. Available bot info is fetched from SpicyChat data sources when possible, with the visible chat page used as a fallback.</p>
+<label>Default HTML layout<select id="chatExportHtmlLayout"><option value="bubbles">Match current chat appearance</option><option value="transcript">Clean transcript</option></select></label>
+<p class="hint">For Match current chat appearance, API history supplies the message data while the currently loaded chat supplies the appearance template (bubble colors, text, borders, radius, font, and backtick styling). Clean transcript uses a simple portable layout. The very slow page-loading fallback is kept under Advanced / Compatibility for troubleshooting only.</p>
 </section>
 
 
@@ -2165,6 +2184,7 @@ step sister" spellcheck="false"></textarea></label>
 <button hidden="" id="resumeBlockedDislikeRun" type="button">Resume unfinished</button>
 <button hidden="" id="retryFailedBlockedDislikes" type="button">Retry last failed</button>
 <button id="clearBlockedDislikeHistory" type="button">Clear handled history</button>
+<button id="resetAndRedoBlockedDislikes" type="button">Reset history + redo all</button>
 <span class="manager-count" id="blockedBotDislikeStatus"></span>
 </div>
 <label>Delay between bots
@@ -2245,7 +2265,9 @@ NTR"></textarea></label>
 <label>Recently Seen history limit<input id="recentlySeenLimit" max="250" min="10" step="10" type="number"/></label>
 <label class="row"><input id="enableBotComparison" type="checkbox"/><span>Enable local side-by-side bot comparison</span></label>
 <label class="row"><input id="showQuickNotInterestedButtons" type="checkbox"/><span>Add a quick Not Interested button to bot cards</span></label>
-<p class="hint">Comparison uses information already visible on cards plus your local QoL folders/tags/notes. Recently Seen is local and can be backed up or deleted separately.</p>
+<label class="row"><input id="showQuickLessLikeButtons" type="checkbox"/><span>Add a quick Stop recommending me this button to bot cards</span></label>
+<label class="row"><input id="showQuickDislikeButtons" type="checkbox"/><span>Add a separate quick Dislike button to bot cards (desktop browser only)</span></label>
+<p class="hint">All three are separate and opt-in: Not Interested is only a local QoL filter; Stop recommending me this uses SpicyChat's own Less Like This action for recommendation preferences; Dislike uses the existing QoL/SpicyChat rating worker and is tracked in the handled Dislike history.</p>
 </section>
 
 

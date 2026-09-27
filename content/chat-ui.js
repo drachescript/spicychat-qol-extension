@@ -771,7 +771,12 @@
     function applyChatUiCleanup() {
       const { settings } = DS.state;
       const onChat = !!settings.enabled && DS.isSingleChatPage();
+      const stackedLayout = !!onChat && !!settings.stackChatMessages;
+      if (stackedLayout) document.documentElement.setAttribute("data-ds-chat-message-layout", "stacked");
+      else document.documentElement.removeAttribute("data-ds-chat-message-layout");
+
       const hasActiveCleanup = !!(
+        settings.stackChatMessages ||
         settings.hideChatPlusButton ||
         settings.hideChatImageButton ||
         settings.replaceChatImageWithOocButton ||

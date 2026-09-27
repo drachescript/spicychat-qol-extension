@@ -481,11 +481,13 @@
 
     let roots = [];
     if (signatureChanged) {
-      roots = getMessageRoots();
+      roots = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || getMessageRoots();
     } else {
       const candidates = new Set(dirtyRoots);
       DS.getCurrentMessageLaneRoots?.().forEach(root => candidates.add(root));
-      document.querySelectorAll("div[id^='message-']:not([data-ds-text-replacement-ready='1'])").forEach(root => {
+      const unready = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-text-replacement-ready", readyValue: "1", newest: 24, margin: 1400 })
+        || document.querySelectorAll("div[id^='message-']:not([data-ds-text-replacement-ready='1'])");
+      unready.forEach(root => {
         if (!root.parentElement?.closest?.("div[id^='message-']")) candidates.add(root);
       });
       roots = [...candidates].filter(root => root?.isConnected);

@@ -470,14 +470,16 @@
     // The module observer handles individual message edits/streaming after the
     // initial pass. Avoid walking every old message again on each global QoL run.
     if (force || !initializedRoute) {
-      const loaded = DS.getLoadedMessageRoots?.() || Array.from(document.querySelectorAll(MESSAGE_SELECTOR));
+      const loaded = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || DS.getLoadedMessageRoots?.() || Array.from(document.querySelectorAll(MESSAGE_SELECTOR));
       loaded.forEach(message => {
         if (!isAiMessage(message)) return;
         processMessage(message, true);
       });
       initializedRoute = route;
     } else {
-      document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-rp-ready])`).forEach(message => {
+      const candidates = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-rp-ready", newest: 24, margin: 1400 })
+        || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-rp-ready])`);
+      candidates.forEach(message => {
         if (isAiMessage(message)) processMessage(message, false);
       });
     }

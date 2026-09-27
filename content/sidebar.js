@@ -9,21 +9,12 @@
   let lastSidebarSettingsSignature = "";
 
   function sidebarSettingsSignature(settings = {}) {
-    return Object.keys(settings)
+    const cleanup = Object.keys(settings)
       .filter(key => key.startsWith("hideSidebar"))
       .sort()
       .map(key => `${key}:${settings[key] ? 1 : 0}`)
-      .join("|") + `|enabled:${settings.enabled ? 1 : 0}`;
-  }
-
-  function sidebarManagedReason(el) {
-    return String(el?.dataset?.dsReason || "");
-  }
-
-  function sidebarManagedElementNeedsRepair(el) {
-    const reason = sidebarManagedReason(el);
-    if (!reason.startsWith("sidebar:")) return false;
-    return el?.dataset?.dsHidden !== "1" || !el?.classList?.contains?.("ds-hidden");
+      .join("|");
+    return `${cleanup}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
   }
 
   function ensureSidebarObserver() {
@@ -42,24 +33,13 @@
     sidebarDirty = true;
     sidebarObserver = new MutationObserver(mutations => {
       for (const mutation of mutations) {
-        if (mutation.type === "attributes") {
-          const attr = String(mutation.attributeName || "");
-          const target = mutation.target instanceof Element ? mutation.target : null;
-          const managed = sidebarManagedReason(target).startsWith("sidebar:");
-
-          // Ignore same-state/native attribute churn on an element that QoL has
-          // already hidden correctly. If React actually removes our hidden
-          // class/state, mark one repair pass instead of continuously
-          // hide/showing the same element.
-          if (managed && ["class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"].includes(attr)) {
-            if (!sidebarManagedElementNeedsRepair(target)) continue;
-            sidebarDirty = true;
-            if (DS.state?.runtimeCounters) {
-              DS.state.runtimeCounters.sidebarNativeStateRepairs =
-                Number(DS.state.runtimeCounters.sidebarNativeStateRepairs || 0) + 1;
-            }
-            return;
-          }
+        if (
+          mutation.type === "attributes" &&
+          ["class", "style", "hidden", "aria-hidden", "data-ds-hidden", "data-ds-reason"].includes(String(mutation.attributeName || "")) &&
+          (String(mutation.target?.dataset?.dsReason || "").startsWith("sidebar:") ||
+           mutation.target?.classList?.contains?.("ds-hidden"))
+        ) {
+          continue;
         }
         if (DS.mutationIsQolOnly?.(mutation)) continue;
         sidebarDirty = true;
@@ -139,6 +119,123 @@
         if (String(el.dataset.dsReason || "").startsWith("sidebar:")) delete el.dataset.dsReason;
       }
       if (el.tagName === "NAV") break;
+    }
+  }
+
+  function sidebarRowFor(el) {
+    if (!el) return null;
+    let node = el instanceof Element ? el : null;
+    for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
+      if (node.classList?.contains("w-full") && node.parentElement?.classList?.contains("flex-col")) return node;
+    }
+    return el.closest?.(".w-full") || el.closest?.("a") || el;
+  }
+
+  function makeQolSidebarButton() {
+    const row = document.createElement("div");
+    row.className = "w-full ds-qol-sidebar-row";
+    row.dataset.dsOwned = "1";
+
+    const button = document.createElement("button");
+    button.id = "ds-qol-sidebar-btn";
+    button.type = "button";
+    button.className = "ds-qol-sidebar-button w-full flex items-center gap-2 px-2.5 h-10 justify-between rounded-md cursor-pointer bg-transparent text-gray-12 dark:text-gray-12 hover:bg-gray-4 dark:hover:bg-gray-4";
+    button.title = "SpicyChat QoL";
+    button.setAttribute("aria-label", "SpicyChat QoL settings");
+
+    const inner = document.createElement("div");
+    inner.className = "flex items-center gap-2";
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", "20");
+    svg.setAttribute("height", "20");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.classList.add("ds-qol-sidebar-icon", "flex-none");
+    for (const [d] of [
+      ["M4 21v-7"], ["M4 10V3"], ["M12 21v-9"], ["M12 8V3"],
+      ["M20 21v-5"], ["M20 12V3"], ["M1 14h6"], ["M9 8h6"], ["M17 16h6"]
+    ]) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    }
+
+    const label = document.createElement("p");
+    label.className = "ds-qol-sidebar-button-text font-sans text-decoration-skip-ink-none text-underline-position-from-font text-label-lg font-regular text-left truncate";
+    label.textContent = "SpicyChat QoL";
+
+    inner.append(svg, label);
+    button.appendChild(inner);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      DS.openOptionsTarget?.("general", { search: "Sidebar cleanup" });
+    }, true);
+    row.appendChild(button);
+    return row;
+  }
+
+  function findTextButtonRow(label) {
+    const nav = getNav();
+    if (!nav) return null;
+    const wanted = DS.normalize(label);
+    const button = DS.qsa("button", nav).find(item => textOf(item) === wanted);
+    return sidebarRowFor(button);
+  }
+
+  function findHrefRow(pathPart) {
+    const nav = getNav();
+    if (!nav) return null;
+    const link = DS.qsa("a", nav).find(item => hrefOf(item).includes(pathPart));
+    return sidebarRowFor(link);
+  }
+
+  function placeQolSidebarButton(settings) {
+    const existing = document.getElementById("ds-qol-sidebar-btn")?.closest?.(".ds-qol-sidebar-row");
+    if (!settings.enabled || !settings.showQolSidebarButton) {
+      existing?.remove();
+      return;
+    }
+
+    const nav = getNav();
+    if (!nav) return;
+    const row = existing || makeQolSidebarButton();
+    const placement = String(settings.qolSidebarButtonPlacement || "after-sai");
+    let anchorRow = null;
+    let before = false;
+
+    if (placement === "after-recommendations") anchorRow = findHrefRow("/recommended-bots");
+    else if (placement === "after-favorites") anchorRow = findHrefRow("/favorite-bots");
+    else if (placement === "before-help") {
+      anchorRow = findTextButtonRow("Help");
+      before = true;
+    } else {
+      anchorRow = sidebarRowFor(document.getElementById("sai-toolkit-sidebar-btn"));
+      if (!anchorRow) anchorRow = findTextButtonRow("Help");
+    }
+
+    if (!anchorRow?.parentElement) {
+      const scroll = nav.querySelector(":scope > div.flex.flex-col.flex-1") || nav.querySelector("div.flex.flex-col.flex-1");
+      const lastSection = scroll ? [...scroll.children].filter(el => el instanceof Element).at(-1) : null;
+      if (lastSection) {
+        lastSection.appendChild(row);
+        return;
+      }
+      return;
+    }
+
+    if (before) {
+      if (row.parentElement !== anchorRow.parentElement || row.nextElementSibling !== anchorRow) {
+        anchorRow.parentElement.insertBefore(row, anchorRow);
+      }
+    } else if (row.parentElement !== anchorRow.parentElement || anchorRow.nextElementSibling !== row) {
+      anchorRow.insertAdjacentElement("afterend", row);
     }
   }
 
@@ -284,7 +381,13 @@
       if (!links.every(isSocialLink)) return;
 
       const anyVisible = links.some(link => !link.classList.contains("ds-hidden"));
-      if (!anyVisible) hideSidebarElement(div, "sidebar:social-links-wrapper");
+      if (anyVisible) {
+        if (div.dataset?.dsReason === "sidebar:social-links-wrapper") {
+          DS.unhideElement?.(div);
+        }
+      } else {
+        hideSidebarElement(div, "sidebar:social-links-wrapper");
+      }
     });
   }
 
@@ -305,10 +408,16 @@
   }
 
   function classifyAppDownloadElement(el) {
-    const aria = ariaOf(el);
+    if (!el) return "";
+
+    // Classify the actual clickable control as a whole. SpicyChat currently uses
+    // a generic /download href for its Google Play badge, so looking only at the
+    // anchor makes that badge look "generic" and lets the wrong toggle hide it.
+    const nodes = [el, ...DS.qsa?.("img", el) || []];
+    const aria = nodes.map(node => ariaOf(node)).join(" ");
     const href = hrefOf(el).toLowerCase();
-    const alt = DS.normalize(el.getAttribute?.("alt") || "");
-    const src = String(el.getAttribute?.("src") || "").toLowerCase();
+    const alt = nodes.map(node => DS.normalize(node.getAttribute?.("alt") || "")).join(" ");
+    const src = nodes.map(node => String(node.getAttribute?.("src") || "").toLowerCase()).join(" ");
     const text = textOf(el);
 
     const googlePlay =
@@ -318,6 +427,7 @@
       alt.includes("playstore") ||
       alt.includes("google play") ||
       src.includes("playstore") ||
+      src.includes("googleplay") ||
       src.includes("google-play");
 
     if (googlePlay) return "google-play";
@@ -345,8 +455,6 @@
   }
 
   function appDownloadTarget(el) {
-    // For individual app-store controls, never climb into a shared wrapper:
-    // hiding a Google Play badge must not accidentally hide the iOS badge too.
     return el?.closest?.("a, button") || el;
   }
 
@@ -354,12 +462,18 @@
     const nav = getNav();
     if (!nav) return;
 
-    DS.qsa("footer a, footer button, footer img", nav).forEach(el => {
-      const detected = classifyAppDownloadElement(el);
+    const controls = new Set(DS.qsa("footer a, footer button", nav));
+    DS.qsa("footer img", nav).forEach(img => {
+      if (!img.closest("a, button")) controls.add(img);
+    });
+
+    controls.forEach(el => {
+      const target = appDownloadTarget(el);
+      const detected = classifyAppDownloadElement(target);
       if (!detected) return;
       if (kind !== "all" && detected !== kind) return;
 
-      hideSidebarElement(appDownloadTarget(el), `sidebar:app-download-${detected}`);
+      hideSidebarElement(target, `sidebar:app-download-${detected}`);
     });
   }
 
@@ -409,6 +523,7 @@
   function sidebarReasonStillWanted(reason, settings = {}) {
     const key = String(reason || "");
     if (!key.startsWith("sidebar:")) return false;
+    if (!settings.enabled) return false;
 
     const wanted = {
       "sidebar:logo": !!settings.hideSidebarLogo,
@@ -448,7 +563,10 @@
       "sidebar:social-discord": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialDiscord,
       "sidebar:social-x": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialX,
       "sidebar:social-reddit": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialReddit,
-      "sidebar:social-links-wrapper": !!settings.hideSidebarSocialLinks || !!settings.hideSidebarSocialDiscord || !!settings.hideSidebarSocialX || !!settings.hideSidebarSocialReddit,
+      // Wrapper visibility is derived from the child links after their individual
+      // settings are applied. Keeping the wrapper hidden merely because *some*
+      // social link is disabled makes newly re-enabled links stay invisible.
+      "sidebar:social-links-wrapper": false,
       "sidebar:footer-terms": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterTerms,
       "sidebar:footer-privacy": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterPrivacy,
       "sidebar:footer-refunds": !!settings.hideSidebarFooterLinks || !!settings.hideSidebarFooterRefunds,
@@ -519,6 +637,7 @@
     restoreNoLongerRequestedSidebarElements(settings);
     keepSignInVisible();
     keepNativeNavigationToggleVisible();
+    placeQolSidebarButton(settings);
 
     if (!settings.enabled) return;
 
@@ -642,6 +761,7 @@
     if (settings.hideSidebarSignOut) hideSignOut();
 
     protectSaiToolkitSidebarButton();
+    placeQolSidebarButton(settings);
 
     keepNativeNavigationToggleVisible();
     keepSignInVisible();

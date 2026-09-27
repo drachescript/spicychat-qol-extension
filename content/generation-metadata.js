@@ -500,7 +500,7 @@
     const laneRoots = DS.getCurrentMessageLaneRoots?.() || [];
     const historyBusy = !!DS.state?.bulkChatHistoryLoadActive || Date.now() < Number(DS.state?.chatHistoryBatchUntil || 0);
     if (force) {
-      const loadedRoots = DS.getLoadedMessageRoots?.() || document.querySelectorAll("[id^='message-']");
+      const loadedRoots = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || DS.getLoadedMessageRoots?.() || document.querySelectorAll("[id^='message-']");
       loadedRoots.forEach(root => applyToMessage(root, settings));
     } else if (laneRoots.length) {
       laneRoots.forEach(root => applyToMessage(root, settings));
@@ -508,7 +508,9 @@
       counters.generationMetadataScopedPasses = Number(counters.generationMetadataScopedPasses || 0) + 1;
       counters.generationMetadataScopedMessages = Number(counters.generationMetadataScopedMessages || 0) + laneRoots.length;
     } else if (!historyBusy) {
-      document.querySelectorAll("[id^='message-']:not([data-ds-generation-metadata-ready='1'])").forEach(root => applyToMessage(root, settings));
+      const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-generation-metadata-ready", readyValue: "1", newest: 24, margin: 1400 })
+        || document.querySelectorAll("[id^='message-']:not([data-ds-generation-metadata-ready='1'])");
+      roots.forEach(root => applyToMessage(root, settings));
     } else {
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.generationMetadataHistoryDeferrals = Number(counters.generationMetadataHistoryDeferrals || 0) + 1;

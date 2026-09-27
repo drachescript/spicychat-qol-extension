@@ -254,7 +254,9 @@
       document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-bookmark-ready]`).forEach(root => delete root.dataset.dsBookmarkReady);
       return;
     }
-    for (const root of document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-bookmark-ready='1'])`)) {
+    const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-bookmark-ready", readyValue: "1", newest: 24, margin: 1400 })
+      || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-bookmark-ready='1'])`);
+    for (const root of roots) {
       const existing = root.querySelector(`.${BUTTON_CLASS}`);
       if (existing) { root.dataset.dsBookmarkReady = "1"; continue; }
       const target = placementTarget(root);

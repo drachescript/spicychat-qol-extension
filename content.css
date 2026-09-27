@@ -3489,10 +3489,47 @@ html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] 
 }
 
 /* Custom alternate-dialogue colors override the selected built-in visual style. */
+html[data-ds-alt-dialogue-custom-colors="1"] .ds-alt-dialogue,
 .ds-alt-dialogue[data-ds-alt-dialogue-custom="1"] {
   color: var(--ds-alt-dialogue-text) !important;
   background: var(--ds-alt-dialogue-bg) !important;
   border-color: var(--ds-alt-dialogue-border) !important;
+}
+
+
+/* v0.2.17 resilience: SpicyChat/React can replace a message body after QoL has
+   already marked it ready. When that happens, native inline-code/highlight
+   nodes may lose .ds-alt-dialogue and fall back to SpicyChat's yellow default.
+   These root-state selectors preserve CUSTOM backtick colors until the normal
+   incremental enhancer sees the replacement node again. Scope is respected so
+   AI-only / user-only styling does not leak to the other side. */
+html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="ai"]
+  div[id^="message-"] div[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight),
+html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="user"]
+  div[id^="message-"] div[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight),
+html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="both"]
+  div[id^="message-"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"]) > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight) {
+  display: inline !important;
+  margin: 0 !important;
+  padding: 0.08em 0.34em !important;
+  border: 1px solid var(--ds-alt-dialogue-border) !important;
+  border-radius: 0.32em !important;
+  color: var(--ds-alt-dialogue-text) !important;
+  background: var(--ds-alt-dialogue-bg) !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  white-space: break-spaces !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Keep native history-loading batches visually cheap while thousands of old
+   messages are being mounted. This does not hide or remove messages. */
+html[data-ds-chat-export-native-loading="1"] div[id^="message-"] *,
+html[data-ds-chat-export-native-loading="1"] div[id^="message-"] {
+  animation-duration: 0s !important;
+  transition-duration: 0s !important;
 }
 
 
@@ -5515,3 +5552,32 @@ html[data-ds-chat-exporting="1"] #ds-qol-export-chat {
   }
   .ds-pagination-top-jump input { width: 64px; }
 }
+
+
+/* Optional SpicyChat QoL sidebar launcher. */
+.ds-qol-sidebar-row {
+  width: 100%;
+}
+#ds-qol-sidebar-btn {
+  border: 0;
+  font: inherit;
+}
+nav[style*="width: 54px"] #ds-qol-sidebar-btn {
+  width: 40px !important;
+  height: 36px !important;
+  min-width: 40px !important;
+  padding: 0 !important;
+  margin-inline: auto !important;
+  justify-content: center !important;
+  border-radius: 9999px !important;
+}
+nav[style*="width: 54px"] #ds-qol-sidebar-btn > div {
+  gap: 0 !important;
+}
+nav[style*="width: 54px"] #ds-qol-sidebar-btn .ds-qol-sidebar-button-text {
+  display: none !important;
+}
+nav:not([style*="width: 54px"]) #ds-qol-sidebar-btn .ds-qol-sidebar-button-text {
+  display: inline !important;
+}
+

@@ -1,12 +1,13 @@
 (() => {
   "use strict";
 
-  // Keep the MAIN-world auth bridge completely asleep when card token info is
-  // disabled. This avoids wrapping page fetch/XHR on the large majority of
-  // installs that do not use token estimates.
+  // Keep the MAIN-world auth bridge limited to features that need authenticated
+  // SpicyChat API access. Chat routes get a very early one-shot start so the
+  // bridge cannot miss SpicyChat's first authenticated message-history XHR.
   const LOADER_ID = "ds-card-token-main-bridge-loader";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
   let requested = false;
+  let bridgeWanted = false;
 
   function sendControl(enabled) {
     try {
@@ -16,7 +17,7 @@
 
   function inject() {
     if (requested || document.documentElement?.getAttribute("data-ds-card-token-main-bridge") === "2") {
-      sendControl(true);
+      sendControl(bridgeWanted);
       return;
     }
     requested = true;
@@ -26,29 +27,56 @@
     script.async = false;
     script.onload = () => {
       script.remove();
-      sendControl(true);
+      sendControl(bridgeWanted);
     };
     script.onerror = () => {
       requested = false;
       script.remove();
     };
-    (document.documentElement || document.head || document).appendChild(script);
+    const append = () => {
+      const root = document.documentElement || document.head || document.body;
+      if (root) root.appendChild(script);
+    };
+    if (document.documentElement || document.head || document.body) append();
+    else document.addEventListener("readystatechange", append, { once: true });
   }
 
   window.DSCardTokenBridgeLoader = {
-    ensure() { inject(); },
-    disable() { sendControl(false); }
+    ensure() { bridgeWanted = true; inject(); },
+    disable() { bridgeWanted = false; sendControl(false); }
   };
 
   function isBotProfileRoute() {
     return /^\/(?:[a-z]{2}\/)?chatbot\/[0-9a-f-]{20,}(?:[/?#]|$)/i.test(String(location.pathname || ""));
   }
 
+  function isChatRoute() {
+    return /^\/(?:[a-z]{2}\/)?chat\/[0-9a-f-]{20,}(?:\/[0-9a-f-]{20,})?(?:[/?#]|$)/i.test(String(location.pathname || ""));
+  }
+
   function syncFromSettings(settings) {
     const publicArchiveNeedsProfileBridge = !!settings?.botArchiveRememberSeenPublic && isBotProfileRoute();
-    const enabled = !!(settings && settings.enabled !== false && (settings.showCardGreetingTokenInfo || settings.deepSleepDisabledFeatures === false || publicArchiveNeedsProfileBridge));
+    // Export can also be opened from the QoL panel even when the title-bar
+    // Export button is hidden, so every enabled chat route needs auth capture.
+    const chatExportNeedsAuthBridge = isChatRoute();
+    const enabled = !!(settings && settings.enabled !== false && (
+      settings.showCardGreetingTokenInfo ||
+      settings.deepSleepDisabledFeatures === false ||
+      publicArchiveNeedsProfileBridge ||
+      chatExportNeedsAuthBridge
+    ));
+    bridgeWanted = enabled;
     if (enabled) inject();
     else sendControl(false);
+  }
+
+  // Chat history is usually fetched very early during page boot. Start the
+  // lightweight MAIN-world bridge immediately on chat routes so it can observe
+  // SpicyChat's own authenticated /messages XHR before an export is requested.
+  // Settings still decide whether the hooks remain active after startup.
+  if (isChatRoute()) {
+    bridgeWanted = true;
+    inject();
   }
 
   try {
@@ -58,7 +86,7 @@
       syncFromSettings(changes.settings.newValue || {});
     });
   } catch {
-    // If storage is unavailable, stay asleep rather than patching the page by
-    // default. card-token-info will simply use its background fallback.
+    // If storage is unavailable, the early chat-route bridge may remain active;
+    // this preserves API export rather than losing auth capture entirely.
   }
 })();

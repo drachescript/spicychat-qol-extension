@@ -1,3 +1,8 @@
+## 0.2.18
+- Fixed API-only Chat Export authentication on long chats by keeping the MAIN-world auth bridge available for Chat Export and starting it early enough to capture SpicyChat's authenticated message-history request.
+- Stopped Chat Export from blindly repeating the same unauthenticated 401 request and added a clearer auth-capture error.
+- Added an optional stacked chat message layout that aligns user and AI message boxes in one column without rebuilding message DOM.
+
 ## 0.2.17
 - Fixed Chat Export:
   - Fixed Copy / Export controls not appearing where enabled.

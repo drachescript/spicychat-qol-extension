@@ -1255,6 +1255,7 @@
       "enableContextKeeper",
       "enableStoryDayTracker",
       "enableRpFormatRepair",
+      "stackChatMessages",
       "enableChatBubbleCustomization",
       "androidTopBarMenu",
       "allowTypingWhileAiResponding",

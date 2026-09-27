@@ -454,7 +454,9 @@
     lastApplySignature = signature;
     lastApplyRoute = route;
 
-    let roots = fullPass ? getMessageRoots() : (DS.getCurrentMessageLaneRoots?.() || []);
+    let roots = fullPass
+      ? (DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || getMessageRoots())
+      : (DS.getCurrentMessageLaneRoots?.() || []);
     if (!roots.length && !fullPass) return;
     roots = [...new Set(roots)].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
 

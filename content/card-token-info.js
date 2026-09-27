@@ -12,6 +12,8 @@
   const MAX_CONCURRENT = 2;
   const MAIN_REQUEST_EVENT = "ds-qol-card-token-request-v2";
   const MAIN_RESPONSE_EVENT = "ds-qol-card-token-response-v2";
+  const HISTORY_REQUEST_EVENT = "ds-qol-chat-history-request-v1";
+  const HISTORY_RESPONSE_EVENT = "ds-qol-chat-history-response-v1";
   const MAIN_BRIDGE_TIMEOUT_MS = 8200;
   const MAIN_BRIDGE_FAILURE_LIMIT = 2;
   const MAIN_BRIDGE_COOLDOWN_MS = 5 * 60 * 1000;
@@ -758,6 +760,117 @@
     // Only start the page bridge when this request actually needs it.
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     return fetchProfileApi(id, null);
+  };
+
+
+  async function mainWorldChatHistoryRequest(characterId, conversationId, { limit = 50, lastId = "" } = {}) {
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+    const ready = await waitForMainBridge(2200);
+    if (!ready) throw new Error("main-world chat history bridge unavailable");
+
+    const requestOnce = async (forceAuth, previousIsolatedToken = null) => {
+      const auth = await discoverSpicychatAuth(forceAuth);
+      const isolatedToken = String(auth?.token || "");
+
+      // Do not fire the exact same unauthenticated/stale request twice. The
+      // first v0.2.17 stress capture showed two identical 401s because a forced
+      // auth lookup found nothing newer. A newly captured MAIN-world token still
+      // gets a retry because the bridge can use it without exposing it here.
+      if (forceAuth && previousIsolatedToken !== null && !mainBridgeHasCapturedAuth() && isolatedToken === previousIsolatedToken) {
+        return {
+          ok: false,
+          status: isolatedToken ? "auth-unchanged" : "auth-unavailable",
+          httpStatus: 401,
+          elapsedMs: 0,
+          authProvided: !!isolatedToken,
+          authSource: auth?.source || "none",
+          authRefreshes: 0,
+          authRetrySkipped: true,
+          __isolatedToken: isolatedToken
+        };
+      }
+
+      const requestId = `dsch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      const response = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          window.removeEventListener(HISTORY_RESPONSE_EVENT, onResponse);
+          resolve(value || null);
+        };
+        const onResponse = event => {
+          if (String(event?.detail?.requestId || "") !== requestId) return;
+          finish(event.detail);
+        };
+        const timer = setTimeout(
+          () => finish({ ok: false, status: "bridge-timeout", elapsedMs: 25500 }),
+          26000
+        );
+        window.addEventListener(HISTORY_RESPONSE_EVENT, onResponse);
+        try {
+          window.dispatchEvent(new CustomEvent(HISTORY_REQUEST_EVENT, {
+            detail: {
+              requestId,
+              characterId,
+              conversationId: conversationId || "",
+              lastId: lastId || "",
+              limit,
+              authToken: isolatedToken,
+              guestUserId: auth?.guest || "",
+              authSource: auth?.source || "none"
+            }
+          }));
+        } catch {
+          finish({ ok: false, status: "bridge-dispatch-failure" });
+        }
+      });
+      return { ...(response || {}), __isolatedToken: isolatedToken };
+    };
+
+    let response = await requestOnce(false);
+    const firstIsolatedToken = String(response?.__isolatedToken || "");
+    let authRefreshes = Number(response?.authRefreshes || 0);
+
+    // Force one fresh auth lookup on 401, but only send another network request
+    // when that lookup actually produced different auth or the MAIN-world bridge
+    // captured SpicyChat's live Authorization header in the meantime.
+    if (!response?.ok && Number(response?.httpStatus || 0) === 401) {
+      state.auth = null;
+      state.authCheckedAt = 0;
+      const retried = await requestOnce(true, firstIsolatedToken);
+      authRefreshes += 1 + Number(retried?.authRefreshes || 0);
+      response = retried;
+    }
+
+    if (response && Object.prototype.hasOwnProperty.call(response, "__isolatedToken")) {
+      response = { ...response };
+      delete response.__isolatedToken;
+    }
+
+    const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    perf.chatHistoryApiRequests = Number(perf.chatHistoryApiRequests || 0) + 1;
+    perf.chatHistoryApiLastMs = Number(response?.elapsedMs || 0);
+    perf.chatHistoryApiLastStatus = String(response?.status || "no-response");
+    perf.chatHistoryApiAuthRefreshes = Number(perf.chatHistoryApiAuthRefreshes || 0) + authRefreshes;
+
+    if (!response?.ok) {
+      const suffix = response?.httpStatus ? ` HTTP ${response.httpStatus}` : "";
+      const error = new Error(`chat history API ${response?.status || "failed"}${suffix}`);
+      error.status = response?.status || "failed";
+      error.httpStatus = Number(response?.httpStatus || 0);
+      error.authRefreshes = authRefreshes;
+      throw error;
+    }
+    return { ...response, authRefreshes };
+  }
+
+  DS.fetchChatHistoryPage = async function fetchChatHistoryPage(characterId, conversationId, options = {}) {
+    const character = String(characterId || "").trim().toLowerCase();
+    const conversation = String(conversationId || "").trim().toLowerCase();
+    if (!character) throw new Error("character id missing");
+    return mainWorldChatHistoryRequest(character, conversation, options);
   };
 
   DS.fetchCharacterArchiveData = async function fetchCharacterArchiveData(botId) {

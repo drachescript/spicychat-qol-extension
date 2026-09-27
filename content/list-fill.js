@@ -1354,6 +1354,12 @@
   }
 
   async function appendNextPaginationPage(page) {
+    if (DS.state.listingRefillHelperRequestActive) {
+      const stats = runStats();
+      stats.helperRequestCoalesced = Number(stats.helperRequestCoalesced || 0) + 1;
+      return 0;
+    }
+    DS.state.listingRefillHelperRequestActive = true;
     const diagBefore = refillDiagSnapshot();
     let diagOutcome = "ok";
     let diagError = "";
@@ -1611,6 +1617,7 @@
       diagError = error?.message || String(error);
       throw error;
     } finally {
+      DS.state.listingRefillHelperRequestActive = false;
       emitListingRefillDiagnostic(page, diagBefore, diagOutcome, diagError);
       updateListingFilterStats();
     }

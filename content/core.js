@@ -421,6 +421,8 @@
     recentlySeenLimit: 100,
     enableBotComparison: false,
     showQuickNotInterestedButtons: false,
+    showQuickLessLikeButtons: false,
+    showQuickDislikeButtons: false,
     showQuickUnblockButtons: false,
 
     reduceAnimatedBotImages: false,
@@ -527,6 +529,7 @@
 
     showChatExportButton: false,
     chatExportLoadPreviousMessages: false,
+    chatExportHistoryMode: "api",
     chatExportIncludeBotInfo: false,
     chatExportIncludeOocDirectives: false,
     chatExportIncludeGenerationDetails: true,
@@ -672,6 +675,7 @@
     scrollTopLoadPreviousTiming: "before",
     protectDraftDuringMessageRemoval: false,
     failedMessageHelper: false,
+    autoRetryFailedMessageSends: false,
     chatPerformanceMode: false,
     runtimePerformanceMode: "adaptive",
     desktopAppPerformanceGuard: true,
@@ -704,6 +708,8 @@
     androidTopBarPersona: true,
     androidTopBarModel: true,
 
+    showQolSidebarButton: false,
+    qolSidebarButtonPlacement: "after-sai",
     hideSidebarLogo: false,
     hideSidebarHome: false,
     hideSidebarChats: false,
@@ -841,6 +847,10 @@
     messageTextRevision: 0,
     messageDirtyRoots: new Set(),
     messageLaneRoots: null,
+    messageResumeLazyUntil: 0,
+    messageLazyScrollTimer: null,
+    messageEnhancerSeen: new WeakSet(),
+    messageEnhancerConfigSignature: "",
     loadedMessageRootsCache: { route: "", revision: -1, roots: [] },
     cardCache: null,
     cardCacheRevision: -1,
@@ -900,6 +910,98 @@
     return roots;
   };
 
+  DS.refreshMessageEnhancerConfig = function refreshMessageEnhancerConfig(settings = DS.state?.settings || {}) {
+    const relevant = {};
+    for (const key of Object.keys(settings || {}).sort()) {
+      if (!/(message|chatBubble|generation|timestamp|rpFormat|alternateDialogue|translation|contextKeeper|bookmark|textReplacement|storyDay|rpState|nudge|selectionRemember)/i.test(key)) continue;
+      const value = settings[key];
+      if (value == null || ["string", "number", "boolean"].includes(typeof value)) relevant[key] = value;
+    }
+    let signature = "";
+    try { signature = JSON.stringify(relevant); } catch {}
+    if (signature === DS.state.messageEnhancerConfigSignature) return false;
+    DS.state.messageEnhancerConfigSignature = signature;
+    DS.state.messageEnhancerSeen = new WeakSet();
+    const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    counters.messageEnhancerConfigResets = Number(counters.messageEnhancerConfigResets || 0) + 1;
+    return true;
+  };
+
+  DS.messageEnhancerHasVisited = function messageEnhancerHasVisited(root) {
+    return !!root && !!DS.state?.messageEnhancerSeen?.has?.(root);
+  };
+
+  DS.markMessageEnhancerVisited = function markMessageEnhancerVisited(roots = []) {
+    const seen = DS.state.messageEnhancerSeen || (DS.state.messageEnhancerSeen = new WeakSet());
+    let added = 0;
+    for (const root of roots || []) {
+      if (!(root instanceof Element) || !root.isConnected || seen.has(root)) continue;
+      seen.add(root);
+      added++;
+    }
+    if (added) {
+      const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.messageEnhancerFirstVisits = Number(counters.messageEnhancerFirstVisits || 0) + added;
+    }
+    return added;
+  };
+
+  DS.isMessageRootNearViewport = function isMessageRootNearViewport(root, margin = 1200) {
+    if (!(root instanceof Element) || !root.isConnected) return false;
+    try {
+      const rect = root.getBoundingClientRect();
+      const height = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 800);
+      const pad = Math.max(0, Number(margin) || 0);
+      return rect.bottom >= -pad && rect.top <= height + pad;
+    } catch {
+      return false;
+    }
+  };
+
+  DS.getMessageEnhancerRoots = function getMessageEnhancerRoots(options = {}) {
+    if (!DS.isSingleChatPage?.()) return [];
+    const loaded = DS.getLoadedMessageRoots?.() || [];
+    const lane = DS.getCurrentMessageLaneRoots?.() || [];
+    const threshold = Math.max(60, Number(options.threshold || 120));
+    const forceAll = options.forceAll === true;
+    const forceLazy = options.forceLazy === true;
+    const lazy = !forceAll && (forceLazy || loaded.length >= threshold || Date.now() < Number(DS.state?.messageResumeLazyUntil || 0));
+    const newest = Math.max(0, Number(options.newest ?? 24));
+    const margin = Math.max(0, Number(options.margin ?? 1400));
+    const readyAttribute = String(options.readyAttribute || "").trim();
+    const readyValue = options.readyValue == null ? null : String(options.readyValue);
+
+    const needsWork = root => {
+      if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
+      if (!readyAttribute) return true;
+      if (readyValue == null) return !root.hasAttribute(readyAttribute);
+      return root.getAttribute(readyAttribute) !== readyValue;
+    };
+
+    const chosen = new Set();
+    for (const root of lane) if (needsWork(root)) chosen.add(root);
+
+    if (!lazy) {
+      for (const root of loaded) if (needsWork(root)) chosen.add(root);
+    } else {
+      for (const root of loaded) {
+        if (needsWork(root) && DS.isMessageRootNearViewport?.(root, margin)) chosen.add(root);
+      }
+      if (newest) {
+        for (const root of loaded.slice(-newest)) if (needsWork(root)) chosen.add(root);
+      }
+    }
+
+    const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    counters.messageEnhancerRootRequests = Number(counters.messageEnhancerRootRequests || 0) + 1;
+    if (lazy) {
+      counters.messageEnhancerLazyPasses = Number(counters.messageEnhancerLazyPasses || 0) + 1;
+      counters.messageEnhancerLazyRoots = Number(counters.messageEnhancerLazyRoots || 0) + chosen.size;
+      counters.messageEnhancerLazySkipped = Number(counters.messageEnhancerLazySkipped || 0) + Math.max(0, loaded.length - chosen.size);
+    }
+    return [...chosen];
+  };
+
   DS.markMessageRootDirty = function markMessageRootDirty(root) {
     if (!(root instanceof Element) || !root.matches?.("div[id^='message-']")) return false;
     const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
@@ -940,17 +1042,18 @@
     let actual = 0;
     let deduped = 0;
     for (const root of roots) {
-      const newlyDirty = DS.markMessageRootDirty(root);
       const fingerprints = DS.state.messageTextFingerprints || (DS.state.messageTextFingerprints = new WeakMap());
       const previousFingerprint = fingerprints.get(root);
       if (previousFingerprint) {
         const currentFingerprint = messageTextFingerprint(root);
         if (currentFingerprint && currentFingerprint === previousFingerprint) {
           counters.messageCacheFingerprintSkips = Number(counters.messageCacheFingerprintSkips || 0) + 1;
-          if (!newlyDirty) deduped += 1;
+          deduped += 1;
           continue;
         }
       }
+      DS.state.messageEnhancerSeen?.delete?.(root);
+      const newlyDirty = DS.markMessageRootDirty(root);
       const hadCachedText = !!DS.state.messageTextCache?.delete?.(root);
       if (newlyDirty || hadCachedText) actual += 1;
       else deduped += 1;

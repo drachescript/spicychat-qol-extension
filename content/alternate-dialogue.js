@@ -8,6 +8,10 @@
   const STYLE_ATTR = "data-ds-alt-dialogue-style";
   const CUSTOM_ATTR = "data-ds-alt-dialogue-custom";
   const GENERATED_ATTR = "data-ds-alt-dialogue-generated";
+  const ROOT_CUSTOM_ATTR = "data-ds-alt-dialogue-custom-colors";
+  const ROOT_ACTIVE_ATTR = "data-ds-alt-dialogue-active";
+  const ROOT_SCOPE_ATTR = "data-ds-alt-dialogue-scope";
+  const ROOT_STYLE_ATTR = "data-ds-alt-dialogue-style-root";
   const VALID_STYLES = new Set(["dialogue", "texting", "thoughts", "subtle"]);
   const VALID_SCOPES = new Set(["ai", "user", "both"]);
   const READY_ATTR = "data-ds-alt-dialogue-ready";
@@ -78,6 +82,10 @@
     root.style.removeProperty("--ds-alt-dialogue-text");
     root.style.removeProperty("--ds-alt-dialogue-bg");
     root.style.removeProperty("--ds-alt-dialogue-border");
+    root.removeAttribute(ROOT_CUSTOM_ATTR);
+    root.removeAttribute(ROOT_ACTIVE_ATTR);
+    root.removeAttribute(ROOT_SCOPE_ATTR);
+    root.removeAttribute(ROOT_STYLE_ATTR);
     document.querySelectorAll(`[${READY_ATTR}]`).forEach(message => message.removeAttribute(READY_ATTR));
     lastSignature = "";
     lastRoute = "";
@@ -187,11 +195,13 @@
       ? settings.alternateDialogueScope
       : "ai";
     const customColors = !!settings.alternateDialogueCustomColors;
+    const colors = {
+      text: normalizeHex(settings.alternateDialogueTextColor, "#f4d35e"),
+      background: normalizeHex(settings.alternateDialogueBackgroundColor, "#1f2430"),
+      border: normalizeHex(settings.alternateDialogueBorderColor, "#596273")
+    };
     const signature = JSON.stringify([
-      style, scope, customColors,
-      normalizeHex(settings.alternateDialogueTextColor, "#f4d35e"),
-      normalizeHex(settings.alternateDialogueBackgroundColor, "#1f2430"),
-      normalizeHex(settings.alternateDialogueBorderColor, "#596273")
+      style, scope, customColors, colors.text, colors.background, colors.border
     ]);
     const route = String(location.pathname || "");
     const fullPass = signature !== lastSignature || route !== lastRoute;
@@ -199,18 +209,22 @@
     lastRoute = route;
 
     const root = document.documentElement;
-    root.style.setProperty("--ds-alt-dialogue-text", normalizeHex(settings.alternateDialogueTextColor, "#f4d35e"));
-    root.style.setProperty("--ds-alt-dialogue-bg", normalizeHex(settings.alternateDialogueBackgroundColor, "#1f2430"));
-    root.style.setProperty("--ds-alt-dialogue-border", normalizeHex(settings.alternateDialogueBorderColor, "#596273"));
+    root.style.setProperty("--ds-alt-dialogue-text", colors.text);
+    root.style.setProperty("--ds-alt-dialogue-bg", colors.background);
+    root.style.setProperty("--ds-alt-dialogue-border", colors.border);
+    root.setAttribute(ROOT_ACTIVE_ATTR, "1");
+    root.setAttribute(ROOT_SCOPE_ATTR, scope);
+    root.setAttribute(ROOT_STYLE_ATTR, style);
+    root.setAttribute(ROOT_CUSTOM_ATTR, customColors ? "1" : "0");
 
     let messages;
     if (fullPass) {
-      messages = [...document.querySelectorAll("div[id^='message-']")];
+      messages = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || [...document.querySelectorAll("div[id^='message-']")];
     } else {
       const laneRoots = DS.getCurrentMessageLaneRoots?.() || [];
       messages = laneRoots.length
         ? [...new Set(laneRoots)]
-        : [...document.querySelectorAll(`div[id^='message-']:not([${READY_ATTR}])`)];
+        : (DS.getMessageEnhancerRoots?.({ readyAttribute: READY_ATTR, newest: 24, margin: 1400 }) || [...document.querySelectorAll(`div[id^='message-']:not([${READY_ATTR}])`)]);
       if (laneRoots.length) {
         const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
         counters.alternateDialogueIncrementalUpdates = Number(counters.alternateDialogueIncrementalUpdates || 0) + 1;

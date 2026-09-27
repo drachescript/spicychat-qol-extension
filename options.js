@@ -441,6 +441,8 @@ const DEFAULT_SETTINGS = {
   recentlySeenLimit: 100,
   enableBotComparison: false,
   showQuickNotInterestedButtons: false,
+  showQuickLessLikeButtons: false,
+  showQuickDislikeButtons: false,
   showQuickUnblockButtons: false,
 
   reduceAnimatedBotImages: false,
@@ -547,6 +549,7 @@ const DEFAULT_SETTINGS = {
 
   showChatExportButton: false,
   chatExportLoadPreviousMessages: false,
+  chatExportHistoryMode: "api",
   chatExportIncludeBotInfo: false,
   chatExportIncludeOocDirectives: false,
   chatExportIncludeGenerationDetails: true,
@@ -698,6 +701,7 @@ const DEFAULT_SETTINGS = {
   scrollTopLoadPreviousTiming: "before",
   protectDraftDuringMessageRemoval: false,
   failedMessageHelper: false,
+  autoRetryFailedMessageSends: false,
   chatPerformanceMode: false,
   runtimePerformanceMode: "adaptive",
   desktopAppPerformanceGuard: true,
@@ -731,6 +735,8 @@ const DEFAULT_SETTINGS = {
   androidTopBarPersona: true,
   androidTopBarModel: true,
 
+  showQolSidebarButton: false,
+  qolSidebarButtonPlacement: "after-sai",
   hideSidebarLogo: false,
   hideSidebarHome: false,
   hideSidebarChats: false,
@@ -1834,6 +1840,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "showRecentlySeenButton",
   "enableBotComparison",
   "showQuickNotInterestedButtons",
+  "showQuickLessLikeButtons",
+  "showQuickDislikeButtons",
   "showQuickUnblockButtons",
   "reduceAnimatedBotImages",
   "animatedImagesListings",
@@ -1926,6 +1934,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "botArchiveOnChatOpen",
   "protectDraftDuringMessageRemoval",
   "failedMessageHelper",
+  "autoRetryFailedMessageSends",
   "chatPerformanceMode",
   "desktopAppPerformanceGuard",
   "pauseQolInHiddenTabs",
@@ -1933,6 +1942,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableLocalChangeHistory",
   "showUpdateNotifications",
   "androidTopBarMenu",
+  "showQolSidebarButton",
   "hideSidebarLogo",
   "hideSidebarHome",
   "hideSidebarChats",
@@ -9593,6 +9603,32 @@ async function bulkDislikeBlockedBots() {
   return runBlockedBulkDislike("remaining");
 }
 
+async function resetQuickDislikeLocalHistory() {
+  quickDislikeHistoryState = { version: 1, bots: {} };
+  quickDislikeBulkState = { version: 1, status: "idle", pendingIds: [], failedIds: [], startedAt: 0, updatedAt: Date.now(), currentId: "", lastMode: "remaining" };
+  await storageSet({ [QUICK_DISLIKE_HISTORY_KEY]: quickDislikeHistoryState, [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState });
+  renderBotManager("blocked");
+  updateBlockedBulkResumeControls();
+  updateBlockedDislikeStatus();
+}
+
+async function resetAndRedoBlockedDislikes() {
+  if (blockedBulkDislikeRunning) {
+    showSettingsToast("Stop Bulk Dislike before resetting and redoing the history.");
+    return;
+  }
+  await ensureBlockingDataLoaded();
+  const blockedCount = blockedQuickDislikeCounts().total || 0;
+  if (!blockedCount) {
+    showSettingsToast("There are no blocked bots to reprocess.");
+    return;
+  }
+  if (!window.confirm(`Reset the local Quick/Bulk Dislike handled log, then run Dislike again for all ${blockedCount} currently blocked bot${blockedCount === 1 ? "" : "s"}? This does not undo existing SpicyChat ratings first; already-rated bots will be detected again.`)) return;
+  await resetQuickDislikeLocalHistory();
+  showSettingsToast("Handled history reset. Starting a fresh pass over all blocked bots…");
+  await runBlockedBulkDislike("remaining");
+}
+
 async function clearBlockedDislikeHistory() {
   if (blockedBulkDislikeRunning) {
     showSettingsToast("Stop Bulk Dislike before clearing its handled history.");
@@ -9606,12 +9642,7 @@ async function clearBlockedDislikeHistory() {
     return;
   }
   if (!window.confirm(`Forget Quick/Bulk Dislike history for ${totalHistory} bot${totalHistory === 1 ? "" : "s"}? ${counts.handled} of them are currently blocked. This does not change any SpicyChat rating.`)) return;
-  quickDislikeHistoryState = { version: 1, bots: {} };
-  quickDislikeBulkState = { version: 1, status: "idle", pendingIds: [], failedIds: [], startedAt: 0, updatedAt: Date.now(), currentId: "", lastMode: "remaining" };
-  await storageSet({ [QUICK_DISLIKE_HISTORY_KEY]: quickDislikeHistoryState, [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState });
-  renderBotManager("blocked");
-  updateBlockedBulkResumeControls();
-  updateBlockedDislikeStatus();
+  await resetQuickDislikeLocalHistory();
   showSettingsToast("Handled dislike history cleared. Those bots can be processed again.");
 }
 
@@ -11220,6 +11251,7 @@ async function load() {
   setValue("botArchiveRefreshHours", [6, 24, 72, 168].includes(Number(settings.botArchiveRefreshHours)) ? String(Number(settings.botArchiveRefreshHours)) : "24");
   setChecked("protectDraftDuringMessageRemoval", !!settings.protectDraftDuringMessageRemoval);
   setChecked("failedMessageHelper", !!settings.failedMessageHelper);
+  setChecked("autoRetryFailedMessageSends", !!settings.autoRetryFailedMessageSends);
   setChecked("chatPerformanceMode", !!settings.chatPerformanceMode);
   setValue("runtimePerformanceMode", ["normal", "adaptive", "aggressive", "maximum"].includes(settings.runtimePerformanceMode) ? settings.runtimePerformanceMode : "adaptive");
   setChecked("desktopAppPerformanceGuard", settings.desktopAppPerformanceGuard !== false);
@@ -11244,6 +11276,7 @@ async function load() {
   setChecked("showUpdateNotifications", !!settings.showUpdateNotifications);
 
   setValue("androidAppControlsMode", ["auto", "android", "always", "off"].includes(settings.androidAppControlsMode) ? settings.androidAppControlsMode : "auto");
+  setValue("qolSidebarButtonPlacement", settings.qolSidebarButtonPlacement || "after-sai");
   setChecked("androidTopBarMenu", !!settings.androidTopBarMenu);
   setChecked("androidHideComposerShortcuts", settings.androidHideComposerShortcuts !== false);
   setChecked("androidTopBarOoc", settings.androidTopBarOoc !== false);
@@ -11261,6 +11294,7 @@ async function load() {
   setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false);
   setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false);
   setChecked("chatExportIncludeAvatars", settings.chatExportIncludeAvatars !== false);
+  setValue("chatExportHistoryMode", settings.chatExportHistoryMode || "api");
   setValue("chatExportDefaultFormat", settings.chatExportDefaultFormat || "text");
   setValue("chatExportHtmlLayout", settings.chatExportHtmlLayout || "bubbles");
   setChecked("showOocTools", settings.showOocTools);
@@ -11354,6 +11388,8 @@ async function load() {
   setValue("recentlySeenLimit", Math.max(10, Math.min(250, Number(settings.recentlySeenLimit) || 100)));
   setChecked("enableBotComparison", !!settings.enableBotComparison);
   setChecked("showQuickNotInterestedButtons", !!settings.showQuickNotInterestedButtons);
+  setChecked("showQuickLessLikeButtons", !!settings.showQuickLessLikeButtons);
+  setChecked("showQuickDislikeButtons", !!settings.showQuickDislikeButtons);
   setChecked("showQuickUnblockButtons", !!settings.showQuickUnblockButtons);
   setChecked("reduceAnimatedBotImages", !!settings.reduceAnimatedBotImages);
   setValue("animatedImageMode", ["freeze", "once", "hover"].includes(settings.animatedImageMode) ? settings.animatedImageMode : "freeze");
@@ -11838,6 +11874,7 @@ function readSettingsFromPage() {
     botArchiveRefreshHours: [6, 24, 72, 168].includes(Number(value("botArchiveRefreshHours"))) ? Number(value("botArchiveRefreshHours")) : 24,
     protectDraftDuringMessageRemoval: checked("protectDraftDuringMessageRemoval"),
     failedMessageHelper: checked("failedMessageHelper"),
+    autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
     chatPerformanceMode: checked("chatPerformanceMode"),
     runtimePerformanceMode: ["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive",
     desktopAppPerformanceGuard: checked("desktopAppPerformanceGuard", true),
@@ -11873,6 +11910,7 @@ function readSettingsFromPage() {
 
     showChatExportButton: checked("showChatExportButton"),
     chatExportLoadPreviousMessages: checked("chatExportLoadPreviousMessages"),
+    chatExportHistoryMode: value("chatExportHistoryMode", "api"),
     chatExportIncludeBotInfo: checked("chatExportIncludeBotInfo"),
     chatExportIncludeOocDirectives: checked("chatExportIncludeOocDirectives"),
     chatExportIncludeGenerationDetails: checked("chatExportIncludeGenerationDetails"),
@@ -11893,6 +11931,8 @@ function readSettingsFromPage() {
     autoAcceptPersonaChange: checked("autoAcceptPersonaChange"),
     personaQuickSwitchLimit: Math.max(1, Math.min(12, Number(value("personaQuickSwitchLimit", "6")) || 6)),
 
+    showQolSidebarButton: checked("showQolSidebarButton"),
+    qolSidebarButtonPlacement: value("qolSidebarButtonPlacement", "after-sai"),
     hideSidebarLogo: checked("hideSidebarLogo"),
     hideSidebarHome: checked("hideSidebarHome"),
     hideSidebarChats: checked("hideSidebarChats"),
@@ -11991,6 +12031,8 @@ function readSettingsFromPage() {
     recentlySeenLimit: Math.max(10, Math.min(250, Number(value("recentlySeenLimit", "100")) || 100)),
     enableBotComparison: checked("enableBotComparison"),
     showQuickNotInterestedButtons: checked("showQuickNotInterestedButtons"),
+    showQuickLessLikeButtons: checked("showQuickLessLikeButtons"),
+    showQuickDislikeButtons: checked("showQuickDislikeButtons"),
     showQuickUnblockButtons: checked("showQuickUnblockButtons"),
     reduceAnimatedBotImages: checked("reduceAnimatedBotImages"),
     animatedImageMode: ["freeze", "once", "hover"].includes(value("animatedImageMode")) ? value("animatedImageMode") : "freeze",
@@ -15573,6 +15615,7 @@ function setupBotManagerControls(kind) {
     $("resumeBlockedDislikeRun")?.addEventListener("click", () => runBlockedBulkDislike("resume").catch(() => showSettingsToast("Could not resume Bulk Dislike.")));
     $("retryFailedBlockedDislikes")?.addEventListener("click", () => runBlockedBulkDislike("failed").catch(() => showSettingsToast("Could not retry failed dislikes.")));
     $("clearBlockedDislikeHistory")?.addEventListener("click", () => clearBlockedDislikeHistory().catch(() => showSettingsToast("Could not clear handled dislike history.")));
+    $("resetAndRedoBlockedDislikes")?.addEventListener("click", () => resetAndRedoBlockedDislikes().catch(() => showSettingsToast("Could not reset and redo blocked dislikes.")));
     $("blockedBotDislikeFilter")?.addEventListener("change", () => {
       botManagerUiState.blocked.visible = 20;
       botManagerUiState.blocked.collapsed = true;

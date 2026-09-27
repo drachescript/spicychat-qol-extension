@@ -434,12 +434,19 @@
       const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.messageOptionsIncrementalUpdates = Number(counters.messageOptionsIncrementalUpdates || 0) + 1;
     } else {
-      let selector = "button[aria-label='message-dropdown']";
-      if (settings.chatPerformanceMode) {
-        selector = `[id^='message-']:not(.ds-chat-message-far) button[aria-label='message-dropdown']`;
+      const roots = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || [];
+      if (roots.length) {
+        buttons = roots.flatMap(root => {
+          if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
+          return DS.qsa("button[aria-label='message-dropdown']", root)
+            .filter(button => signatureChanged || button.dataset.dsMessageQuickReady !== signature);
+        });
+      } else {
+        let selector = "button[aria-label='message-dropdown']";
+        if (settings.chatPerformanceMode) selector = `[id^='message-']:not(.ds-chat-message-far) button[aria-label='message-dropdown']`;
+        if (!signatureChanged) selector += `:not([data-ds-message-quick-ready='${signature}'])`;
+        buttons = DS.qsa(selector);
       }
-      if (!signatureChanged) selector += `:not([data-ds-message-quick-ready='${signature}'])`;
-      buttons = DS.qsa(selector);
     }
 
     buttons
