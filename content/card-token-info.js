@@ -801,6 +801,14 @@
         if (returnedId && returnedId !== id) {
           return { ok: false, status: "id-mismatch", httpStatus: 0, fields: null, reason: "Character API returned a different character ID." };
         }
+        const signalKeys = ["characterId", "name", "title", "description", "greeting", "creator", "image", "tags", "visibility"];
+        const hasCharacterSignal = signalKeys.some(key => {
+          const value = fields?.[key];
+          return Array.isArray(value) ? value.length > 0 : !!String(value || "").trim();
+        });
+        if (!hasCharacterSignal) {
+          return { ok: false, status: "api-empty", httpStatus: 200, fields: {}, reason: "Character API returned HTTP 200 with an empty character object." };
+        }
         return { ok: true, status: "available", httpStatus: 200, fields: fields || {}, reason: "Character API returned live bot data." };
       } catch (error) {
         const message = String(error?.message || error || "");

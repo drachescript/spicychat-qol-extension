@@ -103,6 +103,7 @@ const QUICK_LESS_LIKE_READY_TTL_MS = 10 * 60 * 1000;
 let botStatusWorkerTabId = null;
 let botStatusWorkerOwned = false;
 const botStatusWorkerTabIds = new Set();
+const botStatusWorkerExpectedCloseIds = new Set();
 const BOT_STATUS_HOME_WORKER_URL = "https://spicychat.ai/?dsQolBotStatusWorker=1";
 const BOT_STATUS_WORKER_SESSION_TAB_KEY = "dsBotStatusWorkerTabId";
 const BOT_STATUS_WORKER_SESSION_OWNED_KEY = "dsBotStatusWorkerOwned";
@@ -1065,6 +1066,7 @@ async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
     const tab = await tabsGet(id);
     if (!tab) return { ok: false, ready: false, status: "worker-closed" };
     const remaining = Math.max(500, deadline - Date.now());
+    await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_MARK_WORKER", phase: "probe" }, Math.min(900, remaining));
     const response = await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_WORKER_READY" }, Math.min(1400, remaining));
     if (response?.__dsTimeout) last = { ok: false, ready: false, status: "worker-message-timeout" };
     else if (response) last = response;
@@ -1108,7 +1110,9 @@ async function releaseBotStatusWorker() {
   if (!id || !owned) return 0;
   const tab = await tabsGet(id);
   if (!tab) return 0;
+  botStatusWorkerExpectedCloseIds.add(id);
   await tabsRemove(id);
+  await recordHelperLifecycle("bot-status-worker-released", { tabId: id, reason: "normal-release" });
   return 1;
 }
 
@@ -1143,9 +1147,12 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
     const ready = await probeBotStatusWorker(Number(tab.id), 1500);
     if (ready?.ready) {
       await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned);
+      await recordHelperLifecycle("bot-status-worker-ready", { tabId: Number(tab.id), reused: true, owned: !!botStatusWorkerOwned });
       return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, ready: true };
     }
+    await recordHelperLifecycle("bot-status-worker-lost", { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, status: String(ready?.status || "not-ready") });
     if (botStatusWorkerOwned) {
+      botStatusWorkerExpectedCloseIds.add(Number(tab.id));
       await tabsRemove(Number(tab.id));
     }
     botStatusWorkerTabId = null;
@@ -1169,8 +1176,10 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   let helper = existing[0] || null;
   for (const duplicate of existing.slice(1)) await tabsRemove(Number(duplicate.id));
   if (!helper?.id) {
+    await recordHelperLifecycle("bot-status-worker-opening", { reason: "create-owned-home-helper" });
     const created = await tabsCreate({ url: BOT_STATUS_HOME_WORKER_URL, active: false });
     helper = created?.ok ? created.tab : null;
+    if (helper?.id) await recordHelperLifecycle("bot-status-worker-restart", { tabId: Number(helper.id), reason: "new-owned-helper" });
   }
   const tabId = Number(helper?.id || 0);
   if (!tabId) return { tabId: 0, owned: false };
@@ -1180,7 +1189,12 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   botStatusWorkerTabIds.add(tabId);
   await rememberBotStatusWorker(tabId, true);
   const ready = await probeBotStatusWorker(tabId, 10000);
-  if (!ready?.ready) return { tabId, owned: true, ready: false, status: ready?.status || "worker-timeout" };
+  if (!ready?.ready) {
+    await recordHelperLifecycle("bot-status-worker-lost", { tabId, owned: true, status: String(ready?.status || "worker-timeout"), reason: "startup-not-ready" });
+    return { tabId, owned: true, ready: false, status: ready?.status || "worker-timeout" };
+  }
+  await recordHelperLifecycle("bot-status-worker-ready", { tabId, reused: false, owned: true });
+  await tabsSendMessage(tabId, { type: "DS_BOT_STATUS_DIAG_EVENT", event: "bot-status-worker-ready", detail: { tabId, owned: true } });
   return { tabId, owned: true, ready: true };
 }
 
@@ -4797,6 +4811,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BOT_STATUS_RUN_EVENT") {
+    const event = String(message.event || "bot-status-event").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "bot-status-event";
+    recordHelperLifecycle(event, message.detail || {})
+      .then(diag => sendResponse({ ok: true, event: diag?.lastEvent || event }))
+      .catch(error => sendResponse({ ok: false, error: String(error?.message || error || "") }));
+    const tabId = Number(botStatusWorkerTabId || 0);
+    if (tabId) tabsSendMessage(tabId, { type: "DS_BOT_STATUS_DIAG_EVENT", event, detail: message.detail || {} }).catch?.(() => null);
+    return true;
+  }
+
   if (message?.type === "DS_BOT_STATUS_HELPER_PREPARE") {
     prepareBotStatusWorker({ forceOwnHelper: message?.forceOwnHelper !== false })
       .then(worker => sendResponse({
@@ -5318,6 +5342,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
   const spicyUrl = tab?.url || changeInfo.url || tab?.pendingUrl;
   if (!isSpicyChatUrl(spicyUrl)) return;
+  if (botStatusWorkerTabIds.has(Number(tabId)) && changeInfo.status === "loading" && !isBotStatusWorkerUrl(spicyUrl)) {
+    await recordHelperLifecycle("bot-status-worker-restart", { tabId: Number(tabId), reason: "reload-after-router-marker-removed" });
+    await tabsUpdate(Number(tabId), { url: BOT_STATUS_HOME_WORKER_URL });
+    return;
+  }
   if (quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
 
   if (changeInfo.url) {
@@ -5406,8 +5435,15 @@ chrome.tabs.onRemoved.addListener(tabId => {
     quickLessLikePersistentWorkerTabId = null;
     storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 }).catch(() => {});
   }
+  const removedBotStatusWorker = botStatusWorkerTabIds.has(Number(tabId)) || Number(botStatusWorkerTabId) === Number(tabId);
+  const expectedBotStatusClose = botStatusWorkerExpectedCloseIds.delete(Number(tabId));
   botStatusWorkerTabIds.delete(Number(tabId));
-  if (Number(botStatusWorkerTabId) === Number(tabId)) botStatusWorkerTabId = null;
+  if (Number(botStatusWorkerTabId) === Number(tabId)) {
+    botStatusWorkerTabId = null;
+    botStatusWorkerOwned = false;
+    rememberBotStatusWorker(0, false).catch(() => {});
+  }
+  if (removedBotStatusWorker && !expectedBotStatusClose) recordHelperLifecycle("bot-status-worker-lost", { tabId: Number(tabId), reason: "tab-closed-unexpected" }).catch(() => {});
   for (const [runId, workerTabId] of quickLessLikeBulkWorkerTabs.entries()) {
     if (Number(workerTabId) === Number(tabId)) {
       quickLessLikeBulkWorkerTabs.delete(runId);

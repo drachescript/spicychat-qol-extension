@@ -1,3 +1,20 @@
+## 0.2.21
+- Added opt-in anonymous Bot Status Center contributions to the public SpicyChat Archive review queue. Public submissions go to `/api/submissions/bot-status` and never use or expose the private archive-import token.
+- Public Archive contributions send only saved bot snapshots plus a locally generated, one-way hashed random extension-install identifier for basic anti-spam/rate limiting; chats, personas, Favorites/Later membership, settings, account data, cookies, and SpicyChat login/session data are not included.
+- Public contributions remember per-bot fingerprints locally, send all saved copies on the first submission, default to new/changed copies afterwards, and retain the latest pending submission ID/status for the Bot Status Center UI.
+- Added direct Bot Status Center → SpicyChat Archive upload to `https://spicychat-archive-import.dragongraf.workers.dev/api/imports/bot-status`, with gzip, Bearer-token authentication, a Worker health test, a 60 MB safety limit, and automatic chunking for unusually large exports.
+- Archive import tokens are stored only in extension local storage and are never included in QoL backup/export/import payloads.
+- Archive upload remembers per-bot fingerprints, shows how many saved copies changed since the last upload, sends all copies on the first run, and defaults to new/changed copies afterwards; a full resend remains available and local Bot Status copies are never deleted after upload.
+- Added Refresh stale bots with configurable 1/7/14/30-day age, plus Safe/Normal/Fast serial Bot Status scan pacing and automatic backoff on HTTP 429/5xx responses.
+- HTTP-200 empty character objects are now unavailable candidates first and require a second independent empty-object result before becoming confirmed unavailable / cleanup-eligible.
+- Bot Status helper identity is hardened across router URL changes/reloads, and worker/run lifecycle telemetry now records opens, ready/lost/restart state, item outcomes, and completion.
+- Large Bot Status scans throttle Options-page progress repainting and avoid changing saved-copy timestamps when the bot snapshot itself did not change.
+- Added a Bot Status Center → SpicyChat Archive export for saved bot copies as compressed `.json.gz`.
+- The archive export uses a versioned schema, preserves snapshot timestamps and historical availability observations, and is designed for repeat/import-and-dedupe workflows by bot ID.
+- Exported unavailable/private/404-style results are explicitly historical observations only; the archive importer must still verify current status and keep its own repeated-404 deletion rule authoritative.
+- The export is conservative: it includes public/Bot Status snapshot fields and safe public revision history, but excludes manual creator/editor backups, local private notes, folder/tag organization, and other personal list metadata.
+- Large exports stream records directly into gzip so thousands of rich saved copies do not require a second giant uncompressed JSON string in memory.
+
 ## 0.2.20
 - Fixed Bot Status Center slow starts and scans getting stuck on a single bot.
 - Bulk status scans now use one background SpicyChat Home helper, continue past temporary API/auth problems, and avoid repeated large saves during a scan.

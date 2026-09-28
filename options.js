@@ -90,6 +90,18 @@ const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
 const BACKUP_FORMAT_VERSION = 13;
 
+const ARCHIVE_IMPORT_ENDPOINT_KEY = "dsArchiveImportEndpointV1";
+const ARCHIVE_IMPORT_TOKEN_KEY = "dsArchiveImportTokenV1";
+const ARCHIVE_UPLOAD_STATE_KEY = "dsBotStatusArchiveUploadStateV1";
+const ARCHIVE_CONTRIBUTION_ENABLED_KEY = "dsArchivePublicContributionEnabledV1";
+const ARCHIVE_CONTRIBUTION_INSTALL_ID_KEY = "dsArchivePublicContributionInstallIdV1";
+const ARCHIVE_CONTRIBUTION_STATE_KEY = "dsBotStatusArchiveSubmissionStateV1";
+const DEFAULT_ARCHIVE_IMPORT_ENDPOINT = "https://spicychat-archive-import.dragongraf.workers.dev/api/imports/bot-status";
+const DEFAULT_ARCHIVE_SUBMISSION_ENDPOINT = "https://spicychat-archive-import.dragongraf.workers.dev/api/submissions/bot-status";
+const ARCHIVE_UPLOAD_SOFT_MAX_BYTES = 60 * 1024 * 1024;
+const ARCHIVE_UPLOAD_CHUNK_SIZE = 1000;
+const BOT_STATUS_SCAN_SPEED_DELAYS = Object.freeze({ safe: 750, normal: 500, fast: 300 });
+
 const OPTIONS_PERFORMANCE = {
   bootStartedAt: typeof performance !== "undefined" ? performance.now() : 0,
   loadMs: 0,
@@ -423,6 +435,8 @@ const DEFAULT_SETTINGS = {
   botArchiveOnProfileVisit: false,
   botArchiveOnChatOpen: false,
   botArchiveRefreshHours: 24,
+  botStatusScanSpeed: "safe",
+  botStatusStaleDays: 7,
   botArchiveRememberSeenPublic: false,
   botBackupToolsEnabled: false,
   botArchiveOwnEditorBackups: true,
@@ -1740,7 +1754,7 @@ const CARD_CHANGE_MARKERS = [
   { selector: "#characterQolProfilesCard h2", version: "0.1.8.88", label: "New" },
   { selector: "#savedSnippetsCard h2", version: "0.1.8.89", label: "New" },
   { selector: "#contextKeeperCard h2", version: "0.1.9.34", label: "Updated" },
-  { selector: "#botAvailabilityCard h2", version: "0.1.9.89", label: "Updated" },
+  { selector: "#botAvailabilityCard h2", version: "0.2.21", label: "Updated" },
   { selector: "#cardWorkflowCard h2", version: "0.1.9.34", label: "Updated" },
   { selector: "#diagnosticsCard h2", version: "0.1.9.120", label: "Updated" },
   { selector: "#simpleFeatureGuideCard h2", version: "0.1.9.105", label: "New" },
@@ -4428,6 +4442,7 @@ async function renderHeavyManagersForTab(tabName) {
   }
 
   renderedHeavyTabs.add(tabName);
+  if (tabName === "saved") refreshArchiveTransferUi().catch(() => {});
 }
 
 function setActiveTab(tabName) {
@@ -5813,13 +5828,35 @@ function saveArchiveSnapshotForBot(idValue, snapshotValue, meta = {}) {
   // only the one entry being changed needs normalization here.
   if (!botArchiveState || typeof botArchiveState !== "object") botArchiveState = { meta: {} };
   if (!botArchiveState.meta || typeof botArchiveState.meta !== "object") botArchiveState.meta = {};
-  botArchiveState.meta[id] = mergeBotArchiveEntry(botArchiveState.meta[id], {
+  const previous = botArchiveState.meta[id] || null;
+  const incoming = {
     ...normalized,
     id,
     profileUrl: meta.profileUrl || normalized.profileUrl || `https://spicychat.ai/chatbot/${id}`,
-    lastSavedAt: Date.now(),
-    lastAvailableAt: Date.now(),
     source: meta.source || normalized.source || "Bot Status Center"
+  };
+  const comparable = value => {
+    const entry = value && typeof value === "object" ? value : {};
+    const fields = entry.fields && typeof entry.fields === "object" ? entry.fields : {};
+    return JSON.stringify({
+      name: cleanBotArchiveText(entry.name || fields.name || "", 500),
+      creator: canonicalBotCreator(entry.creator || fields.creator || ""),
+      image: canonicalBotImage(entry.image || fields.image || ""),
+      profileUrl: String(entry.profileUrl || ""),
+      source: String(entry.source || ""),
+      coverage: [...(entry.coverage || [])].sort(),
+      fields: Object.fromEntries(BOT_ARCHIVE_FIELDS.map(field => [field, field === "image" ? canonicalBotImage(fields[field]) : field === "creator" ? canonicalBotCreator(fields[field]) : cleanBotArchiveText(fields[field] || "", field === "personality" || field === "exampleDialogues" ? 18000 : 12000)]))
+    });
+  };
+  if (previous && comparable(previous) === comparable(incoming)) {
+    // A fresh availability check should not make every unchanged saved copy
+    // look modified. Keep the content snapshot timestamps stable.
+    return false;
+  }
+  botArchiveState.meta[id] = mergeBotArchiveEntry(previous, {
+    ...incoming,
+    lastSavedAt: Date.now(),
+    lastAvailableAt: Date.now()
   });
   return true;
 }
@@ -5908,7 +5945,11 @@ function normalizeBotAvailability(value) {
       updateStatus,
       changedFields,
       updateDetectedAt: Number(raw.updateDetectedAt) || 0,
-      baselineAcceptedAt: Number(raw.baselineAcceptedAt) || 0
+      baselineAcceptedAt: Number(raw.baselineAcceptedAt) || 0,
+      unavailableEvidenceCount: Math.max(0, Number(raw.unavailableEvidenceCount) || 0),
+      unavailableCandidateAt: Number(raw.unavailableCandidateAt) || 0,
+      unavailableConfirmedAt: Number(raw.unavailableConfirmedAt) || 0,
+      unavailableEvidenceType: String(raw.unavailableEvidenceType || "").slice(0, 80)
     };
   }
 
@@ -6338,6 +6379,50 @@ function reconcileBotUpdate(previousValue, checkedValue) {
   checked.updateDetectedAt = Number(previous?.updateDetectedAt) || 0;
   checked.baselineAcceptedAt = Number(previous?.baselineAcceptedAt) || 0;
 
+  // SpicyChat can return HTTP 200 with an empty object for an unavailable ID.
+  // One empty result is only a candidate; require the same evidence on a later
+  // independent check before making the record eligible for destructive cleanup.
+  const candidate = checked.unavailableCandidate === true || String(checked.unavailableEvidenceType || "") === "api-empty-200";
+  if (candidate) {
+    const sameEvidence = String(previous?.unavailableEvidenceType || "") === "api-empty-200";
+    const priorCount = sameEvidence ? Math.max(0, Number(previous?.unavailableEvidenceCount) || 0) : 0;
+    const priorCheckedAt = Number(previous?.checkedAt) || 0;
+    const independent = !priorCheckedAt || Number(checked.checkedAt || 0) > priorCheckedAt;
+    const count = Math.min(99, priorCount + (independent ? 1 : 0));
+    checked.unavailableEvidenceType = "api-empty-200";
+    checked.unavailableEvidenceCount = count;
+    checked.unavailableCandidateAt = Number(previous?.unavailableCandidateAt) || Number(checked.checkedAt) || Date.now();
+    checked.unavailableConfirmedAt = Number(previous?.unavailableConfirmedAt) || 0;
+    if (count >= 2) {
+      checked.status = "unavailable";
+      checked.unavailableConfirmedAt = Number(checked.checkedAt) || Date.now();
+      checked.reason = `Confirmed unavailable after ${count} independent HTTP-200 empty-object checks.`;
+    } else {
+      checked.status = "unknown";
+      checked.reason = "Unavailable candidate: Character API returned HTTP 200 with an empty object. Recheck on a later scan before cleanup.";
+    }
+    return checked;
+  }
+
+  if (["available", "restricted"].includes(String(checked.status || ""))) {
+    checked.unavailableEvidenceCount = 0;
+    checked.unavailableCandidateAt = 0;
+    checked.unavailableConfirmedAt = 0;
+    checked.unavailableEvidenceType = "";
+  } else if (checked.status === "unavailable") {
+    checked.unavailableEvidenceCount = Math.max(2, Number(previous?.unavailableEvidenceCount) || 0);
+    checked.unavailableCandidateAt = Number(previous?.unavailableCandidateAt) || Number(checked.checkedAt) || Date.now();
+    checked.unavailableConfirmedAt = Number(checked.checkedAt) || Date.now();
+    checked.unavailableEvidenceType = String(checked.unavailableEvidenceType || previous?.unavailableEvidenceType || "explicit-unavailable");
+  } else if (previous?.unavailableEvidenceCount) {
+    // A transient/unknown check should not erase an earlier candidate, but it
+    // also does not advance the confirmation count.
+    checked.unavailableEvidenceCount = Number(previous.unavailableEvidenceCount) || 0;
+    checked.unavailableCandidateAt = Number(previous.unavailableCandidateAt) || 0;
+    checked.unavailableConfirmedAt = Number(previous.unavailableConfirmedAt) || 0;
+    checked.unavailableEvidenceType = String(previous.unavailableEvidenceType || "");
+  }
+
   if (checked.status !== "available" || !snapshot) return checked;
   if (!oldBaseline || !snapshotHasSignal(oldBaseline)) {
     checked.baseline = snapshot;
@@ -6445,8 +6530,17 @@ async function checkBotAvailability(entry, options = {}) {
   const helperHttp = Number(helper?.httpStatus || 0);
   base.httpStatus = helperHttp;
 
+  if (helperStatus === "api-empty") {
+    return {
+      ...base,
+      status: "unknown",
+      unavailableCandidate: true,
+      unavailableEvidenceType: "api-empty-200",
+      reason: helper?.reason || "Character API returned HTTP 200 with an empty object; a later independent recheck is required before cleanup."
+    };
+  }
   if (helperStatus === "unavailable") {
-    return { ...base, status: "unavailable", reason: helper?.reason || (helperHttp ? `Character API returned HTTP ${helperHttp}.` : "Character API confirmed the chatbot is unavailable/deleted.") };
+    return { ...base, status: "unavailable", unavailableEvidenceType: "explicit-unavailable", reason: helper?.reason || (helperHttp ? `Character API returned HTTP ${helperHttp}.` : "Character API confirmed the chatbot is unavailable/deleted.") };
   }
   if (helperStatus === "restricted") {
     return { ...base, status: "restricted", reason: helper?.reason || (helperHttp ? `Character API returned HTTP ${helperHttp}.` : "Character API confirmed the chatbot is private/restricted.") };
@@ -6878,6 +6972,768 @@ function downloadJsonFile(payload, filename) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
+const BOT_STATUS_ARCHIVE_EXPORT_SCHEMA = "spicychat-qol-bot-status-archive-export";
+const BOT_STATUS_ARCHIVE_EXPORT_VERSION = 1;
+const BOT_STATUS_ARCHIVE_PUBLIC_SOURCE_RE = /(?:bot status|profile visit|spicychat public profile|character api|character-api|tracked metadata)/i;
+const BOT_STATUS_ARCHIVE_PRIVATE_SOURCE_RE = /(?:manual|editor|draft|creator backup|own[- ]?bot backup)/i;
+
+function botStatusArchiveExportSourceAllowed(entry) {
+  const source = String(entry?.source || "").trim();
+  if (!source || BOT_STATUS_ARCHIVE_PRIVATE_SOURCE_RE.test(source)) return false;
+  return BOT_STATUS_ARCHIVE_PUBLIC_SOURCE_RE.test(source);
+}
+
+function botStatusArchiveExportTags(value) {
+  const raw = Array.isArray(value) ? value : String(value || "").split(/\s*,\s*|\n+/g);
+  return uniqueClean(raw.map(tag => cleanBotArchiveText(tag, 120)).filter(Boolean)).slice(0, 100);
+}
+
+function botStatusArchiveExportFields(entryValue) {
+  const entry = entryValue && typeof entryValue === "object" ? entryValue : {};
+  const fields = entry.fields && typeof entry.fields === "object" ? entry.fields : {};
+  return {
+    name: cleanBotArchiveText(fields.name || entry.name || "", 500),
+    title: cleanBotArchiveText(fields.title || "", 12000),
+    description: cleanBotArchiveText(fields.description || "", 12000),
+    greeting: cleanBotArchiveText(fields.greeting || "", 12000),
+    personality: cleanBotArchiveText(fields.personality || "", 18000),
+    scenario: cleanBotArchiveText(fields.scenario || "", 12000),
+    exampleDialogues: cleanBotArchiveText(fields.exampleDialogues || "", 18000),
+    tags: botStatusArchiveExportTags(fields.tags),
+    visibility: cleanBotArchiveText(fields.visibility || "", 120),
+    creator: cleanBotArchiveText(fields.creator || entry.creator || "", 500),
+    avatarUrl: canonicalBotImage(fields.image || entry.image || ""),
+    messageCount: cleanBotArchiveText(fields.messageCount || "", 120),
+    rating: cleanBotArchiveText(fields.rating || "", 120),
+    tokenCount: cleanBotArchiveText(fields.tokenCount || "", 120)
+  };
+}
+
+function botStatusArchiveExportRevision(revisionValue) {
+  const revision = normalizeBotArchiveRevision(revisionValue);
+  if (!revision || !botStatusArchiveExportSourceAllowed(revision)) return null;
+  return {
+    capturedAt: Number(revision.capturedAt) || 0,
+    source: cleanBotArchiveText(revision.source || "", 120),
+    kind: cleanBotArchiveText(revision.kind || "auto", 40) || "auto",
+    fields: botStatusArchiveExportFields({ fields: revision.fields || {} }),
+    coverage: [...(revision.coverage || [])]
+  };
+}
+
+function botStatusArchiveExportRecord(entryValue, availabilityValue) {
+  const entry = entryValue && typeof entryValue === "object" ? entryValue : {};
+  const availability = availabilityValue && typeof availabilityValue === "object" ? availabilityValue : null;
+  const revisions = Array.isArray(entry.revisions)
+    ? entry.revisions.map(botStatusArchiveExportRevision).filter(Boolean)
+    : [];
+  const snapshotAt = Number(entry.lastSavedAt) || Number(entry.lastAvailableAt) || Number(entry.firstSavedAt) || 0;
+  const status = availability && BOT_AVAILABILITY_STATUSES.has(String(availability.status || "").toLowerCase())
+    ? String(availability.status).toLowerCase()
+    : "unknown";
+
+  return {
+    id: String(entry.id || "").trim(),
+    snapshotAt,
+    firstSavedAt: Number(entry.firstSavedAt) || 0,
+    lastSavedAt: Number(entry.lastSavedAt) || 0,
+    lastAvailableAt: Number(entry.lastAvailableAt) || 0,
+    source: cleanBotArchiveText(entry.source || "", 120),
+    profileUrl: String(entry.profileUrl || (entry.id ? `https://spicychat.ai/chatbot/${entry.id}` : "")).trim(),
+    fields: botStatusArchiveExportFields(entry),
+    coverage: [...(entry.coverage || [])],
+    publicHistory: revisions,
+    statusObservation: {
+      status,
+      checkedAt: Number(availability?.checkedAt) || 0,
+      httpStatus: Number(availability?.httpStatus) || 0,
+      reason: cleanBotArchiveText(availability?.reason || "", 500)
+    }
+  };
+}
+
+function botStatusArchiveExportFilename(extension = "json.gz") {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `spicychat-qol-bot-status-archive-${stamp}.${extension}`;
+}
+
+function downloadBlobFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function downloadBotStatusArchiveJsonGz() {
+  const button = $("exportBotStatusArchiveJsonGz");
+  const statusEl = $("botStatusArchiveExportStatus");
+  const setStatus = text => { if (statusEl) statusEl.textContent = text; };
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+
+  try {
+    setStatus("Preparing archive export…");
+    const stored = await storageGet([BOT_ARCHIVE_KEY, BOT_AVAILABILITY_KEY]);
+    const archive = normalizeBotArchive(stored[BOT_ARCHIVE_KEY]);
+    const availability = normalizeBotAvailability(stored[BOT_AVAILABILITY_KEY]);
+    const allEntries = Object.values(archive.meta || {}).sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+    const entries = allEntries.filter(botStatusArchiveExportSourceAllowed);
+    const skippedUnsafeCopies = Math.max(0, allEntries.length - entries.length);
+
+    if (!entries.length) {
+      setStatus("No public / Bot Status saved copies to export.");
+      showSettingsToast("No public / Bot Status saved copies were found. Manual creator/editor backups are intentionally excluded.");
+      return;
+    }
+
+    const statusCounts = { available: 0, unavailable: 0, restricted: 0, unknown: 0 };
+    let withPublicHistory = 0;
+    for (const entry of entries) {
+      const observed = availability.meta?.[entry.id]?.status;
+      const key = BOT_AVAILABILITY_STATUSES.has(String(observed || "").toLowerCase())
+        ? String(observed).toLowerCase()
+        : "unknown";
+      statusCounts[key] = Number(statusCounts[key] || 0) + 1;
+      if (Array.isArray(entry.revisions) && entry.revisions.some(revision => botStatusArchiveExportRevision(revision))) withPublicHistory += 1;
+    }
+
+    const header = {
+      schema: BOT_STATUS_ARCHIVE_EXPORT_SCHEMA,
+      version: BOT_STATUS_ARCHIVE_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      generatedBy: {
+        product: "SpicyChat QoL",
+        version: String(chrome.runtime?.getManifest?.().version || "0.2.21")
+      },
+      source: "qol-bot-status-export",
+      semantics: {
+        snapshotsAreHistoricalObservations: true,
+        currentPublicStatusRequiresVerification: true,
+        unavailableOr404DoesNotByItselfMeanDeleted: true,
+        emptyImportedFieldsMustNotReplaceKnownArchiveValues: true,
+        manualCreatorBackupsExcluded: true,
+        localPrivateNotesExcluded: true
+      },
+      counts: {
+        savedCopiesSeen: allEntries.length,
+        exportedBots: entries.length,
+        skippedNonPublicOrManualCopies: skippedUnsafeCopies,
+        withPublicHistory,
+        statusObservations: statusCounts
+      }
+    };
+
+    if (typeof CompressionStream !== "function") {
+      const bots = entries.map(entry => botStatusArchiveExportRecord(entry, availability.meta?.[entry.id]));
+      downloadJsonFile({ ...header, bots }, botStatusArchiveExportFilename("json"));
+      setStatus(`Exported ${entries.length} bots as JSON (gzip is unavailable in this browser).`);
+      showSettingsToast(`Exported ${entries.length} archive snapshot${entries.length === 1 ? "" : "s"}. This browser does not support gzip, so QoL used plain JSON.`);
+      return;
+    }
+
+    // Stream one bot at a time into gzip so thousands of rich snapshots do not
+    // require a second giant uncompressed JSON string in memory.
+    const encoder = new TextEncoder();
+    const gzip = new CompressionStream("gzip");
+    const blobPromise = new Response(gzip.readable).blob();
+    const writer = gzip.writable.getWriter();
+    const prefix = `${JSON.stringify(header).slice(0, -1)},\"bots\":[`;
+    await writer.write(encoder.encode(prefix));
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const record = botStatusArchiveExportRecord(entry, availability.meta?.[entry.id]);
+      await writer.write(encoder.encode(`${index ? "," : ""}${JSON.stringify(record)}`));
+      if ((index + 1) % 250 === 0 || index + 1 === entries.length) {
+        setStatus(`Compressing ${index + 1} / ${entries.length} saved copies…`);
+        await nextUiFrame();
+      }
+    }
+
+    await writer.write(encoder.encode("]}"));
+    await writer.close();
+    const compressed = await blobPromise;
+    const gzipBlob = new Blob([compressed], { type: "application/gzip" });
+    downloadBlobFile(gzipBlob, botStatusArchiveExportFilename("json.gz"));
+    setStatus(`Exported ${entries.length} saved copies${skippedUnsafeCopies ? ` · skipped ${skippedUnsafeCopies} manual/non-public` : ""}.`);
+    showSettingsToast(`Archive export ready: ${entries.length} saved bot cop${entries.length === 1 ? "y" : "ies"} in compressed JSON.`);
+  } catch (error) {
+    console.error("SpicyChat QoL archive export failed", error);
+    setStatus("Archive export failed.");
+    showSettingsToast(`Could not create the archive export: ${String(error?.message || error || "unknown error")}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+
+function normalizeArchiveUploadState(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const fingerprints = raw.fingerprints && typeof raw.fingerprints === "object" && !Array.isArray(raw.fingerprints)
+    ? Object.fromEntries(Object.entries(raw.fingerprints).map(([id, hash]) => [String(id), String(hash || "").slice(0, 64)]).filter(([id, hash]) => BOT_ID_RE.test(id) && hash))
+    : {};
+  return {
+    version: 1,
+    lastUploadAt: Number(raw.lastUploadAt) || 0,
+    lastSentCount: Math.max(0, Number(raw.lastSentCount) || 0),
+    lastSnapshotCount: Math.max(0, Number(raw.lastSnapshotCount) || 0),
+    lastMode: String(raw.lastMode || ""),
+    lastQueueIds: Array.isArray(raw.lastQueueIds) ? raw.lastQueueIds.map(value => String(value || "").slice(0, 160)).filter(Boolean).slice(0, 50) : [],
+    fingerprints
+  };
+}
+
+function normalizeArchiveImportEndpoint(value) {
+  const raw = String(value || DEFAULT_ARCHIVE_IMPORT_ENDPOINT).trim() || DEFAULT_ARCHIVE_IMPORT_ENDPOINT;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return "";
+    url.hash = "";
+    return url.href.replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function archiveHealthUrl(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    url.pathname = "/health";
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function archiveUploadComparable(record) {
+  const snapshot = record?.snapshot && typeof record.snapshot === "object" ? record.snapshot : {};
+  const status = snapshot.statusObservation && typeof snapshot.statusObservation === "object" ? snapshot.statusObservation : {};
+  return {
+    botId: String(record?.botId || ""),
+    snapshot: {
+      source: snapshot.source || "",
+      profileUrl: snapshot.profileUrl || "",
+      fields: snapshot.fields || {},
+      coverage: snapshot.coverage || [],
+      publicHistory: snapshot.publicHistory || [],
+      statusObservation: {
+        status: status.status || "unknown",
+        httpStatus: Number(status.httpStatus || 0),
+        reason: status.reason || ""
+      }
+    }
+  };
+}
+
+function fastArchiveFingerprint(record) {
+  const text = JSON.stringify(archiveUploadComparable(record));
+  let a = 0x811c9dc5;
+  let b = 5381;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    a ^= code;
+    a = Math.imul(a, 0x01000193) >>> 0;
+    b = (((b << 5) + b) ^ code) >>> 0;
+  }
+  return `${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+function archiveUploadSavedCopyRecord(entry, availability) {
+  const snapshot = botStatusArchiveExportRecord(entry, availability);
+  const savedMs = Number(entry?.lastSavedAt) || Number(snapshot?.snapshotAt) || Number(entry?.firstSavedAt) || 0;
+  return {
+    botId: String(entry?.id || "").trim(),
+    savedAt: savedMs ? new Date(savedMs).toISOString() : null,
+    snapshot
+  };
+}
+
+async function currentArchiveUploadRecords({ updateProgress = false, progressElementId = "botStatusArchiveUploadStatus" } = {}) {
+  await ensureSavedListsDataLoaded();
+  const archive = normalizeBotArchive(botArchiveState);
+  const availability = normalizeBotAvailability(botAvailabilityState);
+  const entries = Object.values(archive.meta || {})
+    .filter(botStatusArchiveExportSourceAllowed)
+    .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+  const records = [];
+  const fingerprints = {};
+  const statusEl = $(progressElementId);
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    const record = archiveUploadSavedCopyRecord(entry, availability.meta?.[entry.id]);
+    records.push(record);
+    fingerprints[record.botId] = fastArchiveFingerprint(record);
+    if ((i + 1) % 250 === 0 || i + 1 === entries.length) {
+      if (updateProgress && statusEl) statusEl.textContent = `Preparing ${i + 1} / ${entries.length} saved copies…`;
+      // Fingerprinting several thousand rich saved copies can otherwise block the
+      // Options page long enough to feel frozen. Yield in small batches even
+      // when this is only the quiet "changed since last upload" refresh.
+      await nextUiFrame();
+    }
+  }
+  return { records, fingerprints };
+}
+
+async function gzipArchiveUploadRecords(records, exportedAt, chunk = null, extraHeader = null) {
+  if (typeof CompressionStream !== "function") throw new Error("This browser does not support gzip CompressionStream.");
+  const encoder = new TextEncoder();
+  const gzip = new CompressionStream("gzip");
+  const blobPromise = new Response(gzip.readable).blob();
+  const writer = gzip.writable.getWriter();
+  const header = {
+    schemaVersion: 1,
+    kind: "spicychat-qol-bot-status-export",
+    exportedAt,
+    ...(extraHeader && typeof extraHeader === "object" ? extraHeader : {}),
+    ...(chunk ? { chunk } : {})
+  };
+  await writer.write(encoder.encode(`${JSON.stringify(header).slice(0, -1)},"savedCopies":[`));
+  for (let i = 0; i < records.length; i += 1) {
+    await writer.write(encoder.encode(`${i ? "," : ""}${JSON.stringify(records[i])}`));
+  }
+  await writer.write(encoder.encode("]}"));
+  await writer.close();
+  const blob = await blobPromise;
+  return new Blob([blob], { type: "application/gzip" });
+}
+
+function archiveUploadFilename(exportedAt, chunkIndex = 0, chunkCount = 1) {
+  const stamp = String(exportedAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  const suffix = chunkCount > 1 ? `-part-${chunkIndex + 1}-of-${chunkCount}` : "";
+  return `bot-status-${stamp}${suffix}.json.gz`;
+}
+
+async function postArchiveUpload(endpoint, token, blob, { exportedAt, filename }) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/gzip",
+      "Content-Encoding": "gzip",
+      "X-Import-Filename": filename,
+      "X-Exported-At": exportedAt
+    },
+    body: blob,
+    cache: "no-store"
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok || data?.ok === false) {
+    const detail = String(data?.error || data?.message || text || `HTTP ${response.status}`).slice(0, 500);
+    throw new Error(`Archive Worker rejected the upload (${response.status}): ${detail}`);
+  }
+  return data && typeof data === "object" ? data : { ok: true, queued: true, bytes: blob.size, compressed: true };
+}
+
+async function splitArchiveUploadRecords(records, exportedAt, extraHeader = null) {
+  const chunks = [];
+  const pending = [];
+  for (let i = 0; i < records.length; i += ARCHIVE_UPLOAD_CHUNK_SIZE) pending.push(records.slice(i, i + ARCHIVE_UPLOAD_CHUNK_SIZE));
+  while (pending.length) {
+    const part = pending.shift();
+    const blob = await gzipArchiveUploadRecords(part, exportedAt, null, extraHeader);
+    if (blob.size <= ARCHIVE_UPLOAD_SOFT_MAX_BYTES) {
+      chunks.push({ records: part, blob });
+      continue;
+    }
+    if (part.length <= 1) throw new Error(`One saved copy compresses to ${(blob.size / 1024 / 1024).toFixed(1)} MB, above the 60 MB safe upload limit.`);
+    const midpoint = Math.ceil(part.length / 2);
+    pending.unshift(part.slice(midpoint), part.slice(0, midpoint));
+  }
+  return chunks;
+}
+
+function normalizeArchiveContributionState(value) {
+  const raw = value && typeof value === "object" ? value : {};
+  const base = normalizeArchiveUploadState({
+    lastUploadAt: raw.lastSubmissionAt,
+    lastSentCount: raw.lastSentCount,
+    lastSnapshotCount: raw.lastSnapshotCount,
+    lastMode: raw.lastMode,
+    lastQueueIds: raw.lastSubmissionIds,
+    fingerprints: raw.fingerprints
+  });
+  return {
+    version: 1,
+    lastSubmissionAt: base.lastUploadAt,
+    lastSentCount: base.lastSentCount,
+    lastSnapshotCount: base.lastSnapshotCount,
+    lastMode: base.lastMode,
+    lastSubmissionIds: base.lastQueueIds,
+    lastStatus: ["pending", "approved", "rejected", "queued"].includes(String(raw.lastStatus || "").toLowerCase())
+      ? String(raw.lastStatus).toLowerCase()
+      : (base.lastUploadAt ? "pending" : ""),
+    fingerprints: base.fingerprints
+  };
+}
+
+async function loadArchiveContributionConfig() {
+  const stored = await storageGet([ARCHIVE_CONTRIBUTION_ENABLED_KEY, ARCHIVE_CONTRIBUTION_STATE_KEY]);
+  return {
+    enabled: stored[ARCHIVE_CONTRIBUTION_ENABLED_KEY] === true,
+    state: normalizeArchiveContributionState(stored[ARCHIVE_CONTRIBUTION_STATE_KEY])
+  };
+}
+
+async function archiveContributionInstallHash() {
+  const stored = await storageGet([ARCHIVE_CONTRIBUTION_INSTALL_ID_KEY]);
+  let installId = String(stored[ARCHIVE_CONTRIBUTION_INSTALL_ID_KEY] || "").trim();
+  if (!installId) {
+    installId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(24)), value => value.toString(16).padStart(2, "0")).join("");
+    await storageSet({ [ARCHIVE_CONTRIBUTION_INSTALL_ID_KEY]: installId });
+  }
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`spicychat-archive-public-v1:${installId}`));
+  return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function archiveContributionHeader() {
+  return {
+    submission: {
+      source: "spicychat-qol-extension",
+      extensionVersion: String(chrome.runtime?.getManifest?.()?.version || ""),
+      anonymousInstallIdHash: await archiveContributionInstallHash()
+    }
+  };
+}
+
+function archiveSubmissionFilename(exportedAt, chunkIndex = 0, chunkCount = 1) {
+  const stamp = String(exportedAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  const suffix = chunkCount > 1 ? `-part-${chunkIndex + 1}-of-${chunkCount}` : "";
+  return `bot-status-submission-${stamp}${suffix}.json.gz`;
+}
+
+async function postArchiveSubmission(blob, { exportedAt, filename }) {
+  const response = await fetch(DEFAULT_ARCHIVE_SUBMISSION_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/gzip",
+      "Content-Encoding": "gzip",
+      "X-Import-Filename": filename,
+      "X-Exported-At": exportedAt
+    },
+    body: blob,
+    cache: "no-store"
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok || data?.ok === false) {
+    const detail = String(data?.error || data?.message || text || `HTTP ${response.status}`).slice(0, 500);
+    throw new Error(`Archive submission endpoint rejected the upload (${response.status}): ${detail}`);
+  }
+  return data && typeof data === "object"
+    ? data
+    : { ok: true, submissionId: "", status: "pending", bytes: blob.size, compressed: true };
+}
+
+async function refreshArchiveContributionUi(prepared = null) {
+  const config = await loadArchiveContributionConfig();
+  const toggle = $("enableBotStatusArchiveContribution");
+  const actions = $("botStatusArchiveContributionActions");
+  const sendChanged = $("submitBotStatusArchiveChanged");
+  const sendAll = $("submitBotStatusArchiveAll");
+  const summary = $("botStatusArchiveContributionSummary");
+  if (toggle && document.activeElement !== toggle) toggle.checked = config.enabled;
+  if (actions) actions.hidden = !config.enabled;
+  if (!config.enabled) {
+    if (summary) summary.textContent = "Contribution is off. Nothing is sent unless you enable it and press the submit button.";
+    return;
+  }
+
+  const { records, fingerprints } = prepared || await currentArchiveUploadRecords();
+  const previous = config.state.fingerprints || {};
+  const changed = records.filter(record => previous[record.botId] !== fingerprints[record.botId]).length;
+  const first = !config.state.lastSubmissionAt || !Object.keys(previous).length;
+  if (sendChanged) {
+    sendChanged.disabled = records.length === 0 || (!first && changed === 0);
+    sendChanged.textContent = first
+      ? "Submit saved copies for review"
+      : changed
+        ? `Submit new/changed copies for review (${changed})`
+        : "No new/changed copies to submit";
+  }
+  if (sendAll) sendAll.hidden = first || !records.length;
+  if (summary) {
+    if (!config.state.lastSubmissionAt) {
+      summary.textContent = `${records.length.toLocaleString()} saved copies are ready for the first anonymous Archive submission.`;
+    } else {
+      const last = new Date(config.state.lastSubmissionAt).toLocaleString();
+      const ids = config.state.lastSubmissionIds.length
+        ? ` · submission ${config.state.lastSubmissionIds.map(id => id.slice(0, 12)).join(", ")}`
+        : "";
+      const state = config.state.lastStatus || "pending";
+      summary.textContent = `Last submission: ${last} · ${config.state.lastSentCount.toLocaleString()} copies · ${state}${ids} · ${changed.toLocaleString()} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`;
+    }
+  }
+}
+
+async function refreshArchiveTransferUi() {
+  const [admin, contribution] = await Promise.all([loadArchiveUploadConfig(), loadArchiveContributionConfig()]);
+  const needsPrepared = (!!admin.endpoint && !!admin.token) || contribution.enabled;
+  const prepared = needsPrepared ? await currentArchiveUploadRecords() : null;
+  await Promise.all([
+    refreshArchiveUploadUi(prepared),
+    refreshArchiveContributionUi(prepared)
+  ]);
+}
+
+async function setArchiveContributionEnabled(enabled) {
+  await storageSet({ [ARCHIVE_CONTRIBUTION_ENABLED_KEY]: !!enabled });
+  await refreshArchiveTransferUi();
+}
+
+async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
+  const changedButton = $("submitBotStatusArchiveChanged");
+  const allButton = $("submitBotStatusArchiveAll");
+  const status = $("botStatusArchiveContributionStatus");
+  if (changedButton) changedButton.disabled = true;
+  if (allButton) allButton.disabled = true;
+  const setStatus = text => { if (status) status.textContent = text; };
+  try {
+    const config = await loadArchiveContributionConfig();
+    if (!config.enabled) throw new Error("Enable public Archive contribution first.");
+    setStatus("Preparing saved copies…");
+    const { records, fingerprints } = await currentArchiveUploadRecords({ updateProgress: true, progressElementId: "botStatusArchiveContributionStatus" });
+    if (!records.length) throw new Error("No public / Bot Status saved copies are available to submit.");
+    const previous = config.state.fingerprints || {};
+    const firstSubmission = !config.state.lastSubmissionAt || !Object.keys(previous).length;
+    const selected = forceAll || firstSubmission
+      ? records
+      : records.filter(record => previous[record.botId] !== fingerprints[record.botId]);
+    if (!selected.length) {
+      setStatus("No new or changed saved copies to submit.");
+      return;
+    }
+
+    const exportedAt = new Date().toISOString();
+    const extraHeader = await archiveContributionHeader();
+    setStatus(`Compressing ${selected.length.toLocaleString()} saved copies…`);
+    let chunks = [];
+    const fullBlob = await gzipArchiveUploadRecords(selected, exportedAt, null, extraHeader);
+    if (fullBlob.size <= ARCHIVE_UPLOAD_SOFT_MAX_BYTES) chunks = [{ records: selected, blob: fullBlob }];
+    else {
+      setStatus(`Compressed submission is ${(fullBlob.size / 1024 / 1024).toFixed(1)} MB; splitting into safe chunks…`);
+      chunks = await splitArchiveUploadRecords(selected, exportedAt, extraHeader);
+    }
+
+    const submissionIds = [];
+    let finalStatus = "pending";
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = chunks[i];
+      let blob = chunk.blob;
+      if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length }, extraHeader);
+      if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe submission limit.`);
+      setStatus(`Submitting bundle ${i + 1} / ${chunks.length} · ${chunk.records.length.toLocaleString()} saved copies…`);
+      const result = await postArchiveSubmission(blob, {
+        exportedAt,
+        filename: archiveSubmissionFilename(exportedAt, i, chunks.length)
+      });
+      const id = String(result?.submissionId || result?.id || "").trim();
+      if (id) submissionIds.push(id);
+      const state = String(result?.status || "pending").toLowerCase();
+      if (["pending", "approved", "rejected", "queued"].includes(state)) finalStatus = state;
+    }
+
+    const currentIds = new Set(records.map(record => record.botId));
+    const nextFingerprints = forceAll || firstSubmission ? {} : { ...previous };
+    for (const id of Object.keys(nextFingerprints)) if (!currentIds.has(id)) delete nextFingerprints[id];
+    for (const record of selected) nextFingerprints[record.botId] = fingerprints[record.botId];
+    await storageSet({
+      [ARCHIVE_CONTRIBUTION_STATE_KEY]: {
+        version: 1,
+        lastSubmissionAt: Date.now(),
+        lastSentCount: selected.length,
+        lastSnapshotCount: records.length,
+        lastMode: forceAll || firstSubmission ? "all" : "changed",
+        lastSubmissionIds: submissionIds,
+        lastStatus: finalStatus || "pending",
+        fingerprints: nextFingerprints
+      }
+    });
+    setStatus(`✓ ${selected.length.toLocaleString()} saved cop${selected.length === 1 ? "y" : "ies"} submitted for Archive review${chunks.length > 1 ? ` in ${chunks.length} bundles` : ""}. ${finalStatus === "pending" ? "Pending approval." : `Status: ${finalStatus}.`}`);
+    showSettingsToast(`Archive contribution submitted: ${selected.length.toLocaleString()} saved bot cop${selected.length === 1 ? "y" : "ies"}.`);
+  } catch (error) {
+    console.error("SpicyChat QoL public archive submission failed", error);
+    setStatus(`Archive submission failed: ${String(error?.message || error || "unknown error")}`);
+  } finally {
+    if (changedButton) changedButton.disabled = false;
+    if (allButton) allButton.disabled = false;
+    await refreshArchiveTransferUi().catch(() => {});
+  }
+}
+
+async function loadArchiveUploadConfig() {
+  const stored = await storageGet([ARCHIVE_IMPORT_ENDPOINT_KEY, ARCHIVE_IMPORT_TOKEN_KEY, ARCHIVE_UPLOAD_STATE_KEY]);
+  return {
+    endpoint: normalizeArchiveImportEndpoint(stored[ARCHIVE_IMPORT_ENDPOINT_KEY] || DEFAULT_ARCHIVE_IMPORT_ENDPOINT),
+    token: String(stored[ARCHIVE_IMPORT_TOKEN_KEY] || ""),
+    state: normalizeArchiveUploadState(stored[ARCHIVE_UPLOAD_STATE_KEY])
+  };
+}
+
+async function saveArchiveUploadConfig({ quiet = false } = {}) {
+  const endpoint = normalizeArchiveImportEndpoint(value("botStatusArchiveEndpoint", DEFAULT_ARCHIVE_IMPORT_ENDPOINT));
+  const token = String(value("botStatusArchiveToken", "")).trim();
+  if (!endpoint) {
+    if (!quiet) showSettingsToast("Archive endpoint must be a valid HTTPS URL.");
+    return false;
+  }
+  await storageSet({
+    [ARCHIVE_IMPORT_ENDPOINT_KEY]: endpoint,
+    [ARCHIVE_IMPORT_TOKEN_KEY]: token
+  });
+  await refreshArchiveUploadUi();
+  return true;
+}
+
+async function refreshArchiveUploadUi(prepared = null) {
+  const config = await loadArchiveUploadConfig();
+  const endpointInput = $("botStatusArchiveEndpoint");
+  const tokenInput = $("botStatusArchiveToken");
+  if (endpointInput && document.activeElement !== endpointInput) endpointInput.value = config.endpoint || DEFAULT_ARCHIVE_IMPORT_ENDPOINT;
+  if (tokenInput && document.activeElement !== tokenInput && !tokenInput.value) tokenInput.value = config.token || "";
+
+  const actions = $("botStatusArchiveUploadActions");
+  const sendChanged = $("sendBotStatusArchiveChanged");
+  const sendAll = $("sendBotStatusArchiveAll");
+  const summary = $("botStatusArchiveUploadSummary");
+  const configured = !!config.endpoint && !!config.token;
+  if (actions) actions.hidden = !configured;
+  if (!configured) {
+    if (summary) summary.textContent = "Configure the endpoint and private import token to enable archive upload. The token stays only in extension local storage and is never included in QoL backups.";
+    return;
+  }
+
+  const { records, fingerprints } = prepared || await currentArchiveUploadRecords();
+  const previous = config.state.fingerprints || {};
+  const changed = records.filter(record => previous[record.botId] !== fingerprints[record.botId]).length;
+  const first = !config.state.lastUploadAt || !Object.keys(previous).length;
+  if (sendChanged) {
+    sendChanged.disabled = records.length === 0 || (!first && changed === 0);
+    sendChanged.textContent = first
+      ? "Send saved copies to Archive"
+      : changed
+        ? `Send new/changed copies to Archive (${changed})`
+        : "No new/changed copies to send";
+  }
+  if (sendAll) sendAll.hidden = first || !records.length;
+  if (summary) {
+    const last = config.state.lastUploadAt ? new Date(config.state.lastUploadAt).toLocaleString() : "Never";
+    summary.textContent = config.state.lastUploadAt
+      ? `Last archive upload: ${last} · ${config.state.lastSnapshotCount || config.state.lastSentCount} copies at that snapshot · ${changed} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`
+      : `${records.length} saved copies ready for the first archive upload.`;
+  }
+}
+
+async function testArchiveUploadEndpoint() {
+  const button = $("testBotStatusArchiveEndpoint");
+  const status = $("botStatusArchiveConfigStatus");
+  if (button) button.disabled = true;
+  try {
+    const saved = await saveArchiveUploadConfig({ quiet: true });
+    if (!saved) throw new Error("Enter a valid HTTPS endpoint first.");
+    const config = await loadArchiveUploadConfig();
+    const health = archiveHealthUrl(config.endpoint);
+    if (!health) throw new Error("Could not derive the Worker health URL.");
+    if (status) status.textContent = "Testing Worker health…";
+    const response = await fetch(health, { method: "GET", cache: "no-store", headers: { Accept: "application/json,text/plain" } });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Health endpoint returned HTTP ${response.status}${text ? `: ${text.slice(0, 180)}` : ""}`);
+    if (status) status.textContent = `✓ Worker health responded HTTP ${response.status}. Token is saved locally and will be validated on the first upload.`;
+  } catch (error) {
+    if (status) status.textContent = `Endpoint test failed: ${String(error?.message || error || "unknown error")}`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
+  const changedButton = $("sendBotStatusArchiveChanged");
+  const allButton = $("sendBotStatusArchiveAll");
+  const status = $("botStatusArchiveUploadStatus");
+  if (changedButton) changedButton.disabled = true;
+  if (allButton) allButton.disabled = true;
+  const setStatus = text => { if (status) status.textContent = text; };
+  try {
+    await saveArchiveUploadConfig({ quiet: true });
+    const config = await loadArchiveUploadConfig();
+    if (!config.endpoint || !config.token) throw new Error("Configure both the Archive endpoint and import token first.");
+    setStatus("Preparing saved copies…");
+    const { records, fingerprints } = await currentArchiveUploadRecords({ updateProgress: true });
+    if (!records.length) throw new Error("No public / Bot Status saved copies are available to upload.");
+    const previous = config.state.fingerprints || {};
+    const firstUpload = !config.state.lastUploadAt || !Object.keys(previous).length;
+    const selected = forceAll || firstUpload
+      ? records
+      : records.filter(record => previous[record.botId] !== fingerprints[record.botId]);
+    if (!selected.length) {
+      setStatus("No new or changed saved copies to upload.");
+      return;
+    }
+
+    const exportedAt = new Date().toISOString();
+    setStatus(`Compressing ${selected.length} saved copies…`);
+    let chunks = [];
+    const fullBlob = await gzipArchiveUploadRecords(selected, exportedAt);
+    if (fullBlob.size <= ARCHIVE_UPLOAD_SOFT_MAX_BYTES) chunks = [{ records: selected, blob: fullBlob }];
+    else {
+      setStatus(`Compressed upload is ${(fullBlob.size / 1024 / 1024).toFixed(1)} MB; splitting into safe chunks…`);
+      chunks = await splitArchiveUploadRecords(selected, exportedAt);
+    }
+
+    const queueIds = [];
+    let uploadedBytes = 0;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = chunks[i];
+      let blob = chunk.blob;
+      if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length });
+      if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe upload limit.`);
+      setStatus(`Uploading bundle ${i + 1} / ${chunks.length} · ${chunk.records.length} saved copies…`);
+      const result = await postArchiveUpload(config.endpoint, config.token, blob, {
+        exportedAt,
+        filename: archiveUploadFilename(exportedAt, i, chunks.length)
+      });
+      uploadedBytes += Number(result?.bytes || blob.size) || blob.size;
+      if (result?.queueId) queueIds.push(String(result.queueId));
+    }
+
+    const currentIds = new Set(records.map(record => record.botId));
+    const nextFingerprints = forceAll || firstUpload ? {} : { ...previous };
+    for (const id of Object.keys(nextFingerprints)) if (!currentIds.has(id)) delete nextFingerprints[id];
+    for (const record of selected) nextFingerprints[record.botId] = fingerprints[record.botId];
+    await storageSet({
+      [ARCHIVE_UPLOAD_STATE_KEY]: {
+        version: 1,
+        lastUploadAt: Date.now(),
+        lastSentCount: selected.length,
+        lastSnapshotCount: records.length,
+        lastMode: forceAll || firstUpload ? "all" : "changed",
+        lastQueueIds: queueIds,
+        fingerprints: nextFingerprints
+      }
+    });
+    setStatus(`✓ ${selected.length.toLocaleString()} saved cop${selected.length === 1 ? "y" : "ies"} queued for archive import${chunks.length > 1 ? ` in ${chunks.length} bundles` : ""}. They'll be processed during the next archive run.`);
+    showSettingsToast(`Archive upload queued: ${selected.length.toLocaleString()} saved bot cop${selected.length === 1 ? "y" : "ies"}.`);
+  } catch (error) {
+    console.error("SpicyChat QoL archive upload failed", error);
+    setStatus(`Archive upload failed: ${String(error?.message || error || "unknown error")}`);
+  } finally {
+    if (changedButton) changedButton.disabled = false;
+    if (allButton) allButton.disabled = false;
+    await refreshArchiveUploadUi().catch(() => {});
+  }
 }
 
 function portableBotProfileJson(archiveValue) {
@@ -7649,6 +8505,11 @@ function renderBotAvailability(renderOptions = {}) {
   const updatedCount = base.filter(entry => entry.updateStatus === "updated").length;
   const checkedCount = base.filter(entry => Number(entry.checkedAt) > 0).length;
   const archivedCount = base.filter(entry => !!entry.archive).length;
+  const unavailableCandidateCount = base.filter(entry => Number(entry.unavailableEvidenceCount || 0) === 1 && entry.status !== "unavailable").length;
+  const confirmedUnavailableCount = base.filter(entry => entry.status === "unavailable").length;
+  const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
+  const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
+  const staleCount = base.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
   let limit = Math.max(20, Number(botAvailabilityUiState.visible || 20) || 20);
   const shown = entries.slice(0, limit);
 
@@ -7663,6 +8524,17 @@ function renderBotAvailability(renderOptions = {}) {
   if (uncheckedButton && !botAvailabilityScanRunning) {
     uncheckedButton.disabled = uncheckedCount === 0;
     uncheckedButton.textContent = uncheckedCount ? `Check unchecked bots (${uncheckedCount})` : "No unchecked bots";
+  }
+  const staleButton = $("scanStaleBotAvailability");
+  if (staleButton && !botAvailabilityScanRunning) {
+    staleButton.disabled = staleCount === 0;
+    staleButton.textContent = staleCount ? `Refresh stale bots (${staleCount})` : "No stale bots";
+  }
+  const unavailableSummary = $("botAvailabilityUnavailableSummary");
+  if (unavailableSummary) {
+    unavailableSummary.textContent = unavailableCandidateCount || confirmedUnavailableCount
+      ? `Unavailable candidates: ${unavailableCandidateCount} · Confirmed unavailable: ${confirmedUnavailableCount}${unavailableCandidateCount ? ` · Needs recheck: ${unavailableCandidateCount}` : ""}`
+      : "";
   }
 
   const showMore = $("botAvailabilityShowMore");
@@ -7802,21 +8674,55 @@ function renderBotAvailability(renderOptions = {}) {
   });
 }
 
+async function noteBotStatusRunEvent(event, detail = {}) {
+  try {
+    await runtimeMessage({ type: "DS_BOT_STATUS_RUN_EVENT", event, detail });
+  } catch {}
+}
+
+function botStatusScanDelayMs() {
+  const speed = String(value("botStatusScanSpeed", "safe"));
+  return Number(BOT_STATUS_SCAN_SPEED_DELAYS[speed] || BOT_STATUS_SCAN_SPEED_DELAYS.safe);
+}
+
+function sortBotStatusRefreshQueue(entries, availability, archives) {
+  return [...entries].sort((a, b) => {
+    const av = availability[a.id] || {};
+    const bv = availability[b.id] || {};
+    const priority = (entry, state) => {
+      if (Number(state.unavailableEvidenceCount || 0) > 0 && state.status !== "unavailable") return 0;
+      if (state.status === "restricted") return 1;
+      if (!archives[entry.id]) return 2;
+      return 3;
+    };
+    return priority(a, av) - priority(b, bv) || Number(av.checkedAt || 0) - Number(bv.checkedAt || 0) || String(a.name || a.id).localeCompare(String(b.name || b.id));
+  });
+}
+
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
   if (botAvailabilityScanRunning) return;
   const scope = String($("botAvailabilityScope")?.value || "all");
-  const uncheckedOnly = options?.uncheckedOnly === true;
+  const mode = options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all");
   const allEntries = collectTrackedAvailabilityBots(scope);
   const existingAvailability = normalizeBotAvailability(botAvailabilityState).meta;
-  const entries = uncheckedOnly
+  const archives = normalizeBotArchive(botArchiveState).meta;
+  const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
+  const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
+  let entries = mode === "unchecked"
     ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) <= 0)
-    : allEntries;
+    : mode === "stale"
+      ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
+      : allEntries;
+  entries = sortBotStatusRefreshQueue(entries, existingAvailability, archives);
+
   const status = $("botAvailabilityScanStatus");
   if (!entries.length) {
-    const message = uncheckedOnly
+    const message = mode === "unchecked"
       ? "No unchecked tracked bots in this scope."
-      : "No locally tracked bots found in that scope.";
+      : mode === "stale"
+        ? `No tracked bots in this scope are older than ${staleDays} day${staleDays === 1 ? "" : "s"}.`
+        : "No locally tracked bots found in that scope.";
     if (status) status.textContent = message;
     showSettingsToast(message);
     renderBotAvailability();
@@ -7827,35 +8733,46 @@ async function runBotAvailabilityScan(options = {}) {
   botAvailabilityStopRequested = false;
   const scanButton = $("scanBotAvailability");
   const uncheckedButton = $("scanUncheckedBotAvailability");
+  const staleButton = $("scanStaleBotAvailability");
   const stopButton = $("stopBotAvailabilityScan");
   if (scanButton) scanButton.disabled = true;
   if (uncheckedButton) uncheckedButton.disabled = true;
+  if (staleButton) staleButton.disabled = true;
   if (stopButton) stopButton.disabled = false;
 
   let completed = 0;
   let updatesFound = 0;
   let unknownCount = 0;
+  let candidateCount = 0;
   let terminalMessage = "";
+  let lastProgressPaintAt = 0;
+  let adaptiveDelay = botStatusScanDelayMs();
+  const runStartedAt = Date.now();
+
+  await noteBotStatusRunEvent("bot-status-run-start", { mode, scope, count: entries.length, speed: String(value("botStatusScanSpeed", "safe")), staleDays });
   try {
-    if (status) status.textContent = uncheckedOnly
+    if (status) status.textContent = mode === "unchecked"
       ? `Preparing to check ${entries.length} unchecked bot${entries.length === 1 ? "" : "s"}…`
-      : "Preparing one background Bot Status helper on SpicyChat Home…";
+      : mode === "stale"
+        ? `Preparing to refresh ${entries.length} stale bot${entries.length === 1 ? "" : "s"}…`
+        : "Preparing one background Bot Status helper on SpicyChat Home…";
     const prepared = await prepareBotStatusHelper({ forceOwnHelper: true, timeoutMs: 17000 });
     if (!prepared?.ok || prepared?.ready === false) {
       terminalMessage = "Could not initialize the Bot Status helper. No bots were changed; try the scan again after SpicyChat Home is signed in.";
       return;
     }
 
-    // Normalize the large state stores once for the batch. Doing this for every
-    // bot was a major source of Options-page CPU work on libraries with
-    // thousands of tracked/recovery records.
     botAvailabilityState = normalizeBotAvailability(botAvailabilityState);
     botArchiveState = normalizeBotArchive(botArchiveState);
     const metadataIndex = buildBotStatusMetadataScanIndex();
 
     for (const entry of entries) {
       if (botAvailabilityStopRequested) break;
-      if (status) status.textContent = `Checking ${completed + 1} / ${entries.length}: ${entry.name || entry.id}`;
+      const now = Date.now();
+      if (status && (now - lastProgressPaintAt >= 400 || completed === 0)) {
+        status.textContent = `Checking ${completed + 1} / ${entries.length}: ${entry.name || entry.id}`;
+        lastProgressPaintAt = now;
+      }
       const previous = botAvailabilityState?.meta?.[entry.id] || null;
       const rawResult = await checkBotAvailability(
         { ...entry, ...(previous || {}), sources: uniqueClean([...(previous?.sources || []), ...(entry.sources || [])]) },
@@ -7864,6 +8781,7 @@ async function runBotAvailabilityScan(options = {}) {
       const result = reconcileBotUpdate(previous, rawResult);
       if (result.updateStatus === "updated") updatesFound++;
       if (result.status === "unknown") unknownCount++;
+      if (Number(result.unavailableEvidenceCount || 0) === 1 && result.status !== "unavailable") candidateCount++;
       botAvailabilityState.meta[result.id] = result;
       if (applyAuthoritativeBotMetadata(rawResult, metadataIndex)) botStatusMetadataDirty = true;
       const blockedFromRecovery = metadataIndex?.blocked instanceof Set && metadataIndex.blocked.has(result.id);
@@ -7878,17 +8796,13 @@ async function runBotAvailabilityScan(options = {}) {
         });
       }
       completed++;
-      // Keep the large status/archive databases in memory during the scan.
-      // Rewriting tens of MB of profile data every 50 bots caused minute-long
-      // pauses on large libraries. Stop/finish persists the completed results once.
-      if (completed % 50 === 0 && status && completed < entries.length) {
-        status.textContent = `Checking ${completed} / ${entries.length}…`;
-      }
-      // Do not rebuild the large Saved Bots & Lists DOM during a bulk scan.
-      // The progress text above stays live; results are rendered once when the
-      // scan stops or finishes in the finally block below.
+
       if (!botAvailabilityStopRequested && completed < entries.length) {
-        await new Promise(resolve => setTimeout(resolve, result.httpStatus === 429 ? 1200 : 250));
+        const http = Number(result.httpStatus || 0);
+        const transientServerFailure = http === 429 || http >= 500;
+        if (transientServerFailure) adaptiveDelay = Math.min(8000, Math.max(1500, adaptiveDelay * 2));
+        else adaptiveDelay = Math.max(botStatusScanDelayMs(), Math.round(adaptiveDelay * 0.85));
+        await new Promise(resolve => setTimeout(resolve, adaptiveDelay));
       }
     }
   } finally {
@@ -7898,10 +8812,10 @@ async function runBotAvailabilityScan(options = {}) {
     if (completed > 0) {
       if (status) status.textContent = `Saving ${completed} completed Bot Status checks…`;
       await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
-      if (status) status.textContent = `Saving recovery copies…`;
+      if (status) status.textContent = "Saving changed recovery copies…";
       await storageSet({ [BOT_ARCHIVE_KEY]: botArchiveState });
       if (botStatusMetadataDirty) {
-        if (status) status.textContent = `Saving repaired saved-bot details…`;
+        if (status) status.textContent = "Saving repaired saved-bot details…";
         await storageSet(botStatusMetadataStoragePayload());
       }
     }
@@ -7909,12 +8823,17 @@ async function runBotAvailabilityScan(options = {}) {
     botAvailabilityScanRunning = false;
     if (scanButton) scanButton.disabled = false;
     if (uncheckedButton) uncheckedButton.disabled = false;
+    if (staleButton) staleButton.disabled = false;
     if (stopButton) stopButton.disabled = true;
     if (status) status.textContent = terminalMessage || (botAvailabilityStopRequested
       ? `Stopped after ${completed} / ${entries.length}. Completed status/update checks were saved.`
-      : `${uncheckedOnly ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${updatesFound ? `${updatesFound} update${updatesFound === 1 ? "" : "s"} detected. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
+      : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${updatesFound ? `${updatesFound} update${updatesFound === 1 ? "" : "s"} detected. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
+    await noteBotStatusRunEvent("bot-status-run-complete", {
+      mode, scope, completed, requested: entries.length, stopped: !!botAvailabilityStopRequested, updatesFound, unknownCount, candidateCount, durationMs: Date.now() - runStartedAt
+    });
     botAvailabilityStopRequested = false;
     renderBotAvailability();
+    refreshArchiveTransferUi().catch(() => {});
     refreshStorageUsageIfVisible();
   }
 }
@@ -8372,8 +9291,9 @@ async function clearBotArchive() {
 }
 
 function setupBotAvailabilityControls() {
-  $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ uncheckedOnly: false }));
-  $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ uncheckedOnly: true }));
+  $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
+  $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
+  $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
   $("savedBotInfoSearch")?.addEventListener("input", event => {
     savedBotInfoUiState.query = event?.target?.value || "";
@@ -8456,6 +9376,18 @@ function setupBotAvailabilityControls() {
   });
   $("clearBotAvailabilityResults")?.addEventListener("click", clearBotAvailabilityResults);
   $("clearBotArchive")?.addEventListener("click", clearBotArchive);
+  $("exportBotStatusArchiveJsonGz")?.addEventListener("click", downloadBotStatusArchiveJsonGz);
+  $("testBotStatusArchiveEndpoint")?.addEventListener("click", testArchiveUploadEndpoint);
+  $("sendBotStatusArchiveChanged")?.addEventListener("click", () => sendBotStatusArchiveToArchive({ forceAll: false }));
+  $("sendBotStatusArchiveAll")?.addEventListener("click", () => sendBotStatusArchiveToArchive({ forceAll: true }));
+  $("enableBotStatusArchiveContribution")?.addEventListener("change", event => setArchiveContributionEnabled(!!event.target.checked).catch(() => {}));
+  $("submitBotStatusArchiveChanged")?.addEventListener("click", () => sendBotStatusArchiveContribution({ forceAll: false }));
+  $("submitBotStatusArchiveAll")?.addEventListener("click", () => sendBotStatusArchiveContribution({ forceAll: true }));
+  const persistArchiveConfig = debounceCallback(() => saveArchiveUploadConfig({ quiet: true }).catch(() => {}), 350);
+  $("botStatusArchiveEndpoint")?.addEventListener("change", persistArchiveConfig);
+  $("botStatusArchiveToken")?.addEventListener("input", persistArchiveConfig);
+  $("botStatusScanSpeed")?.addEventListener("change", () => save().catch(() => {}));
+  $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability(); });
   $("botAvailabilityScope")?.addEventListener("change", () => {
     invalidateDuplicateCache();
     botAvailabilityUiState.visible = 20;
@@ -12307,6 +13239,11 @@ async function load() {
     DEEPL_API_KEY,
     CHAT_BACKGROUNDS_KEY,
     CREATOR_BOT_WEBHOOK_KEY,
+    ARCHIVE_IMPORT_ENDPOINT_KEY,
+    ARCHIVE_IMPORT_TOKEN_KEY,
+    ARCHIVE_UPLOAD_STATE_KEY,
+    ARCHIVE_CONTRIBUTION_ENABLED_KEY,
+    ARCHIVE_CONTRIBUTION_STATE_KEY,
     "generationMetadataDefaultsMigrationV01841",
     "backupOptInMigrationV01990",
     "quickDislikeOptInMigrationV019119",
@@ -12626,6 +13563,8 @@ async function load() {
   setValue("chatListBlockedFilter", ["all", "blocked", "unblocked"].includes(settings.chatListBlockedFilter) ? settings.chatListBlockedFilter : "all");
 
   setChecked("trackOpenedChats", settings.trackOpenedChats);
+  setValue("botStatusScanSpeed", Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, settings.botStatusScanSpeed) ? settings.botStatusScanSpeed : "safe");
+  setValue("botStatusStaleDays", [1, 7, 14, 30].includes(Number(settings.botStatusStaleDays)) ? String(Number(settings.botStatusStaleDays)) : "7");
   setChecked("importOpenedFromChatsPage", settings.importOpenedFromChatsPage);
   setChecked("hideOpenedChats", settings.hideOpenedChats);
   setValue("openedBotSortMode", settings.openedBotSortMode || "newest");
@@ -12896,6 +13835,9 @@ async function load() {
   setChecked("botArchiveOnProfileVisit", !!settings.botArchiveOnProfileVisit);
   setChecked("botArchiveOnChatOpen", !!settings.botArchiveOnChatOpen);
   setValue("botArchiveRefreshHours", [6, 24, 72, 168].includes(Number(settings.botArchiveRefreshHours)) ? String(Number(settings.botArchiveRefreshHours)) : "24");
+  setValue("botStatusArchiveEndpoint", normalizeArchiveImportEndpoint(result[ARCHIVE_IMPORT_ENDPOINT_KEY] || DEFAULT_ARCHIVE_IMPORT_ENDPOINT) || DEFAULT_ARCHIVE_IMPORT_ENDPOINT);
+  setValue("botStatusArchiveToken", String(result[ARCHIVE_IMPORT_TOKEN_KEY] || ""));
+  setChecked("enableBotStatusArchiveContribution", result[ARCHIVE_CONTRIBUTION_ENABLED_KEY] === true);
   setChecked("protectDraftDuringMessageRemoval", !!settings.protectDraftDuringMessageRemoval);
   setChecked("failedMessageHelper", !!settings.failedMessageHelper);
   setChecked("autoRetryFailedMessageSends", !!settings.autoRetryFailedMessageSends);
@@ -13270,6 +14212,8 @@ function readSettingsFromPage() {
     chatListBlockedFilter: ["all", "blocked", "unblocked"].includes(value("chatListBlockedFilter")) ? value("chatListBlockedFilter") : "all",
 
     trackOpenedChats: checked("trackOpenedChats"),
+    botStatusScanSpeed: Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, value("botStatusScanSpeed", "safe")) ? value("botStatusScanSpeed", "safe") : "safe",
+    botStatusStaleDays: [1, 7, 14, 30].includes(Number(value("botStatusStaleDays", "7"))) ? Number(value("botStatusStaleDays", "7")) : 7,
     importOpenedFromChatsPage: checked("importOpenedFromChatsPage"),
     hideOpenedChats: checked("hideOpenedChats"),
     openedBotSortMode: value("openedBotSortMode", "newest"),

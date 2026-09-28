@@ -427,6 +427,14 @@
     return element;
   };
 
+  DS.diagEvent = function diagEvent(feature, event, meta = {}) {
+    return emit("feature-event", {
+      feature: String(feature || "qol").slice(0, 80),
+      event: String(event || "event").slice(0, 100),
+      ...safeValue(meta || {})
+    });
+  };
+
   DS.diagOperationStart = function diagOperationStart(feature, operation = "run", meta = {}) {
     if (!active()) return null;
     const token = {

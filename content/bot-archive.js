@@ -774,11 +774,24 @@
 
   async function helperApiCheck(botId) {
     const id = String(botId || "").trim().toLowerCase();
+    const startedAt = Date.now();
+    const finish = result => {
+      try {
+        DS.diagEvent?.("bot-status", "bot-status-item-result", {
+          botId: id,
+          status: String(result?.status || "unknown"),
+          httpStatus: Number(result?.httpStatus || 0),
+          elapsedMs: Date.now() - startedAt,
+          emptyObject: String(result?.status || "") === "api-empty"
+        });
+      } catch {}
+      return result;
+    };
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      return { ok: false, ready: true, status: "invalid-bot", httpStatus: 0 };
+      return finish({ ok: false, ready: true, status: "invalid-bot", httpStatus: 0 });
     }
     if (typeof DS.fetchPublicCharacterFieldsDetailed !== "function") {
-      return { ok: false, ready: document.readyState !== "loading", status: "api-bridge-not-ready", httpStatus: 0 };
+      return finish({ ok: false, ready: document.readyState !== "loading", status: "api-bridge-not-ready", httpStatus: 0 });
     }
     const result = await Promise.race([
       DS.fetchPublicCharacterFieldsDetailed(id),
@@ -791,10 +804,11 @@
       }), 12000))
     ]);
     const httpStatus = Number(result?.httpStatus || 0);
-    if (result?.status === "unavailable") return { ok: true, ready: true, status: "unavailable", httpStatus, reason: result.reason || "Character API says this bot is unavailable." };
-    if (result?.status === "restricted") return { ok: true, ready: true, status: "restricted", httpStatus, reason: result.reason || "Character API says this bot is restricted." };
+    if (result?.status === "api-empty") return finish({ ok: false, ready: true, status: "api-empty", httpStatus: httpStatus || 200, emptyObject: true, reason: result.reason || "Character API returned HTTP 200 with an empty character object." });
+    if (result?.status === "unavailable") return finish({ ok: true, ready: true, status: "unavailable", httpStatus, reason: result.reason || "Character API says this bot is unavailable." });
+    if (result?.status === "restricted") return finish({ ok: true, ready: true, status: "restricted", httpStatus, reason: result.reason || "Character API says this bot is restricted." });
     if (!result?.ok || result?.status !== "available") {
-      return { ok: false, ready: true, status: result?.status || "unknown", httpStatus, reason: result?.reason || "Character API did not confirm live bot data." };
+      return finish({ ok: false, ready: true, status: result?.status || "unknown", httpStatus, reason: result?.reason || "Character API did not confirm live bot data." });
     }
 
     const api = result.fields && typeof result.fields === "object" ? result.fields : {};
@@ -816,15 +830,19 @@
     };
     const coverage = FIELDS.filter(field => fields[field]);
     if (!coverage.length) {
-      return { ok: false, ready: true, status: "api-empty", httpStatus, reason: "Character API returned no usable public bot fields." };
+      return finish({ ok: false, ready: true, status: "api-empty", httpStatus: httpStatus || 200, emptyObject: true, reason: "Character API returned HTTP 200 with no usable public bot fields." });
+    }
+    const visibility = String(fields.visibility || "").trim().toLowerCase();
+    if (visibility === "private") {
+      return finish({ ok: true, ready: true, status: "restricted", httpStatus: httpStatus || 200, reason: "Character API returned visibility: private." });
     }
     const now = Date.now();
-    return {
+    return finish({
       ok: true,
       ready: true,
       status: "available",
       httpStatus: httpStatus || 200,
-      reason: "Character API returned live bot data.",
+      reason: visibility === "hidden" ? "Character API returned live bot data with visibility: hidden." : "Character API returned live bot data.",
       archiveSnapshot: {
         id,
         name: fields.name || id,
@@ -838,10 +856,27 @@
         fields,
         coverage
       }
-    };
+    });
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "DS_BOT_STATUS_MARK_WORKER") {
+      DS.state = DS.state || {};
+      DS.state.botStatusWorker = true;
+      DS.state.qolBackgroundWorker = "bot-status";
+      try {
+        document.documentElement.setAttribute("data-ds-qol-background-worker", "bot-status");
+        document.documentElement.setAttribute("data-ds-qol-bot-status-worker", "1");
+        DS.diagEvent?.("bot-status", "bot-status-worker-marked", { phase: String(message.phase || "runtime") });
+      } catch {}
+      sendResponse({ ok: true, marked: true });
+      return false;
+    }
+    if (message?.type === "DS_BOT_STATUS_DIAG_EVENT") {
+      try { DS.diagEvent?.("bot-status", String(message.event || "bot-status-event"), message.detail || {}); } catch {}
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message?.type === "DS_BOT_STATUS_WORKER_READY") {
       sendResponse({
         ok: typeof DS.fetchPublicCharacterFieldsDetailed === "function",
