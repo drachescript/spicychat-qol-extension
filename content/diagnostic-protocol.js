@@ -454,6 +454,15 @@
     state.operationsEnded += 1;
     const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
     const counts = result?.counts && typeof result.counts === "object" ? result.counts : result;
+    const extraMeta = result && typeof result === "object" ? { ...result } : {};
+    const explicitMeta = extraMeta.meta && typeof extraMeta.meta === "object" ? { ...extraMeta.meta } : {};
+    delete extraMeta.meta;
+    delete extraMeta.counts;
+    delete extraMeta.scanned;
+    delete extraMeta.changed;
+    delete extraMeta.skipped;
+    delete extraMeta.errors;
+    delete extraMeta.outcome;
     emit("operation-end", {
       id: token.id,
       attribution: "confirmed-qol",
@@ -466,7 +475,8 @@
         skipped: Number(counts?.skipped || 0),
         errors: Number(counts?.errors || 0)
       },
-      outcome: String(result?.outcome || "ok").slice(0, 40)
+      outcome: String(result?.outcome || "ok").slice(0, 40),
+      meta: safeValue({ ...explicitMeta, ...extraMeta })
     });
     return true;
   };

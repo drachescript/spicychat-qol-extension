@@ -2398,6 +2398,10 @@
       DS.runtimeLog?.("info", "main", "Quick-dislike helper tab: normal QoL page processing skipped");
       return;
     }
+    if (DS.state.recommendationWorker) {
+      DS.runtimeLog?.("info", "main", "Recommendation helper tab: normal QoL page processing skipped");
+      return;
+    }
     if (DS.state.listingRefillWorker) {
       DS.runtimeLog?.("info", "main", "Listing helper tab: normal QoL page processing skipped");
       return;

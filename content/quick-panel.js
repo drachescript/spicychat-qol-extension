@@ -1,6 +1,10 @@
 (() => {
   "use strict";
 
+  try {
+    if (new URLSearchParams(location.search || "").get("dsQolRecommendationWorker") === "1") return;
+  } catch {}
+
   if (window.__SPICYCHAT_QOL_QUICK_PANEL_V01841__) {
     window.DragonScriptQoL?.scheduleRun?.();
     return;
@@ -825,7 +829,9 @@
           <div class="ds-qol-row" id="ds-qol-chat-list-buttons">
             <button id="ds-qol-scan-visible" type="button">Scan visible</button>
             <button id="ds-qol-load-all-chats" type="button">Load all</button>
+            <button id="ds-qol-full-rescan-chats" type="button" style="display:none;">Full rescan</button>
           </div>
+          <div id="ds-qol-load-all-status" class="ds-qol-small-note" role="status" aria-live="polite" style="display:none;"></div>
         </div>
 
         <div id="ds-qol-smart-filter-pins-row" class="ds-qol-smart-filter-pins" style="display:none;">
@@ -943,6 +949,10 @@
 
     panel.querySelector("#ds-qol-load-all-chats")?.addEventListener("click", async () => {
       await DS.manualLoadAllChatsAndImport?.();
+    });
+
+    panel.querySelector("#ds-qol-full-rescan-chats")?.addEventListener("click", async () => {
+      await DS.manualFullRescanChatsAndImport?.();
     });
 
     panel.querySelector("#ds-qol-auto-voice")?.addEventListener("click", () => {
@@ -1469,6 +1479,7 @@
     setShown(document.getElementById("ds-qol-chat-sort-wrap"), showSort);
     setShown(document.getElementById("ds-qol-scan-visible"), showScan);
     setShown(document.getElementById("ds-qol-load-all-chats"), showLoadAll);
+    setShown(document.getElementById("ds-qol-full-rescan-chats"), showLoadAll && !!DS.state.chatImportBaselineReady && !DS.state.loadAllChats?.running);
     setShown(document.getElementById("ds-qol-chat-list-buttons"), showScan || showLoadAll, "flex");
     setShown(
       document.getElementById("ds-qol-chat-list-tools"),

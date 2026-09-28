@@ -1,3 +1,15 @@
+## 0.2.20
+- Fixed Bot Status Center slow starts and scans getting stuck on a single bot.
+- Bulk status scans now use one background SpicyChat Home helper, continue past temporary API/auth problems, and avoid repeated large saves during a scan.
+- Added a Check unchecked bots option for finishing interrupted scans or checking newly discovered chats.
+- Made tracked status results, saved bot copies, and confirmed deleted-bot recovery clearly separate.
+- Improved Saved Bots & Lists performance and fixed missing bot pictures and false update notices caused by avatar/creator formatting differences.
+- Chat List Load all now stays API-only, keeps visible progress while it runs, and no longer silently falls back to native Load More.
+- After one complete chat import, Load all becomes an incremental Refresh chats that stops at already-known history; Full rescan remains available for repair.
+- Added lightweight background-job coordination so chat imports, Less Like, and Bot Status do not send their API requests at the same instant.
+- Reduced Stop recommending / Less Like per-bot storage churn, added detailed timing telemetry, and use a lighter /chats helper when a known-good Recombee token is already cached.
+- Fixed Refresh duplicate matches changing already-checked bot statuses to Unknown.
+
 ## 0.2.19
 - Added an optional stacked chat layout and fixed its missing Settings switch.
 - Improved Stop recommending / Less Like with one background helper, faster startup, reliable bulk processing, clearer progress, and fewer retries.

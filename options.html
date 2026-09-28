@@ -407,7 +407,7 @@ Testing"></textarea></label>
 <div class="tab-page" data-page="saved"><p class="page-intro">Review Bot Status Center history/checks first, then Saved Bots Hub, local organization, Favorite, Followed, Later, and saved-copy data.</p>
 <section class="card" id="botAvailabilityCard">
 <h2>Bot Status Center</h2>
-<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data.</p>
+<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data. Large scans keep new results in memory and save them when you press Stop or when the scan finishes, so leave Settings open while a scan is running.</p>
 <fieldset class="bot-status-opened-tracking">
 <legend>Opened history tracking</legend>
 <label class="row"><input id="trackOpenedChats" type="checkbox"/><span>Track chats I open in Bot Status Center</span></label>
@@ -473,6 +473,7 @@ Testing"></textarea></label>
 </div>
 <div class="button-row">
 <button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
+<button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <button id="refreshBotDuplicateMatches" type="button">Refresh duplicate matches</button>
 <button id="acceptAllBotUpdates" type="button">Accept all detected updates</button>
@@ -481,6 +482,16 @@ Testing"></textarea></label>
 <button id="clearBotArchive" type="button">Clear saved bot copies</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
 </div>
+<fieldset id="botAvailabilityResultsCard">
+<legend>Tracked Bot Status Results</legend>
+<p class="hint">Live availability results for all tracked bots. Available bots belong here; only confirmed deleted/unavailable recovery copies appear in the separate section below.</p>
+<div class="bot-manager-list" id="botAvailabilityManager"></div>
+<div class="bot-manager-pager">
+<button id="botAvailabilityShowMore" type="button">Show 20 more</button>
+<button id="botAvailabilityShowLess" type="button">Show first 20</button>
+<button id="botAvailabilityCollapse" type="button">Show 100</button>
+</div>
+</fieldset>
 <fieldset>
 <legend>Local Bot Archive</legend>
 <label class="row"><input id="botArchiveRememberSeenPublic" type="checkbox"/><span>Remember the last public bot data QoL sees (including Greeting when available)</span></label>
@@ -499,17 +510,22 @@ Testing"></textarea></label>
 <p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
 </fieldset>
 <fieldset id="savedBotInfoCard">
-<legend>Saved Bot Info / Recovery</legend>
-<p class="hint">Browse the local recovery copies QoL has already captured. These copies stay available even when the live bot is later deleted or cleaned out of active lists. Only fields SpicyChat actually exposed to QoL are stored.</p>
+<legend>Saved Bot Copies / Recovery</legend>
+<p class="hint">Browse bot data QoL has saved locally. This list can include bots that are still Available; confirmed deleted/unavailable recovery copies are shown separately below. Currently blocked bots stay out of recovery views and are not added by Bot Status scans; any older recovery data is kept locally rather than deleted. Only fields SpicyChat actually exposed to QoL are stored.</p>
 <div class="bot-manager-toolbar">
 <input id="savedBotInfoSearch" placeholder="Search saved bot copies, creators or IDs" type="search"/>
 <span class="manager-count" id="savedBotInfoSummary">0 saved copies</span>
 </div>
 <div class="bot-manager-list" id="savedBotInfoManager"></div>
+<div class="bot-manager-pager">
+<button id="savedBotInfoShowMore" type="button">Show 20 more</button>
+<button id="savedBotInfoShowLess" type="button">Show first 20</button>
+<button id="savedBotInfoCollapse" type="button">Show 100</button>
+</div>
 </fieldset>
 <fieldset id="deletedSavedBotsCard">
 <legend>Deleted / Unavailable Saved Bots</legend>
-<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Active-list cleanup never removes these copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
+<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Currently blocked bots stay hidden here. Active-list cleanup never removes recovery copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
 <div class="bot-manager-toolbar">
 <input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
 <span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
@@ -521,12 +537,6 @@ Testing"></textarea></label>
 <button id="deletedSavedBotCollapse" type="button">Show 100</button>
 </div>
 </fieldset>
-<div class="bot-manager-list" id="botAvailabilityManager"></div>
-<div class="bot-manager-pager">
-<button id="botAvailabilityShowMore" type="button">Show 20 more</button>
-<button id="botAvailabilityShowLess" type="button">Show first 20</button>
-<button id="botAvailabilityCollapse" type="button">Show 100</button>
-</div>
 <p class="hint"><strong>Saved bot copies:</strong> successful profile checks can preserve the accessible name, description, greeting, personality/definition, scenario, example dialogues, tags, creator, visible stats and avatar URL in extension storage. A saved copy stays available here even if the live bot later disappears. Clearing status history does not clear these copies.</p>
 <p class="hint"><strong>Update Watch:</strong> the first successful profile check becomes that bot's baseline. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Missing fields are ignored instead of being treated as edits; use Accept update after reviewing a real change.</p>
 <p class="hint"><strong>Duplicate / Reupload Finder:</strong> compares local names, avatars and captured profile text and labels matches as Exact, Likely or Possible. These are hints only and can have false positives; QoL never hides, blocks or deletes a bot because of a match.</p>

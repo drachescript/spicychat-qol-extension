@@ -43,13 +43,21 @@
   function imageUrl(value) {
     const text = clean(value, 2000);
     if (!text) return "";
+    const cleanText = text.replace(/[?#].*$/, "");
+    const avatarPath = cleanText
+      .replace(/^https?:\/\/(?:www\.)?spicychat\.ai\/avatars\//i, "avatars/")
+      .replace(/^https?:\/\/cdn\.nd-api\.com\/avatars\//i, "avatars/")
+      .replace(/^\/+/, "");
+    if (/^avatars\//i.test(avatarPath)) {
+      return `https://cdn.nd-api.com/${avatarPath}`;
+    }
     try {
       const url = new URL(text, "https://spicychat.ai");
       url.search = "";
       url.hash = "";
       return url.href;
     } catch {
-      return text.replace(/[?#].*$/, "");
+      return cleanText;
     }
   }
 
@@ -772,7 +780,16 @@
     if (typeof DS.fetchPublicCharacterFieldsDetailed !== "function") {
       return { ok: false, ready: document.readyState !== "loading", status: "api-bridge-not-ready", httpStatus: 0 };
     }
-    const result = await DS.fetchPublicCharacterFieldsDetailed(id);
+    const result = await Promise.race([
+      DS.fetchPublicCharacterFieldsDetailed(id),
+      new Promise(resolve => setTimeout(() => resolve({
+        ok: false,
+        status: "worker-timeout",
+        httpStatus: 0,
+        fields: null,
+        reason: "Character API check did not finish in time."
+      }), 12000))
+    ]);
     const httpStatus = Number(result?.httpStatus || 0);
     if (result?.status === "unavailable") return { ok: true, ready: true, status: "unavailable", httpStatus, reason: result.reason || "Character API says this bot is unavailable." };
     if (result?.status === "restricted") return { ok: true, ready: true, status: "restricted", httpStatus, reason: result.reason || "Character API says this bot is restricted." };

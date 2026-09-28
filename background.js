@@ -26,6 +26,7 @@ const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
 const INSTALLED_VERSION_KEY = "dsLastInstalledVersion";
 const QUICK_DISLIKE_HISTORY_KEY = "quickDislikeHistoryV1";
 const QUICK_LESS_LIKE_HISTORY_KEY = "quickLessLikeHistoryV1";
+const QUICK_LESS_LIKE_PENDING_KEY = "quickLessLikeHistoryPendingV1";
 const QUICK_DISLIKE_ACTIVE_JOBS_KEY = "quickDislikeActiveJobsV1";
 const HELPER_LIFECYCLE_DIAG_KEY = "helperLifecycleDiagnosticsV1";
 const HELPER_RUNTIME_SESSION_KEY = "dsHelperRuntimeSessionIdV1";
@@ -90,7 +91,13 @@ const quickLessLikeDirectBulkTabs = new Map();
 const quickLessLikeClosedBulkRuns = new Map();
 const quickLessLikeReadyWorkerTabs = new Map();
 let quickLessLikePersistentWorkerTabId = null;
+let quickLessLikeHistoryCache = null;
+let quickLessLikePendingCache = null;
+let quickLessLikeHistoryCacheRunId = "";
+const QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY = 25;
 const QUICK_LESS_LIKE_RECOMMENDATION_WORKER_URL = "https://spicychat.ai/?dsQolRecommendationWorker=1";
+const QUICK_LESS_LIKE_LIGHT_WORKER_URL = "https://spicychat.ai/chats?dsQolRecommendationWorker=1&dsQolWorkerLight=1";
+const QUICK_LESS_LIKE_TOKEN_CACHE_KEY = "dsQolRecombeePublicTokenCache";
 const QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY = "dsQuickLessLikeRecommendationWorkerTabId";
 const QUICK_LESS_LIKE_READY_TTL_MS = 10 * 60 * 1000;
 let botStatusWorkerTabId = null;
@@ -110,6 +117,66 @@ const canceledQuickDislikeBulkRuns = new Map();
 const canceledQuickLessLikeBulkRuns = new Map();
 let helperRuntimeSessionPromise = null;
 let helperLifecycleInitPromise = null;
+
+let backgroundJobLease = null;
+const backgroundJobQueue = [];
+let backgroundJobSeq = 0;
+
+function grantNextBackgroundJob() {
+  if (backgroundJobLease || !backgroundJobQueue.length) return;
+  const next = backgroundJobQueue.shift();
+  if (!next) return;
+  const now = Date.now();
+  const leaseId = `bgjob-${(++backgroundJobSeq).toString(36)}-${now.toString(36)}`;
+  const maxHoldMs = Math.max(1000, Math.min(60000, Number(next.maxHoldMs || 30000)));
+  const timer = setTimeout(() => {
+    if (backgroundJobLease?.leaseId !== leaseId) return;
+    backgroundJobLease = null;
+    grantNextBackgroundJob();
+  }, maxHoldMs);
+  backgroundJobLease = {
+    leaseId,
+    jobType: next.jobType,
+    ownerTabId: Number(next.ownerTabId || 0) || 0,
+    detail: String(next.detail || "").slice(0, 120),
+    grantedAt: now,
+    timer
+  };
+  next.resolve({ ok: true, leaseId, jobType: next.jobType, waitMs: Math.max(0, now - next.requestedAt) });
+}
+
+function acquireBackgroundJob(jobType, options = {}) {
+  const type = String(jobType || "generic").slice(0, 50);
+  return new Promise(resolve => {
+    backgroundJobQueue.push({
+      jobType: type,
+      ownerTabId: Number(options.ownerTabId || 0) || 0,
+      detail: String(options.detail || "").slice(0, 120),
+      maxHoldMs: Math.max(1000, Number(options.maxHoldMs || 30000)),
+      requestedAt: Date.now(),
+      resolve
+    });
+    grantNextBackgroundJob();
+  });
+}
+
+function releaseBackgroundJob(leaseId) {
+  const id = String(leaseId || "");
+  if (!id || backgroundJobLease?.leaseId !== id) return false;
+  clearTimeout(backgroundJobLease.timer);
+  backgroundJobLease = null;
+  grantNextBackgroundJob();
+  return true;
+}
+
+async function withBackgroundJob(jobType, options, callback) {
+  const lease = await acquireBackgroundJob(jobType, options);
+  try {
+    return await callback(lease);
+  } finally {
+    releaseBackgroundJob(lease?.leaseId);
+  }
+}
 
 function quickDislikeWorkerUrlInfo(url) {
   try {
@@ -517,6 +584,12 @@ async function quickLessLikeWorkerTabs() {
 async function releaseQuickLessLikeBulkWorker(runId) {
   const id = String(runId || "").trim();
   if (!id) return false;
+  try { await flushQuickLessLikeHistory(true, id); } catch {}
+  if (quickLessLikeHistoryCacheRunId === id) {
+    quickLessLikeHistoryCacheRunId = "";
+    quickLessLikeHistoryCache = null;
+    quickLessLikePendingCache = null;
+  }
   quickLessLikeDirectBulkTabs.delete(id);
   quickLessLikeClosedBulkRuns.delete(id);
   const tabIds = new Set();
@@ -659,6 +732,19 @@ function quickLessLikeRecommendationWorkerUrl() {
   return new URL(QUICK_LESS_LIKE_RECOMMENDATION_WORKER_URL);
 }
 
+async function preferredQuickLessLikeRecommendationWorkerUrl() {
+  try {
+    const stored = await storageLocalGet([QUICK_LESS_LIKE_TOKEN_CACHE_KEY]);
+    const cached = stored?.[QUICK_LESS_LIKE_TOKEN_CACHE_KEY] || {};
+    const token = String(cached?.token || "").trim();
+    const at = Number(cached?.at || 0);
+    if (token.length >= 16 && token.length <= 180 && at > 0 && Date.now() - at < 24 * 60 * 60 * 1000) {
+      return new URL(QUICK_LESS_LIKE_LIGHT_WORKER_URL);
+    }
+  } catch {}
+  return quickLessLikeRecommendationWorkerUrl();
+}
+
 async function createOrReuseQuickLessLikeRecommendationWorker(runId = "") {
   const id = String(runId || "").trim();
   if (id && quickLessLikeClosedBulkRuns.has(id)) {
@@ -677,7 +763,8 @@ async function createOrReuseQuickLessLikeRecommendationWorker(runId = "") {
     const info = quickLessLikeWorkerUrlInfo(currentUrl);
     const knownWorkerHome = isKnownQuickLessLikeRecommendationWorkerTab(tabId, currentUrl);
     if (!info?.recommendationWorker && !knownWorkerHome) {
-      const updated = await tabsUpdate(tabId, { url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+      const preferredUrl = await preferredQuickLessLikeRecommendationWorkerUrl();
+      const updated = await tabsUpdate(tabId, { url: preferredUrl.href, active: false });
       if (!updated?.ok) return { ok: false, status: "recommendation-worker-navigation-failed", tabId };
       quickLessLikeReadyWorkerTabs.delete(tabId);
       await recordHelperLifecycle("quickLessLikeRecommendationWorkerResetHome", { tabId, runId: id });
@@ -687,7 +774,8 @@ async function createOrReuseQuickLessLikeRecommendationWorker(runId = "") {
     await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: tabId });
     return { ok: true, status: "recommendation-worker-available", tabId };
   }
-  const created = await tabsCreate({ url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+  const preferredUrl = await preferredQuickLessLikeRecommendationWorkerUrl();
+  const created = await tabsCreate({ url: preferredUrl.href, active: false });
   const tabId = Number(created?.tab?.id || 0);
   if (!created?.ok || !Number.isFinite(tabId) || !tabId) {
     return { ok: false, status: "recommendation-worker-create-failed", tabId: 0, error: created?.error || "" };
@@ -798,22 +886,50 @@ async function releaseQuickLessLikeStandaloneWorker() {
 }
 
 async function runDirectCharacterFeedback(message, mode) {
+  const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || mode !== "less-like") return { ok: false, status: "invalid-bot" };
   const runId = String(message?.bulkRunId || "").trim();
   if (runId && quickLessLikeClosedBulkRuns.has(runId)) {
     return { ok: false, status: "recommendation-worker-closed", feedbackTabsTried: 0, requestSent: false, networkAttempts: 0 };
   }
+
+  const workerStartedAt = Date.now();
   const worker = await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+  const workerReadyMs = Date.now() - workerStartedAt;
   if (!worker?.ready) {
-    return { ...worker, ok: false, feedbackTabsTried: worker?.tabId ? 1 : 0, requestSent: false, networkAttempts: 0 };
+    return { ...worker, ok: false, feedbackTabsTried: worker?.tabId ? 1 : 0, requestSent: false, networkAttempts: 0, workerReadyMs, totalMs: Date.now() - totalStartedAt };
   }
+
   const tabId = Number(worker.tabId || 0);
-  let response = await tabsSendMessage(tabId, {
-    type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
-    botName: String(message?.botName || "").slice(0, 160)
+  let coordinatorWaitMs = 0;
+  let feedbackMs = 0;
+  let response = null;
+  let result = null;
+
+  const sendFeedback = async () => {
+    const feedbackStartedAt = Date.now();
+    response = await tabsSendMessage(tabId, {
+      type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
+      botName: String(message?.botName || "").slice(0, 160)
+    });
+    feedbackMs += Date.now() - feedbackStartedAt;
+    return response;
+  };
+
+  const lease = await acquireBackgroundJob("less-like", {
+    ownerTabId: tabId,
+    detail: botId,
+    maxHoldMs: 50000
   });
-  let result = response?.status ? { ...response, feedbackTabId: tabId, feedbackTabsTried: 1 } : {
+  coordinatorWaitMs += Number(lease?.waitMs || 0);
+  try {
+    await sendFeedback();
+  } finally {
+    releaseBackgroundJob(lease?.leaseId);
+  }
+
+  result = response?.status ? { ...response, feedbackTabId: tabId, feedbackTabsTried: 1 } : {
     ok: false, status: "direct-feedback-unavailable", feedbackTabId: tabId, feedbackTabsTried: 1,
     requestSent: false, networkAttempts: 0
   };
@@ -829,10 +945,13 @@ async function runDirectCharacterFeedback(message, mode) {
       await recordHelperLifecycle("quickLessLikeRecommendationWorkerSelfHeal", { tabId, runId, status: String(result?.status || "") });
       const healed = await probeQuickLessLikeRecommendationWorker(tabId, true);
       if (healed?.ready) {
-        response = await tabsSendMessage(tabId, {
-          type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
-          botName: String(message?.botName || "").slice(0, 160)
-        });
+        const retryLease = await acquireBackgroundJob("less-like", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 50000 });
+        coordinatorWaitMs += Number(retryLease?.waitMs || 0);
+        try {
+          await sendFeedback();
+        } finally {
+          releaseBackgroundJob(retryLease?.leaseId);
+        }
         if (response?.status) result = { ...response, feedbackTabId: tabId, feedbackTabsTried: 1, workerRecovered: true };
       } else {
         result = { ...healed, ok: false, feedbackTabId: tabId, feedbackTabsTried: 1, requestSent: false, networkAttempts: 0 };
@@ -842,16 +961,26 @@ async function runDirectCharacterFeedback(message, mode) {
     }
   }
   if (result?.ok && result?.status === "less-liked") quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
-  return result;
+  return {
+    ...result,
+    workerReadyMs,
+    coordinatorWaitMs,
+    feedbackMs,
+    availabilityMs: Number(result?.availabilityMs || 0),
+    ratingMs: Number(result?.ratingMs || 0),
+    userLookupMs: Number(result?.userLookupMs || 0),
+    totalMs: Date.now() - totalStartedAt
+  };
 }
 
 async function runQuickLessLikeBot(message) {
+  const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
   const botName = String(message?.botName || "").trim().slice(0, 160);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
   if (message?.bulkRunId && isQuickLessLikeBulkRunCanceled(message.bulkRunId)) return { ok: false, status: "bulk-canceled" };
   if (message?.force !== true) {
-    const history = await getQuickLessLikeHistory();
+    const history = await getQuickLessLikeHistory(message?.bulkRunId || "");
     const remembered = history.bots[botId];
     if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
   }
@@ -862,12 +991,14 @@ async function runQuickLessLikeBot(message) {
   } finally {
     if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
   }
+
+  const historyStartedAt = Date.now();
   if (result?.ok && result.status === "less-liked") {
-    const remembered = await rememberQuickLessLike(botId, botName);
+    const remembered = await rememberQuickLessLike(botId, botName, { immediate: !String(message?.bulkRunId || "").trim(), runId: String(message?.bulkRunId || "").trim() });
     if (remembered) result.handledAt = remembered.handledAt || Date.now();
   } else if (result?.status === "bot-not-found" && (result?.availabilityConfirmed || Number(message?.retryAttempt || 0) >= 1)) {
-    const remembered = await rememberQuickLessLikeUnavailable(botId, botName, result);
-    return {
+    const remembered = await rememberQuickLessLikeUnavailable(botId, botName, result, { immediate: !String(message?.bulkRunId || "").trim(), runId: String(message?.bulkRunId || "").trim() });
+    result = {
       ...result,
       ok: true,
       status: "unavailable",
@@ -875,7 +1006,33 @@ async function runQuickLessLikeBot(message) {
       handledAt: remembered?.handledAt || Date.now()
     };
   }
-  return result;
+  const historyPersistMs = Date.now() - historyStartedAt;
+  const timed = {
+    ...result,
+    historyPersistMs,
+    totalMs: Date.now() - totalStartedAt
+  };
+  const feedbackTabId = Number(timed?.feedbackTabId || 0);
+  if (feedbackTabId && !String(message?.bulkRunId || "").trim()) {
+    tabsSendMessage(feedbackTabId, {
+      type: "DS_QUICK_LESS_LIKE_TIMING",
+      botId,
+      timing: {
+        workerReadyMs: Number(timed.workerReadyMs || 0),
+        coordinatorWaitMs: Number(timed.coordinatorWaitMs || 0),
+        feedbackMs: Number(timed.feedbackMs || timed.elapsedMs || 0),
+        availabilityMs: Number(timed.availabilityMs || 0),
+        ratingMs: Number(timed.ratingMs || 0),
+        userLookupMs: Number(timed.userLookupMs || 0),
+        historyPersistMs,
+        totalMs: Number(timed.totalMs || 0),
+        requestElapsedMs: Number(timed.elapsedMs || 0),
+        networkAttempts: Number(timed.networkAttempts || 0),
+        status: String(timed.status || "")
+      }
+    }).catch?.(() => null);
+  }
+  return timed;
 }
 
 
@@ -907,8 +1064,10 @@ async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
   while (Date.now() < deadline) {
     const tab = await tabsGet(id);
     if (!tab) return { ok: false, ready: false, status: "worker-closed" };
-    const response = await tabsSendMessage(id, { type: "DS_BOT_STATUS_WORKER_READY" });
-    if (response) last = response;
+    const remaining = Math.max(500, deadline - Date.now());
+    const response = await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_WORKER_READY" }, Math.min(1400, remaining));
+    if (response?.__dsTimeout) last = { ok: false, ready: false, status: "worker-message-timeout" };
+    else if (response) last = response;
     if (response?.ready) return { ...response, ok: true, ready: true, tabId: id };
     await new Promise(resolve => setTimeout(resolve, 300));
   }
@@ -968,11 +1127,23 @@ async function findBorrowableBotStatusTab() {
 async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   await restoreBotStatusWorkerSession();
   let tab = Number.isFinite(Number(botStatusWorkerTabId)) ? await tabsGet(Number(botStatusWorkerTabId)) : null;
+
+  // Bulk Bot Status scans deliberately use one QoL-owned Home helper. Do not
+  // keep borrowing an arbitrary profile/editor/chat tab just because it has the
+  // content scripts loaded; those pages can have different auth/runtime state.
+  if (forceOwnHelper && tab?.id && !botStatusWorkerOwned) {
+    botStatusWorkerTabId = null;
+    botStatusWorkerOwned = false;
+    botStatusWorkerTabIds.clear();
+    await rememberBotStatusWorker(0, false);
+    tab = null;
+  }
+
   if (tab?.id) {
     const ready = await probeBotStatusWorker(Number(tab.id), 1500);
     if (ready?.ready) {
       await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned);
-      return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned };
+      return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, ready: true };
     }
     if (botStatusWorkerOwned) {
       await tabsRemove(Number(tab.id));
@@ -1020,47 +1191,67 @@ function botStatusApiResponseIsTransient(response) {
   return /auth(?:entication)?[^.;]{0,30}(?:unavailable|not ready)|no reusable auth|bridge[^.;]{0,30}(?:unavailable|timeout|not ready)/i.test(reason);
 }
 
-async function waitForBotStatusApiCheck(tabId, botId, timeoutMs = 8000) {
+async function waitForBotStatusApiCheck(tabId, botId, timeoutMs = 12000) {
   const id = Number(tabId || 0);
   if (!id) return null;
-  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 8000);
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 12000);
   let response = null;
   do {
-    response = await tabsSendMessage(id, { type: "DS_BOT_STATUS_API_CHECK", botId });
+    const remaining = Math.max(500, deadline - Date.now());
+    response = await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_API_CHECK", botId }, Math.min(12000, remaining));
+    if (response?.__dsTimeout) {
+      return { ok: false, ready: true, status: "worker-timeout", httpStatus: 0, reason: "Bot Status helper did not answer this API check in time." };
+    }
     if (response && !botStatusApiResponseIsTransient(response)) return response;
     if (Date.now() >= deadline) break;
     await new Promise(resolve => setTimeout(resolve, 400));
   } while (Date.now() < deadline);
-  return response;
+  return response || { ok: false, ready: true, status: "worker-timeout", httpStatus: 0, reason: "Bot Status helper timed out before returning a result." };
 }
 
 async function runBotStatusHelperCheck(message) {
   const botId = String(message?.botId || "").trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
 
-  let worker = await prepareBotStatusWorker({ forceOwnHelper: false });
+  const forceOwnHelper = !!message?.forceOwnHelper;
+  let worker = await prepareBotStatusWorker({ forceOwnHelper });
   let tabId = Number(worker?.tabId || 0);
-  if (!tabId) return { ok: false, ready: true, status: "worker-tab-failed", httpStatus: 0 };
+  if (!tabId) return { ok: false, ready: true, status: "worker-tab-failed", httpStatus: 0, reason: "Could not create or reuse the Bot Status helper." };
 
-  let response = await tabsSendMessage(tabId, { type: "DS_BOT_STATUS_API_CHECK", botId });
+  // QoL-owned Home helpers get one total API deadline rather than stacking an
+  // initial long request plus another long retry. A broken bot/runtime can
+  // therefore never pin the whole serial scan indefinitely.
+  let response = null;
+  response = await withBackgroundJob("bot-status", { ownerTabId: tabId, detail: botId, maxHoldMs: 15000 }, async () => {
+    if (worker.owned || forceOwnHelper) {
+      return await waitForBotStatusApiCheck(tabId, botId, 12000);
+    }
+    const direct = await tabsSendMessageWithTimeout(tabId, { type: "DS_BOT_STATUS_API_CHECK", botId }, 10000);
+    if (direct?.__dsTimeout) {
+      return { ok: false, ready: true, status: "worker-timeout", httpStatus: 0, reason: "Bot Status helper did not answer this API check in time." };
+    }
+    return direct;
+  });
+
   const status = String(response?.status || "");
-  const shouldRetryOnOwnHelper = !worker.owned && (!response || ["api-bridge-not-ready", "auth-unavailable", "worker-error", "unknown"].includes(status));
+  const shouldRetryOnOwnHelper = !forceOwnHelper && !worker.owned && (!response || ["api-bridge-not-ready", "auth-unavailable", "worker-error", "unknown", "worker-timeout"].includes(status));
   if (shouldRetryOnOwnHelper) {
     botStatusWorkerTabId = null;
     botStatusWorkerOwned = false;
     await rememberBotStatusWorker(0, false);
     worker = await prepareBotStatusWorker({ forceOwnHelper: true });
     tabId = Number(worker?.tabId || 0);
-    if (tabId) response = await waitForBotStatusApiCheck(tabId, botId, 8000);
-  } else if (worker.owned && botStatusApiResponseIsTransient(response)) {
-    // A freshly loaded Home helper can have the content bridge before SpicyChat
-    // has finished restoring auth. Wait on that same tab instead of marking the
-    // first bot Unknown or reloading/navigating the worker.
-    response = await waitForBotStatusApiCheck(tabId, botId, 8000);
+    if (tabId) response = await withBackgroundJob("bot-status", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 15000 }, () => waitForBotStatusApiCheck(tabId, botId, 12000));
   }
 
-  if (!message?.keepHelper) await releaseBotStatusWorker();
-  return response || { ok: false, ready: true, status: "worker-no-response", httpStatus: 0 };
+  if (String(response?.status || "") === "worker-timeout" && worker.owned) {
+    // Do not leave a wedged helper pinned to the whole serial scan. The current
+    // bot becomes Unknown and the next bot gets a fresh Home worker.
+    await releaseBotStatusWorker();
+  } else if (!message?.keepHelper) {
+    await releaseBotStatusWorker();
+  }
+  return response || { ok: false, ready: true, status: "worker-no-response", httpStatus: 0, reason: "Bot Status helper returned no response." };
 }
 
 function alarmName(tabId) {
@@ -1225,6 +1416,20 @@ function tabsSendMessage(tabId, message) {
     } catch {
       resolve(null);
     }
+  });
+}
+
+function tabsSendMessageWithTimeout(tabId, message, timeoutMs = 10000) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish({ __dsTimeout: true }), Math.max(500, Number(timeoutMs) || 10000));
+    tabsSendMessage(tabId, message).then(finish).catch(() => finish(null));
   });
 }
 
@@ -1664,48 +1869,118 @@ function normalizeQuickLessLikeHistory(raw) {
   return { version: 1, bots: normalized };
 }
 
-async function getQuickLessLikeHistory() {
-  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY]);
-  return normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+function normalizeQuickLessLikePending(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const bots = source.bots && typeof source.bots === "object" ? source.bots : {};
+  return { version: 1, bots: { ...bots } };
 }
 
-async function rememberQuickLessLike(botId, botName) {
-  const history = await getQuickLessLikeHistory();
-  history.bots[botId] = {
-    status: "less-liked",
-    name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
-    handledAt: Date.now()
-  };
-  const entries = Object.entries(history.bots);
+function trimQuickLessLikeHistory(history) {
+  const entries = Object.entries(history?.bots || {});
   if (entries.length > 5000) {
     entries
       .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
       .slice(5000)
       .forEach(([id]) => delete history.bots[id]);
   }
-  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: history });
+  return history;
+}
+
+async function readQuickLessLikeHistoryFromStorage() {
+  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_PENDING_KEY]);
+  const history = normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+  const pending = normalizeQuickLessLikePending(result[QUICK_LESS_LIKE_PENDING_KEY]);
+  for (const [id, value] of Object.entries(pending.bots || {})) {
+    if (!/^[0-9a-f-]{20,}$/i.test(String(id || ""))) continue;
+    const status = String(value?.status || "");
+    if (!["less-liked", "unavailable"].includes(status)) continue;
+    history.bots[id] = {
+      status,
+      name: String(value?.name || history.bots[id]?.name || "").slice(0, 160),
+      handledAt: Number(value?.handledAt || 0) || Date.now(),
+      stage: String(value?.stage || "").slice(0, 80),
+      reason: String(value?.reason || "").slice(0, 300),
+      httpStatus: Number(value?.httpStatus || 0) || 0
+    };
+  }
+  return { history: trimQuickLessLikeHistory(history), pending };
+}
+
+async function getQuickLessLikeHistory(runId = "") {
+  const id = String(runId || "").trim();
+  if (id && quickLessLikeHistoryCacheRunId === id && quickLessLikeHistoryCache) {
+    return quickLessLikeHistoryCache;
+  }
+  const loaded = await readQuickLessLikeHistoryFromStorage();
+  if (id) {
+    quickLessLikeHistoryCacheRunId = id;
+    quickLessLikeHistoryCache = loaded.history;
+    quickLessLikePendingCache = loaded.pending;
+  }
+  return loaded.history;
+}
+
+async function flushQuickLessLikeHistory(force = false, runId = "") {
+  const id = String(runId || quickLessLikeHistoryCacheRunId || "").trim();
+  if (!id || quickLessLikeHistoryCacheRunId !== id || !quickLessLikeHistoryCache) return true;
+  const pending = quickLessLikePendingCache || { version: 1, bots: {} };
+  const pendingCount = Object.keys(pending.bots || {}).length;
+  if (!pendingCount) return true;
+  if (!force && pendingCount < QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY) return false;
+  trimQuickLessLikeHistory(quickLessLikeHistoryCache);
+  await storageSet({
+    [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryCache,
+    [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
+  });
+  quickLessLikePendingCache = { version: 1, bots: {} };
+  return true;
+}
+
+async function rememberQuickLessLikeEntry(botId, entry, { immediate = false, runId = "" } = {}) {
+  const id = String(runId || "").trim();
+  if (!id) {
+    const loaded = await readQuickLessLikeHistoryFromStorage();
+    loaded.history.bots[botId] = entry;
+    trimQuickLessLikeHistory(loaded.history);
+    await storageSet({
+      [QUICK_LESS_LIKE_HISTORY_KEY]: loaded.history,
+      [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
+    });
+    return loaded.history.bots[botId];
+  }
+
+  const history = await getQuickLessLikeHistory(id);
+  const pending = quickLessLikePendingCache || (quickLessLikePendingCache = { version: 1, bots: {} });
+  history.bots[botId] = entry;
+  pending.bots[botId] = entry;
+  trimQuickLessLikeHistory(history);
+  // Persist a very small delta after every successful action so an interrupted
+  // run cannot repeat a rating, but only rewrite the full multi-thousand-entry
+  // history occasionally (and once at run end).
+  await storageSet({ [QUICK_LESS_LIKE_PENDING_KEY]: pending });
+  await flushQuickLessLikeHistory(immediate, id);
   return history.bots[botId];
 }
 
-async function rememberQuickLessLikeUnavailable(botId, botName, result = {}) {
-  const history = await getQuickLessLikeHistory();
-  history.bots[botId] = {
+async function rememberQuickLessLike(botId, botName, options = {}) {
+  const history = await getQuickLessLikeHistory(options?.runId || "");
+  return rememberQuickLessLikeEntry(botId, {
+    status: "less-liked",
+    name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
+    handledAt: Date.now()
+  }, options);
+}
+
+async function rememberQuickLessLikeUnavailable(botId, botName, result = {}, options = {}) {
+  const history = await getQuickLessLikeHistory(options?.runId || "");
+  return rememberQuickLessLikeEntry(botId, {
     status: "unavailable",
     name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
     handledAt: Date.now(),
     stage: String(result?.stage || "response").slice(0, 80),
     reason: String(result?.reason || "Character was not found while sending Less Like feedback.").slice(0, 300),
     httpStatus: Number(result?.httpStatus || 0) || 0
-  };
-  const entries = Object.entries(history.bots);
-  if (entries.length > 5000) {
-    entries
-      .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
-      .slice(5000)
-      .forEach(([id]) => delete history.bots[id]);
-  }
-  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: history });
-  return history.bots[botId];
+  }, options);
 }
 
 function makeQuickDislikeJobId(botId) {
@@ -4522,6 +4797,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BOT_STATUS_HELPER_PREPARE") {
+    prepareBotStatusWorker({ forceOwnHelper: message?.forceOwnHelper !== false })
+      .then(worker => sendResponse({
+        ok: !!worker?.tabId && worker?.ready !== false,
+        ready: worker?.ready !== false,
+        tabId: Number(worker?.tabId || 0),
+        owned: !!worker?.owned,
+        status: worker?.status || (worker?.tabId ? "ready" : "worker-tab-failed")
+      }))
+      .catch(error => sendResponse({ ok: false, ready: false, status: "worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_BOT_STATUS_HELPER_CHECK") {
     runBotStatusHelperCheck(message)
       .then(sendResponse)
@@ -4879,6 +5167,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: !chrome.runtime.lastError });
     });
 
+    return true;
+  }
+
+  if (message?.type === "DS_BACKGROUND_JOB_ACQUIRE") {
+    acquireBackgroundJob(message.jobType, {
+      ownerTabId: tabId,
+      detail: message.detail,
+      maxHoldMs: message.maxHoldMs
+    }).then(sendResponse).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_BACKGROUND_JOB_RELEASE") {
+    sendResponse({ ok: releaseBackgroundJob(message.leaseId) });
+    return false;
+  }
+
+  if (message?.type === "DS_QUICK_LESS_LIKE_CLIENT_TIMING" || message?.type === "DS_QUICK_LESS_LIKE_RUN_TIMING") {
+    const targetTabId = Number(message?.feedbackTabId || message?.tabId || 0);
+    if (!targetTabId) {
+      sendResponse({ ok: false, status: "missing-target-tab" });
+      return false;
+    }
+    const forwardType = message.type === "DS_QUICK_LESS_LIKE_RUN_TIMING"
+      ? "DS_QUICK_LESS_LIKE_RUN_TIMING"
+      : "DS_QUICK_LESS_LIKE_TIMING";
+    tabsSendMessage(targetTabId, {
+      type: forwardType,
+      botId: String(message?.botId || ""),
+      runId: String(message?.runId || ""),
+      phase: String(message?.phase || ""),
+      timing: message?.timing && typeof message.timing === "object" ? message.timing : {},
+      meta: message?.meta && typeof message.meta === "object" ? message.meta : {}
+    }).then(response => sendResponse({ ok: !!response?.ok, response })).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 

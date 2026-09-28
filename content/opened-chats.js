@@ -1,7 +1,99 @@
 (() => {
   "use strict";
 
+  try {
+    if (new URLSearchParams(location.search || "").get("dsQolRecommendationWorker") === "1") return;
+  } catch {}
+
   const DS = window.DragonScriptQoL;
+  const CHAT_IMPORT_STATE_KEY = "dsQolChatImportState";
+
+  function localStorageGet(keys) {
+    return new Promise(resolve => {
+      try {
+        chrome.storage.local.get(keys, result => resolve(result || {}));
+      } catch {
+        resolve({});
+      }
+    });
+  }
+
+  function localStorageSet(values) {
+    return new Promise(resolve => {
+      try {
+        chrome.storage.local.set(values || {}, () => resolve(!chrome.runtime.lastError));
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  function normalizeChatImportState(value) {
+    const raw = value && typeof value === "object" ? value : {};
+    return {
+      version: 1,
+      fullImportCompletedAt: Math.max(0, Number(raw.fullImportCompletedAt || 0) || 0),
+      lastRefreshAt: Math.max(0, Number(raw.lastRefreshAt || 0) || 0),
+      lastFullConversationCount: Math.max(0, Number(raw.lastFullConversationCount || 0) || 0),
+      lastRefreshConversationCount: Math.max(0, Number(raw.lastRefreshConversationCount || 0) || 0)
+    };
+  }
+
+  async function readChatImportState() {
+    const stored = await localStorageGet([CHAT_IMPORT_STATE_KEY]);
+    const state = normalizeChatImportState(stored?.[CHAT_IMPORT_STATE_KEY]);
+    DS.state.chatImportBaselineReady = !!state.fullImportCompletedAt;
+    DS.state.chatImportState = state;
+    return state;
+  }
+
+  async function writeChatImportState(patch = {}) {
+    const current = normalizeChatImportState(DS.state.chatImportState);
+    const next = normalizeChatImportState({ ...current, ...patch });
+    DS.state.chatImportState = next;
+    DS.state.chatImportBaselineReady = !!next.fullImportCompletedAt;
+    await localStorageSet({ [CHAT_IMPORT_STATE_KEY]: next });
+    return next;
+  }
+
+  function conversationIdFromUrl(value) {
+    const match = String(value || "").match(/\/chat\/[^/?#]+\/([0-9a-f-]{20,})(?:[/?#]|$)/i);
+    return match?.[1] ? String(match[1]).toLowerCase() : "";
+  }
+
+  function knownConversationIds() {
+    const ids = new Set();
+    const meta = DS.state.openedChatMeta && typeof DS.state.openedChatMeta === "object" ? DS.state.openedChatMeta : {};
+    for (const entry of Object.values(meta)) {
+      const urls = [entry?.chatUrl, ...(Array.isArray(entry?.chatUrls) ? entry.chatUrls : [])];
+      for (const url of urls) {
+        const id = conversationIdFromUrl(url);
+        if (id) ids.add(id);
+      }
+    }
+    return ids;
+  }
+
+  async function acquireBackgroundJob(jobType, meta = {}) {
+    const started = Date.now();
+    const result = await sendBackgroundMessage({
+      type: "DS_BACKGROUND_JOB_ACQUIRE",
+      jobType: String(jobType || "generic"),
+      maxHoldMs: Math.max(1000, Number(meta.maxHoldMs || 30000)),
+      detail: meta.detail || ""
+    });
+    return {
+      ok: !!result?.ok,
+      leaseId: String(result?.leaseId || ""),
+      waitMs: Math.max(0, Number(result?.waitMs || (Date.now() - started)) || 0)
+    };
+  }
+
+  async function releaseBackgroundJob(leaseId) {
+    if (!leaseId) return false;
+    const result = await sendBackgroundMessage({ type: "DS_BACKGROUND_JOB_RELEASE", leaseId });
+    return !!result?.ok;
+  }
 
   function isChatListPage() {
     if (typeof DS.isChatListPage === "function") {
@@ -38,7 +130,20 @@
         importedTotal: 0,
         noChange: 0,
         lastBeforeLinks: 0,
-        userStarted: false
+        userStarted: false,
+        mode: "",
+        apiPages: 0,
+        conversationsImported: 0,
+        cursor: "",
+        dirty: false,
+        statusText: "",
+        statusVisibleUntil: 0,
+        refreshMode: false,
+        forceFullRescan: false,
+        knownConversationIds: new Set(),
+        refreshBoundaryReached: false,
+        newConversationsSeen: 0,
+        diagRunToken: null
       };
     }
 
@@ -50,6 +155,106 @@
     return String(value || "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function canonicalConversationImage(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^https?:\/\//i.test(raw)) {
+      return raw.replace(/^https:\/\/(?:www\.)?spicychat\.ai\/avatars\//i, "https://cdn.nd-api.com/avatars/");
+    }
+    if (/^(?:\/)?avatars\//i.test(raw)) {
+      return `https://cdn.nd-api.com/${raw.replace(/^\/+/, "")}`;
+    }
+    return raw;
+  }
+
+  function conversationMessageText(message) {
+    if (!message || typeof message !== "object") return "";
+    const direct = message.content ?? message.text ?? message.message ?? message.value ?? "";
+    if (typeof direct === "string") return cleanMetaText(direct).slice(0, 4000);
+    if (Array.isArray(direct)) {
+      return cleanMetaText(direct.map(item => typeof item === "string" ? item : (item?.text || item?.content || "")).join(" ")).slice(0, 4000);
+    }
+    return "";
+  }
+
+  function exactConversationUrl(botId, conversationId) {
+    if (!botId) return "";
+    return conversationId
+      ? `${location.origin}/chat/${encodeURIComponent(botId)}/${encodeURIComponent(conversationId)}`
+      : `${location.origin}/chat/${encodeURIComponent(botId)}`;
+  }
+
+  function importConversationApiRows(rows) {
+    const openedChats = DS.state.openedChats;
+    DS.state.openedChatMeta = DS.state.openedChatMeta || {};
+    let added = 0;
+    let metadataChanged = false;
+    let conversations = 0;
+
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const character = row?.character && typeof row.character === "object" ? row.character : {};
+      const id = String(row?.character_id || character.id || "").trim().toLowerCase();
+      if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) continue;
+
+      const conversationId = String(row?.id || "").trim().toLowerCase();
+      const name = cleanMetaText(character.name || "");
+      const description = cleanMetaText(character.description || character.title || "");
+      const image = canonicalConversationImage(character.avatar_url || character.avatar || character.image || "");
+      const lastMessagePreview = conversationMessageText(row?.last_text_message || row?.last_message);
+      const messageCount = Math.max(0, Number(row?.num_messages ?? row?.message_count ?? 0) || 0);
+      const chatUrl = exactConversationUrl(id, conversationId);
+      const candidateMeta = { id, name, image, description, chatUrl };
+
+      if (DS.isBlockedForOpenedHistory?.(id, candidateMeta)) {
+        if (openedChats.delete(id)) {
+          delete DS.state.openedChatMeta[id];
+          metadataChanged = true;
+        }
+        continue;
+      }
+
+      conversations++;
+      const existing = DS.state.openedChatMeta[id] || {};
+      const existingUrls = Array.isArray(existing.chatUrls) ? existing.chatUrls : [];
+      const nextUrls = [...new Set([
+        ...(existing.chatUrl ? [existing.chatUrl] : []),
+        ...existingUrls,
+        ...(chatUrl ? [chatUrl] : [])
+      ].map(value => String(value || "").trim()).filter(Boolean))].slice(0, 50);
+      const existingHasExactConversation = /\/chat\/[^/?#]+\/[^/?#]+/i.test(String(existing.chatUrl || ""));
+      const firstExactConversationUrl = nextUrls.find(url => /\/chat\/[^/?#]+\/[^/?#]+/i.test(url)) || "";
+      const nextChatUrl = existingHasExactConversation ? existing.chatUrl : (firstExactConversationUrl || nextUrls[0] || chatUrl || `${location.origin}/chat/${id}`);
+
+      const next = {
+        ...existing,
+        id,
+        name: name || existing.name || id,
+        image: image || existing.image || "",
+        creator: existing.creator || "",
+        description: description || existing.description || "",
+        lastMessagePreview: lastMessagePreview || existing.lastMessagePreview || "",
+        messageCount: Math.max(messageCount, Number(existing.messageCount || 0) || 0),
+        chatUrl: nextChatUrl,
+        chatUrls: nextUrls,
+        profileUrl: existing.profileUrl || `${location.origin}/chatbot/${id}`,
+        savedAt: existing.savedAt || Date.now(),
+        lastSeenAt: Date.now(),
+        cardMetaCaptured: true,
+        apiMetaCaptured: true
+      };
+
+      const before = JSON.stringify(existing);
+      DS.state.openedChatMeta[id] = next;
+      if (before !== JSON.stringify(next)) metadataChanged = true;
+      if (!openedChats.has(id)) {
+        openedChats.add(id);
+        added++;
+      }
+    }
+
+    return { added, conversations, metadataChanged };
   }
 
   function getCardCreator(card) {
@@ -127,16 +332,54 @@
 
   function updateLoadAllButton() {
     const button = document.getElementById("ds-qol-load-all-chats");
+    const progress = document.getElementById("ds-qol-load-all-status");
     const state = loadAllState();
 
-    if (!button) return;
+    if (button) {
+      const baselineReady = !!DS.state.chatImportBaselineReady;
+      const idleLabel = baselineReady ? "Refresh chats" : "Load all";
+      DS.setTextIfChanged?.(button, state.running ? "Stop loading" : idleLabel);
+      button.setAttribute("aria-busy", state.running ? "true" : "false");
+      button.title = state.running
+        ? "QoL is importing conversations through SpicyChat's API. The visible chat cards stay small for performance."
+        : baselineReady
+          ? "Fetch only the newest conversation pages until QoL reaches already-known chat history."
+          : "Import all conversations through SpicyChat's API without mounting thousands of extra chat cards.";
+    }
 
-    DS.setTextIfChanged?.(button, state.running ? "Stop loading" : "Load all");
+    const fullRescan = document.getElementById("ds-qol-full-rescan-chats");
+    if (fullRescan) {
+      const show = !!DS.state.chatImportBaselineReady && !state.running;
+      fullRescan.style.display = show ? "inline-flex" : "none";
+      fullRescan.disabled = !!state.running;
+      fullRescan.title = "Reread the entire conversation history from page 1 to repair or rebuild imported chat data.";
+    }
+
+    if (progress) {
+      const showProgress = !!state.statusText && (state.running || Date.now() < Number(state.statusVisibleUntil || 0));
+      DS.setTextIfChanged?.(progress, state.statusText || "");
+      progress.style.display = showProgress ? "block" : "none";
+    }
   }
 
   function setLoadAllStatus(text, sticky = true) {
-    DS.setQuickStatus?.(text, sticky);
+    const state = loadAllState();
+    state.statusText = String(text || "");
+    state.statusVisibleUntil = state.running || sticky ? Number.MAX_SAFE_INTEGER : Date.now() + 10000;
+
+    // Keep the normal Quick Panel status in sync when the user has it enabled,
+    // but Load all also owns a dedicated progress line so disabling the generic
+    // status can never make a long-running API import look frozen/broken.
+    DS.setQuickStatus?.(state.statusText, sticky);
     updateLoadAllButton();
+
+    clearTimeout(state.statusHideTimer);
+    if (!state.running && !sticky && state.statusText) {
+      state.statusHideTimer = setTimeout(() => {
+        state.statusVisibleUntil = 0;
+        updateLoadAllButton();
+      }, 10050);
+    }
   }
 
   DS.findLoadMoreButton = function findLoadMoreButton() {
@@ -269,7 +512,7 @@
     return { added, visible };
   };
 
-  DS.startLoadAllChats = async function startLoadAllChats(userInitiated = false) {
+  DS.startLoadAllChats = async function startLoadAllChats(userInitiated = false, options = {}) {
     const { settings } = DS.state;
 
     if (!userInitiated) return;
@@ -281,6 +524,10 @@
 
     const state = loadAllState();
 
+    const importState = await readChatImportState();
+    const forceFullRescan = !!options?.forceFullRescan;
+    const refreshMode = !!importState.fullImportCompletedAt && !forceFullRescan;
+
     state.running = true;
     state.userStarted = true;
     state.cancel = false;
@@ -289,14 +536,30 @@
     state.importedTotal = 0;
     state.noChange = 0;
     state.lastBeforeLinks = DS.qsa("a[href*='/chat/']").length;
+    state.mode = "api";
+    state.apiPages = 0;
+    state.conversationsImported = 0;
+    state.cursor = "";
+    state.dirty = false;
+    state.refreshMode = refreshMode;
+    state.forceFullRescan = forceFullRescan;
+    state.knownConversationIds = knownConversationIds();
+    state.refreshBoundaryReached = false;
+    state.newConversationsSeen = 0;
+    state.diagRunToken = DS.diagOperationStart?.("chat-import", refreshMode ? "incremental-refresh" : "full-import", {
+      knownConversations: state.knownConversationIds.size,
+      baselineAt: Number(importState.fullImportCompletedAt || 0)
+    }) || null;
 
-    await sendBackgroundMessage({
-      type: "DS_LOAD_ALL_CHATS_START"
-    });
+    if (typeof DS.fetchConversationListPage !== "function") {
+      await DS.finishLoadAllChats("API chat import is not available on this page yet. Reload /chats and try Load all again; QoL did not start native Load More.");
+      return;
+    }
 
-    setLoadAllStatus("Loading chats... You can switch tabs now.", true);
-
-    DS.runLoadAllChatsLoop?.();
+    setLoadAllStatus(refreshMode
+      ? "Refreshing recent chats by API... QoL will stop when it reaches already-known history."
+      : "Importing all chats by API... You can switch tabs; extra chat cards will not be mounted.", true);
+    Promise.resolve(DS.runLoadAllChatsApi?.()).catch(() => {});
   };
 
   DS.stopLoadAllChats = async function stopLoadAllChats() {
@@ -314,10 +577,68 @@
   DS.finishLoadAllChats = async function finishLoadAllChats(message) {
     const state = loadAllState();
 
+    if (state.dirty) {
+      setLoadAllStatus(`Saving ${DS.state.openedChats.size} imported bots...`, true);
+      const saveDiag = DS.diagOperationStart?.("chat-import", "save", {
+        botsStored: Number(DS.state.openedChats?.size || 0),
+        conversations: Number(state.conversationsImported || 0),
+        mode: state.refreshMode ? "incremental" : "full"
+      }) || null;
+      let saveOk = false;
+      try {
+        await DS.saveOpenedChats?.({ skipBlockedCleanup: true });
+        state.dirty = false;
+        saveOk = true;
+      } catch {}
+      DS.diagOperationEnd?.(saveDiag, {
+        scanned: Number(state.conversationsImported || 0),
+        changed: saveOk ? Number(state.importedTotal || 0) : 0,
+        skipped: 0,
+        errors: saveOk ? 0 : 1,
+        outcome: saveOk ? "ok" : "failed"
+      });
+    }
+
+    const completedNormally = /^Done\./.test(String(message || ""));
+    if (completedNormally) {
+      const now = Date.now();
+      if (state.refreshMode) {
+        await writeChatImportState({
+          lastRefreshAt: now,
+          lastRefreshConversationCount: Number(state.conversationsImported || 0)
+        });
+      } else {
+        await writeChatImportState({
+          fullImportCompletedAt: now,
+          lastRefreshAt: now,
+          lastFullConversationCount: Number(state.conversationsImported || 0),
+          lastRefreshConversationCount: Number(state.conversationsImported || 0)
+        });
+      }
+    }
+
+    if (state.diagRunToken) {
+      DS.diagOperationEnd?.(state.diagRunToken, {
+        scanned: Number(state.conversationsImported || 0),
+        changed: Number(state.importedTotal || 0),
+        skipped: 0,
+        errors: completedNormally ? 0 : 1,
+        outcome: completedNormally ? "ok" : (state.cancel ? "stopped" : "incomplete"),
+        meta: {
+          pages: Number(state.apiPages || 0),
+          mode: state.refreshMode ? "incremental" : "full",
+          botsStored: Number(DS.state.openedChats?.size || 0),
+          newConversations: Number(state.newConversationsSeen || 0)
+        }
+      });
+      state.diagRunToken = null;
+    }
+
     state.running = false;
     state.userStarted = false;
     state.cancel = false;
     state.stepping = false;
+    state.mode = "";
 
     await sendBackgroundMessage({
       type: "DS_LOAD_ALL_CHATS_DONE"
@@ -325,6 +646,162 @@
 
     setLoadAllStatus(message, false);
     DS.updateQuickPanel?.();
+  };
+
+  DS.runLoadAllChatsApi = async function runLoadAllChatsApi() {
+    const state = loadAllState();
+    if (!state.running || state.mode !== "api" || state.stepping) return;
+    state.stepping = true;
+
+    const pageLimit = 25;
+    const maxPages = 500;
+    let firstPage = state.apiPages === 0;
+
+    try {
+      try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+
+      while (state.running && state.mode === "api" && !state.cancel) {
+        if (state.apiPages >= maxPages) {
+          await DS.finishLoadAllChats(
+            `Stopped at the API safety limit. Imported ${state.conversationsImported} conversations; ${DS.state.openedChats.size} bots stored.`
+          );
+          return;
+        }
+
+        setLoadAllStatus(
+          `${state.refreshMode ? "Refreshing" : "Importing"} chat page ${state.apiPages + 1}... ${state.conversationsImported} conversations · ${DS.state.openedChats.size} bots stored.`,
+          true
+        );
+
+        const pageNumber = state.apiPages + 1;
+        const pageDiag = DS.diagOperationStart?.("chat-import", "page", {
+          page: pageNumber,
+          mode: state.refreshMode ? "incremental" : "full"
+        }) || null;
+        let response = null;
+        let lastError = null;
+        let coordinatorWaitMs = 0;
+        const pageStartedAt = performance.now?.() || Date.now();
+        for (let attempt = 0; attempt < 2; attempt++) {
+          let lease = null;
+          try {
+            lease = await acquireBackgroundJob("chat-import", { maxHoldMs: 30000, detail: `page-${pageNumber}` });
+            coordinatorWaitMs += Number(lease?.waitMs || 0);
+            response = await DS.fetchConversationListPage({ limit: pageLimit, lastId: state.cursor || "" });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (attempt === 0 && !state.cancel) {
+              await new Promise(resolve => setTimeout(resolve, Number(error?.httpStatus || 0) === 429 ? 1200 : 500));
+            }
+          } finally {
+            if (lease?.leaseId) await releaseBackgroundJob(lease.leaseId);
+          }
+        }
+        const pageElapsedMs = Math.max(0, (performance.now?.() || Date.now()) - pageStartedAt);
+
+        if (lastError || !response?.ok || !Array.isArray(response?.data)) {
+          throw lastError || new Error("conversation list API returned no chat list");
+        }
+
+        const rows = response.data;
+        firstPage = false;
+        if (!rows.length) {
+          DS.diagOperationEnd?.(pageDiag, { scanned: 0, changed: 0, skipped: 0, errors: 0, outcome: "empty", meta: { page: pageNumber, coordinatorWaitMs, pageElapsedMs } });
+          await DS.finishLoadAllChats(
+            state.refreshMode
+              ? `Done. Checked ${state.conversationsImported} recent conversations · ${state.newConversationsSeen} new. ${DS.state.openedChats.size} bots stored.`
+              : `Done. Imported ${state.conversationsImported} conversations without mounting extra chat cards. ${DS.state.openedChats.size} bots stored.`
+          );
+          return;
+        }
+
+        let previouslyKnownRows = 0;
+        let newlySeenConversationIds = 0;
+        for (const row of rows) {
+          const conversationId = String(row?.id || "").trim().toLowerCase();
+          if (!conversationId) continue;
+          if (state.knownConversationIds.has(conversationId)) previouslyKnownRows += 1;
+          else {
+            state.knownConversationIds.add(conversationId);
+            newlySeenConversationIds += 1;
+          }
+        }
+
+        const imported = importConversationApiRows(rows);
+        state.importedTotal += imported.added;
+        state.conversationsImported += imported.conversations;
+        state.newConversationsSeen += newlySeenConversationIds;
+        state.apiPages++;
+        if (imported.added || imported.metadataChanged) state.dirty = true;
+        DS.diagOperationEnd?.(pageDiag, {
+          scanned: Number(rows.length || 0),
+          changed: Number(newlySeenConversationIds || 0),
+          skipped: Number(previouslyKnownRows || 0),
+          errors: 0,
+          outcome: "ok",
+          meta: {
+            page: pageNumber,
+            mode: state.refreshMode ? "incremental" : "full",
+            coordinatorWaitMs,
+            pageElapsedMs: Math.round(pageElapsedMs * 10) / 10,
+            apiElapsedMs: Number(response?.elapsedMs || 0),
+            newConversationIds: newlySeenConversationIds,
+            knownRows: previouslyKnownRows
+          }
+        });
+
+        if (state.refreshMode && newlySeenConversationIds === 0 && previouslyKnownRows === rows.length) {
+          state.refreshBoundaryReached = true;
+          await DS.finishLoadAllChats(
+            `Done. Checked ${state.conversationsImported} recent conversations · ${state.newConversationsSeen} new · stopped at already-known history. ${DS.state.openedChats.size} bots stored.`
+          );
+          return;
+        }
+
+        const last = rows[rows.length - 1] || {};
+        const nextCursor = String(last.character_id || last?.character?.id || "").trim().toLowerCase();
+        const finished = rows.length < pageLimit || !nextCursor || nextCursor === state.cursor;
+        state.cursor = nextCursor;
+
+        setLoadAllStatus(
+          `${state.refreshMode ? "Refreshed" : "Imported"} ${state.conversationsImported} conversations · ${DS.state.openedChats.size} bots stored. ${finished ? "Finishing..." : "Continuing in background..."}`,
+          true
+        );
+
+        if (finished) {
+          await DS.finishLoadAllChats(
+            `Done. ${state.refreshMode ? "Refreshed" : "Imported"} ${state.conversationsImported} conversations without mounting extra chat cards. ${DS.state.openedChats.size} bots stored.`
+          );
+          return;
+        }
+      }
+
+      if (state.cancel) {
+        await DS.finishLoadAllChats(
+          `Stopped. Imported ${state.conversationsImported} conversations; ${DS.state.openedChats.size} bots stored.`
+        );
+      }
+    } catch (error) {
+      console.warn(`[${DS.EXT_NAME}] API chat-list import failed`, error);
+      if (firstPage || state.apiPages === 0) {
+        const suffix = Number(error?.httpStatus || 0) === 401
+          ? " SpicyChat auth was not ready for the API request."
+          : "";
+        await DS.finishLoadAllChats(
+          `API chat import could not start.${suffix} Reload /chats or wait for it to finish signing in, then press Load all again. Native Load More was not started.`
+        );
+        return;
+      }
+
+      await DS.finishLoadAllChats(
+        `Paused after ${state.conversationsImported} conversations because the chat API stopped responding. Saved what was imported; press Load all to retry.`
+      );
+    } finally {
+      state.stepping = false;
+      updateLoadAllButton();
+    }
   };
 
   DS.loadAllChatsStep = async function loadAllChatsStep(source = "content") {
@@ -479,7 +956,13 @@
       return;
     }
 
-    await DS.startLoadAllChats(true);
+    await DS.startLoadAllChats(true, { forceFullRescan: false });
+  };
+
+  DS.manualFullRescanChatsAndImport = async function manualFullRescanChatsAndImport() {
+    const state = loadAllState();
+    if (state.running) return;
+    await DS.startLoadAllChats(true, { forceFullRescan: true });
   };
 
   let openedCurrentSaveTimer = null;
@@ -658,6 +1141,17 @@
     state.userStarted = false;
     state.cancel = false;
     state.stepping = false;
+    state.mode = "";
+    state.cursor = "";
+    state.dirty = false;
+    state.refreshMode = false;
+    state.forceFullRescan = false;
+    state.knownConversationIds = new Set();
+    state.refreshBoundaryReached = false;
+    if (state.diagRunToken) {
+      DS.diagOperationEnd?.(state.diagRunToken, { scanned: 0, changed: 0, skipped: 0, errors: 0, outcome: "route-reset" });
+      state.diagRunToken = null;
+    }
     updateLoadAllButton();
     sendBackgroundMessage({ type: "DS_LOAD_ALL_CHATS_STOP" });
   };
@@ -683,6 +1177,12 @@
 
     if (!state.running) return;
 
+    if (state.mode === "api") {
+      // API import does not depend on DOM growth or browser alarm pacing, so it
+      // keeps running normally in a background tab.
+      return;
+    }
+
     if (document.hidden) {
       sendBackgroundMessage({
         type: "DS_LOAD_ALL_CHATS_RESCHEDULE"
@@ -693,6 +1193,11 @@
       }, 300);
     }
   });
+
+  readChatImportState().then(() => {
+    updateLoadAllButton();
+    DS.updateQuickPanel?.();
+  }).catch(() => {});
 
   const oldUpdateQuickPanel = DS.updateQuickPanel;
 

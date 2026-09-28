@@ -24,6 +24,8 @@
   const HISTORY_RESPONSE_EVENT = "ds-qol-chat-history-response-v1";
   const HISTORY_NATIVE_REQUEST_EVENT = "ds-qol-chat-history-native-request-v1";
   const HISTORY_NATIVE_RESPONSE_EVENT = "ds-qol-chat-history-native-response-v1";
+  const CONVERSATION_LIST_REQUEST_EVENT = "ds-qol-conversation-list-request-v1";
+  const CONVERSATION_LIST_RESPONSE_EVENT = "ds-qol-conversation-list-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
   const FEEDBACK_REQUEST_EVENT = "ds-qol-character-feedback-request-v1";
   const FEEDBACK_RESPONSE_EVENT = "ds-qol-character-feedback-response-v1";
@@ -57,6 +59,18 @@
   const clean = value => String(value || "").trim();
   const isJwt = value => /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(clean(value));
   const isGuest = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean(value));
+
+  // The guest/user identity is stored by SpicyChat itself and is available
+  // before the React app finishes booting. Using it here lets a cached Less
+  // Like signing token make the lightweight /chats worker ready without
+  // waiting for a full Home listing render.
+  try {
+    const storedGuest = clean(localStorage.getItem("guest_user_id"));
+    if (isGuest(storedGuest)) {
+      capturedGuest = storedGuest;
+      capturedAt = Date.now();
+    }
+  } catch {}
 
   function exposeCapturedAuthState() {
     try {
@@ -513,6 +527,116 @@
     }
   });
 
+
+
+  function conversationListSend(detail) {
+    try { window.dispatchEvent(new CustomEvent(CONVERSATION_LIST_RESPONSE_EVENT, { detail })); } catch {}
+  }
+
+  window.addEventListener(CONVERSATION_LIST_REQUEST_EVENT, async event => {
+    const detail = event?.detail || {};
+    if (!active) return;
+
+    const requestId = clean(detail.requestId);
+    const lastId = clean(detail.lastId).toLowerCase();
+    const requestedLimit = Math.floor(Number(detail.limit || 25));
+    const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 25));
+    if (!requestId) return;
+    if (lastId && !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lastId)) return;
+
+    const resolved = resolveAuth(detail);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const started = Date.now();
+
+    const runRequest = async ({ token, guest, authSource }) => {
+      const params = new URLSearchParams();
+      params.set("limit", String(limit));
+      params.set("sort", "latest");
+      if (lastId) params.set("last_id", lastId);
+
+      const headers = {
+        Accept: "application/json, text/plain, */*",
+        "x-app-id": "spicychat",
+        "x-platform": "WEB",
+        "x-platform-os": "DESKTOP"
+      };
+      const appVersion = clean(document.querySelector('meta[name="app-version"]')?.content || "");
+      if (appVersion) headers["x-app-version"] = appVersion;
+      if (isJwt(token) && token.length < MAX_TOKEN) headers.Authorization = `Bearer ${token}`;
+      if (isGuest(guest)) headers["x-guest-userid"] = guest;
+
+      const response = await nativeFetch(`https://prod.nd-api.com/v2/conversations?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers,
+        signal: controller.signal
+      });
+      const text = await response.text().catch(() => "");
+      return { response, text, headers, authSource, token, guest };
+    };
+
+    try {
+      let attempt = await runRequest(resolved);
+      let authRefreshes = 0;
+
+      if (attempt.response.status === 401 && attempt.authSource === "captured-main-world") {
+        capturedToken = "";
+        capturedAt = 0;
+        exposeCapturedAuthState();
+
+        const fallbackToken = clean(detail.authToken);
+        const fallbackGuest = isGuest(clean(detail.guestUserId)) ? clean(detail.guestUserId) : attempt.guest;
+        const fallbackSource = clean(detail.authSource) || "refreshed-isolated-world";
+        if (isJwt(fallbackToken) && fallbackToken !== attempt.token) {
+          authRefreshes++;
+          attempt = await runRequest({ token: fallbackToken, guest: fallbackGuest, authSource: fallbackSource });
+        }
+      }
+
+      const { response, text, headers, authSource } = attempt;
+      const elapsedMs = Date.now() - started;
+      if (!response.ok) {
+        conversationListSend({
+          requestId, ok: false, status: "http", httpStatus: response.status,
+          elapsedMs, authSource, authProvided: !!headers.Authorization, limit, authRefreshes
+        });
+        return;
+      }
+
+      let rows = null;
+      try { rows = JSON.parse(text); } catch {}
+      if (!Array.isArray(rows)) {
+        conversationListSend({
+          requestId, ok: false, status: "parse-failure", httpStatus: response.status,
+          elapsedMs, authSource, authProvided: !!headers.Authorization, limit, authRefreshes
+        });
+        return;
+      }
+
+      conversationListSend({
+        requestId, ok: true, status: "success", httpStatus: response.status,
+        elapsedMs, authSource, authProvided: !!headers.Authorization,
+        limit, authRefreshes, data: rows
+      });
+    } catch (error) {
+      conversationListSend({
+        requestId,
+        ok: false,
+        status: error?.name === "AbortError" ? "timeout" : "network-failure",
+        httpStatus: 0,
+        elapsedMs: Date.now() - started,
+        authSource: resolved.authSource,
+        authProvided: isJwt(resolved.token),
+        limit,
+        authRefreshes: 0,
+        error: clean(error?.message || error)
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   function feedbackSend(detail) {
     try { window.dispatchEvent(new CustomEvent(FEEDBACK_RESPONSE_EVENT, { detail })); } catch {}
@@ -1140,18 +1264,27 @@
       coalesced = true;
     } else {
       work = (async () => {
+        const availabilityStartedAt = Date.now();
         const availability = await checkCharacterAccessible(botId);
+        const availabilityMs = Math.max(0, Date.now() - availabilityStartedAt);
         if (!availability?.ok) {
           return {
             ...availability,
             characterId: botId,
             attempts: 0,
             networkAttempts: 0,
-            requestSent: false
+            requestSent: false,
+            availabilityMs,
+            availabilityHttpStatus: Number(availability?.httpStatus || 0),
+            userLookupMs: 0,
+            ratingMs: 0,
+            ratingHttpStatus: 0
           };
         }
 
+        const userLookupStartedAt = Date.now();
         const userId = currentRecombeeUserId();
+        const userLookupMs = Math.max(0, Date.now() - userLookupStartedAt);
         if (!userId) {
           return {
             ok: false,
@@ -1164,14 +1297,26 @@
             availabilityNetworkAttempts: Number(availability.availabilityNetworkAttempts || 0),
             availabilityConfirmed: true,
             requestSent: false,
-            characterId: botId
+            characterId: botId,
+            availabilityMs,
+            availabilityHttpStatus: Number(availability?.httpStatus || 0),
+            userLookupMs,
+            ratingMs: 0,
+            ratingHttpStatus: 0
           };
         }
+        const ratingStartedAt = Date.now();
         const result = await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        const ratingMs = Math.max(0, Date.now() - ratingStartedAt);
         return {
           ...result,
           availabilityNetworkAttempts: Number(availability.availabilityNetworkAttempts || 0),
-          availabilityConfirmed: true
+          availabilityConfirmed: true,
+          availabilityMs,
+          availabilityHttpStatus: Number(availability?.httpStatus || 0),
+          userLookupMs,
+          ratingMs,
+          ratingHttpStatus: Number(result?.httpStatus || 0)
         };
       })();
       recombeeFeedbackInFlight.set(botId, work);
@@ -1201,6 +1346,11 @@
       characterId: clean(result?.characterId || botId),
       publicToken: plausibleRecombeeToken(result?.publicToken || ""),
       tokenSource: clean(result?.tokenSource || ""),
+      availabilityMs: Number(result?.availabilityMs || 0),
+      availabilityHttpStatus: Number(result?.availabilityHttpStatus || 0),
+      userLookupMs: Number(result?.userLookupMs || 0),
+      ratingMs: Number(result?.ratingMs || 0),
+      ratingHttpStatus: Number(result?.ratingHttpStatus || 0),
       elapsedMs: Date.now() - started,
       coalesced,
       executor: "direct-recombee-api"

@@ -612,6 +612,7 @@
   const RECOMBEE_PUBLIC_TOKEN_CACHE_KEY = "dsQolRecombeePublicTokenCache";
   const RECOMBEE_PUBLIC_TOKEN_CACHE_MS = 24 * 60 * 60 * 1000;
   const directFeedbackInFlight = new Map();
+  const lessLikeRunDiagTokens = new Map();
 
   function plausiblePublicToken(value) {
     const token = String(value || "").trim();
@@ -658,6 +659,27 @@
     } catch {}
   }
 
+  function settleRecommendationWorkerPresentation() {
+    if (!DS.state.recommendationWorker) return;
+    try {
+      document.documentElement?.setAttribute("data-ds-qol-recommendation-worker-settled", "1");
+      if (!document.getElementById("ds-qol-recommendation-worker-style")) {
+        const style = document.createElement("style");
+        style.id = "ds-qol-recommendation-worker-style";
+        style.textContent = `
+          html[data-ds-qol-recommendation-worker-settled="1"] body { overflow: hidden !important; }
+          html[data-ds-qol-recommendation-worker-settled="1"] #root {
+            content-visibility: hidden !important;
+            contain: strict !important;
+            pointer-events: none !important;
+            user-select: none !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+    } catch {}
+  }
+
   async function probeRecommendationWorker() {
     if (!DS.state.quickLessLikeWorker || !DS.state.recommendationWorker) {
       return { ok: false, ready: false, status: "not-recommendation-worker" };
@@ -672,6 +694,7 @@
         settled = true;
         clearTimeout(timer);
         window.removeEventListener(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, onResponse);
+        if (value?.ready) settleRecommendationWorkerPresentation();
         resolve(value || { ok: false, ready: false, status: "worker-probe-empty" });
       };
       const onResponse = event => {
@@ -705,6 +728,8 @@
     if (existing) return existing;
 
     const operation = DS.diagOperationStart?.("quick-less-like", "direct-api", { botId, mode });
+    const availabilityNetwork = DS.diagNetworkStart?.("quick-less-like", "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { phase: "availability-preflight", botId });
+    const ratingNetwork = DS.diagNetworkStart?.("quick-less-like", "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });
     const work = (async () => {
       try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
       const preferredRecombeeToken = await cachedRecombeePublicToken();
@@ -756,7 +781,21 @@
         availabilityNetworkAttempts: Number(result?.availabilityNetworkAttempts || 0),
         availabilityConfirmed: !!result?.availabilityConfirmed,
         tokenSource: String(result?.tokenSource || ""),
-        requestSent: !!result?.requestSent
+        requestSent: !!result?.requestSent,
+        availabilityMs: Number(result?.availabilityMs || 0),
+        userLookupMs: Number(result?.userLookupMs || 0),
+        ratingMs: Number(result?.ratingMs || 0),
+        elapsedMs: Number(result?.elapsedMs || 0)
+      });
+      DS.diagNetworkEnd?.(availabilityNetwork, {
+        status: Number(result?.availabilityHttpStatus || result?.httpStatus || 0),
+        ok: !!result?.availabilityConfirmed,
+        outcome: result?.availabilityConfirmed ? "confirmed" : String(result?.stage || result?.status || "unknown")
+      });
+      DS.diagNetworkEnd?.(ratingNetwork, {
+        status: Number(result?.ratingHttpStatus || (result?.requestSent ? result?.httpStatus : 0) || 0),
+        ok: !!(result?.ok && result?.status === "less-liked"),
+        outcome: result?.requestSent ? String(result?.status || "unknown") : "not-sent"
       });
       return result;
     })();
@@ -800,6 +839,58 @@
     if (message?.type === "DS_QUICK_LESS_LIKE_WORKER_READY") {
       probeRecommendationWorker().then(sendResponse);
       return true;
+    }
+
+    if (message?.type === "DS_QUICK_LESS_LIKE_TIMING") {
+      const timing = message?.timing && typeof message.timing === "object" ? message.timing : {};
+      const token = DS.diagOperationStart?.("quick-less-like", "bulk-item-timing", { botId: String(message?.botId || "") });
+      DS.diagOperationEnd?.(token, {
+        scanned: 1,
+        changed: String(timing.status || "") === "less-liked" ? 1 : 0,
+        skipped: 0,
+        errors: ["less-liked", "unavailable", "already-handled"].includes(String(timing.status || "")) ? 0 : 1,
+        outcome: String(timing.status || "unknown"),
+        configuredDelayMs: Number(timing.configuredDelayMs || 0),
+        itemBeforeDelayMs: Number(timing.itemBeforeDelayMs || 0),
+        workerReadyMs: Number(timing.workerReadyMs || 0),
+        coordinatorWaitMs: Number(timing.coordinatorWaitMs || 0),
+        feedbackMs: Number(timing.feedbackMs || 0),
+        availabilityMs: Number(timing.availabilityMs || 0),
+        userLookupMs: Number(timing.userLookupMs || 0),
+        ratingMs: Number(timing.ratingMs || 0),
+        requestElapsedMs: Number(timing.requestElapsedMs || 0),
+        historyPersistMs: Number(timing.historyPersistMs || 0),
+        backgroundTotalMs: Number(timing.backgroundTotalMs || timing.totalMs || 0),
+        totalMs: Number(timing.totalMs || timing.itemBeforeDelayMs || 0),
+        networkAttempts: Number(timing.networkAttempts || 0)
+      });
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "DS_QUICK_LESS_LIKE_RUN_TIMING") {
+      const runId = String(message?.runId || "");
+      const phase = String(message?.phase || "");
+      const timing = message?.timing && typeof message.timing === "object" ? message.timing : {};
+      const meta = message?.meta && typeof message.meta === "object" ? message.meta : {};
+      if (phase === "start") {
+        const token = DS.diagOperationStart?.("quick-less-like", "bulk-run", { runId, ...meta, ...timing });
+        if (token && runId) lessLikeRunDiagTokens.set(runId, token);
+      } else if (phase === "end") {
+        const token = lessLikeRunDiagTokens.get(runId) || null;
+        if (runId) lessLikeRunDiagTokens.delete(runId);
+        DS.diagOperationEnd?.(token, {
+          scanned: Number(meta.processed || 0),
+          changed: Number(meta.sent || 0),
+          skipped: Number(meta.unavailable || 0),
+          errors: Number(meta.failed || 0),
+          outcome: meta.stopped ? "stopped" : "completed",
+          totalRunMs: Number(timing.totalRunMs || 0),
+          ...meta
+        });
+      }
+      sendResponse({ ok: true });
+      return false;
     }
 
     if (message?.type === "DS_DIRECT_CHARACTER_FEEDBACK") {

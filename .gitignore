@@ -36,3 +36,5 @@ Thumbs.db
 /dev_build
 SETUP-NOTES.md
 REPLACE_THESE_FILES.txt
+APPLY-QOL14-HOTFIX.bat
+apply_qol14_patch.py

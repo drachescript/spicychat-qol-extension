@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -25,7 +25,11 @@
         "https://spicychat.ai/chat/*",
         "https://www.spicychat.ai/chat/*",
         "https://spicychat.ai/*/chat/*",
-        "https://www.spicychat.ai/*/chat/*"
+        "https://www.spicychat.ai/*/chat/*",
+        "https://spicychat.ai/chats*",
+        "https://www.spicychat.ai/chats*",
+        "https://spicychat.ai/*/chats*",
+        "https://www.spicychat.ai/*/chats*"
       ],
       "js": [
         "content/card-token-main.js"
@@ -207,5 +211,5 @@
     "downloads",
     "notifications"
   ],
-  "version_name": "0.2.19"
+  "version_name": "0.2.20"
 }
