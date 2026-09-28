@@ -668,6 +668,28 @@
     };
   }
 
+  function publicMetadataFromApiCharacter(sc) {
+    const value = sc && typeof sc === "object" ? sc : {};
+    const creatorValue = value.creator_username || value.creatorUsername || value.creator_name || value.creatorName || value.author || value.creator || "";
+    const creator = typeof creatorValue === "string"
+      ? creatorValue
+      : (creatorValue?.username || creatorValue?.name || creatorValue?.handle || "");
+    const tagsValue = value.tags || value.tag_names || value.tagNames || value.categories || [];
+    const tags = Array.isArray(tagsValue)
+      ? [...new Set(tagsValue.map(tag => cleanText(typeof tag === "string" ? tag : tag?.name || tag?.label || tag?.title || "")).filter(Boolean))].join(", ")
+      : cleanText(tagsValue);
+    return {
+      characterId: cleanText(value.id || value.uuid || value.character_id || value.characterId || value.chatbot_id || value.chatbotId || ""),
+      name: cleanText(value.name || value.character_name || value.characterName || value.chatbot_name || value.chatbotName || ""),
+      title: cleanText(value.title || value.subtitle || value.headline || ""),
+      description: cleanText(value.description || value.short_description || value.shortDescription || value.title || ""),
+      creator: cleanText(creator),
+      image: cleanText(value.avatar || value.avatar_url || value.avatarUrl || value.image || value.image_url || value.imageUrl || value.thumbnail || ""),
+      tags,
+      visibility: cleanText(value.visibility || value.privacy || value.publish_status || value.publishStatus || "")
+    };
+  }
+
   function characterPayload(data) {
     if (!data || typeof data !== "object") return null;
     const direct = data?.data && typeof data.data === "object" ? data.data : data;
@@ -685,7 +707,7 @@
     return direct;
   }
 
-  async function fetchProfileApi(botId, card, forceAuth = false) {
+  async function fetchProfileApi(botId, card, forceAuth = false, includePublicMeta = false, requireGreeting = true) {
     const auth = await discoverSpicychatAuth(forceAuth);
     let mainError = null;
 
@@ -706,9 +728,9 @@
       const sc = characterPayload(data);
       if (!sc || typeof sc !== "object") throw new Error("main-world character API returned no character data");
       const fields = fieldsFromApiCharacter(sc, definitionVisibleFromCard(card));
-      if (!fields.greeting) throw new Error("main-world character API returned no greeting");
+      if (requireGreeting && !fields.greeting) throw new Error("main-world character API returned no greeting");
       DS.diagNetworkEnd?.(mainNet, { status: 200, ok: true, outcome: "main-world-success" });
-      return fields;
+      return includePublicMeta ? { ...fields, ...publicMetadataFromApiCharacter(sc) } : fields;
     } catch (error) {
       DS.diagNetworkEnd?.(mainNet, { status: Number(error?.httpStatus || 0), ok: false, outcome: error?.name === "AbortError" ? "timeout" : "main-world-failed" });
       mainError = error;
@@ -739,14 +761,17 @@
     if (!response.ok) {
       if (Number(response.httpStatus || 0) === 401) noteCharacterAuthRejected();
       const suffix = response.httpStatus ? ` HTTP ${response.httpStatus}` : "";
-      throw new Error(`${String(mainError?.message || mainError || "main-world API unavailable")}; background character API ${response.status || "failed"}${suffix}`);
+      const error = new Error(`${String(mainError?.message || mainError || "main-world API unavailable")}; background character API ${response.status || "failed"}${suffix}`);
+      error.httpStatus = Number(response.httpStatus || mainError?.httpStatus || 0);
+      error.bridgeStatus = String(response.status || "failed");
+      throw error;
     }
     state.characterAuthRejectedUntil = 0;
     const sc = characterPayload(response.data);
     if (!sc || typeof sc !== "object") throw new Error("character API returned no character data");
     const fields = fieldsFromApiCharacter(sc, definitionVisibleFromCard(card));
-    if (!fields.greeting) throw new Error("character API returned no greeting");
-    return fields;
+    if (requireGreeting && !fields.greeting) throw new Error("character API returned no greeting");
+    return includePublicMeta ? { ...fields, ...publicMetadataFromApiCharacter(sc) } : fields;
   }
 
   // Shared public-data helper for Local Bot Archive. This deliberately uses
@@ -760,6 +785,43 @@
     // Only start the page bridge when this request actually needs it.
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     return fetchProfileApi(id, null);
+  };
+
+  DS.fetchPublicCharacterFieldsDetailed = async function fetchPublicCharacterFieldsDetailed(botId) {
+    const id = String(botId || "").trim().toLowerCase();
+    if (!id) return { ok: false, status: "invalid-id", httpStatus: 0, fields: null };
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+
+    const attempt = async forceAuth => {
+      try {
+        const fields = await fetchProfileApi(id, null, forceAuth, true, false);
+        const returnedId = String(fields?.characterId || "").trim().toLowerCase();
+        if (returnedId && returnedId !== id) {
+          return { ok: false, status: "id-mismatch", httpStatus: 0, fields: null, reason: "Character API returned a different character ID." };
+        }
+        return { ok: true, status: "available", httpStatus: 200, fields: fields || {}, reason: "Character API returned live bot data." };
+      } catch (error) {
+        const message = String(error?.message || error || "");
+        const match = message.match(/HTTP\s+(\d{3})/i);
+        const httpStatus = Number(error?.httpStatus || match?.[1] || 0);
+        return { ok: false, status: "failed", httpStatus, fields: null, reason: message.slice(0, 300) };
+      }
+    };
+
+    let result = await attempt(false);
+    if (!result.ok && result.httpStatus === 401) result = await attempt(true);
+    if (result.ok) return result;
+    if ([404, 410].includes(result.httpStatus)) return { ...result, status: "unavailable" };
+    if (result.httpStatus === 403) return { ...result, status: "restricted" };
+    if (result.httpStatus === 429) return { ...result, status: "rate-limited" };
+    const reason = String(result.reason || "");
+    if (result.httpStatus === 401 || /auth(?:entication)?[^.;]{0,30}(?:unavailable|not ready)|no reusable auth/i.test(reason)) {
+      return { ...result, status: "auth-unavailable" };
+    }
+    if (/bridge[^.;]{0,30}(?:unavailable|timeout|not ready)/i.test(reason)) {
+      return { ...result, status: "api-bridge-not-ready" };
+    }
+    return { ...result, status: "unknown" };
   };
 
 

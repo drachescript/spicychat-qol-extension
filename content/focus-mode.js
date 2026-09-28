@@ -112,11 +112,11 @@
     const s = settings();
     const active = isActive() && featureAvailable();
 
-    root.classList.toggle(ROOT_ACTIVE, active);
-    root.classList.toggle(ROOT_HIDE_SIDEBAR, active && s.focusHideSidebar !== false);
-    root.classList.toggle(ROOT_HIDE_TOPBAR, active && s.focusHideTopBar !== false);
-    root.classList.toggle(ROOT_HIDE_CHAT_HEADER, active && s.focusHideChatHeader !== false);
-    root.classList.toggle(ROOT_HIDE_QOL, active && s.focusHideQolPanel !== false);
+    DS.setClassState?.(root, ROOT_ACTIVE, active);
+    DS.setClassState?.(root, ROOT_HIDE_SIDEBAR, active && s.focusHideSidebar !== false);
+    DS.setClassState?.(root, ROOT_HIDE_TOPBAR, active && s.focusHideTopBar !== false);
+    DS.setClassState?.(root, ROOT_HIDE_CHAT_HEADER, active && s.focusHideChatHeader !== false);
+    DS.setClassState?.(root, ROOT_HIDE_QOL, active && s.focusHideQolPanel !== false);
   }
 
   function ensureExitButton() {

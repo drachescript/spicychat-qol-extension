@@ -124,17 +124,17 @@
       : hexToRgba(settings.chatBubbleUserBackground || "#253f52", settings.chatBubbleUserOpacity));
     root.style.setProperty("--ds-chat-bubble-user-shadow", settings.chatBubbleUserShadow ? "0 6px 18px rgba(0,0,0,.28)" : "none");
 
-    root.setAttribute(ROOT_ATTR, "1");
-    root.setAttribute(AI_SHAPE_ATTR, normalizedShape(settings.chatBubbleAiShape));
-    root.setAttribute(USER_SHAPE_ATTR, normalizedShape(settings.chatBubbleUserShape));
-    root.setAttribute(AI_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleAiTextMode));
-    root.setAttribute(USER_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleUserTextMode));
-    root.setAttribute(AI_ACTION_MODE_ATTR, actionMode(settings, "chatBubbleAi"));
-    root.setAttribute(USER_ACTION_MODE_ATTR, actionMode(settings, "chatBubbleUser"));
-    root.setAttribute(AI_DIALOGUE_MODE_ATTR, normalizedSegmentMode(settings.chatBubbleAiDialogueMode, "base"));
-    root.setAttribute(USER_DIALOGUE_MODE_ATTR, normalizedSegmentMode(settings.chatBubbleUserDialogueMode, "base"));
-    root.setAttribute(AI_CAT_LAYOUT_ATTR, normalizedCatLayout(settings.chatBubbleAiCatEarLayout));
-    root.setAttribute(USER_CAT_LAYOUT_ATTR, normalizedCatLayout(settings.chatBubbleUserCatEarLayout));
+    DS.setAttributeIfChanged?.(root, ROOT_ATTR, "1");
+    DS.setAttributeIfChanged?.(root, AI_SHAPE_ATTR, normalizedShape(settings.chatBubbleAiShape));
+    DS.setAttributeIfChanged?.(root, USER_SHAPE_ATTR, normalizedShape(settings.chatBubbleUserShape));
+    DS.setAttributeIfChanged?.(root, AI_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleAiTextMode));
+    DS.setAttributeIfChanged?.(root, USER_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleUserTextMode));
+    DS.setAttributeIfChanged?.(root, AI_ACTION_MODE_ATTR, actionMode(settings, "chatBubbleAi"));
+    DS.setAttributeIfChanged?.(root, USER_ACTION_MODE_ATTR, actionMode(settings, "chatBubbleUser"));
+    DS.setAttributeIfChanged?.(root, AI_DIALOGUE_MODE_ATTR, normalizedSegmentMode(settings.chatBubbleAiDialogueMode, "base"));
+    DS.setAttributeIfChanged?.(root, USER_DIALOGUE_MODE_ATTR, normalizedSegmentMode(settings.chatBubbleUserDialogueMode, "base"));
+    DS.setAttributeIfChanged?.(root, AI_CAT_LAYOUT_ATTR, normalizedCatLayout(settings.chatBubbleAiCatEarLayout));
+    DS.setAttributeIfChanged?.(root, USER_CAT_LAYOUT_ATTR, normalizedCatLayout(settings.chatBubbleUserCatEarLayout));
   }
 
   function cleanup() {

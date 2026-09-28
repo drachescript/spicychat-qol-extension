@@ -252,8 +252,8 @@
     }
 
     DS.state.androidAppControlsWasActive = true;
-    document.documentElement.classList.add("ds-android-app-controls-active");
-    document.documentElement.classList.toggle("ds-android-hide-composer-shortcuts", !!s.androidTopBarMenu && s.androidHideComposerShortcuts !== false);
+    DS.setClassState?.(document.documentElement, "ds-android-app-controls-active", true);
+    DS.setClassState?.(document.documentElement, "ds-android-hide-composer-shortcuts", !!s.androidTopBarMenu && s.androidHideComposerShortcuts !== false);
 
     if (s.androidTopBarMenu) ensureButton();
     else {

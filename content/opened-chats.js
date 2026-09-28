@@ -113,7 +113,11 @@
       name: base.name || DS.getCardTitle?.(card) || id,
       image: base.image || DS.getCardImageUrl?.(card) || "",
       creator: base.creator || getCardCreator(card),
-      description: getCardDescription(card),
+      // /chat and /chats cards show the latest conversation message in the
+      // same visual area that normal discovery cards use for descriptions.
+      // Keep that preview separate so it can never become the bot description.
+      description: "",
+      lastMessagePreview: getCardDescription(card),
       chatUrl: base.chatUrl || (id ? `${location.origin}/chat/${id}` : anchor?.href || ""),
       profileUrl: base.profileUrl || (id ? `${location.origin}/chatbot/${id}` : ""),
       savedAt: base.savedAt || Date.now(),

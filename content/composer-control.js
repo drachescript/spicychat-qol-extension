@@ -205,12 +205,19 @@
     state.mobileActiveEditTextarea = textarea;
     const viewportHeight = Number(window.visualViewport?.height || window.innerHeight || 640);
     const maxHeight = Math.max(150, Math.min(360, Math.round(viewportHeight * 0.46)));
-    const wanted = Math.max(96, Math.min(maxHeight, textarea.scrollHeight + 2));
+
+    // Measure the textarea at its natural content height. Keeping the previous
+    // explicit pixel height in place can make scrollHeight include that stale
+    // size, causing the editor to ratchet taller on every input/delete and
+    // preventing it from shrinking again when text is removed.
+    textarea.style.height = "auto";
+    const naturalHeight = Math.max(0, Number(textarea.scrollHeight || 0)) + 2;
+    const wanted = Math.max(96, Math.min(maxHeight, naturalHeight || 96));
 
     DS.setClassState?.(textarea, "ds-mobile-message-edit-textarea", true);
-    if (textarea.style.height !== `${wanted}px`) textarea.style.height = `${wanted}px`;
+    textarea.style.height = `${wanted}px`;
     if (textarea.style.maxHeight !== `${maxHeight}px`) textarea.style.maxHeight = `${maxHeight}px`;
-    const overflow = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    const overflow = naturalHeight > maxHeight ? "auto" : "hidden";
     if (textarea.style.overflowY !== overflow) textarea.style.overflowY = overflow;
 
     const root = textarea.closest("div[id^='message-']");

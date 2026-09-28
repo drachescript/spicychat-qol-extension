@@ -653,6 +653,7 @@
     hideChatVoiceButton: false,
     hideUnlockCustomVoices: false,
 
+    stackChatMessages: false,
     showMessageQuickActions: false,
     messageQuickActionCopy: false,
     messageQuickActionEdit: false,

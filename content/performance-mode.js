@@ -11,6 +11,9 @@
   let listingPaintRevision = -1;
   let listingPaintKey = "";
   let listingPaintCards = new Set();
+  let menuCard = null;
+  let menuCleanupTimer = 0;
+  let menuHooksInstalled = false;
 
   function settings() {
     return DS.state?.settings || {};
@@ -63,7 +66,78 @@
   }
 
 
+
+  function clearNativeCardMenuState() {
+    clearTimeout(menuCleanupTimer);
+    menuCleanupTimer = 0;
+    if (menuCard?.classList) menuCard.classList.remove("ds-listing-card-menu-open");
+    menuCard = null;
+    document.querySelectorAll(".ds-native-card-actions-menu").forEach(menu => menu.classList.remove("ds-native-card-actions-menu"));
+  }
+
+  function markNativeCardActionsMenu(card) {
+    if (!card?.isConnected) return;
+    menuCard = card;
+    card.classList.add("ds-listing-card-menu-open");
+    const findMenu = () => {
+      const candidates = Array.from(document.querySelectorAll("button, [role='menuitem'], [role='option'], li, div"));
+      const item = candidates.find(el => String(el.textContent || "").trim().toLowerCase() === "less like this" && el.getClientRects().length);
+      if (!item) return;
+      let menu = item.closest?.('[role="menu"], [data-radix-menu-content], [data-menu-content]') || null;
+      if (!menu) {
+        let node = item.parentElement;
+        for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
+          const rect = node.getBoundingClientRect?.();
+          const text = String(node.textContent || "");
+          if (rect && rect.width > 80 && rect.width < 520 && rect.height < 900 && /Less Like This/i.test(text) && /(Report|Share|Block Creator|Less Like This)/i.test(text)) {
+            menu = node;
+            break;
+          }
+        }
+      }
+      menu?.classList?.add("ds-native-card-actions-menu");
+    };
+    [0, 50, 150].forEach(delay => setTimeout(findMenu, delay));
+    clearTimeout(menuCleanupTimer);
+    menuCleanupTimer = setTimeout(() => {
+      if (!document.querySelector(".ds-native-card-actions-menu")) clearNativeCardMenuState();
+    }, 5000);
+  }
+
+  function installNativeCardMenuHooks() {
+    if (menuHooksInstalled) return;
+    menuHooksInstalled = true;
+    document.addEventListener("click", event => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || target.closest?.("#ds-qol-panel")) return;
+      const card = target.closest?.(".ds-listing-card-lite") || (DS.collectCards?.() || []).find(item => item?.card?.contains?.(target))?.card || null;
+      if (!card) {
+        if (menuCard) setTimeout(() => {
+          if (!document.querySelector(".ds-native-card-actions-menu")) clearNativeCardMenuState();
+        }, 100);
+        return;
+      }
+      const button = target.closest?.("button");
+      const ellipsis = target.closest?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical") ||
+        button?.querySelector?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical");
+      const label = String(button?.getAttribute?.("aria-label") || button?.title || button?.dataset?.testid || "");
+      const isMore = !!ellipsis || /more|action|ellipsis|menu/i.test(label);
+      if (!isMore) {
+        if (menuCard) setTimeout(() => {
+          if (!document.querySelector(".ds-native-card-actions-menu")) clearNativeCardMenuState();
+        }, 100);
+        return;
+      }
+      clearNativeCardMenuState();
+      markNativeCardActionsMenu(card);
+    }, true);
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") clearNativeCardMenuState();
+    }, true);
+  }
+
   function clearListingClasses() {
+    clearNativeCardMenuState();
     DS.setClassState?.(document.documentElement, "ds-listing-performance", false);
     // Only touch cards this helper marked. A document-wide cleanup scan on a
     // large My Creations page defeats the point of the paint guard.
@@ -116,6 +190,7 @@
       if (!activeCards.has(card) && card?.classList) card.classList.remove("ds-listing-card-lite");
     }
     listingPaintCards = activeCards;
+    installNativeCardMenuHooks();
     DS.state.listingPerformanceWasActive = true;
   }
 

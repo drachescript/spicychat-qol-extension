@@ -473,6 +473,11 @@
   };
 
   DS.shouldHideCard = function shouldHideCard(card, anchor, context = {}) {
+    // The dedicated Less Like helper must be able to see the exact blocked bot
+    // it is processing. It runs in a hidden SpicyChat tab and does not affect
+    // the user's visible listings.
+    if (DS.state.quickLessLikeWorker) return null;
+
     const { settings, openedChats } = DS.state;
     const discoveryContext = !!context.discovery;
     const homeContext = !!context.home;
@@ -814,8 +819,10 @@
     if (!card) return null;
 
     const exactSelectors = [
+      ":scope > div[class*='px-2'][class*='py-3'] > div[class*='line-clamp-3'][class*='group-hover:line-clamp-none']",
       ":scope > div[class*='px-2'][class*='py-3'] > div[class*='line-clamp-2'][class*='group-hover:line-clamp-none']",
       ":scope > div[class*='px-2'][class*='py-3'] > div[class*='scrollbar-hide'][class*='overflow-y-auto']",
+      "div[class*='line-clamp-3'][class*='group-hover:line-clamp-none']",
       "div[class*='line-clamp-2'][class*='group-hover:line-clamp-none']",
       "div[class*='scrollbar-hide'][class*='overflow-y-auto']"
     ];
@@ -854,7 +861,7 @@
         const cls = DS.classText(el);
         const childCount = el.children?.length || 0;
         const score =
-          (cls.includes("line-clamp-2") ? 260 : 0) +
+          ((cls.includes("line-clamp-3") || cls.includes("line-clamp-2")) ? 260 : 0) +
           (cls.includes("group-hover:line-clamp-none") ? 180 : 0) +
           (cls.includes("scrollbar-hide") ? 120 : 0) +
           (cls.includes("overflow-y-auto") ? 80 : 0) +
@@ -897,6 +904,11 @@
       // Fall back to a text-length estimate below.
     }
 
+    const cls = DS.classText?.(block) || String(block.className || "");
+    // My Creations currently uses a three-line clamp with a fixed ~60px box.
+    // Some cards report equal client/scroll heights while React is settling, so
+    // use a slightly earlier text fallback for that layout.
+    if (cls.includes("line-clamp-3")) return text.length >= 68;
     return text.length >= 78;
   }
 

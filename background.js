@@ -25,6 +25,7 @@ const RELEASE_NOTICE_KEY = "dsReleaseNotice";
 const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
 const INSTALLED_VERSION_KEY = "dsLastInstalledVersion";
 const QUICK_DISLIKE_HISTORY_KEY = "quickDislikeHistoryV1";
+const QUICK_LESS_LIKE_HISTORY_KEY = "quickLessLikeHistoryV1";
 const QUICK_DISLIKE_ACTIVE_JOBS_KEY = "quickDislikeActiveJobsV1";
 const HELPER_LIFECYCLE_DIAG_KEY = "helperLifecycleDiagnosticsV1";
 const HELPER_RUNTIME_SESSION_KEY = "dsHelperRuntimeSessionIdV1";
@@ -76,12 +77,28 @@ const DUPLICATE_TAB_DEFAULTS = {
 
 let duplicateTabScanChain = Promise.resolve();
 let quickDislikeChain = Promise.resolve();
+let quickLessLikeChain = Promise.resolve();
 let creatorBotScanChain = Promise.resolve();
 let tabCleanupWorkerTabId = null;
 const tabCleanupWorkerTabIds = new Set();
 const quickDislikeWorkerTabIds = new Set();
 const quickDislikeBulkWorkerTabs = new Map();
 let quickDislikePersistentWorkerTabId = null;
+const quickLessLikeWorkerTabIds = new Set();
+const quickLessLikeBulkWorkerTabs = new Map();
+const quickLessLikeDirectBulkTabs = new Map();
+const quickLessLikeClosedBulkRuns = new Map();
+const quickLessLikeReadyWorkerTabs = new Map();
+let quickLessLikePersistentWorkerTabId = null;
+const QUICK_LESS_LIKE_RECOMMENDATION_WORKER_URL = "https://spicychat.ai/?dsQolRecommendationWorker=1";
+const QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY = "dsQuickLessLikeRecommendationWorkerTabId";
+const QUICK_LESS_LIKE_READY_TTL_MS = 10 * 60 * 1000;
+let botStatusWorkerTabId = null;
+let botStatusWorkerOwned = false;
+const botStatusWorkerTabIds = new Set();
+const BOT_STATUS_HOME_WORKER_URL = "https://spicychat.ai/?dsQolBotStatusWorker=1";
+const BOT_STATUS_WORKER_SESSION_TAB_KEY = "dsBotStatusWorkerTabId";
+const BOT_STATUS_WORKER_SESSION_OWNED_KEY = "dsBotStatusWorkerOwned";
 const listingRefillWorkerTabIds = new Set();
 const listingRefillPageWorkerTabs = new Map();
 const listingRefillSourceTabs = new Map();
@@ -90,6 +107,7 @@ const LISTING_REFILL_WORKER_MAX_AGE_MS = 30 * 60 * 1000;
 const LISTING_REFILL_WORKER_RESPONSE_MAX_MS = 45 * 1000;
 const personaRefreshWorkerTabIds = new Set();
 const canceledQuickDislikeBulkRuns = new Map();
+const canceledQuickLessLikeBulkRuns = new Map();
 let helperRuntimeSessionPromise = null;
 let helperLifecycleInitPromise = null;
 
@@ -112,6 +130,75 @@ function quickDislikeWorkerUrlInfo(url) {
 
 function isQuickDislikeWorkerUrl(url) {
   return !!quickDislikeWorkerUrlInfo(url);
+}
+
+function quickLessLikeWorkerUrlInfo(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!isSpicyChatUrl(parsed.href)) return null;
+    const recommendationWorker = parsed.searchParams.get("dsQolRecommendationWorker") === "1";
+    const legacyWorker = parsed.searchParams.get("dsQuickLessLike") === "1";
+    if (!recommendationWorker && !legacyWorker) return null;
+    return {
+      jobId: String(parsed.searchParams.get("dsLessLikeJobId") || "").trim(),
+      botId: String(parsed.searchParams.get("dsLessLikeBotId") || "").trim().toLowerCase(),
+      botName: String(parsed.searchParams.get("dsLessLikeBotName") || "").trim(),
+      bulkRunId: String(parsed.searchParams.get("dsLessLikeBulkRunId") || "").trim(),
+      startedAt: Number(parsed.searchParams.get("dsLessLikeStartedAt") || 0) || 0,
+      sessionId: String(parsed.searchParams.get("dsHelperSession") || "").trim(),
+      persistent: recommendationWorker || parsed.searchParams.get("dsLessLikePersistent") === "1",
+      recommendationWorker
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isQuickLessLikeWorkerUrl(url) {
+  return !!quickLessLikeWorkerUrlInfo(url);
+}
+
+function isSpicyChatHomeUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!isSpicyChatUrl(parsed.href)) return false;
+    const path = String(parsed.pathname || "/").replace(/\/+$/, "") || "/";
+    return path === "/";
+  } catch {
+    return false;
+  }
+}
+
+function isKnownQuickLessLikeRecommendationWorkerTab(tabId, url = "") {
+  const id = Number(tabId || 0);
+  if (!Number.isFinite(id) || !id || !isSpicyChatHomeUrl(url)) return false;
+  const info = quickLessLikeWorkerUrlInfo(url);
+  if (info?.recommendationWorker) return true;
+  if (quickLessLikeWorkerTabIds.has(id)) return true;
+  if (Number(quickLessLikePersistentWorkerTabId) === id) return true;
+  for (const workerTabId of quickLessLikeBulkWorkerTabs.values()) {
+    if (Number(workerTabId) === id) return true;
+  }
+  return false;
+}
+
+function stampQuickLessLikeWorkerUrl(url, { jobId = "", botId = "", botName = "", bulkRunId = "", startedAt = Date.now(), sessionId = "" } = {}) {
+  const next = new URL(String(url));
+  next.searchParams.set("dsQuickLessLike", "1");
+  next.searchParams.set("dsLessLikePersistent", "1");
+  const values = {
+    dsLessLikeJobId: String(jobId || "").trim(),
+    dsLessLikeBotId: String(botId || "").trim().toLowerCase(),
+    dsLessLikeBotName: String(botName || "").trim(),
+    dsLessLikeBulkRunId: String(bulkRunId || "").trim(),
+    dsHelperSession: String(sessionId || "").trim()
+  };
+  for (const [key, value] of Object.entries(values)) {
+    if (value) next.searchParams.set(key, value);
+    else next.searchParams.delete(key);
+  }
+  next.searchParams.set("dsLessLikeStartedAt", String(Number(startedAt) || Date.now()));
+  return next;
 }
 
 function stampQuickDislikeWorkerUrl(url, { jobId = "", botId = "", bulkRunId = "", startedAt = Date.now(), sessionId = "" } = {}) {
@@ -397,6 +484,583 @@ async function prepareQuickDislikeWorkerTab(url, bulkRunId = "", job = {}) {
   quickDislikePersistentWorkerTabId = tabId;
   if (runId) quickDislikeBulkWorkerTabs.set(runId, tabId);
   return { ok: true, tabId, reusable: true, reused: false, reusedWithoutReload: false, recovered: false, duplicateClosed: 0 };
+}
+
+function markQuickLessLikeBulkRunCanceled(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  const now = Date.now();
+  canceledQuickLessLikeBulkRuns.set(id, now);
+  for (const [key, at] of canceledQuickLessLikeBulkRuns.entries()) {
+    if (now - Number(at || 0) > 30 * 60 * 1000) canceledQuickLessLikeBulkRuns.delete(key);
+  }
+  return true;
+}
+
+function isQuickLessLikeBulkRunCanceled(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  const at = Number(canceledQuickLessLikeBulkRuns.get(id) || 0);
+  if (!at) return false;
+  if (Date.now() - at > 30 * 60 * 1000) {
+    canceledQuickLessLikeBulkRuns.delete(id);
+    return false;
+  }
+  return true;
+}
+
+async function quickLessLikeWorkerTabs() {
+  const tabs = await tabsQuery({});
+  return tabs.filter(tab => isQuickLessLikeWorkerUrl(tab?.url || tab?.pendingUrl || ""));
+}
+
+async function releaseQuickLessLikeBulkWorker(runId) {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  quickLessLikeDirectBulkTabs.delete(id);
+  quickLessLikeClosedBulkRuns.delete(id);
+  const tabIds = new Set();
+  const mapped = Number(quickLessLikeBulkWorkerTabs.get(id));
+  if (Number.isFinite(mapped)) tabIds.add(mapped);
+  quickLessLikeBulkWorkerTabs.delete(id);
+  for (const tab of await quickLessLikeWorkerTabs()) {
+    const info = quickLessLikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
+    if (info?.bulkRunId === id && tab?.id) tabIds.add(Number(tab.id));
+  }
+  let released = false;
+  for (const tabId of tabIds) {
+    quickLessLikeWorkerTabIds.delete(tabId);
+    quickLessLikeReadyWorkerTabs.delete(tabId);
+    await tabsRemove(tabId);
+    if (Number(tabId) === Number(quickLessLikePersistentWorkerTabId)) {
+      quickLessLikePersistentWorkerTabId = null;
+      await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 });
+    }
+    released = true;
+    await recordHelperLifecycle("quickLessLikeRecommendationWorkerReleased", { tabId, runId: id });
+  }
+  return released;
+}
+
+async function findPersistentQuickLessLikeWorker(sessionId = "") {
+  let mapped = Number(quickLessLikePersistentWorkerTabId);
+  if (!Number.isFinite(mapped) || !mapped) {
+    const stored = await storageSessionGet([QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]);
+    mapped = Number(stored[QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY] || 0);
+  }
+  if (Number.isFinite(mapped) && mapped > 0) {
+    const tab = await tabsGet(mapped);
+    const url = tab?.url || tab?.pendingUrl || "";
+    if (tab && isSpicyChatHomeUrl(url)) {
+      // Home replaces the helper query with listing-filter query params after boot.
+      // Keep using the known tab instead of mistaking that SPA rewrite for navigation.
+      quickLessLikeWorkerTabIds.add(mapped);
+      quickLessLikePersistentWorkerTabId = mapped;
+      await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: mapped });
+      return tab;
+    }
+    quickLessLikePersistentWorkerTabId = null;
+    await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 });
+  }
+
+  const tabs = await quickLessLikeWorkerTabs();
+  const candidates = [];
+  for (const tab of tabs) {
+    const info = quickLessLikeWorkerUrlInfo(tab.url || tab.pendingUrl || "");
+    if (!info?.persistent) continue;
+    if (sessionId && info.sessionId && info.sessionId !== sessionId) {
+      if (tab?.id) {
+        quickLessLikeWorkerTabIds.delete(Number(tab.id));
+        await tabsRemove(Number(tab.id));
+      }
+      continue;
+    }
+    candidates.push(tab);
+  }
+  candidates.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  const tab = candidates[0] || null;
+  if (tab?.id) {
+    const tabId = Number(tab.id);
+    quickLessLikeWorkerTabIds.add(tabId);
+    quickLessLikePersistentWorkerTabId = tabId;
+    await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: tabId });
+  }
+  return tab;
+}
+
+async function navigateQuickLessLikeWorkerTab(tabId, targetUrl, botId, botName, jobId) {
+  const response = await tabsSendMessage(tabId, {
+    type: "DS_QUICK_LESS_LIKE_NAVIGATE",
+    targetUrl: targetUrl.href,
+    botId,
+    botName,
+    jobId
+  });
+  return response?.ok === true;
+}
+
+async function prepareQuickLessLikeWorkerTab(url, bulkRunId = "", job = {}) {
+  const runId = String(bulkRunId || "").trim();
+  const runtimeSession = await getHelperRuntimeSession();
+  const jobId = String(job?.jobId || "").trim();
+  const botId = String(job?.botId || "").trim().toLowerCase();
+  const botName = String(job?.botName || "").trim();
+  const startedAt = Number(job?.startedAt || 0) || Date.now();
+  const stampedFor = source => stampQuickLessLikeWorkerUrl(source, {
+    jobId, botId, botName, bulkRunId: runId, startedAt, sessionId: runtimeSession.id
+  });
+
+  let existing = null;
+  if (runId) {
+    const mappedId = Number(quickLessLikeBulkWorkerTabs.get(runId));
+    if (Number.isFinite(mappedId)) existing = await tabsGet(mappedId);
+  }
+  if (!existing) existing = await findPersistentQuickLessLikeWorker(runtimeSession.id);
+
+  if (existing?.id) {
+    const existingId = Number(existing.id);
+    const target = stampedFor(url);
+    let reusedWithoutReload = false;
+    try { reusedWithoutReload = await navigateQuickLessLikeWorkerTab(existingId, target, botId, botName, jobId); } catch {}
+    if (!reusedWithoutReload) {
+      const updated = await tabsUpdate(existingId, { url: target.href, active: false });
+      if (!updated?.ok) {
+        quickLessLikeWorkerTabIds.delete(existingId);
+        if (Number(quickLessLikePersistentWorkerTabId) === existingId) quickLessLikePersistentWorkerTabId = null;
+        if (runId) quickLessLikeBulkWorkerTabs.delete(runId);
+        existing = null;
+      }
+    }
+    if (existing) {
+      quickLessLikeWorkerTabIds.add(existingId);
+      quickLessLikePersistentWorkerTabId = existingId;
+      if (runId) quickLessLikeBulkWorkerTabs.set(runId, existingId);
+      return { ok: true, tabId: existingId, reusable: true, reused: true, reusedWithoutReload };
+    }
+  }
+
+  const created = await tabsCreate({ url: stampedFor(url).href, active: false });
+  const tabId = Number(created?.tab?.id);
+  if (!created.ok || !Number.isFinite(tabId)) return { ok: false, tabId: null, reusable: true, error: created.error || "" };
+  quickLessLikeWorkerTabIds.add(tabId);
+  quickLessLikePersistentWorkerTabId = tabId;
+  if (runId) quickLessLikeBulkWorkerTabs.set(runId, tabId);
+  return { ok: true, tabId, reusable: true, reused: false, reusedWithoutReload: false };
+}
+
+function quickLessLikeSearchUrl(botName, botId) {
+  const url = new URL("https://spicychat.ai/");
+  const key = "public_characters_alias/sort/_text_match(buckets: 3):desc,num_messages_24h:desc[query]";
+  url.searchParams.set(key, String(botName || botId || "").trim());
+  return url;
+}
+
+function quickLessLikeRecommendationWorkerUrl() {
+  return new URL(QUICK_LESS_LIKE_RECOMMENDATION_WORKER_URL);
+}
+
+async function createOrReuseQuickLessLikeRecommendationWorker(runId = "") {
+  const id = String(runId || "").trim();
+  if (id && quickLessLikeClosedBulkRuns.has(id)) {
+    return { ok: false, status: "recommendation-worker-closed", tabId: 0 };
+  }
+  let tab = null;
+  const mapped = id ? Number(quickLessLikeBulkWorkerTabs.get(id) || 0) : 0;
+  if (Number.isFinite(mapped) && mapped > 0) tab = await tabsGet(mapped);
+  if (!tab) tab = await findPersistentQuickLessLikeWorker();
+  if (tab?.id) {
+    const tabId = Number(tab.id);
+    quickLessLikeWorkerTabIds.add(tabId);
+    quickLessLikePersistentWorkerTabId = tabId;
+    if (id) quickLessLikeBulkWorkerTabs.set(id, tabId);
+    const currentUrl = tab.url || tab.pendingUrl || "";
+    const info = quickLessLikeWorkerUrlInfo(currentUrl);
+    const knownWorkerHome = isKnownQuickLessLikeRecommendationWorkerTab(tabId, currentUrl);
+    if (!info?.recommendationWorker && !knownWorkerHome) {
+      const updated = await tabsUpdate(tabId, { url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+      if (!updated?.ok) return { ok: false, status: "recommendation-worker-navigation-failed", tabId };
+      quickLessLikeReadyWorkerTabs.delete(tabId);
+      await recordHelperLifecycle("quickLessLikeRecommendationWorkerResetHome", { tabId, runId: id });
+    } else {
+      await recordHelperLifecycle("quickLessLikeRecommendationWorkerReused", { tabId, runId: id });
+    }
+    await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: tabId });
+    return { ok: true, status: "recommendation-worker-available", tabId };
+  }
+  const created = await tabsCreate({ url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+  const tabId = Number(created?.tab?.id || 0);
+  if (!created?.ok || !Number.isFinite(tabId) || !tabId) {
+    return { ok: false, status: "recommendation-worker-create-failed", tabId: 0, error: created?.error || "" };
+  }
+  quickLessLikeWorkerTabIds.add(tabId);
+  quickLessLikePersistentWorkerTabId = tabId;
+  if (id) quickLessLikeBulkWorkerTabs.set(id, tabId);
+  await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: tabId });
+  await recordHelperLifecycle("quickLessLikeRecommendationWorkerCreated", { tabId, runId: id });
+  return { ok: true, status: "recommendation-worker-created", tabId };
+}
+
+async function probeQuickLessLikeRecommendationWorker(tabId, force = false, timeoutMs = 12000) {
+  const id = Number(tabId || 0);
+  if (!Number.isFinite(id) || !id) return { ok: false, ready: false, status: "recommendation-worker-missing" };
+  const cachedAt = Number(quickLessLikeReadyWorkerTabs.get(id) || 0);
+  if (!force && cachedAt && Date.now() - cachedAt < QUICK_LESS_LIKE_READY_TTL_MS) {
+    return { ok: true, ready: true, status: "recommendation-worker-ready", cached: true, tabId: id };
+  }
+  const deadline = Date.now() + Math.max(2000, Number(timeoutMs || 12000));
+  let last = null;
+  while (Date.now() < deadline) {
+    const tab = await tabsGet(id);
+    if (!tab) return { ok: false, ready: false, status: "recommendation-worker-closed", tabId: id };
+    const currentUrl = tab.url || tab.pendingUrl || "";
+    if (!isKnownQuickLessLikeRecommendationWorkerTab(id, currentUrl)) {
+      return { ok: false, ready: false, status: "recommendation-worker-wrong-page", tabId: id };
+    }
+    const response = await tabsSendMessage(id, { type: "DS_QUICK_LESS_LIKE_WORKER_READY" });
+    if (response) last = response;
+    if (response?.ready) {
+      quickLessLikeReadyWorkerTabs.set(id, Date.now());
+      await recordHelperLifecycle("quickLessLikeRecommendationWorkerReady", {
+        tabId: id,
+        nativeSignedSamples: Number(response?.nativeSignedSamples || 0),
+        candidateTokenCount: Number(response?.candidateTokenCount || 0),
+        recombeeValidated: !!response?.recombeeValidated,
+        tokenSource: String(response?.tokenSource || "")
+      });
+      return { ...response, tabId: id };
+    }
+    if (["not-recommendation-worker", "not-worker"].includes(String(response?.status || ""))) {
+      return { ...response, ok: false, ready: false, tabId: id };
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return {
+    ...(last || {}), ok: false, ready: false, status: "recommendation-worker-not-ready", tabId: id,
+    reason: String(last?.reason || "SpicyChat Home did not expose a ready recommendation/auth context in time.")
+  };
+}
+
+async function ensureQuickLessLikeRecommendationWorker(runId = "", { allowReload = true } = {}) {
+  const worker = await createOrReuseQuickLessLikeRecommendationWorker(runId);
+  if (!worker?.ok) return worker;
+  const tabId = Number(worker.tabId || 0);
+  let ready = await probeQuickLessLikeRecommendationWorker(tabId, false);
+  if (ready?.ready) return { ...ready, ok: true, tabId };
+  if (!allowReload || ready?.status === "recommendation-worker-closed") return ready;
+
+  // Do not throw away a healthy Home runtime just because token discovery is
+  // still finishing. A native signed Recombee sample, usable auth/user state,
+  // or discovered candidates all prove that the helper itself is alive. Give
+  // that same page a short extra window instead of paying for another complete
+  // SpicyChat startup (OAuth, settings, banners, queue, etc.).
+  const hasRecommendationEvidence = !!(
+    Number(ready?.nativeSignedSamples || 0) > 0 ||
+    Number(ready?.candidateTokenCount || 0) > 0 ||
+    ready?.recombeeValidated
+  );
+  if (hasRecommendationEvidence) {
+    const extended = await probeQuickLessLikeRecommendationWorker(tabId, true, 5000);
+    if (extended?.ready) return { ...extended, ok: true, tabId };
+    // A reload would discard the native signed request we can use to verify the
+    // real token offline. Preserve this worker and report not-ready instead of
+    // rebooting SpicyChat and falling back to blind candidate POSTs.
+    return { ...(extended || ready), ok: false, ready: false, tabId };
+  }
+
+  const tab = await tabsGet(tabId);
+  if (!tab) return { ok: false, ready: false, status: "recommendation-worker-closed", tabId };
+  const reset = await tabsUpdate(tabId, { url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+  if (!reset?.ok) return { ok: false, ready: false, status: "recommendation-worker-navigation-failed", tabId };
+  quickLessLikeReadyWorkerTabs.delete(tabId);
+  await recordHelperLifecycle("quickLessLikeRecommendationWorkerReloaded", { tabId, runId: String(runId || "") });
+  ready = await probeQuickLessLikeRecommendationWorker(tabId, true);
+  return { ...ready, tabId };
+}
+
+async function prepareQuickLessLikeBulkWorker(message) {
+  const runId = String(message?.bulkRunId || "").trim();
+  if (!runId) return { ok: false, status: "invalid-run" };
+  quickLessLikeClosedBulkRuns.delete(runId);
+  return ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+}
+
+async function releaseQuickLessLikeStandaloneWorker() {
+  const tabId = Number(quickLessLikePersistentWorkerTabId || 0);
+  if (!Number.isFinite(tabId) || !tabId) return false;
+  if ([...quickLessLikeBulkWorkerTabs.values()].some(value => Number(value) === tabId)) return false;
+  quickLessLikeWorkerTabIds.delete(tabId);
+  quickLessLikeReadyWorkerTabs.delete(tabId);
+  quickLessLikePersistentWorkerTabId = null;
+  await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 });
+  const result = await tabsRemove(tabId);
+  if (result?.ok) await recordHelperLifecycle("quickLessLikeRecommendationWorkerSingleClosed", { tabId });
+  return !!result?.ok;
+}
+
+async function runDirectCharacterFeedback(message, mode) {
+  const botId = String(message?.botId || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || mode !== "less-like") return { ok: false, status: "invalid-bot" };
+  const runId = String(message?.bulkRunId || "").trim();
+  if (runId && quickLessLikeClosedBulkRuns.has(runId)) {
+    return { ok: false, status: "recommendation-worker-closed", feedbackTabsTried: 0, requestSent: false, networkAttempts: 0 };
+  }
+  const worker = await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+  if (!worker?.ready) {
+    return { ...worker, ok: false, feedbackTabsTried: worker?.tabId ? 1 : 0, requestSent: false, networkAttempts: 0 };
+  }
+  const tabId = Number(worker.tabId || 0);
+  let response = await tabsSendMessage(tabId, {
+    type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
+    botName: String(message?.botName || "").slice(0, 160)
+  });
+  let result = response?.status ? { ...response, feedbackTabId: tabId, feedbackTabsTried: 1 } : {
+    ok: false, status: "direct-feedback-unavailable", feedbackTabId: tabId, feedbackTabsTried: 1,
+    requestSent: false, networkAttempts: 0
+  };
+  const mayHaveSentRating = !!result?.requestSent || Number(result?.networkAttempts || 0) > 0;
+  const recoverableBeforeSend = new Set([
+    "direct-feedback-unavailable", "recombee-token-not-found", "recombee-user-not-found",
+    "character-auth-not-ready", "character-auth-rejected", "not-worker"
+  ]);
+  if (!result?.ok && !mayHaveSentRating && recoverableBeforeSend.has(String(result?.status || ""))) {
+    quickLessLikeReadyWorkerTabs.delete(tabId);
+    const reset = await tabsUpdate(tabId, { url: quickLessLikeRecommendationWorkerUrl().href, active: false });
+    if (reset?.ok) {
+      await recordHelperLifecycle("quickLessLikeRecommendationWorkerSelfHeal", { tabId, runId, status: String(result?.status || "") });
+      const healed = await probeQuickLessLikeRecommendationWorker(tabId, true);
+      if (healed?.ready) {
+        response = await tabsSendMessage(tabId, {
+          type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
+          botName: String(message?.botName || "").slice(0, 160)
+        });
+        if (response?.status) result = { ...response, feedbackTabId: tabId, feedbackTabsTried: 1, workerRecovered: true };
+      } else {
+        result = { ...healed, ok: false, feedbackTabId: tabId, feedbackTabsTried: 1, requestSent: false, networkAttempts: 0 };
+      }
+    } else if (!(await tabsGet(tabId)) || (runId && quickLessLikeClosedBulkRuns.has(runId))) {
+      result = { ok: false, status: "recommendation-worker-closed", feedbackTabId: tabId, feedbackTabsTried: 1, requestSent: false, networkAttempts: 0 };
+    }
+  }
+  if (result?.ok && result?.status === "less-liked") quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
+  return result;
+}
+
+async function runQuickLessLikeBot(message) {
+  const botId = String(message?.botId || "").trim().toLowerCase();
+  const botName = String(message?.botName || "").trim().slice(0, 160);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
+  if (message?.bulkRunId && isQuickLessLikeBulkRunCanceled(message.bulkRunId)) return { ok: false, status: "bulk-canceled" };
+  if (message?.force !== true) {
+    const history = await getQuickLessLikeHistory();
+    const remembered = history.bots[botId];
+    if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
+  }
+
+  let result;
+  try {
+    result = await runDirectCharacterFeedback(message, "less-like");
+  } finally {
+    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
+  }
+  if (result?.ok && result.status === "less-liked") {
+    const remembered = await rememberQuickLessLike(botId, botName);
+    if (remembered) result.handledAt = remembered.handledAt || Date.now();
+  } else if (result?.status === "bot-not-found" && (result?.availabilityConfirmed || Number(message?.retryAttempt || 0) >= 1)) {
+    const remembered = await rememberQuickLessLikeUnavailable(botId, botName, result);
+    return {
+      ...result,
+      ok: true,
+      status: "unavailable",
+      rememberedStatus: "unavailable",
+      handledAt: remembered?.handledAt || Date.now()
+    };
+  }
+  return result;
+}
+
+
+function isBotStatusWorkerUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return isSpicyChatUrl(parsed.href) && parsed.searchParams.get("dsQolBotStatusWorker") === "1";
+  } catch { return false; }
+}
+
+function isUsableBotStatusPage(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    if (!isSpicyChatUrl(parsed.href)) return false;
+    // Do not borrow a tab that belongs to another QoL helper workflow.
+    if (parsed.searchParams.get("dsQolRecommendationWorker") === "1") return false;
+    if (parsed.searchParams.get("dsQuickDislike") === "1") return false;
+    if (parsed.searchParams.get("dsListFill") === "1") return false;
+    if (parsed.searchParams.get("dsBotStatus") === "1") return false;
+    return true;
+  } catch { return false; }
+}
+
+async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
+  const id = Number(tabId || 0);
+  if (!id) return { ok: false, ready: false, status: "worker-missing" };
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 7000);
+  let last = null;
+  while (Date.now() < deadline) {
+    const tab = await tabsGet(id);
+    if (!tab) return { ok: false, ready: false, status: "worker-closed" };
+    const response = await tabsSendMessage(id, { type: "DS_BOT_STATUS_WORKER_READY" });
+    if (response) last = response;
+    if (response?.ready) return { ...response, ok: true, ready: true, tabId: id };
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  return { ...(last || {}), ok: false, ready: false, status: last?.status || "worker-timeout", tabId: id };
+}
+
+async function rememberBotStatusWorker(tabId, owned) {
+  const id = Number(tabId || 0);
+  await storageSessionSet({
+    [BOT_STATUS_WORKER_SESSION_TAB_KEY]: id || 0,
+    [BOT_STATUS_WORKER_SESSION_OWNED_KEY]: !!owned
+  });
+}
+
+async function restoreBotStatusWorkerSession() {
+  if (Number(botStatusWorkerTabId || 0)) return;
+  const stored = await storageSessionGet([BOT_STATUS_WORKER_SESSION_TAB_KEY, BOT_STATUS_WORKER_SESSION_OWNED_KEY]);
+  const id = Number(stored?.[BOT_STATUS_WORKER_SESSION_TAB_KEY] || 0);
+  if (!id) return;
+  const tab = await tabsGet(id);
+  if (!tab || !isUsableBotStatusPage(tab.url || tab.pendingUrl || "")) {
+    await rememberBotStatusWorker(0, false);
+    return;
+  }
+  botStatusWorkerTabId = id;
+  botStatusWorkerOwned = !!stored?.[BOT_STATUS_WORKER_SESSION_OWNED_KEY];
+  if (botStatusWorkerOwned) botStatusWorkerTabIds.add(id);
+}
+
+async function releaseBotStatusWorker() {
+  await restoreBotStatusWorkerSession();
+  const id = Number(botStatusWorkerTabId || 0);
+  const owned = !!botStatusWorkerOwned;
+  botStatusWorkerTabId = null;
+  botStatusWorkerOwned = false;
+  botStatusWorkerTabIds.clear();
+  await rememberBotStatusWorker(0, false);
+  if (!id || !owned) return 0;
+  const tab = await tabsGet(id);
+  if (!tab) return 0;
+  await tabsRemove(id);
+  return 1;
+}
+
+async function findBorrowableBotStatusTab() {
+  const tabs = await tabsQuery({});
+  const candidates = tabs
+    .filter(tab => tab?.id && isUsableBotStatusPage(tab.url || tab.pendingUrl || ""))
+    .sort((a, b) => Number(b.active || false) - Number(a.active || false) || Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  for (const tab of candidates) {
+    const ready = await probeBotStatusWorker(Number(tab.id), 1200);
+    if (ready?.ready) return Number(tab.id);
+  }
+  return 0;
+}
+
+async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
+  await restoreBotStatusWorkerSession();
+  let tab = Number.isFinite(Number(botStatusWorkerTabId)) ? await tabsGet(Number(botStatusWorkerTabId)) : null;
+  if (tab?.id) {
+    const ready = await probeBotStatusWorker(Number(tab.id), 1500);
+    if (ready?.ready) {
+      await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned);
+      return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned };
+    }
+    if (botStatusWorkerOwned) {
+      await tabsRemove(Number(tab.id));
+    }
+    botStatusWorkerTabId = null;
+    botStatusWorkerOwned = false;
+    botStatusWorkerTabIds.clear();
+    await rememberBotStatusWorker(0, false);
+  }
+
+  if (!forceOwnHelper) {
+    const borrowedId = await findBorrowableBotStatusTab();
+    if (borrowedId) {
+      botStatusWorkerTabId = borrowedId;
+      botStatusWorkerOwned = false;
+      await rememberBotStatusWorker(borrowedId, false);
+      return { tabId: borrowedId, owned: false };
+    }
+  }
+
+  const existing = (await tabsQuery({})).filter(item => item?.id && isBotStatusWorkerUrl(item.url || item.pendingUrl || ""));
+  existing.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  let helper = existing[0] || null;
+  for (const duplicate of existing.slice(1)) await tabsRemove(Number(duplicate.id));
+  if (!helper?.id) {
+    const created = await tabsCreate({ url: BOT_STATUS_HOME_WORKER_URL, active: false });
+    helper = created?.ok ? created.tab : null;
+  }
+  const tabId = Number(helper?.id || 0);
+  if (!tabId) return { tabId: 0, owned: false };
+  botStatusWorkerTabId = tabId;
+  botStatusWorkerOwned = true;
+  botStatusWorkerTabIds.clear();
+  botStatusWorkerTabIds.add(tabId);
+  await rememberBotStatusWorker(tabId, true);
+  const ready = await probeBotStatusWorker(tabId, 10000);
+  if (!ready?.ready) return { tabId, owned: true, ready: false, status: ready?.status || "worker-timeout" };
+  return { tabId, owned: true, ready: true };
+}
+
+function botStatusApiResponseIsTransient(response) {
+  const status = String(response?.status || "");
+  if (["api-bridge-not-ready", "auth-unavailable", "worker-no-response"].includes(status)) return true;
+  const reason = String(response?.reason || "");
+  return /auth(?:entication)?[^.;]{0,30}(?:unavailable|not ready)|no reusable auth|bridge[^.;]{0,30}(?:unavailable|timeout|not ready)/i.test(reason);
+}
+
+async function waitForBotStatusApiCheck(tabId, botId, timeoutMs = 8000) {
+  const id = Number(tabId || 0);
+  if (!id) return null;
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 8000);
+  let response = null;
+  do {
+    response = await tabsSendMessage(id, { type: "DS_BOT_STATUS_API_CHECK", botId });
+    if (response && !botStatusApiResponseIsTransient(response)) return response;
+    if (Date.now() >= deadline) break;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  } while (Date.now() < deadline);
+  return response;
+}
+
+async function runBotStatusHelperCheck(message) {
+  const botId = String(message?.botId || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
+
+  let worker = await prepareBotStatusWorker({ forceOwnHelper: false });
+  let tabId = Number(worker?.tabId || 0);
+  if (!tabId) return { ok: false, ready: true, status: "worker-tab-failed", httpStatus: 0 };
+
+  let response = await tabsSendMessage(tabId, { type: "DS_BOT_STATUS_API_CHECK", botId });
+  const status = String(response?.status || "");
+  const shouldRetryOnOwnHelper = !worker.owned && (!response || ["api-bridge-not-ready", "auth-unavailable", "worker-error", "unknown"].includes(status));
+  if (shouldRetryOnOwnHelper) {
+    botStatusWorkerTabId = null;
+    botStatusWorkerOwned = false;
+    await rememberBotStatusWorker(0, false);
+    worker = await prepareBotStatusWorker({ forceOwnHelper: true });
+    tabId = Number(worker?.tabId || 0);
+    if (tabId) response = await waitForBotStatusApiCheck(tabId, botId, 8000);
+  } else if (worker.owned && botStatusApiResponseIsTransient(response)) {
+    // A freshly loaded Home helper can have the content bridge before SpicyChat
+    // has finished restoring auth. Wait on that same tab instead of marking the
+    // first bot Unknown or reloading/navigating the worker.
+    response = await waitForBotStatusApiCheck(tabId, botId, 8000);
+  }
+
+  if (!message?.keepHelper) await releaseBotStatusWorker();
+  return response || { ok: false, ready: true, status: "worker-no-response", httpStatus: 0 };
 }
 
 function alarmName(tabId) {
@@ -880,7 +1544,7 @@ async function runDuplicateTabScan(options = {}) {
   const groups = new Map();
 
   for (const tab of tabs) {
-    if (!tab?.id || tabCleanupWorkerTabIds.has(Number(tab.id)) || quickDislikeWorkerTabIds.has(Number(tab.id)) || listingRefillWorkerTabIds.has(Number(tab.id)) || isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl) || isListingRefillWorkerUrl(tab.url || tab.pendingUrl)) continue;
+    if (!tab?.id || tabCleanupWorkerTabIds.has(Number(tab.id)) || quickDislikeWorkerTabIds.has(Number(tab.id)) || quickLessLikeWorkerTabIds.has(Number(tab.id)) || botStatusWorkerTabIds.has(Number(tab.id)) || listingRefillWorkerTabIds.has(Number(tab.id)) || isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl) || isQuickLessLikeWorkerUrl(tab.url || tab.pendingUrl) || isBotStatusWorkerUrl(tab.url || tab.pendingUrl) || isListingRefillWorkerUrl(tab.url || tab.pendingUrl)) continue;
     const key = duplicateTabKey(tab.url || tab.pendingUrl, settings);
     if (!key) continue;
     summary.checked += 1;
@@ -977,6 +1641,70 @@ async function rememberQuickDislike(botId, botName, status) {
   }
 
   await storageSet({ [QUICK_DISLIKE_HISTORY_KEY]: history });
+  return history.bots[botId];
+}
+
+function normalizeQuickLessLikeHistory(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const bots = source.bots && typeof source.bots === "object" ? source.bots : {};
+  const normalized = {};
+  for (const [id, value] of Object.entries(bots)) {
+    if (!/^[0-9a-f-]{20,}$/i.test(String(id || ""))) continue;
+    const status = String(value?.status || "");
+    if (!["less-liked", "unavailable"].includes(status)) continue;
+    normalized[id] = {
+      status,
+      name: String(value?.name || "").slice(0, 160),
+      handledAt: Number(value?.handledAt || value?.at || 0) || Date.now(),
+      stage: String(value?.stage || "").slice(0, 80),
+      reason: String(value?.reason || "").slice(0, 300),
+      httpStatus: Number(value?.httpStatus || 0) || 0
+    };
+  }
+  return { version: 1, bots: normalized };
+}
+
+async function getQuickLessLikeHistory() {
+  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY]);
+  return normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+}
+
+async function rememberQuickLessLike(botId, botName) {
+  const history = await getQuickLessLikeHistory();
+  history.bots[botId] = {
+    status: "less-liked",
+    name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
+    handledAt: Date.now()
+  };
+  const entries = Object.entries(history.bots);
+  if (entries.length > 5000) {
+    entries
+      .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
+      .slice(5000)
+      .forEach(([id]) => delete history.bots[id]);
+  }
+  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: history });
+  return history.bots[botId];
+}
+
+async function rememberQuickLessLikeUnavailable(botId, botName, result = {}) {
+  const history = await getQuickLessLikeHistory();
+  history.bots[botId] = {
+    status: "unavailable",
+    name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
+    handledAt: Date.now(),
+    stage: String(result?.stage || "response").slice(0, 80),
+    reason: String(result?.reason || "Character was not found while sending Less Like feedback.").slice(0, 300),
+    httpStatus: Number(result?.httpStatus || 0) || 0
+  };
+  const entries = Object.entries(history.bots);
+  if (entries.length > 5000) {
+    entries
+      .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
+      .slice(5000)
+      .forEach(([id]) => delete history.bots[id]);
+  }
+  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: history });
   return history.bots[botId];
 }
 
@@ -2087,6 +2815,13 @@ function queueQuickDislikeBot(message) {
     .catch(() => {})
     .then(() => runQuickDislikeBot(message));
   return quickDislikeChain;
+}
+
+function queueQuickLessLikeBot(message) {
+  quickLessLikeChain = quickLessLikeChain
+    .catch(() => {})
+    .then(() => runQuickLessLikeBot(message));
+  return quickLessLikeChain;
 }
 
 function queueDuplicateTabScan(options = {}) {
@@ -3787,6 +4522,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BOT_STATUS_HELPER_CHECK") {
+    runBotStatusHelperCheck(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_BOT_STATUS_HELPER_RELEASE") {
+    releaseBotStatusWorker()
+      .then(released => sendResponse({ ok: true, released }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_QUICK_DISLIKE_CANCEL_BULK") {
     sendResponse({ ok: markQuickDislikeBulkRunCanceled(message.bulkRunId) });
     return;
@@ -3801,6 +4550,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "DS_QUICK_DISLIKE_BOT") {
     queueQuickDislikeBot(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_QUICK_LESS_LIKE_CANCEL_BULK") {
+    sendResponse({ ok: markQuickLessLikeBulkRunCanceled(message.bulkRunId) });
+    return;
+  }
+
+  if (message?.type === "DS_QUICK_LESS_LIKE_RELEASE_BULK") {
+    releaseQuickLessLikeBulkWorker(message.bulkRunId)
+      .then(released => sendResponse({ ok: true, released }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_QUICK_LESS_LIKE_PREPARE_BULK") {
+    prepareQuickLessLikeBulkWorker(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "recommendation-worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_QUICK_LESS_LIKE_BOT") {
+    queueQuickLessLikeBot({ ...message, sourceTabId: tabId })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
     return true;
@@ -4216,9 +4991,12 @@ chrome.tabs.onActivated.addListener(async activeInfo => {
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (quickLessLikeWorkerTabIds.has(Number(tabId)) && (changeInfo.url || changeInfo.status === "loading")) {
+    quickLessLikeReadyWorkerTabs.delete(Number(tabId));
+  }
   const spicyUrl = tab?.url || changeInfo.url || tab?.pendingUrl;
   if (!isSpicyChatUrl(spicyUrl)) return;
-  if (quickDislikeWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
+  if (quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
 
   if (changeInfo.url) {
     const duplicateSettings = await getDuplicateTabSettings();
@@ -4241,6 +5019,15 @@ chrome.tabs.onCreated.addListener(tab => {
   if (!tab?.id || !isSpicyChatUrl(tab.url || tab.pendingUrl)) return;
   if (isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl)) {
     quickDislikeWorkerTabIds.add(Number(tab.id));
+    return;
+  }
+  if (isQuickLessLikeWorkerUrl(tab.url || tab.pendingUrl)) {
+    quickLessLikeWorkerTabIds.add(Number(tab.id));
+    return;
+  }
+  if (isBotStatusWorkerUrl(tab.url || tab.pendingUrl)) {
+    botStatusWorkerTabIds.add(Number(tab.id));
+    botStatusWorkerTabId = Number(tab.id);
     return;
   }
   if (isListingRefillWorkerUrl(tab.url || tab.pendingUrl)) {
@@ -4290,6 +5077,23 @@ chrome.tabs.onRemoved.addListener(tabId => {
   if (Number(quickDislikePersistentWorkerTabId) === Number(tabId)) quickDislikePersistentWorkerTabId = null;
   for (const [runId, workerTabId] of quickDislikeBulkWorkerTabs.entries()) {
     if (Number(workerTabId) === Number(tabId)) quickDislikeBulkWorkerTabs.delete(runId);
+  }
+  quickLessLikeWorkerTabIds.delete(Number(tabId));
+  quickLessLikeReadyWorkerTabs.delete(Number(tabId));
+  if (Number(quickLessLikePersistentWorkerTabId) === Number(tabId)) {
+    quickLessLikePersistentWorkerTabId = null;
+    storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 }).catch(() => {});
+  }
+  botStatusWorkerTabIds.delete(Number(tabId));
+  if (Number(botStatusWorkerTabId) === Number(tabId)) botStatusWorkerTabId = null;
+  for (const [runId, workerTabId] of quickLessLikeBulkWorkerTabs.entries()) {
+    if (Number(workerTabId) === Number(tabId)) {
+      quickLessLikeBulkWorkerTabs.delete(runId);
+      quickLessLikeClosedBulkRuns.set(String(runId), Date.now());
+    }
+  }
+  for (const [runId, directTabId] of quickLessLikeDirectBulkTabs.entries()) {
+    if (Number(directTabId) === Number(tabId)) quickLessLikeDirectBulkTabs.delete(runId);
   }
   listingRefillWorkerTabIds.delete(Number(tabId));
   for (const [runId, workerTabId] of listingRefillPageWorkerTabs.entries()) {

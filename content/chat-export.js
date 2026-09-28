@@ -2376,13 +2376,17 @@
       } else {
         count.textContent = `${messageLabel} available.`;
       }
-      reloadChatButton.hidden = !(status?.source === "dom" && Number(status?.mountedMessages || 0) >= 250);
+      const reloadHidden = !(status?.source === "dom" && Number(status?.mountedMessages || 0) >= 250);
+      if (reloadChatButton.hidden !== reloadHidden) reloadChatButton.hidden = reloadHidden;
       const canUseApiHistory = !!chatRouteIds().characterId;
       const historyAlreadyComplete = status?.source === "api" && !!status?.complete;
-      apiHistoryButton.hidden = !canUseApiHistory || historyAlreadyComplete;
-      apiHistoryButton.textContent = "Retry full chat fetch";
-      refreshApiButton.hidden = !canUseApiHistory;
-      nativeHistoryButton.hidden = !workingData.olderMessagesAvailable && workingData.captureStatus?.source === "dom";
+      const apiHidden = !canUseApiHistory || historyAlreadyComplete;
+      if (apiHistoryButton.hidden !== apiHidden) apiHistoryButton.hidden = apiHidden;
+      if (apiHistoryButton.textContent !== "Retry full chat fetch") apiHistoryButton.textContent = "Retry full chat fetch";
+      const refreshHidden = !canUseApiHistory;
+      if (refreshApiButton.hidden !== refreshHidden) refreshApiButton.hidden = refreshHidden;
+      const nativeHidden = !workingData.olderMessagesAvailable && workingData.captureStatus?.source === "dom";
+      if (nativeHistoryButton.hidden !== nativeHidden) nativeHistoryButton.hidden = nativeHidden;
       nativeHistoryButton.textContent = "Load full chat through page (very slow)";
       if (historyAlreadyComplete) {
         nativeWarning.textContent = "Chat history is already complete in memory through the fast API. These controls are only for troubleshooting or compatibility testing; page-loading old messages is not needed for a normal export.";

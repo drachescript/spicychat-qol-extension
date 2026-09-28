@@ -212,10 +212,10 @@
     root.style.setProperty("--ds-alt-dialogue-text", colors.text);
     root.style.setProperty("--ds-alt-dialogue-bg", colors.background);
     root.style.setProperty("--ds-alt-dialogue-border", colors.border);
-    root.setAttribute(ROOT_ACTIVE_ATTR, "1");
-    root.setAttribute(ROOT_SCOPE_ATTR, scope);
-    root.setAttribute(ROOT_STYLE_ATTR, style);
-    root.setAttribute(ROOT_CUSTOM_ATTR, customColors ? "1" : "0");
+    DS.setAttributeIfChanged?.(root, ROOT_ACTIVE_ATTR, "1");
+    DS.setAttributeIfChanged?.(root, ROOT_SCOPE_ATTR, scope);
+    DS.setAttributeIfChanged?.(root, ROOT_STYLE_ATTR, style);
+    DS.setAttributeIfChanged?.(root, ROOT_CUSTOM_ATTR, customColors ? "1" : "0");
 
     let messages;
     if (fullPass) {

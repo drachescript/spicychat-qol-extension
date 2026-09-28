@@ -8,6 +8,10 @@
     if (params.get("dsQuickDislike") === "1") {
       DS.state.quickDislikeWorker = true;
     }
+    if (params.get("dsQuickLessLike") === "1" || params.get("dsQolRecommendationWorker") === "1") {
+      DS.state.quickLessLikeWorker = true;
+      DS.state.recommendationWorker = params.get("dsQolRecommendationWorker") === "1";
+    }
   } catch {}
 
   function phoneOrAppEnvironment() {
@@ -157,6 +161,107 @@
     const closed = await waitForElement(() => !ratingModal(), 4000).catch?.(() => null);
     if (!closed) return finish({ ok: false, status: "submit-not-confirmed" });
     return finish({ ok: true, status: "disliked" });
+  }
+
+  function workerCardForBotId(botId) {
+    const wanted = String(botId || "").trim().toLowerCase();
+    if (!wanted) return null;
+    const cards = DS.collectCards?.() || [];
+    for (const item of cards) {
+      const id = String(DS.botIdFromHref?.(item.anchor?.href || "") || DS.chatIdFromHref?.(item.anchor?.href || "") || "").trim().toLowerCase();
+      if (id === wanted) return item;
+    }
+    return null;
+  }
+
+  function workerVisibleMenuItemByText(text) {
+    const wanted = String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return [...document.querySelectorAll("button, [role='menuitem'], [role='option'], li, div")].find(el => {
+      if (!el?.isConnected || !visibleElement(el)) return false;
+      return String(el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === wanted;
+    }) || null;
+  }
+
+  async function navigateQuickLessLikeWorker(message) {
+    if (!DS.state.quickLessLikeWorker) return { ok: false, status: "not-worker" };
+    let target;
+    try { target = new URL(String(message?.targetUrl || ""), location.origin); }
+    catch { return { ok: false, status: "invalid-url" }; }
+    if (target.origin !== location.origin || target.pathname !== "/") return { ok: false, status: "invalid-url" };
+
+    try {
+      history.pushState(history.state, "", target.href);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+    } catch {
+      return { ok: false, status: "navigation-failed" };
+    }
+
+    const botId = String(message?.botId || "").trim().toLowerCase();
+    const ready = await waitForElement(() => workerCardForBotId(botId), 14000, 140);
+    return ready ? { ok: true, status: "navigated", botId } : { ok: false, status: "navigation-timeout", botId };
+  }
+
+  async function runQuickLessLikeWorker() {
+    if (!DS.state.quickLessLikeWorker) return { ok: false, status: "not-worker" };
+    const params = new URLSearchParams(location.search || "");
+    const botId = String(params.get("dsLessLikeBotId") || "").trim().toLowerCase();
+    const botName = String(params.get("dsLessLikeBotName") || "").trim();
+    const jobId = String(params.get("dsLessLikeJobId") || "").trim();
+    const token = DS.diagOperationStart?.("quick-less-like", "helper", { botId, botName, jobId });
+    const finish = result => {
+      DS.diagOperationEnd?.(token, {
+        scanned: 1,
+        changed: result?.status === "less-liked" ? 1 : 0,
+        skipped: result?.ok && result?.status !== "less-liked" ? 1 : 0,
+        status: result?.status || "unknown",
+        botId,
+        jobId,
+        executor: "spicychat-native-ui"
+      });
+      return result;
+    };
+    if (!botId) return finish({ ok: false, status: "invalid-bot" });
+
+    const found = await waitForElement(() => workerCardForBotId(botId), 12000, 140);
+    if (!found?.card) return finish({ ok: false, status: "card-not-found" });
+    const card = found.card;
+    // A previous QoL filter pass can have hidden this card before the helper
+    // route fully settled. The helper is isolated in a hidden tab, so restore
+    // only this exact target card before using SpicyChat's native menu.
+    const hideTarget = DS.getBestHideTarget?.(card) || card;
+    DS.unhideElement?.(hideTarget);
+    const buttons = [...card.querySelectorAll("button")];
+    const menuButton = buttons.find(button => {
+      const aria = String(button.getAttribute("aria-label") || "").toLowerCase();
+      const title = String(button.getAttribute("title") || "").toLowerCase();
+      const testid = String(button.getAttribute("data-testid") || "").toLowerCase();
+      return aria.includes("more") || aria.includes("action") || aria.includes("ellipsis") || aria.includes("menu") ||
+        title.includes("more") || title.includes("action") || testid.includes("more") || testid.includes("menu") ||
+        !!button.querySelector("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical");
+    });
+    if (!menuButton) return finish({ ok: false, status: "menu-button-not-found" });
+
+    try { menuButton.click(); } catch { DS.realClick?.(menuButton); }
+    const item = await waitForElement(() => workerVisibleMenuItemByText("Less Like This"), 3500, 80);
+    if (!item) return finish({ ok: false, status: "less-like-missing" });
+    try { item.click(); } catch { DS.realClick?.(item); }
+
+    const started = Date.now();
+    while (Date.now() - started < 6000) {
+      const pageText = String(document.body?.innerText || "").replace(/\s+/g, " ");
+      if (/failed to update character preferences/i.test(pageText)) return finish({ ok: false, status: "submit-failed" });
+      if (/character preferences updated/i.test(pageText)) return finish({ ok: true, status: "less-liked" });
+      if (!card.isConnected || !workerCardForBotId(botId)) {
+        // Native Less Like normally removes the card from the recommendation
+        // results after the preference update succeeds.
+        await new Promise(resolve => setTimeout(resolve, 350));
+        const afterText = String(document.body?.innerText || "").replace(/\s+/g, " ");
+        if (!/failed to update character preferences/i.test(afterText)) return finish({ ok: true, status: "less-liked" });
+        return finish({ ok: false, status: "submit-failed" });
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return finish({ ok: false, status: "submit-not-confirmed" });
   }
 
   DS.getCurrentBotName = function getCurrentBotName() {
@@ -499,6 +604,171 @@
     DS.diagOperationEnd?.(token, { scanned, changed, skipped });
   };
 
+
+  const DIRECT_FEEDBACK_REQUEST_EVENT = "ds-qol-character-feedback-request-v1";
+  const DIRECT_FEEDBACK_RESPONSE_EVENT = "ds-qol-character-feedback-response-v1";
+  const RECOMMENDATION_WORKER_PROBE_REQUEST_EVENT = "ds-qol-recommendation-worker-probe-request-v1";
+  const RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT = "ds-qol-recommendation-worker-probe-response-v1";
+  const RECOMBEE_PUBLIC_TOKEN_CACHE_KEY = "dsQolRecombeePublicTokenCache";
+  const RECOMBEE_PUBLIC_TOKEN_CACHE_MS = 24 * 60 * 60 * 1000;
+  const directFeedbackInFlight = new Map();
+
+  function plausiblePublicToken(value) {
+    const token = String(value || "").trim();
+    return token.length >= 16 && token.length <= 180 && /^[A-Za-z0-9_-]+$/.test(token) ? token : "";
+  }
+
+  async function cachedRecombeePublicToken() {
+    try {
+      const result = await new Promise(resolve => {
+        chrome.storage.local.get([RECOMBEE_PUBLIC_TOKEN_CACHE_KEY], value => resolve(value || {}));
+      });
+      const cached = result?.[RECOMBEE_PUBLIC_TOKEN_CACHE_KEY] || {};
+      const token = plausiblePublicToken(cached.token);
+      const at = Number(cached.at || 0);
+      if (!token || !at || Date.now() - at > RECOMBEE_PUBLIC_TOKEN_CACHE_MS) return "";
+      return token;
+    } catch {
+      return "";
+    }
+  }
+
+  async function rememberRecombeePublicToken(token, source = "") {
+    const cleanToken = plausiblePublicToken(token);
+    if (!cleanToken) return false;
+    try {
+      await new Promise(resolve => {
+        chrome.storage.local.set({
+          [RECOMBEE_PUBLIC_TOKEN_CACHE_KEY]: {
+            token: cleanToken,
+            at: Date.now(),
+            source: String(source || "").slice(0, 80)
+          }
+        }, () => resolve());
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function clearRecombeePublicTokenCache() {
+    try {
+      await new Promise(resolve => chrome.storage.local.remove([RECOMBEE_PUBLIC_TOKEN_CACHE_KEY], () => resolve()));
+    } catch {}
+  }
+
+  async function probeRecommendationWorker() {
+    if (!DS.state.quickLessLikeWorker || !DS.state.recommendationWorker) {
+      return { ok: false, ready: false, status: "not-recommendation-worker" };
+    }
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+    const preferredRecombeeToken = await cachedRecombeePublicToken();
+    const requestId = `worker-probe-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    return await new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, onResponse);
+        resolve(value || { ok: false, ready: false, status: "worker-probe-empty" });
+      };
+      const onResponse = event => {
+        const detail = event?.detail || {};
+        if (String(detail.requestId || "") !== requestId) return;
+        finish(detail);
+      };
+      window.addEventListener(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, onResponse);
+      const timer = setTimeout(() => finish({
+        ok: false, ready: false, status: "worker-probe-timeout",
+        bridgeReady: document.documentElement?.getAttribute("data-ds-card-token-main-bridge") === "2"
+      }), 9000);
+      try {
+        window.dispatchEvent(new CustomEvent(RECOMMENDATION_WORKER_PROBE_REQUEST_EVENT, {
+          detail: { requestId, preferredRecombeeToken }
+        }));
+      } catch (error) {
+        finish({ ok: false, ready: false, status: "worker-probe-unavailable", reason: String(error?.message || error || "") });
+      }
+    });
+  }
+
+  async function runDirectCharacterFeedback(message) {
+    const botId = String(message?.botId || "").trim().toLowerCase();
+    const mode = String(message?.mode || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || mode !== "less-like") {
+      return { ok: false, status: "invalid-feedback-request" };
+    }
+
+    const existing = directFeedbackInFlight.get(botId);
+    if (existing) return existing;
+
+    const operation = DS.diagOperationStart?.("quick-less-like", "direct-api", { botId, mode });
+    const work = (async () => {
+      try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+      const preferredRecombeeToken = await cachedRecombeePublicToken();
+      const requestId = `feedback-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const result = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          window.removeEventListener(DIRECT_FEEDBACK_RESPONSE_EVENT, onResponse);
+          resolve(value);
+        };
+        const onResponse = event => {
+          const detail = event?.detail || {};
+          if (String(detail.requestId || "") !== requestId) return;
+          finish(detail);
+        };
+        window.addEventListener(DIRECT_FEEDBACK_RESPONSE_EVENT, onResponse);
+        // Token discovery can lazily inspect SpicyChat's own cached JS bundles.
+        // Give that one direct attempt enough time to finish; the background
+        // worker deliberately will not fan out to another tab after a timeout.
+        const timer = setTimeout(() => finish({ ok: false, status: "direct-feedback-timeout", requestSent: false, networkAttempts: 0 }), 45000);
+        try {
+          window.dispatchEvent(new CustomEvent(DIRECT_FEEDBACK_REQUEST_EVENT, {
+            detail: { requestId, botId, mode, preferredRecombeeToken }
+          }));
+        } catch (error) {
+          finish({ ok: false, status: "direct-feedback-unavailable", error: String(error?.message || error || ""), requestSent: false, networkAttempts: 0 });
+        }
+      });
+      if (result?.ok && result?.publicToken) {
+        await rememberRecombeePublicToken(result.publicToken, result.tokenSource || "less-like-success");
+      } else if (preferredRecombeeToken && result?.status === "recombee-request-failed") {
+        await clearRecombeePublicTokenCache();
+      }
+
+      DS.diagOperationEnd?.(operation, {
+        scanned: 1,
+        changed: result?.ok && result?.status === "less-liked" ? 1 : 0,
+        skipped: result?.ok && result?.status !== "less-liked" ? 1 : 0,
+        status: result?.status || "unknown",
+        botId,
+        executor: result?.executor || "direct-recombee-api",
+        stage: result?.stage || "",
+        httpStatus: Number(result?.httpStatus || 0),
+        tokenAttempts: Number(result?.tokenAttempts || 0),
+        networkAttempts: Number(result?.networkAttempts || 0),
+        availabilityNetworkAttempts: Number(result?.availabilityNetworkAttempts || 0),
+        availabilityConfirmed: !!result?.availabilityConfirmed,
+        tokenSource: String(result?.tokenSource || ""),
+        requestSent: !!result?.requestSent
+      });
+      return result;
+    })();
+
+    directFeedbackInFlight.set(botId, work);
+    try {
+      return await work;
+    } finally {
+      if (directFeedbackInFlight.get(botId) === work) directFeedbackInFlight.delete(botId);
+    }
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === "DS_GET_PAGE_INFO") {
       const path = String(location.pathname || "");
@@ -527,6 +797,16 @@
       return true;
     }
 
+    if (message?.type === "DS_QUICK_LESS_LIKE_WORKER_READY") {
+      probeRecommendationWorker().then(sendResponse);
+      return true;
+    }
+
+    if (message?.type === "DS_DIRECT_CHARACTER_FEEDBACK") {
+      runDirectCharacterFeedback(message).then(sendResponse);
+      return true;
+    }
+
     if (message?.type === "DS_QUICK_DISLIKE_NAVIGATE") {
       navigateQuickDislikeWorker(message).then(sendResponse);
       return true;
@@ -534,6 +814,16 @@
 
     if (message?.type === "DS_QUICK_DISLIKE_RUN") {
       runQuickDislikeWorker().then(sendResponse);
+      return true;
+    }
+
+    if (message?.type === "DS_QUICK_LESS_LIKE_NAVIGATE") {
+      navigateQuickLessLikeWorker(message).then(sendResponse);
+      return true;
+    }
+
+    if (message?.type === "DS_QUICK_LESS_LIKE_RUN") {
+      runQuickLessLikeWorker().then(sendResponse);
       return true;
     }
 

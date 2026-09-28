@@ -21,7 +21,7 @@ Everything is optional. Fresh installs keep the main extension switch on, while 
 - Safe diagnostic copy for bug reports without chat text or saved private content.
 
 ## Saved lists and bot discovery
-- Bot Status Center combines opened-history tracking/hiding/management with on-demand availability checks, Character Update Watch, saved local bot copies, duplicate/reupload hints, last-seen public profile preservation, importable JSON export, and revisioned local backups for your own bots while editing.
+- Bot Status Center checks saved bots by ID, repairs known names/descriptions from live character data, distinguishes deleted/private/unknown results safely, keeps Saved Bot Info recovery copies, and has a separate Deleted / Unavailable Saved Bots view with old chat links when available. It reuses a signed-in SpicyChat page for API checks and only creates one Home helper when needed; it does not open every bot profile.
 - Favorite bot history, including bots that were later unfavorited on SpicyChat.
 - Favorite creators with optional filter protection.
 - Local Follow Creator list with Follow / Following buttons and Saved Lists management.
@@ -142,3 +142,7 @@ Everything is optional. Fresh installs keep the main extension switch on, while 
 - Checks for orphaned/duplicate local data, with cleanup only after you choose it.
 - Recently Seen history is a separate selectable backup/import/storage category.
 - Chatbot Editor Draft History and pinned Smart Filter presets are separate selectable backup/import/storage categories.
+
+
+## Planned
+- **Planned — Bot Recovery Assistant:** build a reviewable remake draft for a deleted bot from exact saved profile fields plus surviving chat history. Recovered data and AI-reconstructed Personality/Scenario stay clearly labeled and separate, and nothing is published automatically.

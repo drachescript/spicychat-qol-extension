@@ -772,8 +772,8 @@
       const { settings } = DS.state;
       const onChat = !!settings.enabled && DS.isSingleChatPage();
       const stackedLayout = !!onChat && !!settings.stackChatMessages;
-      if (stackedLayout) document.documentElement.setAttribute("data-ds-chat-message-layout", "stacked");
-      else document.documentElement.removeAttribute("data-ds-chat-message-layout");
+      if (stackedLayout) DS.setAttributeIfChanged?.(document.documentElement, "data-ds-chat-message-layout", "stacked");
+      else if (document.documentElement.hasAttribute("data-ds-chat-message-layout")) document.documentElement.removeAttribute("data-ds-chat-message-layout");
 
       const hasActiveCleanup = !!(
         settings.stackChatMessages ||
@@ -786,7 +786,8 @@
         settings.hideUnlockCustomVoices
       );
 
-      document.documentElement.classList.toggle(
+      DS.setClassState?.(
+        document.documentElement,
         "ds-hide-chat-voice",
         !!onChat && !!settings.hideChatVoiceButton
       );

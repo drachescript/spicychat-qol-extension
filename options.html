@@ -407,7 +407,7 @@ Testing"></textarea></label>
 <div class="tab-page" data-page="saved"><p class="page-intro">Review Bot Status Center history/checks first, then Saved Bots Hub, local organization, Favorite, Followed, Later, and saved-copy data.</p>
 <section class="card" id="botAvailabilityCard">
 <h2>Bot Status Center</h2>
-<p class="hint">Combines the Deleted / Unavailable Bot Detector with Character Update Watch and a local Duplicate / Reupload Finder. Network checks only run when you start them; duplicate matching itself uses locally known bot data.</p>
+<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data.</p>
 <fieldset class="bot-status-opened-tracking">
 <legend>Opened history tracking</legend>
 <label class="row"><input id="trackOpenedChats" type="checkbox"/><span>Track chats I open in Bot Status Center</span></label>
@@ -447,6 +447,10 @@ Testing"></textarea></label>
 <option value="all">All tracked bots</option>
 <option value="favorite">Favorites only</option>
 <option value="later">Later only</option>
+<option value="blocked">Blocked bots only</option>
+<option value="notInterested">Not Interested only</option>
+<option value="recent">Recently Seen only</option>
+<option value="creatorWatch">Followed creator detections only</option>
 <option value="organizer">Bot Organizer only</option>
 <option value="opened">Opened history only</option>
 <option value="archive">Saved bot copies only</option>
@@ -472,6 +476,7 @@ Testing"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <button id="refreshBotDuplicateMatches" type="button">Refresh duplicate matches</button>
 <button id="acceptAllBotUpdates" type="button">Accept all detected updates</button>
+<button id="cleanUnavailableBots" type="button">Clean confirmed unavailable bots</button>
 <button id="clearBotAvailabilityResults" type="button">Clear status history</button>
 <button id="clearBotArchive" type="button">Clear saved bot copies</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
@@ -490,8 +495,31 @@ Testing"></textarea></label>
 </select>
 </label>
 <p class="hint"><strong>Bot Profile Snapshots:</strong> when enabled, opening a chatbot profile stores the bot ID, name/title, creator, image, tags, Greeting, description and any definition/scenario/example fields, stats or other metadata that SpicyChat actually exposes to QoL. Meaningful profile changes are kept in profile history; stats-only observations stay separate where possible. QoL never unlocks or guesses private/hidden definition fields.</p>
-<p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh uses a normal SpicyChat profile request only when the saved copy is older than this interval.</p>
+<p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh only updates an older saved copy when live SpicyChat character data is still readable; opening an old chat by itself never overwrites a recovery copy for a deleted/unavailable bot.</p>
 <p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
+</fieldset>
+<fieldset id="savedBotInfoCard">
+<legend>Saved Bot Info / Recovery</legend>
+<p class="hint">Browse the local recovery copies QoL has already captured. These copies stay available even when the live bot is later deleted or cleaned out of active lists. Only fields SpicyChat actually exposed to QoL are stored.</p>
+<div class="bot-manager-toolbar">
+<input id="savedBotInfoSearch" placeholder="Search saved bot copies, creators or IDs" type="search"/>
+<span class="manager-count" id="savedBotInfoSummary">0 saved copies</span>
+</div>
+<div class="bot-manager-list" id="savedBotInfoManager"></div>
+</fieldset>
+<fieldset id="deletedSavedBotsCard">
+<legend>Deleted / Unavailable Saved Bots</legend>
+<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Active-list cleanup never removes these copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
+<div class="bot-manager-toolbar">
+<input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
+<span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
+</div>
+<div class="bot-manager-list" id="deletedSavedBotManager"></div>
+<div class="bot-manager-pager">
+<button id="deletedSavedBotShowMore" type="button">Show 20 more</button>
+<button id="deletedSavedBotShowLess" type="button">Show first 20</button>
+<button id="deletedSavedBotCollapse" type="button">Show 100</button>
+</div>
 </fieldset>
 <div class="bot-manager-list" id="botAvailabilityManager"></div>
 <div class="bot-manager-pager">
@@ -1828,6 +1856,11 @@ cash =&gt; Bingo Coins
 
 <section class="card">
 <h2>Message options</h2>
+<div class="sub-card">
+<h3>Message layout</h3>
+<label class="row"><input id="stackChatMessages" type="checkbox"/><span>Stack user and AI messages in one chat column</span></label>
+<p class="hint">Aligns user and AI message boxes in the same vertical chat column without rebuilding SpicyChat's message DOM. Turn it off to keep SpicyChat's normal left/right message layout.</p>
+</div>
 <p class="hint">Adds small quick-action icons to chat messages. Every individual action switch is authoritative. The first checkbox is only a group toggle for Copy + Edit + Report, so turning Report off below always removes the Report icon. Copy is handled directly when the rendered message can be read safely; Edit, Report and Remove Image silently trigger SpicyChat's own native actions without showing the intermediate three-dot popup. The native report form/editor still appears when needed.</p>
 <label class="row"><input id="showMessageQuickActions" type="checkbox"/><span>Copy, Edit &amp; Report quick actions (toggle all three)</span></label>
 <label class="row"><input id="messageQuickActionCopy" type="checkbox"/><span>Show Copy icon</span></label>
@@ -2170,9 +2203,17 @@ step sister" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label class="manager-sort-label">
-            Rating
+            Dislike
             <select id="blockedBotDislikeFilter">
-<option value="all">all blocked bots</option>
+<option value="all">all</option>
+<option value="remaining">not handled yet</option>
+<option value="handled">already handled</option>
+</select>
+</label>
+<label class="manager-sort-label">
+            Less Like
+            <select id="blockedBotLessLikeFilter">
+<option value="all">all</option>
 <option value="remaining">not handled yet</option>
 <option value="handled">already handled</option>
 </select>
@@ -2180,16 +2221,27 @@ step sister" spellcheck="false"></textarea></label>
 <span class="manager-count" id="blockedBotManagerSummary">0 saved</span>
 </div>
 <div class="button-row">
+<strong>Dislike:</strong>
 <button id="bulkDislikeBlockedBots" type="button">Dislike remaining blocked bots</button>
 <button hidden="" id="resumeBlockedDislikeRun" type="button">Resume unfinished</button>
 <button hidden="" id="retryFailedBlockedDislikes" type="button">Retry last failed</button>
-<button id="clearBlockedDislikeHistory" type="button">Clear handled history</button>
-<button id="resetAndRedoBlockedDislikes" type="button">Reset history + redo all</button>
+<button id="clearBlockedDislikeHistory" type="button">Clear Dislike history</button>
+<button id="resetAndRedoBlockedDislikes" type="button">Reset Dislike history + redo all</button>
 <span class="manager-count" id="blockedBotDislikeStatus"></span>
 </div>
+<div class="button-row">
+<strong>Less Like:</strong>
+<button id="bulkLessLikeBlockedBots" type="button">Stop recommending remaining blocked bots</button>
+<button hidden="" id="resumeBlockedLessLikeRun" type="button">Resume unfinished</button>
+<button hidden="" id="retryFailedBlockedLessLikes" type="button">Retry last failed</button>
+<button id="clearBlockedLessLikeHistory" type="button">Clear Less Like history</button>
+<button id="resetAndRedoBlockedLessLikes" type="button">Reset Less Like history + redo all</button>
+</div>
+<div class="manager-count less-like-status-row" id="blockedBotLessLikeStatus"></div>
+<div class="button-row"><span class="manager-count" id="blockedBotNameOnlyStatus"></span></div>
 <label>Delay between bots
 <input id="blockedBulkDislikeDelayMs" max="10000" min="250" step="250" type="number" value="750"/>
-<span class="hint">Milliseconds. 750 ms is the default; this is only the short gap between ratings in a bulk run.</span>
+<span class="hint">Milliseconds. 750 ms is the default. The same delay is used by both Dislike and Stop recommending bulk runs.</span>
 </label>
 <div class="bot-manager-bulkbar" data-manager-kind="blocked">
 <button id="blockedBotSelectShown" type="button">Select shown</button>
@@ -2199,13 +2251,14 @@ step sister" spellcheck="false"></textarea></label>
 <select aria-label="Blocked bot bulk action" id="blockedBotBulkAction">
 <option value="">Bulk action…</option>
 <option value="dislike-selected">Dislike selected</option>
+<option value="less-like-selected">Stop recommending selected</option>
 <option value="copy-links">Copy profile links</option>
 <option value="unblock">Unblock selected</option>
 </select>
 <button id="blockedBotApplyBulk" type="button">Apply</button>
 </div>
 <p class="hint ds-bulk-selection-hint">Selections stay active after Apply so you can run another bulk action on the same bots. Use Clear selection when you are finished.</p>
-<p class="hint">Desktop browser only. QoL processes one blocked bot at a time through SpicyChat's normal rating dialog. Successfully disliked bots, bots that were already disliked, creator-blocked bots, private/deleted/404 bots, and other terminal unavailable ratings are remembered locally and skipped on later runs. Failed/time-out attempts stay eligible for retry. A bulk run now pauses after several helper failures in a row instead of continuing through the rest of the queue. If Settings closes mid-run, the unfinished queue can be resumed later. Name-only blocks are skipped because they do not have a bot ID/chat to rate.</p>
+<p class="hint">Desktop browser only. Dislike and Stop recommending are separate workflows with separate handled history. Dislike keeps the existing QoL/SpicyChat rating worker. Stop recommending opens or reuses one inactive SpicyChat Home helper for the entire batch so auth and SpicyChat's recommendation client stay initialized, then sends feedback directly by bot ID without navigating between bots or searching/clicking cards. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
 <div class="bot-manager-list" id="blockedBotManager"></div>
 <div class="bot-manager-pager">
 <button id="blockedBotShowMore" type="button">Show 20 more</button>
@@ -2498,7 +2551,7 @@ myth => Fantasy | ✨"></textarea></label>
 <p class="hint" id="cleanupStatus"></p>
 </section><section class="card" id="settingsHealthCard">
 <h2>Settings check</h2>
-<p class="hint">Checks only things that are likely to need action, such as an enabled feature missing required setup, invalid values, interrupted bulk actions, broken local records, or unusually large storage. It does not change anything by itself.</p>
+<p class="hint">Checks things that are likely to need action, including enabled features missing setup, invalid values, interrupted bulk actions, broken local records, unusually large storage, and developer wiring mistakes where a registered setting has no Settings control. It does not change anything by itself.</p>
 <div class="button-row"><button id="runSettingsHealthCheck" type="button">Check configuration</button></div>
 <div class="settings-health-results" id="settingsHealthResults"><span class="hint">No check run yet.</span></div>
 </section>

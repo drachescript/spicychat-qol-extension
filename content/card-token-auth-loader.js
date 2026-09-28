@@ -54,6 +54,11 @@
     return /^\/(?:[a-z]{2}\/)?chat\/[0-9a-f-]{20,}(?:\/[0-9a-f-]{20,})?(?:[/?#]|$)/i.test(String(location.pathname || ""));
   }
 
+  function isRecommendationWorkerRoute() {
+    try { return new URLSearchParams(location.search || "").get("dsQolRecommendationWorker") === "1"; }
+    catch { return false; }
+  }
+
   function syncFromSettings(settings) {
     const publicArchiveNeedsProfileBridge = !!settings?.botArchiveRememberSeenPublic && isBotProfileRoute();
     // Export can also be opened from the QoL panel even when the title-bar
@@ -63,7 +68,8 @@
       settings.showCardGreetingTokenInfo ||
       settings.deepSleepDisabledFeatures === false ||
       publicArchiveNeedsProfileBridge ||
-      chatExportNeedsAuthBridge
+      chatExportNeedsAuthBridge ||
+      isRecommendationWorkerRoute()
     ));
     bridgeWanted = enabled;
     if (enabled) inject();
@@ -74,7 +80,7 @@
   // lightweight MAIN-world bridge immediately on chat routes so it can observe
   // SpicyChat's own authenticated /messages XHR before an export is requested.
   // Settings still decide whether the hooks remain active after startup.
-  if (isChatRoute()) {
+  if (isChatRoute() || isRecommendationWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }

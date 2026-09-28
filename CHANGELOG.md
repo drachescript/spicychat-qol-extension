@@ -1,7 +1,18 @@
+## 0.2.19
+- Added an optional stacked chat layout and fixed its missing Settings switch.
+- Improved Stop recommending / Less Like with one background helper, faster startup, reliable bulk processing, clearer progress, and fewer retries.
+- Less Like now skips invalid or unavailable bots and can clean confirmed deleted bots out of active saved lists.
+- Improved Bot Status Center with faster bot availability checks, better saved names/descriptions, and safer deleted/private detection.
+- Added a Deleted / Unavailable Saved Bots recovery view with saved bot details and old chat links when available.
+- Added Bot Recovery Assistant to planned features for rebuilding deleted bots from saved data and old chats.
+- Saved bot copies now refresh only when live bot data is still available.
+- Added cleanup for broken saved bot records without deleting archived/recovery copies.
+- Fixed expanded long descriptions in My Creations.
+- Added an automatic check for missing Settings switches.
+
 ## 0.2.18
 - Fixed API-only Chat Export authentication on long chats by keeping the MAIN-world auth bridge available for Chat Export and starting it early enough to capture SpicyChat's authenticated message-history request.
 - Stopped Chat Export from blindly repeating the same unauthenticated 401 request and added a clearer auth-capture error.
-- Added an optional stacked chat message layout that aligns user and AI message boxes in one column without rebuilding message DOM.
 
 ## 0.2.17
 - Fixed Chat Export:

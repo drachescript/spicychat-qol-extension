@@ -194,6 +194,8 @@
         creator: clean(raw.creator || fields.creator || "", 500),
         image: imageUrl(raw.image || fields.image || ""),
         profileUrl: String(raw.profileUrl || `https://spicychat.ai/chatbot/${id}`).trim(),
+        chatUrls: [...new Set([...(Array.isArray(raw.chatUrls) ? raw.chatUrls : []), raw.chatUrl || ""]
+          .map(value => String(value || "").trim()).filter(value => /^https:\/\/[^/]*spicychat\.ai\/chat\//i.test(value)))].slice(0, 50),
         firstSavedAt: Number(raw.firstSavedAt) || Number(raw.savedAt) || 0,
         lastSavedAt: Number(raw.lastSavedAt) || Number(raw.savedAt) || 0,
         lastAvailableAt: Number(raw.lastAvailableAt) || Number(raw.lastSavedAt) || 0,
@@ -229,6 +231,7 @@
       creator: incoming.creator || previous?.creator || fields.creator || "",
       image: incoming.image || previous?.image || fields.image || "",
       profileUrl: incoming.profileUrl || previous?.profileUrl || `https://spicychat.ai/chatbot/${id}`,
+      chatUrls: [...new Set([...(previous?.chatUrls || []), ...(incoming.chatUrls || [])])].slice(0, 50),
       firstSavedAt: Number(previous?.firstSavedAt) || Number(incoming.firstSavedAt) || Date.now(),
       lastSavedAt: Number(incoming.lastSavedAt) || Date.now(),
       lastAvailableAt: Number(incoming.lastAvailableAt) || Date.now(),
@@ -648,29 +651,200 @@
       : 24;
     if (current?.lastSavedAt && Date.now() - Number(current.lastSavedAt) < hours * 3600000) return false;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
-    try {
-      const response = await fetch(`https://spicychat.ai/chatbot/${id}`, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-        redirect: "follow",
-        signal: controller.signal,
-        headers: { Accept: "text/html,application/xhtml+xml" }
-      });
-      if (!response.ok || /\/(login|signin|sign-in|auth)(?:[/?#]|$)/i.test(String(response.url || ""))) return false;
-      const html = await response.text();
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      const snapshot = extract(doc, id, "Chat-open refresh");
-      if (!snapshot) return false;
-      return saveSnapshot(snapshot);
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timer);
+    // A chat route can remain usable from local conversation state after the
+    // character/profile itself has disappeared. Never treat merely opening the
+    // chat as proof that fresh bot data still exists. Only replace/refresh the
+    // recovery copy after SpicyChat's live character data can actually be read.
+    let live = null;
+    if (typeof DS.fetchCharacterArchiveData === "function") {
+      try { live = await DS.fetchCharacterArchiveData(id); } catch {}
     }
+
+    const liveSource = clean(live?.source || "", 120).toLowerCase();
+    const liveName = clean(live?.name || "", 500);
+    const liveHasSignal = !!(
+      (liveName && !/^spicychat(?:\s*[|\-–—].*)?$/i.test(liveName)) ||
+      clean(live?.greeting || "", 12000) ||
+      clean(live?.personality || "", 18000) ||
+      clean(live?.scenario || "", 12000) ||
+      clean(live?.examples || "", 18000) ||
+      clean(live?.avatar || "", 2000)
+    );
+    if (!live || !liveHasSignal || !liveSource || liveSource === "unavailable") {
+      const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.botArchiveChatRefreshSkippedUnavailable = Number(counters.botArchiveChatRefreshSkippedUnavailable || 0) + 1;
+      return false;
+    }
+
+    const tags = Array.isArray(live.tags) ? live.tags.join(", ") : clean(live.tags || "", 12000);
+    const fields = {
+      name: live.name || "",
+      title: live.description || "",
+      description: live.description || "",
+      greeting: live.greeting || "",
+      personality: live.personality || "",
+      scenario: live.scenario || "",
+      exampleDialogues: live.examples || "",
+      tags,
+      visibility: live.visibility || "",
+      creator: live.creator || "",
+      image: live.avatar || "",
+      messageCount: "",
+      rating: "",
+      tokenCount: ""
+    };
+    const snapshot = normalize({ meta: { [id]: {
+      id,
+      name: fields.name || current?.name || id,
+      creator: fields.creator || current?.creator || "",
+      image: fields.image || current?.image || "",
+      profileUrl: `https://spicychat.ai/chatbot/${id}`,
+      firstSavedAt: current?.firstSavedAt || Date.now(),
+      lastSavedAt: Date.now(),
+      lastAvailableAt: Date.now(),
+      source: `Chat-open refresh (${live.source})`,
+      fields
+    } } }).meta[id];
+    if (!snapshot?.coverage?.length) return false;
+    return saveSnapshot(snapshot);
   }
+
+
+  async function helperCapture(botId) {
+    const id = String(botId || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false, ready: true, status: "invalid-bot" };
+    if (profileIdFromPath() !== id) return { ok: false, ready: false, status: "wrong-profile" };
+
+    const bodyText = clean(document.body?.textContent || "", 12000).toLowerCase();
+    const unavailable = [
+      "chatbot not found", "character not found",
+      "this chatbot is unavailable", "this character is unavailable",
+      "chatbot is unavailable", "character is unavailable",
+      "this chatbot has been deleted", "this character has been deleted",
+      "couldn't find this chatbot", "could not find this chatbot",
+      "page does not exist", "page doesn't exist"
+    ];
+    if (unavailable.some(text => bodyText.includes(text))) return { ok: true, ready: true, status: "unavailable" };
+    const restricted = ["this chatbot is private", "this character is private", "you do not have access", "access denied"];
+    if (restricted.some(text => bodyText.includes(text))) return { ok: true, ready: true, status: "restricted" };
+
+    let snapshot = extract(document, id, "Bot Status helper");
+    if (typeof DS.fetchPublicCharacterFields === "function") {
+      try {
+        const api = await DS.fetchPublicCharacterFields(id);
+        if (api && typeof api === "object") {
+          const fields = { ...(snapshot?.fields || {}) };
+          fields.name = fields.name || api.name || "";
+          fields.title = fields.title || api.title || api.description || "";
+          fields.description = fields.description || api.description || "";
+          fields.greeting = fields.greeting || api.greeting || "";
+          fields.personality = fields.personality || api.personality || api.definition || "";
+          fields.scenario = fields.scenario || api.scenario || "";
+          fields.exampleDialogues = fields.exampleDialogues || api.exampleDialogues || api.example_dialogues || api.mes_example || "";
+          fields.tags = fields.tags || api.tags || "";
+          fields.creator = fields.creator || api.creator || "";
+          fields.image = fields.image || api.image || api.avatar || "";
+          snapshot = mergeEntry(snapshot, {
+            id,
+            name: snapshot?.name || fields.name || id,
+            creator: snapshot?.creator || fields.creator || "",
+            image: snapshot?.image || fields.image || "",
+            profileUrl: `https://spicychat.ai/chatbot/${id}`,
+            firstSavedAt: snapshot?.firstSavedAt || Date.now(),
+            lastSavedAt: Date.now(),
+            lastAvailableAt: Date.now(),
+            source: "Bot Status helper + public API",
+            fields,
+            coverage: FIELDS.filter(field => fields[field])
+          });
+        }
+      } catch {}
+    }
+    if (!snapshot?.coverage?.length) return { ok: false, ready: document.readyState === "complete", status: "profile-not-ready" };
+    return { ok: true, ready: true, status: "available", archiveSnapshot: snapshot };
+  }
+
+  async function helperApiCheck(botId) {
+    const id = String(botId || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return { ok: false, ready: true, status: "invalid-bot", httpStatus: 0 };
+    }
+    if (typeof DS.fetchPublicCharacterFieldsDetailed !== "function") {
+      return { ok: false, ready: document.readyState !== "loading", status: "api-bridge-not-ready", httpStatus: 0 };
+    }
+    const result = await DS.fetchPublicCharacterFieldsDetailed(id);
+    const httpStatus = Number(result?.httpStatus || 0);
+    if (result?.status === "unavailable") return { ok: true, ready: true, status: "unavailable", httpStatus, reason: result.reason || "Character API says this bot is unavailable." };
+    if (result?.status === "restricted") return { ok: true, ready: true, status: "restricted", httpStatus, reason: result.reason || "Character API says this bot is restricted." };
+    if (!result?.ok || result?.status !== "available") {
+      return { ok: false, ready: true, status: result?.status || "unknown", httpStatus, reason: result?.reason || "Character API did not confirm live bot data." };
+    }
+
+    const api = result.fields && typeof result.fields === "object" ? result.fields : {};
+    const fields = {
+      name: clean(api.name || "", 500),
+      title: clean(api.title || "", 12000),
+      description: clean(api.description || api.title || "", 12000),
+      greeting: clean(api.greeting || "", 12000),
+      personality: "",
+      scenario: "",
+      exampleDialogues: "",
+      tags: clean(api.tags || "", 12000),
+      visibility: clean(api.visibility || "", 120),
+      creator: clean(api.creator || "", 500),
+      image: imageUrl(api.image || ""),
+      messageCount: "",
+      rating: "",
+      tokenCount: ""
+    };
+    const coverage = FIELDS.filter(field => fields[field]);
+    if (!coverage.length) {
+      return { ok: false, ready: true, status: "api-empty", httpStatus, reason: "Character API returned no usable public bot fields." };
+    }
+    const now = Date.now();
+    return {
+      ok: true,
+      ready: true,
+      status: "available",
+      httpStatus: httpStatus || 200,
+      reason: "Character API returned live bot data.",
+      archiveSnapshot: {
+        id,
+        name: fields.name || id,
+        creator: fields.creator || "",
+        image: fields.image || "",
+        profileUrl: `https://spicychat.ai/chatbot/${id}`,
+        firstSavedAt: now,
+        lastSavedAt: now,
+        lastAvailableAt: now,
+        source: "Bot Status Center character API",
+        fields,
+        coverage
+      }
+    };
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "DS_BOT_STATUS_WORKER_READY") {
+      sendResponse({
+        ok: typeof DS.fetchPublicCharacterFieldsDetailed === "function",
+        ready: document.readyState !== "loading" && typeof DS.fetchPublicCharacterFieldsDetailed === "function",
+        status: typeof DS.fetchPublicCharacterFieldsDetailed === "function" ? "ready" : "api-bridge-not-ready"
+      });
+      return false;
+    }
+    if (message?.type === "DS_BOT_STATUS_API_CHECK") {
+      helperApiCheck(message.botId)
+        .then(sendResponse)
+        .catch(error => sendResponse({ ok: false, ready: true, status: "worker-error", httpStatus: 0, reason: String(error?.message || error || "") }));
+      return true;
+    }
+    if (message?.type !== "DS_BOT_STATUS_CAPTURE") return false;
+    helperCapture(message.botId)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, ready: true, status: "worker-error", error: String(error?.message || error || "") }));
+    return true;
+  });
 
   DS.applyBotArchive = async function applyBotArchive() {
     if (inflight || !DS.state?.settings?.enabled) return;

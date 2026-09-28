@@ -831,6 +831,8 @@ html[data-ds-message-action-bridge="1"] div[style*="box-shadow"]:has(> button[ar
    virtualizing cards during a long scroll. */
 .ds-card-long-description [data-ds-description-expanded="1"],
 .ds-card-long-description .ds-card-description-block,
+.ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-3"][class*="scrollbar-hide"],
+.ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-3"][class*="group-hover:line-clamp-none"],
 .ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-2"][class*="scrollbar-hide"],
 .ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-2"][class*="group-hover:line-clamp-none"] {
   display: -webkit-box !important;
@@ -5401,6 +5403,42 @@ html.ds-chat-custom-background div.flex.grow.flex-col.top-0.left-0.w-full.h-full
 html.ds-listing-performance .ds-listing-card-lite {
   content-visibility: auto;
   contain-intrinsic-size: auto 360px;
+}
+
+
+/* Native card menus must escape the large-list paint containment. */
+html.ds-listing-performance .ds-listing-card-lite.ds-listing-card-menu-open,
+html.ds-listing-performance .ds-listing-card-lite:has(button[aria-expanded="true"]) {
+  content-visibility: visible !important;
+  contain: none !important;
+  contain-intrinsic-size: none !important;
+  overflow: visible !important;
+}
+
+/* Compact only SpicyChat's native card action menu after JS confirms that the
+   popup contains the native Less Like This item. */
+.ds-native-card-actions-menu {
+  gap: 4px !important;
+  padding: 6px !important;
+  min-width: 180px !important;
+  max-width: min(280px, calc(100vw - 16px)) !important;
+}
+.ds-native-card-actions-menu :is(button, [role="menuitem"], [role="option"], li) {
+  gap: 8px !important;
+  padding: 7px 10px !important;
+  min-height: 32px !important;
+  font-size: 13px !important;
+  line-height: 1.25 !important;
+}
+.ds-native-card-actions-menu :is(p, span) {
+  font-size: 13px !important;
+  line-height: 1.25 !important;
+}
+.ds-native-card-actions-menu svg {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
 }
 .ds-memory-import-duplicates {
   display: inline-flex;

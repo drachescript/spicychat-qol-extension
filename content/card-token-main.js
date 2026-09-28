@@ -3,10 +3,20 @@
 
   if (window.__dsCardTokenMainBridgeV1) return;
   window.__dsCardTokenMainBridgeV1 = true;
+
+  function setRootAttribute(name, value) {
+    const root = document.documentElement;
+    if (!root) return false;
+    const next = String(value);
+    if (root.getAttribute(name) === next) return false;
+    root.setAttribute(name, next);
+    return true;
+  }
+
   // Chrome/Brave loads this file directly in MAIN world at document_start.
   // Expose readiness immediately so the isolated-world loader does not race the
   // site's first authenticated history request or inject a redundant copy.
-  try { document.documentElement?.setAttribute("data-ds-card-token-main-bridge", "2"); } catch {}
+  try { setRootAttribute("data-ds-card-token-main-bridge", "2"); } catch {}
 
   const REQUEST_EVENT = "ds-qol-card-token-request-v2";
   const RESPONSE_EVENT = "ds-qol-card-token-response-v2";
@@ -15,6 +25,10 @@
   const HISTORY_NATIVE_REQUEST_EVENT = "ds-qol-chat-history-native-request-v1";
   const HISTORY_NATIVE_RESPONSE_EVENT = "ds-qol-chat-history-native-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
+  const FEEDBACK_REQUEST_EVENT = "ds-qol-character-feedback-request-v1";
+  const FEEDBACK_RESPONSE_EVENT = "ds-qol-character-feedback-response-v1";
+  const RECOMMENDATION_WORKER_PROBE_REQUEST_EVENT = "ds-qol-recommendation-worker-probe-request-v1";
+  const RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT = "ds-qol-recommendation-worker-probe-response-v1";
   const API_BASE = "https://prod.nd-api.com/v2/characters/";
   const MESSAGE_API_BASE = "https://prod.nd-api.com/characters/";
   const API_HOST = "prod.nd-api.com";
@@ -24,6 +38,17 @@
   let capturedToken = "";
   let capturedGuest = "";
   let capturedAt = 0;
+  let recombeePublicToken = "";
+  let recombeeTokenCandidatesPromise = null;
+  let recombeeTokenCandidatesCache = [];
+  let recombeeTokenCandidatesCachedAt = 0;
+  const RECOMBEE_TOKEN_CACHE_MS = 10 * 60 * 1000;
+  const RECOMBEE_TOKEN_EMPTY_CACHE_MS = 5 * 1000;
+  const recombeeFeedbackInFlight = new Map();
+  const recombeeSignedRequestSamples = [];
+  const RECOMBEE_SIGNED_SAMPLE_LIMIT = 24;
+  const recommendationWorkerBootAt = Date.now();
+  const RECOMBEE_DISCOVERY_FALLBACK_MS = 7000;
   let nativeHistoryRequestSeq = 0;
   let nativeHistoryResponseSeq = 0;
   let nativeHistorySuccesses = 0;
@@ -35,9 +60,9 @@
 
   function exposeCapturedAuthState() {
     try {
-      document.documentElement?.setAttribute("data-ds-card-token-main-auth", isJwt(capturedToken) ? "1" : "0");
-      document.documentElement?.setAttribute("data-ds-card-token-main-guest", isGuest(capturedGuest) ? "1" : "0");
-      document.documentElement?.setAttribute("data-ds-card-token-main-auth-at", String(Math.max(0, Number(capturedAt || 0))));
+      setRootAttribute("data-ds-card-token-main-auth", isJwt(capturedToken) ? "1" : "0");
+      setRootAttribute("data-ds-card-token-main-guest", isGuest(capturedGuest) ? "1" : "0");
+      setRootAttribute("data-ds-card-token-main-auth-at", String(Math.max(0, Number(capturedAt || 0))));
     } catch {}
   }
 
@@ -63,6 +88,38 @@
     return !!url && url.hostname === API_HOST;
   }
 
+  function recombeeSignedSample(input) {
+    const url = parseApiUrl(input);
+    if (!url || url.hostname !== "client-rapi-ca-east.recombee.com" || !url.pathname.startsWith("/spicychat-prod/")) return null;
+    const signature = clean(url.searchParams.get("frontend_sign")).toLowerCase();
+    if (!/^[0-9a-f]{40}$/i.test(signature)) return null;
+
+    const unsigned = new URL(url.href);
+    unsigned.searchParams.delete("frontend_sign");
+    return {
+      message: `${unsigned.pathname}${unsigned.search}`,
+      signature,
+      at: Date.now()
+    };
+  }
+
+  function rememberRecombeeSignedRequest(input) {
+    const sample = recombeeSignedSample(input);
+    if (!sample) return;
+    if (recombeeSignedRequestSamples.some(item => item.message === sample.message && item.signature === sample.signature)) return;
+    recombeeSignedRequestSamples.unshift(sample);
+    if (recombeeSignedRequestSamples.length > RECOMBEE_SIGNED_SAMPLE_LIMIT) {
+      recombeeSignedRequestSamples.length = RECOMBEE_SIGNED_SAMPLE_LIMIT;
+    }
+  }
+
+  function collectPerformanceRecombeeSamples() {
+    try {
+      const entries = performance.getEntriesByType("resource") || [];
+      for (const entry of entries.slice(-250)) rememberRecombeeSignedRequest(entry?.name || "");
+    } catch {}
+  }
+
   function urlIsNativeHistoryApi(input) {
     const url = parseApiUrl(input);
     if (!url || url.hostname !== API_HOST) return false;
@@ -74,8 +131,8 @@
     nativeHistoryRequestSeq += 1;
     const at = Date.now();
     try {
-      document.documentElement?.setAttribute("data-ds-chat-history-main-seq", String(nativeHistoryRequestSeq));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-at", String(at));
+      setRootAttribute("data-ds-chat-history-main-seq", String(nativeHistoryRequestSeq));
+      setRootAttribute("data-ds-chat-history-main-at", String(at));
       window.dispatchEvent(new CustomEvent(HISTORY_NATIVE_REQUEST_EVENT, {
         detail: { seq: nativeHistoryRequestSeq, at, transport: String(transport || "unknown") }
       }));
@@ -100,13 +157,13 @@
       exposeCapturedAuthState();
     }
     try {
-      document.documentElement?.setAttribute("data-ds-chat-history-main-response-seq", String(nativeHistoryResponseSeq));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-response-request-seq", String(requestSeq));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-response-status", String(httpStatus));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-response-at", String(at));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-response-ms", String(elapsedMs));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-successes", String(nativeHistorySuccesses));
-      document.documentElement?.setAttribute("data-ds-chat-history-main-auth-401s", String(nativeHistoryAuth401s));
+      setRootAttribute("data-ds-chat-history-main-response-seq", String(nativeHistoryResponseSeq));
+      setRootAttribute("data-ds-chat-history-main-response-request-seq", String(requestSeq));
+      setRootAttribute("data-ds-chat-history-main-response-status", String(httpStatus));
+      setRootAttribute("data-ds-chat-history-main-response-at", String(at));
+      setRootAttribute("data-ds-chat-history-main-response-ms", String(elapsedMs));
+      setRootAttribute("data-ds-chat-history-main-successes", String(nativeHistorySuccesses));
+      setRootAttribute("data-ds-chat-history-main-auth-401s", String(nativeHistoryAuth401s));
       window.dispatchEvent(new CustomEvent(HISTORY_NATIVE_RESPONSE_EVENT, {
         detail: {
           seq: nativeHistoryResponseSeq, requestSeq, at, elapsedMs, status: httpStatus,
@@ -164,6 +221,7 @@
     let historySeq = 0;
     let historyStartedAt = 0;
     try {
+      if (active) rememberRecombeeSignedRequest(input instanceof Request ? input.url : input);
       if (active && urlIsApi(input)) {
         scanHeaders(input instanceof Request ? input.headers : null);
         scanHeaders(init?.headers);
@@ -190,6 +248,7 @@
 
   function observedOpen(method, url, ...rest) {
     try {
+      if (active) rememberRecombeeSignedRequest(url);
       this.__dsCardTokenApi = active && urlIsApi(url);
       this.__dsCardTokenUrl = this.__dsCardTokenApi ? String(url || "") : "";
       this.__dsCardTokenHistoryApi = this.__dsCardTokenApi && urlIsNativeHistoryApi(url);
@@ -248,7 +307,7 @@
     active = !!next;
     if (active) installHooks();
     else uninstallHooks();
-    try { document.documentElement?.setAttribute("data-ds-card-token-main-active", active ? "1" : "0"); } catch {}
+    try { setRootAttribute("data-ds-card-token-main-active", active ? "1" : "0"); } catch {}
   }
 
   window.addEventListener(CONTROL_EVENT, event => setActive(event?.detail?.enabled !== false));
@@ -454,17 +513,711 @@
     }
   });
 
+
+  function feedbackSend(detail) {
+    try { window.dispatchEvent(new CustomEvent(FEEDBACK_RESPONSE_EVENT, { detail })); } catch {}
+  }
+
+  function currentRecombeeUserId() {
+    const candidates = [];
+    try {
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = clean(localStorage.key(index));
+        if (!key) continue;
+        const kp = key.match(/(?:^|_)(kp:[0-9a-f]{24,64})$/i);
+        if (kp?.[1]) candidates.push(kp[1]);
+      }
+    } catch {}
+    const preferred = candidates.find(value => /^kp:[0-9a-f]{32}$/i.test(value));
+    if (preferred) return preferred;
+    if (candidates[0]) return candidates[0];
+    try {
+      const guest = clean(localStorage.getItem("guest_user_id"));
+      if (isGuest(guest)) return guest;
+    } catch {}
+    return isGuest(capturedGuest) ? capturedGuest : "";
+  }
+
+  function plausibleRecombeeToken(value) {
+    const token = clean(value);
+    if (token.length < 16 || token.length > 180) return "";
+    if (!/^[A-Za-z0-9_-]+$/.test(token)) return "";
+    if (/^(spicychat|homepage|navigate|ca-east|ratings|recommend)/i.test(token)) return "";
+    return token;
+  }
+
+  function collectRecombeeTokensFromText(text, scored = new Map()) {
+    const source = String(text || "");
+    if (!source.includes("spicychat-prod")) return scored;
+    const add = (raw, score) => {
+      const token = plausibleRecombeeToken(raw);
+      if (!token) return;
+      scored.set(token, Math.max(Number(scored.get(token) || 0), Number(score || 0)));
+    };
+
+    // Common SDK construction / config forms with a literal public token.
+    const literalPatterns = [
+      [/['"]spicychat-prod['"]\s*,\s*['"]([A-Za-z0-9_-]{16,180})['"]/g, 120],
+      [/databaseId\s*:\s*['"]spicychat-prod['"][\s\S]{0,500}?publicToken\s*:\s*['"]([A-Za-z0-9_-]{16,180})['"]/g, 115],
+      [/publicToken\s*:\s*['"]([A-Za-z0-9_-]{16,180})['"][\s\S]{0,500}?databaseId\s*:\s*['"]spicychat-prod['"]/g, 115]
+    ];
+    for (const [pattern, score] of literalPatterns) {
+      let match;
+      while ((match = pattern.exec(source))) add(match[1], score);
+    }
+
+    // Minified bundles often pass an identifier as the SDK's second ctor arg:
+    // new X("spicychat-prod",tokenVar,{region:"ca-east"}). Resolve a nearby
+    // string assignment for that identifier without treating unrelated strings
+    // as high-confidence candidates.
+    const ctorIdentifier = /['"]spicychat-prod['"]\s*,\s*([A-Za-z_$][\w$]*)\s*,/g;
+    let ctorMatch;
+    while ((ctorMatch = ctorIdentifier.exec(source))) {
+      const name = ctorMatch[1].replace(/[$]/g, "\\$");
+      const assign = new RegExp(`(?:const|let|var)?\\s*${name}\\s*=\\s*['\"]([A-Za-z0-9_-]{16,180})['\"]`, "g");
+      let assignment;
+      while ((assignment = assign.exec(source))) add(assignment[1], 105);
+    }
+
+    // Low-confidence fallback: only inspect quoted strings very close to the
+    // database id and only when the same slice also mentions Recombee/region.
+    let pos = source.indexOf("spicychat-prod");
+    let windows = 0;
+    while (pos >= 0 && windows < 24) {
+      const start = Math.max(0, pos - 500);
+      const end = Math.min(source.length, pos + 900);
+      const windowText = source.slice(start, end);
+      if (/ca-east|recombee|client-rapi/i.test(windowText)) {
+        const quote = /['"]([A-Za-z0-9_-]{20,140})['"]/g;
+        let match;
+        while ((match = quote.exec(windowText))) add(match[1], 20);
+      }
+      windows++;
+      pos = source.indexOf("spicychat-prod", pos + 1);
+    }
+    return scored;
+  }
+
+  function collectRecombeeTokensFromGlobals(scored = new Map()) {
+    const seen = new WeakSet();
+    const visit = (value, depth = 0, hint = "") => {
+      if (!value || typeof value !== "object" || depth > 2 || seen.has(value)) return;
+      seen.add(value);
+      let databaseId = "";
+      let publicToken = "";
+      try {
+        databaseId = clean(value.databaseId || value.databaseID || value.dbId);
+        publicToken = clean(value.publicToken || value.public_token || value.token);
+      } catch {}
+      if (databaseId === "spicychat-prod") {
+        const token = plausibleRecombeeToken(publicToken);
+        if (token) scored.set(token, Math.max(140, Number(scored.get(token) || 0)));
+      }
+      if (depth >= 2) return;
+      let entries = [];
+      try { entries = Object.entries(value).slice(0, 80); } catch { return; }
+      for (const [key, child] of entries) {
+        if (!/recombee|recommend|rapi|client|spicy/i.test(`${hint} ${key}`)) continue;
+        visit(child, depth + 1, key);
+      }
+    };
+    try {
+      for (const key of Object.getOwnPropertyNames(window).filter(key => /recombee|recommend|rapi/i.test(key)).slice(0, 80)) {
+        let value;
+        try { value = window[key]; } catch { continue; }
+        visit(value, 0, key);
+      }
+    } catch {}
+    return scored;
+  }
+
+  async function discoverRecombeeTokenCandidates() {
+    if (recombeePublicToken) return [recombeePublicToken];
+    const cacheAge = Date.now() - Number(recombeeTokenCandidatesCachedAt || 0);
+    const cacheTtl = recombeeTokenCandidatesCache.length ? RECOMBEE_TOKEN_CACHE_MS : RECOMBEE_TOKEN_EMPTY_CACHE_MS;
+    if (recombeeTokenCandidatesCachedAt && cacheAge >= 0 && cacheAge < cacheTtl) {
+      return [...recombeeTokenCandidatesCache];
+    }
+    if (recombeeTokenCandidatesPromise) return recombeeTokenCandidatesPromise;
+    recombeeTokenCandidatesPromise = (async () => {
+      const scored = collectRecombeeTokensFromGlobals(new Map());
+      try {
+        Array.from(document.scripts || []).forEach(script => {
+          if (!script.src && String(script.textContent || "").includes("spicychat-prod")) {
+            collectRecombeeTokensFromText(script.textContent, scored);
+          }
+        });
+      } catch {}
+      if ([...scored.values()].some(score => score >= 100)) {
+        const found = [...scored.entries()].sort((a, b) => b[1] - a[1]).map(([token]) => token).slice(0, 20);
+        recombeeTokenCandidatesCache = found;
+        recombeeTokenCandidatesCachedAt = Date.now();
+        return [...found];
+      }
+
+      const urls = [];
+      const addUrl = raw => {
+        try {
+          const url = new URL(raw, location.href);
+          if (url.origin !== location.origin || !/\.js(?:$|\?)/i.test(url.href)) return;
+          if (!urls.includes(url.href)) urls.push(url.href);
+        } catch {}
+      };
+      try { Array.from(document.scripts || []).forEach(script => addUrl(script.src)); } catch {}
+      try {
+        performance.getEntriesByType("resource")
+          .filter(entry => entry.initiatorType === "script")
+          .forEach(entry => addUrl(entry.name));
+      } catch {}
+
+      // Recombee's browser token is public and bundled into SpicyChat's own
+      // same-origin app code. Prefer the main app bundles and read a few cached
+      // bundles in parallel. The worker normally waits for Home's first native
+      // signed recommendation request before reaching this point, so these
+      // files should already be in the browser cache instead of competing with
+      // SpicyChat's initial page boot.
+      const bundlePriority = raw => {
+        const value = String(raw || "");
+        if (/\/assets\/index-[^/]+\.js(?:$|\?)/i.test(value)) return 0;
+        if (/\/assets\/common-[^/]+\.js(?:$|\?)/i.test(value)) return 1;
+        if (/\/assets\/vendor-[^/]+\.js(?:$|\?)/i.test(value)) return 2;
+        if (/\/assets\//i.test(value)) return 3;
+        return 4;
+      };
+      const prioritized = urls.slice(0, 36).sort((a, b) => bundlePriority(a) - bundlePriority(b));
+      const batchSize = 4;
+      for (let offset = 0; offset < prioritized.length; offset += batchSize) {
+        const batch = prioritized.slice(offset, offset + batchSize);
+        const texts = await Promise.all(batch.map(async url => {
+          try {
+            const response = await nativeFetch(url, { credentials: "same-origin", cache: "force-cache" });
+            if (!response.ok) return "";
+            return await response.text();
+          } catch {
+            return "";
+          }
+        }));
+        for (const text of texts) {
+          if (text.includes("spicychat-prod")) collectRecombeeTokensFromText(text, scored);
+        }
+        if ([...scored.values()].some(score => score >= 100)) break;
+      }
+      const found = [...scored.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([token]) => token)
+        .slice(0, 20);
+      recombeeTokenCandidatesCache = found;
+      recombeeTokenCandidatesCachedAt = Date.now();
+      return [...found];
+    })().finally(() => { recombeeTokenCandidatesPromise = null; });
+    return recombeeTokenCandidatesPromise;
+  }
+
+  async function hmacSha1Hex(keyText, message) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(keyText),
+      { name: "HMAC", hash: "SHA-1" },
+      false,
+      ["sign"]
+    );
+    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+    return [...new Uint8Array(signature)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function identifyRecombeeTokenFromSignedRequests(candidates) {
+    const tokens = [...new Set((candidates || []).map(plausibleRecombeeToken).filter(Boolean))];
+    if (!tokens.length) return "";
+    collectPerformanceRecombeeSamples();
+    const samples = recombeeSignedRequestSamples.slice(0, RECOMBEE_SIGNED_SAMPLE_LIMIT);
+    if (!samples.length) return "";
+
+    for (const sample of samples) {
+      for (const token of tokens) {
+        try {
+          const signature = await hmacSha1Hex(token, sample.message);
+          if (signature.toLowerCase() === sample.signature) {
+            recombeePublicToken = token;
+            recombeeTokenCandidatesCache = [token, ...recombeeTokenCandidatesCache.filter(value => value !== token)];
+            recombeeTokenCandidatesCachedAt = Date.now();
+            return token;
+          }
+        } catch {}
+      }
+    }
+    return "";
+  }
+
+  async function waitForCharacterAuth(timeoutMs = 5000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (isJwt(capturedToken) || isGuest(capturedGuest)) return true;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return isJwt(capturedToken) || isGuest(capturedGuest);
+  }
+
+  async function checkCharacterAccessible(botId) {
+    const hasAuth = await waitForCharacterAuth(5000);
+    if (!hasAuth) {
+      return {
+        ok: false,
+        status: "character-auth-not-ready",
+        stage: "availability-preflight",
+        reason: "This SpicyChat page has not exposed usable character API auth yet.",
+        httpStatus: 0,
+        availabilityNetworkAttempts: 0,
+        availabilityConfirmed: false
+      };
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const headers = { Accept: "application/json", "x-app-id": "spicychat" };
+      if (isJwt(capturedToken) && capturedToken.length < MAX_TOKEN) headers.Authorization = `Bearer ${capturedToken}`;
+      if (isGuest(capturedGuest)) headers["x-guest-userid"] = capturedGuest;
+      const response = await nativeFetch(`${API_BASE}${encodeURIComponent(botId)}`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers,
+        signal: controller.signal
+      });
+      const httpStatus = Number(response?.status || 0);
+
+      if (httpStatus === 404 || httpStatus === 410) {
+        return {
+          ok: false,
+          status: "bot-not-found",
+          stage: "availability-preflight",
+          reason: `SpicyChat character API returned HTTP ${httpStatus}.`,
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: true
+        };
+      }
+      if (httpStatus === 401) {
+        if (headers.Authorization) {
+          capturedToken = "";
+          capturedAt = 0;
+          exposeCapturedAuthState();
+        }
+        return {
+          ok: false,
+          status: "character-auth-rejected",
+          stage: "availability-preflight",
+          reason: "SpicyChat rejected this page's current character API authentication (HTTP 401).",
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: false
+        };
+      }
+      if (httpStatus === 403) {
+        return {
+          ok: false,
+          status: "character-restricted",
+          stage: "availability-preflight",
+          reason: "SpicyChat says this character is not accessible to the current account (HTTP 403).",
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: false
+        };
+      }
+      if (httpStatus === 429) {
+        return {
+          ok: false,
+          status: "character-rate-limited",
+          stage: "availability-preflight",
+          reason: "SpicyChat rate-limited the character availability check.",
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: false
+        };
+      }
+      if (!response?.ok) {
+        return {
+          ok: false,
+          status: "character-api-failed",
+          stage: "availability-preflight",
+          reason: `SpicyChat character API returned HTTP ${httpStatus || "unknown"}.`,
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: false
+        };
+      }
+
+      let data = null;
+      try { data = await response.json(); } catch {}
+      if (!data || typeof data !== "object") {
+        return {
+          ok: false,
+          status: "character-api-invalid-response",
+          stage: "availability-preflight",
+          reason: "SpicyChat character API returned no readable character data.",
+          httpStatus,
+          availabilityNetworkAttempts: 1,
+          availabilityConfirmed: false
+        };
+      }
+
+      return {
+        ok: true,
+        status: "available",
+        stage: "availability-preflight",
+        reason: "SpicyChat character API confirmed the bot is still accessible.",
+        httpStatus,
+        availabilityNetworkAttempts: 1,
+        availabilityConfirmed: true
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: error?.name === "AbortError" ? "character-api-timeout" : "character-api-network-failure",
+        stage: "availability-preflight",
+        reason: clean(error?.message || error || "Character availability request failed."),
+        httpStatus: 0,
+        availabilityNetworkAttempts: 1,
+        availabilityConfirmed: false
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function recommendationWorkerReadiness(preferredToken = "") {
+    collectPerformanceRecombeeSamples();
+    const authReady = isJwt(capturedToken) || isGuest(capturedGuest);
+    const userId = currentRecombeeUserId();
+    const preferred = plausibleRecombeeToken(preferredToken);
+    const signedSamples = recombeeSignedRequestSamples.length;
+    const bootAgeMs = Math.max(0, Date.now() - recommendationWorkerBootAt);
+
+    // A token supplied by the isolated-world cache came from a previous
+    // successful Less Like transaction, so it is already safe to reuse. Do not
+    // rescan SpicyChat bundles just to re-prove it on every worker boot.
+    if (!recombeePublicToken && preferred) recombeePublicToken = preferred;
+
+    let candidates = [...new Set([
+      recombeePublicToken,
+      preferred,
+      ...recombeeTokenCandidatesCache
+    ].map(plausibleRecombeeToken).filter(Boolean))];
+
+    // The old worker started bundle discovery immediately after opening Home.
+    // On a cold page that competed with SpicyChat's own boot and could take
+    // ~20 seconds, eventually triggering an unnecessary full-page reload. Home
+    // naturally makes a signed Recombee recommendation request once its native
+    // client is ready. Wait for that signal first, then inspect already-cached
+    // bundles and verify the correct token OFFLINE against the native signature.
+    // If Home never makes such a request, fall back after a short grace period.
+    const shouldDiscover = !recombeePublicToken && (
+      signedSamples > 0 ||
+      bootAgeMs >= RECOMBEE_DISCOVERY_FALLBACK_MS
+    );
+
+    if (shouldDiscover) {
+      try {
+        const discovered = await discoverRecombeeTokenCandidates();
+        candidates = [...new Set([...candidates, ...discovered].map(plausibleRecombeeToken).filter(Boolean))];
+      } catch {}
+    }
+
+    if (!recombeePublicToken && candidates.length && signedSamples) {
+      try { await identifyRecombeeTokenFromSignedRequests(candidates); } catch {}
+    }
+
+    const validatedTokenReady = !!plausibleRecombeeToken(recombeePublicToken);
+    const candidateTokens = [...new Set(candidates.filter(plausibleRecombeeToken))];
+    const waitingForNativeSample = !validatedTokenReady && !signedSamples && bootAgeMs < RECOMBEE_DISCOVERY_FALLBACK_MS;
+    // If Home has already produced a native signed Recombee request, do not
+    // knowingly probe unverified candidates against the ratings endpoint. The
+    // native signature gives us an offline oracle; wait for a matching token.
+    // Network candidate probing remains only as the fallback for pages where
+    // Home never emits a signed recommendation request at all.
+    const recombeeReady = validatedTokenReady || (!signedSamples && !waitingForNativeSample && candidateTokens.length > 0);
+    const ready = authReady && !!userId && recombeeReady;
+    return {
+      ok: ready,
+      ready,
+      status: ready
+        ? "recommendation-worker-ready"
+        : (waitingForNativeSample ? "recommendation-worker-waiting-native-signature" : "recommendation-worker-waiting"),
+      bridgeReady: true,
+      authReady,
+      userReady: !!userId,
+      recombeeReady,
+      recombeeValidated: validatedTokenReady,
+      candidateTokenCount: candidateTokens.length,
+      nativeSignedSamples: signedSamples,
+      workerBootAgeMs: bootAgeMs,
+      tokenSource: validatedTokenReady
+        ? (signedSamples ? "native-signed-request" : "cached-success-token")
+        : (candidateTokens.length ? "bundle-candidates" : ""),
+      publicToken: validatedTokenReady ? recombeePublicToken : ""
+    };
+  }
+
+  async function postRecombeeLessLike(botId, userId, preferredToken = "") {
+    const preferred = plausibleRecombeeToken(preferredToken);
+    let discovered = [];
+    let discoveredFallbackLoaded = false;
+
+    // A token learned from an earlier success is the cheapest path. Do not
+    // rescan SpicyChat's bundles before trying a token we already know worked.
+    if (!recombeePublicToken && !preferred) {
+      discovered = await discoverRecombeeTokenCandidates();
+      discoveredFallbackLoaded = true;
+    }
+
+    let initial = [...new Set([recombeePublicToken, preferred, ...discovered].filter(Boolean))];
+    if (!initial.length) {
+      discovered = await discoverRecombeeTokenCandidates();
+      discoveredFallbackLoaded = true;
+      initial = [...new Set(discovered.filter(Boolean))];
+    }
+    if (!initial.length) {
+      return {
+        ok: false,
+        status: "recombee-token-not-found",
+        stage: "token-discovery",
+        reason: "No SpicyChat Recombee public-token candidate was found.",
+        characterId: botId,
+        httpStatus: 0,
+        attempts: 0,
+        networkAttempts: 0,
+        requestSent: false
+      };
+    }
+
+    // If SpicyChat already made any signed Recombee request on this page, use
+    // its valid signature as an offline oracle to identify the correct public
+    // token. This avoids probing candidates against the network at all.
+    let observedToken = await identifyRecombeeTokenFromSignedRequests(initial);
+    let ordered = [...new Set([observedToken, recombeePublicToken, preferred, ...initial].filter(Boolean))];
+    let lastStatus = 0;
+    let lastReason = "";
+    let attempts = 0;
+    let networkAttempts = 0;
+    let index = 0;
+
+    while (index < ordered.length || !discoveredFallbackLoaded) {
+      if (index >= ordered.length && !discoveredFallbackLoaded) {
+        discovered = await discoverRecombeeTokenCandidates();
+        discoveredFallbackLoaded = true;
+        if (!observedToken) observedToken = await identifyRecombeeTokenFromSignedRequests(discovered);
+        ordered = [...new Set([...ordered, observedToken, ...discovered].filter(Boolean))].slice(0, 12);
+        if (index >= ordered.length) break;
+      }
+
+      const token = ordered[index++];
+      if (!token || attempts >= 12) break;
+      attempts++;
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signedPath = `/spicychat-prod/ratings/?frontend_timestamp=${timestamp}`;
+      let signature = "";
+      try {
+        signature = await hmacSha1Hex(token, signedPath);
+      } catch {
+        return {
+          ok: false,
+          status: "recombee-signing-unavailable",
+          stage: "signing",
+          reason: "Browser HMAC-SHA1 signing was unavailable.",
+          characterId: botId,
+          httpStatus: 0,
+          attempts,
+          networkAttempts,
+          requestSent: networkAttempts > 0
+        };
+      }
+
+      const url = `https://client-rapi-ca-east.recombee.com${signedPath}&frontend_sign=${signature}`;
+      try {
+        networkAttempts++;
+        const response = await nativeFetch(url, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, itemId: botId, rating: -1, cascadeCreate: true })
+        });
+        lastStatus = Number(response.status || 0);
+
+        if (response.ok) {
+          recombeePublicToken = token;
+          recombeeTokenCandidatesCache = [token, ...recombeeTokenCandidatesCache.filter(value => value !== token)];
+          recombeeTokenCandidatesCachedAt = Date.now();
+          return {
+            ok: true,
+            status: "less-liked",
+            stage: "response",
+            reason: "Matching Recombee rating request returned 2xx.",
+            characterId: botId,
+            httpStatus: lastStatus,
+            attempts,
+            networkAttempts,
+            requestSent: true,
+            publicToken: token,
+            tokenSource: token === observedToken ? "observed-native-signature" : (token === preferred ? "cached-extension-token" : "bundle-candidate")
+          };
+        }
+
+        let responseText = "";
+        try { responseText = String(await response.text()); } catch {}
+        lastReason = responseText.slice(0, 300);
+
+        const unavailable =
+          [404, 410].includes(lastStatus) ||
+          /(?:item|character).{0,40}(?:not found|does not exist|unknown)|not found.{0,40}(?:item|character)/i.test(responseText);
+
+        if (unavailable) {
+          return {
+            ok: false,
+            status: "bot-not-found",
+            stage: "response",
+            reason: lastReason || `Recombee returned HTTP ${lastStatus} for this character ID.`,
+            characterId: botId,
+            httpStatus: lastStatus,
+            attempts,
+            networkAttempts,
+            requestSent: true
+          };
+        }
+
+        if (token === recombeePublicToken) recombeePublicToken = "";
+      } catch (error) {
+        lastReason = String(error?.message || error || "").slice(0, 300);
+        if (token === recombeePublicToken) recombeePublicToken = "";
+      }
+    }
+
+    return {
+      ok: false,
+      status: "recombee-request-failed",
+      stage: "request",
+      reason: lastReason || "No signed Less Like request completed successfully.",
+      characterId: botId,
+      httpStatus: lastStatus,
+      attempts,
+      networkAttempts,
+      requestSent: networkAttempts > 0
+    };
+  }
+
+  window.addEventListener(RECOMMENDATION_WORKER_PROBE_REQUEST_EVENT, event => {
+    const detail = event?.detail || {};
+    const requestId = clean(detail.requestId);
+    recommendationWorkerReadiness(detail.preferredRecombeeToken).then(result => {
+      try {
+        window.dispatchEvent(new CustomEvent(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, {
+          detail: { requestId, ...result }
+        }));
+      } catch {}
+    }).catch(error => {
+      try {
+        window.dispatchEvent(new CustomEvent(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, {
+          detail: {
+            requestId, ok: false, ready: false, status: "recommendation-worker-probe-error",
+            reason: clean(error?.message || error)
+          }
+        }));
+      } catch {}
+    });
+  });
+
+  window.addEventListener(FEEDBACK_REQUEST_EVENT, async event => {
+    const detail = event?.detail || {};
+    if (!active) return;
+    const requestId = clean(detail.requestId);
+    const botId = clean(detail.botId).toLowerCase();
+    const mode = clean(detail.mode).toLowerCase();
+    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || mode !== "less-like") return;
+
+    const started = Date.now();
+    let coalesced = false;
+    let work = recombeeFeedbackInFlight.get(botId) || null;
+    if (work) {
+      coalesced = true;
+    } else {
+      work = (async () => {
+        const availability = await checkCharacterAccessible(botId);
+        if (!availability?.ok) {
+          return {
+            ...availability,
+            characterId: botId,
+            attempts: 0,
+            networkAttempts: 0,
+            requestSent: false
+          };
+        }
+
+        const userId = currentRecombeeUserId();
+        if (!userId) {
+          return {
+            ok: false,
+            status: "recombee-user-not-found",
+            stage: "user-discovery",
+            reason: "No SpicyChat/Recombee user ID was available in this page context.",
+            httpStatus: availability.httpStatus || 0,
+            attempts: 0,
+            networkAttempts: 0,
+            availabilityNetworkAttempts: Number(availability.availabilityNetworkAttempts || 0),
+            availabilityConfirmed: true,
+            requestSent: false,
+            characterId: botId
+          };
+        }
+        const result = await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        return {
+          ...result,
+          availabilityNetworkAttempts: Number(availability.availabilityNetworkAttempts || 0),
+          availabilityConfirmed: true
+        };
+      })();
+      recombeeFeedbackInFlight.set(botId, work);
+    }
+
+    let result;
+    try {
+      result = await work;
+    } finally {
+      if (!coalesced && recombeeFeedbackInFlight.get(botId) === work) recombeeFeedbackInFlight.delete(botId);
+    }
+
+    feedbackSend({
+      requestId,
+      ok: !!result?.ok,
+      status: result?.status || "recombee-request-failed",
+      mode,
+      botId,
+      httpStatus: Number(result?.httpStatus || 0),
+      tokenAttempts: Number(result?.attempts || 0),
+      networkAttempts: Number(result?.networkAttempts || 0),
+      requestSent: !!result?.requestSent,
+      availabilityNetworkAttempts: Number(result?.availabilityNetworkAttempts || 0),
+      availabilityConfirmed: !!result?.availabilityConfirmed,
+      stage: clean(result?.stage || ""),
+      reason: clean(result?.reason || ""),
+      characterId: clean(result?.characterId || botId),
+      publicToken: plausibleRecombeeToken(result?.publicToken || ""),
+      tokenSource: clean(result?.tokenSource || ""),
+      elapsedMs: Date.now() - started,
+      coalesced,
+      executor: "direct-recombee-api"
+    });
+  });
+
   try {
     exposeCapturedAuthState();
-    document.documentElement?.setAttribute("data-ds-chat-history-main-seq", String(nativeHistoryRequestSeq));
-    document.documentElement?.setAttribute("data-ds-chat-history-main-response-seq", String(nativeHistoryResponseSeq));
-    document.documentElement?.setAttribute("data-ds-chat-history-main-response-request-seq", "0");
-    document.documentElement?.setAttribute("data-ds-chat-history-main-response-status", "0");
-    document.documentElement?.setAttribute("data-ds-chat-history-main-response-at", "0");
-    document.documentElement?.setAttribute("data-ds-chat-history-main-response-ms", "0");
-    document.documentElement?.setAttribute("data-ds-chat-history-main-successes", String(nativeHistorySuccesses));
-    document.documentElement?.setAttribute("data-ds-chat-history-main-auth-401s", String(nativeHistoryAuth401s));
-    document.documentElement?.setAttribute("data-ds-card-token-main-bridge", "2");
+    setRootAttribute("data-ds-chat-history-main-seq", String(nativeHistoryRequestSeq));
+    setRootAttribute("data-ds-chat-history-main-response-seq", String(nativeHistoryResponseSeq));
+    setRootAttribute("data-ds-chat-history-main-response-request-seq", "0");
+    setRootAttribute("data-ds-chat-history-main-response-status", "0");
+    setRootAttribute("data-ds-chat-history-main-response-at", "0");
+    setRootAttribute("data-ds-chat-history-main-response-ms", "0");
+    setRootAttribute("data-ds-chat-history-main-successes", String(nativeHistorySuccesses));
+    setRootAttribute("data-ds-chat-history-main-auth-401s", String(nativeHistoryAuth401s));
+    setRootAttribute("data-ds-card-token-main-bridge", "2");
     window.dispatchEvent(new CustomEvent("ds-qol-card-token-bridge-ready-v2", {
       detail: { capturedAuth: !!capturedToken, capturedAt }
     }));
