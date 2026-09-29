@@ -474,9 +474,9 @@ Testing"></textarea></label>
 <div class="bot-availability-controls">
 <label>Scan speed
 <select id="botStatusScanSpeed" aria-label="Bot Status scan speed">
-<option value="safe">Safe · ~750 ms after response</option>
-<option value="normal">Normal · ~500 ms after response</option>
-<option value="fast">Fast · ~300 ms after response</option>
+<option value="safe">Safe · ~600 ms after response</option>
+<option value="normal">Normal · ~450 ms after response</option>
+<option value="fast">Fast · ~350 ms after response</option>
 </select>
 </label>
 <label>Refresh stale after
@@ -496,7 +496,7 @@ Testing"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <button id="refreshBotDuplicateMatches" type="button">Refresh duplicate matches</button>
 <button id="acceptAllBotUpdates" type="button">Accept all detected updates</button>
-<button id="cleanUnavailableBots" type="button">Clean confirmed unavailable bots</button>
+<button id="cleanUnavailableBots" type="button">Archive + clean confirmed unavailable bots</button>
 <button id="clearBotAvailabilityResults" type="button">Clear status history</button>
 <button id="clearBotArchive" type="button">Clear saved bot copies</button>
 <button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies for Archive (.json.gz)</button>
@@ -2301,7 +2301,7 @@ step sister" spellcheck="false"></textarea></label>
 <div class="button-row"><span class="manager-count" id="blockedBotNameOnlyStatus"></span></div>
 <label>Delay between bots
 <input id="blockedBulkDislikeDelayMs" max="10000" min="250" step="250" type="number" value="750"/>
-<span class="hint">Milliseconds. 750 ms is the default. The same delay is used by both Dislike and Stop recommending bulk runs.</span>
+<span class="hint">Milliseconds. 750 ms is the default. Dislike uses this as its fixed delay; Stop recommending uses it as the safe starting interval, then adapts between 350–5000 ms based on successful responses and throttle/error signals.</span>
 </label>
 <div class="bot-manager-bulkbar" data-manager-kind="blocked">
 <button id="blockedBotSelectShown" type="button">Select shown</button>

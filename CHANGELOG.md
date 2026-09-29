@@ -1,3 +1,22 @@
+## 0.2.23
+- Reduced Bot Status stale-refresh finish stalls by persisting only touched availability/archive IDs through a service-worker merge, avoiding full-state re-normalization, skipping unchanged multi-megabyte archive rewrites, yielding between commits, and deferring heavy Saved-manager/storage-usage refreshes.
+- Suppressed duplicate Options-page storage-change reprocessing for Bot Status commits so the same large state is not normalized and rerendered again immediately after it was saved.
+- Unavailable-bot cleanup now writes and verifies a compact recovery ledger before removing active memberships; if recovery cannot be verified, cleanup is cancelled and no IDs are removed.
+- Confirmed-unavailable cleanup no longer erases completed Less Like / Dislike history or creator seen-history. Unfinished bulk queues are cleaned, while historical evidence is preserved.
+- Cleaned unavailable bots remain tracked through the recovery ledger even when no rich saved copy exists, and memberships are automatically restored if a later Bot Status check confirms the bot is available again.
+- Fixed Bot Status scan-speed labels to match the actual 600/450/350 ms Safe/Normal/Fast pacing values.
+- Kept bulk Stop recommending / Less Like on the validated dedicated API-only recommendation helper and made large jobs substantially faster without adding concurrency.
+- Replaced fixed Less Like pacing with centralized adaptive serial pacing: 750 ms default start, gradual success-based step-down to 350 ms, and immediate slowdown/backoff on 429, 5xx, network, or timeout signals.
+- Removed the apparent every-25-item stall by moving expensive full Less Like history compaction from every 25 successes to a 500-item / 5-minute checkpoint while retaining a crash-safe per-success journal.
+- Added bounded retry/backoff for explicitly retryable Less Like failures while never retrying successful 2xx responses or ambiguous POST failures that may already have reached Recombee.
+- Added durable bulk Less Like job checkpoints with job ID, queue position, totals, failures, pacing state, and resumable pending work; input IDs are deduplicated before execution.
+- Throttled Less Like progress UI and availability/job-state persistence so multi-thousand-bot jobs do not rebuild or rewrite large state after every success.
+- Added Less Like run statistics for attempted/succeeded/failed/retried/skipped/duplicates, elapsed time, ETA, current interval/state, recent median POST latency, 429/5xx counts, and queue position.
+- Reused the already-ready recommendation worker during a bulk run instead of repeatedly revalidating the same helper before every bot.
+- Fixed the public bot-profile Export button stretching across the whole profile column; it now stays a compact content-width control.
+- Fixed stacked chat layout to use one centered shared message lane with matching user/AI card widths, matching the older Stylist-style behavior instead of only aligning one edge.
+- Hid the Quick Panel entirely when the current route has no enabled/usable panel controls, so pages such as `/chats` no longer show an empty “SpicyChat QoL” shell.
+
 ## 0.2.22
 - Fixed periodic freezes while SpicyChat's persona picker is open by putting QoL into a low-impact modal pass instead of repeatedly running the full chat runtime.
 - Persona Organizer no longer re-appends already correctly ordered picker rows or rebuilds unchanged local folder/note metadata on every pass.

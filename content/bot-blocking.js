@@ -752,7 +752,17 @@
         // Token discovery can lazily inspect SpicyChat's own cached JS bundles.
         // Give that one direct attempt enough time to finish; the background
         // worker deliberately will not fan out to another tab after a timeout.
-        const timer = setTimeout(() => finish({ ok: false, status: "direct-feedback-timeout", requestSent: false, networkAttempts: 0 }), 45000);
+        const timer = setTimeout(() => finish({
+          ok: false,
+          status: "direct-feedback-timeout",
+          stage: "isolated-bridge-timeout",
+          reason: "Timed out waiting for the MAIN-world feedback result; request completion is ambiguous.",
+          requestSent: true,
+          networkAttempts: 1,
+          retryable: false,
+          networkAmbiguous: true,
+          throttleSignal: "timeout"
+        }), 45000);
         try {
           window.dispatchEvent(new CustomEvent(DIRECT_FEEDBACK_REQUEST_EVENT, {
             detail: { requestId, botId, mode, preferredRecombeeToken }
@@ -782,6 +792,10 @@
         availabilityConfirmed: !!result?.availabilityConfirmed,
         tokenSource: String(result?.tokenSource || ""),
         requestSent: !!result?.requestSent,
+        retryable: !!result?.retryable,
+        retryAfterMs: Number(result?.retryAfterMs || 0),
+        throttleSignal: String(result?.throttleSignal || ""),
+        networkAmbiguous: !!result?.networkAmbiguous,
         availabilityMs: Number(result?.availabilityMs || 0),
         userLookupMs: Number(result?.userLookupMs || 0),
         ratingMs: Number(result?.ratingMs || 0),
@@ -862,7 +876,13 @@
         historyPersistMs: Number(timing.historyPersistMs || 0),
         backgroundTotalMs: Number(timing.backgroundTotalMs || timing.totalMs || 0),
         totalMs: Number(timing.totalMs || timing.itemBeforeDelayMs || 0),
-        networkAttempts: Number(timing.networkAttempts || 0)
+        networkAttempts: Number(timing.networkAttempts || 0),
+        currentIntervalMs: Number(timing.currentIntervalMs || 0),
+        pacingState: String(timing.pacingState || ""),
+        recentMedianRequestMs: Number(timing.recentMedianRequestMs || 0),
+        retries: Number(timing.retries || 0),
+        http429: Number(timing.http429 || 0),
+        http5xx: Number(timing.http5xx || 0)
       });
       sendResponse({ ok: true });
       return false;
@@ -886,6 +906,8 @@
           errors: Number(meta.failed || 0),
           outcome: meta.stopped ? "stopped" : "completed",
           totalRunMs: Number(timing.totalRunMs || 0),
+          currentIntervalMs: Number(timing.currentIntervalMs || 0),
+          recentMedianRequestMs: Number(timing.recentMedianRequestMs || 0),
           ...meta
         });
       }

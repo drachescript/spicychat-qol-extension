@@ -94,7 +94,13 @@ let quickLessLikePersistentWorkerTabId = null;
 let quickLessLikeHistoryCache = null;
 let quickLessLikePendingCache = null;
 let quickLessLikeHistoryCacheRunId = "";
-const QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY = 25;
+let quickLessLikeHistoryLastFlushAt = 0;
+// Successful Less Like actions are still journaled before returning so a crash
+// cannot repeat a known-successful rating. The expensive full-history compaction
+// is deliberately much less frequent; the old every-25 rewrite matched the
+// ~5-second cadence seen in the Inspector stress test.
+const QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY = 500;
+const QUICK_LESS_LIKE_HISTORY_FLUSH_MAX_AGE_MS = 5 * 60 * 1000;
 const QUICK_LESS_LIKE_RECOMMENDATION_WORKER_URL = "https://spicychat.ai/?dsQolRecommendationWorker=1";
 const QUICK_LESS_LIKE_LIGHT_WORKER_URL = "https://spicychat.ai/chats?dsQolRecommendationWorker=1&dsQolWorkerLight=1";
 const QUICK_LESS_LIKE_TOKEN_CACHE_KEY = "dsQolRecombeePublicTokenCache";
@@ -596,6 +602,7 @@ async function releaseQuickLessLikeBulkWorker(runId) {
     quickLessLikeHistoryCacheRunId = "";
     quickLessLikeHistoryCache = null;
     quickLessLikePendingCache = null;
+    quickLessLikeHistoryLastFlushAt = 0;
   }
   quickLessLikeDirectBulkTabs.delete(id);
   quickLessLikeClosedBulkRuns.delete(id);
@@ -835,6 +842,21 @@ async function probeQuickLessLikeRecommendationWorker(tabId, force = false, time
   };
 }
 
+function cachedReadyQuickLessLikeBulkWorker(runId = "") {
+  const id = String(runId || "").trim();
+  if (!id || quickLessLikeClosedBulkRuns.has(id)) return null;
+  const tabId = Number(quickLessLikeBulkWorkerTabs.get(id) || 0);
+  const readyAt = Number(quickLessLikeReadyWorkerTabs.get(tabId) || 0);
+  if (!tabId || !readyAt || Date.now() - readyAt >= QUICK_LESS_LIKE_READY_TTL_MS) return null;
+  return {
+    ok: true,
+    ready: true,
+    status: "recommendation-worker-ready-cached",
+    cached: true,
+    tabId
+  };
+}
+
 async function ensureQuickLessLikeRecommendationWorker(runId = "", { allowReload = true } = {}) {
   const worker = await createOrReuseQuickLessLikeRecommendationWorker(runId);
   if (!worker?.ok) return worker;
@@ -902,7 +924,12 @@ async function runDirectCharacterFeedback(message, mode) {
   }
 
   const workerStartedAt = Date.now();
-  const worker = await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+  // Bulk runs already prepared and validated one dedicated helper. Reuse its
+  // cached tab identity directly instead of tabs.get + lifecycle/session writes
+  // for every bot. A real send failure still falls through to the existing
+  // self-heal/closed-worker path below.
+  const worker = cachedReadyQuickLessLikeBulkWorker(runId)
+    || await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
   const workerReadyMs = Date.now() - workerStartedAt;
   if (!worker?.ready) {
     return { ...worker, ok: false, feedbackTabsTried: worker?.tabId ? 1 : 0, requestSent: false, networkAttempts: 0, workerReadyMs, totalMs: Date.now() - totalStartedAt };
@@ -1438,6 +1465,82 @@ function storageGet(keys) {
 
 function storageSet(values) {
   return new Promise(resolve => chrome.storage.local.set(values, resolve));
+}
+
+// Bot Status scans can touch a relatively small set of IDs while the persisted
+// availability/archive objects contain thousands of entries. Merge those deltas
+// in the service worker so the Options document does not have to structured-clone
+// and serialize the complete multi-megabyte stores on its UI thread.
+let botStatusPersistQueue = Promise.resolve();
+
+function botStatusDeltaEntries(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const out = {};
+  for (const [rawId, rawEntry] of Object.entries(source)) {
+    const id = String(rawId || "").trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) continue;
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) continue;
+    out[id] = rawEntry;
+  }
+  return out;
+}
+
+function persistBotStatusDelta(message = {}) {
+  const availabilityUpdates = botStatusDeltaEntries(message.availabilityUpdates);
+  const archiveUpdates = botStatusDeltaEntries(message.archiveUpdates);
+  const availabilityIds = Object.keys(availabilityUpdates);
+  const archiveIds = Object.keys(archiveUpdates);
+
+  if (!availabilityIds.length && !archiveIds.length) {
+    return Promise.resolve({ ok: true, availability: 0, archive: 0 });
+  }
+
+  botStatusPersistQueue = botStatusPersistQueue.catch(() => null).then(async () => {
+    const keys = [];
+    if (availabilityIds.length) keys.push("botAvailability");
+    if (archiveIds.length) keys.push("botArchive");
+    const current = await storageGet(keys);
+    const payload = {};
+
+    if (availabilityIds.length) {
+      const raw = current.botAvailability && typeof current.botAvailability === "object" && !Array.isArray(current.botAvailability)
+        ? current.botAvailability
+        : {};
+      const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta) ? raw.meta : {};
+      payload.botAvailability = { ...raw, meta: { ...meta, ...availabilityUpdates } };
+    }
+
+    if (archiveIds.length) {
+      const raw = current.botArchive && typeof current.botArchive === "object" && !Array.isArray(current.botArchive)
+        ? current.botArchive
+        : {};
+      const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta) ? raw.meta : {};
+      payload.botArchive = { ...raw, meta: { ...meta, ...archiveUpdates } };
+    }
+
+    return new Promise(resolve => {
+      try {
+        chrome.storage.local.set(payload, () => {
+          const error = chrome.runtime.lastError?.message || "";
+          resolve({
+            ok: !error,
+            error,
+            availability: availabilityIds.length,
+            archive: archiveIds.length
+          });
+        });
+      } catch (error) {
+        resolve({
+          ok: false,
+          error: error?.message || String(error),
+          availability: availabilityIds.length,
+          archive: archiveIds.length
+        });
+      }
+    });
+  });
+
+  return botStatusPersistQueue;
 }
 
 function storageSessionGet(keys) {
@@ -2063,6 +2166,7 @@ async function getQuickLessLikeHistory(runId = "") {
     quickLessLikeHistoryCacheRunId = id;
     quickLessLikeHistoryCache = loaded.history;
     quickLessLikePendingCache = loaded.pending;
+    quickLessLikeHistoryLastFlushAt = Date.now();
   }
   return loaded.history;
 }
@@ -2073,13 +2177,15 @@ async function flushQuickLessLikeHistory(force = false, runId = "") {
   const pending = quickLessLikePendingCache || { version: 1, bots: {} };
   const pendingCount = Object.keys(pending.bots || {}).length;
   if (!pendingCount) return true;
-  if (!force && pendingCount < QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY) return false;
+  const ageMs = quickLessLikeHistoryLastFlushAt ? Date.now() - quickLessLikeHistoryLastFlushAt : Infinity;
+  if (!force && pendingCount < QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY && ageMs < QUICK_LESS_LIKE_HISTORY_FLUSH_MAX_AGE_MS) return false;
   trimQuickLessLikeHistory(quickLessLikeHistoryCache);
   await storageSet({
     [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryCache,
     [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
   });
   quickLessLikePendingCache = { version: 1, bots: {} };
+  quickLessLikeHistoryLastFlushAt = Date.now();
   return true;
 }
 
@@ -2101,9 +2207,9 @@ async function rememberQuickLessLikeEntry(botId, entry, { immediate = false, run
   history.bots[botId] = entry;
   pending.bots[botId] = entry;
   trimQuickLessLikeHistory(history);
-  // Persist a very small delta after every successful action so an interrupted
-  // run cannot repeat a rating, but only rewrite the full multi-thousand-entry
-  // history occasionally (and once at run end).
+  // Persist the compact success journal before returning so an interrupted run
+  // cannot repeat a known-successful rating. Full multi-thousand-entry history
+  // compaction is deferred to a large/time-based checkpoint and run end.
   await storageSet({ [QUICK_LESS_LIKE_PENDING_KEY]: pending });
   await flushQuickLessLikeHistory(immediate, id);
   return history.bots[botId];
@@ -4810,6 +4916,12 @@ async function runLorebookExportHelperTab(tabId, message) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
+  if (message?.type === "DS_BOT_STATUS_PERSIST_DELTA") {
+    persistBotStatusDelta(message).then(sendResponse).catch(error => {
+      sendResponse({ ok: false, error: error?.message || String(error) });
+    });
+    return true;
+  }
 
   if (message?.type === "DS_REQUEST_DOWNLOAD_PERMISSION") {
     if (!chrome.permissions?.contains || !chrome.permissions?.request) {

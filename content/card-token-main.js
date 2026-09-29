@@ -57,6 +57,139 @@
   let nativeHistoryAuth401s = 0;
 
   const clean = value => String(value || "").trim();
+
+  // 0.2.23 UI maintenance that must be available on /chat and /chats even
+  // before the normal isolated-world runtime finishes booting.
+  //
+  // - Stacked chat mode now means one shared centered message lane: user and AI
+  //   cards use the same width instead of only sharing an approximate left edge.
+  // - An otherwise-empty Quick Panel shell is hidden after its route-specific
+  //   controls have all been disabled.
+  function installV023ChatLayoutFixes() {
+    const styleId = "ds-qol-v023-chat-layout-fixes";
+    if (document.getElementById(styleId)) return true;
+
+    const host = document.head || document.documentElement;
+    if (!host) return false;
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      html[data-ds-chat-message-layout="stacked"]
+        div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center {
+          justify-content: center !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+        }
+
+      html[data-ds-chat-message-layout="stacked"]
+        div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center > div:first-child:empty {
+          display: none !important;
+          flex: 0 0 0 !important;
+          width: 0 !important;
+          min-width: 0 !important;
+          margin: 0 !important;
+        }
+
+      html[data-ds-chat-message-layout="stacked"]
+        div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center > div:nth-child(2) {
+          box-sizing: border-box !important;
+          width: calc(100% - 20px) !important;
+          min-width: 0 !important;
+          max-width: calc(100% - 20px) !important;
+          flex: 0 1 calc(100% - 20px) !important;
+          margin-left: 10px !important;
+          margin-right: 10px !important;
+        }
+
+      #ds-qol-panel[data-ds-qol-empty="1"] {
+        display: none !important;
+      }
+    `;
+    host.appendChild(style);
+    return true;
+  }
+
+  let quickPanelVisibilityObserved = null;
+  let quickPanelVisibilityObserver = null;
+  let quickPanelVisibilityRaf = 0;
+
+  function refreshQuickPanelEmptyState() {
+    quickPanelVisibilityRaf = 0;
+    const panel = document.getElementById("ds-qol-panel");
+
+    if (panel !== quickPanelVisibilityObserved) {
+      try { quickPanelVisibilityObserver?.disconnect(); } catch {}
+      quickPanelVisibilityObserved = panel || null;
+
+      if (panel) {
+        quickPanelVisibilityObserver = new MutationObserver(() => scheduleQuickPanelEmptyRefresh());
+        try {
+          quickPanelVisibilityObserver.observe(panel, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ["style", "hidden", "class"]
+          });
+        } catch {}
+      }
+    }
+
+    if (!panel) return;
+    const body = panel.querySelector(".ds-qol-body");
+    if (!body) {
+      panel.setAttribute("data-ds-qol-empty", "1");
+      return;
+    }
+
+    const hasUsableContent = [...body.children].some(child => {
+      if (child.hidden) return false;
+      try { return getComputedStyle(child).display !== "none"; }
+      catch { return child.style?.display !== "none"; }
+    });
+
+    const next = hasUsableContent ? "0" : "1";
+    if (panel.getAttribute("data-ds-qol-empty") !== next) {
+      panel.setAttribute("data-ds-qol-empty", next);
+    }
+  }
+
+  function scheduleQuickPanelEmptyRefresh() {
+    if (quickPanelVisibilityRaf) return;
+    quickPanelVisibilityRaf = requestAnimationFrame(refreshQuickPanelEmptyState);
+  }
+
+  function installQuickPanelEmptyWatcher() {
+    scheduleQuickPanelEmptyRefresh();
+    const root = document.documentElement;
+    if (!root) return false;
+
+    // Only watch for the panel itself being mounted/replaced. Once it exists,
+    // a small observer is attached directly to that panel instead of observing
+    // all page attribute churn.
+    const mountObserver = new MutationObserver(() => scheduleQuickPanelEmptyRefresh());
+    try { mountObserver.observe(root, { childList: true }); }
+    catch { return false; }
+    return true;
+  }
+
+  if (!installV023ChatLayoutFixes()) {
+    document.addEventListener("DOMContentLoaded", installV023ChatLayoutFixes, { once: true });
+  }
+  if (!installQuickPanelEmptyWatcher()) {
+    document.addEventListener("DOMContentLoaded", installQuickPanelEmptyWatcher, { once: true });
+  }
+
+  function responseRetryAfterMs(response) {
+    let raw = "";
+    try { raw = clean(response?.headers?.get?.("retry-after")); } catch {}
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(30000, Math.round(seconds * 1000));
+    const at = Date.parse(raw);
+    return Number.isFinite(at) ? Math.min(30000, Math.max(0, at - Date.now())) : 0;
+  }
+
   const isJwt = value => /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(clean(value));
   const isGuest = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean(value));
 
@@ -910,6 +1043,7 @@
         signal: controller.signal
       });
       const httpStatus = Number(response?.status || 0);
+      const retryAfterMs = responseRetryAfterMs(response);
 
       if (httpStatus === 404 || httpStatus === 410) {
         return {
@@ -957,10 +1091,14 @@
           reason: "SpicyChat rate-limited the character availability check.",
           httpStatus,
           availabilityNetworkAttempts: 1,
-          availabilityConfirmed: false
+          availabilityConfirmed: false,
+          retryable: true,
+          retryAfterMs,
+          throttleSignal: "429"
         };
       }
       if (!response?.ok) {
+        const retryable = httpStatus >= 500 && httpStatus <= 599;
         return {
           ok: false,
           status: "character-api-failed",
@@ -968,7 +1106,10 @@
           reason: `SpicyChat character API returned HTTP ${httpStatus || "unknown"}.`,
           httpStatus,
           availabilityNetworkAttempts: 1,
-          availabilityConfirmed: false
+          availabilityConfirmed: false,
+          retryable,
+          retryAfterMs,
+          throttleSignal: retryable ? "5xx" : ""
         };
       }
 
@@ -1003,7 +1144,10 @@
         reason: clean(error?.message || error || "Character availability request failed."),
         httpStatus: 0,
         availabilityNetworkAttempts: 1,
-        availabilityConfirmed: false
+        availabilityConfirmed: false,
+        retryable: true,
+        retryAfterMs: 0,
+        throttleSignal: error?.name === "AbortError" ? "timeout" : "network"
       };
     } finally {
       clearTimeout(timer);
@@ -1189,6 +1333,41 @@
         let responseText = "";
         try { responseText = String(await response.text()); } catch {}
         lastReason = responseText.slice(0, 300);
+        const retryAfterMs = responseRetryAfterMs(response);
+
+        if (lastStatus === 429) {
+          return {
+            ok: false,
+            status: "recombee-rate-limited",
+            stage: "response",
+            reason: lastReason || "Recombee rate-limited the rating request.",
+            characterId: botId,
+            httpStatus: lastStatus,
+            attempts,
+            networkAttempts,
+            requestSent: true,
+            retryable: true,
+            retryAfterMs,
+            throttleSignal: "429"
+          };
+        }
+
+        if (lastStatus >= 500 && lastStatus <= 599) {
+          return {
+            ok: false,
+            status: "recombee-server-error",
+            stage: "response",
+            reason: lastReason || `Recombee returned HTTP ${lastStatus}.`,
+            characterId: botId,
+            httpStatus: lastStatus,
+            attempts,
+            networkAttempts,
+            requestSent: true,
+            retryable: true,
+            retryAfterMs,
+            throttleSignal: "5xx"
+          };
+        }
 
         const unavailable =
           [404, 410].includes(lastStatus) ||
@@ -1211,7 +1390,26 @@
         if (token === recombeePublicToken) recombeePublicToken = "";
       } catch (error) {
         lastReason = String(error?.message || error || "").slice(0, 300);
-        if (token === recombeePublicToken) recombeePublicToken = "";
+        // A transport failure says nothing about token validity. Keep the
+        // already-validated token cached for a later explicit/manual retry.
+        // Once a ratings POST may have left the browser, a fetch exception is
+        // ambiguous: retrying with another token could create duplicate -1
+        // ratings. Record the failure and let the user explicitly retry it.
+        return {
+          ok: false,
+          status: "recombee-network-error",
+          stage: "request",
+          reason: lastReason || "The Recombee rating request failed after it may have been sent.",
+          characterId: botId,
+          httpStatus: 0,
+          attempts,
+          networkAttempts,
+          requestSent: true,
+          retryable: false,
+          retryAfterMs: 0,
+          throttleSignal: "network",
+          networkAmbiguous: true
+        };
       }
     }
 
@@ -1351,6 +1549,10 @@
       userLookupMs: Number(result?.userLookupMs || 0),
       ratingMs: Number(result?.ratingMs || 0),
       ratingHttpStatus: Number(result?.ratingHttpStatus || 0),
+      retryable: !!result?.retryable,
+      retryAfterMs: Math.max(0, Number(result?.retryAfterMs || 0) || 0),
+      throttleSignal: clean(result?.throttleSignal || ""),
+      networkAmbiguous: !!result?.networkAmbiguous,
       elapsedMs: Date.now() - started,
       coalesced,
       executor: "direct-recombee-api"
