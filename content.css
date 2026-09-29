@@ -5550,22 +5550,6 @@ html[data-ds-chat-exporting="1"] #ds-qol-export-chat {
 }
 
 @media (max-width: 760px), (pointer: coarse) {
-  div[id^="message-"] textarea.ds-mobile-message-edit-textarea {
-    min-height: 96px !important;
-    resize: none !important;
-    box-sizing: border-box !important;
-    overscroll-behavior: contain;
-  }
-
-  div[id^="message-"] .ds-mobile-message-edit-actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 8;
-    display: flex !important;
-    gap: 8px;
-    padding-top: 6px;
-  }
-
   .ds-mobile-chat-send-wrapper {
     width: fit-content !important;
     min-width: 0 !important;

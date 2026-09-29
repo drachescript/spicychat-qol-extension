@@ -14,8 +14,7 @@
     guardTimer: 0,
     mobileObserver: null,
     mobileListenersInstalled: false,
-    mobileResizeRaf: 0,
-    mobileActiveEditTextarea: null
+    mobileNormalizeRaf: 0
   };
 
   function settings() {
@@ -195,39 +194,6 @@
     catch { return window.innerWidth <= 760; }
   }
 
-  function isMessageEditTextarea(textarea) {
-    return textarea instanceof HTMLTextAreaElement && !!textarea.closest("div[id^='message-']");
-  }
-
-  function resizeMessageEditTextarea(textarea) {
-    if (!mobileLayoutActive() || !isMessageEditTextarea(textarea)) return;
-
-    state.mobileActiveEditTextarea = textarea;
-    const viewportHeight = Number(window.visualViewport?.height || window.innerHeight || 640);
-    const maxHeight = Math.max(150, Math.min(360, Math.round(viewportHeight * 0.46)));
-
-    // Measure the textarea at its natural content height. Keeping the previous
-    // explicit pixel height in place can make scrollHeight include that stale
-    // size, causing the editor to ratchet taller on every input/delete and
-    // preventing it from shrinking again when text is removed.
-    textarea.style.height = "auto";
-    const naturalHeight = Math.max(0, Number(textarea.scrollHeight || 0)) + 2;
-    const wanted = Math.max(96, Math.min(maxHeight, naturalHeight || 96));
-
-    DS.setClassState?.(textarea, "ds-mobile-message-edit-textarea", true);
-    textarea.style.height = `${wanted}px`;
-    if (textarea.style.maxHeight !== `${maxHeight}px`) textarea.style.maxHeight = `${maxHeight}px`;
-    const overflow = naturalHeight > maxHeight ? "auto" : "hidden";
-    if (textarea.style.overflowY !== overflow) textarea.style.overflowY = overflow;
-
-    const root = textarea.closest("div[id^='message-']");
-    const buttons = [...(root?.querySelectorAll("button") || [])];
-    const save = buttons.find(button => /^save$/i.test(String(button.textContent || "").trim()));
-    const cancel = buttons.find(button => /^cancel$/i.test(String(button.textContent || "").trim()));
-    const actions = save?.parentElement && save.parentElement === cancel?.parentElement ? save.parentElement : null;
-    if (actions) DS.setClassState?.(actions, "ds-mobile-message-edit-actions", true);
-  }
-
   function composerTextarea() {
     return getMessageTextareas().find(textarea => !textarea.closest("div[id^='message-']")) || null;
   }
@@ -250,62 +216,31 @@
     if (wrapper && wrapper !== scope) DS.setClassState?.(wrapper, "ds-mobile-chat-send-wrapper", true);
   }
 
-  function processAddedMobileNode(node) {
-    if (!mobileLayoutActive()) return;
-    const el = node instanceof Element ? node : null;
-    if (!el) return;
-    if (isMessageEditTextarea(el)) resizeMessageEditTextarea(el);
-    el.querySelectorAll?.("div[id^='message-'] textarea").forEach(resizeMessageEditTextarea);
-  }
-
-  function refreshActiveMobileEditor() {
-    const textarea = state.mobileActiveEditTextarea;
-    if (textarea?.isConnected && isMessageEditTextarea(textarea)) resizeMessageEditTextarea(textarea);
-    else state.mobileActiveEditTextarea = null;
-    normalizeMobileSendWrapper();
+  function scheduleMobileSendWrapperNormalize() {
+    cancelAnimationFrame(state.mobileNormalizeRaf);
+    state.mobileNormalizeRaf = requestAnimationFrame(normalizeMobileSendWrapper);
   }
 
   function installMobileChatLayoutFixes() {
-    if (!mobileLayoutActive()) return;
-    if (state.mobileListenersInstalled) return;
+    if (!mobileLayoutActive() || state.mobileListenersInstalled) return;
     state.mobileListenersInstalled = true;
 
-    document.addEventListener("focusin", event => {
-      if (!isMessageEditTextarea(event.target)) return;
-      resizeMessageEditTextarea(event.target);
-      setTimeout(() => {
-        if (event.target?.isConnected) resizeMessageEditTextarea(event.target);
-      }, 80);
-    }, true);
-
-    document.addEventListener("focusout", event => {
-      if (event.target === state.mobileActiveEditTextarea) state.mobileActiveEditTextarea = null;
-    }, true);
-
-    document.addEventListener("input", event => {
-      if (isMessageEditTextarea(event.target)) resizeMessageEditTextarea(event.target);
-    }, true);
-
-    const onViewportResize = () => {
-      cancelAnimationFrame(state.mobileResizeRaf);
-      state.mobileResizeRaf = requestAnimationFrame(refreshActiveMobileEditor);
-    };
-    window.addEventListener("resize", onViewportResize, { passive: true });
-    window.visualViewport?.addEventListener("resize", onViewportResize, { passive: true });
-
-    state.mobileObserver = new MutationObserver(mutations => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes || []) processAddedMobileNode(node);
-      }
+    // Leave SpicyChat's message-edit textarea height alone. In Android/WebView
+    // the visual viewport changes when the keyboard opens, and QoL's previous
+    // inline auto-resize could collapse long edited messages into a tiny
+    // scrollable line.
+    state.mobileObserver = new MutationObserver(() => scheduleMobileSendWrapperNormalize());
+    state.mobileObserver.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true
     });
-    state.mobileObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    window.addEventListener("resize", scheduleMobileSendWrapperNormalize, { passive: true });
   }
 
   DS.applyMobileChatLayoutFixes = function applyMobileChatLayoutFixes() {
     if (!enabled() || !mobileLayoutActive()) return;
     installMobileChatLayoutFixes();
-    const active = document.activeElement;
-    if (isMessageEditTextarea(active)) resizeMessageEditTextarea(active);
     normalizeMobileSendWrapper();
   };
 

@@ -100,6 +100,11 @@ const DEFAULT_ARCHIVE_IMPORT_ENDPOINT = "https://spicychat-archive-import.dragon
 const DEFAULT_ARCHIVE_SUBMISSION_ENDPOINT = "https://spicychat-archive-import.dragongraf.workers.dev/api/submissions/bot-status";
 const ARCHIVE_UPLOAD_SOFT_MAX_BYTES = 60 * 1024 * 1024;
 const ARCHIVE_UPLOAD_CHUNK_SIZE = 1000;
+// Public submissions have stricter Worker limits than the trusted owner import.
+// Keep a safety margin below 16 MiB compressed / 64 MiB decompressed / 5,000 bots.
+const ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_BYTES = 14 * 1024 * 1024;
+const ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_RAW_BYTES = 56 * 1024 * 1024;
+const ARCHIVE_PUBLIC_SUBMISSION_MAX_RECORDS = 4500;
 const BOT_STATUS_SCAN_SPEED_DELAYS = Object.freeze({ safe: 750, normal: 500, fast: 300 });
 
 const OPTIONS_PERFORMANCE = {
@@ -7353,6 +7358,49 @@ async function splitArchiveUploadRecords(records, exportedAt, extraHeader = null
   return chunks;
 }
 
+function archiveSubmissionApproxRawBytes(records, exportedAt, extraHeader = null) {
+  const encoder = new TextEncoder();
+  let bytes = 512 + encoder.encode(String(exportedAt || "")).byteLength;
+  if (extraHeader) bytes += encoder.encode(JSON.stringify(extraHeader)).byteLength;
+  for (const record of records) bytes += encoder.encode(JSON.stringify(record)).byteLength + 1;
+  return bytes;
+}
+
+async function splitArchiveSubmissionRecords(records, exportedAt, extraHeader = null) {
+  const chunks = [];
+  const pending = [];
+  for (let i = 0; i < records.length; i += ARCHIVE_PUBLIC_SUBMISSION_MAX_RECORDS) {
+    pending.push(records.slice(i, i + ARCHIVE_PUBLIC_SUBMISSION_MAX_RECORDS));
+  }
+
+  while (pending.length) {
+    const part = pending.shift();
+    const rawBytes = archiveSubmissionApproxRawBytes(part, exportedAt, extraHeader);
+    if (rawBytes > ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_RAW_BYTES) {
+      if (part.length <= 1) {
+        throw new Error(`One saved copy is too large for the public Archive submission limit.`);
+      }
+      const midpoint = Math.ceil(part.length / 2);
+      pending.unshift(part.slice(midpoint), part.slice(0, midpoint));
+      continue;
+    }
+
+    const blob = await gzipArchiveUploadRecords(part, exportedAt, null, extraHeader);
+    if (blob.size <= ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_BYTES) {
+      chunks.push({ records: part, blob, rawBytes });
+      continue;
+    }
+
+    if (part.length <= 1) {
+      throw new Error(`One saved copy compresses to ${(blob.size / 1024 / 1024).toFixed(1)} MB, above the public Archive submission limit.`);
+    }
+    const midpoint = Math.ceil(part.length / 2);
+    pending.unshift(part.slice(midpoint), part.slice(0, midpoint));
+  }
+
+  return chunks;
+}
+
 function normalizeArchiveContributionState(value) {
   const raw = value && typeof value === "object" ? value : {};
   const base = normalizeArchiveUploadState({
@@ -7414,14 +7462,16 @@ function archiveSubmissionFilename(exportedAt, chunkIndex = 0, chunkCount = 1) {
   return `bot-status-submission-${stamp}${suffix}.json.gz`;
 }
 
-async function postArchiveSubmission(blob, { exportedAt, filename }) {
+async function postArchiveSubmission(blob, { exportedAt, filename, installIdHash, submissionGroupId }) {
   const response = await fetch(DEFAULT_ARCHIVE_SUBMISSION_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/gzip",
       "Content-Encoding": "gzip",
       "X-Import-Filename": filename,
-      "X-Exported-At": exportedAt
+      "X-Exported-At": exportedAt,
+      "X-Install-Id": String(installIdHash || ""),
+      "X-Submission-Group": String(submissionGroupId || "")
     },
     body: blob,
     cache: "no-store"
@@ -7519,26 +7569,32 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
 
     const exportedAt = new Date().toISOString();
     const extraHeader = await archiveContributionHeader();
+    const installIdHash = String(extraHeader?.submission?.anonymousInstallIdHash || "");
+    if (!installIdHash) throw new Error("Could not create the anonymous Archive install identifier.");
+    const submissionGroupId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint8Array(12)), value => value.toString(16).padStart(2, "0")).join("")}`;
+
     setStatus(`Compressing ${selected.length.toLocaleString()} saved copies…`);
-    let chunks = [];
-    const fullBlob = await gzipArchiveUploadRecords(selected, exportedAt, null, extraHeader);
-    if (fullBlob.size <= ARCHIVE_UPLOAD_SOFT_MAX_BYTES) chunks = [{ records: selected, blob: fullBlob }];
-    else {
-      setStatus(`Compressed submission is ${(fullBlob.size / 1024 / 1024).toFixed(1)} MB; splitting into safe chunks…`);
-      chunks = await splitArchiveUploadRecords(selected, exportedAt, extraHeader);
+    const chunks = await splitArchiveSubmissionRecords(selected, exportedAt, extraHeader);
+    if (chunks.length > 1) {
+      setStatus(`Prepared ${chunks.length} safe submission bundles for ${selected.length.toLocaleString()} saved copies…`);
     }
 
     const submissionIds = [];
     let finalStatus = "pending";
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i];
-      let blob = chunk.blob;
-      if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length }, extraHeader);
-      if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe submission limit.`);
+      const blob = chunk.blob;
+      if (blob.size > ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the public Archive compressed-size limit.`);
+      if (Number(chunk.rawBytes || 0) > ARCHIVE_PUBLIC_SUBMISSION_SOFT_MAX_RAW_BYTES) throw new Error(`Chunk ${i + 1} is still above the public Archive decompressed-size limit.`);
+      if (chunk.records.length > ARCHIVE_PUBLIC_SUBMISSION_MAX_RECORDS) throw new Error(`Chunk ${i + 1} contains too many saved copies.`);
       setStatus(`Submitting bundle ${i + 1} / ${chunks.length} · ${chunk.records.length.toLocaleString()} saved copies…`);
       const result = await postArchiveSubmission(blob, {
         exportedAt,
-        filename: archiveSubmissionFilename(exportedAt, i, chunks.length)
+        filename: archiveSubmissionFilename(exportedAt, i, chunks.length),
+        installIdHash,
+        submissionGroupId
       });
       const id = String(result?.submissionId || result?.id || "").trim();
       if (id) submissionIds.push(id);

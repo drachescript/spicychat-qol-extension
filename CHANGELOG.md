@@ -1,3 +1,8 @@
+## 0.2.22
+- Fixed the Changelog staying on “Loading changelog...” indefinitely in the Android app by using the native bundled-text bridge directly with bounded fallbacks.
+- Reverted QoL's mobile message-edit textarea resizing so SpicyChat controls the editor height again, fixing edited messages collapsing into a tiny scrollable text box on Android.
+- Kept the separate mobile send-button wrapper fix without changing message-editor sizing.
+
 ## 0.2.21
 - Added opt-in anonymous Bot Status Center contributions to the public SpicyChat Archive review queue. Public submissions go to `/api/submissions/bot-status` and never use or expose the private archive-import token.
 - Public Archive contributions send only saved bot snapshots plus a locally generated, one-way hashed random extension-install identifier for basic anti-spam/rate limiting; chats, personas, Favorites/Later membership, settings, account data, cookies, and SpicyChat login/session data are not included.
