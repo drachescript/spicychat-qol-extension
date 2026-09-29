@@ -54,6 +54,7 @@
         "content/footer-manager.js",
         "content/premium-notifications.js",
         "content/quick-panel.js",
+        "content/qol23-ui-fixes.js",
         "content/rc83-ui.js",
         "content/rc87-panel-position.js",
         "content/scroll-to-top.js",
