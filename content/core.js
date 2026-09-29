@@ -2472,7 +2472,10 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
   const params = new URLSearchParams(location.search || "");
   const recommendationWorker = params.get("dsQolRecommendationWorker") === "1" || params.get("dsQuickLessLike") === "1";
   const botStatusWorker = params.get("dsQolBotStatusWorker") === "1";
-  const workerKind = recommendationWorker ? "less-like" : (botStatusWorker ? "bot-status" : "");
+  let workerKind = recommendationWorker ? "less-like" : (botStatusWorker ? "bot-status" : "");
+  let workerSessionId = "";
+  let workerIdentityPromise = null;
+  let workerHeartbeatTimer = 0;
 
   const JOB_LOCK_NAME = "ds-qol-background-api-v1";
   const FALLBACK_LEASE_KEY = "ds:qol:background-api-lease:v1";
@@ -2653,7 +2656,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
    are the missing half that actually put user + AI bubbles in one column. */
 html[data-ds-chat-message-layout="stacked"]
   div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center {
-  justify-content: flex-start !important;
+  justify-content: center !important;
 }
 html[data-ds-chat-message-layout="stacked"]
   div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center > div:first-child:empty {
@@ -2681,9 +2684,56 @@ html[data-ds-qol-background-worker] *::after {
 
   injectHotfixStyle();
 
-  if (workerKind) {
+  function sendRuntimeMessage(message) {
+    return new Promise(resolve => {
+      try {
+        const runtime = chrome?.runtime;
+        if (!runtime?.sendMessage) return resolve(null);
+        const maybe = runtime.sendMessage(message, response => {
+          void chrome.runtime?.lastError;
+          resolve(response || null);
+        });
+        if (maybe && typeof maybe.then === "function") {
+          maybe.then(value => resolve(value || null)).catch(() => resolve(null));
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  function startBotStatusHeartbeat() {
+    if (workerHeartbeatTimer || workerKind !== "bot-status") return;
+
+    const beat = async () => {
+      if (workerKind !== "bot-status") return;
+      const response = await sendRuntimeMessage({
+        type: "DS_BOT_STATUS_WORKER_HEARTBEAT",
+        sessionId: workerSessionId || "",
+        href: location.href,
+        at: Date.now()
+      });
+      if (response?.worker === "bot-status" && response?.sessionId) {
+        workerSessionId = String(response.sessionId);
+        DS.state = DS.state || {};
+        DS.state.qolBackgroundWorkerSessionId = workerSessionId;
+      }
+    };
+
+    beat().catch(() => {});
+    workerHeartbeatTimer = setInterval(() => beat().catch(() => {}), 3000);
+  }
+
+  function activateWorkerMode(kindValue, sessionId = "", phase = "boot") {
+    const kind = String(kindValue || "").trim();
+    if (!kind) return "";
+    if (workerKind && workerKind !== kind) return workerKind;
+    workerKind = kind;
+    if (sessionId) workerSessionId = String(sessionId);
+
     DS.state = DS.state || {};
-    DS.state.qolBackgroundWorker = workerKind;
+    DS.state.qolBackgroundWorker = kind;
+    DS.state.qolBackgroundWorkerSessionId = workerSessionId || "";
 
     // main.js already has a mature worker fast-path for Quick Dislike. Reuse
     // that *suppression flag only* so dedicated API helpers do not wake the
@@ -2691,12 +2741,47 @@ html[data-ds-qol-background-worker] *::after {
     DS.state.quickDislikeWorker = true;
 
     try {
-      html.setAttribute("data-ds-qol-background-worker", workerKind);
+      html.setAttribute("data-ds-qol-background-worker", kind);
+      if (workerSessionId) html.setAttribute("data-ds-qol-background-worker-session", workerSessionId);
       nativeDispatchEvent(new CustomEvent(WORKER_EVENT, {
-        detail: { kind: workerKind, phase: "boot", at: Date.now() }
+        detail: { kind, phase, sessionId: workerSessionId || "", at: Date.now() }
       }));
     } catch {}
+
+    if (kind === "bot-status") startBotStatusHeartbeat();
+    return kind;
   }
+
+  DS.resolveBackgroundWorkerIdentity = function resolveBackgroundWorkerIdentity() {
+    if (workerIdentityPromise) return workerIdentityPromise;
+    workerIdentityPromise = (async () => {
+      if (workerKind) activateWorkerMode(workerKind, workerSessionId, "bootstrap");
+      const response = await sendRuntimeMessage({
+        type: "DS_QOL_BACKGROUND_WORKER_IDENTITY_QUERY",
+        sessionId: workerSessionId || "",
+        href: location.href
+      });
+      if (response?.worker) {
+        activateWorkerMode(response.worker, response.sessionId || workerSessionId, "background-identity");
+      }
+      return {
+        worker: workerKind || "",
+        sessionId: workerSessionId || ""
+      };
+    })().catch(() => ({ worker: workerKind || "", sessionId: workerSessionId || "" }));
+    return workerIdentityPromise;
+  };
+
+  if (workerKind) {
+    // The URL marker only exists on the first bootstrap navigation. Keep a
+    // same-tab session hint so document_start loaders can stay lightweight if
+    // SpicyChat later performs a real reload after its router removed the query.
+    try { sessionStorage.setItem("dsQolBackgroundWorkerKind", workerKind); } catch {}
+    activateWorkerMode(workerKind, "", "bootstrap");
+  }
+  // Also ask the background immediately. This is what lets a real page reload
+  // keep worker identity even after SpicyChat has stripped the bootstrap query.
+  DS.resolveBackgroundWorkerIdentity().catch(() => {});
 
   function classifyFetch(input, init) {
     let href = "";
@@ -2812,12 +2897,12 @@ html[data-ds-qol-background-worker] *::after {
     const nativeSendMessage = runtime && typeof runtime.sendMessage === "function"
       ? runtime.sendMessage.bind(runtime)
       : null;
-    if (nativeSendMessage && workerKind === "bot-status" && !runtime.sendMessage?.__dsQol14Wrapped) {
+    if (nativeSendMessage && !runtime.sendMessage?.__dsQol14Wrapped) {
       const wrappedSendMessage = function dsQol14SendMessage(...args) {
         const first = args[0];
         const second = args[1];
         const message = (typeof first === "string" && second && typeof second === "object") ? second : first;
-        if (!message || message.type !== "DS_CARD_TOKEN_FETCH") return nativeSendMessage(...args);
+        if (workerKind !== "bot-status" || !message || message.type !== "DS_CARD_TOKEN_FETCH") return nativeSendMessage(...args);
 
         const callbackIndex = typeof args[args.length - 1] === "function" ? args.length - 1 : -1;
         if (callbackIndex >= 0) {
@@ -2858,19 +2943,16 @@ html[data-ds-qol-background-worker] *::after {
     }, 250);
   }
 
-  if (workerKind === "less-like") {
-    window.addEventListener(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, event => {
-      if (event?.detail?.ready) parkNativeWorkerRoot("recommendation-ready");
-    });
-    window.addEventListener(DIRECT_FEEDBACK_RESPONSE_EVENT, event => {
-      if (event?.detail?.ok) parkNativeWorkerRoot("first-feedback-success");
-    });
-  }
+  window.addEventListener(RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT, event => {
+    if (workerKind === "less-like" && event?.detail?.ready) parkNativeWorkerRoot("recommendation-ready");
+  });
+  window.addEventListener(DIRECT_FEEDBACK_RESPONSE_EVENT, event => {
+    if (workerKind === "less-like" && event?.detail?.ok) parkNativeWorkerRoot("first-feedback-success");
+  });
+  window.addEventListener(CARD_TOKEN_RESPONSE_EVENT, event => {
+    if (workerKind === "bot-status" && event?.detail?.ok) parkNativeWorkerRoot("first-character-success");
+  });
 
-  if (workerKind === "bot-status") {
-    window.addEventListener(CARD_TOKEN_RESPONSE_EVENT, event => {
-      if (event?.detail?.ok) parkNativeWorkerRoot("first-character-success");
-    });
-  }
+  DS.parkBackgroundWorkerRoot = parkNativeWorkerRoot;
 })();
 /* DS_QOL14_HOTFIX_END */

@@ -2,6 +2,7 @@
   "use strict";
 
   const DS = window.DragonScriptQoL;
+  let personaPickerLightweightLastRun = 0;
 
   function cleanText(value) {
     return String(value || "")
@@ -631,6 +632,34 @@
       labels[0].closest("div.fixed") ||
       labels[0].parentElement;
   }
+
+  DS.isPersonaPickerOpen = function isPersonaPickerOpen() {
+    return !!findPersonaPicker();
+  };
+
+  DS.applyPersonaPickerLightweight = async function applyPersonaPickerLightweight() {
+    const settings = DS.state?.settings || {};
+    const picker = findPersonaPicker();
+    if (!picker) return false;
+
+    // The native picker can animate/re-render while it is open. Keep QoL's
+    // modal-specific work bounded so those native updates do not wake the full
+    // chat runtime every ~2 seconds.
+    const now = Date.now();
+    if (now - personaPickerLightweightLastRun < 700) return true;
+    personaPickerLightweightLastRun = now;
+
+    if (settings.enabled && settings.savePersonasFromPages) {
+      await DS.scanPersonasFromPage?.();
+    }
+    if (settings.enabled && settings.enablePersonaOrganizer) {
+      await DS.applyPersonaPickerOrganization?.();
+    }
+    if (settings.enabled && settings.autoAcceptPersonaChange) {
+      DS.acceptPersonaChangeModal?.();
+    }
+    return true;
+  };
 
   function getVisiblePersonaLabels() {
     return DS.qsa("label")

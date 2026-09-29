@@ -864,12 +864,19 @@
       DS.state = DS.state || {};
       DS.state.botStatusWorker = true;
       DS.state.qolBackgroundWorker = "bot-status";
+      if (message?.sessionId) DS.state.qolBackgroundWorkerSessionId = String(message.sessionId);
       try {
         document.documentElement.setAttribute("data-ds-qol-background-worker", "bot-status");
         document.documentElement.setAttribute("data-ds-qol-bot-status-worker", "1");
-        DS.diagEvent?.("bot-status", "bot-status-worker-marked", { phase: String(message.phase || "runtime") });
+        if (DS.state.qolBackgroundWorkerSessionId) {
+          document.documentElement.setAttribute("data-ds-qol-background-worker-session", DS.state.qolBackgroundWorkerSessionId);
+        }
+        DS.diagEvent?.("bot-status", "bot-status-worker-marked", {
+          phase: String(message.phase || "runtime"),
+          sessionId: DS.state.qolBackgroundWorkerSessionId || ""
+        });
       } catch {}
-      sendResponse({ ok: true, marked: true });
+      sendResponse({ ok: true, marked: true, sessionId: DS.state.qolBackgroundWorkerSessionId || "" });
       return false;
     }
     if (message?.type === "DS_BOT_STATUS_DIAG_EVENT") {
@@ -878,10 +885,15 @@
       return false;
     }
     if (message?.type === "DS_BOT_STATUS_WORKER_READY") {
+      if (message?.sessionId) {
+        DS.state = DS.state || {};
+        DS.state.qolBackgroundWorkerSessionId = String(message.sessionId);
+      }
       sendResponse({
         ok: typeof DS.fetchPublicCharacterFieldsDetailed === "function",
         ready: document.readyState !== "loading" && typeof DS.fetchPublicCharacterFieldsDetailed === "function",
-        status: typeof DS.fetchPublicCharacterFieldsDetailed === "function" ? "ready" : "api-bridge-not-ready"
+        status: typeof DS.fetchPublicCharacterFieldsDetailed === "function" ? "ready" : "api-bridge-not-ready",
+        sessionId: DS.state?.qolBackgroundWorkerSessionId || ""
       });
       return false;
     }

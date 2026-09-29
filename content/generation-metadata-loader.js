@@ -1,6 +1,26 @@
 (() => {
   "use strict";
 
+  const bootstrapParams = new URLSearchParams(location.search || "");
+  const botStatusBootstrap = bootstrapParams.get("dsQolBotStatusWorker") === "1";
+  if (botStatusBootstrap) {
+    // Persist this before SpicyChat's router gets a chance to rewrite/reload the
+    // Home URL. sessionStorage is tab-scoped, so it never marks other tabs.
+    try { sessionStorage.setItem("dsQolBackgroundWorkerKind", "bot-status"); } catch {}
+  }
+  let sessionWorkerKind = "";
+  try { sessionWorkerKind = String(sessionStorage.getItem("dsQolBackgroundWorkerKind") || ""); } catch {}
+  if (
+    sessionWorkerKind === "bot-status" ||
+    botStatusBootstrap ||
+    bootstrapParams.get("dsQolRecommendationWorker") === "1" ||
+    bootstrapParams.get("dsQuickLessLike") === "1"
+  ) {
+    // Background API helpers do not need generation metadata/timestamp
+    // interception. Keep only the auth/API bridge required by their task.
+    return;
+  }
+
   const SOURCE = "spicychat-qol-generation-metadata";
   const CONTROL_SOURCE = "spicychat-qol-generation-metadata-control";
   const BUFFER_KEY = "__DSQ_GENERATION_METADATA_BUFFER__";

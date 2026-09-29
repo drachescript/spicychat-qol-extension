@@ -1,4 +1,14 @@
 ## 0.2.22
+- Fixed periodic freezes while SpicyChat's persona picker is open by putting QoL into a low-impact modal pass instead of repeatedly running the full chat runtime.
+- Persona Organizer no longer re-appends already correctly ordered picker rows or rebuilds unchanged local folder/note metadata on every pass.
+- Centered the optional stacked chat column inside SpicyChat's native message lane instead of leaving the stacked bubbles visually offset to the left.
+- “Show full bot descriptions on cards” now removes the native line clamp completely instead of stopping at five lines, so the full description is readable without hover.
+- Clarified the existing chat appearance controls: custom backgrounds, bubble/text colors, font families, global chat text size, and line spacing are already available under Appearance & Interface.
+- Fixed the Bot Status helper reload loop caused by treating `?dsQolBotStatusWorker=1` as permanent worker identity after SpicyChat's Home router removed the query marker.
+- Bot Status workers now keep durable background tab/session identity, send a 3-second heartbeat, tolerate the router URL rewrite, and only get replaced after an actual request/liveness timeout with restart backoff.
+- Added a dedicated `worker:bot-status` runtime plan so Bot Status helpers skip normal listing/UI processing; exact-message-count and generation-metadata bridges are also skipped on worker bootstrap.
+- Tuned serial Bot Status pacing to 600 ms Safe / 450 ms Normal / 350 ms Fast while retaining adaptive 429/5xx backoff.
+- Expanded diagnostic module fingerprints to include Options, Bot Status worker management, runtime-plan and background-worker coordinator code so future Inspector captures can identify which worker code actually changed.
 - Fixed the Changelog staying on “Loading changelog...” indefinitely in the Android app by using the native bundled-text bridge directly with bounded fallbacks.
 - Reverted QoL's mobile message-edit textarea resizing so SpicyChat controls the editor height again, fixing edited messages collapsing into a tiny scrollable text box on Android.
 - Kept the separate mobile send-button wrapper fix without changing message-editor sizing.

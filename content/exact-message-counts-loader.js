@@ -1,6 +1,27 @@
 (() => {
   "use strict";
 
+  const bootstrapParams = new URLSearchParams(location.search || "");
+  const botStatusBootstrap = bootstrapParams.get("dsQolBotStatusWorker") === "1";
+  if (botStatusBootstrap) {
+    // Persist this before SpicyChat's router gets a chance to rewrite/reload the
+    // Home URL. sessionStorage is tab-scoped, so it never marks other tabs.
+    try { sessionStorage.setItem("dsQolBackgroundWorkerKind", "bot-status"); } catch {}
+  }
+  let sessionWorkerKind = "";
+  try { sessionWorkerKind = String(sessionStorage.getItem("dsQolBackgroundWorkerKind") || ""); } catch {}
+  if (
+    sessionWorkerKind === "bot-status" ||
+    botStatusBootstrap ||
+    bootstrapParams.get("dsQolRecommendationWorker") === "1" ||
+    bootstrapParams.get("dsQuickLessLike") === "1"
+  ) {
+    // Dedicated API helpers must not install the Typesense/exact-count bridge.
+    // Their URL marker is bootstrap-only; durable worker identity is handled by
+    // the background tab/session heartbeat after SpicyChat rewrites the URL.
+    return;
+  }
+
   const SOURCE = "spicychat-qol-exact-message-counts";
   const CONTROL_SOURCE = "spicychat-qol-exact-message-counts-control";
   const BUFFER_KEY = "__DSQ_EXACT_MESSAGE_COUNT_BUFFER__";

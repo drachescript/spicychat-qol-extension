@@ -1618,7 +1618,15 @@ ${description}`);
       return Number(a.label.dataset.dsPersonaPickerOriginalIndex || 0) - Number(b.label.dataset.dsPersonaPickerOriginalIndex || 0);
     });
 
-    sorted.forEach(item => parent.appendChild(item.label));
+    // Re-appending every persona label on every QoL pass creates a React/
+    // MutationObserver feedback loop in the chat-start persona picker. Only
+    // touch the DOM when the requested order is actually different.
+    const labelSet = new Set(sorted.map(item => item.label));
+    const current = [...parent.children].filter(child => labelSet.has(child));
+    const needsReorder =
+      current.length !== sorted.length ||
+      sorted.some((item, index) => current[index] !== item.label);
+    if (needsReorder) sorted.forEach(item => parent.appendChild(item.label));
 
     for (const item of sorted) {
       const data = org.meta[item.id] || {};
@@ -1627,23 +1635,37 @@ ${description}`);
       if (filterMode === "favorites") show = !!data.favorite;
       else if (filterMode === "unsorted") show = !folder || !configuredFolders.has(folder);
       else if (filterMode.startsWith("folder:")) show = folder === filterMode.slice(7);
-      item.label.classList.toggle("ds-persona-picker-group-hidden", !show);
+      const hidden = !show;
+      if (item.label.classList.contains("ds-persona-picker-group-hidden") !== hidden) {
+        item.label.classList.toggle("ds-persona-picker-group-hidden", hidden);
+      }
     }
   }
 
   function addPickerMeta(label, id, settings) {
-    label.querySelectorAll(".ds-persona-picker-meta").forEach(el => el.remove());
-    if (!settings.personaShowLocalMetaInPicker) return;
+    const existing = label.querySelector(".ds-persona-picker-meta");
+    if (!settings.personaShowLocalMetaInPicker) {
+      existing?.remove();
+      return;
+    }
 
     const data = org.meta[id] || {};
     const folder = cleanText(data.folder || "");
     const note = cleanText(data.note || "");
-    if (!folder && !note) return;
+    if (!folder && !note) {
+      existing?.remove();
+      return;
+    }
+
+    const signature = `${folder}\n${note}`;
+    if (existing?.dataset.dsPersonaPickerMetaSignature === signature) return;
+    existing?.remove();
 
     const description = label.querySelector("span.line-clamp-3, span[class*='line-clamp-3']");
     const content = description?.parentElement || label.querySelector("div.flex.flex-col") || label;
     const meta = document.createElement("div");
     meta.className = "ds-persona-picker-meta";
+    meta.dataset.dsPersonaPickerMetaSignature = signature;
     if (folder) {
       const folderChip = document.createElement("span");
       folderChip.className = "ds-persona-picker-folder";

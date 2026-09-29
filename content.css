@@ -835,15 +835,15 @@ html[data-ds-message-action-bridge="1"] div[style*="box-shadow"]:has(> button[ar
 .ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-3"][class*="group-hover:line-clamp-none"],
 .ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-2"][class*="scrollbar-hide"],
 .ds-card-long-description > div[class*="px-2"][class*="py-3"] > div[class*="line-clamp-2"][class*="group-hover:line-clamp-none"] {
-  display: -webkit-box !important;
-  -webkit-line-clamp: 5 !important;
-  line-clamp: 5 !important;
-  -webkit-box-orient: vertical !important;
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  -webkit-box-orient: initial !important;
   max-height: none !important;
   min-height: 0 !important;
-  overflow: hidden !important;
-  overflow-y: hidden !important;
-  scrollbar-width: none !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+  scrollbar-width: auto !important;
   white-space: normal !important;
 }
 

@@ -102,11 +102,17 @@ const QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY = "dsQuickLessLikeRecommendationWor
 const QUICK_LESS_LIKE_READY_TTL_MS = 10 * 60 * 1000;
 let botStatusWorkerTabId = null;
 let botStatusWorkerOwned = false;
+let botStatusWorkerSessionId = "";
+let botStatusWorkerHeartbeatAt = 0;
+let botStatusWorkerRestartCount = 0;
+let botStatusWorkerRestartBackoffUntil = 0;
 const botStatusWorkerTabIds = new Set();
 const botStatusWorkerExpectedCloseIds = new Set();
 const BOT_STATUS_HOME_WORKER_URL = "https://spicychat.ai/?dsQolBotStatusWorker=1";
 const BOT_STATUS_WORKER_SESSION_TAB_KEY = "dsBotStatusWorkerTabId";
 const BOT_STATUS_WORKER_SESSION_OWNED_KEY = "dsBotStatusWorkerOwned";
+const BOT_STATUS_WORKER_SESSION_ID_KEY = "dsBotStatusWorkerSessionId";
+const BOT_STATUS_WORKER_HEARTBEAT_TTL_MS = 15 * 1000;
 const listingRefillWorkerTabIds = new Set();
 const listingRefillPageWorkerTabs = new Map();
 const listingRefillSourceTabs = new Map();
@@ -1057,6 +1063,46 @@ function isUsableBotStatusPage(url) {
   } catch { return false; }
 }
 
+function createBotStatusWorkerSessionId() {
+  try {
+    if (crypto?.randomUUID) return `bot-status:${crypto.randomUUID()}`;
+  } catch {}
+  return `bot-status:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function botStatusHeartbeatFresh() {
+  return !!botStatusWorkerHeartbeatAt && Date.now() - Number(botStatusWorkerHeartbeatAt || 0) <= BOT_STATUS_WORKER_HEARTBEAT_TTL_MS;
+}
+
+function noteBotStatusWorkerHeartbeat(tabId, sessionId = "") {
+  const id = Number(tabId || 0);
+  if (!id || Number(botStatusWorkerTabId || 0) !== id) return false;
+  const supplied = String(sessionId || "").trim();
+  if (supplied && botStatusWorkerSessionId && supplied !== botStatusWorkerSessionId) return false;
+  if (supplied && !botStatusWorkerSessionId) botStatusWorkerSessionId = supplied;
+  botStatusWorkerHeartbeatAt = Date.now();
+  return true;
+}
+
+function botStatusRestartDelayMs(nextRestartCount) {
+  const count = Math.max(1, Number(nextRestartCount || 1));
+  if (count <= 1) return 0;
+  if (count === 2) return 5000;
+  if (count === 3) return 15000;
+  if (count === 4) return 30000;
+  return 60000;
+}
+
+async function waitForBotStatusRestartBackoff() {
+  const waitMs = Math.max(0, Number(botStatusWorkerRestartBackoffUntil || 0) - Date.now());
+  if (!waitMs) return;
+  await recordHelperLifecycle("bot-status-worker-backoff", {
+    waitMs,
+    restartCount: Number(botStatusWorkerRestartCount || 0)
+  });
+  await new Promise(resolve => setTimeout(resolve, waitMs));
+}
+
 async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
   const id = Number(tabId || 0);
   if (!id) return { ok: false, ready: false, status: "worker-missing" };
@@ -1066,27 +1112,45 @@ async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
     const tab = await tabsGet(id);
     if (!tab) return { ok: false, ready: false, status: "worker-closed" };
     const remaining = Math.max(500, deadline - Date.now());
-    await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_MARK_WORKER", phase: "probe" }, Math.min(900, remaining));
-    const response = await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_WORKER_READY" }, Math.min(1400, remaining));
+    await tabsSendMessageWithTimeout(id, {
+      type: "DS_BOT_STATUS_MARK_WORKER",
+      phase: "probe",
+      sessionId: botStatusWorkerSessionId || ""
+    }, Math.min(900, remaining));
+    const response = await tabsSendMessageWithTimeout(id, {
+      type: "DS_BOT_STATUS_WORKER_READY",
+      sessionId: botStatusWorkerSessionId || ""
+    }, Math.min(1400, remaining));
     if (response?.__dsTimeout) last = { ok: false, ready: false, status: "worker-message-timeout" };
     else if (response) last = response;
-    if (response?.ready) return { ...response, ok: true, ready: true, tabId: id };
+    if (response?.ready) {
+      noteBotStatusWorkerHeartbeat(id, response?.sessionId || botStatusWorkerSessionId);
+      return { ...response, ok: true, ready: true, tabId: id, sessionId: botStatusWorkerSessionId || response?.sessionId || "" };
+    }
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   return { ...(last || {}), ok: false, ready: false, status: last?.status || "worker-timeout", tabId: id };
 }
 
-async function rememberBotStatusWorker(tabId, owned) {
+async function rememberBotStatusWorker(tabId, owned, sessionId = botStatusWorkerSessionId) {
   const id = Number(tabId || 0);
+  const nextSessionId = id ? String(sessionId || botStatusWorkerSessionId || createBotStatusWorkerSessionId()) : "";
+  botStatusWorkerSessionId = nextSessionId;
+  if (!id) botStatusWorkerHeartbeatAt = 0;
   await storageSessionSet({
     [BOT_STATUS_WORKER_SESSION_TAB_KEY]: id || 0,
-    [BOT_STATUS_WORKER_SESSION_OWNED_KEY]: !!owned
+    [BOT_STATUS_WORKER_SESSION_OWNED_KEY]: !!owned,
+    [BOT_STATUS_WORKER_SESSION_ID_KEY]: nextSessionId
   });
 }
 
 async function restoreBotStatusWorkerSession() {
   if (Number(botStatusWorkerTabId || 0)) return;
-  const stored = await storageSessionGet([BOT_STATUS_WORKER_SESSION_TAB_KEY, BOT_STATUS_WORKER_SESSION_OWNED_KEY]);
+  const stored = await storageSessionGet([
+    BOT_STATUS_WORKER_SESSION_TAB_KEY,
+    BOT_STATUS_WORKER_SESSION_OWNED_KEY,
+    BOT_STATUS_WORKER_SESSION_ID_KEY
+  ]);
   const id = Number(stored?.[BOT_STATUS_WORKER_SESSION_TAB_KEY] || 0);
   if (!id) return;
   const tab = await tabsGet(id);
@@ -1096,23 +1160,25 @@ async function restoreBotStatusWorkerSession() {
   }
   botStatusWorkerTabId = id;
   botStatusWorkerOwned = !!stored?.[BOT_STATUS_WORKER_SESSION_OWNED_KEY];
+  botStatusWorkerSessionId = String(stored?.[BOT_STATUS_WORKER_SESSION_ID_KEY] || botStatusWorkerSessionId || createBotStatusWorkerSessionId());
   if (botStatusWorkerOwned) botStatusWorkerTabIds.add(id);
 }
 
-async function releaseBotStatusWorker() {
+async function releaseBotStatusWorker({ reason = "normal-release" } = {}) {
   await restoreBotStatusWorkerSession();
   const id = Number(botStatusWorkerTabId || 0);
   const owned = !!botStatusWorkerOwned;
   botStatusWorkerTabId = null;
   botStatusWorkerOwned = false;
+  botStatusWorkerHeartbeatAt = 0;
   botStatusWorkerTabIds.clear();
-  await rememberBotStatusWorker(0, false);
+  await rememberBotStatusWorker(0, false, "");
   if (!id || !owned) return 0;
   const tab = await tabsGet(id);
   if (!tab) return 0;
   botStatusWorkerExpectedCloseIds.add(id);
   await tabsRemove(id);
-  await recordHelperLifecycle("bot-status-worker-released", { tabId: id, reason: "normal-release" });
+  await recordHelperLifecycle("bot-status-worker-released", { tabId: id, reason: String(reason || "normal-release") });
   return 1;
 }
 
@@ -1144,11 +1210,33 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   }
 
   if (tab?.id) {
-    const ready = await probeBotStatusWorker(Number(tab.id), 1500);
+    const ready = await probeBotStatusWorker(Number(tab.id), botStatusWorkerOwned ? 10000 : 1500);
     if (ready?.ready) {
-      await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned);
-      await recordHelperLifecycle("bot-status-worker-ready", { tabId: Number(tab.id), reused: true, owned: !!botStatusWorkerOwned });
-      return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, ready: true };
+      await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned, ready?.sessionId || botStatusWorkerSessionId);
+      await recordHelperLifecycle("bot-status-worker-ready", {
+        tabId: Number(tab.id),
+        reused: true,
+        owned: !!botStatusWorkerOwned,
+        sessionId: botStatusWorkerSessionId || ""
+      });
+      return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, ready: true, sessionId: botStatusWorkerSessionId || "" };
+    }
+    // A router URL change is no longer treated as worker death. If the worker
+    // is still heartbeating, keep the durable tab identity and let the API
+    // request retry through the existing serial deadline.
+    if (botStatusWorkerOwned && botStatusHeartbeatFresh()) {
+      await recordHelperLifecycle("bot-status-worker-heartbeat-alive", {
+        tabId: Number(tab.id),
+        status: String(ready?.status || "not-ready"),
+        heartbeatAgeMs: Date.now() - Number(botStatusWorkerHeartbeatAt || 0)
+      });
+      return {
+        tabId: Number(tab.id),
+        owned: true,
+        ready: true,
+        status: "heartbeat-alive",
+        sessionId: botStatusWorkerSessionId || ""
+      };
     }
     await recordHelperLifecycle("bot-status-worker-lost", { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, status: String(ready?.status || "not-ready") });
     if (botStatusWorkerOwned) {
@@ -1157,8 +1245,9 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
     }
     botStatusWorkerTabId = null;
     botStatusWorkerOwned = false;
+    botStatusWorkerHeartbeatAt = 0;
     botStatusWorkerTabIds.clear();
-    await rememberBotStatusWorker(0, false);
+    await rememberBotStatusWorker(0, false, "");
   }
 
   if (!forceOwnHelper) {
@@ -1171,15 +1260,25 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
     }
   }
 
+  await waitForBotStatusRestartBackoff();
   const existing = (await tabsQuery({})).filter(item => item?.id && isBotStatusWorkerUrl(item.url || item.pendingUrl || ""));
   existing.sort((a, b) => Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
   let helper = existing[0] || null;
   for (const duplicate of existing.slice(1)) await tabsRemove(Number(duplicate.id));
+  if (!botStatusWorkerSessionId) botStatusWorkerSessionId = createBotStatusWorkerSessionId();
   if (!helper?.id) {
-    await recordHelperLifecycle("bot-status-worker-opening", { reason: "create-owned-home-helper" });
+    await recordHelperLifecycle("bot-status-worker-opening", {
+      reason: "create-owned-home-helper",
+      sessionId: botStatusWorkerSessionId
+    });
     const created = await tabsCreate({ url: BOT_STATUS_HOME_WORKER_URL, active: false });
     helper = created?.ok ? created.tab : null;
-    if (helper?.id) await recordHelperLifecycle("bot-status-worker-restart", { tabId: Number(helper.id), reason: "new-owned-helper" });
+    if (helper?.id) await recordHelperLifecycle("bot-status-worker-restart", {
+      tabId: Number(helper.id),
+      reason: "new-owned-helper",
+      sessionId: botStatusWorkerSessionId,
+      restartCount: Number(botStatusWorkerRestartCount || 0)
+    });
   }
   const tabId = Number(helper?.id || 0);
   if (!tabId) return { tabId: 0, owned: false };
@@ -1187,15 +1286,25 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   botStatusWorkerOwned = true;
   botStatusWorkerTabIds.clear();
   botStatusWorkerTabIds.add(tabId);
-  await rememberBotStatusWorker(tabId, true);
+  await rememberBotStatusWorker(tabId, true, botStatusWorkerSessionId);
   const ready = await probeBotStatusWorker(tabId, 10000);
   if (!ready?.ready) {
     await recordHelperLifecycle("bot-status-worker-lost", { tabId, owned: true, status: String(ready?.status || "worker-timeout"), reason: "startup-not-ready" });
     return { tabId, owned: true, ready: false, status: ready?.status || "worker-timeout" };
   }
-  await recordHelperLifecycle("bot-status-worker-ready", { tabId, reused: false, owned: true });
-  await tabsSendMessage(tabId, { type: "DS_BOT_STATUS_DIAG_EVENT", event: "bot-status-worker-ready", detail: { tabId, owned: true } });
-  return { tabId, owned: true, ready: true };
+  noteBotStatusWorkerHeartbeat(tabId, ready?.sessionId || botStatusWorkerSessionId);
+  await recordHelperLifecycle("bot-status-worker-ready", {
+    tabId,
+    reused: false,
+    owned: true,
+    sessionId: botStatusWorkerSessionId || ""
+  });
+  await tabsSendMessage(tabId, {
+    type: "DS_BOT_STATUS_DIAG_EVENT",
+    event: "bot-status-worker-ready",
+    detail: { tabId, owned: true, sessionId: botStatusWorkerSessionId || "" }
+  });
+  return { tabId, owned: true, ready: true, sessionId: botStatusWorkerSessionId || "" };
 }
 
 function botStatusApiResponseIsTransient(response) {
@@ -1258,12 +1367,36 @@ async function runBotStatusHelperCheck(message) {
     if (tabId) response = await withBackgroundJob("bot-status", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 15000 }, () => waitForBotStatusApiCheck(tabId, botId, 12000));
   }
 
-  if (String(response?.status || "") === "worker-timeout" && worker.owned) {
-    // Do not leave a wedged helper pinned to the whole serial scan. The current
-    // bot becomes Unknown and the next bot gets a fresh Home worker.
-    await releaseBotStatusWorker();
-  } else if (!message?.keepHelper) {
-    await releaseBotStatusWorker();
+  const finalStatus = String(response?.status || "");
+  if (finalStatus === "worker-timeout" && worker.owned) {
+    if (botStatusHeartbeatFresh()) {
+      // The page is alive; only this character request timed out. Keep the
+      // worker and let the serial queue continue instead of rebuilding Home.
+      await recordHelperLifecycle("bot-status-request-timeout-worker-alive", {
+        tabId,
+        heartbeatAgeMs: Date.now() - Number(botStatusWorkerHeartbeatAt || 0)
+      });
+    } else {
+      // Only a real request + heartbeat timeout is allowed to discard the
+      // durable worker identity. Repeated restarts back off instead of hammering Home.
+      botStatusWorkerRestartCount = Math.max(0, Number(botStatusWorkerRestartCount || 0)) + 1;
+      const delayMs = botStatusRestartDelayMs(botStatusWorkerRestartCount);
+      botStatusWorkerRestartBackoffUntil = Date.now() + delayMs;
+      await recordHelperLifecycle("bot-status-worker-timeout", {
+        tabId,
+        restartCount: botStatusWorkerRestartCount,
+        nextRestartDelayMs: delayMs,
+        heartbeatAgeMs: botStatusWorkerHeartbeatAt ? Date.now() - botStatusWorkerHeartbeatAt : -1
+      });
+      await releaseBotStatusWorker({ reason: "request-and-heartbeat-timeout" });
+    }
+  } else {
+    if (response && !["worker-error", "api-bridge-not-ready", "auth-unavailable", "worker-no-response"].includes(finalStatus)) {
+      botStatusWorkerRestartCount = 0;
+      botStatusWorkerRestartBackoffUntil = 0;
+      noteBotStatusWorkerHeartbeat(tabId, worker?.sessionId || botStatusWorkerSessionId);
+    }
+    if (!message?.keepHelper) await releaseBotStatusWorker({ reason: "normal-release" });
   }
   return response || { ok: false, ready: true, status: "worker-no-response", httpStatus: 0, reason: "Bot Status helper returned no response." };
 }
@@ -4811,6 +4944,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_QOL_BACKGROUND_WORKER_IDENTITY_QUERY") {
+    const senderTabId = Number(sender?.tab?.id || 0);
+    restoreBotStatusWorkerSession()
+      .then(() => {
+        const isBotStatus = !!senderTabId && (
+          Number(botStatusWorkerTabId || 0) === senderTabId ||
+          botStatusWorkerTabIds.has(senderTabId)
+        );
+        if (isBotStatus) {
+          noteBotStatusWorkerHeartbeat(senderTabId, message?.sessionId || "");
+          sendResponse({
+            ok: true,
+            worker: "bot-status",
+            tabId: senderTabId,
+            owned: !!botStatusWorkerOwned,
+            sessionId: botStatusWorkerSessionId || "",
+            heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS
+          });
+        } else {
+          sendResponse({ ok: true, worker: "", tabId: senderTabId });
+        }
+      })
+      .catch(error => sendResponse({ ok: false, worker: "", error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_BOT_STATUS_WORKER_HEARTBEAT") {
+    const senderTabId = Number(sender?.tab?.id || 0);
+    restoreBotStatusWorkerSession()
+      .then(async () => {
+        const accepted = noteBotStatusWorkerHeartbeat(senderTabId, message?.sessionId || "");
+        if (accepted && senderTabId) {
+          botStatusWorkerTabIds.add(senderTabId);
+          if (!botStatusWorkerSessionId) {
+            botStatusWorkerSessionId = String(message?.sessionId || createBotStatusWorkerSessionId());
+            await rememberBotStatusWorker(senderTabId, !!botStatusWorkerOwned, botStatusWorkerSessionId);
+          }
+        }
+        sendResponse({
+          ok: accepted,
+          worker: accepted ? "bot-status" : "",
+          sessionId: accepted ? (botStatusWorkerSessionId || "") : "",
+          heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS
+        });
+      })
+      .catch(error => sendResponse({ ok: false, error: String(error?.message || error || "") }));
+    return true;
+  }
+
   if (message?.type === "DS_BOT_STATUS_RUN_EVENT") {
     const event = String(message.event || "bot-status-event").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "bot-status-event";
     recordHelperLifecycle(event, message.detail || {})
@@ -4828,6 +5010,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ready: worker?.ready !== false,
         tabId: Number(worker?.tabId || 0),
         owned: !!worker?.owned,
+        sessionId: String(worker?.sessionId || botStatusWorkerSessionId || ""),
         status: worker?.status || (worker?.tabId ? "ready" : "worker-tab-failed")
       }))
       .catch(error => sendResponse({ ok: false, ready: false, status: "worker-error", error: error?.message || String(error) }));
@@ -5342,9 +5525,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
   const spicyUrl = tab?.url || changeInfo.url || tab?.pendingUrl;
   if (!isSpicyChatUrl(spicyUrl)) return;
-  if (botStatusWorkerTabIds.has(Number(tabId)) && changeInfo.status === "loading" && !isBotStatusWorkerUrl(spicyUrl)) {
-    await recordHelperLifecycle("bot-status-worker-restart", { tabId: Number(tabId), reason: "reload-after-router-marker-removed" });
-    await tabsUpdate(Number(tabId), { url: BOT_STATUS_HOME_WORKER_URL });
+  if (botStatusWorkerTabIds.has(Number(tabId))) {
+    // The query parameter is bootstrap-only. SpicyChat's Home router is free to
+    // replace the URL; the tab/session/heartbeat remain the worker identity.
+    // Never navigate the helper back to the marker URL just because it vanished.
     return;
   }
   if (quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
@@ -5441,7 +5625,9 @@ chrome.tabs.onRemoved.addListener(tabId => {
   if (Number(botStatusWorkerTabId) === Number(tabId)) {
     botStatusWorkerTabId = null;
     botStatusWorkerOwned = false;
-    rememberBotStatusWorker(0, false).catch(() => {});
+    botStatusWorkerHeartbeatAt = 0;
+    botStatusWorkerSessionId = "";
+    rememberBotStatusWorker(0, false, "").catch(() => {});
   }
   if (removedBotStatusWorker && !expectedBotStatusClose) recordHelperLifecycle("bot-status-worker-lost", { tabId: Number(tabId), reason: "tab-closed-unexpected" }).catch(() => {});
   for (const [runId, workerTabId] of quickLessLikeBulkWorkerTabs.entries()) {

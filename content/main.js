@@ -543,6 +543,15 @@
     return anySetting(settings, ["autoAcceptPersonaChange", "savePersonasFromPages", "keepLocalPersonaCopies", "expandPersonaDescriptions", "enablePersonaOrganizer", "showPersonaQuickSwitch"]);
   }
 
+  async function runPersonaPickerLowImpact(source = "runtime") {
+    if (!DS.isPersonaPickerOpen?.()) return false;
+    const counters = runtimeCounters();
+    counters.personaPickerLowImpactRuns = Number(counters.personaPickerLowImpactRuns || 0) + 1;
+    counters.lastPersonaPickerLowImpactSource = String(source || "runtime");
+    await runStep("persona picker low-impact", () => DS.applyPersonaPickerLightweight?.());
+    return true;
+  }
+
   function memoryManagerWanted(settings) {
     return anySetting(settings, ["enableBulkMemoryManager", "showCopyMemoryAction", "memoryAutoLoadAll"]);
   }
@@ -1091,6 +1100,12 @@
         return;
       }
 
+      // The chat-start/change-persona modal is a transient native surface.
+      // While it is open, broad chat/listing reconciliation only competes with
+      // SpicyChat's own picker rendering and can cause periodic half-second
+      // stalls. Keep only the tiny persona-specific pass alive until it closes.
+      if (await runPersonaPickerLowImpact("critical")) return;
+
       DS.state.disabledCleanupDone = false;
       const deepSleep = deepSleepEnabled(settings);
       if (!deepSleep || cardFilteringWanted(settings) || document.querySelector("[data-ds-hidden-card],.ds-card-hidden,.ds-card-dimmed")) {
@@ -1328,6 +1343,8 @@
         await runDisabledCleanup();
         return;
       }
+
+      if (await runPersonaPickerLowImpact("slow")) return;
 
       if (Date.now() < pauseRerunsUntil || (DS.isSingleChatPage?.() && DS.isChatHeaderMenuOpen?.())) {
         rerunAfterMenuSettles();
@@ -2392,8 +2409,16 @@
 
   (async function main() {
     await DS.loadState();
-    DS.runtimeLog?.("info", "main", "State loaded", { enabled: DS.state?.settings?.enabled !== false });
+    try { await DS.resolveBackgroundWorkerIdentity?.(); } catch {}
+    DS.runtimeLog?.("info", "main", "State loaded", {
+      enabled: DS.state?.settings?.enabled !== false,
+      backgroundWorker: String(DS.state?.qolBackgroundWorker || "")
+    });
 
+    if (DS.state.qolBackgroundWorker) {
+      DS.runtimeLog?.("info", "main", `${DS.state.qolBackgroundWorker} helper tab: normal QoL page processing skipped`);
+      return;
+    }
     if (DS.state.quickDislikeWorker) {
       DS.runtimeLog?.("info", "main", "Quick-dislike helper tab: normal QoL page processing skipped");
       return;

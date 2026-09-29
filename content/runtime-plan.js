@@ -38,20 +38,61 @@
   let cachedPage = null;
   let cachedListing = null;
   let cachedBuildMask = null;
+  let cachedWorkerKind = "";
   let cachedPlan = null;
 
   DS.getRuntimePlan = function getRuntimePlan(pageState = null, hints = {}) {
     const page = pageState || DS.getPageState?.() || {};
+    const workerKind = String(
+      DS.state?.qolBackgroundWorker ||
+      document.documentElement?.getAttribute?.("data-ds-qol-background-worker") ||
+      ""
+    ).trim();
     const explicitListing = hints.listing;
     const listing = explicitListing === true || (
       explicitListing !== false &&
       ["listing", "creator-listing", "lorebook-listing"].includes(page.routeType)
     );
     const currentBuildMask = Number.isFinite(DS.RUNTIME_BUILD_MASK) ? DS.RUNTIME_BUILD_MASK : null;
-    if (cachedPlan && cachedPage === page && cachedListing === listing && cachedBuildMask === currentBuildMask) {
+    if (cachedPlan && cachedPage === page && cachedListing === listing && cachedBuildMask === currentBuildMask && cachedWorkerKind === workerKind) {
       const perf = DS.state?.runtimePerformance;
       if (perf) perf.runtimePlanCacheHits = Number(perf.runtimePlanCacheHits || 0) + 1;
       return cachedPlan;
+    }
+
+    if (workerKind) {
+      const buildMask = Number.isFinite(DS.RUNTIME_BUILD_MASK) ? DS.RUNTIME_BUILD_MASK : (bits.core || 1);
+      const plan = {
+        key: `worker:${workerKind}`,
+        page,
+        routeMask: bits.core || 1,
+        bundleMask: (bits.core || 1) & buildMask,
+        buildMask,
+        core: true,
+        interface: false,
+        chat: false,
+        chatList: false,
+        listings: false,
+        creator: false,
+        lorebook: false,
+        profiles: false,
+        personas: false,
+        botEditor: false,
+        lorebookEditor: false,
+        nonChat: true,
+        discovery: false,
+        creatorAny: false,
+        personaTools: false,
+        creatorModeration: false,
+        worker: true,
+        workerKind
+      };
+      cachedPage = page;
+      cachedListing = listing;
+      cachedBuildMask = currentBuildMask;
+      cachedWorkerKind = workerKind;
+      cachedPlan = plan;
+      return plan;
     }
 
     const routeFlags = {
@@ -90,6 +131,7 @@
     cachedPage = page;
     cachedListing = listing;
     cachedBuildMask = currentBuildMask;
+    cachedWorkerKind = workerKind;
     cachedPlan = plan;
     return plan;
   };
