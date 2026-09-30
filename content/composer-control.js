@@ -14,7 +14,9 @@
     guardTimer: 0,
     mobileObserver: null,
     mobileListenersInstalled: false,
-    mobileNormalizeRaf: 0
+    mobileNormalizeRaf: 0,
+    editResizeRaf: 0,
+    editResizeTimer: 0
   };
 
   function settings() {
@@ -58,9 +60,6 @@
     if (textarea.getAttribute("aria-disabled") === "true") textarea.setAttribute("aria-disabled", "false");
     if (textarea.getAttribute("aria-readonly") === "true") textarea.setAttribute("aria-readonly", "false");
 
-    // This only keeps drafting/editing available. It deliberately does not
-    // click or re-enable SpicyChat's send/generate buttons while another text
-    // or image generation is in flight.
     DS.setClassState?.(textarea, "ds-composer-forced-enabled", true);
   }
 
@@ -190,8 +189,22 @@
   }
 
   function mobileLayoutActive() {
-    try { return window.matchMedia?.("(max-width: 760px), (pointer: coarse)")?.matches ?? window.innerWidth <= 760; }
-    catch { return window.innerWidth <= 760; }
+    try {
+      return window.matchMedia?.("(max-width: 760px), (pointer: coarse)")?.matches ?? window.innerWidth <= 760;
+    } catch {
+      return window.innerWidth <= 760;
+    }
+  }
+
+  function androidAppRuntime() {
+    const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
+    return !!(
+      env.android ||
+      window.__spicyChatQolAndroidWebView ||
+      window.__spicyChatQolAndroidApp ||
+      window.AndroidBridge ||
+      window.SpicyChatQoLAndroidBridge
+    );
   }
 
   function composerTextarea() {
@@ -216,36 +229,210 @@
     if (wrapper && wrapper !== scope) DS.setClassState?.(wrapper, "ds-mobile-chat-send-wrapper", true);
   }
 
+  function buttonLabels(node) {
+    return Array.from(node?.querySelectorAll?.("button") || [])
+      .map(button => String(
+        button.getAttribute("aria-label") ||
+        button.textContent ||
+        ""
+      ).trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  function isMessageEditTextarea(textarea) {
+    if (!(textarea instanceof HTMLTextAreaElement)) return false;
+
+    const messageRoot = textarea.closest("div[id^='message-']");
+    if (!messageRoot) return false;
+
+    let node = textarea.parentElement;
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      const labels = buttonLabels(node);
+      const hasSave = labels.some(label => label === "save" || label.includes("save"));
+      const hasCancel = labels.some(label => label === "cancel" || label.includes("cancel"));
+
+      if (hasSave && hasCancel) return true;
+      if (node === messageRoot) break;
+    }
+
+    // SpicyChat sometimes mounts the textarea one render before Save/Cancel.
+    // A textarea inside a message card is not the normal composer, so treat it
+    // as an editor during that short mount window.
+    return true;
+  }
+
+  function messageEditShell(textarea) {
+    const messageRoot = textarea.closest("div[id^='message-']");
+    let node = textarea.parentElement;
+
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      if (!(node instanceof HTMLElement)) continue;
+
+      const labels = buttonLabels(node);
+      const hasSave = labels.some(label => label === "save" || label.includes("save"));
+      const hasCancel = labels.some(label => label === "cancel" || label.includes("cancel"));
+
+      if (hasSave && hasCancel) return node;
+      if (messageRoot && node === messageRoot) break;
+    }
+
+    return textarea.parentElement;
+  }
+
+  function repairMessageEditAncestors(textarea, wantedHeight) {
+    const shell = messageEditShell(textarea);
+    const messageRoot = textarea.closest("div[id^='message-']");
+    let node = textarea.parentElement;
+
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (messageRoot && node === messageRoot) break;
+
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const clips =
+        style.overflow === "hidden" ||
+        style.overflow === "clip" ||
+        style.overflowY === "hidden" ||
+        style.overflowY === "clip";
+
+      const tooShort = rect.height > 0 && rect.height + 4 < wantedHeight;
+
+      if (clips || tooShort || node === shell) {
+        node.dataset.dsMobileMessageEditShell = "1";
+        node.style.setProperty("height", "auto", "important");
+        node.style.setProperty("max-height", "none", "important");
+        node.style.setProperty("overflow", "visible", "important");
+        node.style.setProperty("overflow-y", "visible", "important");
+      }
+
+      if (node === shell) break;
+    }
+  }
+
+  function resizeAndroidMessageEdit(textarea) {
+    if (!androidAppRuntime() || !mobileLayoutActive()) return false;
+    if (!isMessageEditTextarea(textarea) || !textarea.isConnected) return false;
+
+    const viewportHeight = Math.max(
+      320,
+      Number(window.visualViewport?.height || window.innerHeight || 640)
+    );
+
+    const minHeight = 96;
+    const maxHeight = Math.max(200, Math.min(520, viewportHeight * 0.62));
+
+    // Measure from the content, not the previous explicit height.
+    textarea.style.setProperty("height", "auto", "important");
+    textarea.style.setProperty("min-height", `${minHeight}px`, "important");
+    textarea.style.setProperty("max-height", `${maxHeight}px`, "important");
+    textarea.style.setProperty("box-sizing", "border-box", "important");
+    textarea.style.setProperty("line-height", "1.5", "important");
+    textarea.style.setProperty("padding-top", "6px", "important");
+    textarea.style.setProperty("padding-bottom", "12px", "important");
+
+    const naturalHeight = Math.ceil(textarea.scrollHeight + 8);
+    const wantedHeight = Math.max(
+      minHeight,
+      Math.min(maxHeight, naturalHeight)
+    );
+
+    textarea.style.setProperty("height", `${wantedHeight}px`, "important");
+    textarea.style.setProperty(
+      "overflow-y",
+      naturalHeight > maxHeight ? "auto" : "hidden",
+      "important"
+    );
+
+    textarea.dataset.dsMobileMessageEditFixed = "1";
+    repairMessageEditAncestors(textarea, wantedHeight);
+    return true;
+  }
+
+  function normalizeAndroidMessageEditors() {
+    if (!androidAppRuntime() || !mobileLayoutActive()) return;
+
+    document.querySelectorAll("textarea").forEach(textarea => {
+      if (isMessageEditTextarea(textarea)) {
+        resizeAndroidMessageEdit(textarea);
+      }
+    });
+  }
+
+  function scheduleAndroidMessageEditResize(textarea = null) {
+    if (!androidAppRuntime() || !mobileLayoutActive()) return;
+
+    cancelAnimationFrame(state.editResizeRaf);
+    clearTimeout(state.editResizeTimer);
+
+    state.editResizeRaf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (textarea?.isConnected && isMessageEditTextarea(textarea)) {
+          resizeAndroidMessageEdit(textarea);
+        } else {
+          normalizeAndroidMessageEditors();
+        }
+      });
+    });
+
+    // SpicyChat/React can write its own height at the end of the input event.
+    // One bounded delayed pass fixes that race without an endless observer loop.
+    state.editResizeTimer = setTimeout(() => {
+      if (textarea?.isConnected && isMessageEditTextarea(textarea)) {
+        resizeAndroidMessageEdit(textarea);
+      } else {
+        normalizeAndroidMessageEditors();
+      }
+    }, 90);
+  }
+
   function scheduleMobileSendWrapperNormalize() {
     cancelAnimationFrame(state.mobileNormalizeRaf);
-    state.mobileNormalizeRaf = requestAnimationFrame(normalizeMobileSendWrapper);
+    state.mobileNormalizeRaf = requestAnimationFrame(() => {
+      normalizeMobileSendWrapper();
+      normalizeAndroidMessageEditors();
+    });
   }
 
   function installMobileChatLayoutFixes() {
     if (!mobileLayoutActive() || state.mobileListenersInstalled) return;
     state.mobileListenersInstalled = true;
 
-    // Leave SpicyChat's message-edit textarea height alone. In Android/WebView
-    // the visual viewport changes when the keyboard opens, and QoL's previous
-    // inline auto-resize could collapse long edited messages into a tiny
-    // scrollable line.
     state.mobileObserver = new MutationObserver(() => scheduleMobileSendWrapperNormalize());
     state.mobileObserver.observe(document.body || document.documentElement, {
       childList: true,
       subtree: true
     });
 
-    window.addEventListener("resize", scheduleMobileSendWrapperNormalize, { passive: true });
+    document.addEventListener("focusin", event => {
+      const textarea = event.target;
+      if (!isMessageEditTextarea(textarea)) return;
+      scheduleAndroidMessageEditResize(textarea);
+    }, true);
+
+    document.addEventListener("input", event => {
+      const textarea = event.target;
+      if (!isMessageEditTextarea(textarea)) return;
+      scheduleAndroidMessageEditResize(textarea);
+    }, true);
+
+    window.addEventListener("resize", () => {
+      scheduleMobileSendWrapperNormalize();
+      scheduleAndroidMessageEditResize();
+    }, { passive: true });
+
+    window.visualViewport?.addEventListener("resize", () => {
+      scheduleAndroidMessageEditResize();
+    }, { passive: true });
   }
 
   DS.applyMobileChatLayoutFixes = function applyMobileChatLayoutFixes() {
     if (!enabled() || !mobileLayoutActive()) return;
     installMobileChatLayoutFixes();
     normalizeMobileSendWrapper();
+    normalizeAndroidMessageEditors();
   };
 
-  // Kept as no-ops so older helpers cannot accidentally re-enable the removed
-  // automatic chat-following behaviour.
   DS.beginFollowNewestChatMessage = () => {};
   DS.isFollowingNewestMessage = () => false;
 
