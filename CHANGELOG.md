@@ -1,3 +1,13 @@
+## 0.2.26
+- Improved bot-name cleanup so generic labels and decorative wrapper text are less likely to replace a real character name in saved/discovered metadata.
+- Added a bounded browsed/discovered-bot index that can feed Bot Status Center from normal browsing without storing chat history.
+- Added an opt-in desktop-only **Less Like This after block** action, kept separate from the existing Dislike-on-block option.
+- Added adaptive large-chat performance escalation using mounted-message count, DOM size, heap usage when available, and recent Long Tasks so very heavy chats can move into the strongest performance tier sooner.
+- Changed large Settings/backup manager paging to start at 10 items at a time, with clearer Show more / first / all controls where applicable.
+- Added per-device Account Sync rules: two-way, upload/source-only, download/cloud-only, or manual, plus category/key selection and explicit Upload Settings / Download Settings actions.
+- New QoL accounts default to source/upload-only while newly linked devices default to cloud/download-only, reducing the chance that a fresh device overwrites existing cloud settings before its sync rules are chosen.
+- Strengthened Account Sync conflict handling, including revision observation before retrying and merge-aware handling for set-like block/filter lists.
+
 ## 0.2.25
 - Added a shared device-capability registry for desktop browsers and the Android/WebView app so QoL can distinguish normal current-page tools from features that require real browser tabs, helper tabs, bulk operations or desktop background automation.
 - Android now treats second/helper-tab workflows and bulk tools as unavailable at runtime while preserving the user's actual saved preference. A desktop-only option can remain ON for desktop without Android syncing or saving a fake OFF value over it.
