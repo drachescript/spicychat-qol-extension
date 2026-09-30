@@ -1,0 +1,346 @@
+name: Rebuild current stable release
+
+on:
+  workflow_run:
+    workflows:
+      - "Development builds"
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spicychat-qol-stable-release
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    name: Rebuild current stable release from latest main
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve source ref
+        id: source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            echo "ref=$WORKFLOW_RUN_SHA" >> "$GITHUB_OUTPUT"
+            echo "mode=auto" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "mode=manual" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out current release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js for syntax and Firefox checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Decide whether current version needs rebuilding
+        id: rebuild
+        shell: bash
+        env:
+          MODE: ${{ steps.source.outputs.mode }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          mode = os.environ["MODE"]
+          subprocess.run(["git", "fetch", "origin", "main", "--tags", "--force"], check=True)
+
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          current_main = subprocess.check_output(
+              ["git", "rev-parse", "origin/main"], text=True
+          ).strip()
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          version = str(manifest.get("version") or "").strip()
+          version_name = str(manifest.get("version_name") or version).strip()
+
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
+          if version_name != version:
+              raise SystemExit(
+                  f"manifest.json version_name ({version_name}) does not match version ({version})."
+              )
+
+          tag = f"v{version}"
+          rebuild = True
+          reason = ""
+          tag_sha = ""
+
+          if head != current_main:
+              rebuild = False
+              reason = "A newer main commit exists; this run was superseded."
+          else:
+              tags = subprocess.check_output(
+                  ["git", "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"], text=True
+              ).splitlines()
+
+              def parsed(value):
+                  match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", value.strip())
+                  return tuple(map(int, match.groups())) if match else None
+
+              stable = [(parsed(value), value) for value in tags]
+              stable = [(parts, value) for parts, value in stable if parts is not None]
+
+              if tag not in tags:
+                  rebuild = False
+                  reason = (
+                      f"{tag} does not exist yet; the normal Release workflow will create it."
+                  )
+              elif stable and max(stable)[1] != tag:
+                  latest_tag = max(stable)[1]
+                  raise SystemExit(
+                      f"Refusing to rebuild {tag}: latest stable tag is {latest_tag}."
+                  )
+              else:
+                  tag_sha = subprocess.check_output(
+                      ["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], text=True
+                  ).strip()
+                  if tag_sha == head and mode != "manual":
+                      rebuild = False
+                      reason = f"{tag} already points at current main ({head[:12]})."
+                  elif tag_sha == head:
+                      reason = f"Manual rebuild requested for {tag} at {head[:12]}."
+                  else:
+                      reason = (
+                          f"Rebuilding {tag}: tag is {tag_sha[:12]}, current main is {head[:12]}."
+                      )
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if rebuild and not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
+              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+              out.write(f"tag={tag}\n")
+              out.write(f"head={head}\n")
+              out.write(f"tag_sha={tag_sha}\n")
+              out.write(f"rebuild={'true' if rebuild else 'false'}\n")
+              out.write(f"reason={reason}\n")
+
+          print(reason)
+          PY
+
+      - name: Show rebuild decision
+        shell: bash
+        run: |
+          echo "Version: ${{ steps.rebuild.outputs.version }}"
+          echo "Tag: ${{ steps.rebuild.outputs.tag }}"
+          echo "Rebuild: ${{ steps.rebuild.outputs.rebuild }}"
+          echo "Reason: ${{ steps.rebuild.outputs.reason }}"
+
+      - name: Verify Full modular build metadata
+        if: steps.rebuild.outputs.rebuild == 'true'
+        run: python3 scripts/build_extension.py --profile full --verify-only
+
+      - name: Check runtime JavaScript syntax
+        if: steps.rebuild.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          files = {"background.js", "options.js", "popup.js"}
+
+          for content_script in manifest.get("content_scripts", []):
+              files.update(content_script.get("js", []))
+
+          for entry in manifest.get("web_accessible_resources", []):
+              for rel in entry.get("resources", []):
+                  if rel.endswith(".js") and "*" not in rel:
+                      files.add(rel)
+
+          missing = [rel for rel in sorted(files) if not Path(rel).is_file()]
+          if missing:
+              raise SystemExit("Runtime JS files are missing:\n  " + "\n  ".join(missing))
+
+          for rel in sorted(files):
+              subprocess.run(["node", "--check", rel], check=True)
+
+          print(f"JavaScript syntax OK: {len(files)} runtime files")
+          PY
+
+      - name: Build Chrome and Firefox release ZIPs
+        if: steps.rebuild.outputs.rebuild == 'true'
+        run: python3 scripts/build_extension.py --profile full
+
+      - name: Validate release package structure
+        if: steps.rebuild.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.rebuild.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          packages = {
+              "chrome": Path(f"dist/spicychat-qol-v{version}-chrome.zip"),
+              "firefox": Path(f"dist/spicychat-qol-v{version}-firefox.zip"),
+          }
+
+          for target, path in packages.items():
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"Missing/empty {target} package: {path}")
+
+              with zipfile.ZipFile(path) as zf:
+                  names = zf.namelist()
+                  if len(names) != len(set(names)):
+                      raise SystemExit(f"{path}: duplicate ZIP entries detected")
+                  if "manifest.json" not in names:
+                      raise SystemExit(f"{path}: manifest.json is missing")
+
+                  packaged_manifest = json.loads(zf.read("manifest.json"))
+                  if packaged_manifest.get("version") != version:
+                      raise SystemExit(
+                          f"{path}: manifest version {packaged_manifest.get('version')} != {version}"
+                      )
+
+                  required = {
+                      "background.js",
+                      "options.html",
+                      "options.js",
+                      "popup.html",
+                      "popup.js",
+                  }
+                  missing = sorted(required - set(names))
+                  if missing:
+                      raise SystemExit(f"{path}: missing required files: {', '.join(missing)}")
+
+                  for content_script in packaged_manifest.get("content_scripts", []):
+                      for rel in content_script.get("js", []) + content_script.get("css", []):
+                          if rel not in names:
+                              raise SystemExit(f"{path}: manifest references missing file {rel}")
+
+                  if target == "chrome":
+                      if packaged_manifest.get("background", {}).get("service_worker") != "background.js":
+                          raise SystemExit(f"{path}: Chrome service worker is not background.js")
+                      if packaged_manifest.get("browser_specific_settings"):
+                          raise SystemExit(
+                              f"{path}: Chrome package unexpectedly contains browser_specific_settings"
+                          )
+                  else:
+                      if "background.js" not in packaged_manifest.get("background", {}).get("scripts", []):
+                          raise SystemExit(
+                              f"{path}: Firefox background scripts do not include background.js"
+                          )
+                      gecko = packaged_manifest.get("browser_specific_settings", {}).get("gecko", {})
+                      if not gecko.get("id"):
+                          raise SystemExit(f"{path}: Firefox gecko extension id is missing")
+
+              print(f"{target.capitalize()} package structure OK: {path}")
+          PY
+
+      - name: Lint Firefox release package
+        if: steps.rebuild.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.rebuild.outputs.version }}
+        run: |
+          rm -rf /tmp/spicychat-qol-firefox-release
+          mkdir -p /tmp/spicychat-qol-firefox-release
+          unzip -q "dist/spicychat-qol-v${VERSION}-firefox.zip" -d /tmp/spicychat-qol-firefox-release
+          npx --yes web-ext lint --source-dir /tmp/spicychat-qol-firefox-release
+
+      - name: Generate SHA-256 checksums
+        if: steps.rebuild.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          cd dist
+          sha256sum \
+            "spicychat-qol-v${{ steps.rebuild.outputs.version }}-chrome.zip" \
+            "spicychat-qol-v${{ steps.rebuild.outputs.version }}-firefox.zip" \
+            > SHA256SUMS.txt
+
+      - name: Keep rebuilt workflow artifacts
+        if: steps.rebuild.outputs.rebuild == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: spicychat-qol-v${{ steps.rebuild.outputs.version }}-rebuild
+          path: |
+            dist/spicychat-qol-v${{ steps.rebuild.outputs.version }}-chrome.zip
+            dist/spicychat-qol-v${{ steps.rebuild.outputs.version }}-firefox.zip
+            dist/SHA256SUMS.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Move current version tag to rebuilt source
+        if: steps.rebuild.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          TAG="${{ steps.rebuild.outputs.tag }}"
+          HEAD_SHA="${{ steps.rebuild.outputs.head }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" "$HEAD_SHA"
+          git push origin "refs/tags/$TAG" --force
+
+      - name: Replace current GitHub release assets
+        if: steps.rebuild.outputs.rebuild == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="${{ steps.rebuild.outputs.tag }}"
+          VERSION="${{ steps.rebuild.outputs.version }}"
+
+          CHROME="dist/spicychat-qol-v${VERSION}-chrome.zip"
+          FIREFOX="dist/spicychat-qol-v${VERSION}-firefox.zip"
+          CHECKSUMS="dist/SHA256SUMS.txt"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "SpicyChat QoL v${VERSION}" \
+              --latest
+
+            gh release upload "$TAG" \
+              "$CHROME" \
+              "$FIREFOX" \
+              "$CHECKSUMS" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "$CHROME" \
+              "$FIREFOX" \
+              "$CHECKSUMS" \
+              --verify-tag \
+              --title "SpicyChat QoL v${VERSION}" \
+              --generate-notes \
+              --latest
+          fi
+
+      - name: Skip rebuild
+        if: steps.rebuild.outputs.rebuild != 'true'
+        shell: bash
+        run: echo "${{ steps.rebuild.outputs.reason }}"
