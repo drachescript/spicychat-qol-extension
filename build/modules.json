@@ -27,6 +27,7 @@
         "content/auto-afk.js",
         "content/build-profile.js",
         "content/compatibility.js",
+        "platform-capabilities.js",
         "content/core.js",
         "content/diagnostic-protocol.js",
         "content/dom.js",

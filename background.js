@@ -5904,3 +5904,21 @@ getDuplicateTabSettings().then(settings => {
 configureChatNudgeAlarm(false);
 configureCreatorBotWatchAlarm(false);
 initializeHelperLifecycleRecovery();
+
+// v0.2.25 account/device sync is intentionally isolated from the large
+// background worker coordinator. Keep it in its own file, but load it from the
+// canonical background.js because the release builder pins this entry point for
+// both Chromium and Firefox packages. Chromium runs a service worker; Firefox's
+// generated manifest may run a background page instead, so support both loaders.
+try {
+  if (typeof importScripts === "function") {
+    importScripts("sync-service.js");
+  } else if (typeof document !== "undefined") {
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("sync-service.js");
+    script.async = false;
+    (document.head || document.documentElement).appendChild(script);
+  }
+} catch (error) {
+  console.warn("[SpicyChat QoL] Sync service failed to load", error);
+}

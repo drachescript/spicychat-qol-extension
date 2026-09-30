@@ -685,7 +685,7 @@
     runtimePerformanceMode: "adaptive",
     desktopAppPerformanceGuard: true,
     pauseQolInHiddenTabs: false,
-    autoPerformanceLargeChats: false,
+    autoPerformanceLargeChats: true,
     largeChatPerformanceThreshold: 500,
     deferQolWhileTyping: false,
     pauseQolWhileMessageEditing: true,
@@ -877,7 +877,58 @@
     runtimeLog: initialRuntimeLog,
     runtimePerformance: { sampleStartedAt: Date.now(), mutations: 0, qolOnlyMutations: 0, chatLocalMutations: 0, composerOnlyMutationSkips: 0, schedules: 0, criticalSchedules: 0, slowSchedules: 0, deferredWhileScrolling: 0, hiddenSkips: 0, messageCacheHits: 0, messageCacheMisses: 0, messageCacheInvalidations: 0, messageCacheInvalidationRequests: 0, messageCacheInvalidationDeduped: 0, messageCacheNonTextSkips: 0, messageCacheFingerprintSkips: 0, messageLaneScheduleCoalesced: 0, quickPanelLayoutSkips: 0, quickPanelStateSkips: 0, routeFeatureStepSkips: 0, routeFeatureGroupSkips: 0, storageWriteRequests: 0, storageWriteBatches: 0, storageWriteKeys: 0, storageWriteMergedKeys: 0, storageWriteImmediateFlushes: 0 },
     messageTextCache: new WeakMap(),
-    messageTextFingerprints: new WeakMap()
+    messageTextFingerprints: new WeakMap(),
+    persistedSettings: { ...DS.DEFAULT_SETTINGS },
+    platformEnvironment: null,
+    platformDormantSettings: {}
+  };
+
+  DS.getPlatformEnvironment = function getPlatformEnvironment() {
+    const platformApi = globalThis.SpicyChatQoLPlatform;
+    const environment = platformApi?.detectEnvironment?.() || {
+      platform: /Android/i.test(String(navigator.userAgent || "")) ? "android" : "desktop",
+      android: /Android/i.test(String(navigator.userAgent || "")),
+      desktop: !/Android/i.test(String(navigator.userAgent || "")),
+      capabilities: {}
+    };
+    DS.state.platformEnvironment = environment;
+    try {
+      document.documentElement?.setAttribute?.("data-ds-platform", environment.platform || "desktop");
+    } catch {}
+    return environment;
+  };
+
+  DS.platformSupports = function platformSupports(capability) {
+    const api = globalThis.SpicyChatQoLPlatform;
+    const env = DS.state.platformEnvironment || DS.getPlatformEnvironment();
+    if (typeof api?.supports === "function") return api.supports(capability, env);
+    return true;
+  };
+
+  DS.settingCompatibility = function settingCompatibility(name) {
+    const api = globalThis.SpicyChatQoLPlatform;
+    const env = DS.state.platformEnvironment || DS.getPlatformEnvironment();
+    return api?.settingCompatibility?.(name, env) || { supported: true, setting: String(name || ""), requires: [], missing: [], reason: "" };
+  };
+
+  DS.applyPlatformCompatibility = function applyPlatformCompatibility(desiredSettings) {
+    const desired = desiredSettings && typeof desiredSettings === "object" ? { ...desiredSettings } : {};
+    const api = globalThis.SpicyChatQoLPlatform;
+    const env = DS.getPlatformEnvironment();
+    if (typeof api?.applyEffectiveSettings !== "function") {
+      DS.state.platformDormantSettings = {};
+      return desired;
+    }
+    const result = api.applyEffectiveSettings(desired, DS.DEFAULT_SETTINGS, env);
+    DS.state.platformDormantSettings = result?.dormant && typeof result.dormant === "object" ? result.dormant : {};
+    return result?.settings && typeof result.settings === "object" ? result.settings : desired;
+  };
+
+  DS.getDesiredSetting = function getDesiredSetting(name) {
+    const key = String(name || "");
+    return Object.prototype.hasOwnProperty.call(DS.state.persistedSettings || {}, key)
+      ? DS.state.persistedSettings[key]
+      : DS.DEFAULT_SETTINGS[key];
   };
 
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
@@ -1985,11 +2036,13 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     const savedChatOrganization = result[DS.CHAT_ORGANIZER_KEY] || {};
     const savedRecentlySeenBots = result[DS.RECENTLY_SEEN_BOTS_KEY] || {};
 
-    // Keep a global/persisted snapshot separate from the per-tab enabled
-    // override. It lets setting patches stay tiny even when this tab is paused.
+    // Keep the desired/persisted snapshot separate from the live settings.
+    // v0.2.25 applies device compatibility only to the runtime copy: Android
+    // keeps desktop-only preferences saved, but does not activate them.
     DS.state.persistedSettings = { ...settings };
-    DS.applyQolTabEnabledOverride?.(settings);
-    DS.state.settings = settings;
+    const runtimeSettings = DS.applyPlatformCompatibility(settings);
+    DS.applyQolTabEnabledOverride?.(runtimeSettings);
+    DS.state.settings = runtimeSettings;
 
     DS.state.openedChats = new Set(
       Array.isArray(result[DS.OPENED_KEY])
@@ -2137,10 +2190,12 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         normalizedSettings.quickDislikeIdleEnabled = !!normalizedSettings.quickDislikeOnBlock;
       }
       normalizedSettings.quickDislikeOnBlock = false;
-      DS.state.persistedSettings = { ...DS.DEFAULT_SETTINGS, ...normalizedSettings };
-      DS.state.settings = { ...DS.state.persistedSettings };
-      DS.state.globalEnabledSetting = DS.state.settings.enabled !== false;
-      DS.applyQolTabEnabledOverride?.(DS.state.settings);
+      const persisted = { ...DS.DEFAULT_SETTINGS, ...normalizedSettings };
+      DS.state.persistedSettings = persisted;
+      DS.state.globalEnabledSetting = persisted.enabled !== false;
+      const next = DS.applyPlatformCompatibility(persisted);
+      DS.applyQolTabEnabledOverride?.(next);
+      DS.state.settings = next;
       DS.state.settings.oocTemplates = DS.normalizeOocTemplates(
         changes[DS.OOC_TEMPLATES_KEY]?.newValue ?? rawSettings.oocTemplates ?? DS.state.settings.oocTemplates
       );
@@ -2148,23 +2203,18 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       refreshLookups = true;
       cardFilterStateChanged = true;
     } else if (granularSettings.length) {
-      const next = { ...(DS.state.settings || DS.DEFAULT_SETTINGS) };
-      for (const [name, change] of granularSettings) {
-        next[name] = change?.newValue === undefined ? DS.DEFAULT_SETTINGS[name] : change.newValue;
-        DS.state.settingsIndex.add(name);
-      }
-      if (!("quickDislikeIdleEnabled" in next)) next.quickDislikeIdleEnabled = !!next.quickDislikeOnBlock;
-      next.quickDislikeOnBlock = false;
       const persisted = { ...(DS.state.persistedSettings || DS.DEFAULT_SETTINGS) };
       for (const [name, change] of granularSettings) {
         persisted[name] = change?.newValue === undefined ? DS.DEFAULT_SETTINGS[name] : change.newValue;
+        DS.state.settingsIndex.add(name);
       }
+      if (!("quickDislikeIdleEnabled" in persisted)) persisted.quickDislikeIdleEnabled = !!persisted.quickDislikeOnBlock;
+      persisted.quickDislikeOnBlock = false;
       DS.state.persistedSettings = persisted;
-      // `next` contains the live UI/runtime state; the persisted copy above
-      // remains global and is never contaminated by the per-tab pause switch.
-      DS.state.settings = next;
       DS.state.globalEnabledSetting = persisted.enabled !== false;
-      DS.applyQolTabEnabledOverride?.(DS.state.settings);
+      const next = DS.applyPlatformCompatibility(persisted);
+      DS.applyQolTabEnabledOverride?.(next);
+      DS.state.settings = next;
       rebuildBlockedStateFromCache();
       refreshLookups = true;
       cardFilterStateChanged = true;

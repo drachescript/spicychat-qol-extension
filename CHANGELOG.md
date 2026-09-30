@@ -1,3 +1,17 @@
+## 0.2.25
+- Added a shared device-capability registry for desktop browsers and the Android/WebView app so QoL can distinguish normal current-page tools from features that require real browser tabs, helper tabs, bulk operations or desktop background automation.
+- Android now treats second/helper-tab workflows and bulk tools as unavailable at runtime while preserving the user's actual saved preference. A desktop-only option can remain ON for desktop without Android syncing or saving a fake OFF value over it.
+- Kept styles, chat appearance, editing/creator tools, presets and normal current-page controls Android-capable by default; only features with a real platform requirement are made dormant.
+- Added Android Settings compatibility hints: unsupported controls stay visible but are dimmed/disabled with a Desktop only explanation, making it clear that the saved value is being preserved rather than deleted.
+- Added device filters and compatibility badges to the Features catalogue, including Works on this device, Desktop only, Android supported and Unavailable here views plus Partial on Android states for mixed features.
+- Connected the Account & Sync page to the live Cloudflare/D1 service at `syncqol.drache.uk`: create a QoL account, link another device with a one-use 10-minute code, sync automatically after linking, sync on demand, pause/resume, list devices and revoke other linked devices.
+- Device credentials stay local in a separate non-backup storage record; Cloudflare stores only the server-side token hash. Normal QoL backups continue to exclude account/device credentials.
+- Automatic sync sends only logical setting keys that changed instead of rebuilding/uploading the full settings document after every edit. Periodic/startup pulls use revisions so other devices' changes arrive without Android switching unsupported desktop preferences off.
+- Backup metadata now records the compatibility schema and source platform without including the local device/account identity, and diagnostics report the current platform plus how many saved preferences are dormant on this device.
+- Registered the new shared platform capability runtime in both the manifest and full-build module metadata so release verification includes it.
+- Made **Automatically use stronger performance mode on very large chats** default ON for new/unsaved settings.
+- Shrunk the floating large-chat folded-message control into a much lighter utility strip with smaller text, buttons, padding and shadow.
+
 ## 0.2.24
 - Renamed the old version-scoped `content/qol23-ui-fixes.js` runtime file to the permanent `content/ui-layout-fixes.js` name and updated build metadata so future releases do not carry a stale 0.2.23 filename.
 - Fixed stacked chat centering so the native composer bubble measures the current message lane and follows the same horizontal center/width instead of being pushed right by left-side composer controls; mobile keeps the native compact layout.

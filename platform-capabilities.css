@@ -1,0 +1,185 @@
+/* v0.2.25 device compatibility + sync foundation */
+.platform-compatibility-notice {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(130, 150, 180, 0.35);
+  border-radius: 12px;
+  background: rgba(90, 110, 140, 0.09);
+}
+
+.platform-compatibility-notice strong { display: block; margin-bottom: 4px; }
+
+.ds-platform-unsupported-row {
+  opacity: 0.68;
+}
+
+.ds-platform-unsupported-row input,
+.ds-platform-unsupported-row select,
+.ds-platform-unsupported-row textarea,
+.ds-platform-unsupported-row button,
+[data-ds-platform-unsupported="1"] {
+  cursor: not-allowed !important;
+}
+
+.ds-platform-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 7px;
+  padding: 1px 7px;
+  border: 1px solid rgba(150, 165, 190, 0.35);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+.ds-platform-badge.is-inactive {
+  border-style: dashed;
+}
+
+.feature-index-item.is-platform-unavailable {
+  opacity: 0.72;
+}
+
+.feature-badge.is-platform {
+  border-style: dashed;
+}
+
+.account-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.account-sync-stat {
+  padding: 10px 12px;
+  border: 1px solid rgba(150, 165, 190, 0.25);
+  border-radius: 10px;
+}
+
+.account-sync-stat strong,
+.account-sync-stat span {
+  display: block;
+}
+
+.account-sync-stat span {
+  margin-top: 3px;
+  font-size: 0.85rem;
+  opacity: 0.78;
+}
+
+.account-sync-device-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.account-sync-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+@media (max-width: 700px) {
+  .ds-platform-badge { margin-left: 4px; }
+  .account-sync-grid { grid-template-columns: 1fr; }
+}
+
+.account-sync-grid-small {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.account-sync-link-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 240px) max-content;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.account-sync-link-row input {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.account-sync-code-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(150, 165, 190, 0.42);
+  border-radius: 10px;
+}
+
+.account-sync-code-box > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-sync-link-code {
+  font: 700 1.15rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+}
+
+.account-sync-section-head,
+.account-sync-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.account-sync-section-head h3 {
+  margin-bottom: 2px;
+}
+
+.account-sync-device-row {
+  padding: 8px 0;
+  border-top: 1px solid rgba(150, 165, 190, 0.18);
+}
+
+.account-sync-device-row:first-child {
+  border-top: 0;
+}
+
+.account-sync-device-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-sync-device-copy strong,
+.account-sync-device-copy span {
+  overflow-wrap: anywhere;
+}
+
+.account-sync-error {
+  color: #ff9b9b;
+}
+
+@media (max-width: 700px) {
+  .account-sync-link-row {
+    grid-template-columns: 1fr;
+  }
+  .account-sync-section-head,
+  .account-sync-device-row {
+    align-items: flex-start;
+  }
+}
+
+.account-sync-code-box[hidden],
+#accountSyncLinked[hidden],
+#accountSyncSetup[hidden],
+#accountSyncDevicesCard[hidden] {
+  display: none !important;
+}

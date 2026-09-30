@@ -55,6 +55,9 @@ const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
 const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
 const GRANULAR_SETTINGS_REVISION_KEY = "dsSettingsRevisionV1";
 const GRANULAR_SETTINGS_LAST_BATCH_KEY = "dsSettingsLastBatchV1";
+const QOL_SYNC_STATE_KEY = "qolSyncStateV1";
+const QOL_SYNC_DEVICE_SCHEMA_VERSION = 1;
+const PLATFORM_API = window.SpicyChatQoLPlatform || null;
 const BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD = 3;
 const BULK_DISLIKE_RETRY_LIMIT = 2;
 const BULK_DISLIKE_RETRY_BASE_MS = 1200;
@@ -778,7 +781,7 @@ const DEFAULT_SETTINGS = {
   runtimePerformanceMode: "adaptive",
   desktopAppPerformanceGuard: true,
   pauseQolInHiddenTabs: false,
-  autoPerformanceLargeChats: false,
+  autoPerformanceLargeChats: true,
   largeChatPerformanceThreshold: 500,
   deferQolWhileTyping: false,
   pauseQolWhileMessageEditing: true,
@@ -4669,6 +4672,7 @@ function setActiveTab(tabName) {
   if (tabName === "features") DS_FEATURE_INDEX_REFRESH?.();
   if (tabName === "bot-tools") loadCreatorBackupManager().catch(() => {});
   if (tabName === "control" && optionsDataLoaded) setupControlCenterView().catch(() => {});
+  if (tabName === "account" && optionsDataLoaded) refreshAccountSyncUi().catch(() => {});
   if (tabName === "data" && optionsDataLoaded) { refreshStorageUsage().catch(() => {}); renderLocalChangeHistory().catch(() => {}); }
   renderHeavyManagersForTab(tabName);
 }
@@ -15091,12 +15095,15 @@ async function load() {
   settingsAutosaveReady = true;
   updateBlockedBulkResumeControls();
   updateSettingDependencies();
+  refreshPlatformCompatibilityUi(settings);
+  await refreshAccountSyncUi();
   DS_FEATURE_INDEX_REFRESH?.();
   await applyPendingOptionsNavigation(result[PENDING_OPTIONS_NAV_KEY]);
   const activeTab = activeOptionsTab();
   renderHeavyManagersForTab(activeTab);
   if (activeTab === "data") { refreshStorageUsage().catch(() => {}); renderLocalChangeHistory().catch(() => {}); }
   if (activeTab === "control") setupControlCenterView().catch(() => {});
+  if (activeTab === "account") refreshAccountSyncUi().catch(() => {});
   if (activeTab === "changelog") loadChangelog();
   renderMiniPanelPreview();
   applyFeatureChangeBadges(String(result[LAST_SEEN_VERSION_KEY] || ""));
@@ -16880,7 +16887,8 @@ function buildExportPayload(scopes, result) {
     _qolBackup: {
       formatVersion: BACKUP_FORMAT_VERSION,
       extensionVersion: chrome.runtime.getManifest()?.version || "",
-      exportedAt: new Date().toISOString()
+      exportedAt: new Date().toISOString(),
+      ...(PLATFORM_API?.backupMetadata?.(PLATFORM_API.detectEnvironment?.()) || {})
     }
   };
 
@@ -19524,6 +19532,13 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `S.AI compatibility enabled: ${settings.saiToolkitCompatibility ? "yes" : "no"}`,
     Number.isFinite(bytes) ? `QoL storage: ${(bytes / 1024).toFixed(1)} KB` : "QoL storage: unavailable",
     `Backup schema supported: v${BACKUP_FORMAT_VERSION}`,
+    (() => {
+      const platform = PLATFORM_API?.detectEnvironment?.() || detectSettingsEnvironment();
+      const desired = { ...DEFAULT_SETTINGS, ...(loadedSettingsSnapshot || settings) };
+      const compatibility = PLATFORM_API?.applyEffectiveSettings?.(desired, DEFAULT_SETTINGS, platform);
+      const dormantCount = Object.keys(compatibility?.dormant || {}).length;
+      return `QoL device compatibility: ${platform?.label || platform?.platform || "unknown"}; schema v${Number(PLATFORM_API?.schemaVersion || 0) || "unavailable"}; ${dormantCount} saved preference${dormantCount === 1 ? "" : "s"} inactive on this device`;
+    })(),
     (() => { const snap = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]); return snap ? `Recovery snapshot: yes (${snap.createdAt ? new Date(snap.createdAt).toISOString() : "unknown time"}; ${snap.reason})` : "Recovery snapshot: none"; })(),
     `Opened: ${countStoreItems(result[OPENED_KEY], "opened")}`,
     `Blocked: ${countStoreItems(result[BLOCKED_BOTS_KEY])}`,
@@ -20551,14 +20566,39 @@ function setupFeaturesIndex() {
   const search = $("featureIndexSearch");
   const category = $("featureIndexCategory");
   const status = $("featureIndexStatus");
+  const platformFilter = $("featureIndexPlatform");
   const sortMode = $("featureIndexSort");
   const summary = $("featureIndexSummary");
   if (!host || !search || !category || !summary) return;
 
   const clean = value => String(value || "").replace(/\s+/g, " ").trim();
   const registry = Array.isArray(window.SpicyChatQoLFeatureRegistry)
-    ? window.SpicyChatQoLFeatureRegistry.filter(entry => entry && entry.id && entry.name && entry.category)
+    ? window.SpicyChatQoLFeatureRegistry.filter(entry => entry && entry.id && entry.name && entry.category).map(entry => ({ ...entry }))
     : [];
+  if (!registry.some(entry => entry.id === "device-compatibility")) {
+    registry.push({
+      id: "device-compatibility",
+      name: "Device compatibility",
+      category: "Setup & Compatibility",
+      description: "Keeps desktop-only bulk/helper-tab preferences saved but dormant on Android while styles, editing tools and normal current-page features keep working where supported.",
+      builtIn: true,
+      target: "accountSyncCard",
+      added: "0.2.25",
+      aliases: ["android unsupported", "desktop only", "mobile compatibility", "dormant settings", "device support"]
+    });
+  }
+  if (!registry.some(entry => entry.id === "account-sync-foundation")) {
+    registry.push({
+      id: "account-sync-foundation",
+      name: "QoL Account & Sync",
+      category: "Data & Backup",
+      description: "Links this device to the QoL Cloudflare sync service, syncs logical settings automatically, supports one-use device link codes, and keeps unsupported Android preferences preserved instead of switching them off.",
+      builtIn: true,
+      target: "accountSyncCard",
+      added: "0.2.25",
+      aliases: ["account", "sync", "cloudflare", "devices", "automatic sync", "discord link"]
+    });
+  }
 
   const registryOrder = new Map(registry.map((entry, index) => [entry.id, index]));
   const categories = [...new Set(registry.map(entry => entry.category))];
@@ -20592,20 +20632,29 @@ function setupFeaturesIndex() {
   );
 
   function featureSearchText(entry) {
-    return clean(`${entry.name} ${entry.category} ${entry.description || ""} ${(entry.aliases || []).join(" ")} ${entry.platform || ""} ${entry.maturity || ""}`).toLowerCase();
+    const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || {};
+    return clean(`${entry.name} ${entry.category} ${entry.description || ""} ${(entry.aliases || []).join(" ")} ${entry.platform || ""} ${entry.maturity || ""} ${compatibility.label || ""} ${compatibility.reason || ""}`).toLowerCase();
   }
 
   function renderFeature(entry) {
     const state = featureRegistryState(entry);
-    const card = makeElement("article", { className: "feature-index-item feature-catalog-item" });
+    const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || { supported: true, fullySupported: true, partial: false, label: entry.platform || "" };
+    const card = makeElement("article", { className: `feature-index-item feature-catalog-item${compatibility.fullySupported === false && !compatibility.partial ? " is-platform-unavailable" : ""}` });
     const main = makeElement("div", { className: "feature-index-main" }, [
       makeElement("div", { className: "feature-index-title", text: displayNormalizedSavedText(entry.name) }),
       makeElement("div", { className: "feature-index-description", text: entry.description || "" })
     ]);
     const badges = makeElement("div", { className: "feature-index-badges" });
-    badges.appendChild(makeElement("span", { className: `feature-index-state is-${state.key}`, text: state.label }));
+    const stateLabel = state.key === "on" && compatibility.fullySupported === false && !compatibility.partial
+      ? "On · inactive here"
+      : state.label;
+    badges.appendChild(makeElement("span", { className: `feature-index-state is-${state.key}`, text: stateLabel }));
     if (entry.maturity) badges.appendChild(makeElement("span", { className: "feature-badge feature-badge-muted", text: entry.maturity }));
-    if (entry.platform) badges.appendChild(makeElement("span", { className: "feature-badge feature-badge-muted", text: entry.platform }));
+    if (compatibility.label && compatibility.kind !== "all") {
+      const platformBadge = makeElement("span", { className: "feature-badge feature-badge-muted is-platform", text: compatibility.label });
+      if (compatibility.reason) platformBadge.title = compatibility.reason;
+      badges.appendChild(platformBadge);
+    } else if (entry.platform && compatibility.kind === "all") badges.appendChild(makeElement("span", { className: "feature-badge feature-badge-muted", text: entry.platform }));
     if (entry.updated) badges.appendChild(makeElement("span", { className: "feature-badge", text: `Updated ${displayReleaseVersion(entry.updated)}` }));
     else if (entry.added) badges.appendChild(makeElement("span", { className: "feature-badge", text: `Added ${displayReleaseVersion(entry.added)}` }));
 
@@ -20632,10 +20681,17 @@ function setupFeaturesIndex() {
     const query = clean(search.value).toLowerCase();
     const wantedCategory = category.value || "all";
     const wantedStatus = status?.value || "all";
+    const wantedPlatform = platformFilter?.value || "all";
+    const platformEnvironment = PLATFORM_API?.detectEnvironment?.();
     const filtered = registry.filter(entry => {
       if (wantedCategory !== "all" && entry.category !== wantedCategory) return false;
       const state = featureRegistryState(entry);
       if (wantedStatus !== "all" && state.key !== wantedStatus) return false;
+      const compatibility = PLATFORM_API?.featureCompatibility?.(entry, platformEnvironment) || { fullySupported: true, partial: false, kind: "all", androidSupported: true };
+      if (wantedPlatform === "here" && compatibility.fullySupported === false && !compatibility.partial) return false;
+      if (wantedPlatform === "desktop-only" && compatibility.kind !== "desktop-only") return false;
+      if (wantedPlatform === "android" && compatibility.androidSupported !== true) return false;
+      if (wantedPlatform === "unavailable" && (compatibility.fullySupported !== false || compatibility.partial)) return false;
       if (query && !featureSearchText(entry).includes(query)) return false;
       return true;
     });
@@ -20651,7 +20707,13 @@ function setupFeaturesIndex() {
     const optional = registry.filter(entry => !entry.planned && !entry.builtIn && (entry.setting || entry.settings));
     const enabled = optional.filter(entry => featureRegistryState(entry).key === "on").length;
     const planned = registry.filter(entry => entry.planned).length;
-    summary.textContent = `${filtered.length} shown · ${enabled}/${optional.length} optional features on · ${planned} planned`;
+    const unavailableHere = PLATFORM_API
+      ? registry.filter(entry => {
+          const compatibility = PLATFORM_API.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || {};
+          return compatibility.fullySupported === false && !compatibility.partial;
+        }).length
+      : 0;
+    summary.textContent = `${filtered.length} shown · ${enabled}/${optional.length} optional features on · ${unavailableHere} unavailable here · ${planned} planned`;
 
     if (!filtered.length) {
       host.replaceChildren(makeElement("div", { className: "feature-index-empty", text: "No features match this filter." }));
@@ -20723,6 +20785,7 @@ function setupFeaturesIndex() {
   search.addEventListener("input", renderFeatureIndexDebounced);
   category.addEventListener("change", render);
   status?.addEventListener("change", render);
+  platformFilter?.addEventListener("change", render);
   sortMode?.addEventListener("change", render);
   document.addEventListener("change", event => {
     if (event.target?.matches?.("input[type='checkbox'], input[type='radio'], select")) render();
@@ -21137,9 +21200,10 @@ function updateAppearanceColorControlStates() {
 }
 
 function detectSettingsEnvironment() {
+  const shared = PLATFORM_API?.detectEnvironment?.();
   const ua = navigator.userAgent || "";
-  const android = /Android/i.test(ua);
-  const webview = android && (/;\s*wv\)/i.test(ua) || /Version\/4\.0.*Chrome\/\d+.*Mobile Safari/i.test(ua));
+  const android = shared ? !!shared.android : /Android/i.test(ua);
+  const webview = shared ? !!shared.webview : (android && (/;\s*wv\)/i.test(ua) || /Version\/4\.0.*Chrome\/\d+.*Mobile Safari/i.test(ua)));
   let displayMode = "browser";
   try {
     if (window.matchMedia?.("(display-mode: window-controls-overlay)")?.matches) displayMode = "window-controls-overlay";
@@ -21147,12 +21211,25 @@ function detectSettingsEnvironment() {
     else if (window.matchMedia?.("(display-mode: minimal-ui)")?.matches) displayMode = "minimal-ui";
     else if (window.matchMedia?.("(display-mode: fullscreen)")?.matches) displayMode = "fullscreen";
   } catch {}
-  const installedApp = displayMode !== "browser" || navigator.standalone === true;
+  const installedApp = displayMode !== "browser" || navigator.standalone === true || !!window.__spicyChatQolAndroidApp;
   const firefox = /Firefox\/|FxiOS\//i.test(ua);
   const waterfox = /Waterfox/i.test(ua);
   const opera = /\bOPR\//i.test(ua);
   const chromium = /Chrome\//i.test(ua) && !firefox && !waterfox;
-  return { android, webview, installedApp, displayMode, firefox, waterfox, opera, chromium, ua };
+  return {
+    android,
+    webview,
+    installedApp,
+    displayMode,
+    firefox,
+    waterfox,
+    opera,
+    chromium,
+    ua,
+    platform: shared?.platform || (android ? "android" : "desktop"),
+    capabilities: shared?.capabilities || {},
+    label: shared?.label || (android ? "Android" : "Desktop browser")
+  };
 }
 
 function refreshAndroidSettingsVisibility(forceShow = false) {
@@ -21214,6 +21291,460 @@ function setupAndroidSettings() {
   $("applyAndroidRecommended")?.addEventListener("click", applyAndroidRecommendedUi);
   $("androidTopBarMenu")?.addEventListener("change", () => refreshAndroidSettingsVisibility(true));
   $("androidAppControlsMode")?.addEventListener("change", () => refreshAndroidSettingsVisibility(true));
+}
+
+
+function settingIsCustomizedForPlatform(name, settings = loadedSettingsSnapshot) {
+  if (!name || !settings || typeof settings !== "object") return false;
+  const desired = settings[name];
+  const fallback = DEFAULT_SETTINGS[name];
+  return !storageValueMatches(desired, fallback);
+}
+
+function platformCompatibilityForControl(control) {
+  if (!control?.id || !PLATFORM_API) return { supported: true, requires: [], reason: "" };
+  if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, control.id)) {
+    return PLATFORM_API.settingCompatibility?.(control.id, PLATFORM_API.detectEnvironment?.()) || { supported: true, requires: [], reason: "" };
+  }
+  return PLATFORM_API.actionCompatibility?.(control, PLATFORM_API.detectEnvironment?.()) || { supported: true, requires: [], reason: "" };
+}
+
+function platformBadgeHost(control) {
+  if (!control) return null;
+  const label = control.closest?.("label");
+  if (label) return label.querySelector("span") || label;
+  return null;
+}
+
+function markPlatformUnsupportedControl(control, compatibility, settings = loadedSettingsSnapshot) {
+  if (!control || compatibility?.supported !== false) return;
+  if (control.dataset.dsPlatformOriginalDisabled === undefined) {
+    control.dataset.dsPlatformOriginalDisabled = control.disabled ? "1" : "0";
+  }
+  control.dataset.dsPlatformUnsupported = "1";
+  control.disabled = true;
+  control.setAttribute("aria-disabled", "true");
+  if (compatibility.reason) control.title = compatibility.reason;
+
+  const row = control.closest?.("label, .button-row, .sub-card");
+  if (row) row.classList.add("ds-platform-unsupported-row");
+
+  const isSetting = Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, control.id);
+  if (!isSetting) return;
+  const host = platformBadgeHost(control);
+  if (!host) return;
+  let badge = [...(host.querySelectorAll?.(".ds-platform-badge") || [])].find(item => item.dataset.for === control.id) || null;
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "ds-platform-badge";
+    badge.dataset.for = control.id;
+    host.appendChild(badge);
+  }
+  const desired = settings?.[control.id];
+  const saved = typeof desired === "boolean" ? desired : settingIsCustomizedForPlatform(control.id, settings);
+  badge.classList.toggle("is-inactive", saved);
+  badge.textContent = saved ? "Desktop only · saved" : "Desktop only";
+  badge.title = compatibility.reason || "Saved here but inactive on Android.";
+}
+
+function clearPlatformCompatibilityMarks() {
+  document.querySelectorAll('[data-ds-platform-unsupported="1"]').forEach(control => {
+    const original = control.dataset.dsPlatformOriginalDisabled;
+    if (original !== undefined) control.disabled = original === "1";
+    control.removeAttribute("data-ds-platform-unsupported");
+    control.removeAttribute("aria-disabled");
+    delete control.dataset.dsPlatformOriginalDisabled;
+  });
+  document.querySelectorAll(".ds-platform-unsupported-row").forEach(row => row.classList.remove("ds-platform-unsupported-row"));
+  document.querySelectorAll(".ds-platform-badge").forEach(badge => badge.remove());
+}
+
+function refreshPlatformCompatibilityUi(settings = loadedSettingsSnapshot) {
+  if (!PLATFORM_API) return;
+  const env = PLATFORM_API.detectEnvironment?.() || detectSettingsEnvironment();
+  document.documentElement.dataset.dsPlatform = env.platform || (env.android ? "android" : "desktop");
+  const notice = $("platformCompatibilityNotice");
+  const noticeText = $("platformCompatibilityNoticeText");
+  if (notice) notice.hidden = !env.android;
+  if (noticeText && env.android) {
+    noticeText.textContent = "Desktop-only bulk, helper-tab and real-browser-tab controls are dimmed here. Their saved values are kept unchanged, so syncing from Android will not switch those desktop preferences off.";
+  }
+
+  clearPlatformCompatibilityMarks();
+  if (!env.android) return;
+
+  const controls = [...document.querySelectorAll("input[id], select[id], textarea[id], button[id]")];
+  for (const control of controls) {
+    const compatibility = platformCompatibilityForControl(control);
+    if (!compatibility.supported) markPlatformUnsupportedControl(control, compatibility, settings);
+  }
+
+  // Manager bulk bars are action UI rather than persisted settings, so not all
+  // of their controls have "bulk" in the individual id. Disable the whole
+  // action surface on Android while leaving the underlying saved lists usable.
+  const bulkReason = { supported: false, reason: "Bulk operations are desktop-only in QoL for now." };
+  document.querySelectorAll(".bot-manager-bulkbar button, .bot-manager-bulkbar select, .bot-manager-bulkbar input").forEach(control => {
+    markPlatformUnsupportedControl(control, bulkReason, settings);
+  });
+}
+
+function setupPlatformCompatibility() {
+  refreshPlatformCompatibilityUi();
+  document.addEventListener("change", event => {
+    if (!(event.target instanceof Element)) return;
+    window.setTimeout(() => refreshPlatformCompatibilityUi(), 0);
+  }, true);
+}
+
+function randomSyncDeviceId() {
+  try {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  } catch {
+    return `device-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+function normalizeQolSyncState(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    schemaVersion: QOL_SYNC_DEVICE_SCHEMA_VERSION,
+    deviceId: String(source.deviceId || "").trim(),
+    deviceCreatedAt: Number(source.deviceCreatedAt || 0),
+    accountId: String(source.accountId || "").trim(),
+    linkedAt: Number(source.linkedAt || 0),
+    automatic: source.automatic !== false,
+    paused: source.paused === true,
+    lastRevision: Math.max(0, Number(source.lastRevision || 0)),
+    lastSyncAt: Math.max(0, Number(source.lastSyncAt || 0)),
+    lastSyncAttemptAt: Math.max(0, Number(source.lastSyncAttemptAt || 0)),
+    lastLocalStorageRevision: Math.max(0, Number(source.lastLocalStorageRevision || 0)),
+    lastError: String(source.lastError || ""),
+    lastErrorAt: Math.max(0, Number(source.lastErrorAt || 0)),
+    lastStatus: String(source.lastStatus || "")
+  };
+}
+
+async function ensureQolSyncState({ resetDevice = false } = {}) {
+  const data = await storageGet([QOL_SYNC_STATE_KEY]);
+  const state = normalizeQolSyncState(data[QOL_SYNC_STATE_KEY]);
+  if (resetDevice || !state.deviceId) {
+    state.deviceId = randomSyncDeviceId();
+    state.deviceCreatedAt = Date.now();
+    state.accountId = resetDevice ? "" : state.accountId;
+    state.linkedAt = resetDevice ? 0 : state.linkedAt;
+    state.lastRevision = resetDevice ? 0 : state.lastRevision;
+    state.lastSyncAt = resetDevice ? 0 : state.lastSyncAt;
+    state.lastSyncAttemptAt = resetDevice ? 0 : state.lastSyncAttemptAt;
+    state.lastLocalStorageRevision = resetDevice ? 0 : state.lastLocalStorageRevision;
+    state.lastError = resetDevice ? "" : state.lastError;
+    state.lastErrorAt = resetDevice ? 0 : state.lastErrorAt;
+    state.lastStatus = resetDevice ? "Not linked" : state.lastStatus;
+    await storageSet({ [QOL_SYNC_STATE_KEY]: state });
+  }
+  return state;
+}
+
+function browserLabelForSync(env) {
+  const ua = String(navigator.userAgent || "");
+  let browser = "Browser";
+  if (/Firefox\//i.test(ua)) browser = "Firefox";
+  else if (/Edg\//i.test(ua)) browser = "Edge";
+  else if (/OPR\//i.test(ua)) browser = "Opera";
+  else if (/Chrome\//i.test(ua)) browser = "Chrome / Chromium";
+  return env.android ? env.label : `${browser} · Desktop`;
+}
+
+function syncDeviceMeta() {
+  const env = PLATFORM_API?.detectEnvironment?.() || detectSettingsEnvironment();
+  let clientVersion = "0.2.25";
+  try { clientVersion = chrome.runtime.getManifest?.().version || clientVersion; } catch {}
+  return {
+    deviceName: browserLabelForSync(env),
+    platform: env.android ? "android" : "desktop",
+    clientVersion
+  };
+}
+
+function formatSyncTime(value) {
+  const time = Number(value || 0);
+  if (!time) return "Never";
+  try { return new Date(time).toLocaleString(); }
+  catch { return "Unknown"; }
+}
+
+let accountSyncDevicesCache = [];
+let accountSyncLastLinkCode = null;
+let accountSyncBusy = false;
+
+function setAccountSyncBusy(busy, status = "") {
+  accountSyncBusy = !!busy;
+  document.querySelectorAll("#accountSyncCard button, #accountSyncCard input").forEach(control => {
+    if (control.id === "accountSyncLinkCode") return;
+    control.disabled = accountSyncBusy;
+  });
+  const node = $("accountSyncActionStatus");
+  if (node && status) node.textContent = status;
+}
+
+function renderAccountSyncDevices(devices = [], currentDeviceId = "") {
+  const host = $("accountSyncDevices");
+  if (!host) return;
+  host.replaceChildren();
+  const list = Array.isArray(devices) ? devices : [];
+  if (!list.length) {
+    host.append(makeElement("p", { className: "hint", text: "No linked devices were returned yet." }));
+    return;
+  }
+  for (const device of list) {
+    const row = makeElement("div", { className: "account-sync-device-row" });
+    const text = makeElement("div", { className: "account-sync-device-copy" });
+    const title = `${device.name || device.platform || "QoL device"}${device.current || device.id === currentDeviceId ? " · This device" : ""}`;
+    text.append(
+      makeElement("strong", { text: title }),
+      makeElement("span", { className: "hint", text: `${device.platform || "unknown"}${device.clientVersion ? ` · v${device.clientVersion}` : ""} · last seen ${formatSyncTime(device.lastSeenAt)}` })
+    );
+    row.append(text);
+    if (!(device.current || device.id === currentDeviceId)) {
+      const remove = makeElement("button", { text: "Unlink", attrs: { type: "button" } });
+      remove.addEventListener("click", async () => {
+        if (!confirm(`Unlink ${device.name || "this device"} from the QoL account?`)) return;
+        setAccountSyncBusy(true, "Unlinking device…");
+        const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_REVOKE_DEVICE", deviceId: device.id }, 18000);
+        setAccountSyncBusy(false);
+        if (!result?.ok) {
+          $("accountSyncActionStatus").textContent = result?.message || "Could not unlink that device.";
+          return;
+        }
+        showSettingsToast("Device unlinked.");
+        await refreshAccountSyncUi({ refreshDevices: true });
+      });
+      row.append(remove);
+    }
+    host.append(row);
+  }
+}
+
+function renderAccountSyncLinkCode() {
+  const box = $("accountSyncGeneratedCodeBox");
+  const code = $("accountSyncGeneratedCode");
+  const expiry = $("accountSyncGeneratedCodeExpiry");
+  if (!box || !code || !expiry) return;
+  const value = accountSyncLastLinkCode;
+  const valid = !!(value?.code && Number(value.expiresAt || 0) > Date.now());
+  box.hidden = !valid;
+  if (!valid) return;
+  code.textContent = value.code;
+  expiry.textContent = `Expires ${formatSyncTime(value.expiresAt)} · one use only`;
+}
+
+async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
+  const card = $("accountSyncCard");
+  if (!card || !PLATFORM_API) return;
+  const env = PLATFORM_API.detectEnvironment?.() || detectSettingsEnvironment();
+  const localState = await ensureQolSyncState();
+  const response = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
+  const state = normalizeQolSyncState(response?.state || localState);
+  const linked = !!response?.linked;
+  const desired = { ...DEFAULT_SETTINGS, ...(loadedSettingsSnapshot || {}) };
+  const effective = PLATFORM_API.applyEffectiveSettings?.(desired, DEFAULT_SETTINGS, env) || { dormant: {} };
+  const dormantCount = Object.keys(effective.dormant || {}).length;
+  const syncDocument = PLATFORM_API.syncableSettingsDocument?.(desired, { revision: state.lastRevision }) || { settings: desired };
+  const settingCount = Object.keys(syncDocument.settings || {}).length;
+
+  if ($("accountSyncLinkState")) $("accountSyncLinkState").textContent = linked ? "Linked" : "Not linked";
+  if ($("accountSyncAutoState")) $("accountSyncAutoState").textContent = linked ? (state.paused ? "Paused" : "Automatic") : "Starts after linking";
+  if ($("accountSyncSettingCount")) $("accountSyncSettingCount").textContent = `${settingCount} setting${settingCount === 1 ? "" : "s"}`;
+  if ($("accountSyncDormantCount")) $("accountSyncDormantCount").textContent = `${dormantCount} inactive here`;
+  if ($("accountSyncDeviceLabel")) $("accountSyncDeviceLabel").textContent = browserLabelForSync(env);
+  if ($("accountSyncDeviceId")) $("accountSyncDeviceId").textContent = state.deviceId || "Preparing…";
+  if ($("accountSyncRevision")) $("accountSyncRevision").textContent = String(state.lastRevision || 0);
+  if ($("accountSyncLastSync")) $("accountSyncLastSync").textContent = formatSyncTime(state.lastSyncAt);
+  if ($("accountSyncApiBase")) $("accountSyncApiBase").textContent = response?.apiBase || "https://syncqol.drache.uk";
+
+  const caps = env.capabilities || {};
+  const supported = [];
+  if (caps.styling) supported.push("styles");
+  if (caps.editing) supported.push("editing");
+  if (caps.helperTabs) supported.push("helper tabs");
+  if (caps.bulkOperations) supported.push("bulk");
+  if ($("accountSyncCapabilitySummary")) {
+    $("accountSyncCapabilitySummary").textContent = `Works here: ${supported.join(", ") || "current-page tools"}.`;
+  }
+
+  const setup = $("accountSyncSetup");
+  const linkedArea = $("accountSyncLinked");
+  const devicesCard = $("accountSyncDevicesCard");
+  if (setup) setup.hidden = linked;
+  if (linkedArea) linkedArea.hidden = !linked;
+  if (devicesCard) devicesCard.hidden = !linked;
+
+  const backendStatus = $("accountSyncBackendStatus");
+  if (backendStatus) {
+    backendStatus.textContent = linked
+      ? `Connected to ${response?.apiBase || "https://syncqol.drache.uk"}. ${state.lastStatus || "Automatic sync is active."}`
+      : `Cloudflare sync is ready at ${response?.apiBase || "https://syncqol.drache.uk"}. Create a QoL account here or enter a one-use code from another linked device.`;
+  }
+  const error = $("accountSyncError");
+  if (error) {
+    error.hidden = !state.lastError;
+    error.textContent = state.lastError ? `Last sync error: ${state.lastError}` : "";
+  }
+  const pause = $("accountSyncPause");
+  if (pause) pause.textContent = state.paused ? "Resume sync" : "Pause sync";
+
+  if (linked && (refreshDevices || !accountSyncDevicesCache.length)) {
+    const devices = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LIST_DEVICES" }, 12000);
+    if (devices?.ok) accountSyncDevicesCache = devices.devices || [];
+  }
+  if (linked) renderAccountSyncDevices(accountSyncDevicesCache, state.deviceId);
+  else {
+    accountSyncDevicesCache = [];
+    accountSyncLastLinkCode = null;
+    renderAccountSyncLinkCode();
+  }
+  renderAccountSyncLinkCode();
+  return { state, linked };
+}
+
+function setupAccountSyncFoundation() {
+  refreshAccountSyncUi({ refreshDevices: true }).catch(() => {});
+
+  $("copyAccountSyncDeviceId")?.addEventListener("click", async () => {
+    const state = await ensureQolSyncState();
+    try {
+      await navigator.clipboard.writeText(state.deviceId);
+      showSettingsToast("Sync device ID copied.");
+    } catch {
+      showSettingsToast("Could not copy the device ID.");
+    }
+  });
+
+  $("accountSyncCreate")?.addEventListener("click", async () => {
+    setAccountSyncBusy(true, "Creating QoL account…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_ACCOUNT", meta: syncDeviceMeta() }, 120000);
+    setAccountSyncBusy(false);
+    if (!result?.ok) {
+      $("accountSyncActionStatus").textContent = result?.message || "Could not create the QoL account.";
+      return;
+    }
+    if (result.initialSyncOk === false || result.sync?.ok === false) {
+      const detail = result.sync?.message ? ` ${result.sync.message}` : "";
+      $("accountSyncActionStatus").textContent = `Account created, but the first settings sync failed.${detail} Use Sync now to retry.`;
+      showSettingsToast("QoL account created; first sync needs a retry.");
+    } else {
+      $("accountSyncActionStatus").textContent = "Account created. Your current settings were uploaded and automatic sync is on.";
+      showSettingsToast("QoL sync account created.");
+    }
+    await refreshAccountSyncUi({ refreshDevices: true });
+  });
+
+  $("accountSyncLink")?.addEventListener("click", async () => {
+    const code = String($("accountSyncLinkCode")?.value || "").trim();
+    if (!code) {
+      $("accountSyncActionStatus").textContent = "Enter the one-use code from a linked device first.";
+      return;
+    }
+    setAccountSyncBusy(true, "Linking this device and downloading account settings…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LINK_ACCOUNT", code, meta: syncDeviceMeta() }, 120000);
+    setAccountSyncBusy(false);
+    if (!result?.ok) {
+      $("accountSyncActionStatus").textContent = result?.message || "Could not link this device.";
+      return;
+    }
+    if ($("accountSyncLinkCode")) $("accountSyncLinkCode").value = "";
+    if (result.initialSyncOk === false || result.sync?.ok === false) {
+      const detail = result.sync?.message ? ` ${result.sync.message}` : "";
+      $("accountSyncActionStatus").textContent = `Device linked, but the first settings download failed.${detail} Use Sync now to retry.`;
+      showSettingsToast("Device linked; first sync needs a retry.");
+    } else {
+      $("accountSyncActionStatus").textContent = "Linked. Account settings were downloaded and automatic sync is on.";
+      showSettingsToast("Device linked to QoL sync.");
+    }
+    await refreshAccountSyncUi({ refreshDevices: true });
+  });
+
+  $("accountSyncNow")?.addEventListener("click", async () => {
+    setAccountSyncBusy(true, "Syncing now…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_NOW" }, 120000);
+    setAccountSyncBusy(false);
+    $("accountSyncActionStatus").textContent = result?.ok ? "Sync complete." : (result?.message || "Sync failed.");
+    if (result?.ok) showSettingsToast("QoL settings synced.");
+    await refreshAccountSyncUi({ refreshDevices: false });
+  });
+
+  $("accountSyncPause")?.addEventListener("click", async () => {
+    const current = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
+    const state = normalizeQolSyncState(current?.state);
+    setAccountSyncBusy(true, state.paused ? "Resuming sync…" : "Pausing sync…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_PAUSED", paused: !state.paused }, 30000);
+    setAccountSyncBusy(false);
+    $("accountSyncActionStatus").textContent = result?.ok ? (!state.paused ? "Automatic sync paused on this device." : "Automatic sync resumed.") : (result?.message || "Could not change sync state.");
+    await refreshAccountSyncUi({ refreshDevices: false });
+  });
+
+  $("accountSyncCreateLinkCode")?.addEventListener("click", async () => {
+    setAccountSyncBusy(true, "Creating one-use link code…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_LINK_CODE" }, 16000);
+    setAccountSyncBusy(false);
+    if (!result?.ok) {
+      $("accountSyncActionStatus").textContent = result?.message || "Could not create a link code.";
+      return;
+    }
+    accountSyncLastLinkCode = result;
+    renderAccountSyncLinkCode();
+    $("accountSyncActionStatus").textContent = "Link code ready. Enter it on the other device before it expires.";
+  });
+
+  $("accountSyncCopyLinkCode")?.addEventListener("click", async () => {
+    if (!accountSyncLastLinkCode?.code) return;
+    try {
+      await navigator.clipboard.writeText(accountSyncLastLinkCode.code);
+      showSettingsToast("Link code copied.");
+    } catch {
+      showSettingsToast("Could not copy the link code.");
+    }
+  });
+
+  $("accountSyncRefreshDevices")?.addEventListener("click", async () => {
+    setAccountSyncBusy(true, "Refreshing linked devices…");
+    await refreshAccountSyncUi({ refreshDevices: true });
+    setAccountSyncBusy(false);
+    $("accountSyncActionStatus").textContent = "Device list refreshed.";
+  });
+
+  $("accountSyncDisconnectLocal")?.addEventListener("click", async () => {
+    if (!confirm("Disconnect this browser from the QoL account locally? This does not delete your QoL settings. If you want to revoke the device from the account, use another linked device's Unlink button first.")) return;
+    setAccountSyncBusy(true, "Disconnecting this browser…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_DISCONNECT_LOCAL" }, 12000);
+    setAccountSyncBusy(false);
+    if (!result?.ok) {
+      $("accountSyncActionStatus").textContent = result?.message || "Could not disconnect this browser.";
+      return;
+    }
+    accountSyncDevicesCache = [];
+    accountSyncLastLinkCode = null;
+    $("accountSyncActionStatus").textContent = "This browser is no longer linked. Local settings were kept.";
+    showSettingsToast("QoL account disconnected on this browser.");
+    await refreshAccountSyncUi({ refreshDevices: false });
+  });
+
+  $("resetAccountSyncDeviceId")?.addEventListener("click", async () => {
+    const status = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
+    if (status?.linked) {
+      showSettingsToast("Disconnect this device from Account & Sync before resetting its local identity.");
+      return;
+    }
+    if (!confirm("Reset this device's local QoL sync identity? No settings are deleted.")) return;
+    await ensureQolSyncState({ resetDevice: true });
+    await refreshAccountSyncUi();
+    showSettingsToast("Local sync device identity reset. Your settings were not changed.");
+  });
 }
 
 ["chatBubbleAiBackground", "chatBubbleAiText", "chatBubbleUserBackground", "chatBubbleUserText"].forEach(id => {
@@ -21409,7 +21940,7 @@ $("checkDeeplUsage")?.addEventListener("click", checkDeepLUsage);
 function reorderOptionsUi() {
   const tabOrder = [
     "general", "control", "blocking", "chat-ui", "saved", "chat-list", "writing",
-    "personas-memory", "bot-tools", "appearance", "browser", "data",
+    "personas-memory", "bot-tools", "appearance", "browser", "data", "account",
     "features", "advanced", "android", "changelog", "help"
   ];
   const tabs = document.querySelector("nav.tabs");
@@ -21462,6 +21993,8 @@ setupBotAvailabilityControls();
 setupMiniPanelPreview();
 setupSettingsToast();
 setupSettingDependencies();
+setupPlatformCompatibility();
+setupAccountSyncFoundation();
 setupFeaturesIndex();
 setupMessageQuickActionGroupToggle();
 setupPageIntros();
@@ -21552,6 +22085,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       else next[name] = change.newValue;
     }
     loadedSettingsSnapshot = next;
+  }
+  if (settingsChanged && optionsDataLoaded) {
+    refreshPlatformCompatibilityUi(loadedSettingsSnapshot);
+    DS_FEATURE_INDEX_REFRESH?.();
+    if (activeOptionsTab() === "account") refreshAccountSyncUi().catch(() => {});
+  }
+  if (changes[QOL_SYNC_STATE_KEY] && optionsDataLoaded && activeOptionsTab() === "account") {
+    refreshAccountSyncUi().catch(() => {});
   }
 
   // Bot Status / unavailable-cleanup writes originate from this Options page,
