@@ -27,6 +27,10 @@
   DS.CHAT_BOOKMARKS_KEY = "chatBookmarks";
   DS.RECENTLY_SEEN_BOTS_KEY = "recentlySeenBots";
   DS.PENDING_OPTIONS_NAV_KEY = "pendingOptionsNavigation";
+  DS.GRANULAR_SETTING_PREFIX = "dsSettingV1:";
+  DS.GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
+  DS.GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
+  DS.GRANULAR_SETTINGS_REVISION_KEY = "dsSettingsRevisionV1";
 
   const RUNTIME_LOG_SESSION_KEY = "ds-qol-runtime-log-v1";
   const RUNTIME_LOG_LIMIT = 160;
@@ -974,6 +978,7 @@
 
     const needsWork = root => {
       if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
+      if (DS.state?.settings?.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return false;
       if (!readyAttribute) return true;
       if (readyValue == null) return !root.hasAttribute(readyAttribute);
       return root.getAttribute(readyAttribute) !== readyValue;
@@ -1219,19 +1224,74 @@
     flushingKeys: new Set()
   };
 
+  DS.state.settingsIndex = DS.state.settingsIndex instanceof Set ? DS.state.settingsIndex : new Set();
+  DS.settingStorageKey = name => `${DS.GRANULAR_SETTING_PREFIX}${String(name || "").trim()}`;
+  DS.settingNameFromStorageKey = key => {
+    const value = String(key || "");
+    return value.startsWith(DS.GRANULAR_SETTING_PREFIX) ? value.slice(DS.GRANULAR_SETTING_PREFIX.length) : "";
+  };
+  DS.hasSettingStorageChanges = changes => !!changes?.settings || Object.keys(changes || {}).some(key => key.startsWith(DS.GRANULAR_SETTING_PREFIX));
+
+  function settingStorageValueMatches(left, right) {
+    if (Object.is(left, right)) return true;
+    if (left == null || right == null || typeof left !== "object" || typeof right !== "object") return false;
+    try { return JSON.stringify(left) === JSON.stringify(right); }
+    catch { return false; }
+  }
+
+  function appendGranularSettingsPatch(payload, patch, { comparePersisted = false, protectEnabled = false } = {}) {
+    const source = patch && typeof patch === "object" && !Array.isArray(patch) ? patch : {};
+    const persisted = DS.state?.persistedSettings || {};
+    let indexChanged = false;
+    let added = 0;
+    for (const [name, rawValue] of Object.entries(source)) {
+      if (!String(name || "").trim()) continue;
+      const value = protectEnabled && name === "enabled"
+        ? DS.state?.globalEnabledSetting !== false
+        : rawValue;
+      if (comparePersisted && settingStorageValueMatches(persisted[name], value)) continue;
+      payload[DS.settingStorageKey(name)] = value;
+      added += 1;
+      if (!DS.state.settingsIndex.has(name)) { DS.state.settingsIndex.add(name); indexChanged = true; }
+    }
+    if (added) {
+      if (indexChanged) payload[DS.GRANULAR_SETTINGS_INDEX_KEY] = [...DS.state.settingsIndex].sort();
+      payload[DS.GRANULAR_SETTINGS_MIGRATION_KEY] = true;
+      payload[DS.GRANULAR_SETTINGS_REVISION_KEY] = Date.now();
+    }
+    return added;
+  }
+
   function normalizeStoragePayload(obj) {
     const payload = obj && typeof obj === "object" ? { ...obj } : {};
-    // The per-tab QoL pause is session-only. Content modules often save a
-    // cloned settings object, so never allow the effective paused `enabled`
-    // value to leak into persistent/global settings.
+
+    // New v0.2.24 callers can provide just the setting(s) they changed. This is
+    // the preferred path: it avoids walking or serializing the full settings
+    // object for a one-checkbox update.
+    if (payload.settingsPatch && typeof payload.settingsPatch === "object") {
+      const patch = payload.settingsPatch;
+      delete payload.settingsPatch;
+      appendGranularSettingsPatch(payload, patch);
+    }
+
+    // Compatibility path for older modules that still hand over a cloned full
+    // settings object. Compare it with the last persisted snapshot and emit
+    // only actual differences instead of hundreds of granular storage writes.
     if (payload.settings && typeof payload.settings === "object") {
-      payload.settings = {
-        ...payload.settings,
-        enabled: DS.state?.globalEnabledSetting !== false
-      };
+      const settings = payload.settings;
+      delete payload.settings;
+      appendGranularSettingsPatch(payload, settings, { comparePersisted: true, protectEnabled: true });
     }
     return payload;
   }
+
+  DS.saveSettingsPatch = function saveSettingsPatch(patch, options = {}) {
+    const clean = patch && typeof patch === "object" && !Array.isArray(patch) ? { ...patch } : {};
+    const names = Object.keys(clean).filter(name => String(name || "").trim());
+    if (!names.length) return Promise.resolve(true);
+    if (DS.state?.settings) Object.assign(DS.state.settings, clean);
+    return DS.storageSet({ settingsPatch: clean }, options);
+  };
 
   function requestedStorageKeys(keys) {
     if (keys == null) return null;
@@ -1323,6 +1383,14 @@
     const ok = await storageWriteQueue.flushing;
     storageWriteQueue.flushing = null;
     storageWriteQueue.flushingKeys.clear();
+    if (ok) {
+      const persisted = { ...(DS.state?.persistedSettings || {}) };
+      for (const [storageKey, value] of Object.entries(payload || {})) {
+        const settingName = DS.settingNameFromStorageKey(storageKey);
+        if (settingName) persisted[settingName] = value;
+      }
+      DS.state.persistedSettings = persisted;
+    }
     waiters.forEach(resolve => resolve(ok));
 
     if (Object.keys(storageWriteQueue.payload || {}).length && !storageWriteQueue.timer) {
@@ -1337,7 +1405,27 @@
     // Preserve read-after-write semantics while still allowing unrelated keys to
     // be read without waiting for a queued batch.
     if (pendingWriteTouches(keys)) await flushStorageWriteQueue();
-    return rawStorageGet(keys);
+    const requested = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : null);
+    const wantsSettings = keys == null || requested?.includes("settings");
+    if (!wantsSettings) return rawStorageGet(keys);
+
+    const firstKeys = keys == null ? null : [...new Set([...(requested || []), DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY])];
+    const result = await rawStorageGet(firstKeys);
+    const index = [...new Set((Array.isArray(result[DS.GRANULAR_SETTINGS_INDEX_KEY]) ? result[DS.GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
+    DS.state.settingsIndex = new Set(index);
+    const granular = keys == null || !index.length ? result : await rawStorageGet(index.map(DS.settingStorageKey));
+    const hadLegacy = result.settings && typeof result.settings === "object";
+    const merged = hadLegacy ? { ...result.settings } : {};
+    let found = false;
+    for (const name of index) {
+      const storageKey = DS.settingStorageKey(name);
+      if (!Object.prototype.hasOwnProperty.call(granular, storageKey)) continue;
+      merged[name] = granular[storageKey];
+      found = true;
+    }
+    if (hadLegacy || found) result.settings = merged;
+    else delete result.settings;
+    return result;
   };
 
   DS.storageSet = function storageSet(obj, options = {}) {
@@ -1897,6 +1985,9 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     const savedChatOrganization = result[DS.CHAT_ORGANIZER_KEY] || {};
     const savedRecentlySeenBots = result[DS.RECENTLY_SEEN_BOTS_KEY] || {};
 
+    // Keep a global/persisted snapshot separate from the per-tab enabled
+    // override. It lets setting patches stay tiny even when this tab is paused.
+    DS.state.persistedSettings = { ...settings };
     DS.applyQolTabEnabledOverride?.(settings);
     DS.state.settings = settings;
 
@@ -2035,6 +2126,10 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     let refreshLookups = false;
     let cardFilterStateChanged = false;
 
+    const granularSettings = Object.entries(changes || {})
+      .map(([storageKey, change]) => [DS.settingNameFromStorageKey(storageKey), change])
+      .filter(([name]) => !!name);
+
     if (changes.settings) {
       const rawSettings = changes.settings.newValue || {};
       const normalizedSettings = { ...rawSettings };
@@ -2042,11 +2137,34 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         normalizedSettings.quickDislikeIdleEnabled = !!normalizedSettings.quickDislikeOnBlock;
       }
       normalizedSettings.quickDislikeOnBlock = false;
-      DS.state.settings = { ...DS.DEFAULT_SETTINGS, ...normalizedSettings };
+      DS.state.persistedSettings = { ...DS.DEFAULT_SETTINGS, ...normalizedSettings };
+      DS.state.settings = { ...DS.state.persistedSettings };
+      DS.state.globalEnabledSetting = DS.state.settings.enabled !== false;
       DS.applyQolTabEnabledOverride?.(DS.state.settings);
       DS.state.settings.oocTemplates = DS.normalizeOocTemplates(
         changes[DS.OOC_TEMPLATES_KEY]?.newValue ?? rawSettings.oocTemplates ?? DS.state.settings.oocTemplates
       );
+      rebuildBlockedStateFromCache();
+      refreshLookups = true;
+      cardFilterStateChanged = true;
+    } else if (granularSettings.length) {
+      const next = { ...(DS.state.settings || DS.DEFAULT_SETTINGS) };
+      for (const [name, change] of granularSettings) {
+        next[name] = change?.newValue === undefined ? DS.DEFAULT_SETTINGS[name] : change.newValue;
+        DS.state.settingsIndex.add(name);
+      }
+      if (!("quickDislikeIdleEnabled" in next)) next.quickDislikeIdleEnabled = !!next.quickDislikeOnBlock;
+      next.quickDislikeOnBlock = false;
+      const persisted = { ...(DS.state.persistedSettings || DS.DEFAULT_SETTINGS) };
+      for (const [name, change] of granularSettings) {
+        persisted[name] = change?.newValue === undefined ? DS.DEFAULT_SETTINGS[name] : change.newValue;
+      }
+      DS.state.persistedSettings = persisted;
+      // `next` contains the live UI/runtime state; the persisted copy above
+      // remains global and is never contaminated by the per-tab pause switch.
+      DS.state.settings = next;
+      DS.state.globalEnabledSetting = persisted.enabled !== false;
+      DS.applyQolTabEnabledOverride?.(DS.state.settings);
       rebuildBlockedStateFromCache();
       refreshLookups = true;
       cardFilterStateChanged = true;
@@ -2174,7 +2292,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     // Opened-history writes are already filtered at capture time and during
     // state load. Re-running the full blocked-vs-opened sweep for every opened
     // metadata write becomes very expensive with thousands of records.
-    if (changes[DS.BLOCKED_BOTS_KEY] || changes.settings) {
+    if (changes[DS.BLOCKED_BOTS_KEY] || changes.settings || granularSettings.length) {
       DS.enforceBlockedPriorityOverOpened?.().catch?.(() => {});
     }
   };

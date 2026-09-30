@@ -45,10 +45,10 @@
     organizer.collections = next;
     DS.state.settings = settings;
     DS.state.botOrganization = organizer;
-    await DS.storageSet?.({
-      settings,
-      [DS.BOT_ORGANIZER_KEY || "botOrganization"]: organizer
-    });
+    await Promise.all([
+      DS.saveSettingsPatch?.({ botCollections: settings.botCollections }),
+      DS.storageSet?.({ [DS.BOT_ORGANIZER_KEY || "botOrganization"]: organizer })
+    ]);
     return next;
   }
 

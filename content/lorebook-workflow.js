@@ -106,9 +106,7 @@
   }
 
   function saveSettingsPatch(patch) {
-    const next = { ...(DS.state?.settings || {}), ...patch };
-    if (DS.state) DS.state.settings = next;
-    return DS.storageSet?.({ settings: next });
+    return DS.saveSettingsPatch?.(patch) ?? Promise.resolve(false);
   }
 
   function installTabIntentListener() {

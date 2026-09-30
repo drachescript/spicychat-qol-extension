@@ -1024,14 +1024,81 @@ html[data-ds-message-action-bridge="1"] div[style*="box-shadow"]:has(> button[ar
 html.ds-chat-performance .ds-chat-message-lite {
   content-visibility: auto;
   contain-intrinsic-size: auto 260px;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
 }
 
-html.ds-chat-performance [id^="message-"]:not(.ds-chat-message-lite) {
+html.ds-chat-performance .ds-chat-message-lite,
+html.ds-chat-performance .ds-chat-message-lite * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Large-chat windowing keeps SpicyChat's message nodes intact but takes older
+   cards completely out of layout/paint until the user explicitly reveals
+   another chunk. Nothing is deleted from the conversation or React tree. */
+html.ds-chat-performance .ds-chat-message-windowed {
+  display: none !important;
+  content-visibility: hidden !important;
+  contain-intrinsic-size: 0 0 !important;
+}
+
+html.ds-chat-performance [id^="message-"]:not(.ds-chat-message-lite):not(.ds-chat-message-windowed) {
   content-visibility: visible;
 }
 
 html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
   content-visibility: visible;
+}
+
+#ds-long-chat-window-control {
+  position: fixed;
+  top: 82px;
+  left: 50%;
+  z-index: 2147483000;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(92vw, 760px);
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 10px;
+  background: rgba(18, 18, 20, 0.94);
+  color: #f3f4f6;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font: 12px/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#ds-long-chat-window-control .ds-long-chat-window-status {
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+#ds-long-chat-window-control button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 7px;
+  background: rgba(42, 45, 51, 0.96);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+#ds-long-chat-window-control button:hover {
+  background: rgba(64, 68, 76, 0.98);
+}
+
+@media (max-width: 700px) {
+  #ds-long-chat-window-control {
+    top: 70px;
+    max-width: calc(100vw - 20px);
+    padding: 5px 6px;
+  }
 }
 
 @media (max-width: 700px) {

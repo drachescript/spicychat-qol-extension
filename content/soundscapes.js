@@ -370,11 +370,20 @@
       DS.updateQuickPanel?.();
       ensureChatControl();
     }
-    if (changes.settings) ensureChatControl(changes.settings.newValue || {});
-    if (changes.settings && playing) {
-      const nextSettings = changes.settings.newValue || {};
-      if (!nextSettings.enableSoundscapes || !scopeAllowed(nextSettings)) stopAll({ quiet: true });
-      else for (const player of players.values()) setPlayerVolume(player, player.layerVolume, 1);
+    if (DS.hasSettingStorageChanges?.(changes)) {
+      const nextSettings = { ...(DS.state?.settings || {}) };
+      if (changes.settings?.newValue && typeof changes.settings.newValue === "object") Object.assign(nextSettings, changes.settings.newValue);
+      for (const [key, change] of Object.entries(changes || {})) {
+        const name = DS.settingNameFromStorageKey?.(key);
+        if (!name) continue;
+        if (change?.newValue === undefined) delete nextSettings[name];
+        else nextSettings[name] = change.newValue;
+      }
+      ensureChatControl(nextSettings);
+      if (playing) {
+        if (!nextSettings.enableSoundscapes || !scopeAllowed(nextSettings)) stopAll({ quiet: true });
+        else for (const player of players.values()) setPlayerVolume(player, player.layerVolume, 1);
+      }
     }
   });
 })();

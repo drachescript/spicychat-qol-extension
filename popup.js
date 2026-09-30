@@ -10,6 +10,10 @@ const PERSONAS_KEY = "personas";
 const LEGACY_PERSONAS_KEY = "savedPersonas";
 const OOC_TEMPLATES_KEY = "oocTemplates";
 const GENERATION_PROFILES_KEY = "generationProfiles";
+const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
+const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
+const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
+let granularSettingsIndexCache = new Set();
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -25,16 +29,48 @@ const DEFAULT_SETTINGS = {
   popupShowStorageDetails: false
 };
 
-function storageGet(keys) {
-  return new Promise(resolve => {
-    chrome.storage.local.get(keys, resolve);
-  });
+function settingStorageKey(name) {
+  return `${GRANULAR_SETTING_PREFIX}${String(name || "").trim()}`;
 }
 
-function storageSet(obj) {
-  return new Promise(resolve => {
-    chrome.storage.local.set(obj, resolve);
-  });
+async function storageGet(keys) {
+  const requested = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : null);
+  const wantsSettings = keys == null || requested?.includes("settings");
+  const relevantNames = Object.keys(DEFAULT_SETTINGS);
+  const extra = wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, ...relevantNames.map(settingStorageKey)] : [];
+  const readKeys = keys == null ? null : [...new Set([...(requested || []), ...extra])];
+  const result = await new Promise(resolve => chrome.storage.local.get(readKeys, resolve));
+  if (!wantsSettings) return result || {};
+  const data = result || {};
+  const merged = data.settings && typeof data.settings === "object" ? { ...data.settings } : {};
+  for (const name of relevantNames) {
+    const storageKey = settingStorageKey(name);
+    if (Object.prototype.hasOwnProperty.call(data, storageKey)) merged[name] = data[storageKey];
+    delete data[storageKey];
+  }
+  granularSettingsIndexCache = new Set(Array.isArray(data[GRANULAR_SETTINGS_INDEX_KEY]) ? data[GRANULAR_SETTINGS_INDEX_KEY] : []);
+  data.settings = merged;
+  delete data[GRANULAR_SETTINGS_INDEX_KEY];
+  return data;
+}
+
+async function storageSet(obj) {
+  const payload = obj && typeof obj === "object" ? { ...obj } : {};
+  const patch = payload.settingsPatch && typeof payload.settingsPatch === "object"
+    ? payload.settingsPatch
+    : (payload.settings && typeof payload.settings === "object" ? payload.settings : null);
+  delete payload.settingsPatch;
+  delete payload.settings;
+  if (patch) {
+    let indexChanged = false;
+    for (const [name, value] of Object.entries(patch)) {
+      payload[settingStorageKey(name)] = value;
+      if (!granularSettingsIndexCache.has(name)) { granularSettingsIndexCache.add(name); indexChanged = true; }
+    }
+    if (indexChanged) payload[GRANULAR_SETTINGS_INDEX_KEY] = [...granularSettingsIndexCache].sort();
+    payload[GRANULAR_SETTINGS_MIGRATION_KEY] = true;
+  }
+  return new Promise(resolve => chrome.storage.local.set(payload, resolve));
 }
 
 
@@ -376,7 +412,7 @@ async function saveEnabled() {
   settings.enabled =
     document.getElementById("enabled").checked;
 
-  await storageSet({ settings });
+  await storageSet({ settingsPatch: { enabled: settings.enabled } });
   await load();
 }
 

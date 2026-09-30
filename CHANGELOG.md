@@ -1,3 +1,18 @@
+## 0.2.24
+- Renamed the old version-scoped `content/qol23-ui-fixes.js` runtime file to the permanent `content/ui-layout-fixes.js` name and updated build metadata so future releases do not carry a stale 0.2.23 filename.
+- Fixed stacked chat centering so the native composer bubble measures the current message lane and follows the same horizontal center/width instead of being pushed right by left-side composer controls; mobile keeps the native compact layout.
+- Settings now autosave by default: toggles/selects save almost immediately, text and number fields debounce briefly, pending edits flush on blur/page close, and **Save now** remains as an explicit force-and-verify safety action.
+- Live settings storage is now granular (`dsSettingV1:*`) instead of rewriting one large `settings` object for every option change. Normal autosave only serializes the setting(s) that changed; the full logical settings object is assembled only when existing backup/export/import/runtime code actually asks for it.
+- Added a tiny last-batch safety record for autosave and kept the old monolithic settings object as a migration fallback rather than destructively deleting it during the v0.2.24 transition.
+- Feature-catalogue collapsed categories are now a normal backed-up QoL preference using stable category IDs, so backup/export/import restores the layout and category label wording can change without losing the remembered state.
+- Feature catalogue categories remember whether you left each group expanded or collapsed, save through the same granular autosave path, survive immediate Settings closes, and are preserved across search/filter/sort rerenders; new categories still default to expanded.
+- Strengthened long-chat Performance Mode with safe DOM windowing: older message cards stay in SpicyChat's DOM but are folded out of layout/paint once a chat becomes large, while the newest 40-70 messages remain active depending on performance mode.
+- Added a small large-chat performance bar with Show older / Show all / Fold old controls so hidden history can be revealed in chunks without deleting or rewriting any messages.
+- Added a manual Refresh chat performance action that snapshots the current composer text to QoL-only session storage, reloads the chat, restores the draft only when the native composer is empty, and returns to the bottom. It refuses to refresh while a generation is still running.
+- Long chats now give SpicyChat's native message render/streaming a 0.95-1.4 second quiet period before nonessential QoL message decorators resume, with the resume scheduled through requestIdleCallback when available.
+- Windowed old messages are skipped by shared QoL message-enhancer scans, and visible older messages use stronger animation/transition/shadow/filter suppression while Performance Mode is active.
+- QoL deliberately does not intercept, debounce, or rewrite SpicyChat's own chatDraft sessionStorage writes; the separate refresh snapshot is only a safety net for the explicit performance reload button.
+
 ## 0.2.23
 - Reduced Bot Status stale-refresh finish stalls by persisting only touched availability/archive IDs through a service-worker merge, avoiding full-state re-normalization, skipping unchanged multi-megabyte archive rewrites, yielding between commits, and deferring heavy Saved-manager/storage-usage refreshes.
 - Suppressed duplicate Options-page storage-change reprocessing for Bot Status commits so the same large state is not normalized and rerendered again immediately after it was saved.

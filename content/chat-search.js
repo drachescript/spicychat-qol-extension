@@ -86,9 +86,7 @@
     const map = { exactPhrase:"chatSearchExactPhrase", caseSensitive:"chatSearchCaseSensitive", wholeWord:"chatSearchWholeWord", regex:"chatSearchRegex", loadUntilMatch:"chatSearchLoadUntilMatch" };
     const settingKey = map[key];
     if (!settingKey) return;
-    const next = { ...(DS.state.settings || {}), [settingKey]: !!checked };
-    DS.state.settings = next;
-    await DS.storageSet?.({ settings: next });
+    await DS.saveSettingsPatch?.({ [settingKey]: !!checked });
     runSearch({ keepCurrent: true, scroll: false, force: true });
     syncControls();
   }

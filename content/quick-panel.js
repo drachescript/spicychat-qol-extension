@@ -969,9 +969,7 @@
     panel.querySelector("#ds-qol-auto-translate")?.addEventListener("click", async () => {
       const settings = DS.state?.settings || {};
       if (!settings.enableTranslation) return;
-      const next = { ...settings, translationAutoAi: !settings.translationAutoAi };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ translationAutoAi: !settings.translationAutoAi });
       DS.applyTranslationTools?.();
       DS.updateQuickPanel?.();
     });
@@ -1010,37 +1008,27 @@
     });
 
     panel.querySelector("#ds-qol-chat-sort")?.addEventListener("change", async event => {
-      const next = { ...(DS.state.settings || {}), chatListSortMode: event.target.value };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ chatListSortMode: event.target.value });
       DS.applyChatListTools?.();
     });
 
     panel.querySelector("#ds-qol-chat-opened-filter")?.addEventListener("change", async event => {
-      const next = { ...(DS.state.settings || {}), chatListOpenedFilter: event.target.value };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ chatListOpenedFilter: event.target.value });
       DS.applyChatListTools?.();
     });
 
     panel.querySelector("#ds-qol-chat-message-filter")?.addEventListener("change", async event => {
-      const next = { ...(DS.state.settings || {}), chatListMessageFilter: event.target.value };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ chatListMessageFilter: event.target.value });
       DS.applyChatListTools?.();
     });
 
     panel.querySelector("#ds-qol-chat-saved-filter")?.addEventListener("change", async event => {
-      const next = { ...(DS.state.settings || {}), chatListSavedFilter: event.target.value };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ chatListSavedFilter: event.target.value });
       DS.applyChatListTools?.();
     });
 
     panel.querySelector("#ds-qol-chat-blocked-filter")?.addEventListener("change", async event => {
-      const next = { ...(DS.state.settings || {}), chatListBlockedFilter: event.target.value };
-      DS.state.settings = next;
-      await DS.storageSet?.({ settings: next });
+      await DS.saveSettingsPatch?.({ chatListBlockedFilter: event.target.value });
       DS.applyChatListTools?.();
     });
 

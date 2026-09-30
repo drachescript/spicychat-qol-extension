@@ -467,7 +467,7 @@
     settings.autoPairAsterisks = !!enabled;
     if (settings.autoPairAsterisks) installAsteriskAutoPairing();
 
-    await DS.storageSet?.({ settings: { ...settings } });
+    await DS.saveSettingsPatch?.({ autoPairAsterisks: settings.autoPairAsterisks });
     DS.updateQuickPanel?.();
     return settings.autoPairAsterisks;
   };
@@ -767,6 +767,108 @@
       );
     };
 
+  let stackedComposerAlignmentRaf = 0;
+  let stackedComposerResizeInstalled = false;
+
+  function findStackedComposerLayout() {
+    const textarea = document.querySelector('textarea[placeholder="Message..."], textarea[placeholder*="Message"]');
+    if (!(textarea instanceof HTMLTextAreaElement)) return null;
+    const bubble = textarea.closest("div.grow.border-1") || textarea.parentElement?.parentElement;
+    const row = bubble?.closest("div.flex.items-end.gap-sm.w-full") || bubble?.parentElement?.parentElement;
+    if (!(bubble instanceof HTMLElement) || !(row instanceof HTMLElement)) return null;
+    return { textarea, bubble, row };
+  }
+
+  function clearStackedComposerAlignment() {
+    cancelAnimationFrame(stackedComposerAlignmentRaf);
+    stackedComposerAlignmentRaf = 0;
+    document.querySelectorAll('[data-ds-stacked-composer-row="1"]').forEach(row => {
+      row.removeAttribute("data-ds-stacked-composer-row");
+      row.style.removeProperty("--ds-stacked-composer-shift");
+    });
+    document.querySelectorAll('[data-ds-stacked-composer-bubble="1"]').forEach(bubble => {
+      bubble.removeAttribute("data-ds-stacked-composer-bubble");
+      bubble.style.removeProperty("--ds-stacked-composer-width");
+    });
+  }
+
+  function measureStackedMessageLane() {
+    const rows = [...document.querySelectorAll(
+      'div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center'
+    )].filter(row => row.getClientRects().length);
+    return rows.at(-1)?.getBoundingClientRect?.() || null;
+  }
+
+  function scheduleStackedComposerAlignment(active = true) {
+    if (!active) {
+      clearStackedComposerAlignment();
+      return;
+    }
+
+    const composer = findStackedComposerLayout();
+    if (!composer) return;
+
+    document.querySelectorAll('[data-ds-stacked-composer-row="1"]').forEach(row => {
+      if (row !== composer.row) {
+        row.removeAttribute("data-ds-stacked-composer-row");
+        row.style.removeProperty("--ds-stacked-composer-shift");
+      }
+    });
+    document.querySelectorAll('[data-ds-stacked-composer-bubble="1"]').forEach(bubble => {
+      if (bubble !== composer.bubble) {
+        bubble.removeAttribute("data-ds-stacked-composer-bubble");
+        bubble.style.removeProperty("--ds-stacked-composer-width");
+      }
+    });
+
+    composer.row.setAttribute("data-ds-stacked-composer-row", "1");
+    composer.bubble.setAttribute("data-ds-stacked-composer-bubble", "1");
+
+    if (!stackedComposerResizeInstalled) {
+      stackedComposerResizeInstalled = true;
+      window.addEventListener("resize", () => {
+        if (document.documentElement.getAttribute("data-ds-chat-message-layout") === "stacked") {
+          scheduleStackedComposerAlignment(true);
+        }
+      }, { passive: true });
+    }
+
+    cancelAnimationFrame(stackedComposerAlignmentRaf);
+    stackedComposerAlignmentRaf = requestAnimationFrame(() => {
+      stackedComposerAlignmentRaf = 0;
+      const current = findStackedComposerLayout();
+      if (!current || document.documentElement.getAttribute("data-ds-chat-message-layout") !== "stacked") return;
+
+      const laneRect = measureStackedMessageLane();
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+      if (laneRect?.width) {
+        current.bubble.style.setProperty("--ds-stacked-composer-width", `${Math.round(laneRect.width * 10) / 10}px`);
+      } else {
+        current.bubble.style.removeProperty("--ds-stacked-composer-width");
+      }
+
+      // Let the max-width rule settle before measuring the final bubble center.
+      requestAnimationFrame(() => {
+        const latest = findStackedComposerLayout();
+        if (!latest || document.documentElement.getAttribute("data-ds-chat-message-layout") !== "stacked") return;
+        if (viewportWidth <= 760) {
+          latest.row.style.setProperty("--ds-stacked-composer-shift", "0px");
+          return;
+        }
+
+        const targetRect = measureStackedMessageLane();
+        const bubbleRect = latest.bubble.getBoundingClientRect();
+        const currentShift = Number.parseFloat(latest.row.style.getPropertyValue("--ds-stacked-composer-shift")) || 0;
+        const baseBubbleCenter = bubbleRect.left + (bubbleRect.width / 2) - currentShift;
+        const targetCenter = targetRect?.width
+          ? targetRect.left + (targetRect.width / 2)
+          : viewportWidth / 2;
+        const shift = Math.max(-220, Math.min(220, targetCenter - baseBubbleCenter));
+        latest.row.style.setProperty("--ds-stacked-composer-shift", `${Math.round(shift * 10) / 10}px`);
+      });
+    });
+  }
+
   DS.applyChatUiCleanup =
     function applyChatUiCleanup() {
       const { settings } = DS.state;
@@ -774,6 +876,7 @@
       const stackedLayout = !!onChat && !!settings.stackChatMessages;
       if (stackedLayout) DS.setAttributeIfChanged?.(document.documentElement, "data-ds-chat-message-layout", "stacked");
       else if (document.documentElement.hasAttribute("data-ds-chat-message-layout")) document.documentElement.removeAttribute("data-ds-chat-message-layout");
+      scheduleStackedComposerAlignment(stackedLayout);
 
       const hasActiveCleanup = !!(
         settings.stackChatMessages ||

@@ -367,7 +367,7 @@
   }
 
   async function init() {
-    const initial = await storageGet([SNAPSHOT_KEY, "settings"]);
+    const initial = DS.storageGet ? await DS.storageGet([SNAPSHOT_KEY, "settings"]) : await storageGet([SNAPSHOT_KEY, "settings"]);
     state.storedSettings = initial?.settings && typeof initial.settings === "object" ? initial.settings : null;
     const raw = initial?.[SNAPSHOT_KEY];
     state.snapshotLoaded = true;
@@ -383,8 +383,16 @@
     run();
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes.settings) {
-        state.storedSettings = changes.settings.newValue && typeof changes.settings.newValue === "object" ? changes.settings.newValue : null;
+      if (DS.hasSettingStorageChanges?.(changes)) {
+        const next = { ...(state.storedSettings || DS.state?.settings || {}) };
+        if (changes.settings?.newValue && typeof changes.settings.newValue === "object") Object.assign(next, changes.settings.newValue);
+        for (const [key, change] of Object.entries(changes || {})) {
+          const name = DS.settingNameFromStorageKey?.(key);
+          if (!name) continue;
+          if (change?.newValue === undefined) delete next[name];
+          else next[name] = change.newValue;
+        }
+        state.storedSettings = next;
         schedule();
       }
       if (changes[SNAPSHOT_KEY]) {

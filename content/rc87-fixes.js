@@ -319,7 +319,7 @@
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !changes.settings) return;
+      if (area !== "local" || !DS.hasSettingStorageChanges?.(changes)) return;
       setTimeout(() => {
         if (isMyCreations()) scheduleAutoLoadRetry(250);
         schedulePanelAdjustment(50);

@@ -18,6 +18,11 @@ const CREATOR_LATEST_SORT_INDEX = "public_characters_alias/sort/_text_match(buck
 const AUTO_AFK_ACTIVITY_KEY = "dsAutoAfkTabActivity";
 const AUTO_AFK_STATUS_KEY = "dsAutoAfkLastScan";
 const DUPLICATE_TAB_STATUS_KEY = "dsDuplicateTabLastScan";
+const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
+const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
+const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
+const GRANULAR_SETTINGS_REVISION_KEY = "dsSettingsRevisionV1";
+let granularSettingsIndexCache = new Set();
 const TAB_CLEANUP_ENRICHMENT_KEY = "tabCleanupEnrichment";
 const TAB_CLEANUP_WORKER_TIMEOUT_MS = 30000;
 const OPTIONS_SOURCE_TAB_KEY = "dsQolOptionsSourceTabId";
@@ -1459,12 +1464,56 @@ function stopLoader(tabId) {
 }
 
 
-function storageGet(keys) {
-  return new Promise(resolve => chrome.storage.local.get(keys, resolve));
+function settingStorageKey(name) {
+  return `${GRANULAR_SETTING_PREFIX}${String(name || "").trim()}`;
 }
 
-function storageSet(values) {
-  return new Promise(resolve => chrome.storage.local.set(values, resolve));
+function settingNameFromStorageKey(key) {
+  const value = String(key || "");
+  return value.startsWith(GRANULAR_SETTING_PREFIX) ? value.slice(GRANULAR_SETTING_PREFIX.length) : "";
+}
+
+async function storageGet(keys) {
+  const requested = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : null);
+  const wantsSettings = keys == null || requested?.includes("settings");
+  const firstKeys = !wantsSettings || keys == null ? keys : [...new Set([...(requested || []), GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY])];
+  const first = await new Promise(resolve => chrome.storage.local.get(firstKeys, resolve));
+  if (!wantsSettings) return first || {};
+  const result = first || {};
+  const index = [...new Set((Array.isArray(result[GRANULAR_SETTINGS_INDEX_KEY]) ? result[GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
+  granularSettingsIndexCache = new Set(index);
+  const granular = keys == null || !index.length
+    ? result
+    : await new Promise(resolve => chrome.storage.local.get(index.map(settingStorageKey), resolve));
+  const hadLegacy = result.settings && typeof result.settings === "object";
+  const merged = hadLegacy ? { ...result.settings } : {};
+  let found = false;
+  for (const name of index) {
+    const key = settingStorageKey(name);
+    if (!Object.prototype.hasOwnProperty.call(granular || {}, key)) continue;
+    merged[name] = granular[key];
+    found = true;
+  }
+  if (hadLegacy || found) result.settings = merged;
+  else delete result.settings;
+  return result;
+}
+
+async function storageSet(values) {
+  const payload = values && typeof values === "object" ? { ...values } : {};
+  if (payload.settings && typeof payload.settings === "object") {
+    const settings = payload.settings;
+    delete payload.settings;
+    let indexChanged = false;
+    for (const [name, value] of Object.entries(settings)) {
+      payload[settingStorageKey(name)] = value;
+      if (!granularSettingsIndexCache.has(name)) { granularSettingsIndexCache.add(name); indexChanged = true; }
+    }
+    if (indexChanged) payload[GRANULAR_SETTINGS_INDEX_KEY] = [...granularSettingsIndexCache].sort();
+    payload[GRANULAR_SETTINGS_MIGRATION_KEY] = true;
+    payload[GRANULAR_SETTINGS_REVISION_KEY] = Date.now();
+  }
+  return new Promise(resolve => chrome.storage.local.set(payload, resolve));
 }
 
 // Bot Status scans can touch a relatively small set of IDs while the persisted
@@ -5776,43 +5825,49 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (added.length) queueCreatorBotScan({ force: true, handles: added, reason: "followed-added" });
   }
 
-  if (!changes.settings) return;
+  const granularChanges = Object.entries(changes || {})
+    .map(([key, change]) => [settingNameFromStorageKey(key), change])
+    .filter(([name]) => !!name);
+  if (!changes.settings && !granularChanges.length) return;
 
-  const before = {
-    ...AUTO_AFK_DEFAULTS,
-    ...(changes.settings.oldValue || {})
-  };
-  const after = {
-    ...AUTO_AFK_DEFAULTS,
-    ...(changes.settings.newValue || {})
-  };
+  (async () => {
+    let beforeSettings = {};
+    let afterSettings = {};
+    if (changes.settings) {
+      beforeSettings = changes.settings.oldValue || {};
+      afterSettings = changes.settings.newValue || {};
+    } else {
+      afterSettings = (await storageGet(["settings"])).settings || {};
+      beforeSettings = { ...afterSettings };
+      for (const [name, change] of granularChanges) {
+        if (change?.oldValue === undefined) delete beforeSettings[name];
+        else beforeSettings[name] = change.oldValue;
+      }
+    }
 
-  const justEnabled = !before.autoAfkEnabled && !!after.autoAfkEnabled;
-  configureAutoAfkAlarm(justEnabled);
+    const before = { ...AUTO_AFK_DEFAULTS, ...beforeSettings };
+    const after = { ...AUTO_AFK_DEFAULTS, ...afterSettings };
+    const justEnabled = !before.autoAfkEnabled && !!after.autoAfkEnabled;
+    configureAutoAfkAlarm(justEnabled);
 
-  const duplicateBefore = {
-    ...DUPLICATE_TAB_DEFAULTS,
-    ...(changes.settings.oldValue || {})
-  };
-  const duplicateAfter = {
-    ...DUPLICATE_TAB_DEFAULTS,
-    ...(changes.settings.newValue || {})
-  };
-  const duplicateJustEnabled = !duplicateBefore.duplicateTabGuardEnabled && !!duplicateAfter.duplicateTabGuardEnabled;
-  if (duplicateAfter.enabled !== false && duplicateAfter.duplicateTabGuardEnabled && duplicateJustEnabled) {
-    queueDuplicateTabScan({ focusExisting: false });
-  }
+    const duplicateBefore = { ...DUPLICATE_TAB_DEFAULTS, ...beforeSettings };
+    const duplicateAfter = { ...DUPLICATE_TAB_DEFAULTS, ...afterSettings };
+    const duplicateJustEnabled = !duplicateBefore.duplicateTabGuardEnabled && !!duplicateAfter.duplicateTabGuardEnabled;
+    if (duplicateAfter.enabled !== false && duplicateAfter.duplicateTabGuardEnabled && duplicateJustEnabled) {
+      queueDuplicateTabScan({ focusExisting: false });
+    }
 
-  const nudgeJustEnabled = !before.enableChatNudges && !!after.enableChatNudges;
-  if (nudgeJustEnabled) runChatNudgeScan();
-  configureChatNudgeAlarm(nudgeJustEnabled);
+    const nudgeJustEnabled = !before.enableChatNudges && !!after.enableChatNudges;
+    if (nudgeJustEnabled) runChatNudgeScan();
+    configureChatNudgeAlarm(nudgeJustEnabled);
 
-  const creatorWatchJustEnabled = !before.enableCreatorBotNotifications && !!after.enableCreatorBotNotifications;
-  const creatorWatchIntervalChanged = Number(before.creatorBotCheckMinutes || 60) !== Number(after.creatorBotCheckMinutes || 60);
-  if (creatorWatchJustEnabled) queueCreatorBotScan({ force: true, reason: "enabled" });
-  if (creatorWatchJustEnabled || creatorWatchIntervalChanged || before.enabled !== after.enabled) {
-    configureCreatorBotWatchAlarm(creatorWatchJustEnabled);
-  }
+    const creatorWatchJustEnabled = !before.enableCreatorBotNotifications && !!after.enableCreatorBotNotifications;
+    const creatorWatchIntervalChanged = Number(before.creatorBotCheckMinutes || 60) !== Number(after.creatorBotCheckMinutes || 60);
+    if (creatorWatchJustEnabled) queueCreatorBotScan({ force: true, reason: "enabled" });
+    if (creatorWatchJustEnabled || creatorWatchIntervalChanged || before.enabled !== after.enabled) {
+      configureCreatorBotWatchAlarm(creatorWatchJustEnabled);
+    }
+  })().catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(details => {

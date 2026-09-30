@@ -329,7 +329,7 @@
     if (clean) overrides[character.key] = { text: clean, updatedAt: Date.now() };
     else delete overrides[character.key];
     current.replyInstructionBotOverrides = normalizeOverrides(overrides);
-    const ok = await DS.storageSet?.({ settings: current });
+    const ok = await DS.saveSettingsPatch?.({ replyInstructionBotOverrides: current.replyInstructionBotOverrides });
     if (ok) DS.state.settings = { ...DS.DEFAULT_SETTINGS, ...current };
     return !!ok;
   }

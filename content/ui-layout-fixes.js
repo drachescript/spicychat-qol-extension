@@ -2,13 +2,13 @@
   "use strict";
 
   const DS = window.DragonScriptQoL;
-  if (!DS || window.__DS_QOL_023_UI_FIXES__) return;
-  window.__DS_QOL_023_UI_FIXES__ = true;
+  if (!DS || window.__DS_QOL_UI_LAYOUT_FIXES__) return;
+  window.__DS_QOL_UI_LAYOUT_FIXES__ = true;
 
-  // 0.2.23: "stack" means one shared centered lane, not merely matching the
-  // left edge. Keep this as CSS so React message mounts/remounts need no DOM work.
+  // Shared UI layout fixes: keep stacked chat messages and the native composer on
+  // one centered lane, and hide an otherwise-empty Quick Panel shell.
   const style = document.createElement("style");
-  style.id = "ds-qol-023-stacked-lane-style";
+  style.id = "ds-qol-ui-layout-style";
   style.textContent = `
 html[data-ds-chat-message-layout="stacked"]
   div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center {
@@ -36,10 +36,33 @@ html[data-ds-chat-message-layout="stacked"]
   box-sizing: border-box !important;
 }
 
+html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-row="1"] {
+  translate: var(--ds-stacked-composer-shift, 0px) 0 !important;
+  transition: none !important;
+}
+
+html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-bubble="1"] {
+  width: min(var(--ds-stacked-composer-width, 800px), calc(100vw - 40px)) !important;
+  max-width: min(var(--ds-stacked-composer-width, 800px), calc(100vw - 40px)) !important;
+  min-width: 0 !important;
+  flex: 0 1 min(var(--ds-stacked-composer-width, 800px), calc(100vw - 40px)) !important;
+  box-sizing: border-box !important;
+}
+
 @media (max-width: 760px) {
   html[data-ds-chat-message-layout="stacked"]
     div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center {
     padding-inline: 8px !important;
+  }
+
+  html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-row="1"] {
+    translate: 0 0 !important;
+  }
+
+  html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-bubble="1"] {
+    width: auto !important;
+    max-width: none !important;
+    flex: 1 1 auto !important;
   }
 }
 `;
@@ -65,7 +88,6 @@ html[data-ds-chat-message-layout="stacked"]
       .some(element => inlineVisibleThroughBody(element, body));
     if (actionable) return true;
 
-    // Status-only configurations are valid too. Hidden descendants do not count.
     return [...body.querySelectorAll(".ds-qol-status, .ds-qol-small-note")].some(element => {
       if (!inlineVisibleThroughBody(element, body)) return false;
       return !!String(element.textContent || "").trim();
@@ -84,9 +106,6 @@ html[data-ds-chat-message-layout="stacked"]
       return;
     }
 
-    // Collapsing the panel hides the body via stylesheet. Eligibility is based
-    // on the rows quick-panel.js marked display:none/visible, so closed panels
-    // remain available when they actually contain something useful.
     const hasContent = panelHasUsableContent(panel);
     if (hasContent) {
       if (panel.dataset.dsAutoHiddenEmpty === "1") panel.style.removeProperty("display");
@@ -99,7 +118,7 @@ html[data-ds-chat-message-layout="stacked"]
 
   const originalUpdate = DS.updateQuickPanel;
   if (typeof originalUpdate === "function") {
-    DS.updateQuickPanel = function qol023UpdateQuickPanel(...args) {
+    DS.updateQuickPanel = function uiLayoutUpdateQuickPanel(...args) {
       const result = originalUpdate.apply(this, args);
       reconcileQuickPanelShell();
       return result;
@@ -108,15 +127,13 @@ html[data-ds-chat-message-layout="stacked"]
 
   const originalCreate = DS.createQuickPanel;
   if (typeof originalCreate === "function") {
-    DS.createQuickPanel = function qol023CreateQuickPanel(...args) {
+    DS.createQuickPanel = function uiLayoutCreateQuickPanel(...args) {
       const result = originalCreate.apply(this, args);
       reconcileQuickPanelShell();
       return result;
     };
   }
 
-  // A SPA route pass normally calls updateQuickPanel already; popstate is a
-  // cheap extra safety net for browser back/forward without any polling.
   window.addEventListener("popstate", () => requestAnimationFrame(reconcileQuickPanelShell), { passive: true });
   requestAnimationFrame(reconcileQuickPanelShell);
 })();

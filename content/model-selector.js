@@ -234,7 +234,7 @@
   async function saveFavoriteNames(names) {
     const clean = [...new Set(names.map(cleanText).filter(Boolean))];
     DS.state.settings.modelFavoriteNames = clean.join("\n");
-    await DS.storageSet?.({ settings: { ...DS.state.settings } });
+    await DS.saveSettingsPatch?.({ modelFavoriteNames: DS.state.settings.modelFavoriteNames });
   }
 
   function stopModelSelection(event) {

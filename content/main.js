@@ -14,6 +14,7 @@
   let slowTimer = null;
   let slowScheduledAt = 0;
   let slowQuietTimer = null;
+  let messageEnhancerQuietTimer = null;
   let idleHandle = null;
   let criticalRunning = false;
   let criticalPending = false;
@@ -830,6 +831,22 @@
         return;
       }
       if (Date.now() < pauseRerunsUntil || DS.isChatHeaderMenuOpen?.()) return;
+
+      const enhancerQuietUntil = Number(DS.state.chatEnhancerQuietUntil || 0);
+      if (settings.chatPerformanceMode && enhancerQuietUntil > Date.now()) {
+        await runStep("performance mode", () => DS.applyPerformanceMode?.());
+        const counters = runtimeCounters();
+        counters.chatEnhancerQuietDeferrals = Number(counters.chatEnhancerQuietDeferrals || 0) + 1;
+        clearTimeout(messageEnhancerQuietTimer);
+        const wait = Math.max(40, enhancerQuietUntil - Date.now() + 20);
+        messageEnhancerQuietTimer = window.setTimeout(() => {
+          messageEnhancerQuietTimer = null;
+          const resume = () => DS.scheduleMessageLane?.("post-native-render-quiet");
+          if (typeof requestIdleCallback === "function") requestIdleCallback(resume, { timeout: 700 });
+          else setTimeout(resume, 0);
+        }, wait);
+        return;
+      }
 
       const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
       const laneRoots = [...dirtySet].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
@@ -1842,6 +1859,9 @@
     DS.state.lastMarkedChatId = "";
     DS.state.messageDirtyRoots?.clear?.();
     DS.state.messageLaneRoots = null;
+    DS.state.chatEnhancerQuietUntil = 0;
+    clearTimeout(messageEnhancerQuietTimer);
+    messageEnhancerQuietTimer = null;
     DS.state.activeMessageEditRoots?.clear?.();
     clearBlockedRefreshBatch();
     messageEditSettleTimers.forEach(timer => clearTimeout(timer));
@@ -2149,7 +2169,16 @@
       }
 
       const chatLocal = isChatPage && runtimeProfile() !== "normal" && mutationsAreChatLocal(mutations);
-      if (chatLocal) DS.state.lastChatMutationAt = Date.now();
+      if (chatLocal) {
+        const now = Date.now();
+        DS.state.lastChatMutationAt = now;
+        if (DS.state?.settings?.chatPerformanceMode && loadedChatMessageCount() >= 80) {
+          const profile = runtimeProfile();
+          const quietMs = profile === "maximum" ? 1400 : (profile === "aggressive" ? 1150 : 950);
+          DS.state.chatEnhancerQuietUntil = Math.max(Number(DS.state.chatEnhancerQuietUntil || 0), now + quietMs);
+          counters.chatEnhancerQuietExtensions = Number(counters.chatEnhancerQuietExtensions || 0) + 1;
+        }
+      }
 
       // Keep the expensive whole-page DOM revision stable during token streaming.
       // A real message-root add/remove still bumps it so static long-chat classes
@@ -2322,8 +2351,9 @@
   try {
     if (DS.isExtensionContextValid?.()) {
       chrome.storage.onChanged.addListener(async changes => {
+        const settingsChanged = !!(DS.hasSettingStorageChanges?.(changes));
         if (
-          changes.settings ||
+          settingsChanged ||
           changes[DS.OPENED_KEY] ||
           changes[DS.OPENED_META_KEY] ||
           changes[DS.BLOCKED_BOTS_KEY] ||
@@ -2336,25 +2366,25 @@
           changes[DS.BOT_ORGANIZER_KEY] ||
           changes[DS.OOC_TEMPLATES_KEY]
         ) {
-          if (changes.settings) slowStepThrottle.clear();
+          if (settingsChanged) slowStepThrottle.clear();
           if (typeof DS.applyStorageChanges === "function") {
             DS.applyStorageChanges(changes);
           } else {
             await DS.loadState();
           }
-          if (changes.settings || changes[DS.OPENED_KEY] || changes[DS.OPENED_META_KEY]) {
+          if (settingsChanged || changes[DS.OPENED_KEY] || changes[DS.OPENED_META_KEY]) {
             DS.state.openedImportRevision = -1;
           }
-          if (changes.settings && document.hidden && DS.state?.settings?.autoReadNotifications) {
+          if (settingsChanged && document.hidden && DS.state?.settings?.autoReadNotifications) {
             setTimeout(() => DS.maybeAutoReadNotifications?.("settings-change"), 0);
           }
+          const granularEnabledChange = changes[DS.settingStorageKey?.("enabled") || ""];
           const masterWasDisabled = !!(
-            changes.settings &&
-            changes.settings.oldValue?.enabled !== false &&
-            changes.settings.newValue?.enabled === false
+            (changes.settings && changes.settings.oldValue?.enabled !== false && changes.settings.newValue?.enabled === false) ||
+            (granularEnabledChange && granularEnabledChange.oldValue !== false && granularEnabledChange.newValue === false)
           );
           if (
-            changes.settings ||
+            settingsChanged ||
             changes[DS.OPENED_KEY] ||
             changes[DS.OPENED_META_KEY] ||
             changes[DS.FAVORITE_BOTS_KEY] ||

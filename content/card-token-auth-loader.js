@@ -95,11 +95,40 @@
     inject();
   }
 
+  const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
+  const watchedSettingNames = ["enabled", "showCardGreetingTokenInfo", "deepSleepDisabledFeatures", "botArchiveRememberSeenPublic"];
+  const watchedSettings = {};
+
+  function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }
+
+  function hydrateWatchedSettings(result = {}) {
+    const next = { ...(result.settings || {}) };
+    for (const name of watchedSettingNames) {
+      const key = settingStorageKey(name);
+      if (Object.prototype.hasOwnProperty.call(result, key)) next[name] = result[key];
+    }
+    Object.assign(watchedSettings, next);
+    return watchedSettings;
+  }
+
+  function applyWatchedChanges(changes = {}) {
+    let changed = false;
+    if (changes.settings) { Object.assign(watchedSettings, changes.settings.newValue || {}); changed = true; }
+    for (const name of watchedSettingNames) {
+      const change = changes[settingStorageKey(name)];
+      if (!change) continue;
+      if (change.newValue === undefined) delete watchedSettings[name];
+      else watchedSettings[name] = change.newValue;
+      changed = true;
+    }
+    return changed;
+  }
+
   try {
-    chrome.storage.local.get(["settings"], result => syncFromSettings(result?.settings || {}));
+    chrome.storage.local.get(["settings", ...watchedSettingNames.map(settingStorageKey)], result => syncFromSettings(hydrateWatchedSettings(result || {})));
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !changes.settings) return;
-      syncFromSettings(changes.settings.newValue || {});
+      if (area !== "local" || !applyWatchedChanges(changes)) return;
+      syncFromSettings(watchedSettings);
     });
   } catch {
     // If storage is unavailable, the early chat-route bridge may remain active;

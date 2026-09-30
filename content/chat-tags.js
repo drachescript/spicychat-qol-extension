@@ -73,10 +73,8 @@
     const current = settings();
     const includeTags = uniqueTags([...(current.includeTags || []), tag]);
     const excludeTags = uniqueTags(current.excludeTags || []).filter(item => !sameTag(item, tag));
-    const nextSettings = { ...current, includeTags, excludeTags };
-
-    DS.state.settings = nextSettings;
-    await DS.storageSet?.({ settings: nextSettings });
+    DS.state.settings = { ...current, includeTags, excludeTags };
+    await DS.saveSettingsPatch?.({ includeTags, excludeTags });
 
     if (addButton) {
       const title = `${tag} is in the saved include tags`;

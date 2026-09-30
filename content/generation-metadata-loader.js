@@ -97,14 +97,43 @@
 
   window.__DSQ_SET_GENERATION_METADATA_ENABLED__ = setEnabled;
 
+  const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
+  const watchedSettingNames = ["enabled", "saiToolkitCompatibility", "showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning"];
+  const watchedSettings = {};
+
+  function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }
+
+  function hydrateWatchedSettings(result = {}) {
+    const next = { ...(result.settings || {}) };
+    for (const name of watchedSettingNames) {
+      const key = settingStorageKey(name);
+      if (Object.prototype.hasOwnProperty.call(result, key)) next[name] = result[key];
+    }
+    Object.assign(watchedSettings, next);
+    return watchedSettings;
+  }
+
+  function applyWatchedChanges(changes = {}) {
+    let changed = false;
+    if (changes.settings) { Object.assign(watchedSettings, changes.settings.newValue || {}); changed = true; }
+    for (const name of watchedSettingNames) {
+      const change = changes[settingStorageKey(name)];
+      if (!change) continue;
+      if (change.newValue === undefined) delete watchedSettings[name];
+      else watchedSettings[name] = change.newValue;
+      changed = true;
+    }
+    return changed;
+  }
+
   try {
-    chrome.storage.local.get("settings", result => {
-      applySettings(result?.settings || {});
+    chrome.storage.local.get(["settings", ...watchedSettingNames.map(settingStorageKey)], result => {
+      applySettings(hydrateWatchedSettings(result || {}));
     });
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes.settings) return;
-      applySettings(changes.settings.newValue || {});
+      if (areaName !== "local" || !applyWatchedChanges(changes)) return;
+      applySettings(watchedSettings);
     });
   } catch {}
 })();
