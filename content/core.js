@@ -375,6 +375,7 @@
     showBotCreationDates: false,
     expandBotNamesOnHover: false,
     paginationTopJumpBox: false,
+    paginationQuickJumpMenu: false,
     cardTokenShowGreeting: true,
     cardTokenShowDescription: false,
     cardTokenShowPersonality: false,

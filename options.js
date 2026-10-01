@@ -461,6 +461,7 @@ const DEFAULT_SETTINGS = {
   showBotCreationDates: false,
   expandBotNamesOnHover: false,
   paginationTopJumpBox: false,
+  paginationQuickJumpMenu: false,
   cardTokenShowGreeting: true,
   cardTokenShowDescription: false,
   cardTokenShowPersonality: false,
@@ -974,6 +975,7 @@ const SETTINGS_SECTION_COLLAPSE_EXCLUDED_TABS = new Set(["features", "changelog"
 const SETTINGS_PINNED_SECTIONS_KEY = "dsSettingsPinnedSectionsV1";
 const SETTINGS_RECENT_SECTIONS_KEY = "dsSettingsRecentSectionsV1";
 const SETTINGS_ENABLED_ONLY_KEY = "dsSettingsEnabledOnlyV1";
+const SETTINGS_SECTION_STATE_KEY = "dsSettingsSectionStateV1";
 let settingsSectionDefaultsApplied = false;
 let settingsShowEnabledOnly = false;
 
@@ -1243,7 +1245,52 @@ function setupSettingsSectionNavigation() {
   applySettingsEnabledOnlyFilter();
 }
 
-function setSettingsCardCollapsed(card, collapsed) {
+function readSettingsSectionState() {
+  const raw = readLocalJson(SETTINGS_SECTION_STATE_KEY, {});
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const state = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!key || typeof value !== "boolean") continue;
+    state[key] = value;
+  }
+  return state;
+}
+
+function writeSettingsSectionState(state) {
+  const next = {};
+  for (const [key, value] of Object.entries(state || {})) {
+    if (!key || typeof value !== "boolean") continue;
+    next[key] = value;
+  }
+  writeLocalJson(SETTINGS_SECTION_STATE_KEY, next);
+}
+
+function persistSettingsCardCollapsed(card, collapsed) {
+  const info = settingsCardInfo(card);
+  if (!info?.key || SETTINGS_SECTION_COLLAPSE_EXCLUDED_TABS.has(info.tabName)) return;
+  const state = readSettingsSectionState();
+  state[info.key] = !!collapsed;
+  writeSettingsSectionState(state);
+}
+
+function persistAllSettingsSectionStates() {
+  const state = readSettingsSectionState();
+  const liveKeys = new Set();
+  document.querySelectorAll(".tab-page > section.card.ds-settings-card-collapsible").forEach(card => {
+    const info = settingsCardInfo(card);
+    if (!info?.key || SETTINGS_SECTION_COLLAPSE_EXCLUDED_TABS.has(info.tabName)) return;
+    liveKeys.add(info.key);
+    state[info.key] = card.classList.contains("ds-settings-card-collapsed");
+  });
+  // Drop entries for Settings sections that no longer exist, while keeping the
+  // state object small and resilient across renamed/removed cards.
+  for (const key of Object.keys(state)) {
+    if (!liveKeys.has(key)) delete state[key];
+  }
+  writeSettingsSectionState(state);
+}
+
+function setSettingsCardCollapsed(card, collapsed, { persist = false } = {}) {
   if (!card?.classList?.contains("ds-settings-card-collapsible")) return;
   const body = card.querySelector(":scope > .settings-card-body");
   const toggle = card.querySelector(":scope > h2 .settings-card-toggle");
@@ -1252,6 +1299,7 @@ function setSettingsCardCollapsed(card, collapsed) {
   card.classList.toggle("ds-settings-card-collapsed", next);
   body.hidden = next;
   toggle.setAttribute("aria-expanded", next ? "false" : "true");
+  if (persist) persistSettingsCardCollapsed(card, next);
 }
 
 function setSettingsTabCollapsed(tabName, collapsed) {
@@ -1299,7 +1347,7 @@ function setupCollapsibleSettingsCards() {
       toggle.setAttribute("aria-expanded", "true");
       toggle.title = "Open or close this Settings section";
       toggle.addEventListener("click", () => {
-        setSettingsCardCollapsed(card, !card.classList.contains("ds-settings-card-collapsed"));
+        setSettingsCardCollapsed(card, !card.classList.contains("ds-settings-card-collapsed"), { persist: true });
         recordRecentSettingsCard(card);
       });
 
@@ -1350,8 +1398,24 @@ function setupCollapsibleSettingsCards() {
 function applySettingsSectionDefault(settings = {}) {
   if (settingsSectionDefaultsApplied) return;
   settingsSectionDefaultsApplied = true;
-  if (!settings.collapseSettingsSectionsByDefault) return;
-  setAllSettingsSectionsCollapsed(true);
+
+  const savedState = readSettingsSectionState();
+  const defaultCollapsed = !!settings.collapseSettingsSectionsByDefault;
+  const normalizedState = {};
+
+  document.querySelectorAll(".tab-page > section.card.ds-settings-card-collapsible").forEach(card => {
+    const info = settingsCardInfo(card);
+    if (!info?.key || SETTINGS_SECTION_COLLAPSE_EXCLUDED_TABS.has(info.tabName)) return;
+    const hasSavedState = Object.prototype.hasOwnProperty.call(savedState, info.key);
+    const collapsed = hasSavedState ? !!savedState[info.key] : defaultCollapsed;
+    setSettingsCardCollapsed(card, collapsed);
+    normalizedState[info.key] = collapsed;
+  });
+
+  // Seed any cards that did not have a remembered value yet. From this point
+  // on, each Settings section remembers its own open/closed state across page
+  // reloads and extension restarts instead of resetting to one global default.
+  writeSettingsSectionState(normalizedState);
 }
 
 function invalidateHeavyTab(tabName) {
@@ -1414,7 +1478,7 @@ const botManagerBulkSelection = {
 const botAvailabilityUiState = {
   query: "",
   status: "all",
-  visible: 20,
+  visible: 10,
   collapsed: true
 };
 
@@ -4726,6 +4790,7 @@ function setupSettingsSearch() {
   const SEARCH_ALIASES = {
     autoFillListings: "refill fill page listing autofill hidden cards",
     paginationTopJumpBox: "page number jump go top chatbot listing pagination 20000",
+    paginationQuickJumpMenu: "pagination page jump dropdown random page quick menu ellipsis dots 20000",
     expandBotNamesOnHover: "bot name title expander full name hover tap cut off",
     showListingRefillButton: "refill fill now manual listing",
     showListingFilterStats: "bot blocking filters blocked filtered bots result count stats results found listing statistics",
@@ -4829,13 +4894,46 @@ function setupSettingsSearch() {
     return found;
   }
 
+  function labelPrimaryText(label) {
+    if (!label) return "";
+    const directSpan = label.querySelector(":scope > span");
+    if (directSpan) return cleanSearchText(directSpan.textContent);
+
+    // Do not let select options, dependency helper buttons, validation text,
+    // or dynamic counters become the visible search-result label.
+    const clone = label.cloneNode(true);
+    clone.querySelectorAll("input, select, textarea, button, small, .hint, .setting-dependency-note").forEach(node => node.remove());
+    return cleanSearchText(clone.textContent);
+  }
+
   function targetLabel(target) {
     if (!target) return "Setting";
-    if (target.matches("label")) return cleanSearchText(target.textContent);
+    if (target.matches("label")) return labelPrimaryText(target);
     if (target.matches("button")) return cleanSearchText(target.textContent || target.getAttribute("aria-label"));
     const label = target.closest("label");
-    if (label) return cleanSearchText(label.textContent);
+    if (label) return labelPrimaryText(label);
     return cleanSearchText(target.textContent || target.getAttribute?.("aria-label")) || "Setting";
+  }
+
+  function isSearchNoiseButton(button) {
+    if (!button) return true;
+    if (button.closest([
+      ".settings-search-results",
+      ".bot-manager-list",
+      ".bot-manager-pager",
+      ".bot-manager-bulkbar",
+      ".bot-availability-list",
+      ".tab-cleanup-session-list",
+      ".tab-cleanup-topic-list",
+      ".tab-cleanup-review-list",
+      ".creator-relation-list",
+      ".control-health-results",
+      ".control-storage-grid"
+    ].join(","))) return true;
+    if (button.matches(".settings-card-toggle, .settings-card-pin, .settings-card-reset")) return true;
+
+    const text = cleanSearchText(button.textContent || button.getAttribute("aria-label"));
+    return /^(?:show\s+(?:\d+\s+more|first\s+\d+|\d+)|load\s+more|open\s+profile|open\s+chat|copy\s+link|select|remove|recheck)$/i.test(text);
   }
 
   const items = [];
@@ -4908,14 +5006,18 @@ function setupSettingsSearch() {
     // only knowing which large card contains the words.
     card.querySelectorAll("label").forEach(label => addItem(label, "setting"));
     card.querySelectorAll("button").forEach(button => {
-      if (button.closest("label, .settings-search-results")) return;
+      if (button.closest("label") || isSearchNoiseButton(button)) return;
       const text = cleanSearchText(button.textContent || button.getAttribute("aria-label"));
       if (!text) return;
       addItem(button, "action");
     });
 
-    // Keep one card-level fallback so searches for explanatory hint text still
-    // work even when that wording is not part of a specific control label.
+    // Keep a card-level fallback, but index only the static card heading/hints.
+    // Indexing card.textContent also pulled thousands of rendered bot rows and
+    // pager labels ("Show 20 more", etc.) into Settings search.
+    const staticHintText = cleanSearchText(
+      [...card.querySelectorAll(":scope > p.hint, :scope > .hint")].map(node => node.textContent).join(" ")
+    );
     items.push({
       index: itemIndex++,
       target: card,
@@ -4927,7 +5029,7 @@ function setupSettingsSearch() {
       subheading: "",
       label: cardHeading,
       kind: "card",
-      searchText: cleanSearchText([cardSearchText(card), registrySearchTextFor("", card.id, card.id), GENERIC_SEARCH_TERMS].join(" ")).toLowerCase(),
+      searchText: cleanSearchText([cardHeading, staticHintText, registrySearchTextFor("", card.id, card.id), GENERIC_SEARCH_TERMS].join(" ")).toLowerCase(),
       targetText: cardHeading.toLowerCase()
     });
   });
@@ -5043,7 +5145,7 @@ function setupSettingsSearch() {
         if (genericOnly) return a.item.index - b.item.index;
         return b.score - a.score || a.item.label.length - b.item.label.length;
       })
-      .slice(0, 30);
+      .slice(0, 50);
 
     lastMatches = matches;
     host.hidden = false;
@@ -6352,7 +6454,7 @@ function collectTrackedAvailabilityBots(scope = "all") {
 
   return [...byId.values()].map(entry => ({
     ...entry,
-    name: entry.name || entry.id
+    name: cleanAuthoritativeBotName(entry.name, entry.id) || ""
   }));
 }
 
@@ -6677,6 +6779,21 @@ function compareBotSnapshots(baselineValue, currentValue) {
 function reconcileBotUpdate(previousValue, checkedValue) {
   const previous = previousValue && typeof previousValue === "object" ? previousValue : null;
   const checked = { ...checkedValue };
+  const id = String(checked.id || previous?.id || "").trim();
+  const archive = id ? (botArchiveState?.meta?.[id] || null) : null;
+  const archiveFields = archive?.fields || {};
+  const preservedName = [
+    cleanAuthoritativeBotName(checked.name, id),
+    cleanAuthoritativeBotName(previous?.name, id),
+    cleanAuthoritativeBotName(archiveFields.name, id),
+    cleanAuthoritativeBotName(archive?.name, id),
+    ...localBotNameCandidates(id)
+  ].find(Boolean) || "";
+  checked.name = preservedName;
+  checked.image = checked.image || previous?.image || archive?.image || archiveFields.image || "";
+  checked.creator = checked.creator || previous?.creator || archive?.creator || archiveFields.creator || "";
+  checked.profileUrl = checked.profileUrl || previous?.profileUrl || archive?.profileUrl || (id ? `https://spicychat.ai/chatbot/${id}` : "");
+  checked.chatUrl = checked.chatUrl || previous?.chatUrl || archive?.chatUrls?.[0] || (id ? `https://spicychat.ai/chat/${id}` : "");
   const oldBaseline = previous?.baseline ? normalizeBotSnapshot(previous.baseline) : null;
   const snapshot = checked.snapshot && snapshotHasSignal(checked.snapshot) ? normalizeBotSnapshot(checked.snapshot) : null;
 
@@ -7112,8 +7229,8 @@ function botStatusCenterBaseEntries(scope = "all") {
     byId.set(entry.id, {
       ...trackedEntry,
       ...entry,
-      name: entry.name || trackedEntry.name || entry.id,
-      image: entry.image || trackedEntry.image || "",
+      name: cleanAuthoritativeBotName(entry.name, entry.id) || cleanAuthoritativeBotName(archives[entry.id]?.fields?.name, entry.id) || cleanAuthoritativeBotName(archives[entry.id]?.name, entry.id) || cleanAuthoritativeBotName(trackedEntry.name, entry.id) || bestKnownBotName(entry.id, ""),
+      image: entry.image || trackedEntry.image || archives[entry.id]?.image || archives[entry.id]?.fields?.image || "",
       creator: entry.creator || trackedEntry.creator || "",
       sources: uniqueClean([...(trackedEntry.sources || []), ...(entry.sources || [])]),
       archive: archives[entry.id] || trackedEntry.archive || null
@@ -7126,7 +7243,7 @@ function botStatusCenterBaseEntries(scope = "all") {
     byId.set(id, {
       id,
       ...current,
-      name: current.name || archive.name || archive.fields?.name || id,
+      name: cleanAuthoritativeBotName(current.name, id) || cleanAuthoritativeBotName(archive.fields?.name, id) || cleanAuthoritativeBotName(archive.name, id) || bestKnownBotName(id, ""),
       image: current.image || archive.image || archive.fields?.image || "",
       creator: current.creator || archive.creator || archive.fields?.creator || "",
       profileUrl: current.profileUrl || archive.profileUrl || `https://spicychat.ai/chatbot/${id}`,
@@ -8820,7 +8937,7 @@ function renderBotAvailability(renderOptions = {}) {
   const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
   const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
   const staleCount = base.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
-  let limit = Math.max(20, Number(botAvailabilityUiState.visible || 20) || 20);
+  let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
   const shown = entries.slice(0, limit);
 
   const summary = $("botAvailabilitySummary");
@@ -8852,12 +8969,12 @@ function renderBotAvailability(renderOptions = {}) {
   const collapse = $("botAvailabilityCollapse");
   if (showMore) {
     showMore.style.display = entries.length > shown.length ? "" : "none";
-    showMore.textContent = `Show 20 more (${Math.max(0, entries.length - shown.length)} left)`;
+    showMore.textContent = `Show 10 more (${Math.max(0, entries.length - shown.length)} left)`;
   }
-  if (showLess) showLess.style.display = shown.length > 20 || !botAvailabilityUiState.collapsed ? "" : "none";
+  if (showLess) showLess.style.display = shown.length > 10 || !botAvailabilityUiState.collapsed ? "" : "none";
   if (collapse) {
-    collapse.style.display = entries.length > 20 ? "" : "none";
-    collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
+    collapse.style.display = entries.length > 10 ? "" : "none";
+    collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
 
   if (!base.length) {
@@ -9727,7 +9844,7 @@ function renderSavedBotInfo() {
   if (showLess) showLess.style.display = shown.length > 20 || !savedBotInfoUiState.collapsed ? "" : "none";
   if (collapse) {
     collapse.style.display = items.length > 20 ? "" : "none";
-    collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
+    collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
   if (!items.length) {
     setEmptyState(host, query ? "No saved recovery copies match that search." : "No saved bot recovery copies yet. Run Bot Status Center on saved bots or enable archive capture to build them.");
@@ -9787,25 +9904,25 @@ function renderSavedBotInfo() {
 }
 
 
-const deletedSavedBotsUiState = { query: "", visible: 20, collapsed: true };
+const deletedSavedBotsUiState = { query: "", visible: 10, collapsed: true };
 
 function isConfirmedUnavailableBotStatus(entry) {
-  if (!entry || String(entry.status || "") !== "unavailable") return false;
-  const httpStatus = Number(entry.httpStatus || 0);
-  if (httpStatus === 404 || httpStatus === 410) return true;
-  const reason = String(entry.reason || "").toLowerCase();
-  return /(?:character api|profile).*(?:not found|unavailable|deleted)|(?:http\s*)?(?:404|410)|page says .*?(?:not found|unavailable|deleted)/i.test(reason);
+  // Availability classification is authoritative here. First/temporary empty
+  // responses stay "unknown"; only confirmed deletion/unavailability is
+  // normalized to "unavailable". Re-checking a second evidence predicate in
+  // the recovery renderer caused confirmed cards to disappear from the deleted
+  // section even while Bot Status already labelled them unavailable.
+  return !!entry && String(entry.status || "") === "unavailable";
 }
 
 function deletedSavedBotEntries() {
   const availability = normalizeBotAvailability(botAvailabilityState).meta;
   const archives = normalizeBotArchive(botArchiveState).meta;
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids);
   const query = String($("deletedSavedBotSearch")?.value || deletedSavedBotsUiState.query || "")
     .toLowerCase().replace(/\s+/g, " ").trim();
   deletedSavedBotsUiState.query = query;
   return Object.values(availability)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(entry.id))
+    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id])
     .map(entry => ({ ...entry, archive: archives[entry.id] }))
     .filter(entry => {
       if (!query) return true;
@@ -9824,7 +9941,8 @@ function deletedSavedBotCard(entry) {
   else card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "?" }));
 
   const main = makeElement("div", { className: "bot-manager-main" });
-  main.appendChild(makeElement("div", { className: "bot-manager-title", text: displayNormalizedSavedText(archive?.name || fields.name || entry.name || entry.id) }));
+  const recoveryName = cleanAuthoritativeBotName(fields.name, entry.id) || cleanAuthoritativeBotName(archive?.name, entry.id) || cleanAuthoritativeBotName(entry.name, entry.id) || bestKnownBotName(entry.id, "") || "Unknown bot";
+  main.appendChild(makeElement("div", { className: "bot-manager-title", text: displayNormalizedSavedText(recoveryName) }));
   const creator = archive?.creator || fields.creator || entry.creator || "";
   if (creator) main.appendChild(makeElement("div", { className: "bot-manager-creator", text: displayNormalizedSavedText(creator) }));
   main.appendChild(makeElement("div", { className: "bot-manager-id", text: entry.id }));
@@ -9874,10 +9992,9 @@ function renderDeletedSavedBots() {
   if (!host) return;
   const all = deletedSavedBotEntries();
   const archives = normalizeBotArchive(botArchiveState).meta;
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids);
   const totalRecoverable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(entry.id)).length;
-  const limit = Math.max(20, Number(deletedSavedBotsUiState.visible || 20) || 20);
+    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id]).length;
+  const limit = Math.max(10, Number(deletedSavedBotsUiState.visible || 10) || 10);
   const shown = all.slice(0, limit);
   if ($("deletedSavedBotSummary")) {
     $("deletedSavedBotSummary").textContent = `${totalRecoverable} recoverable deleted bot${totalRecoverable === 1 ? "" : "s"}${deletedSavedBotsUiState.query ? ` · ${all.length} matching` : ""}`;
@@ -9887,11 +10004,11 @@ function renderDeletedSavedBots() {
   const collapse = $("deletedSavedBotCollapse");
   if (showMore) {
     showMore.style.display = all.length > shown.length ? "" : "none";
-    showMore.textContent = `Show 20 more (${Math.max(0, all.length - shown.length)} left)`;
+    showMore.textContent = `Show 10 more (${Math.max(0, all.length - shown.length)} left)`;
   }
-  if (showLess) showLess.style.display = shown.length > 20 || !deletedSavedBotsUiState.collapsed ? "" : "none";
+  if (showLess) showLess.style.display = shown.length > 10 || !deletedSavedBotsUiState.collapsed ? "" : "none";
   if (collapse) {
-    collapse.style.display = all.length > 20 ? "" : "none";
+    collapse.style.display = all.length > 10 ? "" : "none";
     collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
   }
   if (!all.length) {
@@ -10006,26 +10123,26 @@ function setupBotAvailabilityControls() {
     renderSavedBotInfo();
   });
   $("deletedSavedBotSearch")?.addEventListener("input", () => {
-    deletedSavedBotsUiState.visible = 20;
+    deletedSavedBotsUiState.visible = 10;
     deletedSavedBotsUiState.collapsed = true;
     renderDeletedSavedBots();
   });
   $("deletedSavedBotShowMore")?.addEventListener("click", () => {
-    deletedSavedBotsUiState.visible = Math.min(5000, Number(deletedSavedBotsUiState.visible || 20) + 20);
+    deletedSavedBotsUiState.visible = Math.min(5000, Number(deletedSavedBotsUiState.visible || 10) + 10);
     deletedSavedBotsUiState.collapsed = true;
     renderDeletedSavedBots();
   });
   $("deletedSavedBotShowLess")?.addEventListener("click", () => {
-    deletedSavedBotsUiState.visible = 20;
+    deletedSavedBotsUiState.visible = 10;
     deletedSavedBotsUiState.collapsed = true;
     renderDeletedSavedBots();
   });
   $("deletedSavedBotCollapse")?.addEventListener("click", () => {
-    if (Number(deletedSavedBotsUiState.visible || 20) <= 20) {
+    if (Number(deletedSavedBotsUiState.visible || 10) <= 10) {
       deletedSavedBotsUiState.visible = Math.min(100, deletedSavedBotEntries().length);
       deletedSavedBotsUiState.collapsed = false;
     } else {
-      deletedSavedBotsUiState.visible = 20;
+      deletedSavedBotsUiState.visible = 10;
       deletedSavedBotsUiState.collapsed = true;
     }
     renderDeletedSavedBots();
@@ -10073,13 +10190,13 @@ function setupBotAvailabilityControls() {
   $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability(); });
   $("botAvailabilityScope")?.addEventListener("change", () => {
     invalidateDuplicateCache();
-    botAvailabilityUiState.visible = 20;
+    botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
     renderBotAvailability();
   });
   $("botAvailabilityStatusFilter")?.addEventListener("change", async event => {
     botAvailabilityUiState.status = event.target.value || "all";
-    botAvailabilityUiState.visible = 20;
+    botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
     if (BOT_DUPLICATE_LEVELS.has(botAvailabilityUiState.status) && !botDuplicateCacheReady) {
       const scope = String($("botAvailabilityScope")?.value || "all");
@@ -10097,29 +10214,29 @@ function setupBotAvailabilityControls() {
   });
   const renderAvailabilitySearch = debounceCallback(event => {
     botAvailabilityUiState.query = event?.target?.value || $("botAvailabilitySearch")?.value || "";
-    botAvailabilityUiState.visible = 20;
+    botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
     renderBotAvailability();
   });
   $("botAvailabilitySearch")?.addEventListener("input", renderAvailabilitySearch);
   $("botAvailabilityShowMore")?.addEventListener("click", () => {
     botAvailabilityUiState.collapsed = true;
-    botAvailabilityUiState.visible = Math.min(5000, Number(botAvailabilityUiState.visible || 20) + 20);
+    botAvailabilityUiState.visible = Math.min(5000, Number(botAvailabilityUiState.visible || 10) + 10);
     renderBotAvailability();
   });
   $("botAvailabilityShowLess")?.addEventListener("click", () => {
-    botAvailabilityUiState.visible = 20;
+    botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
     renderBotAvailability();
   });
   $("botAvailabilityCollapse")?.addEventListener("click", () => {
-    const current = Number(botAvailabilityUiState.visible || 20);
-    if (current <= 20) {
+    const current = Number(botAvailabilityUiState.visible || 10);
+    if (current <= 10) {
       botAvailabilityUiState.collapsed = false;
       botAvailabilityUiState.visible = Math.min(100, botStatusCenterBaseEntries(String($("botAvailabilityScope")?.value || "all")).length);
     } else {
       botAvailabilityUiState.collapsed = true;
-      botAvailabilityUiState.visible = 20;
+      botAvailabilityUiState.visible = 10;
     }
     renderBotAvailability();
   });
@@ -10790,9 +10907,12 @@ function isPlaceholderBotName(value, id = "") {
   if (id && text.toLowerCase() === String(id).toLowerCase()) return true;
   const lower = text.toLowerCase();
   return [
-    "for you", "unknown bot", "unknown", "chatbot", "spicychat", "404",
+    "for you", "recommended for you", "unknown bot", "unknown character", "unknown", "chatbot", "character", "bot", "spicychat",
+    "chatbot under review", "character under review", "under review", "private chatbot", "deleted chatbot", "deleted",
+    "unavailable", "not available", "404", "404 not found", "not found", "page not found", "error",
+    "error loading chatbot", "failed to load chatbot",
     "create personalized ai characters chatbots", "create personalized ai characters chatbot"
-  ].includes(lower) || /^create personalized ai characters chatbots?\b/i.test(text);
+  ].includes(lower) || /^(?:for you|recommended for you|chatbot under review|character under review|404(?: not found)?|not found|page not found)(?:\b|[.!…])/i.test(text) || /^create personalized ai characters chatbots?\b/i.test(text);
 }
 
 function cleanAuthoritativeBotName(value, id = "") {
@@ -10804,8 +10924,14 @@ function localBotNameCandidates(id) {
   const key = String(id || "").trim();
   if (!key) return [];
   const availability = botAvailabilityState?.meta?.[key] || {};
+  const archive = botArchiveState?.meta?.[key] || {};
+  const recovery = botUnavailableRecoveryState?.meta?.[key] || {};
   const snapshot = normalizeBotSnapshot(availability.snapshot || availability.baseline || {});
   return [
+    archive?.fields?.name,
+    archive?.name,
+    recovery?.records?.openedMeta?.name,
+    recovery?.name,
     openedChatMetaState?.[key]?.name,
     laterBotState?.meta?.[key]?.name,
     favoriteBotState?.meta?.[key]?.name,
@@ -14717,6 +14843,7 @@ async function load() {
   setChecked("showBotCreationDates", !!settings.showBotCreationDates);
   setChecked("expandBotNamesOnHover", !!settings.expandBotNamesOnHover);
   setChecked("paginationTopJumpBox", !!settings.paginationTopJumpBox);
+  setChecked("paginationQuickJumpMenu", !!settings.paginationQuickJumpMenu);
   setChecked("cardTokenShowGreeting", settings.cardTokenShowGreeting !== false);
   setChecked("cardTokenShowPersonality", !!settings.cardTokenShowPersonality);
   setChecked("cardTokenShowScenario", !!settings.cardTokenShowScenario);
@@ -15364,6 +15491,7 @@ function readSettingsFromPage() {
 
     autoFillListings: checked("autoFillListings"),
     paginationTopJumpBox: checked("paginationTopJumpBox"),
+    paginationQuickJumpMenu: checked("paginationQuickJumpMenu"),
     showListingRefillButton: checked("showListingRefillButton"),
     showListingFilterStats: checked("showListingFilterStats"),
     showListingFilterStatsDetails: checked("showListingFilterStatsDetails"),
@@ -21903,8 +22031,14 @@ $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerfo
   $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());
 });
 $("qolInterfaceScale")?.addEventListener("change", () => applyOptionsAccessibilityPreview({ qolInterfaceScale: Number(value("qolInterfaceScale", "100")) || 100 }));
-$("collapseAllSettingsSections")?.addEventListener("click", () => setAllSettingsSectionsCollapsed(true));
-$("expandAllSettingsSections")?.addEventListener("click", () => setAllSettingsSectionsCollapsed(false));
+$("collapseAllSettingsSections")?.addEventListener("click", () => {
+  setAllSettingsSectionsCollapsed(true);
+  persistAllSettingsSectionStates();
+});
+$("expandAllSettingsSections")?.addEventListener("click", () => {
+  setAllSettingsSectionsCollapsed(false);
+  persistAllSettingsSectionStates();
+});
 $("runSettingsHealthCheck")?.addEventListener("click", () => runSettingsHealthCheck().catch(() => showSettingsToast("Settings health check failed.")));
 $("openSaiCompatibilitySetting")?.addEventListener("click", () => revealSettingsTarget("saiToolkitCompatibility"));
 $("markUpdatesSeen")?.addEventListener("click", markUpdatesSeen);

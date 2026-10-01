@@ -5560,6 +5560,29 @@ html.ds-listing-performance .ds-listing-card-lite:has(button[aria-expanded="true
 }
 
 
+/* QoL expanded listing pagination. Native numeric buttons remain in the DOM for
+   SpicyChat/React state, but QoL hides them while its wider page window is active. */
+.ds-pagination-native-hidden {
+  display: none !important;
+}
+.ds-pagination-quick-menu {
+  height: 36px;
+  max-width: 118px;
+  box-sizing: border-box;
+  border: 1px solid var(--gray-8, #4b5563);
+  border-radius: 6px;
+  background: var(--gray-2, #111318);
+  color: inherit;
+  padding: 0 7px;
+  font: 500 12px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+.ds-pagination-qol-current {
+  cursor: default !important;
+}
+@media (max-width:760px) {
+  .ds-pagination-quick-menu { height: 32px; max-width: 92px; padding-inline: 4px; }
+}
+
 #ds-bot-name-expander {
   position: fixed;
   z-index: 2147482500;

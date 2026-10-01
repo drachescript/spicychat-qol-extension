@@ -543,8 +543,8 @@ Testing"></textarea></label>
 <p class="hint">Live availability results for all tracked bots. Available bots belong here; only confirmed deleted/unavailable recovery copies appear in the separate section below.</p>
 <div class="bot-manager-list" id="botAvailabilityManager"></div>
 <div class="bot-manager-pager">
-<button id="botAvailabilityShowMore" type="button">Show 20 more</button>
-<button id="botAvailabilityShowLess" type="button">Show first 20</button>
+<button id="botAvailabilityShowMore" type="button">Show 10 more</button>
+<button id="botAvailabilityShowLess" type="button">Show first 10</button>
 <button id="botAvailabilityCollapse" type="button">Show 100</button>
 </div>
 </fieldset>
@@ -581,15 +581,15 @@ Testing"></textarea></label>
 </fieldset>
 <fieldset id="deletedSavedBotsCard">
 <legend>Deleted / Unavailable Saved Bots</legend>
-<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Currently blocked bots stay hidden here. Active-list cleanup never removes recovery copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
+<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Recovery copies stay visible even if the bot is still present in Blocked or another local list. Active-list cleanup never removes recovery copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
 <div class="bot-manager-toolbar">
 <input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
 <span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
 </div>
 <div class="bot-manager-list" id="deletedSavedBotManager"></div>
 <div class="bot-manager-pager">
-<button id="deletedSavedBotShowMore" type="button">Show 20 more</button>
-<button id="deletedSavedBotShowLess" type="button">Show first 20</button>
+<button id="deletedSavedBotShowMore" type="button">Show 10 more</button>
+<button id="deletedSavedBotShowLess" type="button">Show first 10</button>
 <button id="deletedSavedBotCollapse" type="button">Show 100</button>
 </div>
 </fieldset>
@@ -2396,7 +2396,8 @@ NTR"></textarea></label>
 <p class="hint">Can load extra listing pages in a temporary inactive SpicyChat helper tab (or use Load More on older layouts) after QoL hides cards so the page has enough visible results. Disabled on phone/mobile for now.</p>
 <label class="row"><input id="autoFillListings" type="checkbox"/><span>Enable Listing Refill</span></label>
 <label class="row"><input id="paginationTopJumpBox" type="checkbox"/><span>Show a page-number box above chatbot listings</span></label>
-<p class="hint">The page box accepts pages 1–20,000 and uses the same navigation as the bottom pagination jump control.</p>
+<label class="row"><input id="paginationQuickJumpMenu" type="checkbox"/><span>Show a quick page-jump dropdown beside bottom pagination</span></label>
+<p class="hint">The three-dots controls in bottom pagination are editable page-number boxes (1–20,000). QoL also expands the native page window and adds an estimated last-page shortcut when the listing exposes a result count. The optional dropdown adds Random page plus useful page landmarks.</p>
 <label>Target visible cards<input id="autoFillTargetCards" max="200" min="1" step="1" type="number"/></label>
 <label>Max extra pages / Load More attempts per listing<input id="autoFillMaxClicks" max="30" min="1" step="1" type="number"/></label>
 <p class="hint">Default target is 50 visible cards; you can raise it up to 200. On current paginated listings QoL briefly opens later pages in an inactive helper tab, copies only candidates that pass the current filters back into your listing, skips duplicate bots, and closes/reuses the helper automatically. Listing filter statistics are configured separately under Bot Blocking &amp; Dislikes.</p>
@@ -2839,6 +2840,6 @@ myth => Fantasy | ✨"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="platform-capabilities.js"></script><script src="feature-registry.js"></script><script src="feature-registry-v014.js"></script><script src="options.js"></script>
+<script src="platform-capabilities.js"></script><script src="feature-registry.js"></script><script src="options.js"></script>
 </body>
 </html>

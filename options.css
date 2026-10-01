@@ -1070,8 +1070,9 @@ footer.hidden { display: none; }
   display: grid;
   gap: 6px;
   margin-top: 8px;
-  max-height: 340px;
+  max-height: min(70vh, 760px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .settings-search-result {
   width: 100%;
