@@ -1540,13 +1540,17 @@
         }
       };
       try {
-        chrome.runtime?.sendMessage?.({ type: "DS_OPEN_OPTIONS" }, response => {
+        chrome.runtime?.sendMessage?.({
+          type: "DS_OPEN_OPTIONS_TARGET",
+          target: safeTarget,
+          query: pending.search || ""
+        }, response => {
           let failed = false;
           try { failed = !!chrome.runtime?.lastError; } catch {}
-          if (!failed && response?.ok !== false) finish(true);
+          if (!failed && response?.ok) finish(true);
           else fallback();
         });
-        window.setTimeout(() => { if (!settled) fallback(); }, 800);
+        window.setTimeout(() => { if (!settled) fallback(); }, 1000);
       } catch {
         fallback();
       }

@@ -489,15 +489,11 @@ document
 document
   .getElementById("options")
   .addEventListener("click", async () => {
-    const tab = await getActiveTab();
-    chrome.runtime.sendMessage(
-      { type: "DS_OPEN_OPTIONS_FROM_POPUP", tabId: tab?.id || null },
-      response => {
-        if (chrome.runtime.lastError || !response?.ok) {
-          chrome.runtime.openOptionsPage();
-        }
-      }
-    );
+    const opened = await openOptionsTarget("general");
+    if (!opened) {
+      try { chrome.runtime.openOptionsPage(); } catch {}
+    }
+    window.close();
   });
 
 document

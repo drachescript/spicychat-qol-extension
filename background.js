@@ -115,6 +115,8 @@ let botStatusWorkerTabId = null;
 let botStatusWorkerOwned = false;
 let botStatusWorkerSessionId = "";
 let botStatusWorkerHeartbeatAt = 0;
+let botStatusWorkerActivityAt = 0;
+let botStatusWorkerRequestActive = false;
 let botStatusWorkerRestartCount = 0;
 let botStatusWorkerRestartBackoffUntil = 0;
 const botStatusWorkerTabIds = new Set();
@@ -123,7 +125,11 @@ const BOT_STATUS_HOME_WORKER_URL = "https://spicychat.ai/?dsQolBotStatusWorker=1
 const BOT_STATUS_WORKER_SESSION_TAB_KEY = "dsBotStatusWorkerTabId";
 const BOT_STATUS_WORKER_SESSION_OWNED_KEY = "dsBotStatusWorkerOwned";
 const BOT_STATUS_WORKER_SESSION_ID_KEY = "dsBotStatusWorkerSessionId";
-const BOT_STATUS_WORKER_HEARTBEAT_TTL_MS = 15 * 1000;
+// Visible/request-active health should update quickly, but an inactive helper tab
+// can have its page timers throttled by Chromium for several minutes. Do not
+// mistake that browser throttling for worker death.
+const BOT_STATUS_WORKER_HEARTBEAT_TTL_MS = 60 * 1000;
+const BOT_STATUS_WORKER_THROTTLED_TTL_MS = 6 * 60 * 1000;
 const listingRefillWorkerTabIds = new Set();
 const listingRefillPageWorkerTabs = new Map();
 const listingRefillSourceTabs = new Map();
@@ -1102,8 +1108,29 @@ function createBotStatusWorkerSessionId() {
   return `bot-status:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function botStatusHeartbeatFresh() {
-  return !!botStatusWorkerHeartbeatAt && Date.now() - Number(botStatusWorkerHeartbeatAt || 0) <= BOT_STATUS_WORKER_HEARTBEAT_TTL_MS;
+function botStatusWorkerLastActivityAt() {
+  return Math.max(Number(botStatusWorkerHeartbeatAt || 0), Number(botStatusWorkerActivityAt || 0));
+}
+
+function botStatusHeartbeatFresh(tab = null) {
+  const lastAt = botStatusWorkerLastActivityAt();
+  if (!lastAt) return false;
+  const inactiveOwnedHelper = !!botStatusWorkerOwned && tab?.active !== true;
+  const ttl = (inactiveOwnedHelper || botStatusWorkerRequestActive)
+    ? BOT_STATUS_WORKER_THROTTLED_TTL_MS
+    : BOT_STATUS_WORKER_HEARTBEAT_TTL_MS;
+  return Date.now() - lastAt <= ttl;
+}
+
+async function runTrackedBotStatusRequest(task) {
+  botStatusWorkerRequestActive = true;
+  botStatusWorkerActivityAt = Date.now();
+  try {
+    return await task();
+  } finally {
+    botStatusWorkerRequestActive = false;
+    botStatusWorkerActivityAt = Date.now();
+  }
 }
 
 function noteBotStatusWorkerHeartbeat(tabId, sessionId = "") {
@@ -1156,6 +1183,7 @@ async function probeBotStatusWorker(tabId, timeoutMs = 7000) {
     if (response?.__dsTimeout) last = { ok: false, ready: false, status: "worker-message-timeout" };
     else if (response) last = response;
     if (response?.ready) {
+      botStatusWorkerActivityAt = Date.now();
       noteBotStatusWorkerHeartbeat(id, response?.sessionId || botStatusWorkerSessionId);
       return { ...response, ok: true, ready: true, tabId: id, sessionId: botStatusWorkerSessionId || response?.sessionId || "" };
     }
@@ -1168,7 +1196,11 @@ async function rememberBotStatusWorker(tabId, owned, sessionId = botStatusWorker
   const id = Number(tabId || 0);
   const nextSessionId = id ? String(sessionId || botStatusWorkerSessionId || createBotStatusWorkerSessionId()) : "";
   botStatusWorkerSessionId = nextSessionId;
-  if (!id) botStatusWorkerHeartbeatAt = 0;
+  if (!id) {
+    botStatusWorkerHeartbeatAt = 0;
+    botStatusWorkerActivityAt = 0;
+    botStatusWorkerRequestActive = false;
+  }
   await storageSessionSet({
     [BOT_STATUS_WORKER_SESSION_TAB_KEY]: id || 0,
     [BOT_STATUS_WORKER_SESSION_OWNED_KEY]: !!owned,
@@ -1203,6 +1235,8 @@ async function releaseBotStatusWorker({ reason = "normal-release" } = {}) {
   botStatusWorkerTabId = null;
   botStatusWorkerOwned = false;
   botStatusWorkerHeartbeatAt = 0;
+  botStatusWorkerActivityAt = 0;
+  botStatusWorkerRequestActive = false;
   botStatusWorkerTabIds.clear();
   await rememberBotStatusWorker(0, false, "");
   if (!id || !owned) return 0;
@@ -1256,11 +1290,15 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
     // A router URL change is no longer treated as worker death. If the worker
     // is still heartbeating, keep the durable tab identity and let the API
     // request retry through the existing serial deadline.
-    if (botStatusWorkerOwned && botStatusHeartbeatFresh()) {
-      await recordHelperLifecycle("bot-status-worker-heartbeat-alive", {
+    if (botStatusWorkerOwned && botStatusHeartbeatFresh(tab)) {
+      await recordHelperLifecycle("bot-status-worker-throttle-aware-alive", {
         tabId: Number(tab.id),
         status: String(ready?.status || "not-ready"),
-        heartbeatAgeMs: Date.now() - Number(botStatusWorkerHeartbeatAt || 0)
+        active: !!tab.active,
+        requestActive: !!botStatusWorkerRequestActive,
+        heartbeatAgeMs: botStatusWorkerHeartbeatAt ? Date.now() - Number(botStatusWorkerHeartbeatAt) : -1,
+        activityAgeMs: botStatusWorkerLastActivityAt() ? Date.now() - botStatusWorkerLastActivityAt() : -1,
+        throttleGraceMs: BOT_STATUS_WORKER_THROTTLED_TTL_MS
       });
       return {
         tabId: Number(tab.id),
@@ -1278,6 +1316,8 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
     botStatusWorkerTabId = null;
     botStatusWorkerOwned = false;
     botStatusWorkerHeartbeatAt = 0;
+    botStatusWorkerActivityAt = 0;
+    botStatusWorkerRequestActive = false;
     botStatusWorkerTabIds.clear();
     await rememberBotStatusWorker(0, false, "");
   }
@@ -1377,7 +1417,7 @@ async function runBotStatusHelperCheck(message) {
   // initial long request plus another long retry. A broken bot/runtime can
   // therefore never pin the whole serial scan indefinitely.
   let response = null;
-  response = await withBackgroundJob("bot-status", { ownerTabId: tabId, detail: botId, maxHoldMs: 15000 }, async () => {
+  response = await runTrackedBotStatusRequest(() => withBackgroundJob("bot-status", { ownerTabId: tabId, detail: botId, maxHoldMs: 15000 }, async () => {
     if (worker.owned || forceOwnHelper) {
       return await waitForBotStatusApiCheck(tabId, botId, 12000);
     }
@@ -1386,7 +1426,7 @@ async function runBotStatusHelperCheck(message) {
       return { ok: false, ready: true, status: "worker-timeout", httpStatus: 0, reason: "Bot Status helper did not answer this API check in time." };
     }
     return direct;
-  });
+  }));
 
   const status = String(response?.status || "");
   const shouldRetryOnOwnHelper = !forceOwnHelper && !worker.owned && (!response || ["api-bridge-not-ready", "auth-unavailable", "worker-error", "unknown", "worker-timeout"].includes(status));
@@ -1396,17 +1436,20 @@ async function runBotStatusHelperCheck(message) {
     await rememberBotStatusWorker(0, false);
     worker = await prepareBotStatusWorker({ forceOwnHelper: true });
     tabId = Number(worker?.tabId || 0);
-    if (tabId) response = await withBackgroundJob("bot-status", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 15000 }, () => waitForBotStatusApiCheck(tabId, botId, 12000));
+    if (tabId) response = await runTrackedBotStatusRequest(() => withBackgroundJob("bot-status", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 15000 }, () => waitForBotStatusApiCheck(tabId, botId, 12000)));
   }
 
   const finalStatus = String(response?.status || "");
   if (finalStatus === "worker-timeout" && worker.owned) {
-    if (botStatusHeartbeatFresh()) {
+    const workerTab = await tabsGet(tabId);
+    if (botStatusHeartbeatFresh(workerTab)) {
       // The page is alive; only this character request timed out. Keep the
       // worker and let the serial queue continue instead of rebuilding Home.
       await recordHelperLifecycle("bot-status-request-timeout-worker-alive", {
         tabId,
-        heartbeatAgeMs: Date.now() - Number(botStatusWorkerHeartbeatAt || 0)
+        heartbeatAgeMs: botStatusWorkerHeartbeatAt ? Date.now() - Number(botStatusWorkerHeartbeatAt) : -1,
+        activityAgeMs: botStatusWorkerLastActivityAt() ? Date.now() - botStatusWorkerLastActivityAt() : -1,
+        requestActive: !!botStatusWorkerRequestActive
       });
     } else {
       // Only a real request + heartbeat timeout is allowed to discard the
@@ -4489,7 +4532,13 @@ async function getReachableDiagnosticContext() {
     return { ok: true, runtimeAvailable: true, url: tab.url || "", title: tab.title || "", pageDiagnostics, helperLifecycleDiagnostics, tabId: tab.id };
   }
   const fallback = candidates[0] || null;
-  return { ok: !!fallback, runtimeAvailable: false, url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null, helperLifecycleDiagnostics, tabId: fallback?.id || 0 };
+  return {
+    ok: !!fallback,
+    runtimeAvailable: false,
+    runtimeStatus: fallback ? "page-found-runtime-unreachable" : "no-spicychat-tab",
+    runtimeError: fallback ? "A SpicyChat tab was found, but its QoL content runtime did not answer diagnostics." : "No open SpicyChat tab was found.",
+    url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null, helperLifecycleDiagnostics, tabId: fallback?.id || 0
+  };
 }
 
 async function relayQuickPanelStateToOptions(message) {
@@ -5121,13 +5170,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             tabId: senderTabId,
             owned: !!botStatusWorkerOwned,
             sessionId: botStatusWorkerSessionId || "",
-            heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS
+            heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS,
+            throttledTtlMs: BOT_STATUS_WORKER_THROTTLED_TTL_MS
           });
         } else {
           sendResponse({ ok: true, worker: "", tabId: senderTabId });
         }
       })
       .catch(error => sendResponse({ ok: false, worker: "", error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_BOT_STATUS_PACE_WAIT") {
+    const delayMs = Math.max(0, Math.min(10000, Number(message?.delayMs || 0)));
+    // Keep the extension service worker/message channel alive for scan pacing.
+    // This avoids relying on setTimeout cadence in a backgrounded Options tab,
+    // which Chromium can throttle for minutes at a time.
+    setTimeout(() => sendResponse({ ok: true, waitedMs: delayMs, at: Date.now() }), delayMs);
     return true;
   }
 
@@ -5147,7 +5206,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ok: accepted,
           worker: accepted ? "bot-status" : "",
           sessionId: accepted ? (botStatusWorkerSessionId || "") : "",
-          heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS
+          heartbeatTtlMs: BOT_STATUS_WORKER_HEARTBEAT_TTL_MS,
+          throttledTtlMs: BOT_STATUS_WORKER_THROTTLED_TTL_MS
         });
       })
       .catch(error => sendResponse({ ok: false, error: String(error?.message || error || "") }));
@@ -5517,8 +5577,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "DS_OPEN_OPTIONS") {
     (async () => {
       await rememberOptionsSourceTab(tabId);
-      chrome.runtime.openOptionsPage(() => {
-        sendResponse({ ok: !chrome.runtime.lastError });
+      const url = chrome.runtime.getURL("options.html#general");
+      chrome.tabs.create({ url }, created => {
+        if (created && !chrome.runtime.lastError) { sendResponse({ ok: true }); return; }
+        chrome.runtime.openOptionsPage(() => sendResponse({ ok: !chrome.runtime.lastError }));
       });
     })();
 

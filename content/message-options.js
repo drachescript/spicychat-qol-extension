@@ -397,6 +397,15 @@
     ].join("");
   }
 
+
+  function quickActionBarHealthy(button, signature) {
+    const holder = getDropdownHolder(button);
+    const bar = holder?.querySelector?.(":scope > .ds-message-quick-actions");
+    if (!bar) return false;
+    return bar.dataset.dsActionSignature === JSON.stringify(getEnabledActions(button).map(action => action.label)) &&
+      button.dataset.dsMessageQuickReady === signature;
+  }
+
   function hasAnyQuickActionEnabled(settings) {
     return (
       settings.messageQuickActionCopy === true ||
@@ -439,13 +448,13 @@
         buttons = roots.flatMap(root => {
           if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
           return DS.qsa("button[aria-label='message-dropdown']", root)
-            .filter(button => signatureChanged || button.dataset.dsMessageQuickReady !== signature);
+            .filter(button => signatureChanged || button.dataset.dsMessageQuickReady !== signature || !quickActionBarHealthy(button, signature));
         });
       } else {
         let selector = "button[aria-label='message-dropdown']";
         if (settings.chatPerformanceMode) selector = `[id^='message-']:not(.ds-chat-message-far) button[aria-label='message-dropdown']`;
-        if (!signatureChanged) selector += `:not([data-ds-message-quick-ready='${signature}'])`;
         buttons = DS.qsa(selector);
+        if (!signatureChanged) buttons = buttons.filter(button => button.dataset.dsMessageQuickReady !== signature || !quickActionBarHealthy(button, signature));
       }
     }
 

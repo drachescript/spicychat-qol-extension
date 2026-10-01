@@ -114,13 +114,13 @@
       [${USER_BUBBLE_ATTR}="1"] [data-ds-native-normal-text="1"] q{color:${snap.userText}!important}` : ""}
     ` : "";
     style.textContent = `
-      #${INLINE_TOOLS_ID}{display:flex;align-items:center;gap:2px;flex:0 0 auto;z-index:6;pointer-events:auto}
-      #${INLINE_TOOLS_ID}[data-ds-placement="inside-right"]{position:absolute;right:6px;bottom:4px}
+      #${INLINE_TOOLS_ID}{display:flex;align-items:center;gap:4px;flex:0 0 auto;z-index:6;pointer-events:auto;white-space:nowrap}
+      #${INLINE_TOOLS_ID}[data-ds-placement="inside-right"]{position:absolute;right:7px;top:50%;bottom:auto;transform:translateY(-50%)}
       #${INLINE_TOOLS_ID}[data-ds-placement="outside-left"],#${INLINE_TOOLS_ID}[data-ds-placement="outside-right"]{position:static;align-self:flex-end;margin-bottom:2px}
-      #${INLINE_TOOLS_ID}>*{margin:0!important;flex:0 0 auto!important}
+      #${INLINE_TOOLS_ID}>*{margin:0!important;flex:0 0 auto!important;position:static!important;inset:auto!important;transform:none!important;display:inline-flex!important}
       #${INLINE_TOOLS_ID} button{width:27px!important;height:27px!important;min-width:27px!important;padding:0!important;border-radius:8px!important}
       ${appearanceRules}
-      @media(max-width:700px){#${INLINE_TOOLS_ID}[data-ds-placement="inside-right"]{right:4px}#${INLINE_TOOLS_ID}{gap:1px}#${INLINE_TOOLS_ID} button{width:25px!important;height:25px!important;min-width:25px!important;font-size:12px!important}}
+      @media(max-width:700px){#${INLINE_TOOLS_ID}[data-ds-placement="inside-right"]{right:4px}#${INLINE_TOOLS_ID}{gap:3px}#${INLINE_TOOLS_ID} button{width:25px!important;height:25px!important;min-width:25px!important;font-size:12px!important}}
     `;
   }
 
@@ -314,7 +314,16 @@
       composer.bubble.style.position = composer.bubble.style.position || "relative";
       if (holder.parentElement !== composer.bubble) composer.bubble.appendChild(holder);
       if (!state.composerPaddingBefore.has(composer.textarea)) state.composerPaddingBefore.set(composer.textarea, composer.textarea.style.paddingRight || "");
-      composer.textarea.style.paddingRight = `${Math.max(42, 10 + count * 29)}px`;
+      const measureAndReserve = () => {
+        if (!holder?.isConnected || !composer.textarea?.isConnected) return;
+        const measured = Math.ceil(holder.getBoundingClientRect?.().width || 0);
+        const childWidth = [...holder.children].reduce((sum, child) => sum + Math.ceil(child.getBoundingClientRect?.().width || 0), 0);
+        const estimated = Math.max(42, 14 + childWidth + Math.max(0, count - 1) * 4);
+        composer.textarea.style.paddingRight = `${Math.max(estimated, measured + 14)}px`;
+      };
+      measureAndReserve();
+      requestAnimationFrame(measureAndReserve);
+      setTimeout(measureAndReserve, 180);
     } else {
       const before = state.composerPaddingBefore.get(composer.textarea);
       if (before != null) composer.textarea.style.paddingRight = before;

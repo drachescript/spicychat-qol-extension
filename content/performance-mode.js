@@ -26,6 +26,8 @@
   let chatWindowApplied = false;
   let chatWindowControl = null;
   let performanceReloadRestoreTimer = 0;
+  const chunkedDomJobs = new Map();
+  let deferredPerformanceTimer = 0;
 
   function settings() {
     return DS.state?.settings || {};
@@ -63,6 +65,7 @@
   }
 
   function clearChatWindowState({ keepRoute = false } = {}) {
+    chunkedDomJobs.delete("message-window");
     document.querySelectorAll(".ds-chat-message-windowed, .ds-chat-message-far").forEach(root => {
       root.classList.remove("ds-chat-message-windowed", "ds-chat-message-far");
     });
@@ -75,6 +78,8 @@
   }
 
   function clearMessageClasses() {
+    chunkedDomJobs.delete("message-lite");
+    chunkedDomJobs.delete("message-window");
     document.querySelectorAll(
       ".ds-chat-message-lite, .ds-chat-message-far, .ds-chat-message-windowed, [data-ds-performance-observed='1'], [data-ds-performance-newest='1']"
     ).forEach(el => {
@@ -96,15 +101,42 @@
     return s.desktopAppPerformanceGuard !== false && !!env.installedApp && !env.android;
   }
 
+  function scheduleChunkedDomWork(key, items, callback, { chunkSize = 12, timeout = 900 } = {}) {
+    const token = Symbol(key);
+    chunkedDomJobs.set(key, token);
+    let index = 0;
+    const route = chatRouteKey();
+
+    const run = deadline => {
+      if (chunkedDomJobs.get(key) !== token || chatRouteKey() !== route) return;
+      const started = performance.now();
+      let count = 0;
+      while (index < items.length && count < chunkSize) {
+        const item = items[index++];
+        if (item?.isConnected) callback(item, index - 1);
+        count += 1;
+        if (deadline?.timeRemaining && deadline.timeRemaining() < 2) break;
+        if (!deadline && performance.now() - started > 6) break;
+      }
+      if (index >= items.length) {
+        if (chunkedDomJobs.get(key) === token) chunkedDomJobs.delete(key);
+        return;
+      }
+      if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout });
+      else requestAnimationFrame(() => run(null));
+    };
+
+    if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout });
+    else requestAnimationFrame(() => run(null));
+  }
+
   function applyStaticLightweightClasses(roots) {
     const keepRendered = desktopAppGuardActive() ? DESKTOP_APP_KEEP_FULLY_RENDERED : KEEP_FULLY_RENDERED;
     const liteUntil = Math.max(0, roots.length - keepRendered);
 
-    roots.forEach((root, index) => {
-      // Previous versions changed these classes while scrolling with an
-      // IntersectionObserver. On very long chats that caused repeated DOM work
-      // exactly while the user was trying to scroll. Keep the classification
-      // static instead and let CSS content-visibility decide what to paint.
+    scheduleChunkedDomWork("message-lite", roots, (root, index) => {
+      // Keep classification static, but apply it in small idle/frame chunks so
+      // crossing a performance threshold cannot compete with a freshly-rendered reply.
       const shouldLite = index < liteUntil;
       const hasLite = root.classList.contains("ds-chat-message-lite");
       if (shouldLite && !hasLite) root.classList.add("ds-chat-message-lite");
@@ -383,7 +415,7 @@
     chatWindowVisibleCount = Math.max(config.keep, Math.min(roots.length, chatWindowVisibleCount));
     const hiddenCount = Math.max(0, roots.length - chatWindowVisibleCount);
 
-    roots.forEach((root, index) => {
+    scheduleChunkedDomWork("message-window", roots, (root, index) => {
       const hidden = index < hiddenCount;
       root.classList.toggle("ds-chat-message-windowed", hidden);
       root.classList.toggle("ds-chat-message-far", hidden);
@@ -536,7 +568,24 @@
     const s = settings();
     applyListingPaintGuard();
     const active = isActiveChatPerformance();
-    const hiddenPaused = !!(s.enabled && s.pauseQolInHiddenTabs && document.hidden);
+
+    // A newly mounted reply gets the main thread first. Performance folding and
+    // reclassification are maintenance work and can safely wait until the native
+    // render quiet window has ended.
+    const replyQuietUntil = Number(DS.state?.chatReplyRenderQuietUntil || 0);
+    if (active && replyQuietUntil > Date.now()) {
+      clearTimeout(deferredPerformanceTimer);
+      deferredPerformanceTimer = setTimeout(() => {
+        deferredPerformanceTimer = 0;
+        try { DS.applyPerformanceMode?.(); } catch {}
+      }, Math.max(40, replyQuietUntil - Date.now() + 40));
+      return;
+    }
+    const dedicatedWorker = !!(
+      DS.state?.qolBackgroundWorker ||
+      document.documentElement?.getAttribute?.("data-ds-qol-background-worker")
+    );
+    const hiddenPaused = !!(s.enabled && s.pauseQolInHiddenTabs && document.hidden && !dedicatedWorker);
 
     DS.setClassState?.(document.documentElement, "ds-qol-hidden-tab-paused", hiddenPaused);
 

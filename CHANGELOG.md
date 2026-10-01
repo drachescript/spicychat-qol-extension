@@ -1,3 +1,22 @@
+## 0.2.27 hotfix
+- Fixed the in-page/sidebar and popup Settings launch path so Settings can still open when a SpicyChat tab's normal QoL runtime is unhealthy.
+- Message quick-action icons now self-repair if SpicyChat rerenders/removes the QoL bar while leaving the original message menu button mounted.
+- Fixed dedicated asterisk/backtick composer shortcuts overlapping by forcing their wrappers into one measured flex row and reserving the textarea's real rendered width.
+- Added composer shortcut geometry/overlap details to support reports.
+- Full support-report generation now caps each section at 10 seconds instead of being able to wait indefinitely on a stuck runtime/storage read.
+- Automatic performance escalation to Maximum is sticky for the current chat route, preventing aggressive/maximum flapping and repeated old-message class churn.
+- Performance message classification/windowing is applied in small idle/frame chunks and is deferred through the short native reply-render quiet window.
+- Expected severe-lag detection is logged as diagnostics/info rather than polluting Chromium's extension Errors page with console warnings.
+- Automatic page reload remains removed; refresh stays user-controlled.
+
+## 0.2.27
+- Removed automatic performance-emergency page reloads. Severe lag can escalate QoL to Maximum rendering, but reload/navigation remains user initiated.
+- Added a short chat-startup quiet window so initial history rendering can settle before nonessential QoL message decoration and reconciliation resumes.
+- Reset recent Long Task pressure when changing chats so startup lag from one route cannot immediately trigger performance escalation on the next.
+- Dedicated QoL background workers are no longer paused by the normal hidden-tab pause preference.
+- Bot Status pacing now waits through the extension background process instead of relying on a hidden Options-page timer, reducing Chromium background timer throttling during long scans.
+- Bot Status worker liveness now uses request/result activity as well as heartbeat state, with a longer hidden/throttled grace period before a helper is considered dead.
+
 ## 0.2.26
 - Improved bot-name cleanup so generic labels and decorative wrapper text are less likely to replace a real character name in saved/discovered metadata.
 - Added a bounded browsed/discovered-bot index that can feed Bot Status Center from normal browsing without storing chat history.

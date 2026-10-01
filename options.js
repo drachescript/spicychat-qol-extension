@@ -1753,6 +1753,13 @@ function runtimeMessageWithTimeout(message, timeoutMs = 15000) {
   });
 }
 
+function promiseWithSupportTimeout(promise, timeoutMs, fallbackText) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise(resolve => setTimeout(() => resolve(String(fallbackText || `Timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), Math.max(1000, Number(timeoutMs) || 15000)))
+  ]);
+}
+
 
 const DEEPL_ORIGINS = ["https://api-free.deepl.com/*", "https://api.deepl.com/*"];
 
@@ -9131,6 +9138,20 @@ function botStatusScanDelayMs() {
   return Number(BOT_STATUS_SCAN_SPEED_DELAYS[speed] || BOT_STATUS_SCAN_SPEED_DELAYS.safe);
 }
 
+async function waitForBotStatusPace(delayMs) {
+  const waitMs = Math.max(0, Math.min(10000, Math.round(Number(delayMs || 0))));
+  if (!waitMs) return true;
+  try {
+    const response = await runtimeMessage({ type: "DS_BOT_STATUS_PACE_WAIT", delayMs: waitMs });
+    if (response?.ok) return true;
+  } catch {}
+  // Old/background-mismatched builds still get a safe fallback. The normal
+  // v0.2.27 path is owned by the extension service worker so hidden Options
+  // timer throttling cannot stretch a ~1s scan delay into multi-minute gaps.
+  await new Promise(resolve => setTimeout(resolve, waitMs));
+  return false;
+}
+
 function sortBotStatusRefreshQueue(entries, availability, archives) {
   return [...entries].sort((a, b) => {
     const av = availability[a.id] || {};
@@ -9265,7 +9286,7 @@ async function runBotAvailabilityScan(options = {}) {
         const transientServerFailure = http === 429 || http >= 500;
         if (transientServerFailure) adaptiveDelay = Math.min(8000, Math.max(1500, adaptiveDelay * 2));
         else adaptiveDelay = Math.max(botStatusScanDelayMs(), Math.round(adaptiveDelay * 0.85));
-        await new Promise(resolve => setTimeout(resolve, adaptiveDelay));
+        await waitForBotStatusPace(adaptiveDelay);
       }
     }
   } finally {
@@ -19420,7 +19441,7 @@ function performanceSnapshotFromContext(context) {
 
 async function savePerformanceBaseline() {
   const status = $("controlSupportStatus");
-  const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
   if (!context?.pageDiagnostics) {
     if (status) status.textContent = "No reachable source SpicyChat tab. Open Settings from a SpicyChat tab and try again.";
     return null;
@@ -19441,7 +19462,7 @@ function percentChange(current, baseline) {
 async function comparePerformanceBaseline({ returnText = false } = {}) {
   const result = await storageGet([PERFORMANCE_BASELINE_KEY]);
   const baseline = result[PERFORMANCE_BASELINE_KEY];
-  const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
   if (!baseline || !context?.pageDiagnostics) {
     const text = !baseline ? "No performance baseline saved yet." : "No reachable source SpicyChat tab for comparison.";
     if (!returnText) { const status = $("controlSupportStatus"); if (status) status.textContent = text; }
@@ -19639,7 +19660,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     SPICYCHAT_BETA_CAPABILITIES_KEY,
     "cardTokenFetchDiagnosticsV1"
   ]);
-  const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
   const bytes = await storageBytesInUse(null);
   const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
   const enabledFeatures = OPTIONAL_FEATURE_KEYS.filter(key => settings[key] === true);
@@ -19728,6 +19749,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     if (context?.pageDiagnostics?.chatLayout) {
       const layout = context.pageDiagnostics.chatLayout;
       diagnosticLines.push(`Chat layout: viewport ${Number(layout.viewport || 0)} px; root ${Number(layout.root || 0)} px; composer host ${Number(layout.composer || 0)} px; title host ${Number(layout.titleHost || 0)} px; title ${Number(layout.title || 0)} px`);
+      diagnosticLines.push(`Composer shortcuts: ${layout.shortcutPlacement || "none"}; holder ${Number(layout.shortcutWidth || 0)} px; ${Number(layout.shortcutControls || 0)} controls; textarea right padding ${layout.textareaPaddingRight || "unknown"}; overlap ${layout.shortcutOverlap ? "YES" : "no"}`);
     }
     diagnosticLines.push(`Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`);
     diagnosticLines.push(`Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`);
@@ -19808,7 +19830,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   if (status && !returnOnly) status.textContent = "Building performance report...";
   const stored = await storageGet(["settings", "cardTokenFetchDiagnosticsV1"]);
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-  const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
   const manifest = chrome.runtime.getManifest?.() || {};
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
@@ -19838,7 +19860,10 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Mutations: ${Number(runtime.mutations || 0)} total in ${Number(runtime.observerBatches || 0)} observer batches; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.composerOnlyMutationSkips || 0)} composer-only skipped; ${Number(runtime.qolOnlyMutations || 0)} QoL-owned ignored (${Number(runtime.observerQolOnlyBatches || 0)} pure + ${Number(runtime.observerMixedQolBatches || 0)} mixed batches)`,
     `Message edit guard: ${Number(runtime.messageEditGuardsStarted || 0)} started; ${Number(runtime.messageEditGuardsSettled || 0)} settled; ${Number(runtime.messageEditMutationSkips || 0)} edit mutations skipped; ${Number(runtime.messageEditLaneSkips || 0)} lane runs skipped; ${Number(runtime.messageEditCriticalSkips || 0)} critical runs skipped`,
     `Chat header self-repair: ${Number(runtime.chatHeaderRepairRequests || 0)} repair requests; last source ${runtime.lastChatHeaderRepairSource || "none"}`,
-    ...(context?.pageDiagnostics?.chatLayout ? [`Chat layout: viewport ${Number(context.pageDiagnostics.chatLayout.viewport || 0)} px; root ${Number(context.pageDiagnostics.chatLayout.root || 0)} px; composer host ${Number(context.pageDiagnostics.chatLayout.composer || 0)} px; title host ${Number(context.pageDiagnostics.chatLayout.titleHost || 0)} px; title ${Number(context.pageDiagnostics.chatLayout.title || 0)} px`] : []),
+    ...(context?.pageDiagnostics?.chatLayout ? [
+      `Chat layout: viewport ${Number(context.pageDiagnostics.chatLayout.viewport || 0)} px; root ${Number(context.pageDiagnostics.chatLayout.root || 0)} px; composer host ${Number(context.pageDiagnostics.chatLayout.composer || 0)} px; title host ${Number(context.pageDiagnostics.chatLayout.titleHost || 0)} px; title ${Number(context.pageDiagnostics.chatLayout.title || 0)} px`,
+      `Composer shortcuts: ${context.pageDiagnostics.chatLayout.shortcutPlacement || "none"}; holder ${Number(context.pageDiagnostics.chatLayout.shortcutWidth || 0)} px; ${Number(context.pageDiagnostics.chatLayout.shortcutControls || 0)} controls; textarea right padding ${context.pageDiagnostics.chatLayout.textareaPaddingRight || "unknown"}; overlap ${context.pageDiagnostics.chatLayout.shortcutOverlap ? "YES" : "no"}`
+    ] : []),
     `Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(720, Math.max(1, Number(settings.autoAfkHours) || 12))}h; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}`,
     `Disabled-feature deep sleep: ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
@@ -19894,7 +19919,7 @@ async function buildPerformanceSelfCheckText() {
   const readStarted = performance.now();
   const read = await storageGetChecked(["settings"]);
   const storageMs = performance.now() - readStarted;
-  const context = await runtimeMessage({ type: "DS_GET_DIAGNOSTIC_CONTEXT" });
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
   const warnings = performanceWarningLines(context, settings);
   const total = performance.now() - started;
@@ -19920,43 +19945,31 @@ async function buildPerformanceSelfCheckText() {
 
 
 async function buildAllSupportInfo() {
-  let diagnosticText = "";
-  let performanceText = "";
-  let selfCheckText = "";
+  const sectionTimeoutMs = 10000;
+  const timed = (promise, label) => promiseWithSupportTimeout(
+    promise,
+    sectionTimeoutMs,
+    `${label} timed out after ${Math.round(sectionTimeoutMs / 1000)} seconds. The rest of the support report continued.`
+  );
 
-  try {
-    diagnosticText = await copyDiagnostics({ returnOnly: true });
-  } catch (error) {
-    diagnosticText = `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`;
-  }
+  const diagnosticText = await timed(copyDiagnostics({ returnOnly: true }), "Diagnostic info").catch(error => `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`);
+  const performanceText = await timed(copyPerformanceReport({ returnOnly: true }), "Performance report").catch(error => `Performance report could not be built: ${error?.message || String(error || "unknown error")}`);
+  const selfCheckText = await timed(buildPerformanceSelfCheckText(), "Performance self-check").catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
+  lastPerformanceSelfCheckText = selfCheckText;
 
-  try {
-    performanceText = await copyPerformanceReport({ returnOnly: true });
-  } catch (error) {
-    performanceText = `Performance report could not be built: ${error?.message || String(error || "unknown error")}`;
-  }
-
-  try {
-    selfCheckText = await buildPerformanceSelfCheckText();
-    lastPerformanceSelfCheckText = selfCheckText;
-  } catch (error) {
-    selfCheckText = `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`;
-  }
-
-  let healthText = "Data health could not be checked.";
-  let baselineText = "No performance baseline comparison available.";
-  try {
+  const healthValue = await timed((async () => {
     const health = await collectDataHealth();
-    healthText = [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
-  } catch (error) {
-    healthText = `Data health check failed: ${error?.message || String(error)}`;
-  }
-  try { baselineText = await comparePerformanceBaseline({ returnText: true }); } catch {}
+    return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
+  })(), "Data health").catch(error => `Data health check failed: ${error?.message || String(error)}`);
+
+  const baselineText = await timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison")
+    .catch(() => "No performance baseline comparison available.");
 
   return [
     "SpicyChat QoL support info",
     `Generated: ${new Date().toISOString()}`,
     "Paste or attach this whole report when someone asks for QoL diagnostics/support info.",
+    "Support builder: each section is capped at 10 seconds so a stuck runtime/storage read cannot hang this report indefinitely.",
     "",
     "===== DIAGNOSTIC INFO =====",
     diagnosticText,
@@ -19968,7 +19981,7 @@ async function buildAllSupportInfo() {
     selfCheckText,
     "",
     "===== DATA HEALTH =====",
-    healthText,
+    healthValue,
     "",
     "===== PERFORMANCE BASELINE COMPARISON =====",
     baselineText

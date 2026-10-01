@@ -320,7 +320,12 @@
     );
 
     const minHeight = 96;
-    const maxHeight = Math.max(200, Math.min(520, viewportHeight * 0.62));
+    // Leave enough room for Save/Cancel and the keyboard, but give long edits
+    // more space before switching to an internal scroll area.
+    const maxHeight = Math.max(240, Math.min(640, viewportHeight * 0.78));
+    const previousScrollTop = Number(textarea.scrollTop || 0);
+    const selectionEnd = Number(textarea.selectionEnd ?? textarea.value.length);
+    const editingAtEnd = selectionEnd >= Math.max(0, textarea.value.length - 1);
 
     // Measure from the content, not the previous explicit height.
     textarea.style.setProperty("height", "auto", "important");
@@ -329,23 +334,47 @@
     textarea.style.setProperty("box-sizing", "border-box", "important");
     textarea.style.setProperty("line-height", "1.5", "important");
     textarea.style.setProperty("padding-top", "6px", "important");
-    textarea.style.setProperty("padding-bottom", "12px", "important");
+    textarea.style.setProperty("padding-bottom", "18px", "important");
+    textarea.style.setProperty("scroll-padding-bottom", "22px", "important");
+    textarea.style.setProperty("overscroll-behavior", "contain", "important");
 
-    const naturalHeight = Math.ceil(textarea.scrollHeight + 8);
+    const naturalHeight = Math.ceil(textarea.scrollHeight + 12);
     const wantedHeight = Math.max(
       minHeight,
       Math.min(maxHeight, naturalHeight)
     );
+    const capped = naturalHeight > maxHeight;
 
     textarea.style.setProperty("height", `${wantedHeight}px`, "important");
     textarea.style.setProperty(
       "overflow-y",
-      naturalHeight > maxHeight ? "auto" : "hidden",
+      capped ? "auto" : "hidden",
       "important"
     );
 
     textarea.dataset.dsMobileMessageEditFixed = "1";
     repairMessageEditAncestors(textarea, wantedHeight);
+
+    // Once a long edit reaches the cap, keeping the textarea at the correct
+    // height is not enough: Android WebView can leave the newest line partly
+    // below the internal scroll viewport. Keep the active caret/end visible.
+    const restoreEditScroll = () => {
+      if (!textarea.isConnected) return;
+      const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+      if (!capped || maxScroll <= 0) {
+        textarea.scrollTop = 0;
+        return;
+      }
+
+      if (document.activeElement === textarea && editingAtEnd) {
+        textarea.scrollTop = maxScroll;
+      } else {
+        textarea.scrollTop = Math.max(0, Math.min(previousScrollTop, maxScroll));
+      }
+    };
+
+    restoreEditScroll();
+    requestAnimationFrame(restoreEditScroll);
     return true;
   }
 

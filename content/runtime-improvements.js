@@ -198,14 +198,53 @@
 
   // Adaptive long-chat escalation. The existing performance-mode file does the
   // rendering/window work; this watcher decides when to force its strongest tier.
+  // v0.2.27 deliberately never reloads the page on its own. A disruptive recovery
+  // action must stay user initiated (the long-chat control already exposes Refresh chat).
   const AUTO_TIER_DATASET = "dsQolAutoPerformanceTier";
   const HEAP_SOFT = 700 * 1024 * 1024;
   const HEAP_HARD = 900 * 1024 * 1024;
+  const STARTUP_QUIET_MS = 8000;
   let baselineTier = "";
   let escalated = false;
   let clearPasses = 0;
-  let lastHardRefresh = 0;
+  let performanceRouteKey = "";
+  let escalatedRouteKey = "";
   const longTasks = [];
+
+  function routeKey() {
+    return `${location.pathname || ""}${location.search || ""}`;
+  }
+
+  function startChatStartupQuiet(reason = "route") {
+    if (!DS.isSingleChatPage?.()) return;
+    const now = Date.now();
+    DS.state = DS.state || {};
+    DS.state.chatStartupQuietRoute = routeKey();
+    DS.state.chatStartupQuietStartedAt = now;
+    DS.state.chatStartupQuietUntil = now + STARTUP_QUIET_MS;
+    DS.state.chatStartupLastMessageMutationAt = now;
+    DS.runtimeLog?.("info", "performance", `Chat startup quiet window started (${reason})`, {
+      route: DS.state.chatStartupQuietRoute,
+      quietMs: STARTUP_QUIET_MS
+    });
+  }
+
+  function resetPerformancePressure(reason = "route") {
+    const nextRoute = routeKey();
+    if (escalated && escalatedRouteKey && escalatedRouteKey !== nextRoute) {
+      DS.state.settings.runtimePerformanceMode = baselineTier || DS.state.settings.runtimePerformanceMode || "adaptive";
+      escalated = false;
+      escalatedRouteKey = "";
+      document.documentElement.removeAttribute("data-ds-qol-auto-performance-tier");
+      DS.state.performanceModeRevision = -1;
+    }
+    longTasks.length = 0;
+    clearPasses = 0;
+    performanceRouteKey = nextRoute;
+    document.documentElement.removeAttribute("data-ds-qol-severe-chat-lag");
+    if (DS.isSingleChatPage?.()) startChatStartupQuiet(reason);
+  }
+
   try {
     new PerformanceObserver(list => {
       const now = performance.now();
@@ -223,6 +262,7 @@
     const severeTasks = recent.filter(item => item.duration >= 500).length;
     return { mounted, dom, heap, longTaskMs, severeTasks };
   }
+
   function softReasons(m) {
     const out = [];
     if (m.mounted >= 300) out.push("mounted");
@@ -231,6 +271,7 @@
     if (m.longTaskMs >= 2500 || m.severeTasks >= 3) out.push("longtasks");
     return out;
   }
+
   function hardReasons(m) {
     const out = [];
     if (m.mounted >= 500) out.push("mounted");
@@ -239,72 +280,98 @@
     if (m.longTaskMs >= 5000 || m.severeTasks >= 5) out.push("longtasks");
     return out;
   }
+
+  function hasRealScalePressure(m) {
+    return m.mounted >= 300 || m.dom >= 12000 || m.heap >= HEAP_SOFT;
+  }
+
+  function hasSustainedLag(m) {
+    return m.longTaskMs >= 5000 || m.severeTasks >= 5;
+  }
+
   function formatMetrics(m) {
     return `mounted=${m.mounted}, DOM=${m.dom}, heap=${m.heap ? `${Math.round(m.heap / 1048576)}MB` : "n/a"}, longTask30s=${Math.round(m.longTaskMs)}ms`;
   }
-  function generationActive() {
-    return [...document.querySelectorAll("button")].some(button => /stop\s+(generating|generation|reply)|cancel\s+generation/i.test(`${button.getAttribute("aria-label") || ""} ${button.title || ""} ${button.textContent || ""}`));
-  }
-  function nearBottom() {
-    const root = document.scrollingElement || document.documentElement;
-    return root.scrollHeight - (root.scrollTop + innerHeight) < 1000;
-  }
-  function composer() {
-    return [...document.querySelectorAll("textarea,[contenteditable='true']")].find(el => !el.closest?.("[id^='message-'],#ds-qol-panel,#ds-chat-export-modal") && el.getClientRects?.().length) || null;
-  }
-  function composerText(el) {
-    return el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement ? String(el.value || "") : String(el?.textContent || "");
-  }
-  function emergencyRefresh(m, reasons) {
-    if (!nearBottom() || generationActive() || Date.now() - lastHardRefresh < 120000) return false;
-    lastHardRefresh = Date.now();
-    try {
-      sessionStorage.setItem("dsQolPerformanceReloadV1", JSON.stringify({ routeKey: `${location.pathname || ""}${location.search || ""}`, draft: composerText(composer()), at: Date.now(), scrollBottom: true }));
-      sessionStorage.setItem("dsQolPerformanceEmergencyReloadAtV1", String(Date.now()));
-    } catch {}
-    console.warn(`[SpicyChat QoL] chat performance emergency refresh: ${formatMetrics(m)}, reason=${reasons.join("+")}`);
-    location.reload();
+
+  function startupQuietActive() {
+    if (!DS.isSingleChatPage?.()) return false;
+    const now = Date.now();
+    const until = Number(DS.state?.chatStartupQuietUntil || 0);
+    if (!until || now >= until) return false;
     return true;
   }
+
   function evaluatePerformance() {
+    const currentRoute = routeKey();
+    if (currentRoute !== performanceRouteKey) {
+      resetPerformancePressure("route-change");
+      return;
+    }
+
+    // Initial history mounting is expected to be bursty. Do not feed those
+    // Long Tasks into automatic escalation; main.js also defers nonessential
+    // QoL work during the same quiet window.
+    if (startupQuietActive()) {
+      longTasks.length = 0;
+      return;
+    }
+
     if (!DS.isSingleChatPage?.() || !DS.state?.settings?.enabled || !DS.state?.settings?.chatPerformanceMode) {
+      document.documentElement.removeAttribute("data-ds-qol-severe-chat-lag");
       if (escalated) {
         DS.state.settings.runtimePerformanceMode = baselineTier || DS.state.settings.runtimePerformanceMode;
         escalated = false;
+        escalatedRouteKey = "";
         document.documentElement.removeAttribute(`data-${AUTO_TIER_DATASET.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`);
         DS.state.performanceModeRevision = -1;
         DS.applyPerformanceMode?.();
       }
       return;
     }
+
     const m = metricSnapshot();
     const reasons = softReasons(m);
     const hard = hardReasons(m);
-    if (hard.length && emergencyRefresh(m, hard)) return;
+    const severeScaledLag = hasRealScalePressure(m) && hasSustainedLag(m);
+
     if (reasons.length) {
       clearPasses = 0;
       if (!escalated) {
         baselineTier = String(DS.state.settings.runtimePerformanceMode || "adaptive");
         DS.state.settings.runtimePerformanceMode = "maximum";
         escalated = true;
+        escalatedRouteKey = currentRoute;
         document.documentElement.dataset.dsQolAutoPerformanceTier = "maximum";
         DS.state.performanceModeRevision = -1;
         DS.applyPerformanceMode?.();
         console.info(`[SpicyChat QoL] chat performance escalated: ${formatMetrics(m)}, reason=${reasons.join("+")}`);
       }
     } else if (escalated) {
+      // Do not flap Maximum -> lower tier -> Maximum in the same chat. The old
+      // behavior repeatedly rewrote message classes during exactly the periods
+      // where SpicyChat was already struggling. Maximum now remains sticky for
+      // this route and is restored to the user's baseline only after changing chats.
       clearPasses += 1;
-      if (clearPasses >= 3 && m.mounted < 220 && m.dom < 11000 && (!m.heap || m.heap < 500 * 1024 * 1024) && m.longTaskMs < 900) {
-        DS.state.settings.runtimePerformanceMode = baselineTier || "adaptive";
-        escalated = false;
-        clearPasses = 0;
-        document.documentElement.removeAttribute("data-ds-qol-auto-performance-tier");
-        DS.state.performanceModeRevision = -1;
-        DS.applyPerformanceMode?.();
-        console.info(`[SpicyChat QoL] chat performance de-escalated: ${formatMetrics(m)}`);
+    }
+
+    // Never call location.reload() here. Only flag genuinely large + sustained
+    // lag so diagnostics can explain why Maximum mode was chosen. Once Maximum
+    // mode is active, its long-chat strip exposes the existing user-controlled
+    // Refresh chat action (with draft preservation).
+    if (severeScaledLag) {
+      document.documentElement.setAttribute("data-ds-qol-severe-chat-lag", "1");
+      if (!DS.state?.lastSevereChatLagLogAt || Date.now() - Number(DS.state.lastSevereChatLagLogAt) > 30000) {
+        DS.state.lastSevereChatLagLogAt = Date.now();
+        const detail = `Maximum mode is active and reload remains user-controlled: ${formatMetrics(m)}, reason=${hard.join("+") || reasons.join("+")}`;
+        DS.runtimeLog?.("info", "performance", "Severe chat lag detected", { detail });
+        console.info(`[SpicyChat QoL] severe chat lag detected; ${detail}`);
       }
+    } else {
+      document.documentElement.removeAttribute("data-ds-qol-severe-chat-lag");
     }
   }
+
+  resetPerformancePressure("startup");
   setInterval(evaluatePerformance, 5000);
   setTimeout(evaluatePerformance, 2500);
 })();
