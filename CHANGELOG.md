@@ -1,3 +1,19 @@
+## 0.2.28
+
+- Animated bot/avatar images now use hover-only playback when animation reduction is enabled; older Freeze/Play-once preferences migrate to the hover behavior.
+- Rebuilt Random Chat for Home / Recommended and Favorites using SpicyChat's public character search API instead of temporary rendered Home helper tabs.
+- Saved tab-session Merge now consolidates into one snapshot and deletes the source snapshots after confirmation instead of keeping duplicate copies.
+- Fixed Blocked Bot “Stop recommending” getting stuck at 0/N while its direct recommendation helper warmed up; bulk Less Like now falls back to SpicyChat's native Less Like menu in the same hidden helper workflow when direct auth is not ready.
+- Updated the privacy policy for Account & Sync, anonymous opt-in public Archive contribution, current diagnostics/support behavior, and the newer browser/tab helper features.
+- Fixed Settings navigation so popup shortcuts and in-page QoL Settings buttons cannot hang behind a stuck source-tab/storage handoff; direct browser fallbacks now open the requested Settings section.
+- Added Low memory / PC protection with an LRU limit for normal loaded SpicyChat tabs. Active QoL worker tabs do not count toward the limit, while current, pinned, audible and browser-protected tabs stay awake.
+- Auto-AFK now supports 15- and 30-minute cleanup intervals plus the existing hour/day ranges.
+- Kept Maximum chat performance mode sticky per chat, retained user-controlled reloads, and preserved the startup/reply-render quiet windows plus chunked message-window maintenance.
+- Added lightweight self-repair for missing message Copy/Edit/Report/Remove Image quick actions without rescanning the whole chat.
+- Settings heavy managers remain lazy, bot images are not assigned until near view, hidden manager images can be released, and a new Release temporary Settings memory button drops temporary manager/index data without deleting saved QoL data.
+- Support reports now begin with a lightweight snapshot, use shorter content-runtime waits, build heavy sections in parallel, and include SpicyChat loaded/discarded/worker tab telemetry.
+- Kept the v0.2.27 background-owned Bot Status pacing/liveness path unchanged.
+
 ## 0.2.27 hotfix
 - Fixed the in-page/sidebar and popup Settings launch path so Settings can still open when a SpicyChat tab's normal QoL runtime is unhealthy.
 - Message quick-action icons now self-repair if SpicyChat rerenders/removes the QoL bar while leaving the original message menu button mounted.

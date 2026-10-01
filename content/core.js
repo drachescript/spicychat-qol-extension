@@ -144,6 +144,9 @@
 
     autoAfkEnabled: false,
     autoAfkHours: 12,
+  autoAfkMinutes: 720,
+  lowMemoryProtectionEnabled: false,
+  maxAwakeSpicyTabs: 5,
     autoAfkChats: false,
     autoAfkHome: false,
     autoAfkProfiles: false,
@@ -431,7 +434,7 @@
     showQuickUnblockButtons: false,
 
     reduceAnimatedBotImages: false,
-    animatedImageMode: "freeze",
+    animatedImageMode: "hover",
     animatedImagesListings: false,
     animatedImagesChats: false,
     animatedImagesProfiles: false,
@@ -1520,11 +1523,17 @@
     // from runtime.getURL(), so navigating to an extension URL from page JS can
     // otherwise become a spicychat.ai 404/edit route. A shared storage handoff
     // works in Chrome, Firefox, and the Android wrapper.
+    // Persist the target as a best-effort Android/fallback handoff, but never
+    // make opening Settings wait for storage. A wedged write previously made
+    // every in-page Settings button appear completely dead.
     try {
-      const saved = await DS.storageSet?.({ [DS.PENDING_OPTIONS_NAV_KEY]: pending }, { immediate: true });
-      if (saved === false) throw new Error("options destination could not be saved");
+      Promise.resolve(DS.storageSet?.({ [DS.PENDING_OPTIONS_NAV_KEY]: pending }, { immediate: true }))
+        .then(saved => {
+          if (saved === false) DS.runtimeLog?.("warn", "options", "Pending Settings destination was not saved");
+        })
+        .catch(error => DS.runtimeLog?.("warn", "options", "Could not save pending Settings destination", error));
     } catch (error) {
-      DS.runtimeLog?.("warn", "options", "Could not save pending Settings destination", error);
+      DS.runtimeLog?.("warn", "options", "Could not queue pending Settings destination", error);
     }
 
     return new Promise(resolve => {

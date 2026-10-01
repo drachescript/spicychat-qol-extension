@@ -148,17 +148,57 @@ function sendToActiveTab(message) {
 
 async function openOptionsTarget(target, query = "") {
   const tab = await getActiveTab();
+  const safeTarget = String(target || "general").replace(/[^a-z0-9-]/gi, "") || "general";
+  const safeQuery = String(query || "").trim().slice(0, 180);
+  const directUrl = chrome.runtime.getURL(`options.html${safeQuery ? `?search=${encodeURIComponent(safeQuery)}` : ""}#${safeTarget}`);
+
   return new Promise(resolve => {
-    chrome.runtime.sendMessage(
-      { type: "DS_OPEN_OPTIONS_TARGET", target, query, tabId: tab?.id || null },
-      response => {
-        if (chrome.runtime.lastError || !response?.ok) {
-          chrome.runtime.openOptionsPage(() => resolve(false));
-          return;
-        }
-        resolve(true);
+    let settled = false;
+    let directStarted = false;
+    let timer = 0;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(!!value);
+    };
+    const directFallback = () => {
+      if (directStarted || settled) return;
+      directStarted = true;
+      try {
+        chrome.tabs.create({ url: directUrl }, created => {
+          let failed = false;
+          try { failed = !!chrome.runtime.lastError; } catch {}
+          if (created && !failed) {
+            finish(true);
+            return;
+          }
+          try {
+            chrome.runtime.openOptionsPage(() => finish(!chrome.runtime.lastError));
+          } catch {
+            finish(false);
+          }
+        });
+      } catch {
+        try { chrome.runtime.openOptionsPage(() => finish(!chrome.runtime.lastError)); }
+        catch { finish(false); }
       }
-    );
+    };
+
+    try {
+      chrome.runtime.sendMessage(
+        { type: "DS_OPEN_OPTIONS_TARGET", target: safeTarget, query: safeQuery, tabId: tab?.id || null },
+        response => {
+          let failed = false;
+          try { failed = !!chrome.runtime.lastError; } catch {}
+          if (!failed && response?.ok) finish(true);
+          else directFallback();
+        }
+      );
+    } catch {
+      directFallback();
+    }
+    timer = setTimeout(directFallback, 800);
   });
 }
 

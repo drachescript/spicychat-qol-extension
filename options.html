@@ -199,8 +199,20 @@
 </section><section class="card">
 <h2>Inactive tab cleanup (Auto-AFK)</h2>
 <label class="row"><input id="autoAfkEnabled" type="checkbox"/><span>Enable automatic cleanup for inactive SpicyChat tabs</span></label>
-<label>AFK after (hours)
-          <input id="autoAfkHours" max="720" min="1" step="1" type="number" value="12"/>
+<label>AFK after
+<select id="autoAfkMinutes">
+<option value="15">15 minutes</option>
+<option value="30">30 minutes</option>
+<option value="60">1 hour</option>
+<option value="120">2 hours</option>
+<option value="240">4 hours</option>
+<option value="360">6 hours</option>
+<option selected="" value="720">12 hours</option>
+<option value="1440">1 day</option>
+<option value="2880">2 days</option>
+<option value="10080">7 days</option>
+<option value="43200">30 days</option>
+</select>
 </label>
 <h3>Applies to</h3>
 <label class="row"><input id="autoAfkChats" type="checkbox"/><span>Chat pages (/chat/*)</span></label>
@@ -216,6 +228,13 @@
 <button id="autoAfkCheckNow" type="button">Run cleanup check now</button>
 </div>
 <p class="hint" id="autoAfkStatus">No cleanup check recorded yet.</p>
+</section><section class="card" id="lowMemoryProtectionCard">
+<h2>Low memory / PC protection</h2>
+<label class="row"><input id="lowMemoryProtectionEnabled" type="checkbox"/><span>Keep only a limited number of normal SpicyChat tabs awake</span></label>
+<label>Maximum loaded normal SpicyChat tabs
+<input id="maxAwakeSpicyTabs" max="20" min="1" step="1" type="number" value="5"/>
+</label>
+<p class="hint">When the limit is exceeded, QoL unloads the least-recently-used normal SpicyChat tabs first. The current tab, pinned/audible tabs, browser-protected tabs, and active QoL worker tabs are protected. Unloaded tabs stay in the tab bar and reload when you return to them.</p>
 </section><section class="card" id="duplicateTabGuardCard">
 <h2>Duplicate SpicyChat tab guard</h2>
 <label class="row"><input id="duplicateTabGuardEnabled" type="checkbox"/><span>Automatically close duplicate SpicyChat tabs</span></label>
@@ -263,10 +282,10 @@
 <h3>Saved session snapshots</h3>
 <p class="hint">Snapshots preserve exact chat URLs plus their original browser window/index. Review/reopen never closes the tabs you already have open.</p>
 <div class="button-row">
-<button id="mergeTabCleanupSessions" type="button">Merge all snapshots</button>
+<button id="mergeTabCleanupSessions" type="button">Merge snapshots + delete originals</button>
 <button id="cleanTabCleanupSessionDuplicates" type="button">Clean duplicate snapshot data</button>
 </div>
-<p class="hint" id="tabCleanupSessionToolsStatus">Merge creates a new combined snapshot and keeps the originals. Duplicate cleanup only removes repeated exact URLs inside saved snapshots; it never touches browser tabs.</p>
+<p class="hint" id="tabCleanupSessionToolsStatus">Merge creates one combined snapshot, then deletes the source snapshots it merged. This only changes saved QoL session snapshots; it never closes browser tabs. Duplicate cleanup only removes repeated exact URLs inside saved snapshots.</p>
 <div class="tab-cleanup-session-list" id="tabCleanupSessionList"></div>
 <div class="tab-cleanup-library">
 <h3>Tab Session Library</h3>
@@ -352,14 +371,6 @@ Long chats
 Testing"></textarea></label>
 <p class="hint">Adds local folders to /chat and /chats plus a Select chats mode for assigning several conversations at once. Folders are QoL-local and never rename, delete, or move the real SpicyChat conversations.</p>
 <label class="row"><input id="showSavedChatQuickActions" type="checkbox"/><span>Show Change Title, Clone, and Remove quick actions on saved conversations</span></label>
-<label class="row"><input id="showRandomChatButton" type="checkbox"/><span>Show a Random Chat button on /chat and /chats</span></label>
-<div class="sub-card">
-<label class="row"><input id="randomChatUseLastHomeFilters" type="checkbox"/><span>Use my last Home tag/search filters when available</span></label>
-<label class="row"><input id="randomChatIncludeOpened" type="checkbox"/><span>Allow bots already known as opened</span></label>
-<label class="row"><input id="randomChatIncludeLater" type="checkbox"/><span>Allow bots saved for Later</span></label>
-<label class="row"><input id="randomChatIncludeFavorites" type="checkbox"/><span>Allow bots in Favorite history</span></label>
-<p class="hint">Random Chat uses fully rendered temporary Home pages, so client-rendered cards work reliably. By default it remembers your last Home tag/search query and uses that as the roulette pool; turn that off for site-wide Home discovery. Opened, Later, and Favorite-history bots are all allowed by default unless you exclude them here.</p>
-</div>
 <label>
           Default chat sort
           <select id="chatListSortMode">
@@ -1762,20 +1773,14 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint">Each scene supports up to five layers. Turn layers on/off individually, loop them continuously, or replay them at an interval for occasional sounds such as traffic or a passing train. Direct audio URLs are supported too; playing one contacts the host that serves that audio.</p>
 </section><section class="card" id="animatedImagesCard">
 <h2>Animated bot images</h2>
-<label class="row"><input id="reduceAnimatedBotImages" type="checkbox"/><span>Enable animated-image controls</span></label>
-<label>Animation mode
-          <select id="animatedImageMode">
-<option value="freeze">Freeze on one frame</option>
-<option value="once">Play briefly, then freeze</option>
-<option value="hover">Animate only while hovering</option>
-</select>
-</label>
+<label class="row"><input id="reduceAnimatedBotImages" type="checkbox"/><span>Only animate bot images while I hover them</span></label>
+<input id="animatedImageMode" type="hidden" value="hover"/>
 <h3>Apply to</h3>
 <label class="row"><input id="animatedImagesListings" type="checkbox"/><span>Home, Favorites, Recommendations and bot listings</span></label>
 <label class="row"><input id="animatedImagesChats" type="checkbox"/><span>Bot/avatar animation inside chats</span></label>
 <label class="row"><input id="animatedImagesProfiles" type="checkbox"/><span>Character/profile pages</span></label>
 <label class="row"><input id="animatedImagesChatMedia" type="checkbox"/><span>Large animated media inside chat messages</span></label>
-<p class="hint">Chat message media is separate so you can stop looping bot/avatar animations without freezing GIFs people intentionally send in the conversation. “Play briefly” uses an approximate delay because browsers do not expose a GIF's loop length.</p>
+<p class="hint">When enabled, matching animated images stay on a still frame until you hover them, then pause again when the pointer leaves. Chat message media stays separate so GIFs people intentionally send in the conversation can remain unaffected unless you enable that scope too.</p>
 </section></div>
 <div class="tab-page" data-page="android"><p class="page-intro">Controls for Android browsers, installed apps, and compact/WebView layouts.</p>
 <section class="card">
@@ -2176,6 +2181,17 @@ cash =&gt; Bingo Coins
 </div>
 
 <div class="tab-page" data-page="blocking"><p class="page-intro">Discovery filters, bot blocking and dislikes, recommendation helpers, listing refill, language cleanup, and Not Interested entries.</p>
+<section class="card" id="randomChatSettingsCard">
+<h2>Random Chat</h2>
+<label class="row"><input id="showRandomChatButton" type="checkbox"/><span>Show Random Chat on Home / Recommended and Favorites</span></label>
+<div class="sub-card">
+<label class="row"><input id="randomChatUseLastHomeFilters" type="checkbox"/><span>Reuse my current/last Home search when available</span></label>
+<label class="row"><input id="randomChatIncludeOpened" type="checkbox"/><span>Allow bots already known as opened</span></label>
+<label class="row"><input id="randomChatIncludeLater" type="checkbox"/><span>Allow bots saved for Later</span></label>
+<label class="row"><input id="randomChatIncludeFavorites" type="checkbox"/><span>Allow Favorite-history bots when picking from Home / Recommended</span></label>
+<p class="hint">Random Chat now uses SpicyChat's public character search API instead of opening temporary rendered Home helper tabs. On Favorites it picks from your saved Favorite bot IDs and confirms the chosen bot through the API. On Home / Recommended it picks from the API discovery pool and can reuse your current/last Home text search.</p>
+</div>
+</section>
 <section class="card">
 <h2>Tag defaults</h2>
 <label class="row"><input id="autoTags" type="checkbox"/><span>Automatically include/exclude tags</span></label>
@@ -2806,7 +2822,7 @@ myth => Fantasy | ✨"></textarea></label>
 <section class="card" id="diagnosticsCard">
 <h2>Quick diagnostics</h2>
 <p class="hint">Copies the extension version, browser, enabled feature names, storage counts, Toolkit detection status, and a sanitized SpicyChat page type. It does not copy chat text, memories, personas, blocked words, or other saved content.</p>
-<div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button></div>
+<div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
 <p class="hint">If someone asks for everything, use <strong>Copy all support info</strong> or <strong>Download all support info</strong>. The separate copy/download buttons are there if they only need one report. Downloads are plain text and none of these reports include chat text.</p>
 <p class="hint" id="diagnosticsStatus"></p>
 </section>

@@ -99,6 +99,7 @@ const BULK_LESS_LIKE_TRANSIENT_STATUSES = new Set([
   "worker-timeout",
   "worker-tab-failed",
   "worker-closed",
+  "native-helper-content-not-ready",
   "navigation-timeout",
   "card-not-found",
   "menu-button-not-found",
@@ -227,6 +228,9 @@ const DEFAULT_SETTINGS = {
 
   autoAfkEnabled: false,
   autoAfkHours: 12,
+  autoAfkMinutes: 720,
+  lowMemoryProtectionEnabled: false,
+  maxAwakeSpicyTabs: 5,
   autoAfkChats: false,
   autoAfkHome: false,
   autoAfkProfiles: false,
@@ -521,7 +525,7 @@ const DEFAULT_SETTINGS = {
   showQuickUnblockButtons: false,
 
   reduceAnimatedBotImages: false,
-  animatedImageMode: "freeze",
+  animatedImageMode: "hover",
   animatedImagesListings: false,
   animatedImagesChats: false,
   animatedImagesProfiles: false,
@@ -2479,7 +2483,7 @@ function setupSettingsToast() {
 
 function formatAutoAfkStatus(summary) {
   if (!summary || typeof summary !== "object") {
-    return "No cleanup check recorded yet.";
+    return "No cleanup / memory-protection check recorded yet.";
   }
 
   const when = Number(summary.at)
@@ -2487,33 +2491,35 @@ function formatAutoAfkStatus(summary) {
     : "unknown time";
 
   if (!summary.enabled) {
-    return `Last check ${when}: Auto-AFK was disabled.`;
+    return `Last check ${when}: Auto-AFK and Low memory / PC protection were disabled.`;
   }
 
-  const actionWord = summary.action === "close" ? "closed" : "unloaded";
-  const parts = [
-    `Last check ${when}: ${Number(summary.monitored || 0)} monitored`,
-    `${Number(summary.protected || 0)} protected`,
-    `${Number(summary.recent || 0)} still active`,
-    `${Number(summary.eligible || 0)} eligible`,
-    `${Number(summary.cleaned || 0)} ${actionWord}`
-  ];
-
-  if (Number(summary.alreadyDiscarded || 0) > 0) {
-    parts.push(`${Number(summary.alreadyDiscarded)} already unloaded`);
+  const parts = [`Last check ${when}`];
+  if (summary.lowMemoryEnabled) {
+    parts.push(
+      `PC protection ${Number(summary.loadedNormal || 0)} normal tabs awake / limit ${Number(summary.awakeLimit || 5)}`,
+      `${Number(summary.discardedNormal || 0)} normal tabs unloaded`,
+      `${Number(summary.workerTabs || 0)} worker tabs (${Number(summary.loadedWorkers || 0)} loaded)`,
+      `${Number(summary.lruDiscarded || 0)} LRU-unloaded this check`
+    );
   }
-
-  if (Number(summary.failed || 0) > 0) {
-    parts.push(`${Number(summary.failed)} failed`);
+  if (summary.timerEnabled) {
+    const actionWord = summary.action === "close" ? "closed" : "unloaded";
+    const minutes = Number(summary.minutes || (Number(summary.hours || 12) * 60));
+    const duration = minutes < 60 ? `${minutes} min` : (minutes % 60 ? `${(minutes / 60).toFixed(1)}h` : `${minutes / 60}h`);
+    parts.push(
+      `Auto-AFK ${duration}`,
+      `${Number(summary.monitored || 0)} monitored`,
+      `${Number(summary.protected || 0)} protected`,
+      `${Number(summary.recent || 0)} still active`,
+      `${Number(summary.eligible || 0)} eligible`,
+      `${Number(summary.cleaned || 0)} ${actionWord}`
+    );
+    if (Number(summary.alreadyDiscarded || 0) > 0) parts.push(`${Number(summary.alreadyDiscarded)} already unloaded`);
+    if (Number(summary.nextDueAt) > Date.now()) parts.push(`next eligible around ${new Date(Number(summary.nextDueAt)).toLocaleString()}`);
   }
-
-  if (Number(summary.nextDueAt) > Date.now()) {
-    parts.push(`next eligible around ${new Date(Number(summary.nextDueAt)).toLocaleString()}`);
-  }
-
-  if (Array.isArray(summary.errors) && summary.errors[0]) {
-    parts.push(`browser error: ${summary.errors[0]}`);
-  }
+  if (Number(summary.failed || 0) > 0) parts.push(`${Number(summary.failed)} failed`);
+  if (Array.isArray(summary.errors) && summary.errors[0]) parts.push(`browser error: ${summary.errors[0]}`);
 
   return `${parts.join("; ")}.`;
 }
@@ -3556,6 +3562,9 @@ async function mergeAllTabCleanupSessions() {
     return;
   }
 
+  const sourceCount = store.sessions.length;
+  if (!window.confirm(`Merge all ${sourceCount} saved snapshot${sourceCount === 1 ? "" : "s"} into one combined snapshot and delete the source snapshot${sourceCount === 1 ? "" : "s"}? This does not close any browser tabs.`)) return;
+
   const sourceSessions = [...store.sessions].reverse();
   const mergedByUrl = new Map();
   const windowIds = new Map();
@@ -3602,12 +3611,14 @@ async function mergeAllTabCleanupSessions() {
     tabs
   };
 
-  store.sessions.unshift(merged);
-  store.sessions = store.sessions.slice(0, 40);
+  // The merge is a consolidation operation: once the combined snapshot is
+  // safely constructed, replace its source snapshots instead of leaving a
+  // second full copy of the same session history behind.
+  store.sessions = [merged];
   await storageSet({ [TAB_CLEANUP_SESSIONS_KEY]: store });
   await renderTabCleanupSessions();
   await renderTabCleanupSmartGroups();
-  if (status) status.textContent = `Created one merged snapshot with ${tabs.length} unique exact URLs from ${sourceSessions.length} snapshot${sourceSessions.length === 1 ? "" : "s"}; ${duplicateUrls} repeated URL record${duplicateUrls === 1 ? " was" : "s were"} merged. Original snapshots were kept.`;
+  if (status) status.textContent = `Created one merged snapshot with ${tabs.length} unique exact URLs from ${sourceSessions.length} snapshot${sourceSessions.length === 1 ? "" : "s"}; ${duplicateUrls} repeated URL record${duplicateUrls === 1 ? " was" : "s were"} merged. The ${sourceSessions.length} source snapshot${sourceSessions.length === 1 ? " was" : "s were"} deleted.`;
 }
 
 async function cleanTabCleanupSessionDuplicates() {
@@ -4300,6 +4311,55 @@ function setEmptyState(host, text) {
   host.replaceChildren(makeElement("div", { className: "bot-manager-empty", text }));
 }
 
+let managerImageObserver = null;
+
+function ensureManagerImageObserver() {
+  if (managerImageObserver || typeof IntersectionObserver !== "function") return managerImageObserver;
+  managerImageObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const image = entry.target;
+      const src = String(image?.dataset?.dsSrc || "");
+      if (src && !image.getAttribute("src")) image.setAttribute("src", src);
+      managerImageObserver?.unobserve(image);
+    }
+  }, { rootMargin: "500px 0px" });
+  return managerImageObserver;
+}
+
+function makeDeferredManagerImage(src) {
+  const value = String(src || "").trim();
+  const image = makeElement("img", {
+    className: "bot-manager-image",
+    attrs: { alt: "", loading: "lazy", decoding: "async" },
+    dataset: { dsSrc: value }
+  });
+  window.setTimeout(() => {
+    if (!image.isConnected || !value) return;
+    const observer = ensureManagerImageObserver();
+    if (observer) observer.observe(image);
+    else image.setAttribute("src", value);
+  }, 0);
+  return image;
+}
+
+function releaseManagerImages(root = document) {
+  try { managerImageObserver?.disconnect(); } catch {}
+  managerImageObserver = null;
+  root?.querySelectorAll?.("img.bot-manager-image[data-ds-src]").forEach(image => image.removeAttribute("src"));
+}
+
+function resumeManagerImages(root = document) {
+  const images = [...(root?.querySelectorAll?.("img.bot-manager-image[data-ds-src]:not([src])") || [])];
+  if (!images.length) return;
+  const observer = ensureManagerImageObserver();
+  for (const image of images) {
+    if (observer) observer.observe(image);
+    else if (image.dataset.dsSrc) image.setAttribute("src", image.dataset.dsSrc);
+  }
+}
+
+
 
 // Converts common Unicode "fancy text" letters and digits to ASCII even on
 // older Android WebViews where String.normalize("NFKC") can be incomplete.
@@ -4723,7 +4783,44 @@ async function renderHeavyManagersForTab(tabName) {
   if (tabName === "saved") refreshArchiveTransferUi().catch(() => {});
 }
 
+function releaseTemporaryOptionsMemory() {
+  heavyRenderToken += 1;
+  renderedHeavyTabs.clear();
+  invalidateDuplicateCache();
+  releaseManagerImages(document);
+  resetHeavySavedDataState();
+
+  creatorBackupManagerLoaded = false;
+  creatorBackupManagerLoading = false;
+  creatorBackupManagerState = {
+    bots: normalizeBotArchive(null),
+    lorebooks: normalizeLorebookBackups(null),
+    settings: { ...DEFAULT_SETTINGS }
+  };
+
+  const heavyHosts = [
+    "savedBotsHubManager", "favoriteCreatorManager", "followedCreatorManager",
+    "creatorBotRecentList", "favoriteBotManager", "laterBotManager",
+    "openedBotManager", "botAvailabilityManager", "blockedBotManager",
+    "notInterestedBotManager", "creatorBackupManager"
+  ];
+  heavyHosts.forEach(id => {
+    const host = $(id);
+    if (host) setEmptyState(host, "Temporary Settings data released. Open this section again to reload it.");
+  });
+
+  lastPerformanceSelfCheckText = "";
+  OPTIONS_PERFORMANCE.slowStorageReads = [];
+  showSettingsToast("Released temporary Settings memory. Saved QoL data was not deleted.");
+}
+
 function setActiveTab(tabName) {
+  const previousTab = activeOptionsTab();
+  if (previousTab && previousTab !== tabName) {
+    const previousPage = document.querySelector(`.tab-page[data-page="${CSS.escape(previousTab)}"]`);
+    if (previousPage) releaseManagerImages(previousPage);
+  }
+
   document.querySelectorAll(".tab-button").forEach(button => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
@@ -4746,6 +4843,8 @@ function setActiveTab(tabName) {
   if (tabName === "account" && optionsDataLoaded) refreshAccountSyncUi().catch(() => {});
   if (tabName === "data" && optionsDataLoaded) { refreshStorageUsage().catch(() => {}); renderLocalChangeHistory().catch(() => {}); }
   renderHeavyManagersForTab(tabName);
+  const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
+  if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);
 }
 
 function setupTabs() {
@@ -8847,7 +8946,7 @@ function botAvailabilityCard(entry) {
   const card = makeElement("div", { className: "bot-manager-card", dataset: { id: entry.id } });
   const cardImage = canonicalBotImage(entry.image || entry.archive?.image || entry.archive?.fields?.image || "");
   if (cardImage) {
-    card.appendChild(makeElement("img", { className: "bot-manager-image", attrs: { src: cardImage, alt: "", loading: "lazy", decoding: "async" } }));
+    card.appendChild(makeDeferredManagerImage(cardImage));
   } else {
     card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "?" }));
   }
@@ -9958,7 +10057,7 @@ function deletedSavedBotCard(entry) {
   const fields = archive?.fields || {};
   const card = makeElement("div", { className: "bot-manager-card deleted-saved-bot-card", dataset: { id: entry.id } });
   const image = canonicalBotImage(archive?.image || fields.image || entry.image || "");
-  if (image) card.appendChild(makeElement("img", { className: "bot-manager-image", attrs: { src: image, alt: "", loading: "lazy", decoding: "async" } }));
+  if (image) card.appendChild(makeDeferredManagerImage(image));
   else card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "?" }));
 
   const main = makeElement("div", { className: "bot-manager-main" });
@@ -10424,7 +10523,7 @@ function renderCreatorBotWatchStatus() {
 
   for (const item of recent) {
     const card = makeElement("div", { className: "bot-manager-card creator-bot-watch-row", dataset: { id: item.id } });
-    if (item.image) card.appendChild(makeElement("img", { className: "bot-manager-image", attrs: { src: item.image, alt: "", loading: "lazy", decoding: "async" } }));
+    if (item.image) card.appendChild(makeDeferredManagerImage(item.image));
     else card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "N" }));
     const main = makeElement("div", { className: "bot-manager-main" });
     main.appendChild(makeElement("div", { className: "bot-manager-title", text: displayNormalizedSavedText(item.name || item.id) }));
@@ -11329,7 +11428,7 @@ function savedBotsHubSourceLabel(source) {
 function savedBotsHubCard(entry) {
   const card = makeElement("div", { className: "bot-manager-card saved-bots-hub-card", dataset: { id: entry.id } });
   if (entry.image) {
-    card.appendChild(makeElement("img", { className: "bot-manager-image", attrs: { src: entry.image, alt: "", loading: "lazy", decoding: "async" } }));
+    card.appendChild(makeDeferredManagerImage(entry.image));
   } else {
     card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "?" }));
   }
@@ -13059,18 +13158,19 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     const helperReady = await runtimeMessage({ type: "DS_QUICK_LESS_LIKE_PREPARE_BULK", bulkRunId: runId, jobId });
     const helperReadyMs = Math.max(0, (performance.now?.() || Date.now()) - helperPrepareStartedAt);
     lessLikeFeedbackTabId = Number(helperReady?.tabId || 0);
-    if (!helperReady?.ready) {
+    const nativeFallback = helperReady?.fallback === true;
+    if (!helperReady?.ready && !nativeFallback) {
       blockedBulkLessLikeStopRequested = true;
       await checkpoint({ force: true, status: "paused", currentId: "", nextIndex: 0, stopRequested: true });
       const helperStatus = String(helperReady?.status || "recommendation-worker-not-ready");
       updateBlockedLessLikeStatus(helperStatus === "recommendation-worker-closed"
         ? "Stop recommending paused: the recommendation helper tab was closed. Click Resume to recreate it."
-        : "Stop recommending paused: SpicyChat Home did not expose a ready recommendation/auth context. Click Resume to try the helper again.");
+        : "Stop recommending paused: SpicyChat Home could not start a usable helper. Click Resume to try again.");
       return;
     }
 
-    pacing.state = "adaptive warm-up";
-    renderQuickLessLikeJobStats(stats, pacing, { force: true, note: "Recommendation helper ready" });
+    pacing.state = nativeFallback ? "native Less Like fallback" : "adaptive warm-up";
+    renderQuickLessLikeJobStats(stats, pacing, { force: true, note: nativeFallback ? "Native Less Like fallback ready" : "Recommendation helper ready" });
     if (lessLikeFeedbackTabId) {
       await runtimeMessage({
         type: "DS_QUICK_LESS_LIKE_RUN_TIMING",
@@ -13144,12 +13244,12 @@ async function runBlockedBulkLessLike(mode = "remaining") {
         jobId
       }, name || id, pacing, stats);
 
-      if (["recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-wrong-page", "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error"].includes(String(response?.status || ""))) {
+      if (!response?.fallbackAttempted && ["recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-wrong-page", "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error"].includes(String(response?.status || ""))) {
         blockedBulkLessLikeStopRequested = true;
         await checkpoint({ force: true, status: "paused", currentId: "", nextIndex: index, stopRequested: true });
         updateBlockedLessLikeStatus(response?.status === "recommendation-worker-closed"
-          ? "Stop recommending paused: the recommendation helper tab was closed. Click Resume to recreate it."
-          : "Stop recommending paused: the recommendation helper is not ready. Click Resume to reload SpicyChat Home and continue.");
+          ? "Stop recommending paused: the helper tab was closed. Click Resume to recreate it."
+          : "Stop recommending paused: neither the API helper nor native fallback became usable. Click Resume to try again.");
         break;
       }
       if (response?.status === "spicychat-tab-required") {
@@ -13420,10 +13520,7 @@ function botManagerCardElement(entry, kind) {
   });
 
   if (entry.image) {
-    card.appendChild(makeElement("img", {
-      className: "bot-manager-image",
-      attrs: { src: entry.image, alt: "", loading: "lazy", decoding: "async" }
-    }));
+    card.appendChild(makeDeferredManagerImage(entry.image));
   } else {
     card.appendChild(makeElement("div", { className: "bot-manager-placeholder", text: "?" }));
   }
@@ -14473,6 +14570,10 @@ async function load() {
   const rawSettings = result.settings || {};
   await ensureGranularSettingsMigration(rawSettings);
   const settings = { ...DEFAULT_SETTINGS, ...rawSettings };
+  if (!Object.prototype.hasOwnProperty.call(rawSettings, "autoAfkMinutes")) {
+    const legacyHours = Math.min(720, Math.max(0.25, Number(rawSettings.autoAfkHours) || 12));
+    settings.autoAfkMinutes = Math.min(43200, Math.max(15, Math.round(legacyHours * 60)));
+  }
   loadedSettingsSnapshot = { ...settings };
   creatorBotWebhookState = normalizeCreatorBotWebhookConfig(result[CREATOR_BOT_WEBHOOK_KEY]);
   applyOptionsPerformancePreferences(settings);
@@ -14695,7 +14796,9 @@ async function load() {
   setValue("excludeTags", arrayToLines(settings.excludeTags));
 
   setChecked("autoAfkEnabled", !!settings.autoAfkEnabled);
-  setValue("autoAfkHours", Math.min(720, Math.max(1, Number(settings.autoAfkHours) || 12)));
+  setValue("autoAfkMinutes", String(Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))));
+  setChecked("lowMemoryProtectionEnabled", !!settings.lowMemoryProtectionEnabled);
+  setValue("maxAwakeSpicyTabs", String(Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))));
   setChecked("autoAfkChats", settings.autoAfkChats !== false);
   setChecked("autoAfkHome", !!settings.autoAfkHome);
   setChecked("autoAfkProfiles", !!settings.autoAfkProfiles);
@@ -15203,7 +15306,7 @@ async function load() {
   setChecked("showQuickDislikeButtons", !!settings.showQuickDislikeButtons);
   setChecked("showQuickUnblockButtons", !!settings.showQuickUnblockButtons);
   setChecked("reduceAnimatedBotImages", !!settings.reduceAnimatedBotImages);
-  setValue("animatedImageMode", ["freeze", "once", "hover"].includes(settings.animatedImageMode) ? settings.animatedImageMode : "freeze");
+  setValue("animatedImageMode", "hover");
   setChecked("animatedImagesListings", !!settings.animatedImagesListings);
   setChecked("animatedImagesChats", !!settings.animatedImagesChats);
   setChecked("animatedImagesProfiles", !!settings.animatedImagesProfiles);
@@ -15276,7 +15379,10 @@ function readSettingsFromPage() {
     globalNsfwMode: value("globalNsfwMode", "ignore"),
 
     autoAfkEnabled: checked("autoAfkEnabled"),
-    autoAfkHours: Math.min(720, Math.max(1, Number(value("autoAfkHours", "12")) || 12)),
+    autoAfkMinutes: Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)),
+    autoAfkHours: Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)),
+    lowMemoryProtectionEnabled: checked("lowMemoryProtectionEnabled"),
+    maxAwakeSpicyTabs: Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "5")) || 5)),
     autoAfkChats: checked("autoAfkChats", true),
     autoAfkHome: checked("autoAfkHome"),
     autoAfkProfiles: checked("autoAfkProfiles"),
@@ -15856,7 +15962,7 @@ function readSettingsFromPage() {
     showQuickDislikeButtons: checked("showQuickDislikeButtons"),
     showQuickUnblockButtons: checked("showQuickUnblockButtons"),
     reduceAnimatedBotImages: checked("reduceAnimatedBotImages"),
-    animatedImageMode: ["freeze", "once", "hover"].includes(value("animatedImageMode")) ? value("animatedImageMode") : "freeze",
+    animatedImageMode: "hover",
     animatedImagesListings: checked("animatedImagesListings"),
     animatedImagesChats: checked("animatedImagesChats"),
     animatedImagesProfiles: checked("animatedImagesProfiles"),
@@ -15900,7 +16006,10 @@ function readSingleSettingFromPage(settingKey) {
     case "saiToolkitCompatibility": return (checked("saiToolkitCompatibility", false));
     case "globalNsfwMode": return (value("globalNsfwMode", "ignore"));
     case "autoAfkEnabled": return (checked("autoAfkEnabled"));
-    case "autoAfkHours": return (Math.min(720, Math.max(1, Number(value("autoAfkHours", "12")) || 12)));
+    case "autoAfkMinutes": return (Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)));
+    case "autoAfkHours": return (Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)));
+    case "lowMemoryProtectionEnabled": return (checked("lowMemoryProtectionEnabled"));
+    case "maxAwakeSpicyTabs": return (Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "5")) || 5)));
     case "autoAfkChats": return (checked("autoAfkChats", true));
     case "autoAfkHome": return (checked("autoAfkHome"));
     case "autoAfkProfiles": return (checked("autoAfkProfiles"));
@@ -16462,7 +16571,7 @@ function readSingleSettingFromPage(settingKey) {
     case "showQuickDislikeButtons": return (checked("showQuickDislikeButtons"));
     case "showQuickUnblockButtons": return (checked("showQuickUnblockButtons"));
     case "reduceAnimatedBotImages": return (checked("reduceAnimatedBotImages"));
-    case "animatedImageMode": return (["freeze", "once", "hover"].includes(value("animatedImageMode")) ? value("animatedImageMode") : "freeze");
+    case "animatedImageMode": return "hover";
     case "animatedImagesListings": return (checked("animatedImagesListings"));
     case "animatedImagesChats": return (checked("animatedImagesChats"));
     case "animatedImagesProfiles": return (checked("animatedImagesProfiles"));
@@ -19462,7 +19571,7 @@ function percentChange(current, baseline) {
 async function comparePerformanceBaseline({ returnText = false } = {}) {
   const result = await storageGet([PERFORMANCE_BASELINE_KEY]);
   const baseline = result[PERFORMANCE_BASELINE_KEY];
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   if (!baseline || !context?.pageDiagnostics) {
     const text = !baseline ? "No performance baseline saved yet." : "No reachable source SpicyChat tab for comparison.";
     if (!returnText) { const status = $("controlSupportStatus"); if (status) status.textContent = text; }
@@ -19660,7 +19769,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     SPICYCHAT_BETA_CAPABILITIES_KEY,
     "cardTokenFetchDiagnosticsV1"
   ]);
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   const bytes = await storageBytesInUse(null);
   const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
   const enabledFeatures = OPTIONAL_FEATURE_KEYS.filter(key => settings[key] === true);
@@ -19674,7 +19783,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
-    `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : "unavailable — no open SpicyChat tab responded to diagnostics; runtime counters below are omitted or unavailable"}`,
+    `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
     (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}`; })(),
@@ -19828,9 +19937,9 @@ function performanceWarningLines(context, settings) {
 async function copyPerformanceReport({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building performance report...";
-  const stored = await storageGet(["settings", "cardTokenFetchDiagnosticsV1"]);
+  const stored = await storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]);
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   const manifest = chrome.runtime.getManifest?.() || {};
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
@@ -19854,6 +19963,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Bot archive preservation: ${Number(runtime.botArchiveSeenQueued || 0)} public observations queued; ${Number(runtime.botArchiveSeenMerged || 0)} merged in ${Number(runtime.botArchiveSeenBatches || 0)} batches; ${Number(runtime.botArchiveSeenUnchanged || 0)} unchanged snapshots skipped; ${Number(runtime.botArchiveWrites || 0)} archive writes; ${Number(runtime.ownBotBackupSaves || 0)} own-bot editor saves`,
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
     `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 500)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
+    (() => { const a = stored[AUTO_AFK_STATUS_KEY] || {}; return `SpicyChat tabs: ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${a.lowMemoryEnabled ? `on, limit ${Number(a.awakeLimit || 5)}, LRU unloaded ${Number(a.lruDiscarded || 0)} last check` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
     `Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`,
@@ -19865,7 +19975,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
       `Composer shortcuts: ${context.pageDiagnostics.chatLayout.shortcutPlacement || "none"}; holder ${Number(context.pageDiagnostics.chatLayout.shortcutWidth || 0)} px; ${Number(context.pageDiagnostics.chatLayout.shortcutControls || 0)} controls; textarea right padding ${context.pageDiagnostics.chatLayout.textareaPaddingRight || "unknown"}; overlap ${context.pageDiagnostics.chatLayout.shortcutOverlap ? "YES" : "no"}`
     ] : []),
     `Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`,
-    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(720, Math.max(1, Number(settings.autoAfkHours) || 12))}h; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}`,
+    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))} awake tabs` : "off"}`,
     `Disabled-feature deep sleep: ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
     `Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`,
     `Blocked-bot refresh batching: ${Number(runtime.blockedBotRefreshDeferrals || 0)} deferred single-block changes; ${Number(runtime.blockedBotRefreshFlushes || 0)} settled refreshes; ${Number(runtime.blockedBotMutationSkips || 0)} immediate listing mutations skipped; ${runtime.blockedBotRefreshPending ? `pending (${Math.max(0, Math.ceil((Number(runtime.blockedBotRefreshSettleAt || 0) - Date.now()) / 1000))}s remaining)` : "idle"}`,
@@ -19919,7 +20029,7 @@ async function buildPerformanceSelfCheckText() {
   const readStarted = performance.now();
   const read = await storageGetChecked(["settings"]);
   const storageMs = performance.now() - readStarted;
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 12000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
   const warnings = performanceWarningLines(context, settings);
   const total = performance.now() - started;
@@ -19944,32 +20054,71 @@ async function buildPerformanceSelfCheckText() {
 }
 
 
+async function buildFastSupportSnapshot() {
+  const manifest = chrome.runtime.getManifest?.() || {};
+  const quickStored = await promiseWithSupportTimeout(
+    storageGet(["settings", AUTO_AFK_STATUS_KEY]),
+    1500,
+    null
+  );
+  const bytesValue = await promiseWithSupportTimeout(storageBytesInUse(null), 1500, null);
+  const stored = quickStored && typeof quickStored === "object" ? quickStored : {};
+  const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+  const afk = stored[AUTO_AFK_STATUS_KEY] || {};
+  const bytes = Number(bytesValue);
+  return [
+    "SpicyChat QoL fast support snapshot",
+    `Generated: ${new Date().toISOString()}`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Browser: ${navigator.userAgent}`,
+    `Platform: ${navigator.platform || "unknown"}`,
+    `Options DOM: ${document.getElementsByTagName("*").length} nodes`,
+    `QoL storage: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
+    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,
+    `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))} normal tabs awake` : "off"}`,
+    `Last tab scan: ${afk.at ? new Date(Number(afk.at)).toISOString() : "none"}; ${Number(afk.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(afk.loadedNormal || 0)} normal loaded; ${Number(afk.discardedNormal || 0)} normal unloaded; ${Number(afk.workerTabs || 0)} workers`,
+    "This snapshot is deliberately lightweight and should still appear when a content runtime or a heavier support section is stuck."
+  ].join("\n");
+}
+
 async function buildAllSupportInfo() {
-  const sectionTimeoutMs = 10000;
+  const sectionTimeoutMs = 6500;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
     sectionTimeoutMs,
-    `${label} timed out after ${Math.round(sectionTimeoutMs / 1000)} seconds. The rest of the support report continued.`
+    `${label} timed out after ${Math.round(sectionTimeoutMs / 1000)} seconds. Other support sections still continued.`
   );
 
-  const diagnosticText = await timed(copyDiagnostics({ returnOnly: true }), "Diagnostic info").catch(error => `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`);
-  const performanceText = await timed(copyPerformanceReport({ returnOnly: true }), "Performance report").catch(error => `Performance report could not be built: ${error?.message || String(error || "unknown error")}`);
-  const selfCheckText = await timed(buildPerformanceSelfCheckText(), "Performance self-check").catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
-  lastPerformanceSelfCheckText = selfCheckText;
-
-  const healthValue = await timed((async () => {
+  // Start everything together. The old sequential builder could spend 40+
+  // seconds waiting on four independent failures even after per-section caps.
+  const fastSnapshotPromise = buildFastSupportSnapshot().catch(error =>
+    `Fast snapshot could not be built: ${error?.message || String(error || "unknown error")}`
+  );
+  const diagnosticPromise = timed(copyDiagnostics({ returnOnly: true }), "Diagnostic info")
+    .catch(error => `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`);
+  const performancePromise = timed(copyPerformanceReport({ returnOnly: true }), "Performance report")
+    .catch(error => `Performance report could not be built: ${error?.message || String(error || "unknown error")}`);
+  const selfCheckPromise = timed(buildPerformanceSelfCheckText(), "Performance self-check")
+    .catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
+  const healthPromise = timed((async () => {
     const health = await collectDataHealth();
     return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
   })(), "Data health").catch(error => `Data health check failed: ${error?.message || String(error)}`);
-
-  const baselineText = await timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison")
+  const baselinePromise = timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison")
     .catch(() => "No performance baseline comparison available.");
+
+  const [fastSnapshot, diagnosticText, performanceText, selfCheckText, healthValue, baselineText] =
+    await Promise.all([fastSnapshotPromise, diagnosticPromise, performancePromise, selfCheckPromise, healthPromise, baselinePromise]);
+  lastPerformanceSelfCheckText = selfCheckText;
 
   return [
     "SpicyChat QoL support info",
     `Generated: ${new Date().toISOString()}`,
     "Paste or attach this whole report when someone asks for QoL diagnostics/support info.",
-    "Support builder: each section is capped at 10 seconds so a stuck runtime/storage read cannot hang this report indefinitely.",
+    "Support builder: lightweight state is captured first; heavier sections run in parallel and are independently capped.",
+    "",
+    "===== FAST SNAPSHOT =====",
+    fastSnapshot,
     "",
     "===== DIAGNOSTIC INFO =====",
     diagnosticText,
@@ -20969,7 +21118,8 @@ async function refreshPersonalUsageSummary() {
 }
 
 const SETTING_DEPENDENCY_GROUPS = [
-  { parent: "autoAfkEnabled", name: "Inactive tab cleanup (Auto-AFK)", children: ["autoAfkChats", "autoAfkHome", "autoAfkProfiles", "autoAfkProtectActive", "autoAfkResetOnActivate"] },
+  { parent: "autoAfkEnabled", name: "Inactive tab cleanup (Auto-AFK)", children: ["autoAfkMinutes", "autoAfkChats", "autoAfkHome", "autoAfkProfiles", "autoAfkProtectActive", "autoAfkResetOnActivate"] },
+  { parent: "lowMemoryProtectionEnabled", name: "Low memory / PC protection", children: ["maxAwakeSpicyTabs"] },
   { parent: "duplicateTabGuardEnabled", name: "Duplicate SpicyChat Tab Guard", children: ["duplicateTabChats", "duplicateTabHome", "duplicateTabProfiles", "duplicateTabFocusExisting"] },
   { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
   { parent: "showCardGreetingTokenInfo", name: "Bot card token info", children: ["cardTokenShowGreeting", "cardTokenShowPersonality", "cardTokenShowScenario", "cardTokenShowExamples"] },
@@ -22039,6 +22189,7 @@ $("downloadPerformanceReport")?.addEventListener("click", downloadPerformanceRep
 $("runPerformanceSelfCheck")?.addEventListener("click", runPerformanceSelfCheck);
 $("downloadPerformanceSelfCheck")?.addEventListener("click", downloadPerformanceSelfCheck);
 $("resetPerformanceCounters")?.addEventListener("click", resetPerformanceCounters);
+$("releaseOptionsTemporaryMemory")?.addEventListener("click", releaseTemporaryOptionsMemory);
 $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerformancePreferences({ reduceOptionsAnimations: checked("reduceOptionsAnimations") }));
 ["settingsNavigationStyle", "settingsContentLayout", "settingsPageWidth"].forEach(id => {
   $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());

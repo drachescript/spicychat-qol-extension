@@ -198,7 +198,7 @@
 
   // Adaptive long-chat escalation. The existing performance-mode file does the
   // rendering/window work; this watcher decides when to force its strongest tier.
-  // v0.2.27 deliberately never reloads the page on its own. A disruptive recovery
+  // v0.2.28 deliberately never reloads the page on its own. A disruptive recovery
   // action must stay user initiated (the long-chat control already exposes Refresh chat).
   const AUTO_TIER_DATASET = "dsQolAutoPerformanceTier";
   const HEAP_SOFT = 700 * 1024 * 1024;

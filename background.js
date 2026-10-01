@@ -64,6 +64,9 @@ const cardTokenDiag = {
 const AUTO_AFK_DEFAULTS = {
   autoAfkEnabled: false,
   autoAfkHours: 12,
+  autoAfkMinutes: 720,
+  lowMemoryProtectionEnabled: false,
+  maxAwakeSpicyTabs: 5,
   autoAfkChats: false,
   autoAfkHome: false,
   autoAfkProfiles: false,
@@ -93,6 +96,7 @@ let quickDislikePersistentWorkerTabId = null;
 const quickLessLikeWorkerTabIds = new Set();
 const quickLessLikeBulkWorkerTabs = new Map();
 const quickLessLikeDirectBulkTabs = new Map();
+const quickLessLikeNativeFallbackBulkRuns = new Set();
 const quickLessLikeClosedBulkRuns = new Map();
 const quickLessLikeReadyWorkerTabs = new Map();
 let quickLessLikePersistentWorkerTabId = null;
@@ -616,6 +620,7 @@ async function releaseQuickLessLikeBulkWorker(runId) {
     quickLessLikeHistoryLastFlushAt = 0;
   }
   quickLessLikeDirectBulkTabs.delete(id);
+  quickLessLikeNativeFallbackBulkRuns.delete(id);
   quickLessLikeClosedBulkRuns.delete(id);
   const tabIds = new Set();
   const mapped = Number(quickLessLikeBulkWorkerTabs.get(id));
@@ -909,7 +914,24 @@ async function prepareQuickLessLikeBulkWorker(message) {
   const runId = String(message?.bulkRunId || "").trim();
   if (!runId) return { ok: false, status: "invalid-run" };
   quickLessLikeClosedBulkRuns.delete(runId);
-  return ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+  quickLessLikeNativeFallbackBulkRuns.delete(runId);
+
+  // Do not make the whole bulk job wait 12-18 seconds for private/direct
+  // recommendation auth to become discoverable. Give the API worker a short
+  // warm-up; if it is still not ready, keep the same hidden Home tab and fall
+  // back to SpicyChat's native Less Like menu for each bot.
+  const worker = await createOrReuseQuickLessLikeRecommendationWorker(runId);
+  if (worker?.ok && worker?.tabId) {
+    const ready = await probeQuickLessLikeRecommendationWorker(worker.tabId, true, 4500);
+    if (ready?.ready) return { ...ready, ok: true, ready: true, fallback: false, tabId: Number(worker.tabId) };
+    quickLessLikeNativeFallbackBulkRuns.add(runId);
+    return { ...(ready || worker), ok: true, ready: false, fallback: true, tabId: Number(worker.tabId), status: "native-less-like-fallback" };
+  }
+
+  // Even if the direct recommendation helper could not be created, the normal
+  // native worker path can create its own inactive Home tab on the first item.
+  quickLessLikeNativeFallbackBulkRuns.add(runId);
+  return { ...worker, ok: true, ready: false, fallback: true, tabId: 0, status: "native-less-like-fallback" };
 }
 
 async function releaseQuickLessLikeStandaloneWorker() {
@@ -1018,6 +1040,81 @@ async function runDirectCharacterFeedback(message, mode) {
   };
 }
 
+async function runNativeQuickLessLikeFallback(message, prior = null) {
+  const startedAt = Date.now();
+  const botId = String(message?.botId || "").trim().toLowerCase();
+  const botName = String(message?.botName || "").trim().slice(0, 160);
+  const runId = String(message?.bulkRunId || "").trim();
+  const jobId = String(message?.jobId || "").trim();
+  if (!botId) return { ok: false, status: "invalid-bot", fallbackAttempted: true };
+  if (runId && isQuickLessLikeBulkRunCanceled(runId)) return { ok: false, status: "bulk-canceled", fallbackAttempted: true };
+
+  const target = quickLessLikeSearchUrl(botName, botId);
+  const prepared = await prepareQuickLessLikeWorkerTab(target, runId, { jobId, botId, botName, startedAt });
+  const tabId = Number(prepared?.tabId || 0);
+  if (!prepared?.ok || !tabId) {
+    return {
+      ok: false,
+      status: "worker-tab-failed",
+      fallbackAttempted: true,
+      fallbackExecutor: "spicychat-native-ui",
+      requestSent: false,
+      networkAttempts: 0,
+      reason: prepared?.error || "Could not create the native Less Like helper tab.",
+      priorStatus: String(prior?.status || ""),
+      totalMs: Date.now() - startedAt
+    };
+  }
+
+  // A full navigation temporarily removes the content-script receiver. Retry
+  // only while there is NO response at all; once the native worker answers we
+  // never blindly click the action a second time.
+  const deadline = Date.now() + 18000;
+  let response = null;
+  while (Date.now() < deadline) {
+    if (runId && isQuickLessLikeBulkRunCanceled(runId)) {
+      return { ok: false, status: "bulk-canceled", fallbackAttempted: true, feedbackTabId: tabId };
+    }
+    response = await tabsSendMessage(tabId, { type: "DS_QUICK_LESS_LIKE_RUN" });
+    if (response?.status) break;
+    if (!(await tabsGet(tabId))) {
+      return { ok: false, status: "worker-closed", fallbackAttempted: true, feedbackTabId: tabId, requestSent: false, networkAttempts: 0 };
+    }
+    await new Promise(resolve => setTimeout(resolve, 350));
+  }
+
+  if (!response?.status) {
+    return {
+      ok: false,
+      status: "worker-timeout",
+      fallbackAttempted: true,
+      fallbackExecutor: "spicychat-native-ui",
+      feedbackTabId: tabId,
+      feedbackTabsTried: 1,
+      requestSent: false,
+      networkAttempts: 0,
+      priorStatus: String(prior?.status || ""),
+      totalMs: Date.now() - startedAt
+    };
+  }
+
+  const ambiguousNativeSubmit = String(response?.status || "") === "submit-not-confirmed";
+  return {
+    ...response,
+    fallbackAttempted: true,
+    fallbackExecutor: "spicychat-native-ui",
+    feedbackTabId: tabId,
+    feedbackTabsTried: 1,
+    // If SpicyChat's native UI clicked Less Like but never showed a definitive
+    // success/failure signal, treat it like an ambiguous POST and do not blindly
+    // click the same bot again through retry logic.
+    requestSent: ambiguousNativeSubmit,
+    networkAttempts: ambiguousNativeSubmit ? 1 : 0,
+    priorStatus: String(prior?.status || ""),
+    totalMs: Date.now() - startedAt
+  };
+}
+
 async function runQuickLessLikeBot(message) {
   const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
@@ -1031,10 +1128,27 @@ async function runQuickLessLikeBot(message) {
   }
 
   let result;
+  const runId = String(message?.bulkRunId || "").trim();
   try {
-    result = await runDirectCharacterFeedback(message, "less-like");
+    if (runId && quickLessLikeNativeFallbackBulkRuns.has(runId)) {
+      result = await runNativeQuickLessLikeFallback(message);
+    } else {
+      result = await runDirectCharacterFeedback(message, "less-like");
+      const mayHaveSentRating = !!result?.requestSent || Number(result?.networkAttempts || 0) > 0;
+      const nativeFallbackStatuses = new Set([
+        "recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-waiting",
+        "recommendation-worker-waiting-native-signature", "recommendation-worker-wrong-page",
+        "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error",
+        "direct-feedback-unavailable", "recombee-token-not-found", "recombee-user-not-found",
+        "character-auth-not-ready", "character-auth-rejected", "not-worker"
+      ]);
+      if (!result?.ok && !mayHaveSentRating && nativeFallbackStatuses.has(String(result?.status || ""))) {
+        if (runId) quickLessLikeNativeFallbackBulkRuns.add(runId);
+        result = await runNativeQuickLessLikeFallback(message, result);
+      }
+    }
   } finally {
-    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
+    if (!runId) await releaseQuickLessLikeStandaloneWorker();
   }
 
   const historyStartedAt = Date.now();
@@ -4242,10 +4356,17 @@ function autoAfkLastActivity(tab, activity) {
 
 async function getAutoAfkSettings() {
   const result = await storageGet(["settings"]);
-  return {
+  const raw = result.settings || {};
+  const settings = {
     ...AUTO_AFK_DEFAULTS,
-    ...(result.settings || {})
+    ...raw
   };
+  // Preserve old custom hour values until Settings has saved the new minute field.
+  if (!Object.prototype.hasOwnProperty.call(raw, "autoAfkMinutes")) {
+    const legacyHours = Math.min(720, Math.max(0.25, Number(raw.autoAfkHours) || 12));
+    settings.autoAfkMinutes = Math.round(legacyHours * 60);
+  }
+  return settings;
 }
 
 async function getAutoAfkActivity() {
@@ -4305,10 +4426,56 @@ async function syncAutoAfkTabs() {
   return activity;
 }
 
+let lowMemoryProtectionScanTimer = 0;
+
+function normalizedAutoAfkMinutes(settings = {}) {
+  const raw = Number(settings.autoAfkMinutes);
+  if (Number.isFinite(raw) && raw > 0) return Math.min(43200, Math.max(15, Math.round(raw)));
+  const hours = Math.min(720, Math.max(0.25, Number(settings.autoAfkHours) || 12));
+  return Math.min(43200, Math.max(15, Math.round(hours * 60)));
+}
+
+function isDedicatedWorkerTab(tab) {
+  const id = Number(tab?.id || 0);
+  const url = String(tab?.url || tab?.pendingUrl || "");
+  if (!id) return false;
+  return (
+    tabCleanupWorkerTabIds.has(id) ||
+    quickDislikeWorkerTabIds.has(id) ||
+    quickLessLikeWorkerTabIds.has(id) ||
+    botStatusWorkerTabIds.has(id) ||
+    listingRefillWorkerTabIds.has(id) ||
+    personaRefreshWorkerTabIds.has(id) ||
+    isQuickDislikeWorkerUrl(url) ||
+    isQuickLessLikeWorkerUrl(url) ||
+    isBotStatusWorkerUrl(url) ||
+    isListingRefillWorkerUrl(url) ||
+    isPersonaRefreshWorkerUrl(url)
+  );
+}
+
+function lowMemoryProtectedTab(tab) {
+  if (!tab) return true;
+  // PC protection always keeps the tab the user is looking at. Pinned/audible
+  // tabs and browser-declared non-discardable tabs are never sacrificed either.
+  if (tab.active || tab.pinned || tab.audible || tab.autoDiscardable === false) return true;
+  return false;
+}
+
+function scheduleLowMemoryProtectionScan(delayMs = 300) {
+  clearTimeout(lowMemoryProtectionScanTimer);
+  lowMemoryProtectionScanTimer = setTimeout(() => {
+    lowMemoryProtectionScanTimer = 0;
+    runAutoAfkScan().catch(() => {});
+  }, Math.max(100, Number(delayMs) || 300));
+}
+
 async function configureAutoAfkAlarm(sync = false) {
   const settings = await getAutoAfkSettings();
+  const cleanupEnabled = settings.enabled !== false && !!settings.autoAfkEnabled;
+  const lowMemoryEnabled = settings.enabled !== false && !!settings.lowMemoryProtectionEnabled;
 
-  if (settings.enabled === false || !settings.autoAfkEnabled) {
+  if (!cleanupEnabled && !lowMemoryEnabled) {
     chrome.alarms.clear(AUTO_AFK_ALARM);
     return;
   }
@@ -4332,18 +4499,33 @@ async function writeAutoAfkStatus(status) {
 async function runAutoAfkScan() {
   const settings = await getAutoAfkSettings();
   const now = Date.now();
-  const hours = Math.min(720, Math.max(1, Number(settings.autoAfkHours) || 12));
+  const minutes = normalizedAutoAfkMinutes(settings);
+  const hours = minutes / 60;
   const action = settings.autoAfkAction || "discard";
+  const timerEnabled = settings.enabled !== false && !!settings.autoAfkEnabled;
+  const lowMemoryEnabled = settings.enabled !== false && !!settings.lowMemoryProtectionEnabled;
+  const awakeLimit = Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5));
   const summary = {
     at: now,
-    enabled: settings.enabled !== false && !!settings.autoAfkEnabled,
+    enabled: timerEnabled || lowMemoryEnabled,
+    timerEnabled,
+    lowMemoryEnabled,
+    minutes,
     hours,
     action,
+    awakeLimit,
+    totalSpicyTabs: 0,
+    normalTabs: 0,
+    workerTabs: 0,
+    loadedNormal: 0,
+    discardedNormal: 0,
+    loadedWorkers: 0,
     monitored: 0,
     protected: 0,
     recent: 0,
     eligible: 0,
     cleaned: 0,
+    lruDiscarded: 0,
     alreadyDiscarded: 0,
     failed: 0,
     nextDueAt: null,
@@ -4355,79 +4537,113 @@ async function runAutoAfkScan() {
     return summary;
   }
 
-  const cutoff = now - hours * 60 * 60 * 1000;
+  const cutoff = now - minutes * 60 * 1000;
   const tabs = await tabsQuery({
     url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"]
   });
+  summary.totalSpicyTabs = tabs.length;
+
   const activity = await getAutoAfkActivity();
   let activityChanged = false;
 
+  // Keep LRU timestamps current even when timer cleanup itself is disabled.
   for (const tab of tabs) {
-    if (!tab?.id || !autoAfkApplies(tab.url, settings)) continue;
-    summary.monitored += 1;
-
+    if (!tab?.id) continue;
     const key = String(tab.id);
     const browserLastAccessed = Number(tab.lastAccessed);
     const storedBefore = Number(activity[key]);
-
     if (!Number.isFinite(storedBefore)) {
       activity[key] = Number.isFinite(browserLastAccessed) && browserLastAccessed > 0
         ? Math.min(now, browserLastAccessed)
         : now;
       activityChanged = true;
     }
-
     const lastActive = autoAfkLastActivity(tab, activity);
-
-    // Chrome/Brave lastAccessed is the last time the tab became active. Keep it
-    // as a browser-level fallback in case a content-script activity event was missed.
     if (!Number.isFinite(storedBefore) || lastActive > Number(activity[key] || 0)) {
       activity[key] = lastActive;
       activityChanged = true;
     }
+  }
 
-    if (autoAfkProtectedTab(tab, action, settings)) {
-      summary.protected += 1;
-      continue;
-    }
+  const workers = tabs.filter(isDedicatedWorkerTab);
+  const normalTabs = tabs.filter(tab => !isDedicatedWorkerTab(tab));
+  summary.workerTabs = workers.length;
+  summary.normalTabs = normalTabs.length;
+  summary.loadedWorkers = workers.filter(tab => !tab.discarded).length;
+  summary.loadedNormal = normalTabs.filter(tab => !tab.discarded).length;
+  summary.discardedNormal = normalTabs.filter(tab => !!tab.discarded).length;
 
-    if (action === "discard" && tab.discarded) {
-      summary.alreadyDiscarded += 1;
-      continue;
-    }
-
-    if (lastActive > cutoff) {
-      summary.recent += 1;
-      const dueAt = lastActive + hours * 60 * 60 * 1000;
-      if (!summary.nextDueAt || dueAt < summary.nextDueAt) summary.nextDueAt = dueAt;
-      continue;
-    }
-
-    summary.eligible += 1;
-
-    if (action === "close") {
-      const result = await tabsRemove(tab.id);
+  // Low-memory protection is independent from the AFK timer. Dedicated active
+  // workers never count against the limit. Normal tabs are discarded oldest
+  // first while current/pinned/audible tabs remain protected.
+  if (lowMemoryEnabled && summary.loadedNormal > awakeLimit) {
+    const candidates = normalTabs
+      .filter(tab => !tab.discarded && !lowMemoryProtectedTab(tab))
+      .sort((a, b) => autoAfkLastActivity(a, activity) - autoAfkLastActivity(b, activity));
+    let needed = Math.max(0, summary.loadedNormal - awakeLimit);
+    for (const tab of candidates) {
+      if (needed <= 0) break;
+      const result = await tabsDiscard(tab.id);
       if (result.ok) {
-        summary.cleaned += 1;
-        delete activity[key];
-        activityChanged = true;
+        summary.lruDiscarded += 1;
+        summary.loadedNormal = Math.max(0, summary.loadedNormal - 1);
+        summary.discardedNormal += 1;
+        needed -= 1;
       } else {
         summary.failed += 1;
         if (result.error && summary.errors.length < 3) summary.errors.push(result.error);
       }
-      continue;
-    }
-
-    const result = await tabsDiscard(tab.id);
-    if (result.ok) {
-      summary.cleaned += 1;
-    } else {
-      summary.failed += 1;
-      if (result.error && summary.errors.length < 3) summary.errors.push(result.error);
     }
   }
 
-  // Remove activity records for tabs that no longer exist.
+  if (timerEnabled) {
+    for (const tab of normalTabs) {
+      if (!tab?.id || !autoAfkApplies(tab.url, settings)) continue;
+      summary.monitored += 1;
+      const key = String(tab.id);
+      const lastActive = autoAfkLastActivity(tab, activity);
+
+      if (autoAfkProtectedTab(tab, action, settings)) {
+        summary.protected += 1;
+        continue;
+      }
+
+      if (action === "discard" && tab.discarded) {
+        summary.alreadyDiscarded += 1;
+        continue;
+      }
+
+      if (lastActive > cutoff) {
+        summary.recent += 1;
+        const dueAt = lastActive + minutes * 60 * 1000;
+        if (!summary.nextDueAt || dueAt < summary.nextDueAt) summary.nextDueAt = dueAt;
+        continue;
+      }
+
+      summary.eligible += 1;
+      if (action === "close") {
+        const result = await tabsRemove(tab.id);
+        if (result.ok) {
+          summary.cleaned += 1;
+          delete activity[key];
+          activityChanged = true;
+        } else {
+          summary.failed += 1;
+          if (result.error && summary.errors.length < 3) summary.errors.push(result.error);
+        }
+        continue;
+      }
+
+      const result = await tabsDiscard(tab.id);
+      if (result.ok) {
+        summary.cleaned += 1;
+      } else {
+        summary.failed += 1;
+        if (result.error && summary.errors.length < 3) summary.errors.push(result.error);
+      }
+    }
+  }
+
   const existingIds = new Set(tabs.filter(tab => tab?.id).map(tab => String(tab.id)));
   for (const key of Object.keys(activity)) {
     if (!existingIds.has(key)) {
@@ -4887,6 +5103,177 @@ async function fetchWikiPageSource(value) {
   }
 }
 
+
+function normalizeRandomChatId(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : "";
+}
+
+function secureBackgroundRandomInt(maxExclusive) {
+  const max = Math.floor(Number(maxExclusive) || 0);
+  if (max <= 1) return 0;
+  try {
+    const limit = Math.floor(0x100000000 / max) * max;
+    const values = new Uint32Array(1);
+    do { crypto.getRandomValues(values); } while (values[0] >= limit);
+    return values[0] % max;
+  } catch {
+    return Math.floor(Math.random() * max);
+  }
+}
+
+function shuffleBackgroundRandom(items) {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = secureBackgroundRandomInt(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function randomChatDocument(doc) {
+  const id = normalizeRandomChatId(doc?.character_id);
+  if (!id) return null;
+  return {
+    id,
+    name: String(doc?.name || doc?.title || "").trim().slice(0, 180),
+    creator: String(doc?.creator_username || "").trim().slice(0, 180),
+    tags: Array.isArray(doc?.tags) ? doc.tags.map(tag => String(tag || "").trim()).filter(Boolean).slice(0, 80) : [],
+    avatarUrl: String(doc?.avatar_url || "").trim(),
+    isNsfw: doc?.is_nsfw === true,
+    href: `https://spicychat.ai/chat/${id}`
+  };
+}
+
+function randomChatHomeQueryFromUrl(rawUrl) {
+  let q = "*";
+  try {
+    const url = new URL(String(rawUrl || "https://spicychat.ai/"));
+    for (const [key, value] of url.searchParams.entries()) {
+      if (/\[query\]$/i.test(key) && String(value || "").trim()) {
+        q = String(value).trim().slice(0, 250);
+        break;
+      }
+    }
+  } catch {}
+  return q || "*";
+}
+
+async function typesenseMultiSearch(searches, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 8000));
+  try {
+    const response = await fetch(EXACT_MESSAGE_TYPESENSE_URL, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "text/plain",
+        "X-TYPESENSE-API-KEY": EXACT_MESSAGE_TYPESENSE_KEY
+      },
+      body: JSON.stringify({ searches })
+    });
+    if (!response.ok) return { ok: false, status: response.status, error: `Typesense returned HTTP ${response.status}.` };
+    return { ok: true, data: await response.json() };
+  } catch (error) {
+    return { ok: false, status: error?.name === "AbortError" ? "timeout" : "network-error", error: error?.message || String(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function pickRandomChatCandidates(message) {
+  const scope = String(message?.scope || "home").toLowerCase() === "favorites" ? "favorites" : "home";
+  const batchSize = Math.min(40, Math.max(6, Number(message?.batchSize || 24) || 24));
+  const excluded = new Set((Array.isArray(message?.excludeIds) ? message.excludeIds : []).map(normalizeRandomChatId).filter(Boolean));
+  const includeFields = "character_id,name,title,creator_username,tags,avatar_url,is_nsfw";
+
+  const visibleIds = shuffleBackgroundRandom([...new Set((Array.isArray(message?.visibleIds) ? message.visibleIds : []).map(normalizeRandomChatId).filter(Boolean))])
+    .filter(id => !excluded.has(id));
+
+  // On Home / Recommended, prefer the cards SpicyChat actually put in the
+  // current listing. We still validate them through the public API, so Random
+  // Chat follows that page instead of silently becoming a separate discovery
+  // feed. If the page has no cards yet, fall back to a direct discovery query.
+  if (scope === "home" && visibleIds.length) {
+    const ids = visibleIds.slice(0, Math.max(batchSize, 40));
+    const searches = ids.map(id => ({
+      collection: EXACT_MESSAGE_TYPESENSE_COLLECTION,
+      q: "*",
+      query_by: EXACT_MESSAGE_TYPESENSE_QUERY_BY,
+      filter_by: `application_ids:spicychat && character_id:=${id}`,
+      include_fields: includeFields,
+      per_page: 1
+    }));
+    const result = await typesenseMultiSearch(searches);
+    if (!result.ok) return result;
+    const candidates = [];
+    for (const item of Array.isArray(result.data?.results) ? result.data.results : []) {
+      const normalized = randomChatDocument(item?.hits?.[0]?.document);
+      if (normalized && !excluded.has(normalized.id)) candidates.push(normalized);
+    }
+    return { ok: true, scope, candidates: shuffleBackgroundRandom(candidates).slice(0, batchSize), found: candidates.length, source: "visible-listing-api" };
+  }
+
+  if (scope === "favorites") {
+    const ids = shuffleBackgroundRandom([...new Set((Array.isArray(message?.favoriteIds) ? message.favoriteIds : []).map(normalizeRandomChatId).filter(Boolean))])
+      .filter(id => !excluded.has(id))
+      .slice(0, Math.max(batchSize, 30));
+    if (!ids.length) return { ok: true, scope, candidates: [], found: 0 };
+    const searches = ids.map(id => ({
+      collection: EXACT_MESSAGE_TYPESENSE_COLLECTION,
+      q: "*",
+      query_by: EXACT_MESSAGE_TYPESENSE_QUERY_BY,
+      filter_by: `application_ids:spicychat && character_id:=${id}`,
+      include_fields: includeFields,
+      per_page: 1
+    }));
+    const result = await typesenseMultiSearch(searches);
+    if (!result.ok) return result;
+    const candidates = [];
+    for (const item of Array.isArray(result.data?.results) ? result.data.results : []) {
+      const doc = item?.hits?.[0]?.document;
+      const normalized = randomChatDocument(doc);
+      if (normalized && !excluded.has(normalized.id)) candidates.push(normalized);
+    }
+    return { ok: true, scope, candidates: shuffleBackgroundRandom(candidates).slice(0, batchSize), found: candidates.length };
+  }
+
+  const q = randomChatHomeQueryFromUrl(message?.sourceUrl);
+  const baseSearch = {
+    collection: EXACT_MESSAGE_TYPESENSE_COLLECTION,
+    q,
+    query_by: EXACT_MESSAGE_TYPESENSE_QUERY_BY,
+    filter_by: "application_ids:spicychat && tags:![Step-Family]",
+    include_fields: includeFields,
+    sort_by: "_text_match(buckets: 3):desc,num_messages_24h:desc",
+    per_page: 1,
+    page: 1
+  };
+  const meta = await typesenseMultiSearch([baseSearch]);
+  if (!meta.ok) return meta;
+  const first = Array.isArray(meta.data?.results) ? meta.data.results[0] : null;
+  const found = Math.max(0, Number(first?.found || 0) || 0);
+  if (!found) return { ok: true, scope, candidates: [], found: 0, q };
+
+  // Typesense numbered pages have a practical result window. Randomize inside
+  // that window instead of opening/rendering helper pages in the browser.
+  const perPage = 250;
+  const pageCount = Math.max(1, Math.min(168, Math.ceil(found / perPage)));
+  const page = secureBackgroundRandomInt(pageCount) + 1;
+  const pageResult = await typesenseMultiSearch([{ ...baseSearch, page, per_page: perPage }]);
+  if (!pageResult.ok) return pageResult;
+  const result = Array.isArray(pageResult.data?.results) ? pageResult.data.results[0] : null;
+  const candidates = shuffleBackgroundRandom((Array.isArray(result?.hits) ? result.hits : [])
+    .map(hit => randomChatDocument(hit?.document))
+    .filter(Boolean)
+    .filter(candidate => !excluded.has(candidate.id)))
+    .slice(0, batchSize);
+  return { ok: true, scope, candidates, found, page, pageCount, q };
+}
+
 function normalizeExactMessageBotId(value) {
   const id = String(value || "").trim().toLowerCase();
   return /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id) ? id : "";
@@ -5297,6 +5684,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+
+  if (message?.type === "DS_RANDOM_CHAT_PICK") {
+    pickRandomChatCandidates(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "random-chat-error", error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_LISTING_REFILL_PAGE") {
     runListingRefillPageWorker({ ...message, sourceTabId: tabId })
       .then(sendResponse)
@@ -5375,17 +5770,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "DS_AUTO_AFK_ACTIVITY") {
     (async () => {
       const settings = await getAutoAfkSettings();
-      if (settings.enabled === false || !settings.autoAfkEnabled || !tabId) {
+      if (settings.enabled === false || (!settings.autoAfkEnabled && !settings.lowMemoryProtectionEnabled) || !tabId) {
         sendResponse({ ok: false });
         return;
       }
 
-      if (message.reason === "opened" && settings.autoAfkResetOnActivate === false) {
+      if (message.reason === "opened" && settings.autoAfkResetOnActivate === false && !settings.lowMemoryProtectionEnabled) {
         sendResponse({ ok: true, ignored: true });
         return;
       }
 
       await markAutoAfkActivity(tabId);
+      if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(350);
       sendResponse({ ok: true });
     })();
     return true;
@@ -5553,37 +5949,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_OPEN_OPTIONS_FROM_POPUP") {
-    (async () => {
-      await rememberOptionsSourceTab(Number(message.tabId));
-      chrome.runtime.openOptionsPage(() => {
-        sendResponse({ ok: !chrome.runtime.lastError });
-      });
-    })();
+    rememberOptionsSourceTab(Number(message.tabId)).catch(() => {});
+    chrome.runtime.openOptionsPage(() => {
+      sendResponse({ ok: !chrome.runtime.lastError });
+    });
     return true;
   }
 
   if (message?.type === "DS_OPEN_OPTIONS_TARGET") {
-    (async () => {
-      const sourceTabId = Number(message.tabId || tabId || 0);
-      await rememberOptionsSourceTab(sourceTabId);
-      const target = String(message.target || "general").replace(/[^a-z0-9-]/gi, "") || "general";
-      const query = String(message.query || "").trim().slice(0, 180);
-      const url = chrome.runtime.getURL(`options.html${query ? `?search=${encodeURIComponent(query)}` : ""}#${target}`);
-      chrome.tabs.create({ url }, created => sendResponse({ ok: !!created && !chrome.runtime.lastError }));
-    })();
+    const sourceTabId = Number(message.tabId || tabId || 0);
+    rememberOptionsSourceTab(sourceTabId).catch(() => {});
+    const target = String(message.target || "general").replace(/[^a-z0-9-]/gi, "") || "general";
+    const query = String(message.query || "").trim().slice(0, 180);
+    const url = chrome.runtime.getURL(`options.html${query ? `?search=${encodeURIComponent(query)}` : ""}#${target}`);
+    chrome.tabs.create({ url }, created => {
+      if (created && !chrome.runtime.lastError) {
+        sendResponse({ ok: true });
+        return;
+      }
+      chrome.runtime.openOptionsPage(() => sendResponse({ ok: !chrome.runtime.lastError }));
+    });
     return true;
   }
 
   if (message?.type === "DS_OPEN_OPTIONS") {
-    (async () => {
-      await rememberOptionsSourceTab(tabId);
-      const url = chrome.runtime.getURL("options.html#general");
-      chrome.tabs.create({ url }, created => {
-        if (created && !chrome.runtime.lastError) { sendResponse({ ok: true }); return; }
-        chrome.runtime.openOptionsPage(() => sendResponse({ ok: !chrome.runtime.lastError }));
-      });
-    })();
-
+    rememberOptionsSourceTab(tabId).catch(() => {});
+    const url = chrome.runtime.getURL("options.html#general");
+    chrome.tabs.create({ url }, created => {
+      if (created && !chrome.runtime.lastError) { sendResponse({ ok: true }); return; }
+      chrome.runtime.openOptionsPage(() => sendResponse({ ok: !chrome.runtime.lastError }));
+    });
     return true;
   }
 
@@ -5736,10 +6131,17 @@ if (chrome.notifications?.onClicked) {
 
 chrome.tabs.onActivated.addListener(async activeInfo => {
   const settings = await getAutoAfkSettings();
-  if (settings.enabled === false || !settings.autoAfkEnabled || settings.autoAfkResetOnActivate === false) return;
+  if (settings.enabled === false) return;
 
   const tab = await tabsGet(activeInfo.tabId);
-  if (tab && isSpicyChatUrl(tab.url)) await markAutoAfkActivity(tab.id);
+  if (!tab || !isSpicyChatUrl(tab.url) || isDedicatedWorkerTab(tab)) return;
+
+  // LRU protection needs real "last used" ordering even when the timer's
+  // reset-on-activate option is off.
+  if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
+    await markAutoAfkActivity(tab.id);
+  }
+  if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(250);
 });
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
@@ -5764,12 +6166,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 
   const settings = await getAutoAfkSettings();
-  if (settings.enabled === false || !settings.autoAfkEnabled || settings.autoAfkResetOnActivate === false) return;
+  if (settings.enabled === false) return;
 
-  // A URL change means a new SpicyChat page was opened in this tab. A normal
-  // background reload should not keep extending an AFK timer forever.
-  if (changeInfo.url || (changeInfo.status === "complete" && tab?.active)) {
+  // A URL change means a new normal SpicyChat page was opened in this tab.
+  if ((settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) &&
+      (changeInfo.url || (changeInfo.status === "complete" && tab?.active))) {
     await markAutoAfkActivity(tabId);
+  }
+  if (settings.lowMemoryProtectionEnabled && (changeInfo.url || changeInfo.status === "complete")) {
+    scheduleLowMemoryProtectionScan(tab?.active ? 250 : 700);
   }
 });
 
@@ -5804,9 +6209,11 @@ chrome.tabs.onCreated.addListener(tab => {
   });
 
   getAutoAfkSettings().then(settings => {
-    if (settings.enabled !== false && settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false) {
+    if (settings.enabled === false) return;
+    if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
       markAutoAfkActivity(tab.id);
     }
+    if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(500);
   });
 });
 
@@ -5814,10 +6221,15 @@ chrome.windows.onFocusChanged.addListener(windowId => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
 
   getAutoAfkSettings().then(async settings => {
-    if (settings.enabled === false || !settings.autoAfkEnabled || settings.autoAfkResetOnActivate === false) return;
+    if (settings.enabled === false) return;
     const tabs = await tabsQuery({ active: true, windowId });
     const tab = tabs[0];
-    if (tab?.id && isSpicyChatUrl(tab.url)) await markAutoAfkActivity(tab.id);
+    if (tab?.id && isSpicyChatUrl(tab.url) && !isDedicatedWorkerTab(tab)) {
+      if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
+        await markAutoAfkActivity(tab.id);
+      }
+      if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(250);
+    }
   });
 });
 
@@ -5909,7 +6321,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
     const before = { ...AUTO_AFK_DEFAULTS, ...beforeSettings };
     const after = { ...AUTO_AFK_DEFAULTS, ...afterSettings };
-    const justEnabled = !before.autoAfkEnabled && !!after.autoAfkEnabled;
+    const justEnabled = (!before.autoAfkEnabled && !!after.autoAfkEnabled) ||
+      (!before.lowMemoryProtectionEnabled && !!after.lowMemoryProtectionEnabled);
     configureAutoAfkAlarm(justEnabled);
 
     const duplicateBefore = { ...DUPLICATE_TAB_DEFAULTS, ...beforeSettings };

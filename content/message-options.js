@@ -463,4 +463,56 @@
       .filter(button => !DS.isMessageEditPending?.(button.closest("div[id^='message-']")))
       .forEach(button => ensureQuickActions(button, signature));
   };
+
+  // SpicyChat can replace an already-decorated message toolbar without changing
+  // the original dropdown button's settings marker. Keep a tiny newest-message
+  // watchdog so Copy/Edit/Report/Remove Image repairs itself without requiring a
+  // settings toggle or a full-chat rescan.
+  let quickActionRepairTimer = 0;
+
+  function repairNewestQuickActions() {
+    quickActionRepairTimer = 0;
+    const settings = DS.state?.settings || {};
+    if (document.hidden || !settings.enabled || !DS.isSingleChatPage?.() || !hasAnyQuickActionEnabled(settings)) return;
+    if (DS.state?.chatExportLock?.active) return;
+    const quietUntil = Math.max(
+      Number(DS.state?.chatStartupQuietUntil || 0),
+      Number(DS.state?.chatReplyRenderQuietUntil || 0),
+      Number(DS.state?.chatEnhancerQuietUntil || 0)
+    );
+    if (Date.now() < quietUntil) {
+      scheduleQuickActionRepair(Math.min(1800, Math.max(300, quietUntil - Date.now() + 100)));
+      return;
+    }
+
+    const signature = settingsSignature(settings);
+    const roots = DS.getMessageEnhancerRoots?.({ newest: 12, margin: 900 }) || [];
+    const buttons = roots.length
+      ? roots.flatMap(root => DS.qsa("button[aria-label='message-dropdown']", root))
+      : DS.qsa("button[aria-label='message-dropdown']").slice(-12);
+
+    let repaired = 0;
+    for (const button of buttons) {
+      if (button.closest("#ds-qol-panel") || DS.isMessageEditPending?.(button.closest("div[id^='message-']"))) continue;
+      if (quickActionBarHealthy(button, signature)) continue;
+      ensureQuickActions(button, signature);
+      repaired += 1;
+    }
+    if (repaired) {
+      const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.messageQuickActionSelfRepairs = Number(counters.messageQuickActionSelfRepairs || 0) + repaired;
+    }
+  }
+
+  function scheduleQuickActionRepair(delay = 6500) {
+    clearTimeout(quickActionRepairTimer);
+    quickActionRepairTimer = window.setTimeout(repairNewestQuickActions, Math.max(250, Number(delay) || 6500));
+  }
+
+  window.setInterval(() => scheduleQuickActionRepair(0), 7000);
+  window.addEventListener("pageshow", () => scheduleQuickActionRepair(450), true);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) scheduleQuickActionRepair(450);
+  }, true);
+
 })();

@@ -1534,12 +1534,13 @@
       }
 
       if (chatList) {
-        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!settings.showRandomChatButton || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar"), () => DS.applyChatListTools?.());
+        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar"), () => DS.applyChatListTools?.());
       } else if (document.getElementById("ds-chat-organizer-toolbar") || document.querySelector(".ds-chat-row-hidden-by-folder,.ds-chat-org-select")) {
         DS.removeChatOrganizer?.();
       }
 
       if (listing) {
+        await runFeatureStep("random chat", !!settings.showRandomChatButton || !!document.getElementById("ds-qol-random-chat"), () => DS.applyRandomChatButton?.());
         await runFeatureStep("pagination tools", true, () => DS.applyPaginationTools?.());
         await runFeatureStep("bot name expander", true, () => DS.applyBotNameExpander?.());
         // Recommendation helpers load local creator identity before the final

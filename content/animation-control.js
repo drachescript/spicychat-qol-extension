@@ -228,7 +228,10 @@
     }
 
     DS.state.animationControlWasActive = true;
-    const mode = ["freeze", "once", "hover"].includes(settings.animatedImageMode) ? settings.animatedImageMode : "freeze";
+    // v0.2.28: animated-image reduction is intentionally hover-only. Older
+    // backups may still contain freeze/once, but those modes no longer keep
+    // images permanently frozen or auto-play them in the background.
+    const mode = "hover";
 
     for (const img of [...frozen.keys()]) {
       if (!document.contains(img) || !eligible(img, settings)) unfreezeImage(img);

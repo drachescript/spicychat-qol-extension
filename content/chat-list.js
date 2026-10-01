@@ -393,10 +393,7 @@
     }
   };
 
-  const RANDOM_HOME_PAGE_KEY = "public_characters_alias/sort/_text_match(buckets: 3):desc,num_messages_24h:desc[page]";
   const LAST_HOME_DISCOVERY_URL_KEY = "dsLastHomeDiscoveryUrl";
-  const RANDOM_HOME_META_TTL = 10 * 60 * 1000;
-  let randomHomeMeta = null;
   let randomChatRunning = false;
 
   function runtimeMessage(message) {
@@ -410,188 +407,100 @@
     });
   }
 
-  function secureRandomInt(maxExclusive) {
-    const max = Math.floor(Number(maxExclusive) || 0);
-    if (max <= 1) return 0;
-    if (!globalThis.crypto?.getRandomValues) return Math.floor(Math.random() * max);
-    const limit = Math.floor(0x100000000 / max) * max;
-    const values = new Uint32Array(1);
-    do { crypto.getRandomValues(values); } while (values[0] >= limit);
-    return values[0] % max;
+  function randomChatScope() {
+    if (DS.isFavoriteBotsPage?.()) return "favorites";
+    const path = String(location.pathname || "/").replace(/\/+$/, "") || "/";
+    if (DS.isHomePage?.() || /^\/(?:recommended|recommended-bots)$/.test(path)) return "home";
+    return "";
   }
 
-  function shuffledRandom(items) {
-    const out = [...items];
-    for (let i = out.length - 1; i > 0; i -= 1) {
-      const j = secureRandomInt(i + 1);
-      [out[i], out[j]] = [out[j], out[i]];
-    }
-    return out;
-  }
-
-  function wrapperFromHtml(html) {
-    const source = String(html || "").trim();
-    if (!source) return null;
-
-    const parsed = new DOMParser().parseFromString(source, "text/html");
-    const wrapper = parsed.body.firstElementChild;
-    if (!wrapper) return null;
-
-    // Helper-tab markup comes from SpicyChat, but keep imported fragments inert
-    // before attaching them to the live page.
-    wrapper.querySelectorAll("script, iframe, object, embed").forEach(node => node.remove());
-    for (const node of [wrapper, ...wrapper.querySelectorAll("*")]) {
-      for (const attr of [...(node.attributes || [])]) {
-        if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
-      }
-    }
-
-    return document.importNode(wrapper, true);
-  }
-
-  function botIdFromLink(anchor) {
-    const href = String(anchor?.getAttribute?.("href") || anchor?.href || "");
-    return DS.botIdFromHref?.(href) || DS.chatIdFromHref?.(href) || "";
-  }
-
-  function randomHomeEntriesFromCards(cardHtml, pageUrl) {
-    const seen = new Set();
-    const entries = [];
-    for (const item of Array.isArray(cardHtml) ? cardHtml : []) {
-      const html = typeof item === "string" ? item : item?.html || "";
-      const wrapper = wrapperFromHtml(html);
-      if (!wrapper) continue;
-      const anchor = wrapper.querySelector("a[href*='/chat/']");
-      if (!anchor) continue;
-      try { anchor.href = new URL(anchor.getAttribute("href"), pageUrl).href; } catch {}
-      const id = botIdFromLink(anchor);
-      if (!id || seen.has(id)) continue;
-      const card = anchor.closest("div.relative.group.rounded-xl") || anchor.closest("div[class*='rounded-xl']") || wrapper.querySelector("div.relative.group.rounded-xl") || wrapper;
-      if (!card) continue;
-      seen.add(id);
-      entries.push({ id, href: anchor.href, anchor, card });
-    }
-    return entries;
-  }
-
-  async function loadRenderedRandomHomePage(page, pageKey = RANDOM_HOME_PAGE_KEY, baseUrl = `${location.origin}/`) {
-    const pageUrl = randomHomePageUrl(page, pageKey, baseUrl);
-    const response = await runtimeMessage({
-      type: "DS_LISTING_REFILL_PAGE",
-      url: pageUrl,
-      expectedPage: page
-    });
-    if (!response?.ok) throw new Error(response?.error || response?.status || "Home helper page failed");
-    return {
-      cards: response.cards || [],
-      page: Number(response.page || page) || page,
-      pageCount: Math.max(1, Number(response.lastPage || 1) || 1),
-      url: response.baseUrl || pageUrl
-    };
-  }
-
-  async function randomHomeBaseUrl() {
+  async function randomHomeSourceUrl() {
     const settings = DS.state?.settings || {};
     if (settings.randomChatUseLastHomeFilters === false) return `${location.origin}/`;
+    if (randomChatScope() === "home" && DS.isHomePage?.()) return location.href;
     try {
       const stored = await DS.storageGet?.([LAST_HOME_DISCOVERY_URL_KEY]);
       const raw = String(stored?.[LAST_HOME_DISCOVERY_URL_KEY] || "");
       const url = new URL(raw || `${location.origin}/`);
-      if (url.origin !== location.origin || (url.pathname.replace(/\/+$/, "") || "/") !== "/") return `${location.origin}/`;
-      url.searchParams.delete("dsListingRefill");
-      for (const key of [...url.searchParams.keys()]) {
-        if (/\[page\]$/i.test(key)) url.searchParams.delete(key);
-      }
+      if (url.origin !== location.origin) return `${location.origin}/`;
       return url.href;
     } catch {
       return `${location.origin}/`;
     }
   }
 
-  async function getRandomHomeMeta() {
-    const baseUrl = await randomHomeBaseUrl();
-    if (randomHomeMeta && randomHomeMeta.baseUrl === baseUrl && Date.now() - randomHomeMeta.loadedAt < RANDOM_HOME_META_TTL) return randomHomeMeta;
-    const firstUrl = randomHomePageUrl(1, RANDOM_HOME_PAGE_KEY, baseUrl);
-    const response = await runtimeMessage({ type: "DS_LISTING_REFILL_PAGE", url: firstUrl, expectedPage: 1 });
-    if (!response?.ok) throw new Error(response?.error || response?.status || "Home helper page failed");
-    randomHomeMeta = {
-      loadedAt: Date.now(),
-      pageCount: Math.max(1, Number(response.lastPage || 1) || 1),
-      pageKey: RANDOM_HOME_PAGE_KEY,
-      baseUrl
-    };
-    return randomHomeMeta;
-  }
-
-  function randomHomePageUrl(page, pageKey = RANDOM_HOME_PAGE_KEY, baseUrl = `${location.origin}/`) {
-    const url = new URL(baseUrl, location.origin);
-    url.searchParams.delete("dsListingRefill");
-    url.searchParams.set(pageKey, String(Math.max(1, Math.floor(Number(page) || 1))));
-    return url.href;
-  }
-
-  function randomEntryHideReason(entry) {
+  function localRandomCandidateAllowed(candidate, scope) {
     const settings = DS.state?.settings || {};
-    if (!entry?.card || !entry?.anchor) return "invalid card";
-    if (settings.randomChatIncludeLater === false && DS.state?.laterBotIdSet?.has(entry.id)) return "saved for Later";
-    if (settings.randomChatIncludeFavorites === false && DS.state?.favoriteBotIdSet?.has(entry.id)) return "favorite history";
-    return DS.shouldHideCard?.(entry.card, entry.anchor, {
-      discovery: true,
-      home: true,
-      ignoreOpened: settings.randomChatIncludeOpened !== false
-    }) || "";
+    const id = String(candidate?.id || "").trim().toLowerCase();
+    if (!id) return false;
+    if (DS.state?.blockedBotIdSet?.has?.(id) || DS.state?.blockedBotIds?.has?.(id)) return false;
+    if (settings.randomChatIncludeOpened === false && DS.state?.openedChats?.has?.(id)) return false;
+    if (settings.randomChatIncludeLater === false && DS.state?.laterBotIdSet?.has?.(id)) return false;
+    if (scope !== "favorites" && settings.randomChatIncludeFavorites === false && DS.state?.favoriteBotIdSet?.has?.(id)) return false;
+    return true;
   }
 
-  async function chooseTrueRandomHomeBot() {
-    let meta = await getRandomHomeMeta();
-    const attemptedPages = new Set();
-    const seenBots = new Set();
-    let refreshedMeta = false;
+  function visibleListingBotIds() {
+    const ids = [];
+    const seen = new Set();
+    for (const item of DS.collectCards?.() || []) {
+      const id = String(DS.botIdFromHref?.(item?.anchor?.href || "") || DS.chatIdFromHref?.(item?.anchor?.href || "") || "").trim().toLowerCase();
+      if (!id || seen.has(id)) continue;
+      const hiddenReason = DS.shouldHideCard?.(item?.card, item?.anchor, {
+        discovery: true,
+        home: randomChatScope() === "home",
+        ignoreOpened: true
+      });
+      if (hiddenReason) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
 
-    for (let attempt = 0; attempt < Math.min(12, Math.max(4, meta.pageCount)); attempt += 1) {
-      if (attemptedPages.size >= meta.pageCount) {
-        if (refreshedMeta) break;
-        randomHomeMeta = null;
-        meta = await getRandomHomeMeta();
-        attemptedPages.clear();
-        refreshedMeta = true;
+  async function chooseApiRandomBot(scope) {
+    const settings = DS.state?.settings || {};
+    const visibleIds = visibleListingBotIds();
+    const favoriteIds = scope === "favorites"
+      ? [...new Set([...(DS.state?.favoriteBotIdSet || new Set()), ...visibleIds])]
+      : [];
+    const sourceUrl = scope === "home" ? await randomHomeSourceUrl() : "";
+    const excludedIds = new Set();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await runtimeMessage({
+        type: "DS_RANDOM_CHAT_PICK",
+        scope,
+        sourceUrl,
+        favoriteIds,
+        visibleIds: scope === "home" ? visibleIds : [],
+        excludeIds: [...excludedIds].slice(0, 200),
+        batchSize: 24
+      });
+      if (!response?.ok) throw new Error(response?.error || response?.status || "SpicyChat character API did not return a random bot");
+      const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+      for (const candidate of candidates) {
+        const id = String(candidate?.id || "").trim().toLowerCase();
+        if (!id) continue;
+        excludedIds.add(id);
+        if (!localRandomCandidateAllowed(candidate, scope)) continue;
+        return { ...candidate, href: candidate.href || `${location.origin}/chat/${id}` };
       }
-
-      let page = 1;
-      do { page = secureRandomInt(meta.pageCount) + 1; } while (attemptedPages.has(page) && attemptedPages.size < meta.pageCount);
-      attemptedPages.add(page);
-      DS.setQuickStatus?.(`Random Chat: checking Home page ${page} of ${meta.pageCount}...`, true);
-
-      try {
-        const rendered = await loadRenderedRandomHomePage(page, meta.pageKey, meta.baseUrl);
-        if (rendered.pageCount > meta.pageCount) {
-          meta.pageCount = rendered.pageCount;
-          randomHomeMeta = { ...meta, loadedAt: Date.now() };
-        }
-        const candidates = shuffledRandom(randomHomeEntriesFromCards(rendered.cards, rendered.url))
-          .filter(entry => !seenBots.has(entry.id))
-          .filter(entry => !randomEntryHideReason(entry));
-        candidates.forEach(entry => seenBots.add(entry.id));
-        if (candidates.length) return { ...candidates[secureRandomInt(candidates.length)], page, pageCount: meta.pageCount };
-      } catch (error) {
-        DS.runtimeLog?.("warn", "random-chat", "Random Home helper page failed", { page, error: error?.message || String(error) });
-        // A single stale/failed pagination request should not kill the roulette.
-        // Try a different rendered Home page before reporting a failure.
-      }
+      if (!candidates.length) break;
     }
     return null;
   }
 
-  function findRandomChatButtonHost() {
-    const heading = [...document.querySelectorAll("h1, h2")].find(el => {
-      const text = DS.normalize?.(el.textContent || "") || String(el.textContent || "").trim().toLowerCase();
-      return text === "chats" || text === "chat";
+  function findRandomChatButtonHost(scope) {
+    const patterns = scope === "favorites"
+      ? [/favorite/i]
+      : [/recommended/i, /for you/i, /discover/i, /explore/i];
+    const heading = [...document.querySelectorAll("h1,h2,h3")].find(el => {
+      const text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+      return patterns.some(pattern => pattern.test(text));
     });
     if (heading?.parentElement) return heading.parentElement;
-
-    const rows = DS.collectChatRows?.() || [];
-    const host = findChatListHost(rows);
-    return host?.parentElement || host || document.querySelector("main") || document.body;
+    return document.querySelector("main") || document.body;
   }
 
   function removeRandomChatButton() {
@@ -600,13 +509,14 @@
 
   function applyRandomChatButton() {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !settings.showRandomChatButton || !DS.isChatListPage()) {
+    const scope = randomChatScope();
+    if (!settings.enabled || !settings.showRandomChatButton || !scope) {
       removeRandomChatButton();
       return;
     }
 
     let button = document.getElementById("ds-qol-random-chat");
-    const host = findRandomChatButtonHost();
+    const host = findRandomChatButtonHost(scope);
     if (!host) return;
 
     if (!button) {
@@ -615,26 +525,28 @@
       button.type = "button";
       button.className = "ds-qol-random-chat-button";
       button.textContent = "Random Chat";
-      button.title = "Pick a random bot from a random SpicyChat Home page";
       button.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
         if (randomChatRunning) return;
+        const currentScope = randomChatScope();
+        if (!currentScope) return;
         randomChatRunning = true;
         button.disabled = true;
         const originalText = button.textContent;
         button.textContent = "Picking...";
         try {
-          const choice = await chooseTrueRandomHomeBot();
+          const choice = await chooseApiRandomBot(currentScope);
           if (!choice?.href) {
-            DS.setQuickStatus?.("Random Chat could not find an eligible bot after several random Home pages.");
+            DS.setQuickStatus?.(currentScope === "favorites"
+              ? "Random Chat could not find an available bot in Favorites."
+              : "Random Chat could not find an eligible Home / Recommended bot.");
             return;
           }
-          DS.setQuickStatus?.(`Random Chat picked Home page ${choice.page}/${choice.pageCount}. Opening bot...`, true);
+          DS.setQuickStatus?.(`Random Chat picked ${choice.name || "a bot"}. Opening chat...`, true);
           location.href = choice.href;
         } catch (error) {
-          randomHomeMeta = null;
-          DS.setQuickStatus?.(`Random Chat failed: ${error?.message || "could not render SpicyChat Home"}`);
+          DS.setQuickStatus?.(`Random Chat failed: ${error?.message || "character API request failed"}`);
         } finally {
           randomChatRunning = false;
           if (button.isConnected) {
@@ -649,19 +561,17 @@
     const exclusions = [];
     if (settings.randomChatIncludeOpened === false) exclusions.push("opened");
     if (settings.randomChatIncludeLater === false) exclusions.push("Later");
-    if (settings.randomChatIncludeFavorites === false) exclusions.push("favorite-history");
-    const scope = settings.randomChatUseLastHomeFilters === false ? "all Home results" : "your last Home filters when available";
+    if (scope !== "favorites" && settings.randomChatIncludeFavorites === false) exclusions.push("favorite-history");
+    const pool = scope === "favorites" ? "your Favorites" : (settings.randomChatUseLastHomeFilters === false ? "the Home / Recommended API pool" : "your Home / Recommended API pool");
     button.title = exclusions.length
-      ? `Pick a random eligible bot from ${scope} (${exclusions.join(", ")} bots excluded)`
-      : `Pick a random eligible bot from ${scope}`;
+      ? `Pick a random eligible bot from ${pool} (${exclusions.join(", ")} bots excluded)`
+      : `Pick a random eligible bot from ${pool}`;
   }
 
   DS.applyRandomChatButton = applyRandomChatButton;
 
   DS.applyChatListTools = function applyChatListTools() {
     const { settings } = DS.state;
-    applyRandomChatButton();
-
     if (!settings.enabled || !settings.showChatListTools || !DS.isChatListPage()) {
       DS.applyChatOrganizer?.();
       if (DS.state.chatListToolsWasActive) {
