@@ -6,7 +6,7 @@
   "buildable": true,
   "generated": false,
   "extensionName": "SpicyChat QoL",
-  "devExtensionName": "SpicyChat QoL DEV",
+  "devExtensionName": "SpicyChat QoL",
   "filenameSuffix": "",
   "bundles": [
     "core",
