@@ -16,6 +16,7 @@
 - Added one shared recommendation-feedback coordinator so Less Like and Quick Dislike cannot send duplicate negative ratings for the same bot while overlapping queues are active.
 - Clarified performance-baseline migration: older baseline formats now explicitly ask for one fresh baseline before rate-normalized comparisons resume.
 - Made same-name bots unambiguous in Bot Status / saved recovery UI: cards emphasize creator + shortened UUID, keep the full character ID visible, and flag other bots that share the same displayed name; availability, cleanup and recovery remain keyed strictly by character ID.
+- Added **Recheck archived bots** to Deleted / Unavailable Saved Bots. It revalidates every unblocked archived recovery copy by character ID with one persistent Bot Status helper, restores bots that are public again, keeps recovery history, leaves currently blocked bots alone, and reports restored / still unavailable / restricted / retry-later progress.
 
 ## 0.2.28
 

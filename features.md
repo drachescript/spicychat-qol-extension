@@ -21,7 +21,7 @@ Everything is optional. Fresh installs keep the main extension switch on, while 
 - Safe diagnostic copy for bug reports without chat text or saved private content.
 
 ## Saved lists and bot discovery
-- Bot Status Center checks saved bots by ID, repairs known names/descriptions from live character data, distinguishes deleted/private/unknown results safely, keeps Saved Bot Info recovery copies, and has a separate Deleted / Unavailable Saved Bots view with old chat links when available. It reuses a signed-in SpicyChat page for API checks and only creates one Home helper when needed; it does not open every bot profile.
+- Bot Status Center checks saved bots by ID, repairs known names/descriptions from live character data, distinguishes deleted/private/unknown results safely, keeps Saved Bot Info recovery copies, and has a separate Deleted / Unavailable Saved Bots view with old chat links when available. **Recheck archived bots** can bulk revalidate unblocked recovery copies, restore bots that became public again, keep recovery history, and leave currently blocked bots untouched. It reuses a signed-in SpicyChat page for API checks and only creates one Home helper when needed; it does not open every bot profile.
 - Favorite bot history, including bots that were later unfavorited on SpicyChat.
 - Favorite creators with optional filter protection.
 - Local Follow Creator list with Follow / Following buttons and Saved Lists management.

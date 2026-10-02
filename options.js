@@ -9483,11 +9483,32 @@ function sortBotStatusRefreshQueue(entries, availability, archives) {
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
   if (botAvailabilityScanRunning) return;
-  const scope = String($("botAvailabilityScope")?.value || "all");
+  const requestedScope = String($("botAvailabilityScope")?.value || "all");
   const mode = options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all");
-  const allEntries = collectTrackedAvailabilityBots(scope);
+  const scope = mode === "archived" ? "archived" : requestedScope;
   const existingAvailability = normalizeBotAvailability(botAvailabilityState).meta;
   const archives = normalizeBotArchive(botArchiveState).meta;
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
+  const archivedBlockedSkipped = mode === "archived"
+    ? Object.values(existingAvailability).filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && blockedIds.has(String(entry.id || "").toLowerCase())).length
+    : 0;
+  const allEntries = mode === "archived"
+    ? Object.values(existingAvailability)
+        .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase()))
+        .map(entry => {
+          const archive = archives[entry.id] || {};
+          const fields = archive.fields || {};
+          return {
+            ...entry,
+            id: entry.id,
+            name: cleanAuthoritativeBotName(fields.name || archive.name || entry.name || "", entry.id) || entry.id,
+            creator: archive.creator || fields.creator || entry.creator || "",
+            image: archive.image || fields.image || entry.image || "",
+            profileUrl: archive.profileUrl || entry.profileUrl || `https://spicychat.ai/chatbot/${entry.id}`,
+            sources: uniqueClean([...(entry.sources || []), "archive"])
+          };
+        })
+    : collectTrackedAvailabilityBots(scope);
   const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
   const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
   let entries = mode === "unchecked"
@@ -9498,13 +9519,19 @@ async function runBotAvailabilityScan(options = {}) {
   entries = sortBotStatusRefreshQueue(entries, existingAvailability, archives);
 
   const status = $("botAvailabilityScanStatus");
+  const archivedStatus = mode === "archived" ? $("deletedSavedBotRecheckStatus") : null;
   if (!entries.length) {
-    const message = mode === "unchecked"
-      ? "No unchecked tracked bots in this scope."
-      : mode === "stale"
-        ? `No tracked bots in this scope are older than ${staleDays} day${staleDays === 1 ? "" : "s"}.`
-        : "No locally tracked bots found in that scope.";
+    const message = mode === "archived"
+      ? (archivedBlockedSkipped
+          ? `No unblocked archived bots need rechecking. ${archivedBlockedSkipped} blocked bot${archivedBlockedSkipped === 1 ? " was" : "s were"} left alone.`
+          : "No archived/deleted recovery copies need rechecking.")
+      : mode === "unchecked"
+        ? "No unchecked tracked bots in this scope."
+        : mode === "stale"
+          ? `No tracked bots in this scope are older than ${staleDays} day${staleDays === 1 ? "" : "s"}.`
+          : "No locally tracked bots found in that scope.";
     if (status) status.textContent = message;
+    if (archivedStatus) archivedStatus.textContent = message;
     showSettingsToast(message);
     renderBotAvailability();
     return;
@@ -9515,10 +9542,12 @@ async function runBotAvailabilityScan(options = {}) {
   const scanButton = $("scanBotAvailability");
   const uncheckedButton = $("scanUncheckedBotAvailability");
   const staleButton = $("scanStaleBotAvailability");
+  const archivedButton = $("recheckDeletedSavedBots");
   const stopButton = $("stopBotAvailabilityScan");
   if (scanButton) scanButton.disabled = true;
   if (uncheckedButton) uncheckedButton.disabled = true;
   if (staleButton) staleButton.disabled = true;
+  if (archivedButton) archivedButton.disabled = true;
   if (stopButton) stopButton.disabled = false;
 
   let completed = 0;
@@ -9527,6 +9556,9 @@ async function runBotAvailabilityScan(options = {}) {
   let candidateCount = 0;
   let archiveChangedCount = 0;
   let recoveredCount = 0;
+  let stillUnavailableCount = 0;
+  let restrictedCount = 0;
+  let retryLaterCount = 0;
   let recoveryStateDirty = false;
   const recoveredBlockedIds = new Set();
   const availabilityChangedIds = new Set();
@@ -9539,11 +9571,15 @@ async function runBotAvailabilityScan(options = {}) {
 
   await noteBotStatusRunEvent("bot-status-run-start", { mode, scope, count: entries.length, speed: String(value("botStatusScanSpeed", "safe")), staleDays });
   try {
-    if (status) status.textContent = mode === "unchecked"
-      ? `Preparing to check ${entries.length} unchecked bot${entries.length === 1 ? "" : "s"}…`
-      : mode === "stale"
-        ? `Preparing to refresh ${entries.length} stale bot${entries.length === 1 ? "" : "s"}…`
-        : "Preparing one background Bot Status helper on SpicyChat Home…";
+    const preparingText = mode === "archived"
+      ? `Preparing to recheck ${entries.length} archived bot${entries.length === 1 ? "" : "s"}${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked skipped` : ""}…`
+      : mode === "unchecked"
+        ? `Preparing to check ${entries.length} unchecked bot${entries.length === 1 ? "" : "s"}…`
+        : mode === "stale"
+          ? `Preparing to refresh ${entries.length} stale bot${entries.length === 1 ? "" : "s"}…`
+          : "Preparing one background Bot Status helper on SpicyChat Home…";
+    if (status) status.textContent = preparingText;
+    if (archivedStatus) archivedStatus.textContent = preparingText;
     const prepared = await prepareBotStatusHelper({ forceOwnHelper: true, timeoutMs: 17000 });
     if (!prepared?.ok || prepared?.ready === false) {
       terminalMessage = "Could not initialize the Bot Status helper. No bots were changed; try the scan again after SpicyChat Home is signed in.";
@@ -9557,8 +9593,12 @@ async function runBotAvailabilityScan(options = {}) {
     for (const entry of entries) {
       if (botAvailabilityStopRequested) break;
       const now = Date.now();
-      if (status && (now - lastProgressPaintAt >= 400 || completed === 0)) {
-        status.textContent = `Checking ${completed + 1} / ${entries.length}: ${entry.name || entry.id}`;
+      if ((status || archivedStatus) && (now - lastProgressPaintAt >= 400 || completed === 0)) {
+        const progressText = mode === "archived"
+          ? `Rechecking ${completed + 1} / ${entries.length} · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later`
+          : `Checking ${completed + 1} / ${entries.length}: ${entry.name || entry.id}`;
+        if (status) status.textContent = progressText;
+        if (archivedStatus) archivedStatus.textContent = progressText;
         lastProgressPaintAt = now;
       }
       const previous = botAvailabilityState?.meta?.[entry.id] || null;
@@ -9570,6 +9610,11 @@ async function runBotAvailabilityScan(options = {}) {
       if (result.updateStatus === "updated") updatesFound++;
       if (result.status === "unknown") unknownCount++;
       if (Number(result.unavailableEvidenceCount || 0) === 1 && result.status !== "unavailable") candidateCount++;
+      if (mode === "archived") {
+        if (result.status === "unavailable") stillUnavailableCount++;
+        else if (result.status === "restricted") restrictedCount++;
+        else if (result.status !== "available") retryLaterCount++;
+      }
       botAvailabilityState.meta[result.id] = result;
       availabilityChangedIds.add(result.id);
       if (applyAuthoritativeBotMetadata(rawResult, metadataIndex, metadataDirtyKeys)) botStatusMetadataDirty = true;
@@ -9586,7 +9631,7 @@ async function runBotAvailabilityScan(options = {}) {
         if (archiveChanged) { archiveChangedCount++; archiveChangedIds.add(result.id); }
       }
       if (result.status === "available") {
-        const restored = restoreUnavailableRecoveryEntryInMemory(result.id);
+        const restored = restoreUnavailableRecoveryEntryInMemory(result.id, { restoreBlocked: mode !== "archived" });
         if (restored.restored) {
           recoveryStateDirty = true;
           recoveredCount++;
@@ -9668,13 +9713,19 @@ async function runBotAvailabilityScan(options = {}) {
     if (scanButton) scanButton.disabled = false;
     if (uncheckedButton) uncheckedButton.disabled = false;
     if (staleButton) staleButton.disabled = false;
+    if (archivedButton) archivedButton.disabled = false;
     if (stopButton) stopButton.disabled = true;
-    if (status) status.textContent = terminalMessage || (botAvailabilityStopRequested
+    const finalStatusText = terminalMessage || (botAvailabilityStopRequested
       ? `Stopped after ${completed} / ${entries.length}. Completed status/update checks were saved.`
-      : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${updatesFound ? `${updatesFound} update${updatesFound === 1 ? "" : "s"} detected. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
+      : mode === "archived"
+        ? `${completed} checked · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked left alone` : ""}.`
+        : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${updatesFound ? `${updatesFound} update${updatesFound === 1 ? "" : "s"} detected. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
+    if (status) status.textContent = finalStatusText;
+    if (archivedStatus) archivedStatus.textContent = finalStatusText;
     await noteBotStatusRunEvent("bot-status-run-complete", {
       mode, scope, completed, requested: entries.length, stopped: !!botAvailabilityStopRequested,
       updatesFound, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
+      stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped,
       durationMs: Date.now() - runStartedAt
     });
     botAvailabilityStopRequested = false;
@@ -9858,7 +9909,7 @@ function restoreRecoveryBotStore(storeValue, id, membership, record) {
   return store;
 }
 
-function restoreUnavailableRecoveryEntryInMemory(idValue) {
+function restoreUnavailableRecoveryEntryInMemory(idValue, { restoreBlocked = true } = {}) {
   const id = String(idValue || "").trim();
   if (!BOT_ID_RE.test(id)) return { restored: false, blocked: false };
   if (!botUnavailableRecoveryState || typeof botUnavailableRecoveryState !== "object") {
@@ -9872,7 +9923,7 @@ function restoreUnavailableRecoveryEntryInMemory(idValue) {
 
   const m = recovery.memberships || {};
   const r = recovery.records || {};
-  blockedState = restoreRecoveryBotStore(blockedState, id, m.blocked, r.blocked);
+  if (restoreBlocked) blockedState = restoreRecoveryBotStore(blockedState, id, m.blocked, r.blocked);
   notInterestedState = restoreRecoveryBotStore(notInterestedState, id, m.notInterested, r.notInterested);
   favoriteBotState = restoreRecoveryBotStore(favoriteBotState, id, m.favorite, r.favorite);
   laterBotState = restoreRecoveryBotStore(laterBotState, id, m.later, r.later);
@@ -9910,7 +9961,7 @@ function restoreUnavailableRecoveryEntryInMemory(idValue) {
     };
   }
 
-  return { restored: true, blocked: !!m.blocked };
+  return { restored: true, blocked: restoreBlocked && !!m.blocked };
 }
 
 function botStatusRecoveryStoragePayload({ restoreBlockedIds = [] } = {}) {
@@ -10442,6 +10493,7 @@ function setupBotAvailabilityControls() {
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
+  $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
   $("savedBotInfoSearch")?.addEventListener("input", event => {
     savedBotInfoUiState.query = event?.target?.value || "";
