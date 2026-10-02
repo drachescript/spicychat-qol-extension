@@ -323,6 +323,16 @@
       },
       routeType: page.routeType,
       runtimePlan: page.runtimePlan,
+      environment: {
+        visibilityState: String(document.visibilityState || "unknown"),
+        focused: typeof document.hasFocus === "function" ? !!document.hasFocus() : null,
+        mountedMessages: Number(DS.getLoadedChatMessageCount?.() || document.querySelectorAll("[id^='message-']").length || 0),
+        domNodes: document.getElementsByTagName("*").length,
+        heapBytes: Number(performance?.memory?.usedJSHeapSize || 0),
+        recentLongTaskMs10s: Number(DS.state?.runtimePerformance?.autoPressureLongTask10s || 0),
+        recentLongTaskMs30s: Number(DS.state?.runtimePerformance?.autoPressureLongTask30s || 0),
+        effectiveRuntimeMode: String(DS.state?.runtimePerformance?.mode || document.documentElement?.dataset?.dsQolAutoPerformanceTier || DS.state?.settings?.runtimePerformanceMode || "adaptive")
+      },
       settings: settingsSnapshot(),
       timings: DS.getPerformanceReport?.().slice(0, 30) || [],
       counters: selectedRuntimeCounters()

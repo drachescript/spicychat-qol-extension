@@ -1,3 +1,17 @@
+## 0.2.30
+
+- Fixed a v0.2.30 service-worker startup regression where the Chat Nudge / followed-creator background helper block was accidentally omitted, causing Chrome status-code-15 registration failure and `configureChatNudgeAlarm is not defined`.
+- Simplified Bot Status Center: live profile changes are preserved automatically in history, duplicate matching refreshes automatically, and deleted/recovery bots can be fully forgotten from local QoL data without deleting the real SpicyChat chat.
+- Added archived-bot rechecks with bulk and per-bot checks, exact-ID recovery, safe restoration when bots return, and no restoration of Blocked membership.
+- Load all / Refresh chats now clearly feeds conversation bots into Bot Status Center opened history, while deliberately forgotten IDs stay ignored.
+- Made same-name warnings quieter: ordinary shared names no longer get a warning unless the duplicate helps explain a real availability/recovery conflict.
+- Made Less Like and Dislike-after-block independent options that can run separately or together; both now use the persistent signed feedback helper with shared duplicate-rating protection.
+- Tightened chat performance handling: already-decorated messages are skipped until their node, text/state, or relevant settings actually change; startup/history work stays chunked and reply rendering gets a longer native-first quiet window.
+- Lowered automatic large-chat protection to a 300-message recommendation and added earlier DOM, heap, and recent Long Task pressure triggers; Maximum remains sticky for the current chat and never silently reloads it.
+- Lowered the recommended PC Protection limit from 5 to 3 normal awake SpicyChat tabs and staggered multi-tab restores so QoL does not intentionally wake a pile of discarded tabs at once.
+- Performance diagnostics now record visibility/focus, mounted messages, DOM size, heap, recent Long Task pressure, and effective mode so background/gaming captures are easier to interpret.
+- Kept route-specific runtime plans/deep sleep, but deferred physical per-route content-script loading until it can be implemented safely for SpicyChat SPA route changes.
+
 ## 0.2.29
 
 - Fixed Less Like / Stop recommending on the current SpicyChat build. The persistent helper now recognizes module/preload bundles, validates the recommendation token against SpicyChat's own signed request, and sends direct feedback without per-bot page navigation.
@@ -16,7 +30,6 @@
 - Added one shared recommendation-feedback coordinator so Less Like and Quick Dislike cannot send duplicate negative ratings for the same bot while overlapping queues are active.
 - Clarified performance-baseline migration: older baseline formats now explicitly ask for one fresh baseline before rate-normalized comparisons resume.
 - Made same-name bots unambiguous in Bot Status / saved recovery UI: cards emphasize creator + shortened UUID, keep the full character ID visible, and flag other bots that share the same displayed name; availability, cleanup and recovery remain keyed strictly by character ID.
-- Added **Recheck archived bots** to Deleted / Unavailable Saved Bots. It revalidates every unblocked archived recovery copy by character ID with one persistent Bot Status helper, restores bots that are public again, keeps recovery history, leaves currently blocked bots alone, and reports restored / still unavailable / restricted / retry-later progress.
 
 ## 0.2.28
 

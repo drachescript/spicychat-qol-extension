@@ -232,7 +232,7 @@
 <h2>Low memory / PC protection</h2>
 <label class="row"><input id="lowMemoryProtectionEnabled" type="checkbox"/><span>Keep only a limited number of normal SpicyChat tabs awake</span></label>
 <label>Maximum loaded normal SpicyChat tabs
-<input id="maxAwakeSpicyTabs" max="20" min="1" step="1" type="number" value="5"/>
+<input id="maxAwakeSpicyTabs" max="20" min="1" step="1" type="number" value="3"/>
 </label>
 <p class="hint">When the limit is exceeded, QoL unloads the least-recently-used normal SpicyChat tabs first. The current tab, pinned/audible tabs, browser-protected tabs, and active QoL worker tabs are protected. Unloaded tabs stay in the tab bar and reload when you return to them.</p>
 </section><section class="card" id="duplicateTabGuardCard">
@@ -417,7 +417,7 @@ Testing"></textarea></label>
 <option value="unblocked">not blocked only</option>
 </select>
 </label>
-<p class="hint">Search uses the whole visible chat row, so it can match the bot name, persona name, description and visible message text. Opened/message/saved/blocked filters combine with search and sorting. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state.</p>
+<p class="hint">Search uses the whole visible chat row, so it can match the bot name, persona name, description and visible message text. Opened/message/saved/blocked filters combine with search and sorting. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state. <strong>Load all / Refresh chats also imports every conversation bot into Bot Status Center's Opened history</strong> with the metadata SpicyChat's conversation API exposes; blocked bots remain tracked through the Blocked source instead.</p>
 </section>
 
 
@@ -475,7 +475,7 @@ Testing"></textarea></label>
 </select>
 <select aria-label="Bot status filter" id="botAvailabilityStatusFilter">
 <option value="all">All tracked bots</option>
-<option value="updated">Updated since baseline</option>
+<option value="updated">Has detected changes</option>
 <option value="archived">Has saved local copy</option>
 <option value="unarchived">No saved local copy</option>
 <option value="exact">Exact duplicate matches</option>
@@ -512,15 +512,20 @@ Testing"></textarea></label>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
 <button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
-<button id="refreshBotDuplicateMatches" type="button">Refresh duplicate matches</button>
-<button id="acceptAllBotUpdates" type="button">Accept all detected updates</button>
-<button id="cleanUnavailableBots" type="button">Archive + clean confirmed unavailable bots</button>
-<button id="clearBotAvailabilityResults" type="button">Clear status history</button>
-<button id="clearBotArchive" type="button">Clear saved bot copies</button>
-<button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies for Archive (.json.gz)</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
+</div>
+<p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
+<details class="sub-card bot-status-maintenance-card">
+<summary>Cleanup, export &amp; reset tools</summary>
+<p class="hint">These are occasional maintenance tools. Normal Bot Status scans do not need them.</p>
+<div class="button-row">
+<button id="cleanUnavailableBots" type="button">Move confirmed unavailable to recovery</button>
+<button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies (.json.gz)</button>
+<button id="clearBotAvailabilityResults" type="button">Clear status history</button>
+<button id="clearBotArchive" type="button">Clear all saved bot copies</button>
 <span class="count" id="botStatusArchiveExportStatus"></span>
 </div>
+</details>
 <div class="button-row" id="botStatusArchiveUploadActions" hidden>
 <button id="sendBotStatusArchiveChanged" type="button">Send saved copies to Archive</button>
 <button id="sendBotStatusArchiveAll" type="button" hidden>Send all saved copies</button>
@@ -592,7 +597,7 @@ Testing"></textarea></label>
 </fieldset>
 <fieldset id="deletedSavedBotsCard">
 <legend>Deleted / Unavailable Saved Bots</legend>
-<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Recovery copies stay visible even if the bot is still present in Blocked or another local list. Active-list cleanup never removes recovery copies. Open an old chat when one is still available, or use the saved fields to rebuild the bot later.</p>
+<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Open an old chat when one is still available, keep the saved fields for recovery, or use <strong>Forget from QoL</strong> to remove that exact character ID and all of its local QoL data. Forgotten IDs are kept only as a tiny ignore entry so Load all / future scans do not immediately recreate them; this never deletes the real SpicyChat conversation.</p>
 <div class="bot-manager-toolbar">
 <input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
 <span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
@@ -607,10 +612,14 @@ Testing"></textarea></label>
 <button id="deletedSavedBotShowLess" type="button">Show first 10</button>
 <button id="deletedSavedBotCollapse" type="button">Show 100</button>
 </div>
+<div class="button-row" id="forgottenBotStatusIdsWrap" hidden>
+<span class="manager-count" id="forgottenBotStatusIdsCount">0 forgotten character IDs</span>
+<button id="clearForgottenBotStatusIds" type="button">Allow forgotten IDs to be tracked again</button>
+</div>
 </fieldset>
 <p class="hint"><strong>Saved bot copies:</strong> successful profile checks can preserve the accessible name, description, greeting, personality/definition, scenario, example dialogues, tags, creator, visible stats and avatar URL in extension storage. A saved copy stays available here even if the live bot later disappears. Clearing status history does not clear these copies.</p>
 <p class="hint"><strong>Archive export:</strong> creates a versioned compressed JSON backup for the SpicyChat Archive importer. It exports only public / Bot Status snapshot data, skips manual creator/editor backups and private local notes, makes no live API calls, and treats unavailable/private status as historical observations that still need current verification.</p>
-<p class="hint"><strong>Update Watch:</strong> the first successful profile check becomes that bot's baseline. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Missing fields are ignored instead of being treated as edits; use Accept update after reviewing a real change.</p>
+<p class="hint"><strong>Profile change history:</strong> the first successful profile check becomes the starting snapshot. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Meaningful changes are preserved automatically as history and the newest snapshot becomes the next baseline; cards show only the fields that changed. Missing fields and comparison-only noise such as repeated adjacent words are ignored instead of being treated as edits.</p>
 <p class="hint"><strong>Duplicate / Reupload Finder:</strong> compares local names, avatars and captured profile text and labels matches as Exact, Likely or Possible. These are hints only and can have false positives; QoL never hides, blocks or deletes a bot because of a match.</p>
 <p class="hint">Availability checks only mark clear results. Deleted/404 pages show as unavailable, private/restricted pages stay restricted, and timeouts or rate limits stay Unknown instead of being guessed as deleted.</p>
 </section>
@@ -2259,24 +2268,25 @@ Fantasy" spellcheck="false"></textarea></label>
 <label class="row"><input id="bulkCardBlockingSidebarLauncher" type="checkbox"/><span>Place Select bots below Narrow by Group Size instead of beside Search</span></label>
 <p class="hint">By default, Select bots sits in the main listing controls between the search area and SpicyChat's NSFW/sort controls. Enable the placement option above if you prefer the older location below Narrow by Group Size. The Mini Panel shortcut remains available either way. While Select mode is active, click bot cards to select/unselect them, then block the selection together.</p>
 </div>
+<label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (opt-in, desktop browser only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (opt-in, desktop browser only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Off by default.</strong> Blocking a bot does not dislike it unless you explicitly enable this option. When enabled, dislikes are queued until you have been idle for the configured cooldown. Normal activity restarts that wait; once the queue begins it uses a short safety gap between ratings. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
+<p class="hint"><strong>Both are optional and independent.</strong> Enable either one or both. Less Like and Dislike both use the persistent signed recommendation-feedback helper; Dislike still waits for its idle cooldown and keeps separate handled history. If both point at the same negative recommendation event, QoL coordinates them so the same rating is not posted twice. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
 <label>Blocked creators, one per line<textarea id="blockedCreators" placeholder="@creatorname" spellcheck="false"></textarea></label>
 <p class="hint">Blocked tag/word/creator lists are used when <strong>Block character cards by text</strong> is enabled. Word matching is always case-insensitive (for example enigma = Enigma = ENIGMA), ignores common quote/punctuation/spacing differences, recognizes compact forms such as TF141 / TF 141 / TaskForce 141, and can match multi-word name entries such as Ghost Simon against Simon “Ghost” Riley. Creator blocking checks both the visible creator name and the @handle from the profile link when available.</p>
-<div class="sub-card blocker-test-card">
-<h3>Blocker tester</h3>
-<p class="hint">Test the rules currently typed above without saving first. This is also useful for checking why a title/creator/tag is not being caught.</p>
+<details class="sub-card blocker-test-card">
+<summary>Advanced: test blocking rules</summary>
+<p class="hint">Optional troubleshooting tool. Paste a sample only when you want to check exactly why a word, creator, or tag rule does or does not match. It is not needed for normal blocking.</p>
 <label>Name / description sample<textarea id="blockerTestText" placeholder="Simon “Ghost” Riley" rows="3" spellcheck="false"></textarea></label>
 <label>Creator sample<input id="blockerTestCreator" placeholder="@creatorname" spellcheck="false" type="text"/></label>
 <label>Tags sample<input id="blockerTestTags" placeholder="Military, COD" spellcheck="false" type="text"/></label>
 <div class="button-row"><button id="testBlockerRules" type="button">Test current rules</button><button id="clearBlockerTest" type="button">Clear</button></div>
 <p aria-live="polite" class="blocker-test-result" id="blockerTestResult">Enter a sample and press Test current rules.</p>
-</div>
+</details>
 </section>
 <section class="card" id="blockedBotsCard">
 <h2>Blocked bots manager</h2>
@@ -2353,7 +2363,7 @@ step sister" spellcheck="false"></textarea></label>
 <button id="blockedBotApplyBulk" type="button">Apply</button>
 </div>
 <p class="hint ds-bulk-selection-hint">Selections stay active after Apply so you can run another bulk action on the same bots. Use Clear selection when you are finished.</p>
-<p class="hint">Desktop browser only. Dislike and Stop recommending are separate workflows with separate handled history. Dislike keeps the existing QoL/SpicyChat rating worker. Stop recommending opens or reuses one inactive SpicyChat Home helper for the entire batch so auth and SpicyChat's recommendation client stay initialized, then sends feedback directly by bot ID without navigating between bots or searching/clicking cards. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
+<p class="hint">Desktop browser only. Dislike and Stop recommending are separate workflows with separate handled history. Dislike and Stop recommending share one inactive SpicyChat Home recommendation helper so auth and SpicyChat's recommendation client stay initialized, then send feedback directly by bot ID without navigating between bots or searching/clicking cards. Their handled histories remain separate, while the shared coordinator prevents duplicate negative-rating POSTs. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
 <div class="bot-manager-list" id="blockedBotManager"></div>
 <div class="bot-manager-pager">
 <button id="blockedBotShowMore" type="button">Show 20 more</button>
@@ -2415,7 +2425,7 @@ NTR"></textarea></label>
 <label class="row"><input id="showQuickNotInterestedButtons" type="checkbox"/><span>Add a quick Not Interested button to bot cards</span></label>
 <label class="row"><input id="showQuickLessLikeButtons" type="checkbox"/><span>Add a quick Stop recommending me this button to bot cards</span></label>
 <label class="row"><input id="showQuickDislikeButtons" type="checkbox"/><span>Add a separate quick Dislike button to bot cards (desktop browser only)</span></label>
-<p class="hint">All three are separate and opt-in: Not Interested is only a local QoL filter; Stop recommending me this uses SpicyChat's own Less Like This action for recommendation preferences; Dislike uses the existing QoL/SpicyChat rating worker and is tracked in the handled Dislike history.</p>
+<p class="hint">All three are separate and opt-in: Not Interested is only a local QoL filter; Stop recommending me this uses SpicyChat's own Less Like This action for recommendation preferences; Dislike uses the persistent signed feedback helper and is tracked in the handled Dislike history.</p>
 </section>
 
 

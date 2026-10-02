@@ -201,8 +201,8 @@
   // v0.2.28 deliberately never reloads the page on its own. A disruptive recovery
   // action must stay user initiated (the long-chat control already exposes Refresh chat).
   const AUTO_TIER_DATASET = "dsQolAutoPerformanceTier";
-  const HEAP_SOFT = 700 * 1024 * 1024;
-  const HEAP_HARD = 900 * 1024 * 1024;
+  const HEAP_SOFT = 650 * 1024 * 1024;
+  const HEAP_HARD = 850 * 1024 * 1024;
   const STARTUP_QUIET_MS = 8000;
   let baselineTier = "";
   let escalated = false;
@@ -257,40 +257,46 @@
     const mounted = document.querySelectorAll("[id^='message-']").length;
     const dom = document.getElementsByTagName("*").length;
     const heap = Number(performance?.memory?.usedJSHeapSize || 0);
-    const recent = longTasks.filter(item => performance.now() - item.at <= 30000);
-    const longTaskMs = recent.reduce((sum, item) => sum + item.duration, 0);
-    const severeTasks = recent.filter(item => item.duration >= 500).length;
-    return { mounted, dom, heap, longTaskMs, severeTasks };
+    const now = performance.now();
+    const recent30 = longTasks.filter(item => now - item.at <= 30000);
+    const recent10 = recent30.filter(item => now - item.at <= 10000);
+    const longTaskMs30 = recent30.reduce((sum, item) => sum + item.duration, 0);
+    const longTaskMs10 = recent10.reduce((sum, item) => sum + item.duration, 0);
+    const severeTasks30 = recent30.filter(item => item.duration >= 500).length;
+    const severeTasks10 = recent10.filter(item => item.duration >= 500).length;
+    const visibilityState = String(document.visibilityState || "unknown");
+    const focused = typeof document.hasFocus === "function" ? !!document.hasFocus() : null;
+    return { mounted, dom, heap, longTaskMs10, longTaskMs30, severeTasks10, severeTasks30, visibilityState, focused };
   }
 
   function softReasons(m) {
     const out = [];
-    if (m.mounted >= 300) out.push("mounted");
-    if (m.dom >= 15000) out.push("dom");
+    if (m.mounted >= 280) out.push("mounted");
+    if (m.dom >= 12000) out.push("dom");
     if (m.heap >= HEAP_SOFT) out.push("heap");
-    if (m.longTaskMs >= 2500 || m.severeTasks >= 3) out.push("longtasks");
+    if (m.longTaskMs10 >= 2000 || m.severeTasks10 >= 2) out.push("longtasks");
     return out;
   }
 
   function hardReasons(m) {
     const out = [];
-    if (m.mounted >= 500) out.push("mounted");
-    if (m.dom >= 22000) out.push("dom");
+    if (m.mounted >= 450) out.push("mounted");
+    if (m.dom >= 18000) out.push("dom");
     if (m.heap >= HEAP_HARD) out.push("heap");
-    if (m.longTaskMs >= 5000 || m.severeTasks >= 5) out.push("longtasks");
+    if (m.longTaskMs10 >= 4000 || m.longTaskMs30 >= 7000 || m.severeTasks10 >= 4) out.push("longtasks");
     return out;
   }
 
   function hasRealScalePressure(m) {
-    return m.mounted >= 300 || m.dom >= 12000 || m.heap >= HEAP_SOFT;
+    return m.mounted >= 280 || m.dom >= 10000 || m.heap >= HEAP_SOFT;
   }
 
   function hasSustainedLag(m) {
-    return m.longTaskMs >= 5000 || m.severeTasks >= 5;
+    return m.longTaskMs10 >= 4000 || m.longTaskMs30 >= 7000 || m.severeTasks10 >= 4;
   }
 
   function formatMetrics(m) {
-    return `mounted=${m.mounted}, DOM=${m.dom}, heap=${m.heap ? `${Math.round(m.heap / 1048576)}MB` : "n/a"}, longTask30s=${Math.round(m.longTaskMs)}ms`;
+    return `mounted=${m.mounted}, DOM=${m.dom}, heap=${m.heap ? `${Math.round(m.heap / 1048576)}MB` : "n/a"}, longTask10s=${Math.round(m.longTaskMs10)}ms, longTask30s=${Math.round(m.longTaskMs30)}ms, visibility=${m.visibilityState}, focused=${m.focused == null ? "unknown" : (m.focused ? "yes" : "no")}`;
   }
 
   function startupQuietActive() {
@@ -330,9 +336,18 @@
     }
 
     const m = metricSnapshot();
+    const perfCounters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    perfCounters.autoPressureMountedMessages = m.mounted;
+    perfCounters.autoPressureDomNodes = m.dom;
+    perfCounters.autoPressureHeapBytes = m.heap;
+    perfCounters.autoPressureLongTask10s = Math.round(m.longTaskMs10);
+    perfCounters.autoPressureLongTask30s = Math.round(m.longTaskMs30);
+    perfCounters.autoPressureVisibilityState = m.visibilityState;
+    perfCounters.autoPressureFocused = m.focused == null ? -1 : (m.focused ? 1 : 0);
+    perfCounters.autoPressureEvaluatedAt = Date.now();
     const reasons = softReasons(m);
     const hard = hardReasons(m);
-    const severeScaledLag = hasRealScalePressure(m) && hasSustainedLag(m);
+    const severeScaledLag = hasSustainedLag(m);
 
     if (reasons.length) {
       clearPasses = 0;

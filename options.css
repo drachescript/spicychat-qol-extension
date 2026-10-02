@@ -1272,6 +1272,12 @@ footer.hidden { display: none; }
   color: #e1d4ff;
   background: #251d38;
 }
+.bot-same-name-badge {
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.78;
+}
 .bot-duplicate-badge[data-level="exact"] {
   border-color: #9b4f68;
   color: #ffd1df;

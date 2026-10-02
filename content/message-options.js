@@ -3,6 +3,7 @@
 
   const DS = window.DragonScriptQoL;
   const BRIDGE_ATTR = "data-ds-message-action-bridge";
+  let quickActionState = new WeakMap();
 
   function cleanText(value) {
     return String(value || "")
@@ -328,6 +329,8 @@
       DS.setClassState?.(holder, "ds-message-dropdown-hidden", false);
       bar?.remove();
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
+      const root = getMessageRoot(dropdownButton);
+      quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar: null, hasActions: false });
       return;
     }
 
@@ -341,6 +344,8 @@
 
     if (bar.dataset.dsActionSignature === signature) {
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
+      const root = getMessageRoot(dropdownButton);
+      quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
       return;
     }
 
@@ -372,6 +377,8 @@
     }
 
     DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
+    const root = getMessageRoot(dropdownButton);
+    quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
   }
 
   function cleanup() {
@@ -384,6 +391,7 @@
     });
     document.documentElement.removeAttribute(BRIDGE_ATTR);
     DS.state.messageOptionsSettingsSignature = "";
+    quickActionState = new WeakMap();
   }
 
   function settingsSignature(settings) {
@@ -397,6 +405,18 @@
     ].join("");
   }
 
+
+  function quickActionRevisionStateHealthy(button, signature) {
+    const state = quickActionState.get(button);
+    if (!state || state.signature !== signature) return false;
+    const root = getMessageRoot(button);
+    if (!root || state.root !== root || !root.isConnected) return false;
+    const revision = Number(DS.getMessageRootRevision?.(root) || 0);
+    if (revision !== Number(state.revision || 0)) return false;
+    if (!state.holder?.isConnected || state.holder !== getDropdownHolder(button)) return false;
+    if (state.hasActions) return !!(state.bar?.isConnected && state.bar.parentElement === state.holder);
+    return true;
+  }
 
   function quickActionBarHealthy(button, signature) {
     const holder = getDropdownHolder(button);
@@ -438,7 +458,8 @@
       buttons = laneRoots.flatMap(root => {
         if (DS.isMessageEditPending?.(root)) return [];
         if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
-        return DS.qsa("button[aria-label='message-dropdown']", root);
+        return DS.qsa("button[aria-label='message-dropdown']", root)
+          .filter(button => !quickActionRevisionStateHealthy(button, signature));
       });
       const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.messageOptionsIncrementalUpdates = Number(counters.messageOptionsIncrementalUpdates || 0) + 1;
@@ -448,13 +469,13 @@
         buttons = roots.flatMap(root => {
           if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
           return DS.qsa("button[aria-label='message-dropdown']", root)
-            .filter(button => signatureChanged || button.dataset.dsMessageQuickReady !== signature || !quickActionBarHealthy(button, signature));
+            .filter(button => signatureChanged || !quickActionRevisionStateHealthy(button, signature));
         });
       } else {
         let selector = "button[aria-label='message-dropdown']";
         if (settings.chatPerformanceMode) selector = `[id^='message-']:not(.ds-chat-message-far) button[aria-label='message-dropdown']`;
         buttons = DS.qsa(selector);
-        if (!signatureChanged) buttons = buttons.filter(button => button.dataset.dsMessageQuickReady !== signature || !quickActionBarHealthy(button, signature));
+        if (!signatureChanged) buttons = buttons.filter(button => !quickActionRevisionStateHealthy(button, signature));
       }
     }
 
@@ -494,7 +515,7 @@
     let repaired = 0;
     for (const button of buttons) {
       if (button.closest("#ds-qol-panel") || DS.isMessageEditPending?.(button.closest("div[id^='message-']"))) continue;
-      if (quickActionBarHealthy(button, signature)) continue;
+      if (quickActionRevisionStateHealthy(button, signature) || quickActionBarHealthy(button, signature)) continue;
       ensureQuickActions(button, signature);
       repaired += 1;
     }

@@ -66,7 +66,7 @@ const AUTO_AFK_DEFAULTS = {
   autoAfkHours: 12,
   autoAfkMinutes: 720,
   lowMemoryProtectionEnabled: false,
-  maxAwakeSpicyTabs: 5,
+  maxAwakeSpicyTabs: 3,
   autoAfkChats: false,
   autoAfkHome: false,
   autoAfkProfiles: false,
@@ -934,7 +934,7 @@ async function releaseQuickLessLikeStandaloneWorker() {
 async function runDirectCharacterFeedback(message, mode) {
   const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || mode !== "less-like") return { ok: false, status: "invalid-bot" };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) return { ok: false, status: "invalid-bot" };
   const runId = String(message?.bulkRunId || "").trim();
   if (runId && quickLessLikeClosedBulkRuns.has(runId)) {
     return { ok: false, status: "recommendation-worker-closed", feedbackTabsTried: 0, requestSent: false, networkAttempts: 0 };
@@ -968,7 +968,7 @@ async function runDirectCharacterFeedback(message, mode) {
     return response;
   };
 
-  const lease = await acquireBackgroundJob("less-like", {
+  const lease = await acquireBackgroundJob("recommendation-feedback", {
     ownerTabId: tabId,
     detail: botId,
     maxHoldMs: 50000
@@ -996,7 +996,7 @@ async function runDirectCharacterFeedback(message, mode) {
       await recordHelperLifecycle("quickLessLikeRecommendationWorkerSelfHeal", { tabId, runId, status: String(result?.status || "") });
       const healed = await probeQuickLessLikeRecommendationWorker(tabId, true);
       if (healed?.ready) {
-        const retryLease = await acquireBackgroundJob("less-like", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 50000 });
+        const retryLease = await acquireBackgroundJob("recommendation-feedback", { ownerTabId: tabId, detail: `${botId}:retry`, maxHoldMs: 50000 });
         coordinatorWaitMs += Number(retryLease?.waitMs || 0);
         try {
           await sendFeedback();
@@ -1011,7 +1011,7 @@ async function runDirectCharacterFeedback(message, mode) {
       result = { ok: false, status: "recommendation-worker-closed", feedbackTabId: tabId, feedbackTabsTried: 1, requestSent: false, networkAttempts: 0 };
     }
   }
-  if (result?.ok && result?.status === "less-liked") quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
+  if (result?.ok && ["less-liked", "disliked"].includes(result?.status)) quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
   return {
     ...result,
     workerReadyMs,
@@ -2813,367 +2813,54 @@ async function initializeHelperLifecycleRecovery() {
 }
 
 async function runQuickDislikeBot(message) {
+  const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
+  const botName = String(message?.botName || "").trim().slice(0, 160);
   if (!/^[0-9a-f-]{20,}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
-  if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) {
-    return { ok: false, status: "bulk-canceled" };
-  }
+  if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) return { ok: false, status: "bulk-canceled" };
 
   if (message?.force !== true) {
     const history = await getQuickDislikeHistory();
     const remembered = history.bots[botId];
-    if (remembered) {
-      return {
-        ok: true,
-        status: "already-handled",
-        rememberedStatus: remembered.status,
-        handledAt: remembered.handledAt || 0
-      };
-    }
+    if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status, handledAt: remembered.handledAt || 0 };
 
     const crossHandled = await completedRecommendationFeedbackForBot(botId, "dislike");
     if (crossHandled?.source === "less-like") {
-      const rememberedCross = await rememberQuickDislike(
-        botId,
-        message?.botName || crossHandled.name || "",
-        "already-disliked"
-      );
-      await recordHelperLifecycle("recommendationFeedbackCrossDedupe", {
-        botId,
-        skipped: "dislike",
-        completedBy: "less-like"
-      });
-      return {
-        ok: true,
-        status: "already-handled",
-        rememberedStatus: "already-disliked",
-        handledAt: rememberedCross?.handledAt || crossHandled.handledAt || Date.now(),
-        crossHandledBy: "less-like",
-        networkAttempts: 0,
-        requestSent: false
-      };
+      const rememberedCross = await rememberQuickDislike(botId, botName || crossHandled.name || "", "already-disliked");
+      await recordHelperLifecycle("recommendationFeedbackCrossDedupe", { botId, skipped: "dislike", completedBy: "less-like" });
+      return { ok: true, status: "already-handled", rememberedStatus: "already-disliked", handledAt: rememberedCross?.handledAt || crossHandled.handledAt || Date.now(), crossHandledBy: "less-like", networkAttempts: 0, requestSent: false };
     }
   }
 
-  let url;
+  // v0.2.30: Quick Dislike now uses the same persistent signed-feedback helper
+  // as Less Like. This retires the old per-bot /chat navigation worker while
+  // preserving separate Dislike history/UI and the shared cross-flow dedupe.
+  let result;
   try {
-    url = new URL(String(message?.chatUrl || `https://spicychat.ai/chat/${botId}`));
-  } catch {
-    return { ok: false, status: "invalid-url" };
-  }
-  if (!isSpicyChatUrl(url.href) || !/^\/chat\//i.test(url.pathname)) return { ok: false, status: "invalid-url" };
-
-  const jobId = String(message?.quickDislikeJobId || "").trim() || makeQuickDislikeJobId(botId);
-  const createdAt = Number(message?.createdAt || 0) || Date.now();
-  const recoveryCount = Math.max(0, Number(message?.recoveryCount || 0) || 0);
-  const jobBase = {
-    jobId,
-    botId,
-    botName: String(message?.botName || "").slice(0, 160),
-    chatUrl: url.href,
-    bulkRunId: String(message?.bulkRunId || "").trim(),
-    createdAt,
-    startedAt: Date.now(),
-    tabId: 0,
-    recoveryCount,
-    status: message?.recoveredAfterReload ? "recovery-starting" : "starting"
-  };
-  await upsertActiveQuickDislikeJob(jobBase);
-  await recordHelperLifecycle(message?.recoveredAfterReload ? "quickDislikeRecoveryStart" : "quickDislikeStart", { jobId, botId, recoveryCount });
-
-  const worker = await prepareQuickDislikeWorkerTab(url, message?.bulkRunId || "", jobBase);
-  const tabId = Number(worker?.tabId);
-  if (!worker?.ok || !Number.isFinite(tabId)) {
-    await removeActiveQuickDislikeJob(jobId);
-    await recordHelperLifecycle("quickDislikeWorkerCreateFailed", { jobId, botId, error: worker?.error || "" });
-    return { ok: false, status: "worker-tab-failed", error: worker?.error || "" };
-  }
-  await upsertActiveQuickDislikeJob({ ...jobBase, tabId, status: "worker-open" });
-
-  let result = { ok: false, status: "worker-timeout" };
-  try {
-    const started = Date.now();
-    while (Date.now() - started < 30000) {
-      if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) {
-        result = { ok: false, status: "bulk-canceled" };
-        break;
-      }
-      const tab = await tabsGet(tabId);
-      if (!tab) {
-        result = { ok: false, status: "worker-closed" };
-        break;
-      }
-      const response = await tabsSendMessage(tabId, { type: "DS_QUICK_DISLIKE_RUN", botId, jobId });
-      if (response?.status && response.status !== "not-worker") {
-        result = response;
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 420));
-    }
+    result = await runDirectCharacterFeedback(message, "dislike");
   } finally {
-    // Bulk runs reuse one hidden helper tab instead of booting a fresh full
-    // SpicyChat app for every bot. Failed helpers are discarded so retry starts
-    // clean. Active job storage is cleared only after this invocation finishes;
-    // if the extension reloads mid-run the persisted job remains recoverable.
-    if (!worker.reusable || !result?.ok) {
-      if (worker.reusable && message?.bulkRunId) quickDislikeBulkWorkerTabs.delete(String(message.bulkRunId));
-      await tabsRemove(tabId);
-      quickDislikeWorkerTabIds.delete(tabId);
-      if (Number(quickDislikePersistentWorkerTabId) === tabId) quickDislikePersistentWorkerTabId = null;
-    }
+    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
   }
 
-  if (result?.ok && [
-    "disliked",
-    "already-disliked",
-    "already-rated-or-unavailable",
-    "unavailable-private-or-deleted",
-    "unavailable-creator-blocked"
-  ].includes(result.status)) {
-    await upsertActiveQuickDislikeJob({ ...jobBase, tabId, status: `terminal:${result.status}` });
-    await rememberQuickDislike(botId, message?.botName || "", result.status);
+  if (result?.ok && result.status === "disliked") {
+    const remembered = await rememberQuickDislike(botId, botName, "disliked");
+    if (remembered) result.handledAt = remembered.handledAt || Date.now();
+  } else if (result?.status === "bot-not-found") {
+    const remembered = await rememberQuickDislike(botId, botName, "unavailable-private-or-deleted");
+    result = { ...result, ok: true, status: "unavailable-private-or-deleted", rememberedStatus: "unavailable-private-or-deleted", handledAt: remembered?.handledAt || Date.now() };
+  } else if (result?.status === "character-restricted") {
+    const remembered = await rememberQuickDislike(botId, botName, "unavailable-private-or-deleted");
+    result = { ...result, ok: true, status: "unavailable-private-or-deleted", rememberedStatus: "unavailable-private-or-deleted", handledAt: remembered?.handledAt || Date.now() };
   }
 
-  await removeActiveQuickDislikeJob(jobId);
   await recordHelperLifecycle(result?.ok ? "quickDislikeCompleted" : "quickDislikeFailed", {
-    jobId,
     botId,
     status: result?.status || "unknown",
-    reused: !!worker.reused,
-    reusedWithoutReload: !!worker.reusedWithoutReload,
-    recovered: !!worker.recovered,
-    recoveryCount
+    executor: "persistent-recommendation-worker",
+    elapsedMs: Date.now() - totalStartedAt
   });
-  return { ...result, jobId, helperReused: !!worker.reused, helperSpaReused: !!worker.reusedWithoutReload, helperRecovered: !!worker.recovered };
+  return { ...result, totalMs: Date.now() - totalStartedAt, executor: "persistent-recommendation-worker" };
 }
-
-async function runListingRefillFavoriteWorker(message) {
-  let url;
-  try {
-    url = new URL(String(message?.url || ""));
-  } catch {
-    return { ok: false, status: "invalid-url" };
-  }
-  if (!isSpicyChatUrl(url.href)) return { ok: false, status: "invalid-url" };
-  const botId = String(message?.botId || "").trim();
-  if (!botId) return { ok: false, status: "missing-bot-id" };
-  const favoriteRunId = `favorite-${botId.slice(0, 12)}-${Date.now().toString(36)}`;
-  const runtimeSession = await getHelperRuntimeSession();
-  const stamped = stampListingRefillWorkerUrl(url, favoriteRunId, Date.now(), runtimeSession.id);
-
-  const created = await tabsCreate({ url: stamped.href, active: false });
-  const tabId = Number(created?.tab?.id);
-  if (!created.ok || !Number.isFinite(tabId)) {
-    return { ok: false, status: "worker-tab-failed", error: created.error || "" };
-  }
-
-  listingRefillWorkerTabIds.add(tabId);
-  let result = { ok: false, status: "worker-timeout" };
-  try {
-    const started = Date.now();
-    while (Date.now() - started < 25000) {
-      const tab = await tabsGet(tabId);
-      if (!tab) return { ok: false, status: "worker-closed" };
-      const response = await tabsSendMessage(tabId, {
-        type: "DS_LISTING_REFILL_FAVORITE_RUN",
-        botId
-      });
-      if (response?.ok) {
-        result = response;
-        break;
-      }
-      if (response?.status && !["not-ready", "not-worker"].includes(response.status)) {
-        result = response;
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 420));
-    }
-  } finally {
-    await tabsRemove(tabId);
-    listingRefillWorkerTabIds.delete(tabId);
-  }
-  return result;
-}
-
-async function releaseListingRefillPageWorker(runId) {
-  const id = String(runId || "").trim();
-  if (!id) return false;
-  let tabId = Number(listingRefillPageWorkerTabs.get(id));
-  listingRefillPageWorkerTabs.delete(id);
-  listingRefillSourceTabs.delete(id);
-  const matching = await findListingRefillWorkersForRun(id);
-  const ids = new Set(matching.map(tab => Number(tab?.id)).filter(Number.isFinite));
-  if (Number.isFinite(tabId)) ids.add(tabId);
-  if (!ids.size) return false;
-  for (const idToClose of ids) {
-    listingRefillWorkerTabIds.delete(idToClose);
-    await tabsRemove(idToClose).catch?.(() => null);
-  }
-  return true;
-}
-
-async function prepareListingRefillPageWorker(url, runId = "") {
-  const id = String(runId || "").trim();
-  const runtimeSession = await getHelperRuntimeSession();
-  const gcClosed = await cleanupStaleListingRefillWorkers({ preserveRunId: id, closeLegacy: true });
-  if (id) {
-    let existingId = Number(listingRefillPageWorkerTabs.get(id));
-    let recovered = false;
-    if (!Number.isFinite(existingId)) {
-      const existingTab = await findListingRefillWorkerForRun(id);
-      existingId = Number(existingTab?.id);
-      recovered = Number.isFinite(existingId);
-      if (recovered) listingRefillPageWorkerTabs.set(id, existingId);
-    }
-    if (Number.isFinite(existingId)) {
-      const existing = await tabsGet(existingId);
-      if (existing) {
-        const info = listingRefillWorkerUrlInfo(existing.url || existing.pendingUrl || "");
-        const priorSession = !!(runtimeSession.id && info?.sessionId && info.sessionId !== runtimeSession.id);
-        const stamped = stampListingRefillWorkerUrl(url, id, info?.startedAt || Date.now(), runtimeSession.id);
-        const updated = await tabsUpdate(existingId, { url: stamped.href, active: false });
-        if (updated?.ok) {
-          listingRefillWorkerTabIds.add(existingId);
-          const duplicateClosed = await closeDuplicateListingRefillWorkers(id, existingId);
-          if (recovered || priorSession) await recordHelperLifecycle("listingRefillHelperRecovered", { runId: id, tabId: existingId, priorSession });
-          return { ok: true, tabId: existingId, reusable: true, reused: true, recovered: recovered || priorSession, gcClosed: gcClosed + duplicateClosed };
-        }
-      }
-      listingRefillPageWorkerTabs.delete(id);
-      listingRefillWorkerTabIds.delete(existingId);
-    }
-  }
-
-  const stamped = stampListingRefillWorkerUrl(url, id, Date.now(), runtimeSession.id);
-  const created = await tabsCreate({ url: stamped.href, active: false });
-  const tabId = Number(created?.tab?.id);
-  if (!created.ok || !Number.isFinite(tabId)) {
-    return { ok: false, status: "worker-tab-failed", error: created.error || "", gcClosed };
-  }
-  listingRefillWorkerTabIds.add(tabId);
-  if (id) listingRefillPageWorkerTabs.set(id, tabId);
-  return { ok: true, tabId, reusable: !!id, reused: false, recovered: false, gcClosed };
-}
-
-async function runListingRefillPageWorker(message) {
-  let url;
-  try {
-    url = new URL(String(message?.url || ""));
-  } catch {
-    return { ok: false, status: "invalid-url" };
-  }
-  if (!isSpicyChatUrl(url.href)) return { ok: false, status: "invalid-url" };
-  url.searchParams.set("dsListingRefill", "1");
-
-  const runId = String(message?.runId || "").trim();
-  const sourceTabId = Number(message?.sourceTabId);
-  if (runId && Number.isFinite(sourceTabId)) listingRefillSourceTabs.set(runId, sourceTabId);
-  const worker = await prepareListingRefillPageWorker(url, runId);
-  if (!worker?.ok || !Number.isFinite(Number(worker.tabId))) return worker || { ok: false, status: "worker-tab-failed" };
-
-  const tabId = Number(worker.tabId);
-  let result = { ok: false, status: "worker-timeout" };
-  try {
-    const started = Date.now();
-    while (Date.now() - started < LISTING_REFILL_WORKER_RESPONSE_MAX_MS) {
-      const tab = await tabsGet(tabId);
-      if (!tab) {
-        result = { ok: false, status: "worker-closed" };
-        break;
-      }
-      const response = await tabsSendMessage(tabId, {
-        type: "DS_LISTING_REFILL_EXTRACT",
-        expectedPage: Number(message?.expectedPage || 0) || 0
-      });
-      if (response?.ok) {
-        result = { ...response, reused: !!worker.reused, recovered: !!worker.recovered, gcClosed: Number(worker.gcClosed || 0) };
-        break;
-      }
-      // Reused tabs can briefly answer from the previous page while tabs.update
-      // is navigating. page-mismatch is therefore a transient readiness state,
-      // not a reason to discard the whole refill run.
-      if (response?.status && !["not-ready", "not-worker", "page-mismatch"].includes(response.status)) {
-        result = response;
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 420));
-    }
-  } finally {
-    // Manual/automatic refill runs keep one rendered helper tab and navigate it
-    // through later pages. One-shot callers and failed workers are still closed
-    // immediately so dead helper pages cannot accumulate.
-    if (!worker.reusable || !result?.ok) {
-      if (worker.reusable && runId) listingRefillPageWorkerTabs.delete(runId);
-      await tabsRemove(tabId);
-      listingRefillWorkerTabIds.delete(tabId);
-    }
-  }
-  return result;
-}
-
-
-async function runPersonaRenderedSnapshotWorker(message) {
-  const personaId = String(message?.personaId || "").trim();
-  if (!personaId) return { ok: false, status: "invalid-persona" };
-  const url = new URL(`https://spicychat.ai/personas/edit/${encodeURIComponent(personaId)}`);
-  url.searchParams.set("dsPersonaRefresh", "1");
-
-  const created = await tabsCreate({ url: url.href, active: false });
-  const tabId = Number(created?.tab?.id);
-  if (!created.ok || !Number.isFinite(tabId)) return { ok: false, status: "worker-tab-failed", error: created.error || "" };
-
-  personaRefreshWorkerTabIds.add(tabId);
-  let result = { ok: false, status: "worker-timeout" };
-  try {
-    const started = Date.now();
-    while (Date.now() - started < 22000) {
-      const tab = await tabsGet(tabId);
-      if (!tab) return { ok: false, status: "worker-closed" };
-      const response = await tabsSendMessage(tabId, { type: "DS_PERSONA_RENDERED_SNAPSHOT_READ", personaId });
-      if (response?.ok) { result = response; break; }
-      if (response?.status && !["not-ready", "not-worker"].includes(response.status)) { result = response; break; }
-      await new Promise(resolve => setTimeout(resolve, 350));
-    }
-  } finally {
-    await tabsRemove(tabId);
-    personaRefreshWorkerTabIds.delete(tabId);
-  }
-  return result;
-}
-
-function allowedPersonaImageUrl(rawUrl) {
-  try {
-    const url = new URL(String(rawUrl || ""));
-    if (url.protocol !== "https:") return null;
-    if (!["cdn.nd-api.com", "cms.cdn.nd-api.com"].includes(url.hostname)) return null;
-    return url;
-  } catch {
-    return null;
-  }
-}
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-async function fetchPersonaImageDataUrl(rawUrl) {
-  const url = allowedPersonaImageUrl(rawUrl);
-  if (!url) return { ok: false, error: "unsupported image host" };
-
-  const response = await fetch(url.href, { cache: "no-store", credentials: "omit" });
-  if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
-  const blob = await response.blob();
-  if (!blob.size || blob.size > 5 * 1024 * 1024) return { ok: false, error: "image too large or empty" };
-  const type = /^image\//i.test(blob.type || "") ? blob.type : "image/jpeg";
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  return { ok: true, dataUrl: `data:${type};base64,${bytesToBase64(bytes)}` };
-}
-
 
 function normalizeChatNudgeSubscriptions(value) {
   const rows = Array.isArray(value) ? value : [];
@@ -3556,10 +3243,6 @@ async function scanOneFollowedCreator(handle, existingState) {
   const known = new Set(Array.isArray(prior.seenIds) ? prior.seenIds.map(String) : []);
   let firstKnownIndex = prior.initialized ? cards.findIndex(item => known.has(item.id)) : -1;
 
-  // If a busy creator pushed every previously-seen bot off page 1, walk a
-  // handful of later pages before treating the listing as unrelated. This is
-  // especially useful for longer check intervals without turning every normal
-  // scan into a multi-page crawl.
   if (prior.initialized && firstKnownIndex < 0) {
     const lastPage = Math.max(1, Number(first.lastPage || 1) || 1);
     const maxOverlapPage = Math.min(lastPage, 6);
@@ -3586,9 +3269,6 @@ async function scanOneFollowedCreator(handle, existingState) {
     if (firstKnownIndex >= 0) {
       newBots = cards.slice(0, firstKnownIndex);
     } else {
-      // No overlap after the bounded multi-page check: refresh the baseline without firing a wall
-      // of alerts. This is intentionally conservative; a later normal overlap
-      // resumes precise prefix-based new-bot detection.
       ambiguousReset = true;
     }
   }
@@ -3624,9 +3304,6 @@ async function runCreatorBotScan({ force = false, handles = null, reason = "alar
     return { checked: 0, newBots: 0, failures: 0, skipped: "not-due" };
   }
 
-  // Keep watcher state only for creators who are still locally followed.
-  // Public creator pages/public bot listings are the data source; users opt in
-  // to the watch locally when they choose Follow.
   const followedSet = new Set(followed.handles);
   for (const handle of Object.keys(state.creators)) {
     if (!followedSet.has(handle)) delete state.creators[handle];
@@ -4725,7 +4402,7 @@ async function runAutoAfkScan() {
   const action = settings.autoAfkAction || "discard";
   const timerEnabled = settings.enabled !== false && !!settings.autoAfkEnabled;
   const lowMemoryEnabled = settings.enabled !== false && !!settings.lowMemoryProtectionEnabled;
-  const awakeLimit = Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5));
+  const awakeLimit = Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3));
   const summary = {
     at: now,
     enabled: timerEnabled || lowMemoryEnabled,
@@ -5147,7 +4824,7 @@ async function reopenTabSessionItems(items, mode = "current") {
         failedUrls.push(item.url);
         errors.push(result.error || `Could not reopen ${item.url}`);
       }
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await new Promise(resolve => setTimeout(resolve, 650));
     }
   };
 

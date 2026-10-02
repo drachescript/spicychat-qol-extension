@@ -148,7 +148,7 @@
     autoAfkHours: 12,
   autoAfkMinutes: 720,
   lowMemoryProtectionEnabled: false,
-  maxAwakeSpicyTabs: 5,
+  maxAwakeSpicyTabs: 3,
     autoAfkChats: false,
     autoAfkHome: false,
     autoAfkProfiles: false,
@@ -694,7 +694,7 @@
     desktopAppPerformanceGuard: true,
     pauseQolInHiddenTabs: false,
     autoPerformanceLargeChats: true,
-    largeChatPerformanceThreshold: 500,
+    largeChatPerformanceThreshold: 300,
     deferQolWhileTyping: false,
     pauseQolWhileMessageEditing: true,
     reduceQolAnimations: false,
@@ -859,6 +859,7 @@
     domRevision: 0,
     messageTextRevision: 0,
     messageDirtyRoots: new Set(),
+    messageRootRevisions: new WeakMap(),
     messageLaneRoots: null,
     messageResumeLazyUntil: 0,
     messageLazyScrollTimer: null,
@@ -1080,11 +1081,21 @@
     return [...chosen];
   };
 
+  DS.getMessageRootRevision = function getMessageRootRevision(root) {
+    if (!(root instanceof Element)) return 0;
+    const revisions = DS.state.messageRootRevisions || (DS.state.messageRootRevisions = new WeakMap());
+    return Number(revisions.get(root) || 0);
+  };
+
   DS.markMessageRootDirty = function markMessageRootDirty(root) {
     if (!(root instanceof Element) || !root.matches?.("div[id^='message-']")) return false;
     const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
     const wasDirty = dirty.has(root);
     dirty.add(root);
+    if (!wasDirty) {
+      const revisions = DS.state.messageRootRevisions || (DS.state.messageRootRevisions = new WeakMap());
+      revisions.set(root, Number(revisions.get(root) || 0) + 1);
+    }
     return !wasDirty;
   };
 
@@ -2049,7 +2060,8 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       "backupOptInMigrationV01990",
       "quickDislikeOptInMigrationV019119",
       "oocHardPresetMigrationV022",
-      "chatExportPanelMigrationV0217"
+      "chatExportPanelMigrationV0217",
+      "performanceDefaultsMigrationV0230"
     ]);
 
     const rawSettings = result.settings || {};
@@ -2076,6 +2088,21 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         shouldSaveMigratedSettings = true;
       }
       migrationPayload.chatExportPanelMigrationV0217 = true;
+    }
+
+    // v0.2.30: the old recommended performance defaults were 500 mounted
+    // messages and 5 awake SpicyChat tabs. Move only those exact old defaults
+    // to the new measured recommendations; non-default custom values are kept.
+    if (result.performanceDefaultsMigrationV0230 !== true) {
+      if (!("largeChatPerformanceThreshold" in rawSettings) || Number(rawSettings.largeChatPerformanceThreshold) === 500) {
+        settings.largeChatPerformanceThreshold = 300;
+        shouldSaveMigratedSettings = true;
+      }
+      if (!("maxAwakeSpicyTabs" in rawSettings) || Number(rawSettings.maxAwakeSpicyTabs) === 5) {
+        settings.maxAwakeSpicyTabs = 3;
+        shouldSaveMigratedSettings = true;
+      }
+      migrationPayload.performanceDefaultsMigrationV0230 = true;
     }
 
     // v0.1.9.86: the old immediate Quick Dislike flag is migrated to the

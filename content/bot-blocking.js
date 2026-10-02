@@ -722,16 +722,18 @@
   async function runDirectCharacterFeedback(message) {
     const botId = String(message?.botId || "").trim().toLowerCase();
     const mode = String(message?.mode || "").trim().toLowerCase();
-    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || mode !== "less-like") {
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) {
       return { ok: false, status: "invalid-feedback-request" };
     }
 
     const existing = directFeedbackInFlight.get(botId);
     if (existing) return existing;
 
-    const operation = DS.diagOperationStart?.("quick-less-like", "direct-api", { botId, mode });
-    const availabilityNetwork = DS.diagNetworkStart?.("quick-less-like", "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { phase: "availability-preflight", botId });
-    const ratingNetwork = DS.diagNetworkStart?.("quick-less-like", "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });
+    const diagKind = mode === "dislike" ? "quick-dislike" : "quick-less-like";
+    const successStatus = mode === "dislike" ? "disliked" : "less-liked";
+    const operation = DS.diagOperationStart?.(diagKind, "direct-api", { botId, mode });
+    const availabilityNetwork = DS.diagNetworkStart?.(diagKind, "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { phase: "availability-preflight", botId });
+    const ratingNetwork = DS.diagNetworkStart?.(diagKind, "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });
     const work = (async () => {
       try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
       const preferredRecombeeToken = await cachedRecombeePublicToken();
@@ -781,8 +783,8 @@
 
       DS.diagOperationEnd?.(operation, {
         scanned: 1,
-        changed: result?.ok && result?.status === "less-liked" ? 1 : 0,
-        skipped: result?.ok && result?.status !== "less-liked" ? 1 : 0,
+        changed: result?.ok && result?.status === successStatus ? 1 : 0,
+        skipped: result?.ok && result?.status !== successStatus ? 1 : 0,
         status: result?.status || "unknown",
         botId,
         executor: result?.executor || "direct-recombee-api",
@@ -810,7 +812,7 @@
       });
       DS.diagNetworkEnd?.(ratingNetwork, {
         status: Number(result?.ratingHttpStatus || (result?.requestSent ? result?.httpStatus : 0) || 0),
-        ok: !!(result?.ok && result?.status === "less-liked"),
+        ok: !!(result?.ok && result?.status === successStatus),
         outcome: result?.requestSent ? String(result?.status || "unknown") : "not-sent"
       });
       return result;

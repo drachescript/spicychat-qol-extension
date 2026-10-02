@@ -7,6 +7,26 @@
 
   const DS = window.DragonScriptQoL;
   const CHAT_IMPORT_STATE_KEY = "dsQolChatImportState";
+  const BOT_STATUS_IGNORED_KEY = "botStatusIgnoredIdsV1";
+  let ignoredBotIds = new Set();
+
+  function setIgnoredBotIds(value) {
+    ignoredBotIds = new Set(
+      (Array.isArray(value) ? value : [])
+        .map(id => String(id || "").trim().toLowerCase())
+        .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+    );
+  }
+
+  function isIgnoredBotId(idValue) {
+    return ignoredBotIds.has(String(idValue || "").trim().toLowerCase());
+  }
+
+  async function refreshIgnoredBotIds() {
+    const stored = await localStorageGet([BOT_STATUS_IGNORED_KEY]);
+    setIgnoredBotIds(stored?.[BOT_STATUS_IGNORED_KEY]);
+    return ignoredBotIds;
+  }
 
   function localStorageGet(keys) {
     return new Promise(resolve => {
@@ -197,6 +217,7 @@
       const character = row?.character && typeof row.character === "object" ? row.character : {};
       const id = String(row?.character_id || character.id || "").trim().toLowerCase();
       if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) continue;
+      if (isIgnoredBotId(id)) continue;
 
       const conversationId = String(row?.id || "").trim().toLowerCase();
       const name = cleanMetaText(character.name || "");
@@ -473,7 +494,7 @@
 
     for (const { card, anchor } of entries) {
       const id = DS.chatIdFromHref(anchor?.href || "");
-      if (!id) continue;
+      if (!id || isIgnoredBotId(id)) continue;
 
       const candidateMeta = DS.makeBotMeta?.({ id, card, anchor }) || {
         id,
@@ -524,6 +545,7 @@
 
     const state = loadAllState();
 
+    await refreshIgnoredBotIds();
     const importState = await readChatImportState();
     const forceFullRescan = !!options?.forceFullRescan;
     const refreshMode = !!importState.fullImportCompletedAt && !forceFullRescan;
@@ -1024,7 +1046,7 @@
     if (!DS.isSingleChatPage()) return;
 
     const id = DS.chatIdFromHref(location.href);
-    if (!id) return;
+    if (!id || isIgnoredBotId(id)) return;
 
     const existingMeta = DS.state.openedChatMeta?.[id] || null;
     const alreadyComplete = openedChats.has(id) && !!existingMeta?.name && !!existingMeta?.image;
@@ -1067,7 +1089,7 @@
     if (!link) return false;
 
     const id = DS.chatIdFromHref(link.href || "");
-    if (!id) return false;
+    if (!id || isIgnoredBotId(id)) return false;
 
     const card = DS.getCardFromChatLink?.(link);
     const candidateMeta = DS.makeBotMeta?.({ id, card, anchor: link }) || {
@@ -1194,10 +1216,17 @@
     }
   });
 
-  readChatImportState().then(() => {
+  Promise.all([readChatImportState(), refreshIgnoredBotIds()]).then(() => {
     updateLoadAllButton();
     DS.updateQuickPanel?.();
   }).catch(() => {});
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes?.[BOT_STATUS_IGNORED_KEY]) return;
+      setIgnoredBotIds(changes[BOT_STATUS_IGNORED_KEY].newValue);
+    });
+  } catch {}
 
   const oldUpdateQuickPanel = DS.updateQuickPanel;
 

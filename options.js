@@ -21,6 +21,8 @@ const BOT_AVAILABILITY_KEY = "botAvailability";
 const BOT_ARCHIVE_KEY = "botArchive";
 const LARGE_STORAGE_KEYS = new Set([BOT_AVAILABILITY_KEY, BOT_ARCHIVE_KEY]);
 const BOT_UNAVAILABLE_RECOVERY_KEY = "botUnavailableRecoveryV1";
+const BOT_STATUS_IGNORED_KEY = "botStatusIgnoredIdsV1";
+const BOT_DISCOVERY_INDEX_KEY = "botDiscoveryIndexV1";
 const LOREBOOK_BACKUPS_KEY = "lorebookBackups";
 const SAVED_TEXT_SNIPPETS_KEY = "savedTextSnippets";
 const CONTEXT_KEEPER_DATA_KEY = "contextKeeperData";
@@ -232,7 +234,7 @@ const DEFAULT_SETTINGS = {
   autoAfkHours: 12,
   autoAfkMinutes: 720,
   lowMemoryProtectionEnabled: false,
-  maxAwakeSpicyTabs: 5,
+  maxAwakeSpicyTabs: 3,
   autoAfkChats: false,
   autoAfkHome: false,
   autoAfkProfiles: false,
@@ -791,7 +793,7 @@ const DEFAULT_SETTINGS = {
   desktopAppPerformanceGuard: true,
   pauseQolInHiddenTabs: false,
   autoPerformanceLargeChats: true,
-  largeChatPerformanceThreshold: 500,
+  largeChatPerformanceThreshold: 300,
   deferQolWhileTyping: false,
   pauseQolWhileMessageEditing: true,
   reduceQolAnimations: false,
@@ -888,6 +890,8 @@ let botOrganizationState = { meta: {} };
 let botAvailabilityState = { meta: {} };
 let botArchiveState = { meta: {} };
 let botUnavailableRecoveryState = { version: 1, meta: {} };
+let botStatusIgnoredIdsState = [];
+let botStatusIgnoredIdSetState = new Set();
 let botAvailabilityScanRunning = false;
 let botAvailabilityStopRequested = false;
 let botStatusMetadataDirty = false;
@@ -952,7 +956,8 @@ const SAVED_LIST_DATA_KEYS = [
   BOT_ORGANIZER_KEY,
   BOT_AVAILABILITY_KEY,
   BOT_ARCHIVE_KEY,
-  BOT_UNAVAILABLE_RECOVERY_KEY
+  BOT_UNAVAILABLE_RECOVERY_KEY,
+  BOT_STATUS_IGNORED_KEY
 ];
 
 function nextUiFrame() {
@@ -4600,11 +4605,23 @@ function resetHeavySavedDataState() {
   botOrganizationState = { meta: {} };
   botAvailabilityState = { meta: {} };
   botArchiveState = { meta: {} };
+  botUnavailableRecoveryState = { version: 1, meta: {} };
+  setBotStatusIgnoredIds([]);
 }
 
 
 function validBotId(value) {
   return BOT_ID_RE.test(String(value || "").trim());
+}
+
+function setBotStatusIgnoredIds(value) {
+  botStatusIgnoredIdsState = uniqueClean(Array.isArray(value) ? value : []).map(id => String(id || "").trim().toLowerCase()).filter(validBotId);
+  botStatusIgnoredIdSetState = new Set(botStatusIgnoredIdsState);
+  return botStatusIgnoredIdsState;
+}
+
+function botStatusIdIgnored(idValue) {
+  return botStatusIgnoredIdSetState.has(String(idValue || "").trim().toLowerCase());
 }
 
 function filterMetaToValidBotIds(metaValue) {
@@ -4773,6 +4790,7 @@ async function ensureSavedListsDataLoaded() {
     botAvailabilityState = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
     botArchiveState = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
     botUnavailableRecoveryState = normalizeBotUnavailableRecovery(result[BOT_UNAVAILABLE_RECOVERY_KEY]);
+    setBotStatusIgnoredIds(result[BOT_STATUS_IGNORED_KEY]);
     await ensureBlockingDataLoaded();
     await cleanupMalformedSavedBotRecords();
     const blockedPriorityCleanup = enforceBlockedPriorityOverOpenedState({ markDirty: false });
@@ -6362,7 +6380,6 @@ function saveArchiveSnapshotForBot(idValue, snapshotValue, meta = {}) {
       creator: canonicalBotCreator(entry.creator || fields.creator || ""),
       image: canonicalBotImage(entry.image || fields.image || ""),
       profileUrl: String(entry.profileUrl || ""),
-      source: String(entry.source || ""),
       coverage: [...(entry.coverage || [])].sort(),
       fields: Object.fromEntries(BOT_ARCHIVE_FIELDS.map(field => [field, field === "image" ? canonicalBotImage(fields[field]) : field === "creator" ? canonicalBotCreator(fields[field]) : cleanBotArchiveText(fields[field] || "", field === "personality" || field === "exampleDialogues" ? 18000 : 12000)]))
     });
@@ -6372,8 +6389,41 @@ function saveArchiveSnapshotForBot(idValue, snapshotValue, meta = {}) {
     // look modified. Keep the content snapshot timestamps stable.
     return false;
   }
+
+  let revisions = Array.isArray(previous?.revisions) ? [...previous.revisions] : [];
+  if (previous?.fields) {
+    const meaningfulProfileChanges = compareBotSnapshots(
+      normalizeBotSnapshot({ fields: previous.fields }),
+      normalizeBotSnapshot({ fields: incoming.fields })
+    );
+    if (meaningfulProfileChanges.length) {
+      const revision = normalizeBotArchiveRevision({
+        id: `status-${Number(previous.lastSavedAt || Date.now())}`,
+        capturedAt: Number(previous.lastSavedAt) || Date.now(),
+        source: previous.source || "Previous Bot Status snapshot",
+        label: "Before detected profile change",
+        kind: "profile",
+        fields: previous.fields
+      });
+      if (revision) {
+        const fingerprint = item => comparable({
+          id,
+          fields: item?.fields || {},
+          name: item?.fields?.name || "",
+          creator: item?.fields?.creator || "",
+          image: item?.fields?.image || "",
+          profileUrl: previous.profileUrl || "",
+          coverage: item?.coverage || []
+        });
+        const revisionFingerprint = fingerprint(revision);
+        revisions = [revision, ...revisions.filter(item => fingerprint(item) !== revisionFingerprint)].slice(0, 50);
+      }
+    }
+  }
+
   botArchiveState.meta[id] = mergeBotArchiveEntry(previous, {
     ...incoming,
+    revisions,
     lastSavedAt: Date.now(),
     lastAvailableAt: Date.now()
   });
@@ -6408,6 +6458,88 @@ function snapshotHasSignal(snapshot) {
   return snap.coverage.length >= 2 || snap.strongTextLength >= 40;
 }
 
+function collapseComparisonDuplicateWords(value) {
+  const text = cleanBotSnapshotText(value, 18000);
+  if (!text) return "";
+
+  const normalizeToken = token => String(token || "")
+    .toLocaleLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+
+  // First remove immediate duplicate words. This is comparison-only cleanup:
+  // saved profile text is never rewritten.
+  const compactTokens = [];
+  const compactKeys = [];
+  let lastKey = "";
+  for (const token of text.split(/\s+/g)) {
+    const key = normalizeToken(token);
+    if (key && key === lastKey) continue;
+    compactTokens.push(token);
+    compactKeys.push(key);
+    lastKey = key;
+  }
+
+  // Also ignore accidental repeated phrases such as
+  // "likes dragons and tea likes dragons and tea". These occasionally appear
+  // in API/profile snapshots and should not manufacture a fake update.
+  const out = [];
+  for (let i = 0; i < compactTokens.length;) {
+    let repeatedSpan = 0;
+    const maxSpan = Math.min(8, Math.floor((compactTokens.length - i) / 2));
+    for (let span = maxSpan; span >= 2; span--) {
+      let same = true;
+      let useful = false;
+      for (let j = 0; j < span; j++) {
+        const a = compactKeys[i + j];
+        const b = compactKeys[i + span + j];
+        if (a) useful = true;
+        if (a !== b) { same = false; break; }
+      }
+      if (same && useful) { repeatedSpan = span; break; }
+    }
+
+    if (!repeatedSpan) {
+      out.push(compactTokens[i]);
+      i++;
+      continue;
+    }
+
+    const phraseKeys = compactKeys.slice(i, i + repeatedSpan);
+    out.push(...compactTokens.slice(i, i + repeatedSpan));
+    i += repeatedSpan * 2;
+    while (i + repeatedSpan <= compactTokens.length) {
+      let same = true;
+      for (let j = 0; j < repeatedSpan; j++) {
+        if (compactKeys[i + j] !== phraseKeys[j]) { same = false; break; }
+      }
+      if (!same) break;
+      i += repeatedSpan;
+    }
+  }
+
+  return out.join(" ")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function botSnapshotComparableValue(field, value) {
+  if (field === "image") return canonicalBotImage(value).toLocaleLowerCase();
+  if (field === "creator") return canonicalBotCreator(value).toLocaleLowerCase();
+  if (field === "tags") {
+    return uniqueClean(String(value || "").split(/\s*,\s*|\n+/g))
+      .map(tag => collapseComparisonDuplicateWords(tag).toLocaleLowerCase())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+      .join(",");
+  }
+  const text = collapseComparisonDuplicateWords(value);
+  if (["name", "title"].includes(field)) return text.toLocaleLowerCase();
+  return text;
+}
+
 function normalizeBotChange(change) {
   if (!change || typeof change !== "object") return null;
   const field = BOT_SNAPSHOT_FIELDS.includes(String(change.field || "")) ? String(change.field) : "";
@@ -6419,10 +6551,7 @@ function normalizeBotChange(change) {
       : cleanBotSnapshotText(value);
   const before = normalizeValue(change.before);
   const after = normalizeValue(change.after);
-  const same = field === "creator"
-    ? before.localeCompare(after, undefined, { sensitivity: "base" }) === 0
-    : before === after;
-  if (same) return null;
+  if (botSnapshotComparableValue(field, before) === botSnapshotComparableValue(field, after)) return null;
   return { field, before, after };
 }
 
@@ -6445,7 +6574,7 @@ function normalizeBotAvailability(value) {
     const changedFields = Array.isArray(raw.changedFields)
       ? raw.changedFields.map(normalizeBotChange).filter(Boolean)
       : [];
-    const updateStatus = changedFields.length ? "updated" : (rawUpdateStatus === "updated" ? "current" : rawUpdateStatus);
+    const updateStatus = rawUpdateStatus;
 
     meta[id] = {
       id,
@@ -6559,8 +6688,8 @@ function collectTrackedAvailabilityBots(scope = "all") {
   const selected = source => scope === "all" || scope === source;
 
   const add = (idValue, raw = {}, source = "") => {
-    const id = String(idValue || raw?.id || "").trim();
-    if (!BOT_ID_RE.test(id) || !selected(source)) return;
+    const id = String(idValue || raw?.id || "").trim().toLowerCase();
+    if (!BOT_ID_RE.test(id) || !selected(source) || botStatusIdIgnored(id)) return;
     const previous = byId.get(id) || {
       id,
       name: "",
@@ -6951,8 +7080,8 @@ function compareBotSnapshots(baselineValue, currentValue) {
     const after = current.fields[field] || "";
     // Only call a field changed when both scans could actually read it. This avoids
     // treating a temporarily missing field as a creator edit.
-    if (!before || !after || before === after) continue;
-    if (field === "creator" && before.localeCompare(after, undefined, { sensitivity: "base" }) === 0) continue;
+    if (!before || !after) continue;
+    if (botSnapshotComparableValue(field, before) === botSnapshotComparableValue(field, after)) continue;
     changes.push({ field, before, after });
   }
   return changes;
@@ -6981,7 +7110,11 @@ function reconcileBotUpdate(previousValue, checkedValue) {
 
   checked.baseline = oldBaseline;
   checked.updateStatus = "current";
-  checked.changedFields = [];
+  // Keep the most recent meaningful change visible as history even after it has
+  // been accepted automatically. The baseline itself advances below.
+  checked.changedFields = Array.isArray(previous?.changedFields)
+    ? previous.changedFields.map(normalizeBotChange).filter(Boolean)
+    : [];
   checked.updateDetectedAt = Number(previous?.updateDetectedAt) || 0;
   checked.baselineAcceptedAt = Number(previous?.baselineAcceptedAt) || 0;
   checked.recoverySources = uniqueClean(previous?.recoverySources || []);
@@ -7040,10 +7173,18 @@ function reconcileBotUpdate(previousValue, checkedValue) {
   }
 
   const changes = compareBotSnapshots(oldBaseline, snapshot);
+  const acceptedAt = Date.now();
+  // Bot Status is observational: once the old copy/history has been preserved,
+  // the newly observed live profile becomes the next comparison baseline
+  // automatically. This removes the old manual "Accept update" bookkeeping.
+  checked.baseline = snapshot;
+  checked.baselineAcceptedAt = acceptedAt;
   if (changes.length) {
     checked.updateStatus = "updated";
     checked.changedFields = changes;
-    checked.updateDetectedAt = Date.now();
+    checked.updateDetectedAt = acceptedAt;
+  } else {
+    checked.updateStatus = "current";
   }
   return checked;
 }
@@ -7405,6 +7546,7 @@ function botStatusCenterBaseEntries(scope = "all") {
     });
   }
   for (const entry of Object.values(saved)) {
+    if (botStatusIdIgnored(entry.id)) continue;
     const include = scope === "all" || (entry.sources || []).includes(scope) || byId.has(entry.id);
     if (!include) continue;
     const trackedEntry = byId.get(entry.id) || {};
@@ -7419,6 +7561,7 @@ function botStatusCenterBaseEntries(scope = "all") {
     });
   }
   for (const [id, archive] of Object.entries(archives)) {
+    if (botStatusIdIgnored(id)) continue;
     const include = scope === "all" || scope === "archive" || byId.has(id);
     if (!include) continue;
     const current = byId.get(id) || {};
@@ -7458,13 +7601,13 @@ function botAvailabilityEntries(baseEntries = null, duplicateMatches = null) {
   const base = Array.isArray(baseEntries) ? baseEntries : botStatusCenterBaseEntries(scope);
   const duplicates = duplicateMatches instanceof Map ? duplicateMatches : new Map();
   const priority = { unavailable: 0, restricted: 1, unknown: 2, available: 3 };
-  const updatePriority = entry => entry.updateStatus === "updated" ? 0 : 1;
+  const updatePriority = entry => (entry.changedFields || []).length ? 0 : 1;
 
   return base
     .map(entry => ({ ...entry, duplicateMatches: duplicates.get(entry.id) || [] }))
     .filter(entry => {
       if (filter === "all") return true;
-      if (filter === "updated") return entry.updateStatus === "updated";
+      if (filter === "updated") return (entry.changedFields || []).length > 0;
       if (filter === "archived") return !!entry.archive;
       if (filter === "unarchived") return !entry.archive;
       if (BOT_DUPLICATE_LEVELS.has(filter)) return entry.duplicateMatches.some(match => match.level === filter);
@@ -7485,9 +7628,10 @@ function shortenedDiffValue(value) {
 }
 
 function botUpdateDetails(entry) {
-  if (entry.updateStatus !== "updated" || !(entry.changedFields || []).length) return null;
+  if (!(entry.changedFields || []).length) return null;
   const details = makeElement("details", { className: "bot-update-details" });
-  details.appendChild(makeElement("summary", { text: `View ${entry.changedFields.length} detected change${entry.changedFields.length === 1 ? "" : "s"}` }));
+  const when = entry.updateDetectedAt ? ` · ${new Date(entry.updateDetectedAt).toLocaleString()}` : "";
+  details.appendChild(makeElement("summary", { text: `Last detected change${entry.changedFields.length === 1 ? "" : "s"} (${entry.changedFields.length})${when}` }));
   for (const change of entry.changedFields) {
     const block = makeElement("div", { className: "bot-update-change" });
     block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
@@ -7561,6 +7705,63 @@ function botArchiveDetails(entry) {
     pre.style.font = "inherit";
     details.appendChild(pre);
     details.dataset.archiveLoaded = "1";
+  });
+  return details;
+}
+
+function botArchiveHistoryDetails(archiveValue) {
+  const archive = archiveValue && typeof archiveValue === "object" ? archiveValue : null;
+  const revisions = Array.isArray(archive?.revisions) ? archive.revisions.map(normalizeBotArchiveRevision).filter(Boolean) : [];
+  if (!archive || !revisions.length) return null;
+
+  const details = makeElement("details", { className: "bot-update-details bot-archive-history-details" });
+  details.appendChild(makeElement("summary", { text: `Profile history (${revisions.length + 1} snapshots)` }));
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.historyLoaded === "1") return;
+    const snapshots = [
+      ...revisions.map(item => ({
+        capturedAt: Number(item.capturedAt || 0),
+        source: item.source || item.label || "Saved profile",
+        fields: item.fields || {}
+      })),
+      {
+        capturedAt: Number(archive.lastSavedAt || 0),
+        source: archive.source || "Current saved profile",
+        fields: archive.fields || {}
+      }
+    ].sort((a, b) => Number(a.capturedAt || 0) - Number(b.capturedAt || 0));
+
+    let previous = null;
+    snapshots.forEach((snapshot, index) => {
+      const wrap = makeElement("div", { className: "bot-history-snapshot" });
+      const when = snapshot.capturedAt ? new Date(snapshot.capturedAt).toLocaleString() : "Unknown time";
+      wrap.appendChild(makeElement("div", {
+        className: "bot-update-field",
+        text: `${index + 1}. ${when}${snapshot.source ? ` · ${snapshot.source}` : ""}`
+      }));
+      if (!previous) {
+        wrap.appendChild(makeElement("div", { className: "bot-availability-meta", text: "Earliest saved profile snapshot." }));
+      } else {
+        const changes = compareBotSnapshots(
+          normalizeBotSnapshot({ fields: previous.fields || {} }),
+          normalizeBotSnapshot({ fields: snapshot.fields || {} })
+        );
+        if (!changes.length) {
+          wrap.appendChild(makeElement("div", { className: "bot-availability-meta", text: "No meaningful profile-text changes after comparison cleanup." }));
+        } else {
+          changes.forEach(change => {
+            const block = makeElement("div", { className: "bot-update-change" });
+            block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
+            block.appendChild(makeElement("div", { className: "bot-update-before", text: `Before: ${shortenedDiffValue(change.before)}` }));
+            block.appendChild(makeElement("div", { className: "bot-update-after", text: `Now: ${shortenedDiffValue(change.after)}` }));
+            wrap.appendChild(block);
+          });
+        }
+      }
+      details.appendChild(wrap);
+      previous = snapshot;
+    });
+    details.dataset.historyLoaded = "1";
   });
   return details;
 }
@@ -9092,8 +9293,21 @@ function botSameNameCollisionIndex() {
   for (const group of groups.values()) {
     const unique = group.filter((item, index, list) => list.findIndex(other => other.id === item.id) === index);
     if (unique.length < 2) continue;
-    for (const item of unique) {
-      byId.set(item.id, unique.filter(other => other.id !== item.id));
+
+    // A shared display name by itself is not useful signal. Normal names such
+    // as Chelsea/Mary can have many unrelated live bots. Only surface the
+    // collision when it helps explain a recovery/status ambiguity: one UUID is
+    // confirmed unavailable/deleted while another UUID with the same name is
+    // still not unavailable (usually Available).
+    const unavailable = unique.filter(item => item.deletedRecovery || item.status === "unavailable");
+    const otherStates = unique.filter(item => !(item.deletedRecovery || item.status === "unavailable"));
+    if (!unavailable.length || !otherStates.length) continue;
+
+    for (const item of unavailable) {
+      byId.set(item.id, otherStates.filter(other => other.id !== item.id));
+    }
+    for (const item of otherStates) {
+      byId.set(item.id, unavailable.filter(other => other.id !== item.id));
     }
   }
   return byId;
@@ -9104,9 +9318,10 @@ function appendSameNameCollisionInfo(main, badgeRow, entry) {
   if (!matches.length) return;
 
   badgeRow?.appendChild(makeElement("span", {
-    className: "bot-update-badge",
-    text: "Different bot with same name",
-    dataset: { status: "current" }
+    className: "bot-update-badge bot-same-name-badge",
+    text: "Same name · different ID",
+    dataset: { status: "current" },
+    attrs: { title: "Another character ID uses this name in a different availability/recovery state." }
   }));
 
   const visible = matches.slice(0, 3).map(match => {
@@ -9144,8 +9359,8 @@ function botAvailabilityCard(entry) {
     text: entry.checkedAt ? botAvailabilityStatusLabel(entry.status) : "Not checked",
     dataset: { status: entry.checkedAt ? entry.status : "unknown" }
   }));
-  if (entry.updateStatus === "updated") {
-    badgeRow.appendChild(makeElement("span", { className: "bot-update-badge", text: "Updated", dataset: { status: "updated" } }));
+  if ((entry.changedFields || []).length) {
+    badgeRow.appendChild(makeElement("span", { className: "bot-update-badge", text: "Change history", dataset: { status: "updated" } }));
   }
   if (entry.archive) {
     const archiveFields = entry.archive.coverage?.length || 0;
@@ -9178,15 +9393,14 @@ function botAvailabilityCard(entry) {
   if (updateDetails) main.appendChild(updateDetails);
   const archiveDetails = botArchiveDetails(entry);
   if (archiveDetails) main.appendChild(archiveDetails);
+  const historyDetails = botArchiveHistoryDetails(entry.archive);
+  if (historyDetails) main.appendChild(historyDetails);
   const duplicateDetails = botDuplicateDetails(entry);
   if (duplicateDetails) main.appendChild(duplicateDetails);
 
   const actions = makeElement("div", { className: "bot-manager-actions" });
   actions.appendChild(makeElement("a", { text: "Open profile", attrs: { href: entry.profileUrl || `https://spicychat.ai/chatbot/${entry.id}`, target: "_blank", rel: "noopener noreferrer" } }));
   actions.appendChild(makeElement("button", { className: "bot-availability-recheck", text: entry.checkedAt ? "Recheck" : "Check now", attrs: { type: "button" } }));
-  if (entry.updateStatus === "updated") {
-    actions.appendChild(makeElement("button", { className: "bot-update-accept", text: "Accept update", attrs: { type: "button" } }));
-  }
   if (entry.archive) {
     actions.appendChild(makeElement("button", { className: "bot-archive-copy", text: "Copy saved bot", attrs: { type: "button" } }));
     actions.appendChild(makeElement("button", { className: "bot-archive-portable", text: "Importable JSON", attrs: { type: "button", title: "Character Card JSON that QoL can import back into SpicyChat" } }));
@@ -9222,7 +9436,7 @@ function renderBotAvailability(renderOptions = {}) {
   const duplicateBots = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? [...duplicates.values()].filter(matches => matches.length).length
     : null;
-  const updatedCount = base.filter(entry => entry.updateStatus === "updated").length;
+  const updatedCount = base.filter(entry => (entry.changedFields || []).length > 0).length;
   const checkedCount = base.filter(entry => Number(entry.checkedAt) > 0).length;
   const archivedCount = base.filter(entry => !!entry.archive).length;
   const unavailableCandidateCount = base.filter(entry => Number(entry.unavailableEvidenceCount || 0) === 1 && entry.status !== "unavailable").length;
@@ -9238,7 +9452,7 @@ function renderBotAvailability(renderOptions = {}) {
   if (summary) {
     const matches = entries.length !== base.length ? ` · ${entries.length} matching` : "";
     const duplicateText = duplicateBots == null ? "" : ` · ${duplicateBots} duplicate matches`;
-    summary.textContent = `${base.length} tracked · ${checkedCount} checked · ${archivedCount} saved copies · ${updatedCount} updated${duplicateText}${matches}`;
+    summary.textContent = `${base.length} tracked · ${checkedCount} checked · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
   }
   const uncheckedButton = $("scanUncheckedBotAvailability");
   if (uncheckedButton && !botAvailabilityScanRunning) {
@@ -9325,25 +9539,6 @@ function renderBotAvailability(renderOptions = {}) {
       await storageSet(payload);
       renderBotAvailability({ skipRecoveryRerender: true });
       setTimeout(() => refreshStorageUsageIfVisible(), 120);
-    });
-  });
-  host.querySelectorAll(".bot-update-accept").forEach(button => {
-    button.addEventListener("click", async () => {
-      const id = button.closest(".bot-manager-card")?.dataset.id || "";
-      const current = normalizeBotAvailability(botAvailabilityState).meta[id];
-      if (!current?.snapshot || !snapshotHasSignal(current.snapshot)) return;
-      botAvailabilityState.meta[id] = {
-        ...current,
-        baseline: normalizeBotSnapshot(current.snapshot),
-        updateStatus: "current",
-        changedFields: [],
-        updateDetectedAt: 0,
-        baselineAcceptedAt: Date.now()
-      };
-      botAvailabilityState = normalizeBotAvailability(botAvailabilityState);
-      await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
-      renderBotAvailability();
-      showSettingsToast("Accepted the current bot profile as the new update-watch baseline.");
     });
   });
   host.querySelectorAll(".bot-archive-copy").forEach(button => {
@@ -9551,7 +9746,7 @@ async function runBotAvailabilityScan(options = {}) {
   if (stopButton) stopButton.disabled = false;
 
   let completed = 0;
-  let updatesFound = 0;
+  let changesPreserved = 0;
   let unknownCount = 0;
   let candidateCount = 0;
   let archiveChangedCount = 0;
@@ -9607,7 +9802,7 @@ async function runBotAvailabilityScan(options = {}) {
         { keepHelper: true, forceOwnHelper: true, bulkScan: true, timeoutMs: 17000 }
       );
       const result = reconcileBotUpdate(previous, rawResult);
-      if (result.updateStatus === "updated") updatesFound++;
+      if (result.updateStatus === "updated" && Number(result.updateDetectedAt || 0) > Number(previous?.updateDetectedAt || 0)) changesPreserved++;
       if (result.status === "unknown") unknownCount++;
       if (Number(result.unavailableEvidenceCount || 0) === 1 && result.status !== "unavailable") candidateCount++;
       if (mode === "archived") {
@@ -9719,12 +9914,12 @@ async function runBotAvailabilityScan(options = {}) {
       ? `Stopped after ${completed} / ${entries.length}. Completed status/update checks were saved.`
       : mode === "archived"
         ? `${completed} checked · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked left alone` : ""}.`
-        : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${updatesFound ? `${updatesFound} update${updatesFound === 1 ? "" : "s"} detected. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
+        : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${changesPreserved ? `${changesPreserved} profile change${changesPreserved === 1 ? "" : "s"} preserved in history. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
     if (status) status.textContent = finalStatusText;
     if (archivedStatus) archivedStatus.textContent = finalStatusText;
     await noteBotStatusRunEvent("bot-status-run-complete", {
       mode, scope, completed, requested: entries.length, stopped: !!botAvailabilityStopRequested,
-      updatesFound, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
+      changesPreserved, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
       stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped,
       durationMs: Date.now() - runStartedAt
     });
@@ -9745,38 +9940,164 @@ async function runBotAvailabilityScan(options = {}) {
   }
 }
 
-async function acceptAllBotUpdates() {
-  const normalized = normalizeBotAvailability(botAvailabilityState);
-  const updated = Object.values(normalized.meta).filter(entry => entry.updateStatus === "updated" && snapshotHasSignal(entry.snapshot));
-  if (!updated.length) {
-    showSettingsToast("There are no detected bot updates to accept.");
-    return;
-  }
-  if (!confirm(`Accept the current profile snapshot as the new baseline for ${updated.length} updated bot${updated.length === 1 ? "" : "s"}?`)) return;
-  const now = Date.now();
-  for (const entry of updated) {
-    normalized.meta[entry.id] = {
-      ...entry,
-      baseline: normalizeBotSnapshot(entry.snapshot),
-      updateStatus: "current",
-      changedFields: [],
-      updateDetectedAt: 0,
-      baselineAcceptedAt: now
-    };
-  }
-  botAvailabilityState = normalizeBotAvailability(normalized);
-  await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
-  renderBotAvailability();
-  showSettingsToast(`Accepted ${updated.length} bot update${updated.length === 1 ? "" : "s"}.`);
-}
-
-
 function removeBotIdsFromStore(storeValue, idSet) {
   const store = normalizeBotStore(storeValue);
   const ids = store.ids.filter(id => !idSet.has(id));
   const meta = { ...store.meta };
   for (const id of idSet) delete meta[id];
   return { ids, names: [], meta };
+}
+
+async function forgetDeletedBotFromQol(idValue) {
+  await ensureSavedListsDataLoaded();
+  const id = String(idValue || "").trim().toLowerCase();
+  if (!BOT_ID_RE.test(id)) return false;
+
+  const archive = normalizeBotArchive(botArchiveState).meta[id] || null;
+  const availability = normalizeBotAvailability(botAvailabilityState).meta[id] || null;
+  const name = cleanAuthoritativeBotName(archive?.fields?.name || archive?.name || availability?.name || "", id) || "this bot";
+  const shortId = shortBotCharacterId(id);
+  if (!confirm(
+    `Forget ${name} (${shortId}) from QoL?\n\n` +
+    "This removes its saved copy, Bot Status result/history, opened/Favorite/Later/Blocked/Not Interested/Organizer/Recently Seen records, recovery data and local Dislike/Less Like handled history. " +
+    "The real SpicyChat conversation is NOT deleted. QoL keeps only the exact character UUID on a small forgotten-ID list so Load all and future scans do not immediately recreate it."
+  )) return false;
+
+  const ids = new Set([id]);
+  blockedState = removeBotIdsFromStore(blockedState, ids);
+  notInterestedState = removeBotIdsFromStore(notInterestedState, ids);
+  favoriteBotState = removeBotIdsFromStore(favoriteBotState, ids);
+  laterBotState = removeBotIdsFromStore(laterBotState, ids);
+
+  currentOpened = uniqueClean(currentOpened).filter(value => String(value || "").toLowerCase() !== id);
+  openedChatMetaState = { ...openedChatMetaState };
+  delete openedChatMetaState[id];
+
+  recentlySeenBotState = {
+    entries: normalizeRecentlySeenStore(recentlySeenBotState).entries.filter(item => String(item.id || "").toLowerCase() !== id)
+  };
+
+  const organizer = normalizeBotOrganization(botOrganizationState);
+  delete organizer.meta[id];
+  botOrganizationState = organizer;
+
+  const watch = normalizeCreatorBotWatchState(creatorBotWatchState);
+  watch.recent = watch.recent.filter(item => String(item.id || "").toLowerCase() !== id);
+  for (const creator of Object.values(watch.creators || {})) {
+    creator.seenIds = uniqueClean(creator.seenIds || []).filter(value => String(value || "").toLowerCase() !== id);
+    creator.baselineCount = creator.seenIds.length;
+  }
+  creatorBotWatchState = normalizeCreatorBotWatchState(watch);
+
+  if (botAvailabilityState?.meta) delete botAvailabilityState.meta[id];
+  botAvailabilityState = normalizeBotAvailability(botAvailabilityState);
+  if (botArchiveState?.meta) delete botArchiveState.meta[id];
+  botArchiveState = normalizeBotArchive(botArchiveState);
+  if (botUnavailableRecoveryState?.meta) delete botUnavailableRecoveryState.meta[id];
+  botUnavailableRecoveryState = normalizeBotUnavailableRecovery(botUnavailableRecoveryState);
+
+  quickDislikeHistoryState = normalizeQuickDislikeHistory(quickDislikeHistoryState);
+  if (quickDislikeHistoryState.bots) delete quickDislikeHistoryState.bots[id];
+  quickLessLikeHistoryState = normalizeQuickLessLikeHistory(quickLessLikeHistoryState);
+  if (quickLessLikeHistoryState.bots) delete quickLessLikeHistoryState.bots[id];
+
+  quickDislikeBulkState = normalizeQuickDislikeBulkState({
+    ...quickDislikeBulkState,
+    pendingIds: (quickDislikeBulkState.pendingIds || []).filter(value => String(value || "").toLowerCase() !== id),
+    failedIds: (quickDislikeBulkState.failedIds || []).filter(value => String(value || "").toLowerCase() !== id),
+    currentId: String(quickDislikeBulkState.currentId || "").toLowerCase() === id ? "" : quickDislikeBulkState.currentId
+  });
+  const lessFailureMeta = { ...(quickLessLikeBulkState.failureMeta || {}) };
+  delete lessFailureMeta[id];
+  quickLessLikeBulkState = normalizeQuickLessLikeBulkState({
+    ...quickLessLikeBulkState,
+    pendingIds: (quickLessLikeBulkState.pendingIds || []).filter(value => String(value || "").toLowerCase() !== id),
+    failedIds: (quickLessLikeBulkState.failedIds || []).filter(value => String(value || "").toLowerCase() !== id),
+    failureMeta: lessFailureMeta,
+    currentId: String(quickLessLikeBulkState.currentId || "").toLowerCase() === id ? "" : quickLessLikeBulkState.currentId
+  });
+
+  setBotStatusIgnoredIds([...botStatusIgnoredIdsState, id]);
+
+  const stored = await storageGet([
+    "settings",
+    BOT_DISCOVERY_INDEX_KEY,
+    CARD_TOKEN_CACHE_KEY,
+    ARCHIVE_UPLOAD_STATE_KEY,
+    ARCHIVE_CONTRIBUTION_STATE_KEY
+  ]);
+  const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+  settings.blockedBotIds = uniqueClean(settings.blockedBotIds || []).filter(value => String(value || "").toLowerCase() !== id && validBotId(value));
+  settings.blockedBotNames = [];
+
+  const discoveryRaw = stored[BOT_DISCOVERY_INDEX_KEY] && typeof stored[BOT_DISCOVERY_INDEX_KEY] === "object" ? stored[BOT_DISCOVERY_INDEX_KEY] : {};
+  const discoveryMeta = discoveryRaw.meta && typeof discoveryRaw.meta === "object" ? { ...discoveryRaw.meta } : { ...discoveryRaw };
+  delete discoveryMeta[id];
+  const discoveryNext = discoveryRaw.meta && typeof discoveryRaw.meta === "object"
+    ? { ...discoveryRaw, meta: discoveryMeta }
+    : { meta: discoveryMeta };
+
+  const tokenCache = stored[CARD_TOKEN_CACHE_KEY] && typeof stored[CARD_TOKEN_CACHE_KEY] === "object"
+    ? { ...stored[CARD_TOKEN_CACHE_KEY] }
+    : {};
+  delete tokenCache[id];
+
+  const uploadState = normalizeArchiveUploadState(stored[ARCHIVE_UPLOAD_STATE_KEY]);
+  delete uploadState.fingerprints[id];
+  const contributionState = normalizeArchiveContributionState(stored[ARCHIVE_CONTRIBUTION_STATE_KEY]);
+  delete contributionState.fingerprints[id];
+
+  botStatusStorageSelfWriteUntil = Date.now() + 8000;
+  const ok = await storageSet({
+    settings,
+    [BLOCKED_BOTS_KEY]: blockedState,
+    [NOT_INTERESTED_KEY]: notInterestedState,
+    [FAVORITE_BOTS_KEY]: favoriteBotState,
+    [LATER_BOTS_KEY]: laterBotState,
+    [OPENED_KEY]: currentOpened,
+    [OPENED_META_KEY]: openedChatMetaState,
+    [RECENTLY_SEEN_BOTS_KEY]: recentlySeenBotState,
+    [BOT_ORGANIZER_KEY]: botOrganizationState,
+    [CREATOR_BOT_WATCH_KEY]: creatorBotWatchState,
+    [BOT_AVAILABILITY_KEY]: botAvailabilityState,
+    [BOT_ARCHIVE_KEY]: botArchiveState,
+    [BOT_UNAVAILABLE_RECOVERY_KEY]: botUnavailableRecoveryState,
+    [QUICK_DISLIKE_HISTORY_KEY]: quickDislikeHistoryState,
+    [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState,
+    [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryState,
+    [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState,
+    [BOT_STATUS_IGNORED_KEY]: botStatusIgnoredIdsState,
+    [BOT_DISCOVERY_INDEX_KEY]: discoveryNext,
+    [CARD_TOKEN_CACHE_KEY]: tokenCache,
+    [ARCHIVE_UPLOAD_STATE_KEY]: uploadState,
+    [ARCHIVE_CONTRIBUTION_STATE_KEY]: contributionState
+  });
+  if (!ok) {
+    showSettingsToast("Could not finish forgetting this bot. Reload Settings before trying again.");
+    return false;
+  }
+
+  invalidateDuplicateCache();
+  renderBotAvailability();
+  renderSavedBotsHub();
+  renderBotManager("blocked");
+  renderBotManager("notInterested");
+  renderBotManager("favorite");
+  renderBotManager("later");
+  renderBotManager("opened");
+  refreshStorageUsageIfVisible();
+  showSettingsToast(`Forgot ${name} from QoL. The SpicyChat conversation was left untouched.`);
+  return true;
+}
+
+async function clearForgottenBotStatusIds() {
+  const count = botStatusIgnoredIdsState.length;
+  if (!count) return;
+  if (!confirm(`Allow all ${count} forgotten character ID${count === 1 ? "" : "s"} to be tracked again? Their deleted QoL data is not restored, but future Load all / browsing / Bot Status scans may add them again.`)) return;
+  setBotStatusIgnoredIds([]);
+  await storageSet({ [BOT_STATUS_IGNORED_KEY]: [] });
+  renderDeletedSavedBots();
+  showSettingsToast("Forgotten-ID list cleared. Those bots can be tracked again if QoL sees them later.");
 }
 
 
@@ -10308,11 +10629,12 @@ function isConfirmedUnavailableBotStatus(entry) {
 function deletedSavedBotEntries() {
   const availability = normalizeBotAvailability(botAvailabilityState).meta;
   const archives = normalizeBotArchive(botArchiveState).meta;
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
   const query = String($("deletedSavedBotSearch")?.value || deletedSavedBotsUiState.query || "")
     .toLowerCase().replace(/\s+/g, " ").trim();
   deletedSavedBotsUiState.query = query;
   return Object.values(availability)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id])
+    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase()))
     .map(entry => ({ ...entry, archive: archives[entry.id] }))
     .filter(entry => {
       if (!query) return true;
@@ -10358,6 +10680,8 @@ function deletedSavedBotCard(entry) {
   if (description) main.appendChild(makeElement("div", { className: "bot-manager-description", text: displayNormalizedSavedText(description) }));
   const archiveDetails = botArchiveDetails({ archive });
   if (archiveDetails) main.appendChild(archiveDetails);
+  const historyDetails = botArchiveHistoryDetails(archive);
+  if (historyDetails) main.appendChild(historyDetails);
 
   if ((archive?.chatUrls || []).length > 1) {
     const chats = makeElement("details", { className: "bot-update-details bot-archive-details" });
@@ -10374,6 +10698,7 @@ function deletedSavedBotCard(entry) {
   const actions = makeElement("div", { className: "bot-manager-actions" });
   if (archive?.chatUrls?.length) actions.appendChild(makeElement("a", { text: "Open old chat", attrs: { href: archive.chatUrls[0], target: "_blank", rel: "noopener noreferrer" } }));
   actions.appendChild(makeElement("button", { className: "deleted-bot-recheck", text: "Check again", attrs: { type: "button" } }));
+  actions.appendChild(makeElement("button", { className: "deleted-bot-forget-qol", text: "Forget from QoL", attrs: { type: "button", title: "Remove this exact character ID and its local QoL data; the real SpicyChat chat is untouched." } }));
   actions.appendChild(makeElement("button", { className: "bot-archive-copy", text: "Copy saved bot", attrs: { type: "button" } }));
   actions.appendChild(makeElement("button", { className: "bot-archive-portable", text: "Importable JSON", attrs: { type: "button", title: "Character Card JSON that QoL can import back into SpicyChat" } }));
   actions.appendChild(makeElement("button", { className: "bot-archive-download", text: "Archive JSON", attrs: { type: "button", title: "Exact QoL saved-copy record" } }));
@@ -10391,8 +10716,9 @@ function renderDeletedSavedBots(renderOptions = {}) {
   const all = deletedSavedBotEntries()
     .map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
   const archives = normalizeBotArchive(botArchiveState).meta;
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
   const totalRecoverable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id]).length;
+    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase())).length;
   const limit = Math.max(10, Number(deletedSavedBotsUiState.visible || 10) || 10);
   const shown = all.slice(0, limit);
   if ($("deletedSavedBotSummary")) {
@@ -10410,6 +10736,10 @@ function renderDeletedSavedBots(renderOptions = {}) {
     collapse.style.display = all.length > 10 ? "" : "none";
     collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
   }
+  const forgottenWrap = $("forgottenBotStatusIdsWrap");
+  const forgottenCount = $("forgottenBotStatusIdsCount");
+  if (forgottenWrap) forgottenWrap.hidden = botStatusIgnoredIdsState.length === 0;
+  if (forgottenCount) forgottenCount.textContent = `${botStatusIgnoredIdsState.length} forgotten character ID${botStatusIgnoredIdsState.length === 1 ? "" : "s"}`;
   if (!all.length) {
     setEmptyState(host, deletedSavedBotsUiState.query ? "No deleted recovery copies match that search." : "No confirmed deleted/unavailable bots with recovery copies yet.");
     return;
@@ -10440,6 +10770,13 @@ function renderDeletedSavedBots(renderOptions = {}) {
     await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState, [BOT_ARCHIVE_KEY]: botArchiveState, ...(metadataRepaired ? botStatusMetadataStoragePayload() : {}) });
     renderBotAvailability();
     showSettingsToast(result.status === "available" ? "Bot is available again." : `Bot status: ${botAvailabilityStatusLabel(result.status)}.`);
+  }));
+  host.querySelectorAll(".deleted-bot-forget-qol").forEach(button => button.addEventListener("click", async () => {
+    const id = button.closest(".bot-manager-card")?.dataset.id || "";
+    if (!id) return;
+    button.disabled = true;
+    try { await forgetDeletedBotFromQol(id); }
+    finally { if (button.isConnected) button.disabled = false; }
   }));
   host.querySelectorAll(".bot-archive-copy").forEach(button => button.addEventListener("click", async () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
@@ -10522,6 +10859,7 @@ function setupBotAvailabilityControls() {
     }
     renderSavedBotInfo();
   });
+  $("clearForgottenBotStatusIds")?.addEventListener("click", () => clearForgottenBotStatusIds().catch(() => showSettingsToast("Could not clear the forgotten-ID list.")));
   $("deletedSavedBotSearch")?.addEventListener("input", () => {
     deletedSavedBotsUiState.visible = 10;
     deletedSavedBotsUiState.collapsed = true;
@@ -10551,28 +10889,6 @@ function setupBotAvailabilityControls() {
     botAvailabilityStopRequested = true;
     const status = $("botAvailabilityScanStatus");
     if (status) status.textContent = "Stopping after the current check...";
-  });
-  $("acceptAllBotUpdates")?.addEventListener("click", acceptAllBotUpdates);
-  $("refreshBotDuplicateMatches")?.addEventListener("click", async () => {
-    const scope = String($("botAvailabilityScope")?.value || "all");
-    const button = $("refreshBotDuplicateMatches");
-    if (button) button.disabled = true;
-    showSettingsToast("Calculating duplicate / reupload matches...");
-    await nextUiFrame();
-
-    // Duplicate matching is local analysis only. Snapshot the already-checked
-    // availability data and the rendered base before doing the heavier match
-    // pass so refreshing duplicates can never replace Available/Restricted/etc.
-    // with the tracked-list default of Unknown.
-    const availabilitySnapshot = normalizeBotAvailability(botAvailabilityState);
-    const base = botStatusCenterBaseEntries(scope);
-    botDuplicateMatchesCache = computeBotDuplicateMatches(base);
-    botDuplicateCacheScope = scope;
-    botDuplicateCacheReady = true;
-    botAvailabilityState = availabilitySnapshot;
-    renderBotAvailability({ baseEntries: base, skipRecoveryRerender: true });
-    if (button) button.disabled = false;
-    showSettingsToast("Duplicate / reupload matches refreshed. Bot availability statuses were left unchanged.");
   });
   $("clearBotAvailabilityResults")?.addEventListener("click", clearBotAvailabilityResults);
   $("clearBotArchive")?.addEventListener("click", clearBotArchive);
@@ -11579,7 +11895,7 @@ function collectSavedBotsHubEntries() {
     // Organizer folders/tags are local metadata, not chatbot records. Older or
     // malformed organizer data can contain non-bot keys; never turn those into
     // fake /chatbot/<folder> cards in Saved Bots Hub.
-    if (!id) return null;
+    if (!id || botStatusIdIgnored(id)) return null;
     if (!byId.has(id)) {
       byId.set(id, {
         id,
@@ -12640,7 +12956,7 @@ async function runQuickDislikeWithBackoff(payload, label = "") {
     try {
       response = await runtimeMessage({ ...payload, retryAttempt: attempt });
     } catch (error) {
-      response = { ok: false, status: "worker-error", error: String(error?.message || error || "Quick Dislike worker failed") };
+      response = { ok: false, status: "worker-error", error: String(error?.message || error || "Quick Dislike feedback helper failed") };
     }
     if (!quickDislikeResponseIsTransient(response) || attempt >= BULK_DISLIKE_RETRY_LIMIT) return response || { ok: false, status: "worker-error" };
   }
@@ -15117,7 +15433,7 @@ async function load() {
   setChecked("autoAfkEnabled", !!settings.autoAfkEnabled);
   setValue("autoAfkMinutes", String(Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))));
   setChecked("lowMemoryProtectionEnabled", !!settings.lowMemoryProtectionEnabled);
-  setValue("maxAwakeSpicyTabs", String(Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))));
+  setValue("maxAwakeSpicyTabs", String(Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))));
   setChecked("autoAfkChats", settings.autoAfkChats !== false);
   setChecked("autoAfkHome", !!settings.autoAfkHome);
   setChecked("autoAfkProfiles", !!settings.autoAfkProfiles);
@@ -15492,7 +15808,7 @@ async function load() {
   setChecked("desktopAppPerformanceGuard", settings.desktopAppPerformanceGuard !== false);
   setChecked("pauseQolInHiddenTabs", !!settings.pauseQolInHiddenTabs);
   setChecked("autoPerformanceLargeChats", !!settings.autoPerformanceLargeChats);
-  setValue("largeChatPerformanceThreshold", Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 500)));
+  setValue("largeChatPerformanceThreshold", Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 300)));
   setChecked("deferQolWhileTyping", !!settings.deferQolWhileTyping);
   setChecked("pauseQolWhileMessageEditing", settings.pauseQolWhileMessageEditing !== false);
   setChecked("reduceQolAnimations", !!settings.reduceQolAnimations);
@@ -15708,7 +16024,7 @@ function readSettingsFromPage() {
     autoAfkMinutes: Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)),
     autoAfkHours: Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)),
     lowMemoryProtectionEnabled: checked("lowMemoryProtectionEnabled"),
-    maxAwakeSpicyTabs: Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "5")) || 5)),
+    maxAwakeSpicyTabs: Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "3")) || 3)),
     autoAfkChats: checked("autoAfkChats", true),
     autoAfkHome: checked("autoAfkHome"),
     autoAfkProfiles: checked("autoAfkProfiles"),
@@ -16134,7 +16450,7 @@ function readSettingsFromPage() {
     desktopAppPerformanceGuard: checked("desktopAppPerformanceGuard", true),
     pauseQolInHiddenTabs: checked("pauseQolInHiddenTabs"),
     autoPerformanceLargeChats: checked("autoPerformanceLargeChats"),
-    largeChatPerformanceThreshold: Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "500")) || 500)),
+    largeChatPerformanceThreshold: Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)),
     deferQolWhileTyping: checked("deferQolWhileTyping"),
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
@@ -16337,7 +16653,7 @@ function readSingleSettingFromPage(settingKey) {
     case "autoAfkMinutes": return (Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)));
     case "autoAfkHours": return (Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)));
     case "lowMemoryProtectionEnabled": return (checked("lowMemoryProtectionEnabled"));
-    case "maxAwakeSpicyTabs": return (Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "5")) || 5)));
+    case "maxAwakeSpicyTabs": return (Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "3")) || 3)));
     case "autoAfkChats": return (checked("autoAfkChats", true));
     case "autoAfkHome": return (checked("autoAfkHome"));
     case "autoAfkProfiles": return (checked("autoAfkProfiles"));
@@ -16753,7 +17069,7 @@ function readSingleSettingFromPage(settingKey) {
     case "desktopAppPerformanceGuard": return (checked("desktopAppPerformanceGuard", true));
     case "pauseQolInHiddenTabs": return (checked("pauseQolInHiddenTabs"));
     case "autoPerformanceLargeChats": return (checked("autoPerformanceLargeChats"));
-    case "largeChatPerformanceThreshold": return (Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "500")) || 500)));
+    case "largeChatPerformanceThreshold": return (Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)));
     case "deferQolWhileTyping": return (checked("deferQolWhileTyping"));
     case "pauseQolWhileMessageEditing": return (checked("pauseQolWhileMessageEditing", true));
     case "reduceQolAnimations": return (checked("reduceQolAnimations"));
@@ -20331,7 +20647,7 @@ function performanceWarningLines(context, settings) {
     else if (overlapMax >= 250) lines.push(`Browser main-thread stall observed: max ${overlapMax} ms while a QoL step was active (${runtime.lastLongTaskOverlap || "overlap source unavailable"}).`);
     else lines.push(`Browser main-thread stall observed: max long task ${Number(runtime.maxLongTaskMs || 0)} ms.`);
   }
-  if (Number(runtime.loadedChatMessages || 0) >= Number(settings.largeChatPerformanceThreshold || 500) && !settings.autoPerformanceLargeChats) lines.push(`Large chat detected (${Number(runtime.loadedChatMessages || 0)} messages) while automatic large-chat performance mode is off.`);
+  if (Number(runtime.loadedChatMessages || 0) >= Number(settings.largeChatPerformanceThreshold || 300) && !settings.autoPerformanceLargeChats) lines.push(`Large chat detected (${Number(runtime.loadedChatMessages || 0)} messages) while automatic large-chat performance mode is off.`);
   return lines;
 }
 
@@ -20365,7 +20681,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     (() => { const d = stored.cardTokenFetchDiagnosticsV1 || {}; return `Card token fetch: background ${Number(d.requests || 0)}/${Number(d.successes || 0)} success; MAIN ${Number(d.mainWorldRequests || 0)}/${Number(d.mainWorldSuccesses || 0)} success / ${Number(d.mainWorldFailures || 0)} failed, captured-auth ${Number(d.mainWorldCapturedAuth || 0)}; timeouts ${Number(d.timeouts || 0)}; 401 ${Number(d.http401 || 0)}; 403 ${Number(d.http403 || 0)}; 429 ${Number(d.http429 || 0)}; network ${Number(d.networkFailures || 0)}; auth missing ${Number(d.authMissing || 0)}; IndexedDB auth ${Number(d.indexedDbAuth || 0)}; last ${d.lastStatus || "none"} ${Number(d.lastElapsedMs || 0)} ms`; })(),
     `Bot archive preservation: ${Number(runtime.botArchiveSeenQueued || 0)} public observations queued; ${Number(runtime.botArchiveSeenMerged || 0)} merged in ${Number(runtime.botArchiveSeenBatches || 0)} batches; ${Number(runtime.botArchiveSeenUnchanged || 0)} unchanged snapshots skipped; ${Number(runtime.botArchiveWrites || 0)} archive writes; ${Number(runtime.ownBotBackupSaves || 0)} own-bot editor saves`,
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
-    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 500)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
+    (() => { const c = context?.pageDiagnostics?.runtimeContext || {}; return `Runtime context: visibility ${c.visibilityState || "unknown"}; focus ${c.focused == null ? "unknown" : (c.focused ? "yes" : "no")}; mounted ${Number(c.mountedMessages || runtime.loadedChatMessages || 0)}; DOM ${Number(c.domNodes || 0)}; heap ${Number(c.heapBytes || 0) ? `${Math.round(Number(c.heapBytes) / 1048576)} MB` : "n/a"}; Long Task 10s ${Number(c.recentLongTaskMs10s || 0)} ms; 30s ${Number(c.recentLongTaskMs30s || 0)} ms`; })(),
+    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = stored[AUTO_AFK_STATUS_KEY] || {}; return `SpicyChat tabs: ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${a.lowMemoryEnabled ? `on, limit ${Number(a.awakeLimit || 5)}, LRU unloaded ${Number(a.lruDiscarded || 0)} last check` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
@@ -20379,7 +20696,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
       `Composer shortcuts: ${context.pageDiagnostics.chatLayout.shortcutPlacement || "none"}; holder ${Number(context.pageDiagnostics.chatLayout.shortcutWidth || 0)} px; ${Number(context.pageDiagnostics.chatLayout.shortcutControls || 0)} controls; textarea right padding ${context.pageDiagnostics.chatLayout.textareaPaddingRight || "unknown"}; overlap ${context.pageDiagnostics.chatLayout.shortcutOverlap ? "YES" : "no"}`
     ] : []),
     `Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`,
-    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))} awake tabs` : "off"}`,
+    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} awake tabs` : "off"}`,
     `Disabled-feature deep sleep: ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
     `Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`,
     `Blocked-bot refresh batching: ${Number(runtime.blockedBotRefreshDeferrals || 0)} deferred single-block changes; ${Number(runtime.blockedBotRefreshFlushes || 0)} settled refreshes; ${Number(runtime.blockedBotMutationSkips || 0)} immediate listing mutations skipped; ${runtime.blockedBotRefreshPending ? `pending (${Math.max(0, Math.ceil((Number(runtime.blockedBotRefreshSettleAt || 0) - Date.now()) / 1000))}s remaining)` : "idle"}`,
@@ -20485,7 +20802,7 @@ async function buildFastSupportSnapshot() {
     largeStatsReady
       ? `Large-data IndexedDB: ${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records`
       : "Large-data IndexedDB: fast check timed out; full support sections can finish migration/counting",
-    `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))} normal tabs awake` : "off"}`,
+    `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} normal tabs awake` : "off"}`,
     `Last tab scan: ${afk.at ? new Date(Number(afk.at)).toISOString() : "none"}; ${Number(afk.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(afk.loadedNormal || 0)} normal loaded; ${Number(afk.discardedNormal || 0)} normal unloaded; ${Number(afk.workerTabs || 0)} workers`,
     "This snapshot is deliberately lightweight and should still appear when a content runtime or a heavier support section is stuck."
   ].join("\n");

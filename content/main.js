@@ -535,7 +535,7 @@
     const configured = String(settings.runtimePerformanceMode || "adaptive");
     let mode = ["normal", "adaptive", "aggressive", "maximum"].includes(configured) ? configured : "adaptive";
     if (settings.autoPerformanceLargeChats && DS.isSingleChatPage?.()) {
-      const threshold = Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 500));
+      const threshold = Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 300));
       if (loadedChatMessageCount() >= threshold) {
         if (mode === "normal" || mode === "adaptive") mode = "aggressive";
       }
@@ -1014,7 +1014,7 @@
       }
 
       const profile = runtimeProfile();
-      const chunkLimit = profile === "maximum" ? 8 : profile === "aggressive" ? 10 : 12;
+      const chunkLimit = profile === "maximum" ? 6 : profile === "aggressive" ? 8 : 10;
       const laneBatch = takeIncrementalMessageLaneRoots(chunkLimit);
       const laneRoots = laneBatch.roots;
       DS.state.messageLaneRoots = laneRoots;
@@ -2753,6 +2753,16 @@
           tabQol: DS.getQolTabState?.() || null,
           performance: DS.getPerformanceReport?.() || [],
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
+          runtimeContext: {
+            visibilityState: String(document.visibilityState || "unknown"),
+            focused: typeof document.hasFocus === "function" ? !!document.hasFocus() : null,
+            mountedMessages: loadedChatMessageCount(),
+            domNodes: document.getElementsByTagName("*").length,
+            heapBytes: Number(performance?.memory?.usedJSHeapSize || 0),
+            effectiveRuntimeMode: runtimeProfile(),
+            recentLongTaskMs10s: Number(DS.state?.runtimePerformance?.autoPressureLongTask10s || 0),
+            recentLongTaskMs30s: Number(DS.state?.runtimePerformance?.autoPressureLongTask30s || 0)
+          },
           listingRefill: DS.getListingAutoFillStatus?.() || null,
           chatLayout,
           androidEnvironment: DS.getAndroidEnvironment?.() || null,

@@ -1556,7 +1556,7 @@
       ok: false,
       status: "recombee-request-failed",
       stage: "request",
-      reason: lastReason || "No signed Less Like request completed successfully.",
+      reason: lastReason || "No signed negative-rating request completed successfully.",
       characterId: botId,
       httpStatus: lastStatus,
       attempts,
@@ -1592,7 +1592,7 @@
     const requestId = clean(detail.requestId);
     const botId = clean(detail.botId).toLowerCase();
     const mode = clean(detail.mode).toLowerCase();
-    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || mode !== "less-like") return;
+    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) return;
 
     const started = Date.now();
     let coalesced = false;
@@ -1643,7 +1643,10 @@
           };
         }
         const ratingStartedAt = Date.now();
-        const result = await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        let result = await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        if (mode === "dislike" && result?.ok && result?.status === "less-liked") {
+          result = { ...result, status: "disliked", reason: "Matching Recombee negative-rating request returned 2xx." };
+        }
         const ratingMs = Math.max(0, Date.now() - ratingStartedAt);
         return {
           ...result,
