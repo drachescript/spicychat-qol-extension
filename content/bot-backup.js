@@ -492,8 +492,10 @@
       setStatus(`Automatic backup: ${automatic ? "On" : "Off"} · Draft export is available.`);
       return;
     }
-    const result = await DS.storageGet?.([DS.BOT_ARCHIVE_KEY || "botArchive"]) || {};
-    const entry = result[DS.BOT_ARCHIVE_KEY || "botArchive"]?.meta?.[info.id] || null;
+    const archiveKey = DS.BOT_ARCHIVE_KEY || "botArchive";
+    const entry = typeof DS.largeStorageGetRecord === "function"
+      ? await DS.largeStorageGetRecord(archiveKey, info.id)
+      : ((await DS.storageGet?.([archiveKey]) || {})[archiveKey]?.meta?.[info.id] || null);
     const revisions = Array.isArray(entry?.revisions) ? entry.revisions.length : 0;
     const manuals = Array.isArray(entry?.manualBackups) ? entry.manualBackups.length : 0;
     const versions = Array.isArray(entry?.versions) ? entry.versions.length : 0;

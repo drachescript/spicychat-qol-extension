@@ -1202,7 +1202,8 @@
   const oldUpdateQuickPanel = DS.updateQuickPanel;
 
   DS.updateQuickPanel = function patchedUpdateQuickPanel(...args) {
-    oldUpdateQuickPanel?.(...args);
-    updateLoadAllButton();
+    const result = oldUpdateQuickPanel?.(...args);
+    if (DS.isChatListPage?.()) updateLoadAllButton();
+    return result;
   };
 })();

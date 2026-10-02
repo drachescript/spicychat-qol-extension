@@ -1,5 +1,25 @@
+## 0.2.29
+
+- Fixed Less Like / Stop recommending on the current SpicyChat build. The persistent helper now recognizes module/preload bundles, validates the recommendation token against SpicyChat's own signed request, and sends direct feedback without per-bot page navigation.
+- Kept Quick Dislike separate from Less Like on its proven native hidden `/chat/<bot>` worker path, with its own history and queue behavior instead of sharing the recommendation helper.
+- Added a creator/profile/editor startup quiet window and throttled heavy moderation/archive work so SpicyChat can finish mounting those pages before QoL analysis and backup tasks run. Creator moderation also caches its relevant DOM/settings revision so unrelated React mutations no longer rescan unchanged fields.
+- Animated bot/avatar media now animates only while actually hovered, onscreen, and in a visible/focused tab; leaving the viewport, losing focus, or hiding the tab immediately returns it to the static state.
+- Added a separate **Hide feature release popups** option for SpicyChat's AnnounceKit feature-release booster without requiring the notification bell/badge itself to be hidden.
+- Added configurable chat **Enter / Return behavior**: SpicyChat default, Enter sends with Shift+Enter for a new line, or Enter/Return always inserts a new line while the native Send button remains the submit action. The new-line path handles mobile `beforeinput`/IME events as well as desktop key events.
+- Moved the large Saved Bot Copy/archive and bot-availability datasets from monolithic `chrome.storage.local` objects into extension IndexedDB with one record per bot. Migration is verified before the legacy object is removed, Bot Status writes only touched IDs, and normal archive/profile saves can update individual records instead of rewriting the whole archive.
+- Updated the privacy policy to document local IndexedDB storage for large per-bot datasets. The migration stays local and does not turn those records into cloud data.
+- Settings startup/support work is lighter: backup-scope counting, browser tab-session data and Account & Sync UI load only when their tabs are opened; recovery-snapshot status no longer deserializes the full safety backup; diagnostics use IndexedDB counts instead of loading every saved bot record.
+- Cleaned the Features catalogue so Account & Sync is listed as implemented, while custom Lite builds are explicitly deferred and the normal Full extension remains the maintained build.
+- Kept the current Bot Status worker scheduling architecture and broad chat-performance system intact; this pass targets the measured worker, creator/profile, image, and storage hotspots instead of adding more global performance aggression.
+- Fixed the chat-side large-data runtime bridge error that could break bot-archive refreshes after startup.
+- Made chat startup/reply decoration genuinely incremental: newest messages are prioritized, older visible messages drain in small idle chunks, and Mini Panel work is deferred during native render quiet windows.
+- Added one shared recommendation-feedback coordinator so Less Like and Quick Dislike cannot send duplicate negative ratings for the same bot while overlapping queues are active.
+- Clarified performance-baseline migration: older baseline formats now explicitly ask for one fresh baseline before rate-normalized comparisons resume.
+- Made same-name bots unambiguous in Bot Status / saved recovery UI: cards emphasize creator + shortened UUID, keep the full character ID visible, and flag other bots that share the same displayed name; availability, cleanup and recovery remain keyed strictly by character ID.
+
 ## 0.2.28
 
+- Fixed Recommendations/listing pagination collapsing to only the previous/next arrows after a repeated QoL runtime pass; QoL-generated page numbers are no longer mistaken for native buttons, and pagination now falls back to SpicyChat's native numbers if reconstruction fails.
 - Animated bot/avatar images now use hover-only playback when animation reduction is enabled; older Freeze/Play-once preferences migrate to the hover behavior.
 - Rebuilt Random Chat for Home / Recommended and Favorites using SpicyChat's public character search API instead of temporary rendered Home helper tabs.
 - Saved tab-session Merge now consolidates into one snapshot and deletes the source snapshots after confirmation instead of keeping duplicate copies.

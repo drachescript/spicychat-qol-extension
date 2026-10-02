@@ -41,7 +41,16 @@
   }
 
   function nativePageButtons(parent = document) {
-    return [...parent.querySelectorAll("button[aria-label^='page-']")];
+    // Never treat QoL's cloned number buttons as native paginator state.
+    // The old selector also matched our own clones because they intentionally
+    // carry aria-label="page-N". On a later runtime pass that caused the
+    // signature fast-path to add ds-pagination-native-hidden to *both* the
+    // native numbers and the QoL numbers, leaving only < and > visible.
+    return [...parent.querySelectorAll("button[aria-label^='page-']:not([data-ds-pagination-qol='1'])")];
+  }
+
+  function qolPageButtons(parent = document) {
+    return [...parent.querySelectorAll("button[data-ds-pagination-qol='1'][aria-label^='page-']")];
   }
 
   function currentPageFromButtons() {
@@ -290,9 +299,12 @@
     // keep the existing nodes instead of rebuilding on every QoL runtime pass.
     if (
       parent.dataset.dsPaginationSignature === signature &&
-      parent.querySelector("[data-ds-pagination-qol='1']")
+      qolPageButtons(parent).length > 0
     ) {
+      // Only the original SpicyChat number buttons are hidden. QoL's cloned
+      // numbers must remain visible across repeated runtime passes.
       nativePageButtons(parent).forEach(button => button.classList.add("ds-pagination-native-hidden"));
+      qolPageButtons(parent).forEach(button => button.classList.remove("ds-pagination-native-hidden"));
       return true;
     }
 
@@ -312,6 +324,14 @@
 
     if (settings.paginationQuickJumpMenu) {
       parent.insertBefore(makeQuickJumpMenu(total, current, settings), next);
+    }
+
+    // Fail safe: never leave SpicyChat's native numbers hidden if cloning did
+    // not produce any usable numeric buttons (for example after a site markup
+    // change). Falling back to the native paginator is better than arrows-only.
+    if (!qolPageButtons(parent).length) {
+      restoreNativePagination(parent);
+      return false;
     }
 
     parent.dataset.dsPaginationSignature = signature;

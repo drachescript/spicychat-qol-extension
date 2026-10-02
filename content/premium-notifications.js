@@ -532,5 +532,16 @@
       if (typeof DS.unhideNotificationVisibility === "function") DS.unhideNotificationVisibility();
       else unhideIfReason("notifications");
     }
+
+    // SpicyChat now also uses AnnounceKit's booster modal for feature-release
+    // notices. Keep this separate from the top-bar notification toggle so users
+    // can retain the bell/badge while suppressing the floating release popup.
+    const releasePopups = DS.qsa(".announcekit-booster-modal")
+      .filter(el => el instanceof HTMLElement);
+    if (settings.hideFeatureReleasePopups) {
+      releasePopups.forEach(el => DS.hideElement(el, "notifications:release-popup"));
+    } else {
+      unhideIfReason("notifications:release-popup");
+    }
   };
 })();

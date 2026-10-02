@@ -33,6 +33,40 @@
   const NATIVE_SCROLL_TOP_STYLE_ID = "ds-hide-native-scroll-back-to-top";
   const messageEditSettleTimers = new Map();
   const slowStepThrottle = new Map();
+  const CREATOR_PROFILE_STARTUP_QUIET_MS = 5000;
+  let creatorProfileQuietTimer = 0;
+
+  function creatorProfileStartupQuietActive() {
+    return Date.now() < Number(DS.state?.creatorProfileStartupQuietUntil || 0);
+  }
+
+  function scheduleCreatorProfileQuietResume() {
+    if (!creatorProfileStartupQuietActive()) return;
+    clearTimeout(creatorProfileQuietTimer);
+    const delay = Math.max(80, Number(DS.state.creatorProfileStartupQuietUntil || 0) - Date.now() + 80);
+    creatorProfileQuietTimer = setTimeout(() => {
+      creatorProfileQuietTimer = 0;
+      DS.scheduleRun?.({ priority: "critical", source: "creator-profile-startup-settled" });
+      DS.scheduleRun?.({ priority: "slow", source: "creator-profile-startup-settled" });
+    }, delay);
+  }
+
+  function startCreatorProfileStartupQuietWindow(source = "route") {
+    const page = DS.getPageState?.() || {};
+    const heavyCreatorRoute = !!(page.isBotEditor || page.isBotProfilePage);
+    if (!heavyCreatorRoute) {
+      DS.state.creatorProfileStartupQuietUntil = 0;
+      clearTimeout(creatorProfileQuietTimer);
+      creatorProfileQuietTimer = 0;
+      return;
+    }
+    DS.state.creatorProfileStartupQuietUntil = Date.now() + CREATOR_PROFILE_STARTUP_QUIET_MS;
+    const counters = runtimeCounters();
+    counters.creatorProfileStartupQuietStarts = Number(counters.creatorProfileStartupQuietStarts || 0) + 1;
+    counters.creatorProfileStartupQuietUntil = DS.state.creatorProfileStartupQuietUntil;
+    counters.creatorProfileStartupQuietSource = String(source || "route");
+    scheduleCreatorProfileQuietResume();
+  }
 
   function isMyCreationsChatbotsPage() {
     return !!DS.getPageState?.().isMyCreationsChatbotsPage;
@@ -584,7 +618,7 @@
   }
 
   function notificationsWanted(settings) {
-    return anySetting(settings, ["hideNotifications", "hideTabNotificationBadge", "autoReadNotifications"]);
+    return anySetting(settings, ["hideNotifications", "hideTabNotificationBadge", "autoReadNotifications", "hideFeatureReleasePopups"]);
   }
 
   function cardFilteringWanted(settings) {
@@ -676,6 +710,12 @@
 
   async function runRoutedFeatureStep(plan, group, name, wanted, fn) {
     const settings = DS.state?.settings || {};
+    if (creatorProfileStartupQuietActive() && ["profiles", "creator", "botEditor", "creatorModeration"].includes(String(group || ""))) {
+      const counters = runtimeCounters();
+      counters.creatorProfileStartupQuietDeferrals = Number(counters.creatorProfileStartupQuietDeferrals || 0) + 1;
+      scheduleCreatorProfileQuietResume();
+      return null;
+    }
     if (DS.runtimeKernel?.runFeature) {
       return DS.runtimeKernel.runFeature({
         name,
@@ -874,6 +914,59 @@
     return !!DS.qs?.("a[href*='/chat/'], a[href*='/chatbot/']");
   }
 
+  function takeIncrementalMessageLaneRoots(limit = 10) {
+    const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
+    const dirtyRoots = [...dirtySet].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
+    if (!dirtyRoots.length) {
+      dirtySet.clear();
+      return { roots: [], remaining: 0, chunked: false };
+    }
+
+    const max = Math.max(4, Math.min(20, Number(limit) || 10));
+    if (dirtyRoots.length <= max) {
+      dirtySet.clear();
+      return { roots: dirtyRoots, remaining: 0, chunked: false };
+    }
+
+    // Prioritize the newest messages first. This keeps a freshly-arrived reply
+    // responsive while older startup/history decoration drains in tiny idle
+    // chunks behind it.
+    const dirty = new Set(dirtyRoots);
+    const ordered = (DS.getLoadedMessageRoots?.() || []).filter(root => dirty.has(root));
+    const orderedSet = new Set(ordered);
+    for (const root of dirtyRoots) {
+      if (!orderedSet.has(root)) {
+        ordered.push(root);
+        orderedSet.add(root);
+      }
+    }
+
+    const roots = ordered.slice(-max);
+    const selected = new Set(roots);
+    dirtySet.clear();
+    for (const root of ordered) {
+      if (!selected.has(root) && root?.isConnected && !DS.isMessageEditPending?.(root)) dirtySet.add(root);
+    }
+
+    const counters = runtimeCounters();
+    counters.messageLaneChunkedPasses = Number(counters.messageLaneChunkedPasses || 0) + 1;
+    counters.messageLaneChunkedRoots = Number(counters.messageLaneChunkedRoots || 0) + roots.length;
+    counters.messageLaneDeferredRoots = Number(counters.messageLaneDeferredRoots || 0) + dirtySet.size;
+    counters.lastMessageLaneChunkSize = roots.length;
+    counters.lastMessageLaneDeferredRoots = dirtySet.size;
+    return { roots, remaining: dirtySet.size, chunked: true };
+  }
+
+  function scheduleNextMessageLaneChunk(source = "incremental-message-chunk") {
+    if (!DS.state?.messageDirtyRoots?.size) return;
+    const resume = () => DS.scheduleMessageLane?.(source);
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(resume, { timeout: 240 });
+    } else {
+      setTimeout(resume, 32);
+    }
+  }
+
   async function runChatMessageLane() {
     if (messageLaneRunning) { messageLanePending = true; return; }
     messageLaneRunning = true;
@@ -920,9 +1013,10 @@
         return;
       }
 
-      const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
-      const laneRoots = [...dirtySet].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
-      dirtySet.clear();
+      const profile = runtimeProfile();
+      const chunkLimit = profile === "maximum" ? 8 : profile === "aggressive" ? 10 : 12;
+      const laneBatch = takeIncrementalMessageLaneRoots(chunkLimit);
+      const laneRoots = laneBatch.roots;
       DS.state.messageLaneRoots = laneRoots;
       counters.messageLaneDirtyRoots = Number(counters.messageLaneDirtyRoots || 0) + laneRoots.length;
       counters.lastMessageLaneDirtyRoots = laneRoots.length;
@@ -968,7 +1062,12 @@
     } finally {
       DS.state.messageLaneRoots = null;
       messageLaneRunning = false;
-      if (messageLanePending) { messageLanePending = false; DS.scheduleMessageLane?.("pending"); }
+      if (messageLanePending) {
+        messageLanePending = false;
+        DS.scheduleMessageLane?.("pending");
+      } else if (DS.state?.messageDirtyRoots?.size) {
+        scheduleNextMessageLaneChunk();
+      }
     }
   }
 
@@ -1311,21 +1410,32 @@
         await runFeatureStep("mobile chat layout", true, () => DS.applyMobileChatLayoutFixes?.());
         if (settings.enableReplyInstructions || settings.enableGlobalMemory || settings.enableRpStateTracker || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
         if (settings.showFormattingToolbar || DS.state.formattingToolbarWasActive) await runStep("formatting toolbar", () => DS.applyFormattingToolbar?.());
-        if (DS.isRpFormatRepairEnabledForCurrentCharacter?.() || settings.enableRpFormatRepair || DS.state.rpFormatRepairWasActive) await runStep("RP format repair", () => DS.applyRpFormatRepair?.());
-        if (settings.styleAlternateDialogue || DS.state.alternateDialogueWasActive) await runStep("alternate dialogue", () => DS.applyAlternateDialogueStyling?.());
-        if (settings.enableChatBubbleCustomization || DS.state.chatBubbleCustomizationWasActive) await runStep("chat bubbles", () => DS.applyChatBubbleCustomization?.());
-        if (messageQuickActionsEnabled(settings) || DS.state.messageOptionsWasActive) await runStep("message options", () => DS.applyMessageOptions?.());
-        if (settings.enableStoryDayTracker || DS.state.storyDayTrackerWasActive) await runStep("story day tracker", () => DS.applyStoryDayTracker?.());
-        if (settings.enableRpStateTracker || DS.state.rpStateTrackerWasActive) await runStep("RP state tracker", () => DS.applyRpStateTracker?.());
-        if (settings.enableContextKeeper || DS.state.contextKeeperWasActive) await runStep("context keeper", () => DS.applyContextKeeper?.());
+        // Adaptive/aggressive/maximum chat profiles use the dedicated message
+        // lane below. Running the same message decorators again in the critical
+        // lane turns a tiny reply mutation into a second whole-chat scan.
+        // Normal mode keeps the older direct path for compatibility.
+        const incrementalMessageProfile = runtimeProfile() !== "normal";
+        if (!incrementalMessageProfile) {
+          if (DS.isRpFormatRepairEnabledForCurrentCharacter?.() || settings.enableRpFormatRepair || DS.state.rpFormatRepairWasActive) await runStep("RP format repair", () => DS.applyRpFormatRepair?.());
+          if (settings.styleAlternateDialogue || DS.state.alternateDialogueWasActive) await runStep("alternate dialogue", () => DS.applyAlternateDialogueStyling?.());
+          if (settings.enableChatBubbleCustomization || DS.state.chatBubbleCustomizationWasActive) await runStep("chat bubbles", () => DS.applyChatBubbleCustomization?.());
+          if (messageQuickActionsEnabled(settings) || DS.state.messageOptionsWasActive) await runStep("message options", () => DS.applyMessageOptions?.());
+          if (settings.enableStoryDayTracker || DS.state.storyDayTrackerWasActive) await runStep("story day tracker", () => DS.applyStoryDayTracker?.());
+          if (settings.enableRpStateTracker || DS.state.rpStateTrackerWasActive) await runStep("RP state tracker", () => DS.applyRpStateTracker?.());
+          if (settings.enableContextKeeper || DS.state.contextKeeperWasActive) await runStep("context keeper", () => DS.applyContextKeeper?.());
+          if (settings.enableChatNudges || DS.state.chatNudgesWasActive) await runStep("chat nudges", () => DS.applyChatNudges?.());
+          if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
+          await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
+          if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
+          if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
+          DS.markMessageEnhancerVisited?.(DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || []);
+        } else {
+          const counters = runtimeCounters();
+          counters.criticalMessageEnhancerPassesDeferred = Number(counters.criticalMessageEnhancerPassesDeferred || 0) + 1;
+          DS.scheduleMessageLane?.("critical-incremental-message-lane");
+        }
         if (settings.enableLorebookConsistency || document.querySelector(".ds-lorebook-consistency-bar")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
-        if (settings.enableChatNudges || DS.state.chatNudgesWasActive) await runStep("chat nudges", () => DS.applyChatNudges?.());
-        if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
-        await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
         await runFeatureStep("memory manager", memoryManagerWanted(settings) || !!document.querySelector("[data-ds-memory-manager],#ds-memory-manager"), () => DS.applyMemoryManagerTools?.());
-        if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
-        if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
-        DS.markMessageEnhancerVisited?.(DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || []);
       } else {
         if (DS.state.chatTopBarWasActive) {
           await runStep("chat top bar cleanup", () => DS.applyChatTopBarTools?.());
@@ -1499,19 +1609,22 @@
         await runFeatureStep("premium cleanup", !!settings.hidePremium || !!settings.hideFloatingPremiumPopups || !!document.querySelector("[data-ds-reason^='premium']"), () => DS.hidePremiumStuff?.());
         await runFeatureStep("advert banners", !!settings.hideAdvertBanners || !!document.querySelector("[data-ds-reason^='advert']"), () => DS.applyAdvertBannerCleanup?.());
       }
-      await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications']"), () => DS.handleNotifications?.());
+      await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
 
       await runRoutedFeatureStep(plan, "chat", "generation profiles", () => !!settings.enableGenerationProfiles || !!document.querySelector("[data-ds-generation-profile]"), () => DS.applyGenerationProfileTools?.());
       await runRoutedFeatureStep(plan, "personaTools", "persona page", personaToolsWanted(settings), () => DS.applyPersonaPageTools?.());
       await runRoutedFeatureStep(plan, "personaTools", "persona organizer", () => !!settings.enablePersonaOrganizer || !!document.querySelector("[data-ds-persona-organizer]"), () => DS.applyPersonaOrganizer?.());
       await runRoutedFeatureStep(plan, "lorebook", "lorebook entry expanders", () => !!settings.showLorebookEntryExpandButtons || !!document.querySelector("[data-ds-lorebook-expand]"), () => DS.applyLorebookEntryExpanders?.());
-      if (DS.runtimePlanAllows?.(plan, "creatorModeration") && (settings.creatorModerationWarnings || settings.creatorModerationWarningsChatbots || DS.state.creatorModerationWarningsWasActive)) {
-        await runStep("creator moderation warnings", () => DS.applyCreatorModerationWarnings?.());
+      if (!creatorProfileStartupQuietActive() && DS.runtimePlanAllows?.(plan, "creatorModeration") && (settings.creatorModerationWarnings || settings.creatorModerationWarningsChatbots || DS.state.creatorModerationWarningsWasActive)) {
+        await runThrottledFeatureStep("creator moderation warnings", true, 1800, () => DS.applyCreatorModerationWarnings?.(), !!options.force);
       } else if (!DS.runtimePlanAllows?.(plan, "creatorModeration")) {
         runtimeCounters().routeFeatureStepSkips = Number(runtimeCounters().routeFeatureStepSkips || 0) + 1;
+      } else if (creatorProfileStartupQuietActive()) {
+        runtimeCounters().creatorProfileStartupQuietDeferrals = Number(runtimeCounters().creatorProfileStartupQuietDeferrals || 0) + 1;
+        scheduleCreatorProfileQuietResume();
       }
-      if ((settings.botArchiveOnProfileVisit || !!settings.botArchiveRememberSeenPublic) && plan.profiles) {
-        await runFeatureStep("bot archive profile capture", true, () => DS.applyBotArchive?.());
+      if (!creatorProfileStartupQuietActive() && (settings.botArchiveOnProfileVisit || !!settings.botArchiveRememberSeenPublic) && plan.profiles) {
+        await runThrottledFeatureStep("bot archive profile capture", true, 2500, () => DS.applyBotArchive?.(), !!options.force);
       }
       if (plan.profiles) {
         await runThrottledFeatureStep(
@@ -1961,6 +2074,7 @@
       clearTimeout(DS.state.chatStartupQuietTimer);
       DS.state.chatStartupQuietTimer = 0;
     }
+    startCreatorProfileStartupQuietWindow("route-change");
 
     sessionStorage.removeItem("dsAutoReadNotificationsDone");
     DS.resetChatListLoaderForRoute?.();
@@ -2661,12 +2775,14 @@
         DS.state.runtimePerformance = {
           mutations: 0, qolOnlyMutations: 0, chatLocalMutations: 0, composerOnlyMutationSkips: 0, schedules: 0, criticalSchedules: 0, slowSchedules: 0,
           deferredWhileScrolling: 0, hiddenSkips: 0, messageLaneSchedules: 0, messageLaneRuns: 0, messageLaneDirtyRoots: 0,
+          messageLaneChunkedPasses: 0, messageLaneChunkedRoots: 0, messageLaneDeferredRoots: 0,
+          messageEnhancerIncrementalLanePasses: 0, messageEnhancerIncrementalLaneRoots: 0, criticalMessageEnhancerPassesDeferred: 0,
           typingDeferrals: 0, desktopAppGuardDelays: 0, messageCacheHits: 0, messageCacheMisses: 0,
           messageCacheInvalidations: 0, messageCacheInvalidationRequests: 0, messageCacheInvalidationDeduped: 0,
           messageCacheMutationCandidateNodes: 0, messageCacheMutationRoots: 0, messageCacheMutationNodesCollapsed: 0,
           observerBatches: 0, observerQolOnlyBatches: 0, observerMixedQolBatches: 0, blockedBotMutationSkips: 0, listingSortNoopSkips: 0, listingSortAlreadyOrdered: 0,
           routeFeatureStepSkips: 0, routeFeatureGroupSkips: 0, buildBundleStepSkips: 0, runtimeKernelRuns: 0, runtimePlanCacheHits: 0,
-          quickPanelStateSkips: 0, quickPanelUpdateCoalesced: 0, quickPanelLayoutSkips: 0,
+          quickPanelStateSkips: 0, quickPanelUpdateCoalesced: 0, quickPanelLayoutSkips: 0, quickPanelRenderQuietDeferrals: 0,
           storageWriteRequests: 0, storageWriteBatches: 0, storageWriteKeys: 0, storageWriteMergedKeys: 0, storageWriteImmediateFlushes: 0,
           ...keepModeCounters
         };

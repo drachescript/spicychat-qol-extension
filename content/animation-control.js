@@ -6,6 +6,62 @@
   const onceTimers = new WeakMap();
   const onceTimerImages = new Set();
   const videoState = new Map();
+  let animationVisibilityGuardInstalled = false;
+  let animationVisibilityGuardRaf = 0;
+
+  function elementOnscreen(el) {
+    if (!el?.isConnected) return false;
+    const rect = el.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    const vw = document.documentElement.clientWidth || window.innerWidth || 0;
+    const vh = document.documentElement.clientHeight || window.innerHeight || 0;
+    return rect.bottom > 0 && rect.right > 0 && rect.top < vh && rect.left < vw;
+  }
+
+  function foregroundAnimationAllowed(el) {
+    return document.visibilityState === "visible" && document.hasFocus?.() !== false && elementOnscreen(el);
+  }
+
+  function freezeHoveredMediaIfNeeded() {
+    if (document.visibilityState === "visible" && document.hasFocus?.() !== false) {
+      for (const [img, state] of frozen) {
+        if (!state?.hovering || elementOnscreen(img)) continue;
+        state.hovering = false;
+        state.leave?.();
+      }
+      for (const [video, state] of videoState) {
+        if (!state?.hovering || elementOnscreen(video)) continue;
+        state.hovering = false;
+        try { video.pause?.(); } catch {}
+      }
+      return;
+    }
+    for (const [img, state] of frozen) {
+      if (!state?.hovering) continue;
+      state.hovering = false;
+      state.leave?.();
+    }
+    for (const [video, state] of videoState) {
+      state.hovering = false;
+      try { video.pause?.(); } catch {}
+    }
+  }
+
+  function scheduleAnimationVisibilityGuard() {
+    cancelAnimationFrame(animationVisibilityGuardRaf);
+    animationVisibilityGuardRaf = requestAnimationFrame(() => {
+      animationVisibilityGuardRaf = 0;
+      freezeHoveredMediaIfNeeded();
+    });
+  }
+
+  function installAnimationVisibilityGuard() {
+    if (animationVisibilityGuardInstalled) return;
+    animationVisibilityGuardInstalled = true;
+    document.addEventListener("visibilitychange", scheduleAnimationVisibilityGuard, true);
+    window.addEventListener("blur", scheduleAnimationVisibilityGuard, true);
+    window.addEventListener("scroll", scheduleAnimationVisibilityGuard, { passive: true, capture: true });
+  }
 
   function imageSource(el) {
     return String(el?.currentSrc || el?.src || el?.getAttribute?.("src") || "");
@@ -116,16 +172,22 @@
     img.style.display = "none";
     img.dataset.dsAnimationFrozen = "1";
 
-    const state = { canvas, originalDisplay, mode, enter: null, leave: null, source: imageSource(img) };
+    const state = { canvas, originalDisplay, mode, enter: null, leave: null, source: imageSource(img), hovering: false };
     frozen.set(img, state);
 
     if (mode === "hover") {
       const host = canvas.parentElement || canvas;
       state.enter = () => {
+        state.hovering = true;
+        if (!foregroundAnimationAllowed(canvas)) {
+          state.hovering = false;
+          return;
+        }
         canvas.style.display = "none";
         img.style.display = originalDisplay || "";
       };
       state.leave = () => {
+        state.hovering = false;
         drawFrame(img, canvas);
         img.style.display = "none";
         canvas.style.display = "";
@@ -187,7 +249,7 @@
 
     if (old) restoreVideo(video);
 
-    const state = { mode, loop: video.loop, muted: video.muted, enter: null, leave: null };
+    const state = { mode, loop: video.loop, muted: video.muted, enter: null, leave: null, hovering: false };
     videoState.set(video, state);
     video.dataset.dsAnimationHandled = mode;
 
@@ -201,8 +263,18 @@
 
     try { video.pause?.(); } catch {}
     if (mode === "hover") {
-      state.enter = () => video.play?.().catch?.(() => {});
-      state.leave = () => video.pause?.();
+      state.enter = () => {
+        state.hovering = true;
+        if (!foregroundAnimationAllowed(video)) {
+          state.hovering = false;
+          return;
+        }
+        video.play?.().catch?.(() => {});
+      };
+      state.leave = () => {
+        state.hovering = false;
+        video.pause?.();
+      };
       video.addEventListener("mouseenter", state.enter);
       video.addEventListener("mouseleave", state.leave);
     }
@@ -228,6 +300,10 @@
     }
 
     DS.state.animationControlWasActive = true;
+    installAnimationVisibilityGuard();
+    // v0.2.29: animated media is allowed to move only while it is hovered,
+    // onscreen, and the page is foreground/focused. Leaving the viewport or
+    // tab immediately returns it to the static frame.
     // v0.2.28: animated-image reduction is intentionally hover-only. Older
     // backups may still contain freeze/once, but those modes no longer keep
     // images permanently frozen or auto-play them in the background.

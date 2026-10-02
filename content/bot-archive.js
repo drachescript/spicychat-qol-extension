@@ -23,6 +23,29 @@
   const seenPending = new Map();
   let seenFlushTimer = null;
 
+  async function readArchiveEntries(ids = []) {
+    const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
+    if (!cleanIds.length) return {};
+    if (typeof DS.largeStorageGetRecords === "function") {
+      try { return await DS.largeStorageGetRecords(KEY, cleanIds); } catch {}
+    }
+    const result = await DS.storageGet?.([KEY]) || {};
+    const store = normalize(result[KEY]);
+    return Object.fromEntries(cleanIds.map(id => [id, store.meta[id]]).filter(([, value]) => !!value));
+  }
+
+  async function mergeArchiveEntries(entries = {}) {
+    const clean = entries && typeof entries === "object" && !Array.isArray(entries) ? entries : {};
+    if (!Object.keys(clean).length) return true;
+    if (typeof DS.largeStorageMerge === "function") {
+      try { return !!(await DS.largeStorageMerge(KEY, clean)); } catch {}
+    }
+    const result = await DS.storageGet?.([KEY]) || {};
+    const store = normalize(result[KEY]);
+    for (const [id, value] of Object.entries(clean)) store.meta[id] = value;
+    return !!(await DS.storageSet?.({ [KEY]: normalize(store) }));
+  }
+
   function clean(value, max = 14000) {
     if (Array.isArray(value)) {
       return [...new Set(value.map(item => clean(item, 1000)).filter(Boolean))].join(", ").slice(0, max);
@@ -419,9 +442,8 @@
   async function saveSnapshot(snapshot, options = {}) {
     if (!snapshot?.id || !snapshot.coverage?.length) return false;
     const task = async () => {
-      const result = await DS.storageGet?.([KEY]) || {};
-      const store = normalize(result[KEY]);
-      const previous = store.meta[snapshot.id] || null;
+      const existing = await readArchiveEntries([snapshot.id]);
+      const previous = existing[snapshot.id] || null;
       const merged = mergeEntry(previous, snapshot);
       if (!merged) return false;
 
@@ -515,8 +537,7 @@
       }
 
       merged.ownBot = !!(snapshot.ownBot || previous?.ownBot);
-      store.meta[snapshot.id] = merged;
-      const ok = !!(await DS.storageSet?.({ [KEY]: normalize(store) }));
+      const ok = await mergeArchiveEntries({ [snapshot.id]: merged });
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.botArchiveWrites = Number(counters.botArchiveWrites || 0) + (ok ? 1 : 0);
       return ok;
@@ -535,12 +556,13 @@
     seenPending.clear();
 
     const task = async () => {
-      const result = await DS.storageGet?.([KEY]) || {};
-      const store = normalize(result[KEY]);
+      const ids = snapshots.map(snapshot => snapshot.id).filter(Boolean);
+      const existing = await readArchiveEntries(ids);
+      const updates = {};
       let changed = 0;
       let unchanged = 0;
       for (const snapshot of snapshots) {
-        const previous = store.meta[snapshot.id] || null;
+        const previous = existing[snapshot.id] || null;
         const merged = mergeEntry(previous, snapshot);
         const same = !!previous && sameArchiveFields(previous.fields, merged?.fields) &&
           clean(previous.name, 500) === clean(merged?.name, 500) &&
@@ -548,7 +570,7 @@
           imageUrl(previous.image) === imageUrl(merged?.image) &&
           String(previous.profileUrl || "") === String(merged?.profileUrl || "");
         if (same) { unchanged += 1; continue; }
-        store.meta[snapshot.id] = merged;
+        updates[snapshot.id] = merged;
         changed += 1;
       }
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
@@ -556,7 +578,7 @@
       counters.botArchiveSeenMerged = Number(counters.botArchiveSeenMerged || 0) + changed;
       counters.botArchiveSeenUnchanged = Number(counters.botArchiveSeenUnchanged || 0) + unchanged;
       if (!changed) return true;
-      const ok = !!(await DS.storageSet?.({ [KEY]: normalize(store) }));
+      const ok = await mergeArchiveEntries(updates);
       counters.botArchiveWrites = Number(counters.botArchiveWrites || 0) + (ok ? 1 : 0);
       return ok;
     };

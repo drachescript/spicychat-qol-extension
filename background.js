@@ -87,6 +87,9 @@ const DUPLICATE_TAB_DEFAULTS = {
 let duplicateTabScanChain = Promise.resolve();
 let quickDislikeChain = Promise.resolve();
 let quickLessLikeChain = Promise.resolve();
+const recommendationFeedbackBotChains = new Map();
+let recommendationFeedbackQuickDislikeCache = null;
+let recommendationFeedbackQuickLessLikeCache = null;
 let creatorBotScanChain = Promise.resolve();
 let tabCleanupWorkerTabId = null;
 const tabCleanupWorkerTabIds = new Set();
@@ -96,7 +99,6 @@ let quickDislikePersistentWorkerTabId = null;
 const quickLessLikeWorkerTabIds = new Set();
 const quickLessLikeBulkWorkerTabs = new Map();
 const quickLessLikeDirectBulkTabs = new Map();
-const quickLessLikeNativeFallbackBulkRuns = new Set();
 const quickLessLikeClosedBulkRuns = new Map();
 const quickLessLikeReadyWorkerTabs = new Map();
 let quickLessLikePersistentWorkerTabId = null;
@@ -620,7 +622,6 @@ async function releaseQuickLessLikeBulkWorker(runId) {
     quickLessLikeHistoryLastFlushAt = 0;
   }
   quickLessLikeDirectBulkTabs.delete(id);
-  quickLessLikeNativeFallbackBulkRuns.delete(id);
   quickLessLikeClosedBulkRuns.delete(id);
   const tabIds = new Set();
   const mapped = Number(quickLessLikeBulkWorkerTabs.get(id));
@@ -914,24 +915,7 @@ async function prepareQuickLessLikeBulkWorker(message) {
   const runId = String(message?.bulkRunId || "").trim();
   if (!runId) return { ok: false, status: "invalid-run" };
   quickLessLikeClosedBulkRuns.delete(runId);
-  quickLessLikeNativeFallbackBulkRuns.delete(runId);
-
-  // Do not make the whole bulk job wait 12-18 seconds for private/direct
-  // recommendation auth to become discoverable. Give the API worker a short
-  // warm-up; if it is still not ready, keep the same hidden Home tab and fall
-  // back to SpicyChat's native Less Like menu for each bot.
-  const worker = await createOrReuseQuickLessLikeRecommendationWorker(runId);
-  if (worker?.ok && worker?.tabId) {
-    const ready = await probeQuickLessLikeRecommendationWorker(worker.tabId, true, 4500);
-    if (ready?.ready) return { ...ready, ok: true, ready: true, fallback: false, tabId: Number(worker.tabId) };
-    quickLessLikeNativeFallbackBulkRuns.add(runId);
-    return { ...(ready || worker), ok: true, ready: false, fallback: true, tabId: Number(worker.tabId), status: "native-less-like-fallback" };
-  }
-
-  // Even if the direct recommendation helper could not be created, the normal
-  // native worker path can create its own inactive Home tab on the first item.
-  quickLessLikeNativeFallbackBulkRuns.add(runId);
-  return { ...worker, ok: true, ready: false, fallback: true, tabId: 0, status: "native-less-like-fallback" };
+  return ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
 }
 
 async function releaseQuickLessLikeStandaloneWorker() {
@@ -1040,81 +1024,6 @@ async function runDirectCharacterFeedback(message, mode) {
   };
 }
 
-async function runNativeQuickLessLikeFallback(message, prior = null) {
-  const startedAt = Date.now();
-  const botId = String(message?.botId || "").trim().toLowerCase();
-  const botName = String(message?.botName || "").trim().slice(0, 160);
-  const runId = String(message?.bulkRunId || "").trim();
-  const jobId = String(message?.jobId || "").trim();
-  if (!botId) return { ok: false, status: "invalid-bot", fallbackAttempted: true };
-  if (runId && isQuickLessLikeBulkRunCanceled(runId)) return { ok: false, status: "bulk-canceled", fallbackAttempted: true };
-
-  const target = quickLessLikeSearchUrl(botName, botId);
-  const prepared = await prepareQuickLessLikeWorkerTab(target, runId, { jobId, botId, botName, startedAt });
-  const tabId = Number(prepared?.tabId || 0);
-  if (!prepared?.ok || !tabId) {
-    return {
-      ok: false,
-      status: "worker-tab-failed",
-      fallbackAttempted: true,
-      fallbackExecutor: "spicychat-native-ui",
-      requestSent: false,
-      networkAttempts: 0,
-      reason: prepared?.error || "Could not create the native Less Like helper tab.",
-      priorStatus: String(prior?.status || ""),
-      totalMs: Date.now() - startedAt
-    };
-  }
-
-  // A full navigation temporarily removes the content-script receiver. Retry
-  // only while there is NO response at all; once the native worker answers we
-  // never blindly click the action a second time.
-  const deadline = Date.now() + 18000;
-  let response = null;
-  while (Date.now() < deadline) {
-    if (runId && isQuickLessLikeBulkRunCanceled(runId)) {
-      return { ok: false, status: "bulk-canceled", fallbackAttempted: true, feedbackTabId: tabId };
-    }
-    response = await tabsSendMessage(tabId, { type: "DS_QUICK_LESS_LIKE_RUN" });
-    if (response?.status) break;
-    if (!(await tabsGet(tabId))) {
-      return { ok: false, status: "worker-closed", fallbackAttempted: true, feedbackTabId: tabId, requestSent: false, networkAttempts: 0 };
-    }
-    await new Promise(resolve => setTimeout(resolve, 350));
-  }
-
-  if (!response?.status) {
-    return {
-      ok: false,
-      status: "worker-timeout",
-      fallbackAttempted: true,
-      fallbackExecutor: "spicychat-native-ui",
-      feedbackTabId: tabId,
-      feedbackTabsTried: 1,
-      requestSent: false,
-      networkAttempts: 0,
-      priorStatus: String(prior?.status || ""),
-      totalMs: Date.now() - startedAt
-    };
-  }
-
-  const ambiguousNativeSubmit = String(response?.status || "") === "submit-not-confirmed";
-  return {
-    ...response,
-    fallbackAttempted: true,
-    fallbackExecutor: "spicychat-native-ui",
-    feedbackTabId: tabId,
-    feedbackTabsTried: 1,
-    // If SpicyChat's native UI clicked Less Like but never showed a definitive
-    // success/failure signal, treat it like an ambiguous POST and do not blindly
-    // click the same bot again through retry logic.
-    requestSent: ambiguousNativeSubmit,
-    networkAttempts: ambiguousNativeSubmit ? 1 : 0,
-    priorStatus: String(prior?.status || ""),
-    totalMs: Date.now() - startedAt
-  };
-}
-
 async function runQuickLessLikeBot(message) {
   const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
@@ -1125,30 +1034,43 @@ async function runQuickLessLikeBot(message) {
     const history = await getQuickLessLikeHistory(message?.bulkRunId || "");
     const remembered = history.bots[botId];
     if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
+
+    const crossHandled = await completedRecommendationFeedbackForBot(botId, "less-like");
+    if (crossHandled?.source === "dislike") {
+      const handledAt = crossHandled.handledAt || Date.now();
+      await rememberQuickLessLikeEntry(botId, {
+        status: "less-liked",
+        name: String(botName || crossHandled.name || "").slice(0, 160),
+        handledAt,
+        stage: "cross-feedback-dedupe",
+        reason: "A successful Dislike rating for this bot is already recorded, so QoL skipped a duplicate recommendation rating POST.",
+        httpStatus: 0
+      }, {
+        immediate: !String(message?.bulkRunId || "").trim(),
+        runId: String(message?.bulkRunId || "").trim()
+      });
+      await recordHelperLifecycle("recommendationFeedbackCrossDedupe", {
+        botId,
+        skipped: "less-like",
+        completedBy: "dislike"
+      });
+      return {
+        ok: true,
+        status: "already-handled",
+        rememberedStatus: "less-liked",
+        handledAt,
+        crossHandledBy: "dislike",
+        networkAttempts: 0,
+        requestSent: false
+      };
+    }
   }
 
   let result;
-  const runId = String(message?.bulkRunId || "").trim();
   try {
-    if (runId && quickLessLikeNativeFallbackBulkRuns.has(runId)) {
-      result = await runNativeQuickLessLikeFallback(message);
-    } else {
-      result = await runDirectCharacterFeedback(message, "less-like");
-      const mayHaveSentRating = !!result?.requestSent || Number(result?.networkAttempts || 0) > 0;
-      const nativeFallbackStatuses = new Set([
-        "recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-waiting",
-        "recommendation-worker-waiting-native-signature", "recommendation-worker-wrong-page",
-        "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error",
-        "direct-feedback-unavailable", "recombee-token-not-found", "recombee-user-not-found",
-        "character-auth-not-ready", "character-auth-rejected", "not-worker"
-      ]);
-      if (!result?.ok && !mayHaveSentRating && nativeFallbackStatuses.has(String(result?.status || ""))) {
-        if (runId) quickLessLikeNativeFallbackBulkRuns.add(runId);
-        result = await runNativeQuickLessLikeFallback(message, result);
-      }
-    }
+    result = await runDirectCharacterFeedback(message, "less-like");
   } finally {
-    if (!runId) await releaseQuickLessLikeStandaloneWorker();
+    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
   }
 
   const historyStartedAt = Date.now();
@@ -1630,34 +1552,280 @@ function settingNameFromStorageKey(key) {
   return value.startsWith(GRANULAR_SETTING_PREFIX) ? value.slice(GRANULAR_SETTING_PREFIX.length) : "";
 }
 
-async function storageGet(keys) {
-  const requested = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : null);
-  const wantsSettings = keys == null || requested?.includes("settings");
-  const firstKeys = !wantsSettings || keys == null ? keys : [...new Set([...(requested || []), GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY])];
-  const first = await new Promise(resolve => chrome.storage.local.get(firstKeys, resolve));
-  if (!wantsSettings) return first || {};
-  const result = first || {};
-  const index = [...new Set((Array.isArray(result[GRANULAR_SETTINGS_INDEX_KEY]) ? result[GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
-  granularSettingsIndexCache = new Set(index);
-  const granular = keys == null || !index.length
-    ? result
-    : await new Promise(resolve => chrome.storage.local.get(index.map(settingStorageKey), resolve));
-  const hadLegacy = result.settings && typeof result.settings === "object";
-  const merged = hadLegacy ? { ...result.settings } : {};
-  let found = false;
-  for (const name of index) {
-    const key = settingStorageKey(name);
-    if (!Object.prototype.hasOwnProperty.call(granular || {}, key)) continue;
-    merged[name] = granular[key];
-    found = true;
+
+const LARGE_STORAGE_DB_NAME = "dragon-spicychat-qol-large-v1";
+const LARGE_STORAGE_DB_VERSION = 1;
+const LARGE_STORAGE_META_STORE = "__meta";
+const LARGE_STORAGE_KEYS = new Set(["botAvailability", "botArchive"]);
+let largeStorageDbPromise = null;
+const largeStorageMigrationPromises = new Map();
+
+function largeStorageRequestedKeys(keys) {
+  if (keys == null) return [...LARGE_STORAGE_KEYS];
+  const list = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : Object.keys(keys || {}));
+  return [...new Set(list.filter(key => LARGE_STORAGE_KEYS.has(String(key || ""))))];
+}
+
+function largeStorageLocalKeys(keys) {
+  if (keys == null) return null;
+  if (typeof keys === "string") return LARGE_STORAGE_KEYS.has(keys) ? [] : [keys];
+  if (Array.isArray(keys)) return keys.filter(key => !LARGE_STORAGE_KEYS.has(String(key || "")));
+  if (keys && typeof keys === "object") {
+    return Object.fromEntries(Object.entries(keys).filter(([key]) => !LARGE_STORAGE_KEYS.has(String(key || ""))));
   }
-  if (hadLegacy || found) result.settings = merged;
-  else delete result.settings;
-  return result;
+  return keys;
+}
+
+function openLargeStorageDb() {
+  if (largeStorageDbPromise) return largeStorageDbPromise;
+  largeStorageDbPromise = new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open(LARGE_STORAGE_DB_NAME, LARGE_STORAGE_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        for (const key of LARGE_STORAGE_KEYS) {
+          if (!db.objectStoreNames.contains(key)) db.createObjectStore(key, { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains(LARGE_STORAGE_META_STORE)) {
+          db.createObjectStore(LARGE_STORAGE_META_STORE, { keyPath: "key" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("Could not open QoL large-data IndexedDB."));
+      request.onblocked = () => reject(new Error("QoL large-data IndexedDB upgrade was blocked."));
+    } catch (error) {
+      reject(error);
+    }
+  }).catch(error => {
+    largeStorageDbPromise = null;
+    throw error;
+  });
+  return largeStorageDbPromise;
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB request failed."));
+  });
+}
+
+function idbTransactionDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error || new Error("IndexedDB transaction failed."));
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted."));
+  });
+}
+
+function normalizeLargeStorageRecords(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawMeta = source.meta && typeof source.meta === "object" && !Array.isArray(source.meta) ? source.meta : source;
+  const records = [];
+  for (const [rawId, rawValue] of Object.entries(rawMeta || {})) {
+    const id = String(rawId || rawValue?.id || "").trim();
+    if (!id || !rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) continue;
+    records.push({ id, value: rawValue });
+  }
+  return records;
+}
+
+async function largeStorageMeta(key) {
+  const db = await openLargeStorageDb();
+  const tx = db.transaction(LARGE_STORAGE_META_STORE, "readonly");
+  return (await idbRequest(tx.objectStore(LARGE_STORAGE_META_STORE).get(key))) || null;
+}
+
+async function writeLargeStorageMeta(key, extra = {}) {
+  const db = await openLargeStorageDb();
+  const tx = db.transaction(LARGE_STORAGE_META_STORE, "readwrite");
+  tx.objectStore(LARGE_STORAGE_META_STORE).put({ key, migrated: true, updatedAt: Date.now(), ...extra });
+  await idbTransactionDone(tx);
+  return true;
+}
+
+async function replaceLargeStorage(key, value, { markMigrated = true } = {}) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return false;
+  const records = normalizeLargeStorageRecords(value);
+  const db = await openLargeStorageDb();
+  const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
+  const store = tx.objectStore(key);
+  store.clear();
+  for (const record of records) store.put(record);
+  if (markMigrated) {
+    tx.objectStore(LARGE_STORAGE_META_STORE).put({
+      key,
+      migrated: true,
+      updatedAt: Date.now(),
+      count: records.length
+    });
+  }
+  await idbTransactionDone(tx);
+  return true;
+}
+
+async function mergeLargeStorageEntries(key, entries) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return false;
+  await ensureLargeStorageMigrated(key);
+  const records = normalizeLargeStorageRecords({ meta: entries });
+  if (!records.length) return true;
+  const db = await openLargeStorageDb();
+  const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
+  const store = tx.objectStore(key);
+  for (const record of records) store.put(record);
+  tx.objectStore(LARGE_STORAGE_META_STORE).put({
+    key,
+    migrated: true,
+    updatedAt: Date.now()
+  });
+  await idbTransactionDone(tx);
+  return true;
+}
+
+async function readLargeStorage(key) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return { meta: {} };
+  await ensureLargeStorageMigrated(key);
+  const db = await openLargeStorageDb();
+  const tx = db.transaction(key, "readonly");
+  const rows = await idbRequest(tx.objectStore(key).getAll());
+  const meta = {};
+  for (const row of rows || []) {
+    const id = String(row?.id || "").trim();
+    if (id && row?.value && typeof row.value === "object") meta[id] = row.value;
+  }
+  return { meta };
+}
+
+async function readLargeStorageRecords(key, ids = []) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return {};
+  await ensureLargeStorageMigrated(key);
+  const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
+  if (!cleanIds.length) return {};
+  const db = await openLargeStorageDb();
+  const tx = db.transaction(key, "readonly");
+  const store = tx.objectStore(key);
+  const rows = await Promise.all(cleanIds.map(id => idbRequest(store.get(id)).catch(() => null)));
+  const out = {};
+  for (let i = 0; i < cleanIds.length; i += 1) {
+    const value = rows[i]?.value;
+    if (value && typeof value === "object") out[cleanIds[i]] = value;
+  }
+  return out;
+}
+
+async function clearLargeStorage(key) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return false;
+  const db = await openLargeStorageDb();
+  const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
+  tx.objectStore(key).clear();
+  tx.objectStore(LARGE_STORAGE_META_STORE).put({ key, migrated: true, updatedAt: Date.now(), count: 0 });
+  await idbTransactionDone(tx);
+  try { await new Promise(resolve => chrome.storage.local.remove([key], () => resolve())); } catch {}
+  return true;
+}
+
+async function ensureLargeStorageMigrated(key) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return true;
+  if (largeStorageMigrationPromises.has(key)) return largeStorageMigrationPromises.get(key);
+  const promise = (async () => {
+    const existingMeta = await largeStorageMeta(key).catch(() => null);
+    if (existingMeta?.migrated) return true;
+
+    // One-time .29 migration. Import the legacy monolithic object, verify the
+    // per-record IDB count, then remove ONLY that legacy chrome.storage key.
+    const legacy = await new Promise(resolve => {
+      try { chrome.storage.local.get([key], value => resolve(value?.[key])); }
+      catch { resolve(undefined); }
+    });
+    const records = normalizeLargeStorageRecords(legacy);
+    await replaceLargeStorage(key, legacy);
+
+    const db = await openLargeStorageDb();
+    const tx = db.transaction(key, "readonly");
+    const count = Number(await idbRequest(tx.objectStore(key).count())) || 0;
+    if (count < records.length) throw new Error(`Large storage migration verification failed for ${key}.`);
+
+    await writeLargeStorageMeta(key, { count });
+    try { await new Promise(resolve => chrome.storage.local.remove([key], () => resolve())); } catch {}
+    return true;
+  })().finally(() => largeStorageMigrationPromises.delete(key));
+  largeStorageMigrationPromises.set(key, promise);
+  return promise;
+}
+
+async function getLargeStorageValues(keys) {
+  const requested = largeStorageRequestedKeys(keys);
+  const data = {};
+  for (const key of requested) data[key] = await readLargeStorage(key);
+  return data;
+}
+
+async function getLargeStorageStats() {
+  const stats = {};
+  for (const key of LARGE_STORAGE_KEYS) {
+    await ensureLargeStorageMigrated(key);
+    const db = await openLargeStorageDb();
+    const tx = db.transaction(key, "readonly");
+    stats[key] = Number(await idbRequest(tx.objectStore(key).count())) || 0;
+  }
+  return stats;
+}
+
+async function setLargeStorageValues(values) {
+  const source = values && typeof values === "object" && !Array.isArray(values) ? values : {};
+  const changed = [];
+  for (const key of LARGE_STORAGE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    await replaceLargeStorage(key, source[key]);
+    try { await new Promise(resolve => chrome.storage.local.remove([key], () => resolve())); } catch {}
+    changed.push(key);
+  }
+  return { ok: true, keys: changed };
+}
+
+async function storageGet(keys) {
+  const largeKeys = largeStorageRequestedKeys(keys);
+  let largeData = {};
+  if (largeKeys.length) {
+    try { largeData = await getLargeStorageValues(keys); } catch {}
+  }
+
+  const localKeys = largeStorageLocalKeys(keys);
+  const requested = typeof localKeys === "string" ? [localKeys] : (Array.isArray(localKeys) ? localKeys : null);
+  const wantsSettings = keys == null || requested?.includes("settings");
+  const firstKeys = !wantsSettings || localKeys == null ? localKeys : [...new Set([...(requested || []), GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY])];
+  const first = await new Promise(resolve => chrome.storage.local.get(firstKeys, resolve));
+  const result = first || {};
+  if (wantsSettings) {
+    const index = [...new Set((Array.isArray(result[GRANULAR_SETTINGS_INDEX_KEY]) ? result[GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
+    granularSettingsIndexCache = new Set(index);
+    const granular = localKeys == null || !index.length
+      ? result
+      : await new Promise(resolve => chrome.storage.local.get(index.map(settingStorageKey), resolve));
+    const hadLegacy = result.settings && typeof result.settings === "object";
+    const merged = hadLegacy ? { ...result.settings } : {};
+    let found = false;
+    for (const name of index) {
+      const key = settingStorageKey(name);
+      if (!Object.prototype.hasOwnProperty.call(granular || {}, key)) continue;
+      merged[name] = granular[key];
+      found = true;
+    }
+    if (hadLegacy || found) result.settings = merged;
+    else delete result.settings;
+  }
+  return { ...result, ...largeData };
 }
 
 async function storageSet(values) {
   const payload = values && typeof values === "object" ? { ...values } : {};
+  const largePayload = {};
+  for (const key of LARGE_STORAGE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+    largePayload[key] = payload[key];
+    delete payload[key];
+  }
+  if (Object.keys(largePayload).length) await setLargeStorageValues(largePayload);
   if (payload.settings && typeof payload.settings === "object") {
     const settings = payload.settings;
     delete payload.settings;
@@ -1670,7 +1838,8 @@ async function storageSet(values) {
     payload[GRANULAR_SETTINGS_MIGRATION_KEY] = true;
     payload[GRANULAR_SETTINGS_REVISION_KEY] = Date.now();
   }
-  return new Promise(resolve => chrome.storage.local.set(payload, resolve));
+  if (!Object.keys(payload).length) return true;
+  return new Promise(resolve => chrome.storage.local.set(payload, () => resolve(!chrome.runtime.lastError)));
 }
 
 // Bot Status scans can touch a relatively small set of IDs while the persisted
@@ -1702,48 +1871,20 @@ function persistBotStatusDelta(message = {}) {
   }
 
   botStatusPersistQueue = botStatusPersistQueue.catch(() => null).then(async () => {
-    const keys = [];
-    if (availabilityIds.length) keys.push("botAvailability");
-    if (archiveIds.length) keys.push("botArchive");
-    const current = await storageGet(keys);
-    const payload = {};
-
-    if (availabilityIds.length) {
-      const raw = current.botAvailability && typeof current.botAvailability === "object" && !Array.isArray(current.botAvailability)
-        ? current.botAvailability
-        : {};
-      const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta) ? raw.meta : {};
-      payload.botAvailability = { ...raw, meta: { ...meta, ...availabilityUpdates } };
+    try {
+      // v0.2.29: per-bot IDB writes. A one-bot Bot Status result no longer
+      // clones and rewrites the complete archive/availability objects.
+      if (availabilityIds.length) await mergeLargeStorageEntries("botAvailability", availabilityUpdates);
+      if (archiveIds.length) await mergeLargeStorageEntries("botArchive", archiveUpdates);
+      return { ok: true, availability: availabilityIds.length, archive: archiveIds.length };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error?.message || String(error),
+        availability: availabilityIds.length,
+        archive: archiveIds.length
+      };
     }
-
-    if (archiveIds.length) {
-      const raw = current.botArchive && typeof current.botArchive === "object" && !Array.isArray(current.botArchive)
-        ? current.botArchive
-        : {};
-      const meta = raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta) ? raw.meta : {};
-      payload.botArchive = { ...raw, meta: { ...meta, ...archiveUpdates } };
-    }
-
-    return new Promise(resolve => {
-      try {
-        chrome.storage.local.set(payload, () => {
-          const error = chrome.runtime.lastError?.message || "";
-          resolve({
-            ok: !error,
-            error,
-            availability: availabilityIds.length,
-            archive: archiveIds.length
-          });
-        });
-      } catch (error) {
-        resolve({
-          ok: false,
-          error: error?.message || String(error),
-          availability: availabilityIds.length,
-          archive: archiveIds.length
-        });
-      }
-    });
   });
 
   return botStatusPersistQueue;
@@ -2279,8 +2420,10 @@ function normalizeQuickDislikeHistory(raw) {
 }
 
 async function getQuickDislikeHistory() {
+  if (recommendationFeedbackQuickDislikeCache) return recommendationFeedbackQuickDislikeCache;
   const result = await storageGet([QUICK_DISLIKE_HISTORY_KEY]);
-  return normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
+  recommendationFeedbackQuickDislikeCache = normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
+  return recommendationFeedbackQuickDislikeCache;
 }
 
 async function rememberQuickDislike(botId, botName, status) {
@@ -2362,6 +2505,13 @@ async function readQuickLessLikeHistoryFromStorage() {
   return { history: trimQuickLessLikeHistory(history), pending };
 }
 
+async function getQuickLessLikeCrossHistory() {
+  if (recommendationFeedbackQuickLessLikeCache) return recommendationFeedbackQuickLessLikeCache;
+  const loaded = await readQuickLessLikeHistoryFromStorage();
+  recommendationFeedbackQuickLessLikeCache = loaded.history;
+  return recommendationFeedbackQuickLessLikeCache;
+}
+
 async function getQuickLessLikeHistory(runId = "") {
   const id = String(runId || "").trim();
   if (id && quickLessLikeHistoryCacheRunId === id && quickLessLikeHistoryCache) {
@@ -2401,6 +2551,7 @@ async function rememberQuickLessLikeEntry(botId, entry, { immediate = false, run
     const loaded = await readQuickLessLikeHistoryFromStorage();
     loaded.history.bots[botId] = entry;
     trimQuickLessLikeHistory(loaded.history);
+    recommendationFeedbackQuickLessLikeCache = loaded.history;
     await storageSet({
       [QUICK_LESS_LIKE_HISTORY_KEY]: loaded.history,
       [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
@@ -2413,6 +2564,7 @@ async function rememberQuickLessLikeEntry(botId, entry, { immediate = false, run
   history.bots[botId] = entry;
   pending.bots[botId] = entry;
   trimQuickLessLikeHistory(history);
+  recommendationFeedbackQuickLessLikeCache = history;
   // Persist the compact success journal before returning so an interrupted run
   // cannot repeat a known-successful rating. Full multi-thousand-entry history
   // compaction is deferred to a large/time-based checkpoint and run end.
@@ -2440,6 +2592,52 @@ async function rememberQuickLessLikeUnavailable(botId, botName, result = {}, opt
     reason: String(result?.reason || "Character was not found while sending Less Like feedback.").slice(0, 300),
     httpStatus: Number(result?.httpStatus || 0) || 0
   }, options);
+}
+
+async function completedRecommendationFeedbackForBot(botId, targetMode = "") {
+  const id = String(botId || "").trim().toLowerCase();
+  if (!id) return null;
+  const mode = String(targetMode || "").trim();
+
+  if (mode !== "less-like") {
+    const lessLike = await getQuickLessLikeCrossHistory();
+    const entry = lessLike?.bots?.[id];
+    if (entry?.status === "less-liked") {
+      return {
+        source: "less-like",
+        status: "less-liked",
+        handledAt: Number(entry.handledAt || 0) || 0,
+        name: String(entry.name || "")
+      };
+    }
+  }
+
+  if (mode !== "dislike") {
+    const dislike = await getQuickDislikeHistory();
+    const entry = dislike?.bots?.[id];
+    if (["disliked", "already-disliked"].includes(String(entry?.status || ""))) {
+      return {
+        source: "dislike",
+        status: String(entry.status || ""),
+        handledAt: Number(entry.handledAt || 0) || 0,
+        name: String(entry.name || "")
+      };
+    }
+  }
+
+  return null;
+}
+
+function queueRecommendationFeedbackForBot(botId, task) {
+  const id = String(botId || "").trim().toLowerCase();
+  if (!id || typeof task !== "function") return Promise.resolve().then(task);
+  const prior = recommendationFeedbackBotChains.get(id) || Promise.resolve();
+  const current = prior.catch(() => {}).then(task);
+  recommendationFeedbackBotChains.set(id, current);
+  current.finally(() => {
+    if (recommendationFeedbackBotChains.get(id) === current) recommendationFeedbackBotChains.delete(id);
+  }).catch(() => {});
+  return current;
 }
 
 function makeQuickDislikeJobId(botId) {
@@ -2630,6 +2828,29 @@ async function runQuickDislikeBot(message) {
         status: "already-handled",
         rememberedStatus: remembered.status,
         handledAt: remembered.handledAt || 0
+      };
+    }
+
+    const crossHandled = await completedRecommendationFeedbackForBot(botId, "dislike");
+    if (crossHandled?.source === "less-like") {
+      const rememberedCross = await rememberQuickDislike(
+        botId,
+        message?.botName || crossHandled.name || "",
+        "already-disliked"
+      );
+      await recordHelperLifecycle("recommendationFeedbackCrossDedupe", {
+        botId,
+        skipped: "dislike",
+        completedBy: "less-like"
+      });
+      return {
+        ok: true,
+        status: "already-handled",
+        rememberedStatus: "already-disliked",
+        handledAt: rememberedCross?.handledAt || crossHandled.handledAt || Date.now(),
+        crossHandledBy: "less-like",
+        networkAttempts: 0,
+        requestSent: false
       };
     }
   }
@@ -3547,14 +3768,14 @@ async function configureCreatorBotWatchAlarm(runNow = false) {
 function queueQuickDislikeBot(message) {
   quickDislikeChain = quickDislikeChain
     .catch(() => {})
-    .then(() => runQuickDislikeBot(message));
+    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickDislikeBot(message)));
   return quickDislikeChain;
 }
 
 function queueQuickLessLikeBot(message) {
   quickLessLikeChain = quickLessLikeChain
     .catch(() => {})
-    .then(() => runQuickLessLikeBot(message));
+    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickLessLikeBot(message)));
   return quickLessLikeChain;
 }
 
@@ -4721,12 +4942,24 @@ async function getOptionsSourceTab() {
   return tab;
 }
 
-function sendTabMessage(tabId, message) {
+function sendTabMessage(tabId, message, timeoutMs = 900) {
   return new Promise(resolve => {
-    try { chrome.tabs.sendMessage(tabId, message, response => {
-      if (chrome.runtime.lastError) return resolve(null);
-      resolve(response || null);
-    }); } catch { resolve(null); }
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value || null);
+    };
+    const timer = setTimeout(() => finish(null), Math.max(250, Number(timeoutMs || 900)));
+    try {
+      chrome.tabs.sendMessage(tabId, message, response => {
+        try { if (chrome.runtime.lastError) return finish(null); } catch {}
+        finish(response || null);
+      });
+    } catch {
+      finish(null);
+    }
   });
 }
 
@@ -4735,24 +4968,26 @@ async function getReachableDiagnosticContext() {
   const storedId = Number(stored[OPTIONS_SOURCE_TAB_KEY]);
   const helperLifecycleDiagnostics = stored[HELPER_LIFECYCLE_DIAG_KEY] || null;
   const tabs = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
-  const candidates = tabs.filter(tab => tab?.id).sort((a, b) => {
+  const allCandidates = tabs.filter(tab => tab?.id);
+  const loaded = allCandidates.filter(tab => !tab.discarded);
+  const candidates = (loaded.length ? loaded : allCandidates).sort((a, b) => {
+    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
     if (Number(a.id) === storedId && Number(b.id) !== storedId) return -1;
     if (Number(b.id) === storedId && Number(a.id) !== storedId) return 1;
-    if (!!a.active !== !!b.active) return a.active ? -1 : 1;
     return Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0);
   });
   for (const tab of candidates) {
-    const pageDiagnostics = await sendTabMessage(tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" });
+    const pageDiagnostics = await sendTabMessage(tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" }, 900);
     if (!pageDiagnostics) continue;
     await storageSet({ [OPTIONS_SOURCE_TAB_KEY]: tab.id });
     return { ok: true, runtimeAvailable: true, url: tab.url || "", title: tab.title || "", pageDiagnostics, helperLifecycleDiagnostics, tabId: tab.id };
   }
-  const fallback = candidates[0] || null;
+  const fallback = candidates[0] || allCandidates[0] || null;
   return {
     ok: !!fallback,
     runtimeAvailable: false,
     runtimeStatus: fallback ? "page-found-runtime-unreachable" : "no-spicychat-tab",
-    runtimeError: fallback ? "A SpicyChat tab was found, but its QoL content runtime did not answer diagnostics." : "No open SpicyChat tab was found.",
+    runtimeError: fallback ? "A SpicyChat tab was found, but its QoL content runtime did not answer diagnostics. Reload that tab after an extension update to attach the current QoL runtime." : "No open SpicyChat tab was found.",
     url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null, helperLifecycleDiagnostics, tabId: fallback?.id || 0
   };
 }
@@ -5577,6 +5812,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_RECOMMENDATION_PACE_WAIT") {
+    const delayMs = Math.max(0, Math.min(30000, Number(message?.delayMs || 0)));
+    // Recommendation queues use service-worker-owned pacing too. Hidden
+    // Options-page timers were the reason old Quick Dislike stretched a
+    // sub-second interval into multi-minute gaps.
+    setTimeout(() => sendResponse({ ok: true, waitedMs: delayMs, at: Date.now() }), delayMs);
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_GET") {
+    getLargeStorageValues(message?.keys ?? null)
+      .then(data => sendResponse({ ok: true, data }))
+      .catch(error => sendResponse({ ok: false, data: {}, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_GET_RECORDS") {
+    const key = String(message?.key || "");
+    readLargeStorageRecords(key, message?.ids || [])
+      .then(records => sendResponse({ ok: true, key, records }))
+      .catch(error => sendResponse({ ok: false, key, records: {}, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_STATS") {
+    getLargeStorageStats()
+      .then(stats => sendResponse({ ok: true, stats }))
+      .catch(error => sendResponse({ ok: false, stats: {}, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_SET") {
+    setLargeStorageValues(message?.values || {})
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_MERGE") {
+    const key = String(message?.key || "");
+    mergeLargeStorageEntries(key, message?.entries || {})
+      .then(ok => sendResponse({ ok: !!ok, key }))
+      .catch(error => sendResponse({ ok: false, key, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_REMOVE") {
+    const keys = largeStorageRequestedKeys(message?.keys ?? null);
+    Promise.all(keys.map(clearLargeStorage))
+      .then(() => sendResponse({ ok: true, keys }))
+      .catch(error => sendResponse({ ok: false, keys, error: String(error?.message || error || "") }));
+    return true;
+  }
+
   if (message?.type === "DS_BOT_STATUS_WORKER_HEARTBEAT") {
     const senderTabId = Number(sender?.tab?.id || 0);
     restoreBotStatusWorkerSession()
@@ -5645,8 +5934,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_QUICK_DISLIKE_RELEASE_BULK") {
-    releaseQuickDislikeBulkWorker(message.bulkRunId)
-      .then(released => sendResponse({ ok: true, released }))
+    Promise.all([
+      releaseQuickDislikeBulkWorker(message.bulkRunId),
+      releaseQuickLessLikeBulkWorker(message.bulkRunId)
+    ])
+      .then(values => sendResponse({ ok: true, released: values.some(Boolean) }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
@@ -5929,6 +6221,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         chrome.tabs.sendMessage(tab.id, { type: pageType }, response => {
           if (chrome.runtime.lastError) {
+            if (message.type === "DS_RECOVER_OPTIONS_SOURCE_PAGE") {
+              chrome.tabs.reload(tab.id, {}, () => {
+                const reloadError = chrome.runtime.lastError?.message || "";
+                sendResponse(reloadError
+                  ? { ok: false, error: reloadError }
+                  : { ok: true, reloaded: true, status: "source-tab-reloaded" });
+              });
+              return;
+            }
             sendResponse({ ok: false, error: chrome.runtime.lastError.message || "Could not reach the SpicyChat tab." });
             return;
           }
@@ -6289,6 +6590,14 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  if (changes[QUICK_DISLIKE_HISTORY_KEY]) {
+    recommendationFeedbackQuickDislikeCache = normalizeQuickDislikeHistory(changes[QUICK_DISLIKE_HISTORY_KEY].newValue);
+  }
+  // The Less Like bulk journal changes after every confirmed action, so do not
+  // invalidate the cross-feedback cache for journal-only writes. A main-history
+  // change (including a user reset) invalidates it; the next lookup rehydrates
+  // main history + any still-pending journal entries exactly once.
+  if (changes[QUICK_LESS_LIKE_HISTORY_KEY]) recommendationFeedbackQuickLessLikeCache = null;
   if (changes[CHAT_NUDGE_STORE_KEY]) runChatNudgeScan();
 
   if (changes[FOLLOWED_CREATORS_KEY]) {

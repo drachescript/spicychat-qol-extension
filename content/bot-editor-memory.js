@@ -422,7 +422,8 @@
   DS.getCachedOwnerAuditFields = async function getCachedOwnerAuditFields(idValue) {
     const id = String(idValue || "").trim();
     if (!id) return null;
-    const result = await DS.storageGet?.([AUDIT_KEY, DS.BOT_ARCHIVE_KEY || "botArchive"]) || {};
+    const archiveKey = DS.BOT_ARCHIVE_KEY || "botArchive";
+    const result = await DS.storageGet?.([AUDIT_KEY]) || {};
     const cacheEntry = result[AUDIT_KEY]?.meta?.[id] || {};
     const cacheFields = cacheEntry.fields || {};
     // Ignore legacy emptyKeys: passive scans could write them before React
@@ -431,7 +432,9 @@
     const knownEmpty = new Set(
       Array.isArray(cacheEntry.trustedEmptyKeys) ? cacheEntry.trustedEmptyKeys : []
     );
-    const archive = result[DS.BOT_ARCHIVE_KEY || "botArchive"]?.meta?.[id];
+    const archive = typeof DS.largeStorageGetRecord === "function"
+      ? await DS.largeStorageGetRecord(archiveKey, id)
+      : ((await DS.storageGet?.([archiveKey]) || {})[archiveKey]?.meta?.[id] || null);
     const archiveFields = archive?.fields || {};
     const out = {};
     const verified = {};

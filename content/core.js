@@ -22,6 +22,7 @@
   DS.SAVED_TEXT_SNIPPETS_KEY = "savedTextSnippets";
   DS.CONTEXT_KEEPER_DATA_KEY = "contextKeeperData";
   DS.BOT_ARCHIVE_KEY = "botArchive";
+  DS.BOT_AVAILABILITY_KEY = "botAvailability";
   DS.LOREBOOK_BACKUPS_KEY = "lorebookBackups";
   DS.LOCAL_CHANGE_HISTORY_KEY = "localActionHistory";
   DS.CHAT_BOOKMARKS_KEY = "chatBookmarks";
@@ -34,6 +35,7 @@
 
   const RUNTIME_LOG_SESSION_KEY = "ds-qol-runtime-log-v1";
   const RUNTIME_LOG_LIMIT = 160;
+  const LARGE_STORAGE_KEYS = new Set([DS.BOT_ARCHIVE_KEY, DS.BOT_AVAILABILITY_KEY]);
 
   function safeRuntimeLogValue(value, max = 280) {
     if (value == null) return "";
@@ -253,6 +255,7 @@
     modelHiddenNames: "",
     modelQuickFavoritesOnly: false,
     hideNotifications: false,
+    hideFeatureReleasePopups: false,
     hideTabNotificationBadge: false,
     autoReadNotifications: false,
 
@@ -578,6 +581,7 @@
     replaceChatImageWithOocButton: false,
     showAsteriskButton: false,
     composerShortcutPlacement: "inside-right",
+    chatEnterKeyBehavior: "site-default",
     autoPairAsterisks: false,
     showFormattingToolbar: false,
     formatToolbarAsterisk: true,
@@ -879,7 +883,7 @@
     },
     performanceStats: {},
     runtimeLog: initialRuntimeLog,
-    runtimePerformance: { sampleStartedAt: Date.now(), mutations: 0, qolOnlyMutations: 0, chatLocalMutations: 0, composerOnlyMutationSkips: 0, schedules: 0, criticalSchedules: 0, slowSchedules: 0, deferredWhileScrolling: 0, hiddenSkips: 0, messageCacheHits: 0, messageCacheMisses: 0, messageCacheInvalidations: 0, messageCacheInvalidationRequests: 0, messageCacheInvalidationDeduped: 0, messageCacheNonTextSkips: 0, messageCacheFingerprintSkips: 0, messageLaneScheduleCoalesced: 0, quickPanelLayoutSkips: 0, quickPanelStateSkips: 0, routeFeatureStepSkips: 0, routeFeatureGroupSkips: 0, storageWriteRequests: 0, storageWriteBatches: 0, storageWriteKeys: 0, storageWriteMergedKeys: 0, storageWriteImmediateFlushes: 0 },
+    runtimePerformance: { sampleStartedAt: Date.now(), mutations: 0, qolOnlyMutations: 0, chatLocalMutations: 0, composerOnlyMutationSkips: 0, schedules: 0, criticalSchedules: 0, slowSchedules: 0, deferredWhileScrolling: 0, hiddenSkips: 0, messageCacheHits: 0, messageCacheMisses: 0, messageCacheInvalidations: 0, messageCacheInvalidationRequests: 0, messageCacheInvalidationDeduped: 0, messageCacheNonTextSkips: 0, messageCacheFingerprintSkips: 0, messageLaneScheduleCoalesced: 0, messageLaneChunkedPasses: 0, messageLaneChunkedRoots: 0, messageLaneDeferredRoots: 0, messageEnhancerIncrementalLanePasses: 0, messageEnhancerIncrementalLaneRoots: 0, criticalMessageEnhancerPassesDeferred: 0, quickPanelLayoutSkips: 0, quickPanelStateSkips: 0, quickPanelRenderQuietDeferrals: 0, routeFeatureStepSkips: 0, routeFeatureGroupSkips: 0, storageWriteRequests: 0, storageWriteBatches: 0, storageWriteKeys: 0, storageWriteMergedKeys: 0, storageWriteImmediateFlushes: 0 },
     messageTextCache: new WeakMap(),
     messageTextFingerprints: new WeakMap(),
     persistedSettings: { ...DS.DEFAULT_SETTINGS },
@@ -1042,18 +1046,31 @@
     const chosen = new Set();
     for (const root of lane) if (needsWork(root)) chosen.add(root);
 
-    if (!lazy) {
-      for (const root of loaded) if (needsWork(root)) chosen.add(root);
-    } else {
-      for (const root of loaded) {
-        if (needsWork(root) && DS.isMessageRootNearViewport?.(root, margin)) chosen.add(root);
-      }
-      if (newest) {
-        for (const root of loaded.slice(-newest)) if (needsWork(root)) chosen.add(root);
+    // When the scheduler supplied explicit dirty message roots, stay inside
+    // that incremental lane. The old behavior immediately added every loaded
+    // message again whenever a chat had fewer than the lazy threshold, which
+    // turned a one-message reply/update into a full-history decoration pass.
+    // Full scans are still available when there is no lane (initial/manual
+    // maintenance) or a caller explicitly requests forceAll.
+    const laneOnly = lane.length > 0 && options.respectLane !== false && !forceAll;
+    if (!laneOnly) {
+      if (!lazy) {
+        for (const root of loaded) if (needsWork(root)) chosen.add(root);
+      } else {
+        for (const root of loaded) {
+          if (needsWork(root) && DS.isMessageRootNearViewport?.(root, margin)) chosen.add(root);
+        }
+        if (newest) {
+          for (const root of loaded.slice(-newest)) if (needsWork(root)) chosen.add(root);
+        }
       }
     }
 
     const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    if (laneOnly) {
+      counters.messageEnhancerIncrementalLanePasses = Number(counters.messageEnhancerIncrementalLanePasses || 0) + 1;
+      counters.messageEnhancerIncrementalLaneRoots = Number(counters.messageEnhancerIncrementalLaneRoots || 0) + chosen.size;
+    }
     counters.messageEnhancerRootRequests = Number(counters.messageEnhancerRootRequests || 0) + 1;
     if (lazy) {
       counters.messageEnhancerLazyPasses = Number(counters.messageEnhancerLazyPasses || 0) + 1;
@@ -1365,6 +1382,55 @@
     return pending.some(key => requested.has(key)) || flushing.some(key => requested.has(key));
   }
 
+
+  function largeStorageRequestedKeys(keys) {
+    if (keys == null) return [...LARGE_STORAGE_KEYS];
+    const list = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : Object.keys(keys || {}));
+    return [...new Set(list.filter(key => LARGE_STORAGE_KEYS.has(String(key || ""))))];
+  }
+
+  function localStorageKeysWithoutLarge(keys) {
+    if (keys == null) return null;
+    if (typeof keys === "string") return LARGE_STORAGE_KEYS.has(keys) ? [] : [keys];
+    if (Array.isArray(keys)) return keys.filter(key => !LARGE_STORAGE_KEYS.has(String(key || "")));
+    if (keys && typeof keys === "object") {
+      return Object.fromEntries(Object.entries(keys).filter(([key]) => !LARGE_STORAGE_KEYS.has(String(key || ""))));
+    }
+    return keys;
+  }
+
+  function sendRuntimeMessage(message) {
+    return new Promise(resolve => {
+      try {
+        const runtime = chrome?.runtime;
+        if (!runtime?.sendMessage) return resolve(null);
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          resolve(value || null);
+        };
+        const maybe = runtime.sendMessage(message, response => {
+          try { void chrome.runtime?.lastError; } catch {}
+          finish(response);
+        });
+        if (maybe && typeof maybe.then === "function") {
+          maybe.then(finish).catch(() => finish(null));
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async function readLargeStorage(keys) {
+    const requested = largeStorageRequestedKeys(keys);
+    if (!requested.length) return {};
+    const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_GET", keys: requested });
+    if (!response?.ok) return null; // Android/older-background compatibility
+    return response.data && typeof response.data === "object" ? response.data : {};
+  }
+
   function rawStorageGet(keys) {
     return new Promise(resolve => {
       try {
@@ -1414,26 +1480,50 @@
     counters.storageWriteKeys = Number(counters.storageWriteKeys || 0) + keys.length;
 
     storageWriteQueue.flushingKeys = new Set(keys);
-    storageWriteQueue.flushing = new Promise(resolve => {
+    storageWriteQueue.flushing = (async () => {
       try {
-        if (!DS.isExtensionContextValid()) {
-          resolve(false);
-          return;
+        if (!DS.isExtensionContextValid()) return false;
+
+        const largeValues = {};
+        const localPayload = { ...payload };
+        for (const key of LARGE_STORAGE_KEYS) {
+          if (!Object.prototype.hasOwnProperty.call(localPayload, key)) continue;
+          largeValues[key] = localPayload[key];
+          delete localPayload[key];
         }
-        chrome.storage.local.set(payload, () => {
-          try {
-            if (chrome.runtime.lastError) {
+
+        let largeOk = true;
+        if (Object.keys(largeValues).length) {
+          const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_SET", values: largeValues });
+          largeOk = !!response?.ok;
+          if (!largeOk) {
+            // Compatibility path for Android/WebView or an older background.
+            Object.assign(localPayload, largeValues);
+            largeOk = true;
+          }
+        }
+
+        let localOk = true;
+        if (Object.keys(localPayload).length) {
+          localOk = await new Promise(resolve => {
+            try {
+              chrome.storage.local.set(localPayload, () => {
+                try {
+                  if (chrome.runtime.lastError) return resolve(false);
+                } catch {}
+                resolve(true);
+              });
+            } catch {
               resolve(false);
-              return;
             }
-          } catch {}
-          resolve(true);
-        });
+          });
+        }
+        return !!(largeOk && localOk);
       } catch (error) {
         console.warn(`[${DS.EXT_NAME}] storage save skipped`, error);
-        resolve(false);
+        return false;
       }
-    });
+    })();
 
     const ok = await storageWriteQueue.flushing;
     storageWriteQueue.flushing = null;
@@ -1457,30 +1547,38 @@
   DS.flushStorageWrites = flushStorageWriteQueue;
 
   DS.storageGet = async function storageGet(keys) {
-    // Preserve read-after-write semantics while still allowing unrelated keys to
-    // be read without waiting for a queued batch.
     if (pendingWriteTouches(keys)) await flushStorageWriteQueue();
-    const requested = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : null);
-    const wantsSettings = keys == null || requested?.includes("settings");
-    if (!wantsSettings) return rawStorageGet(keys);
 
-    const firstKeys = keys == null ? null : [...new Set([...(requested || []), DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY])];
+    const wantsLarge = largeStorageRequestedKeys(keys).length > 0;
+    const largeData = wantsLarge ? await readLargeStorage(keys) : {};
+    const largeSupported = largeData !== null;
+
+    // Android/WebView and old background builds can keep using the legacy local
+    // object until they gain the extension-owned IDB service.
+    const localKeys = largeSupported ? localStorageKeysWithoutLarge(keys) : keys;
+    const requested = typeof localKeys === "string" ? [localKeys] : (Array.isArray(localKeys) ? localKeys : null);
+    const wantsSettings = keys == null || requested?.includes("settings");
+    const firstKeys = keys == null
+      ? null
+      : [...new Set([...(requested || []), ...(wantsSettings ? [DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
     const result = await rawStorageGet(firstKeys);
-    const index = [...new Set((Array.isArray(result[DS.GRANULAR_SETTINGS_INDEX_KEY]) ? result[DS.GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
-    DS.state.settingsIndex = new Set(index);
-    const granular = keys == null || !index.length ? result : await rawStorageGet(index.map(DS.settingStorageKey));
-    const hadLegacy = result.settings && typeof result.settings === "object";
-    const merged = hadLegacy ? { ...result.settings } : {};
-    let found = false;
-    for (const name of index) {
-      const storageKey = DS.settingStorageKey(name);
-      if (!Object.prototype.hasOwnProperty.call(granular, storageKey)) continue;
-      merged[name] = granular[storageKey];
-      found = true;
+    if (wantsSettings) {
+      const index = [...new Set((Array.isArray(result[DS.GRANULAR_SETTINGS_INDEX_KEY]) ? result[DS.GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
+      DS.state.settingsIndex = new Set(index);
+      const granular = keys == null || !index.length ? result : await rawStorageGet(index.map(DS.settingStorageKey));
+      const hadLegacy = result.settings && typeof result.settings === "object";
+      const merged = hadLegacy ? { ...result.settings } : {};
+      let found = false;
+      for (const name of index) {
+        const storageKey = DS.settingStorageKey(name);
+        if (!Object.prototype.hasOwnProperty.call(granular, storageKey)) continue;
+        merged[name] = granular[storageKey];
+        found = true;
+      }
+      if (hadLegacy || found) result.settings = merged;
+      else delete result.settings;
     }
-    if (hadLegacy || found) result.settings = merged;
-    else delete result.settings;
-    return result;
+    return largeSupported ? { ...result, ...(largeData || {}) } : result;
   };
 
   DS.storageSet = function storageSet(obj, options = {}) {
@@ -1506,6 +1604,48 @@
     }
     return promise;
   };
+
+  DS.largeStorageGetRecords = async function largeStorageGetRecords(key, ids = []) {
+    key = String(key || "");
+    if (!LARGE_STORAGE_KEYS.has(key)) return {};
+    const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
+    if (!cleanIds.length) return {};
+    const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key, ids: cleanIds });
+    if (response?.ok && response.records && typeof response.records === "object") return response.records;
+
+    // Android/WebView can inject a newer content bundle before the native
+    // wrapper/background learns the IDB message protocol. Fall back to the
+    // legacy local object rather than making archive/status data appear empty.
+    const result = await DS.storageGet([key]);
+    const source = result?.[key] && typeof result[key] === "object" ? result[key] : {};
+    const meta = source.meta && typeof source.meta === "object" ? source.meta : source;
+    return Object.fromEntries(cleanIds.map(id => [id, meta?.[id]]).filter(([, value]) => value && typeof value === "object"));
+  };
+
+  DS.largeStorageGetRecord = async function largeStorageGetRecord(key, id) {
+    const cleanId = String(id || "").trim();
+    if (!cleanId) return null;
+    const records = await DS.largeStorageGetRecords(key, [cleanId]);
+    return records[cleanId] || null;
+  };
+
+  DS.largeStorageMerge = async function largeStorageMerge(key, entries = {}) {
+    key = String(key || "");
+    if (!LARGE_STORAGE_KEYS.has(key)) return false;
+    const clean = entries && typeof entries === "object" && !Array.isArray(entries) ? entries : {};
+    if (!Object.keys(clean).length) return true;
+    const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_MERGE", key, entries: clean });
+    if (response?.ok) return true;
+
+    // Same compatibility fallback as reads: merge into the legacy local object
+    // when the companion background does not expose the v0.2.29 IDB service.
+    const result = await DS.storageGet([key]);
+    const current = result?.[key] && typeof result[key] === "object" ? result[key] : {};
+    const rawMeta = current.meta && typeof current.meta === "object" ? current.meta : current;
+    const next = { ...(current.meta ? current : {}), meta: { ...(rawMeta || {}), ...clean } };
+    return !!(await DS.storageSet({ [key]: next }, { immediate: true }));
+  };
+
 
   DS.openOptionsTarget = async function openOptionsTarget(target = "general", params = {}) {
     const safeTarget = String(target || "general").replace(/[^a-z0-9_-]/gi, "") || "general";

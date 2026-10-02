@@ -33,9 +33,11 @@ QoL does not intentionally inspect unrelated browsing activity. Optional non-Spi
 
 ## 3. Local Storage
 
-Browser builds primarily use extension local storage, plus small per-tab/session records where appropriate. `unlimitedStorage` is requested because local-first datasets such as Saved Bot Copies, availability history, archives, images and recovery data can exceed the browser's small default extension-storage quota.
+Browser builds use extension local storage for normal settings/state, extension IndexedDB for large per-bot datasets, plus small per-tab/session records where appropriate. Starting with v0.2.29, large Saved Bot Copy/archive and bot-availability records are migrated from monolithic extension-local objects into local IndexedDB records so individual bot updates do not require rewriting the full archive. This migration remains local to the user's device.
 
-Local data can include settings, filters, saved lists, Bot Status/Saved Bot Copies, creator/Lorebook backups, Personas, snippets/OOC text, bookmarks, tracker state, tab-session snapshots, caches, performance counters, diagnostics and recovery snapshots.
+`unlimitedStorage` is requested because local-first datasets such as Saved Bot Copies, availability history, archives, images and recovery data can exceed the browser's small default extension-storage quota.
+
+Local data can include settings, filters, saved lists, Bot Status/Saved Bot Copies, creator/Lorebook backups, Personas, snippets/OOC text, bookmarks, tracker state, tab-session snapshots, caches, performance counters, diagnostics and recovery snapshots. Moving a dataset between extension local storage and extension IndexedDB does not make it cloud data and does not send it to DragonScript.
 
 Files created by backup/export/diagnostic tools are saved to a location controlled by the user, browser or operating system and remain there until deleted by the user/platform.
 

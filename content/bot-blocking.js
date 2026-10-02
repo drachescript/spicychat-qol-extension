@@ -180,8 +180,6 @@
       if (!el?.isConnected || !visibleElement(el)) return false;
       const actual = String(el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (actual === wanted) return true;
-      // SpicyChat has used a few labels for the same recommendation action.
-      // Keep the native fallback resilient without accepting generic Like/Dislike.
       return /^(?:less like(?: this)?|show less like this|stop recommending(?: this)?|show me less like this)$/.test(actual);
     }) || null;
   }

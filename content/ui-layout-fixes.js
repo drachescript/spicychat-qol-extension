@@ -120,7 +120,7 @@ html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-bubble="1"
   if (typeof originalUpdate === "function") {
     DS.updateQuickPanel = function uiLayoutUpdateQuickPanel(...args) {
       const result = originalUpdate.apply(this, args);
-      reconcileQuickPanelShell();
+      if (result !== false) reconcileQuickPanelShell();
       return result;
     };
   }

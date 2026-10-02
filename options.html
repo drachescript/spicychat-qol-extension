@@ -340,7 +340,7 @@
 <div class="tab-cleanup-review-list" id="tabCleanupSessionReviewList"></div>
 </div>
 </div>
-</section><section class="card" id="notificationCleanupCard"><h2>Notifications</h2><p class="hint">Optional cleanup for SpicyChat notification controls and browser-tab notification badges.</p><label class="row"><input id="hideNotifications" type="checkbox"/><span>Hide notifications button/badge on SpicyChat</span></label><label class="row"><input id="hideTabNotificationBadge" type="checkbox"/><span>Hide unread notification badge from the browser tab</span></label><label class="row"><input id="autoReadNotifications" type="checkbox"/><span>Clear new product-update notifications in background tabs</span></label><p class="hint">Auto-read is experimental. If it opens something weird, turn it back off.</p></section></div>
+</section><section class="card" id="notificationCleanupCard"><h2>Notifications</h2><p class="hint">Optional cleanup for SpicyChat notification controls and browser-tab notification badges.</p><label class="row"><input id="hideNotifications" type="checkbox"/><span>Hide notifications button/badge on SpicyChat</span></label><label class="row"><input id="hideFeatureReleasePopups" type="checkbox"/><span>Hide feature release popups</span></label><label class="row"><input id="hideTabNotificationBadge" type="checkbox"/><span>Hide unread notification badge from the browser tab</span></label><label class="row"><input id="autoReadNotifications" type="checkbox"/><span>Clear new product-update notifications in background tabs</span></label><p class="hint">Auto-read is experimental. If it opens something weird, turn it back off.</p></section></div>
 <div class="tab-page" data-page="features"><p class="page-intro">A grouped catalogue of current and planned QoL features, with live status and direct links to their settings.</p>
 <section class="card feature-index-card">
 <h2>Features</h2>
@@ -985,6 +985,14 @@ CharacterName" spellcheck="false"></textarea>
 <p class="hint">Select text and press * to wrap it in asterisks for actions. With no selection, it inserts ** and puts the cursor between them. The position choice also keeps a dedicated backtick shortcut beside it when one is present. If the formatting toolbar already provides the same * action wrapper, QoL automatically hides the duplicate dedicated button.</p>
 <label class="row"><input id="autoPairAsterisks" type="checkbox"/><span>Automatically add the matching * when typing an asterisk</span></label>
 <p class="hint">Auto * turns a typed * into ** with the cursor between them, so you can type the action without manually adding the closing asterisk.</p>
+<label>Enter / Return key behavior
+<select id="chatEnterKeyBehavior">
+<option value="site-default">SpicyChat default</option>
+<option value="send">Enter sends · Shift+Enter inserts a new line</option>
+<option value="newline">Enter/Return inserts a new line · use Send to submit</option>
+</select>
+</label>
+<p class="hint">The new-line mode is meant for mobile/browser keyboards too. QoL handles both keyboard Enter and mobile <code>beforeinput</code>/IME line-break events without replacing SpicyChat's composer.</p>
 <label class="row"><input id="showFormattingToolbar" type="checkbox"/><span>Show a small formatting toolbar beside the chat composer</span></label>
 <div class="sub-card">
 <label class="row"><input id="formatToolbarAsterisk" type="checkbox"/><span>* action wrapper</span></label>

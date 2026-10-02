@@ -19,6 +19,7 @@ const CHAT_ORGANIZER_KEY = "chatOrganization";
 const CHARACTER_QOL_PROFILES_KEY = "characterQolProfiles";
 const BOT_AVAILABILITY_KEY = "botAvailability";
 const BOT_ARCHIVE_KEY = "botArchive";
+const LARGE_STORAGE_KEYS = new Set([BOT_AVAILABILITY_KEY, BOT_ARCHIVE_KEY]);
 const BOT_UNAVAILABLE_RECOVERY_KEY = "botUnavailableRecoveryV1";
 const LOREBOOK_BACKUPS_KEY = "lorebookBackups";
 const SAVED_TEXT_SNIPPETS_KEY = "savedTextSnippets";
@@ -124,6 +125,7 @@ const BULK_LESS_LIKE_TRANSIENT_STATUSES = new Set([
 ]);
 const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
+const RECOVERY_SNAPSHOT_META_KEY = "dsRecoverySnapshotMetaV1";
 const BACKUP_FORMAT_VERSION = 13;
 
 const ARCHIVE_IMPORT_ENDPOINT_KEY = "dsArchiveImportEndpointV1";
@@ -340,6 +342,7 @@ const DEFAULT_SETTINGS = {
   modelHiddenNames: "",
   modelQuickFavoritesOnly: false,
   hideNotifications: false,
+  hideFeatureReleasePopups: false,
   hideTabNotificationBadge: false,
   autoReadNotifications: false,
 
@@ -669,6 +672,7 @@ const DEFAULT_SETTINGS = {
   replaceChatImageWithOocButton: false,
   showAsteriskButton: false,
   composerShortcutPlacement: "inside-right",
+  chatEnterKeyBehavior: "site-default",
   autoPairAsterisks: false,
   showFormattingToolbar: false,
   formatToolbarAsterisk: true,
@@ -1527,73 +1531,104 @@ function storageRequestedKeyList(keys) {
   return [];
 }
 
-function storageGetChecked(keys) {
-  const started = typeof performance !== "undefined" ? performance.now() : 0;
-  return new Promise(resolve => {
-    const finish = value => { const elapsed = optionsPerfFinish("read", started); recordSlowStorageRead(keys, elapsed); resolve(value); };
+
+function largeStorageKeysForRequest(keys) {
+  if (keys == null) return [...LARGE_STORAGE_KEYS];
+  const list = typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys : Object.keys(keys || {}));
+  return [...new Set(list.filter(key => LARGE_STORAGE_KEYS.has(String(key || ""))))];
+}
+
+function localStorageKeysForRequest(keys) {
+  if (keys == null) return null;
+  if (typeof keys === "string") return LARGE_STORAGE_KEYS.has(keys) ? [] : [keys];
+  if (Array.isArray(keys)) return keys.filter(key => !LARGE_STORAGE_KEYS.has(String(key || "")));
+  if (keys && typeof keys === "object") {
+    return Object.fromEntries(Object.entries(keys).filter(([key]) => !LARGE_STORAGE_KEYS.has(String(key || ""))));
+  }
+  return keys;
+}
+
+function chromeLocalGet(keys) {
+  return new Promise((resolve, reject) => {
     try {
-      const wantsSettings = storageRequestIncludes(keys, "settings");
-      const requested = storageRequestedKeyList(keys);
-      const firstKeys = requested === null
-        ? null
-        : [...new Set([...(requested || []), ...(wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
-      chrome.storage.local.get(firstKeys, first => {
-        if (chrome.runtime.lastError) {
-          finish({ ok: false, data: {}, error: chrome.runtime.lastError.message || "Browser storage read failed" });
-          return;
-        }
-        const data = first || {};
-        const shouldSynthesize = wantsSettings || requested === null;
-        if (!shouldSynthesize) {
-          finish({ ok: true, data, error: "" });
-          return;
-        }
-
-        const index = normalizeGranularSettingsIndex(data[GRANULAR_SETTINGS_INDEX_KEY]);
-        granularSettingsIndexCache = new Set(index);
-        granularSettingsMigrationSeen = data[GRANULAR_SETTINGS_MIGRATION_KEY] === true;
-        const granularKeys = index.map(granularSettingStorageKey);
-        const synthesize = granular => {
-          const hadLegacy = Object.prototype.hasOwnProperty.call(data, "settings") && data.settings && typeof data.settings === "object";
-          const merged = hadLegacy ? { ...(data.settings || {}) } : {};
-          let granularFound = false;
-          for (const name of index) {
-            const key = granularSettingStorageKey(name);
-            if (!Object.prototype.hasOwnProperty.call(granular || {}, key)) continue;
-            merged[name] = granular[key];
-            granularFound = true;
-          }
-          if (hadLegacy || granularFound) data.settings = merged;
-          else delete data.settings;
-
-          // Internal granular records are an implementation detail. Existing
-          // backup/data code continues to see the stable logical `settings`
-          // object rather than hundreds of storage records.
-          for (const name of index) delete data[granularSettingStorageKey(name)];
-          if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_INDEX_KEY)) delete data[GRANULAR_SETTINGS_INDEX_KEY];
-          if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_MIGRATION_KEY)) delete data[GRANULAR_SETTINGS_MIGRATION_KEY];
-          if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_REVISION_KEY)) delete data[GRANULAR_SETTINGS_REVISION_KEY];
-          if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_LAST_BATCH_KEY)) delete data[GRANULAR_SETTINGS_LAST_BATCH_KEY];
-          finish({ ok: true, data, error: "" });
-        };
-
-        if (!granularKeys.length || requested === null) {
-          // A null/all read already contains the granular keys.
-          synthesize(data);
-          return;
-        }
-        chrome.storage.local.get(granularKeys, granular => {
-          if (chrome.runtime.lastError) {
-            finish({ ok: false, data: {}, error: chrome.runtime.lastError.message || "Browser settings read failed" });
-            return;
-          }
-          synthesize(granular || {});
-        });
+      chrome.storage.local.get(keys, result => {
+        const error = chrome.runtime.lastError?.message || "";
+        if (error) reject(new Error(error));
+        else resolve(result || {});
       });
     } catch (error) {
-      finish({ ok: false, data: {}, error: error?.message || String(error || "Browser storage read failed") });
+      reject(error);
     }
   });
+}
+
+async function readLargeStorageForRequest(keys) {
+  const requested = largeStorageKeysForRequest(keys);
+  if (!requested.length) return {};
+  const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_GET", keys: requested });
+  if (!response?.ok) return null;
+  return response.data && typeof response.data === "object" ? response.data : {};
+}
+
+async function readLargeStorageStats() {
+  const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_STATS" });
+  return response?.ok && response.stats && typeof response.stats === "object" ? response.stats : {};
+}
+
+async function storageGetChecked(keys) {
+  const started = typeof performance !== "undefined" ? performance.now() : 0;
+  const finish = value => {
+    const elapsed = optionsPerfFinish("read", started);
+    recordSlowStorageRead(keys, elapsed);
+    return value;
+  };
+
+  try {
+    const wantsLarge = largeStorageKeysForRequest(keys).length > 0;
+    const largeData = wantsLarge ? await readLargeStorageForRequest(keys) : {};
+    const largeSupported = largeData !== null;
+    const wantsSettings = storageRequestIncludes(keys, "settings");
+    const localRequest = largeSupported ? localStorageKeysForRequest(keys) : keys;
+    const requested = localRequest == null
+      ? null
+      : (Array.isArray(localRequest) ? localRequest : storageRequestedKeyList(localRequest));
+    const firstKeys = requested === null
+      ? null
+      : [...new Set([...(requested || []), ...(wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
+
+    const data = await chromeLocalGet(firstKeys);
+    const shouldSynthesize = wantsSettings || requested === null;
+    if (shouldSynthesize) {
+      const index = normalizeGranularSettingsIndex(data[GRANULAR_SETTINGS_INDEX_KEY]);
+      granularSettingsIndexCache = new Set(index);
+      granularSettingsMigrationSeen = data[GRANULAR_SETTINGS_MIGRATION_KEY] === true;
+      const granularKeys = index.map(granularSettingStorageKey);
+      const granular = !granularKeys.length || requested === null ? data : await chromeLocalGet(granularKeys);
+
+      const hadLegacy = Object.prototype.hasOwnProperty.call(data, "settings") && data.settings && typeof data.settings === "object";
+      const merged = hadLegacy ? { ...(data.settings || {}) } : {};
+      let granularFound = false;
+      for (const name of index) {
+        const key = granularSettingStorageKey(name);
+        if (!Object.prototype.hasOwnProperty.call(granular || {}, key)) continue;
+        merged[name] = granular[key];
+        granularFound = true;
+      }
+      if (hadLegacy || granularFound) data.settings = merged;
+      else delete data.settings;
+
+      for (const name of index) delete data[granularSettingStorageKey(name)];
+      if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_INDEX_KEY)) delete data[GRANULAR_SETTINGS_INDEX_KEY];
+      if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_MIGRATION_KEY)) delete data[GRANULAR_SETTINGS_MIGRATION_KEY];
+      if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_REVISION_KEY)) delete data[GRANULAR_SETTINGS_REVISION_KEY];
+      if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_LAST_BATCH_KEY)) delete data[GRANULAR_SETTINGS_LAST_BATCH_KEY];
+    }
+
+    if (largeSupported) Object.assign(data, largeData || {});
+    return finish({ ok: true, data, error: "" });
+  } catch (error) {
+    return finish({ ok: false, data: {}, error: error?.message || String(error || "Browser storage read failed") });
+  }
 }
 
 async function storageGet(keys) {
@@ -1635,17 +1670,37 @@ function expandSettingsStoragePayload(obj) {
   return payload;
 }
 
-function storageSet(obj) {
-  return rawStorageSet(expandSettingsStoragePayload(obj));
+async function storageSet(obj) {
+  const expanded = expandSettingsStoragePayload(obj);
+  const largeValues = {};
+  for (const key of LARGE_STORAGE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(expanded, key)) continue;
+    largeValues[key] = expanded[key];
+    delete expanded[key];
+  }
+
+  let largeOk = true;
+  if (Object.keys(largeValues).length) {
+    const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_SET", values: largeValues });
+    largeOk = !!response?.ok;
+    if (!largeOk) {
+      // Compatibility fallback for a mismatched/older background.
+      Object.assign(expanded, largeValues);
+      largeOk = true;
+    }
+  }
+  const localOk = Object.keys(expanded).length ? await rawStorageSet(expanded) : true;
+  return !!(largeOk && localOk);
 }
 
 async function storageRemove(keys) {
   const list = storageRequestedKeyList(keys) ?? [];
-  let expanded = [...list];
+  const largeKeys = list.filter(key => LARGE_STORAGE_KEYS.has(String(key || "")));
+  let expanded = list.filter(key => !LARGE_STORAGE_KEYS.has(String(key || "")));
   if (list.includes("settings")) {
     if (!granularSettingsIndexCache.size) {
       try {
-        const current = await new Promise(resolve => chrome.storage.local.get([GRANULAR_SETTINGS_INDEX_KEY], resolve));
+        const current = await chromeLocalGet([GRANULAR_SETTINGS_INDEX_KEY]);
         granularSettingsIndexCache = new Set(normalizeGranularSettingsIndex(current?.[GRANULAR_SETTINGS_INDEX_KEY]));
       } catch {}
     }
@@ -1658,18 +1713,29 @@ async function storageRemove(keys) {
       GRANULAR_SETTINGS_LAST_BATCH_KEY
     ])];
   }
-  return new Promise(resolve => {
-    try {
-      chrome.storage.local.remove(expanded, () => {
-        const ok = !chrome.runtime.lastError;
-        if (ok && list.includes("settings")) {
-          granularSettingsIndexCache.clear();
-          granularSettingsMigrationSeen = false;
-        }
-        resolve(ok);
-      });
-    } catch { resolve(false); }
-  });
+
+  let largeOk = true;
+  if (largeKeys.length) {
+    const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_REMOVE", keys: largeKeys });
+    largeOk = !!response?.ok;
+    if (!largeOk) {
+      expanded.push(...largeKeys);
+      largeOk = true;
+    }
+  }
+
+  let localOk = true;
+  if (expanded.length) {
+    localOk = await new Promise(resolve => {
+      try { chrome.storage.local.remove(expanded, () => resolve(!chrome.runtime.lastError)); }
+      catch { resolve(false); }
+    });
+  }
+  if (localOk && list.includes("settings")) {
+    granularSettingsIndexCache.clear();
+    granularSettingsMigrationSeen = false;
+  }
+  return !!(largeOk && localOk);
 }
 
 async function ensureGranularSettingsMigration(rawSettings) {
@@ -2111,6 +2177,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "customizeModelQuickMenu",
   "modelQuickFavoritesOnly",
   "hideNotifications",
+  "hideFeatureReleasePopups",
   "hideTabNotificationBadge",
   "autoReadNotifications",
   "hideTopBarLanguage",
@@ -4841,7 +4908,16 @@ function setActiveTab(tabName) {
   if (tabName === "bot-tools") loadCreatorBackupManager().catch(() => {});
   if (tabName === "control" && optionsDataLoaded) setupControlCenterView().catch(() => {});
   if (tabName === "account" && optionsDataLoaded) refreshAccountSyncUi().catch(() => {});
-  if (tabName === "data" && optionsDataLoaded) { refreshStorageUsage().catch(() => {}); renderLocalChangeHistory().catch(() => {}); }
+  if (tabName === "data" && optionsDataLoaded) {
+    refreshStorageUsage().catch(() => {});
+    renderLocalChangeHistory().catch(() => {});
+    refreshRecoverySnapshotStatus().catch(() => {});
+    initializeExportScopeSelection().catch(() => {});
+  }
+  if (tabName === "browser" && optionsDataLoaded) {
+    renderTabCleanupSessions().catch(() => {});
+    loadTabCleanupTopics().catch(() => {});
+  }
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
   if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);
@@ -8942,6 +9018,108 @@ function setupCreatorBackupManager() {
   if (activeOptionsTab() === "bot-tools") loadCreatorBackupManager().catch(() => {});
 }
 
+
+function shortBotCharacterId(value) {
+  const id = String(value || "").trim();
+  if (!BOT_ID_RE.test(id)) return id;
+  return `${id.slice(0, 8)}…${id.slice(-6)}`;
+}
+
+function botIdentityDisplay(idValue, creatorValue = "") {
+  const id = String(idValue || "").trim();
+  const creator = displayNormalizedSavedText(String(creatorValue || "").trim());
+  const shortId = shortBotCharacterId(id);
+  return creator ? `${creator} · ${shortId}` : `ID ${shortId}`;
+}
+
+function botSameNameCollisionIndex() {
+  // This index is presentation-only. Availability, cleanup, restore and archive
+  // state stay keyed by the exact character UUID; names are never used to join
+  // or transfer status between bots.
+  const availability = normalizeBotAvailability(botAvailabilityState).meta;
+  const archives = normalizeBotArchive(botArchiveState).meta;
+  const recovery = normalizeBotUnavailableRecovery(botUnavailableRecoveryState).meta;
+  const groups = new Map();
+  const ids = new Set([
+    ...Object.keys(availability || {}),
+    ...Object.keys(archives || {}),
+    ...Object.keys(recovery || {})
+  ]);
+
+  const normalizeName = value => String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  for (const id of ids) {
+    if (!BOT_ID_RE.test(id)) continue;
+    const status = availability[id] || {};
+    const archive = archives[id] || {};
+    const recovered = recovery[id] || {};
+    const fields = archive.fields || {};
+    const name = cleanAuthoritativeBotName(status.name, id)
+      || cleanAuthoritativeBotName(fields.name, id)
+      || cleanAuthoritativeBotName(archive.name, id)
+      || cleanAuthoritativeBotName(recovered.name, id)
+      || "";
+    const key = normalizeName(name);
+    if (key.length < 2) continue;
+    const creator = canonicalBotCreator(
+      status.creator || archive.creator || fields.creator || recovered.creator || ""
+    );
+    const deletedRecovery = String(status.status || "") === "unavailable" && !!archives[id];
+    const item = {
+      id,
+      name,
+      creator,
+      status: String(status.status || "unknown"),
+      checkedAt: Number(status.checkedAt || 0),
+      deletedRecovery,
+      sectionLabel: deletedRecovery
+        ? "Deleted / recovery"
+        : (String(status.status || "") === "available"
+            ? "Available"
+            : (String(status.status || "") === "restricted"
+                ? "Private / restricted"
+                : "Saved / status"))
+    };
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+
+  const byId = new Map();
+  for (const group of groups.values()) {
+    const unique = group.filter((item, index, list) => list.findIndex(other => other.id === item.id) === index);
+    if (unique.length < 2) continue;
+    for (const item of unique) {
+      byId.set(item.id, unique.filter(other => other.id !== item.id));
+    }
+  }
+  return byId;
+}
+
+function appendSameNameCollisionInfo(main, badgeRow, entry) {
+  const matches = Array.isArray(entry?.sameNameMatches) ? entry.sameNameMatches.filter(match => match?.id && match.id !== entry.id) : [];
+  if (!matches.length) return;
+
+  badgeRow?.appendChild(makeElement("span", {
+    className: "bot-update-badge",
+    text: "Different bot with same name",
+    dataset: { status: "current" }
+  }));
+
+  const visible = matches.slice(0, 3).map(match => {
+    const creator = displayNormalizedSavedText(match.creator || "Unknown creator");
+    return `${creator} · ${shortBotCharacterId(match.id)} · ${match.sectionLabel || botAvailabilityStatusLabel(match.status)}`;
+  });
+  const extra = matches.length > visible.length ? ` · +${matches.length - visible.length} more` : "";
+  main.appendChild(makeElement("div", {
+    className: "bot-availability-meta",
+    text: `Same-name bot${matches.length === 1 ? "" : "s"}: ${visible.join(" · ")}${extra}`
+  }));
+}
+
 function botAvailabilityCard(entry) {
   const card = makeElement("div", { className: "bot-manager-card", dataset: { id: entry.id } });
   const cardImage = canonicalBotImage(entry.image || entry.archive?.image || entry.archive?.fields?.image || "");
@@ -8953,8 +9131,12 @@ function botAvailabilityCard(entry) {
 
   const main = makeElement("div", { className: "bot-manager-main" });
   main.appendChild(makeElement("div", { className: "bot-manager-title", text: displayNormalizedSavedText(entry.name || entry.id || "Unknown bot") }));
-  if (entry.creator) main.appendChild(makeElement("div", { className: "bot-manager-creator", text: displayNormalizedSavedText(entry.creator) }));
-  main.appendChild(makeElement("div", { className: "bot-manager-id", text: entry.id }));
+  main.appendChild(makeElement("div", {
+    className: "bot-manager-creator",
+    text: botIdentityDisplay(entry.id, entry.creator),
+    attrs: { title: `Character ID: ${entry.id}` }
+  }));
+  main.appendChild(makeElement("div", { className: "bot-manager-id", text: `Character ID: ${entry.id}` }));
 
   const badgeRow = makeElement("div", { className: "bot-status-badges" });
   badgeRow.appendChild(makeElement("span", {
@@ -8982,6 +9164,7 @@ function botAvailabilityCard(entry) {
     }));
   }
   main.appendChild(badgeRow);
+  appendSameNameCollisionInfo(main, badgeRow, entry);
 
   const sources = (entry.sources || []).map(availabilitySourceLabel).filter(Boolean).join(", ");
   const checked = entry.checkedAt ? new Date(entry.checkedAt).toLocaleString() : "never";
@@ -9017,9 +9200,12 @@ function botAvailabilityCard(entry) {
 }
 
 function renderBotAvailability(renderOptions = {}) {
+  const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
+    ? renderOptions.sameNameCollisions
+    : botSameNameCollisionIndex();
   if (!renderOptions?.skipRecoveryRerender) {
-    renderSavedBotInfo();
-    renderDeletedSavedBots();
+    renderSavedBotInfo({ sameNameCollisions });
+    renderDeletedSavedBots({ sameNameCollisions });
   }
   const host = $("botAvailabilityManager");
   if (!host) return;
@@ -9031,7 +9217,8 @@ function renderBotAvailability(renderOptions = {}) {
   const duplicates = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? botDuplicateMatchesCache
     : new Map();
-  const entries = botAvailabilityEntries(base, duplicates);
+  const entries = botAvailabilityEntries(base, duplicates)
+    .map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
   const duplicateBots = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? [...duplicates.values()].filter(matches => matches.length).length
     : null;
@@ -9249,6 +9436,34 @@ async function waitForBotStatusPace(delayMs) {
   // timer throttling cannot stretch a ~1s scan delay into multi-minute gaps.
   await new Promise(resolve => setTimeout(resolve, waitMs));
   return false;
+}
+
+async function waitForRecommendationPace(delayMs) {
+  const waitMs = Math.max(0, Math.min(30000, Math.round(Number(delayMs || 0))));
+  if (!waitMs) return true;
+  try {
+    const response = await runtimeMessage({ type: "DS_RECOMMENDATION_PACE_WAIT", delayMs: waitMs });
+    if (response?.ok) return true;
+  } catch {}
+  // Compatibility fallback only. Retry/backoff waits are intentionally kept
+  // conservative even on older/mismatched backgrounds.
+  await new Promise(resolve => setTimeout(resolve, waitMs));
+  return false;
+}
+
+async function waitForRecommendationSteadyPace(delayMs) {
+  const waitMs = Math.max(0, Math.min(30000, Math.round(Number(delayMs || 0))));
+  if (!waitMs) return true;
+
+  // v0.2.29 hotfix: Chromium can delay *the hidden Options continuation itself*
+  // for several minutes even when the timer was moved into the service worker.
+  // A bulk queue already serializes on a real network response, so when Settings
+  // is backgrounded we use request/response time as the steady-state pacing and
+  // reserve explicit waits for retries/throttle backoff. This removes the
+  // observed 6-8 minute gaps without turning failures into rapid retries.
+  if (document.hidden || (typeof document.hasFocus === "function" && !document.hasFocus())) return true;
+
+  return waitForRecommendationPace(waitMs);
 }
 
 function sortBotStatusRefreshQueue(entries, availability, archives) {
@@ -9931,13 +10146,16 @@ async function cleanConfirmedUnavailableBots() {
 
 const savedBotInfoUiState = { query: "", visible: 20, collapsed: true };
 
-function renderSavedBotInfo() {
+function renderSavedBotInfo(renderOptions = {}) {
   const host = $("savedBotInfoManager");
   if (!host) return;
   const query = String($("savedBotInfoSearch")?.value || savedBotInfoUiState.query || "").toLowerCase().replace(/\s+/g, " ").trim();
   savedBotInfoUiState.query = query;
   const archives = normalizeBotArchive(botArchiveState).meta;
   const availability = normalizeBotAvailability(botAvailabilityState).meta;
+  const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
+    ? renderOptions.sameNameCollisions
+    : botSameNameCollisionIndex();
   const blockedIds = new Set(normalizeBotStore(blockedState).ids);
   const visibleArchives = Object.values(archives).filter(archive => !blockedIds.has(archive.id));
   const items = visibleArchives
@@ -9986,7 +10204,8 @@ function renderSavedBotInfo() {
       updateStatus: status?.updateStatus || "current",
       changedFields: status?.changedFields || [],
       archive,
-      duplicateMatches: []
+      duplicateMatches: [],
+      sameNameMatches: sameNameCollisions.get(archive.id) || []
     };
     const card = botAvailabilityCard(entry);
     card.querySelector(".bot-availability-recheck")?.remove();
@@ -10064,14 +10283,19 @@ function deletedSavedBotCard(entry) {
   const recoveryName = cleanAuthoritativeBotName(fields.name, entry.id) || cleanAuthoritativeBotName(archive?.name, entry.id) || cleanAuthoritativeBotName(entry.name, entry.id) || bestKnownBotName(entry.id, "") || "Unknown bot";
   main.appendChild(makeElement("div", { className: "bot-manager-title", text: displayNormalizedSavedText(recoveryName) }));
   const creator = archive?.creator || fields.creator || entry.creator || "";
-  if (creator) main.appendChild(makeElement("div", { className: "bot-manager-creator", text: displayNormalizedSavedText(creator) }));
-  main.appendChild(makeElement("div", { className: "bot-manager-id", text: entry.id }));
+  main.appendChild(makeElement("div", {
+    className: "bot-manager-creator",
+    text: botIdentityDisplay(entry.id, creator),
+    attrs: { title: `Character ID: ${entry.id}` }
+  }));
+  main.appendChild(makeElement("div", { className: "bot-manager-id", text: `Character ID: ${entry.id}` }));
 
   const badges = makeElement("div", { className: "bot-status-badges" });
   badges.appendChild(makeElement("span", { className: "bot-availability-status", text: "Unavailable / deleted", dataset: { status: "unavailable" } }));
   const count = archive?.coverage?.length || 0;
   badges.appendChild(makeElement("span", { className: "bot-update-badge", text: `Recovery copy · ${count} field${count === 1 ? "" : "s"}`, dataset: { status: "current" } }));
   main.appendChild(badges);
+  appendSameNameCollisionInfo(main, badges, entry);
 
   const meta = [];
   if (archive?.lastAvailableAt) meta.push(`Last available: ${new Date(archive.lastAvailableAt).toLocaleString()}`);
@@ -10107,10 +10331,14 @@ function deletedSavedBotCard(entry) {
   return card;
 }
 
-function renderDeletedSavedBots() {
+function renderDeletedSavedBots(renderOptions = {}) {
   const host = $("deletedSavedBotManager");
   if (!host) return;
-  const all = deletedSavedBotEntries();
+  const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
+    ? renderOptions.sameNameCollisions
+    : botSameNameCollisionIndex();
+  const all = deletedSavedBotEntries()
+    .map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
   const archives = normalizeBotArchive(botArchiveState).meta;
   const totalRecoverable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
     .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id]).length;
@@ -12299,17 +12527,42 @@ function blockedQuickLessLikeCounts() {
   };
 }
 
+function updateBlockedLessLikeActionState() {
+  const button = $("bulkLessLikeBlockedBots");
+  if (!button || blockedBulkLessLikeRunning) return;
+  const counts = blockedQuickLessLikeCounts();
+
+  if (!counts.total) {
+    button.textContent = "No blocked bots to process";
+    button.disabled = true;
+    button.title = "No blocked bot IDs are currently saved.";
+    return;
+  }
+
+  if (!counts.remaining) {
+    button.textContent = `All ${counts.total} blocked bots handled`;
+    button.disabled = true;
+    button.title = "Every currently blocked bot ID already has Stop recommending history.";
+    return;
+  }
+
+  button.textContent = "Stop recommending remaining blocked bots";
+  button.disabled = false;
+  button.title = `${counts.remaining} blocked bot${counts.remaining === 1 ? "" : "s"} still need Stop recommending.`;
+}
+
 function updateBlockedLessLikeStatus(text = "") {
   const status = $("blockedBotLessLikeStatus");
   if (!status) return;
   const counts = blockedQuickLessLikeCounts();
-  const next = text || `${counts.handled} handled · ${counts.remaining} remaining`;
+  const next = text || `${counts.handled}/${counts.total} total handled · ${counts.remaining} remaining`;
   if (status.textContent !== next) status.textContent = next;
   const shared = $("blockedBotNameOnlyStatus");
   if (shared) {
     const label = counts.nameOnly ? `${counts.nameOnly} name-only skipped` : "";
     if (shared.textContent !== label) shared.textContent = label;
   }
+  updateBlockedLessLikeActionState();
 }
 
 function optionsLooksMobile() {
@@ -12671,6 +12924,18 @@ function quickLessLikeFailureMeta(response) {
   };
 }
 
+function quickLessLikeFailureSummary(meta) {
+  const status = String(meta?.status || "").trim();
+  const stage = String(meta?.stage || "").trim();
+  const reason = String(meta?.reason || "").trim();
+  const bits = [];
+  if (status) bits.push(status);
+  if (stage && stage !== status) bits.push(stage);
+  let text = bits.join("/");
+  if (reason) text += `${text ? " — " : ""}${reason.slice(0, 140)}`;
+  return text || "unknown Less Like failure";
+}
+
 function quickLessLikeHttpStatuses(response) {
   return [
     Number(response?.ratingHttpStatus || 0) || 0,
@@ -12866,6 +13131,7 @@ function renderQuickLessLikeJobStats(stats, pacing, { force = false, note = "" }
   const perItemMs = queuePosition > 0 ? elapsedMs / queuePosition : 0;
   const etaMs = queuePosition >= 3 && perItemMs > 0 ? remaining * perItemMs : 0;
   const duplicateText = Number(stats.duplicates || 0) ? ` (${stats.duplicates} dup)` : "";
+  const overall = blockedQuickLessLikeCounts();
   const parts = [
     `${queuePosition}/${total} queue`,
     `${Number(stats.attempted || 0)} attempted`,
@@ -12873,6 +13139,8 @@ function renderQuickLessLikeJobStats(stats, pacing, { force = false, note = "" }
     `${Number(stats.failed || 0)} failed`,
     `${Number(stats.retried || 0)} retried`,
     `${Number(stats.skipped || 0)} skipped${duplicateText}`,
+    `${overall.handled}/${overall.total} total handled`,
+    `${overall.remaining} total remaining`,
     `${formatQuickLessLikeDuration(elapsedMs)} elapsed`,
     etaMs ? `ETA ${formatQuickLessLikeDuration(etaMs)}` : "ETA —",
     `${Math.round(Number(pacing?.intervalMs || 0))} ms interval`,
@@ -13158,19 +13426,18 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     const helperReady = await runtimeMessage({ type: "DS_QUICK_LESS_LIKE_PREPARE_BULK", bulkRunId: runId, jobId });
     const helperReadyMs = Math.max(0, (performance.now?.() || Date.now()) - helperPrepareStartedAt);
     lessLikeFeedbackTabId = Number(helperReady?.tabId || 0);
-    const nativeFallback = helperReady?.fallback === true;
-    if (!helperReady?.ready && !nativeFallback) {
+    if (!helperReady?.ready) {
       blockedBulkLessLikeStopRequested = true;
       await checkpoint({ force: true, status: "paused", currentId: "", nextIndex: 0, stopRequested: true });
       const helperStatus = String(helperReady?.status || "recommendation-worker-not-ready");
       updateBlockedLessLikeStatus(helperStatus === "recommendation-worker-closed"
         ? "Stop recommending paused: the recommendation helper tab was closed. Click Resume to recreate it."
-        : "Stop recommending paused: SpicyChat Home could not start a usable helper. Click Resume to try again.");
+        : "Stop recommending paused: SpicyChat Home did not expose a ready recommendation/auth context. Click Resume to try the helper again.");
       return;
     }
 
-    pacing.state = nativeFallback ? "native Less Like fallback" : "adaptive warm-up";
-    renderQuickLessLikeJobStats(stats, pacing, { force: true, note: nativeFallback ? "Native Less Like fallback ready" : "Recommendation helper ready" });
+    pacing.state = "adaptive warm-up";
+    renderQuickLessLikeJobStats(stats, pacing, { force: true, note: "Recommendation helper ready" });
     if (lessLikeFeedbackTabId) {
       await runtimeMessage({
         type: "DS_QUICK_LESS_LIKE_RUN_TIMING",
@@ -13244,12 +13511,12 @@ async function runBlockedBulkLessLike(mode = "remaining") {
         jobId
       }, name || id, pacing, stats);
 
-      if (!response?.fallbackAttempted && ["recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-wrong-page", "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error"].includes(String(response?.status || ""))) {
+      if (["recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-wrong-page", "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error"].includes(String(response?.status || ""))) {
         blockedBulkLessLikeStopRequested = true;
         await checkpoint({ force: true, status: "paused", currentId: "", nextIndex: index, stopRequested: true });
         updateBlockedLessLikeStatus(response?.status === "recommendation-worker-closed"
-          ? "Stop recommending paused: the helper tab was closed. Click Resume to recreate it."
-          : "Stop recommending paused: neither the API helper nor native fallback became usable. Click Resume to try again.");
+          ? "Stop recommending paused: the recommendation helper tab was closed. Click Resume to recreate it."
+          : "Stop recommending paused: the recommendation helper is not ready. Click Resume to reload SpicyChat Home and continue.");
         break;
       }
       if (response?.status === "spicychat-tab-required") {
@@ -13457,9 +13724,9 @@ async function runBlockedBulkLessLike(mode = "remaining") {
       skipped: Number(stats?.skipped || 0),
       pacing: snapshotQuickLessLikePacing(pacing)
     });
-    if (button) button.textContent = "Stop recommending remaining blocked bots";
     if (clearButton) clearButton.disabled = false;
     renderBotManager("blocked");
+    updateBlockedLessLikeActionState();
     if (stats && pacing) renderQuickLessLikeJobStats(stats, pacing, { force: true, note: stopped ? "Paused" : "Finished" });
     else updateBlockedLessLikeStatus();
     if (candidates.length) {
@@ -14830,6 +15097,7 @@ async function load() {
   setValue("modelFavoriteNames", settings.modelFavoriteNames || "");
   setValue("modelHiddenNames", settings.modelHiddenNames || "");
   setChecked("hideNotifications", settings.hideNotifications);
+  setChecked("hideFeatureReleasePopups", !!settings.hideFeatureReleasePopups);
   setChecked("hideTabNotificationBadge", !!settings.hideTabNotificationBadge);
   setChecked("autoReadNotifications", settings.autoReadNotifications);
 
@@ -14985,6 +15253,7 @@ async function load() {
   setChecked("replaceChatImageWithOocButton", !!settings.replaceChatImageWithOocButton);
   setChecked("showAsteriskButton", !!settings.showAsteriskButton);
   setValue("composerShortcutPlacement", ["inside-right", "outside-left", "outside-right"].includes(settings.composerShortcutPlacement) ? settings.composerShortcutPlacement : "inside-right");
+  setValue("chatEnterKeyBehavior", ["site-default", "send", "newline"].includes(settings.chatEnterKeyBehavior) ? settings.chatEnterKeyBehavior : "site-default");
   setChecked("autoPairAsterisks", !!settings.autoPairAsterisks);
   setChecked("showFormattingToolbar", !!settings.showFormattingToolbar);
   setChecked("formatToolbarAsterisk", settings.formatToolbarAsterisk !== false);
@@ -15347,23 +15616,28 @@ async function load() {
   updateBlockedBulkResumeControls();
   updateSettingDependencies();
   refreshPlatformCompatibilityUi(settings);
-  await refreshAccountSyncUi();
   DS_FEATURE_INDEX_REFRESH?.();
   await applyPendingOptionsNavigation(result[PENDING_OPTIONS_NAV_KEY]);
   const activeTab = activeOptionsTab();
   renderHeavyManagersForTab(activeTab);
-  if (activeTab === "data") { refreshStorageUsage().catch(() => {}); renderLocalChangeHistory().catch(() => {}); }
+  if (activeTab === "data") {
+    refreshStorageUsage().catch(() => {});
+    renderLocalChangeHistory().catch(() => {});
+    refreshRecoverySnapshotStatus().catch(() => {});
+    initializeExportScopeSelection().catch(() => {});
+  }
+  if (activeTab === "browser") {
+    renderTabCleanupSessions().catch(() => {});
+    loadTabCleanupTopics().catch(() => {});
+  }
   if (activeTab === "control") setupControlCenterView().catch(() => {});
   if (activeTab === "account") refreshAccountSyncUi().catch(() => {});
   if (activeTab === "changelog") loadChangelog();
   renderMiniPanelPreview();
   applyFeatureChangeBadges(String(result[LAST_SEEN_VERSION_KEY] || ""));
-  renderTabCleanupSessions().catch(() => {});
-  loadTabCleanupTopics().catch(() => {});
   applySettingsSectionDefault(settings);
   applySettingsEnabledOnlyFilter();
   refreshSettingsSectionShortcuts();
-  initializeExportScopeSelection().catch(() => {});
 
   dirtySavedStores.clear();
   setAutosaveStatus("Saved automatically", "saved");
@@ -15490,6 +15764,7 @@ function readSettingsFromPage() {
     modelFavoriteNames: value("modelFavoriteNames", ""),
     modelHiddenNames: value("modelHiddenNames", ""),
     hideNotifications: checked("hideNotifications"),
+    hideFeatureReleasePopups: checked("hideFeatureReleasePopups"),
     hideTabNotificationBadge: checked("hideTabNotificationBadge"),
     autoReadNotifications: checked("autoReadNotifications"),
 
@@ -15630,6 +15905,7 @@ function readSettingsFromPage() {
     replaceChatImageWithOocButton: checked("replaceChatImageWithOocButton"),
     showAsteriskButton: checked("showAsteriskButton"),
     composerShortcutPlacement: ["inside-right", "outside-left", "outside-right"].includes(value("composerShortcutPlacement")) ? value("composerShortcutPlacement") : "inside-right",
+    chatEnterKeyBehavior: ["site-default", "send", "newline"].includes(value("chatEnterKeyBehavior")) ? value("chatEnterKeyBehavior") : "site-default",
     autoPairAsterisks: checked("autoPairAsterisks"),
     showFormattingToolbar: checked("showFormattingToolbar"),
     formatToolbarAsterisk: checked("formatToolbarAsterisk", true),
@@ -16115,6 +16391,7 @@ function readSingleSettingFromPage(settingKey) {
     case "modelFavoriteNames": return (value("modelFavoriteNames", ""));
     case "modelHiddenNames": return (value("modelHiddenNames", ""));
     case "hideNotifications": return (checked("hideNotifications"));
+    case "hideFeatureReleasePopups": return (checked("hideFeatureReleasePopups"));
     case "hideTabNotificationBadge": return (checked("hideTabNotificationBadge"));
     case "autoReadNotifications": return (checked("autoReadNotifications"));
     case "hideTopBarLanguage": return (checked("hideTopBarLanguage"));
@@ -16248,6 +16525,7 @@ function readSingleSettingFromPage(settingKey) {
     case "replaceChatImageWithOocButton": return (checked("replaceChatImageWithOocButton"));
     case "showAsteriskButton": return (checked("showAsteriskButton"));
     case "composerShortcutPlacement": return (["inside-right", "outside-left", "outside-right"].includes(value("composerShortcutPlacement")) ? value("composerShortcutPlacement") : "inside-right");
+    case "chatEnterKeyBehavior": return (["site-default", "send", "newline"].includes(value("chatEnterKeyBehavior")) ? value("chatEnterKeyBehavior") : "site-default");
     case "autoPairAsterisks": return (checked("autoPairAsterisks"));
     case "showFormattingToolbar": return (checked("showFormattingToolbar"));
     case "formatToolbarAsterisk": return (checked("formatToolbarAsterisk", true));
@@ -17916,20 +18194,64 @@ function normalizeRecoverySnapshot(value) {
   };
 }
 
+function recoverySnapshotMetaFromSnapshot(snapshot) {
+  const normalized = normalizeRecoverySnapshot(snapshot);
+  if (!normalized) return null;
+  return {
+    version: 1,
+    createdAt: normalized.createdAt,
+    reason: normalized.reason,
+    extensionVersion: normalized.extensionVersion,
+    scopes: [...normalized.scopes]
+  };
+}
+
+function normalizeRecoverySnapshotMeta(value) {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const createdAt = Number(raw.createdAt) || 0;
+  if (!createdAt && !raw.reason && !Array.isArray(raw.scopes)) return null;
+  return {
+    version: 1,
+    createdAt,
+    reason: String(raw.reason || "recovery snapshot"),
+    extensionVersion: String(raw.extensionVersion || ""),
+    scopes: Array.isArray(raw.scopes) ? raw.scopes.map(String) : [],
+    legacy: !!raw.legacy,
+    bytes: Math.max(0, Number(raw.bytes) || 0)
+  };
+}
+
+async function readRecoverySnapshotMeta() {
+  const result = await storageGet([RECOVERY_SNAPSHOT_META_KEY]);
+  const meta = normalizeRecoverySnapshotMeta(result[RECOVERY_SNAPSHOT_META_KEY]);
+  if (meta) return meta;
+
+  // Older snapshots can be tens of megabytes. Detect their presence from byte
+  // usage instead of deserializing the whole backup just to draw a status line.
+  const bytes = Number(await storageBytesInUse(RECOVERY_SNAPSHOT_KEY));
+  if (Number.isFinite(bytes) && bytes > 0) {
+    return { version: 1, createdAt: 0, reason: "legacy recovery snapshot", extensionVersion: "", scopes: [], legacy: true, bytes };
+  }
+  return null;
+}
+
 async function refreshRecoverySnapshotStatus() {
   const host = $("recoverySnapshotStatus");
   if (!host) return;
-  const result = await storageGet([RECOVERY_SNAPSHOT_KEY]);
-  const snapshot = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]);
-  if (!snapshot) {
+  const meta = await readRecoverySnapshotMeta();
+  if (!meta) {
     host.textContent = "No local recovery snapshot saved yet.";
     return;
   }
-  const when = snapshot.createdAt ? new Date(snapshot.createdAt).toLocaleString() : "unknown time";
-  const mediaNote = snapshot.scopes.includes("localMedia")
+  if (meta.legacy && !meta.createdAt) {
+    host.textContent = `Recovery snapshot available${meta.bytes ? ` · ${formatControlBytes(meta.bytes)}` : ""}. Details load only when you choose Load last snapshot, so Settings does not deserialize the full backup at startup.`;
+    return;
+  }
+  const when = meta.createdAt ? new Date(meta.createdAt).toLocaleString() : "unknown time";
+  const mediaNote = meta.scopes.includes("localMedia")
     ? " Local media was included because that category was part of the protected action."
     : " Local media bytes are not included.";
-  host.textContent = `Last snapshot: ${when} · ${snapshot.reason}.${mediaNote} API keys/webhook URLs are never copied.`;
+  host.textContent = `Last snapshot: ${when} · ${meta.reason}.${mediaNote} API keys/webhook URLs are never copied.`;
 }
 
 let pendingImportSafetyDownload = null;
@@ -17967,6 +18289,8 @@ async function createRecoverySnapshot(reason = "manual", sourceData = null, scop
     error.code = "RECOVERY_SNAPSHOT_FAILED";
     throw error;
   }
+  const meta = recoverySnapshotMetaFromSnapshot(snapshot);
+  if (meta) await storageSet({ [RECOVERY_SNAPSHOT_META_KEY]: meta });
   await refreshRecoverySnapshotStatus();
   return snapshot;
 }
@@ -17984,6 +18308,8 @@ async function loadRecoverySnapshotIntoImport() {
   const result = await storageGet([RECOVERY_SNAPSHOT_KEY]);
   const snapshot = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]);
   if (!snapshot) { showSettingsToast("No recovery snapshot is available."); return; }
+  const meta = recoverySnapshotMetaFromSnapshot(snapshot);
+  if (meta) await storageSet({ [RECOVERY_SNAPSHOT_META_KEY]: meta });
   const box = $("settingsJson");
   if (box) box.value = JSON.stringify(snapshot.backup, null, 2);
   pendingImportPayload = null;
@@ -17997,7 +18323,7 @@ async function loadRecoverySnapshotIntoImport() {
 
 async function clearRecoverySnapshot() {
   if (!confirm("Clear the saved local recovery snapshot? This does not change your current QoL data.")) return;
-  const removed = await storageRemoveVerified(RECOVERY_SNAPSHOT_KEY);
+  const removed = await storageRemoveVerified([RECOVERY_SNAPSHOT_KEY, RECOVERY_SNAPSHOT_META_KEY]);
   await refreshRecoverySnapshotStatus();
   showSettingsToast(removed ? "Recovery snapshot cleared." : "Recovery snapshot could not be cleared or verified.");
 }
@@ -19414,26 +19740,40 @@ async function renderCreatorWorkspace() {
   }));
 }
 
-async function collectDataHealth() {
-  const keys = [...new Set([...BACKUP_STORAGE_KEYS, RECOVERY_SNAPSHOT_KEY, CHATBOT_LOREBOOK_LINKS_KEY, LOCAL_CHANGE_HISTORY_KEY, CARD_TOKEN_CACHE_KEY])];
-  const checked = await storageGetChecked(keys);
+async function collectDataHealth({ lightweight = false } = {}) {
+  const backupKeys = lightweight
+    ? BACKUP_STORAGE_KEYS.filter(key => !LARGE_STORAGE_KEYS.has(key) && ![SOUNDSCAPE_AUDIO_KEY, CHAT_BACKGROUNDS_KEY].includes(key))
+    : BACKUP_STORAGE_KEYS;
+  const keys = [...new Set([...backupKeys, RECOVERY_SNAPSHOT_META_KEY, CHATBOT_LOREBOOK_LINKS_KEY, LOCAL_CHANGE_HISTORY_KEY, CARD_TOKEN_CACHE_KEY])];
+  const [checked, totalBytes, largeStats] = await Promise.all([
+    storageGetChecked(keys),
+    storageBytesInUse(null),
+    readLargeStorageStats().catch(() => ({}))
+  ]);
   const rows = [];
   if (!checked.ok) return { ok: false, rows: [{ state: "bad", label: "Browser storage", detail: checked.error || "Could not read local storage." }], summaryText: `Browser storage read failed: ${checked.error || "unknown error"}` };
   const result = checked.data;
-  const totalBytes = await storageBytesInUse(null);
-  rows.push({ state: "ok", label: "Browser storage", detail: `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} used` : ""}.` });
+  rows.push({ state: "ok", label: "Browser storage", detail: `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} in chrome.storage.local` : ""}.` });
+  rows.push({ state: "ok", label: "Large-data IndexedDB", detail: `${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records.` });
 
-  try {
-    const payload = buildExportPayload(new Set(LIGHTWEIGHT_BACKUP_SCOPE_IDS), result);
-    const roundTrip = JSON.parse(JSON.stringify(payload));
-    const validation = validateBackupObject(roundTrip);
-    rows.push({ state: validation.ok ? "ok" : "bad", label: "Backup schema", detail: validation.ok ? `Current local data produces a valid schema v${BACKUP_FORMAT_VERSION} backup.` : validation.warnings.join(" · ") });
-  } catch (error) {
-    rows.push({ state: "bad", label: "Backup schema", detail: error?.message || String(error) });
+  if (lightweight) {
+    rows.push({ state: "ok", label: "Backup schema", detail: `Schema v${BACKUP_FORMAT_VERSION} supported; the combined support report skips the expensive full backup round-trip.` });
+  } else {
+    try {
+      const payload = buildExportPayload(new Set(LIGHTWEIGHT_BACKUP_SCOPE_IDS), result);
+      const roundTrip = JSON.parse(JSON.stringify(payload));
+      const validation = validateBackupObject(roundTrip);
+      rows.push({ state: validation.ok ? "ok" : "bad", label: "Backup schema", detail: validation.ok ? `Current local data produces a valid schema v${BACKUP_FORMAT_VERSION} backup.` : validation.warnings.join(" · ") });
+    } catch (error) {
+      rows.push({ state: "bad", label: "Backup schema", detail: error?.message || String(error) });
+    }
   }
 
-  const snapshot = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]);
-  rows.push({ state: "ok", label: "Recovery snapshot", detail: snapshot ? `Available from ${creatorBackupDate(snapshot.createdAt)} (${snapshot.reason || "manual snapshot"}).` : "None saved. This is normal until a protected import/cleanup or manual snapshot creates one." });
+  let snapshotMeta = normalizeRecoverySnapshotMeta(result[RECOVERY_SNAPSHOT_META_KEY]);
+  if (!snapshotMeta) snapshotMeta = await readRecoverySnapshotMeta().catch(() => null);
+  rows.push({ state: "ok", label: "Recovery snapshot", detail: snapshotMeta
+    ? (snapshotMeta.createdAt ? `Available from ${creatorBackupDate(snapshotMeta.createdAt)} (${snapshotMeta.reason || "manual snapshot"}).` : "Available (legacy snapshot; details load on demand).")
+    : "None saved. This is normal until a protected import/cleanup or manual snapshot creates one." });
 
   let cleanupCandidates = 0;
   const opened = uniqueClean(result[OPENED_KEY] || []);
@@ -19445,11 +19785,17 @@ async function collectDataHealth() {
   }
   rows.push({ state: cleanupCandidates ? "warn" : "ok", label: "Supported orphan check", detail: cleanupCandidates ? `${cleanupCandidates} orphaned metadata record${cleanupCandidates === 1 ? "" : "s"} can be reviewed/cleaned in Data & Backup.` : "No supported orphaned metadata records found." });
 
-  const botArchive = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
-  const badArchives = Object.values(botArchive.meta).filter(bot => !bot.coverage?.length).length;
   const lorebooks = normalizeLorebookBackups(result[LOREBOOK_BACKUPS_KEY]);
   const badLorebookEntries = Object.values(lorebooks.meta).reduce((n, book) => n + Object.values(book.entries || {}).filter(entry => !entry.name).length, 0);
-  rows.push({ state: badArchives || badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badArchives || badLorebookEntries ? `${badArchives} empty bot archive${badArchives === 1 ? "" : "s"}; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.` : `${Object.keys(botArchive.meta).length} bot copies and ${Object.keys(lorebooks.meta).length} Lorebook backups normalize cleanly.` });
+  if (lightweight) {
+    rows.push({ state: badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badLorebookEntries
+      ? `${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} bot copies in IndexedDB; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.`
+      : `${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} bot copies in IndexedDB and ${Object.keys(lorebooks.meta).length} Lorebook backups; deep bot-copy validation is skipped in the combined support report.` });
+  } else {
+    const botArchive = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
+    const badArchives = Object.values(botArchive.meta).filter(bot => !bot.coverage?.length).length;
+    rows.push({ state: badArchives || badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badArchives || badLorebookEntries ? `${badArchives} empty bot archive${badArchives === 1 ? "" : "s"}; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.` : `${Object.keys(botArchive.meta).length} bot copies and ${Object.keys(lorebooks.meta).length} Lorebook backups normalize cleanly.` });
+  }
 
   if (Number.isFinite(totalBytes) && totalBytes > 20 * 1024 * 1024) rows.push({ state: "warn", label: "Storage size", detail: `QoL is using ${formatControlBytes(totalBytes)}. Use the breakdown below before deleting anything.` });
   const warnings = rows.filter(row => row.state === "warn").length;
@@ -19583,7 +19929,7 @@ async function comparePerformanceBaseline({ returnText = false } = {}) {
   const sameFamily = !!baseline.pageFamily && baseline.pageFamily === current.pageFamily;
   const durationRatio = baselineSeconds && currentSeconds ? Math.max(baselineSeconds, currentSeconds) / Math.max(1, Math.min(baselineSeconds, currentSeconds)) : Infinity;
   if (!baseline.pageFamily || !baselineSeconds) {
-    const text = "The saved baseline is from the older comparison format. Save a new performance baseline first.";
+    const text = "The saved baseline uses the older comparison format. This is expected once after the comparison update: save a new performance baseline now, then compare again after using the same page type for a similar amount of time.";
     if (!returnText) { const status = $("controlSupportStatus"); if (status) status.textContent = text; }
     return text;
   }
@@ -19742,35 +20088,36 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building diagnostic info...";
 
-  const result = await storageGet([
-    "settings",
-    OPENED_KEY,
-    BLOCKED_BOTS_KEY,
-    NOT_INTERESTED_KEY,
-    FAVORITE_CREATORS_KEY,
-    FOLLOWED_CREATORS_KEY,
-    FAVORITE_BOTS_KEY,
-    LATER_BOTS_KEY,
-    BOT_ORGANIZER_KEY,
-    CHAT_ORGANIZER_KEY,
-    BOT_AVAILABILITY_KEY,
-    BOT_ARCHIVE_KEY,
-    PERSONAS_KEY,
-    LEGACY_PERSONAS_KEY,
-    PERSONA_ORG_KEY,
-    OOC_TEMPLATES_KEY,
-    GENERATION_PROFILES_KEY,
-    SMART_FILTER_PRESETS_KEY,
-    SMART_FILTER_PINNED_KEY,
-    BOT_EDITOR_DRAFT_HISTORY_KEY,
-    CHAT_BOOKMARKS_KEY,
-    RECOVERY_SNAPSHOT_KEY,
-    SAI_TOOLKIT_PRESENCE_KEY,
-    SPICYCHAT_BETA_CAPABILITIES_KEY,
-    "cardTokenFetchDiagnosticsV1"
+  const [result, context, bytes, largeStorageStats, recoverySnapshotMeta] = await Promise.all([
+    storageGet([
+      "settings",
+      OPENED_KEY,
+      BLOCKED_BOTS_KEY,
+      NOT_INTERESTED_KEY,
+      FAVORITE_CREATORS_KEY,
+      FOLLOWED_CREATORS_KEY,
+      FAVORITE_BOTS_KEY,
+      LATER_BOTS_KEY,
+      BOT_ORGANIZER_KEY,
+      CHAT_ORGANIZER_KEY,
+      PERSONAS_KEY,
+      LEGACY_PERSONAS_KEY,
+      PERSONA_ORG_KEY,
+      OOC_TEMPLATES_KEY,
+      GENERATION_PROFILES_KEY,
+      SMART_FILTER_PRESETS_KEY,
+      SMART_FILTER_PINNED_KEY,
+      BOT_EDITOR_DRAFT_HISTORY_KEY,
+      CHAT_BOOKMARKS_KEY,
+      SAI_TOOLKIT_PRESENCE_KEY,
+      SPICYCHAT_BETA_CAPABILITIES_KEY,
+      "cardTokenFetchDiagnosticsV1"
+    ]),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000),
+    storageBytesInUse(null),
+    readLargeStorageStats().catch(() => ({})),
+    readRecoverySnapshotMeta().catch(() => null)
   ]);
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
-  const bytes = await storageBytesInUse(null);
   const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
   const enabledFeatures = OPTIONAL_FEATURE_KEYS.filter(key => settings[key] === true);
   const personas = Array.isArray(result[PERSONAS_KEY]) ? result[PERSONAS_KEY] : result[LEGACY_PERSONAS_KEY];
@@ -19788,7 +20135,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
     (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}`; })(),
     `S.AI compatibility enabled: ${settings.saiToolkitCompatibility ? "yes" : "no"}`,
-    Number.isFinite(bytes) ? `QoL storage: ${(bytes / 1024).toFixed(1)} KB` : "QoL storage: unavailable",
+    Number.isFinite(bytes) ? `chrome.storage.local: ${(bytes / 1024).toFixed(1)} KB` : "chrome.storage.local: unavailable",
     `Backup schema supported: v${BACKUP_FORMAT_VERSION}`,
     (() => {
       const platform = PLATFORM_API?.detectEnvironment?.() || detectSettingsEnvironment();
@@ -19797,7 +20144,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
       const dormantCount = Object.keys(compatibility?.dormant || {}).length;
       return `QoL device compatibility: ${platform?.label || platform?.platform || "unknown"}; schema v${Number(PLATFORM_API?.schemaVersion || 0) || "unavailable"}; ${dormantCount} saved preference${dormantCount === 1 ? "" : "s"} inactive on this device`;
     })(),
-    (() => { const snap = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]); return snap ? `Recovery snapshot: yes (${snap.createdAt ? new Date(snap.createdAt).toISOString() : "unknown time"}; ${snap.reason})` : "Recovery snapshot: none"; })(),
+    recoverySnapshotMeta ? `Recovery snapshot: yes (${recoverySnapshotMeta.createdAt ? new Date(recoverySnapshotMeta.createdAt).toISOString() : "details load on demand"}; ${recoverySnapshotMeta.reason})` : "Recovery snapshot: none",
     `Opened: ${countStoreItems(result[OPENED_KEY], "opened")}`,
     `Blocked: ${countStoreItems(result[BLOCKED_BOTS_KEY])}`,
     `Not interested: ${countStoreItems(result[NOT_INTERESTED_KEY])}`,
@@ -19807,8 +20154,9 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Later: ${countStoreItems(result[LATER_BOTS_KEY])}`,
     `Bot organization: ${Object.keys(result[BOT_ORGANIZER_KEY]?.meta || {}).length}`,
     `Chat organization: ${Object.keys(normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]).meta).length}`,
-    `Bot availability checks: ${Object.keys(normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]).meta).length}`,
-    `Saved bot copies: ${Object.keys(normalizeBotArchive(result[BOT_ARCHIVE_KEY]).meta).length}`,
+    `Bot availability checks: ${Number(largeStorageStats[BOT_AVAILABILITY_KEY] || 0)}`,
+    `Saved bot copies: ${Number(largeStorageStats[BOT_ARCHIVE_KEY] || 0)}`,
+    `Large-data IndexedDB: ${Number(largeStorageStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStorageStats[BOT_ARCHIVE_KEY] || 0)} archive records`,
     `Personas: ${countStoreItems(personas, "persona")}`,
     `Persona organization: ${Object.keys(result[PERSONA_ORG_KEY]?.meta || {}).length}`,
     `OOC presets: ${countStoreItems(result[OOC_TEMPLATES_KEY], "ooc")}`,
@@ -19852,6 +20200,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     diagnosticLines.push(`QoL performance mode: ${context?.pageDiagnostics?.runtimePerformance?.mode || settings.runtimePerformanceMode || "adaptive"}`);
     const runtime = context?.pageDiagnostics?.runtimePerformance || {};
     diagnosticLines.push(`QoL scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneRuns || 0)} message-lane runs; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate lane schedules coalesced; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots processed; last lane ${Number(runtime.lastMessageLaneDirtyRoots || 0)} roots; ${Number(runtime.historyBatches || 0)} history batches; ${Number(runtime.slowLaneQuietDeferrals || 0)} quiet-gap deferrals; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.mutations || 0)} mutations; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.qolOnlyMutations || 0)} QoL-only ignored; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} desktop-app guard delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced; ${Number(runtime.loadedChatMessages || 0)} loaded messages; history low-impact ${runtime.historyBatchActive ? "active" : "inactive"}`);
+    diagnosticLines.push(`Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes moved to the incremental lane; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`);
     diagnosticLines.push(`Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`);
     diagnosticLines.push(`Message edit guard: ${Number(runtime.messageEditGuardsStarted || 0)} started; ${Number(runtime.messageEditGuardsSettled || 0)} settled; ${Number(runtime.messageEditMutationSkips || 0)} edit mutations skipped; ${Number(runtime.messageEditLaneSkips || 0)} lane runs skipped; ${Number(runtime.messageEditCriticalSkips || 0)} critical runs skipped`);
     diagnosticLines.push(`Chat header self-repair: ${Number(runtime.chatHeaderRepairRequests || 0)} repair requests; last source ${runtime.lastChatHeaderRepairSource || "none"}`);
@@ -19937,9 +20286,11 @@ function performanceWarningLines(context, settings) {
 async function copyPerformanceReport({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building performance report...";
-  const stored = await storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]);
+  const [stored, context] = await Promise.all([
+    storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000)
+  ]);
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   const manifest = chrome.runtime.getManifest?.() || {};
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
@@ -19966,6 +20317,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     (() => { const a = stored[AUTO_AFK_STATUS_KEY] || {}; return `SpicyChat tabs: ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${a.lowMemoryEnabled ? `on, limit ${Number(a.awakeLimit || 5)}, LRU unloaded ${Number(a.lruDiscarded || 0)} last check` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
+    `Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots processed in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes deferred; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`,
     `Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`,
     `Mutations: ${Number(runtime.mutations || 0)} total in ${Number(runtime.observerBatches || 0)} observer batches; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.composerOnlyMutationSkips || 0)} composer-only skipped; ${Number(runtime.qolOnlyMutations || 0)} QoL-owned ignored (${Number(runtime.observerQolOnlyBatches || 0)} pure + ${Number(runtime.observerMixedQolBatches || 0)} mixed batches)`,
     `Message edit guard: ${Number(runtime.messageEditGuardsStarted || 0)} started; ${Number(runtime.messageEditGuardsSettled || 0)} settled; ${Number(runtime.messageEditMutationSkips || 0)} edit mutations skipped; ${Number(runtime.messageEditLaneSkips || 0)} lane runs skipped; ${Number(runtime.messageEditCriticalSkips || 0)} critical runs skipped`,
@@ -20027,9 +20379,9 @@ async function downloadPerformanceReport() {
 async function buildPerformanceSelfCheckText() {
   const started = performance.now();
   const readStarted = performance.now();
-  const read = await storageGetChecked(["settings"]);
-  const storageMs = performance.now() - readStarted;
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const readPromise = storageGetChecked(["settings"]).then(read => ({ read, storageMs: performance.now() - readStarted }));
+  const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const [{ read, storageMs }, context] = await Promise.all([readPromise, contextPromise]);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
   const warnings = performanceWarningLines(context, settings);
   const total = performance.now() - started;
@@ -20062,7 +20414,10 @@ async function buildFastSupportSnapshot() {
     null
   );
   const bytesValue = await promiseWithSupportTimeout(storageBytesInUse(null), 1500, null);
+  const largeStatsValue = await promiseWithSupportTimeout(readLargeStorageStats(), 1500, null);
   const stored = quickStored && typeof quickStored === "object" ? quickStored : {};
+  const largeStatsReady = !!(largeStatsValue && typeof largeStatsValue === "object");
+  const largeStats = largeStatsReady ? largeStatsValue : {};
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
   const afk = stored[AUTO_AFK_STATUS_KEY] || {};
   const bytes = Number(bytesValue);
@@ -20073,8 +20428,11 @@ async function buildFastSupportSnapshot() {
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `Options DOM: ${document.getElementsByTagName("*").length} nodes`,
-    `QoL storage: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
+    `chrome.storage.local: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,
+    largeStatsReady
+      ? `Large-data IndexedDB: ${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records`
+      : "Large-data IndexedDB: fast check timed out; full support sections can finish migration/counting",
     `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 5))} normal tabs awake` : "off"}`,
     `Last tab scan: ${afk.at ? new Date(Number(afk.at)).toISOString() : "none"}; ${Number(afk.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(afk.loadedNormal || 0)} normal loaded; ${Number(afk.discardedNormal || 0)} normal unloaded; ${Number(afk.workerTabs || 0)} workers`,
     "This snapshot is deliberately lightweight and should still appear when a content runtime or a heavier support section is stuck."
@@ -20101,7 +20459,7 @@ async function buildAllSupportInfo() {
   const selfCheckPromise = timed(buildPerformanceSelfCheckText(), "Performance self-check")
     .catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
   const healthPromise = timed((async () => {
-    const health = await collectDataHealth();
+    const health = await collectDataHealth({ lightweight: true });
     return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
   })(), "Data health").catch(error => `Data health check failed: ${error?.message || String(error)}`);
   const baselinePromise = timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison")
@@ -21239,6 +21597,7 @@ function healthResultItem(kind, title, detail, targetId = "", action = null) {
 
 
 const SETTINGS_NO_DIRECT_CONTROL_KEYS = new Set([
+  "autoAfkHours", "featureIndexCollapsedCategories",
   "autoAfkAction", "botEditorSnippets", "blockedBotIds", "blockedBotNames",
   "cardTokenShowDescription", "cardTokenShowCombined", "allowedLanguages",
   "showListingRefillButton", "quickPanelCustomX", "quickPanelCustomY",

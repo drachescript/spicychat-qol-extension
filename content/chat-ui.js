@@ -476,6 +476,167 @@
     return DS.setAutoPairAsterisks?.(!DS.state?.settings?.autoPairAsterisks);
   };
 
+  let chatEnterBehaviorInstalled = false;
+  let lastHandledEnterAt = 0;
+  let lastHandledEnterField = null;
+  let allowNativeLineBreakUntil = 0;
+  let allowNativeLineBreakField = null;
+
+  function composerEnterBehavior() {
+    const raw = String(DS.state?.settings?.chatEnterKeyBehavior || "site-default");
+    return ["site-default", "send", "newline"].includes(raw) ? raw : "site-default";
+  }
+
+  function insertComposerNewline(field) {
+    if (!field) return false;
+    if (field.isContentEditable) {
+      field.focus?.({ preventScroll: true });
+      const selection = window.getSelection?.();
+      let range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range || !field.contains(range.commonAncestorContainer)) {
+        range = document.createRange();
+        range.selectNodeContents(field);
+        range.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      range.deleteContents();
+      const node = document.createTextNode("\n");
+      range.insertNode(node);
+      const next = document.createRange();
+      next.setStartAfter(node);
+      next.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(next);
+      try {
+        field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertLineBreak", data: null }));
+      } catch {
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return true;
+    }
+
+    if (!(field instanceof HTMLTextAreaElement) && !(field instanceof HTMLInputElement)) return false;
+    const value = String(field.value || "");
+    const start = Number.isFinite(field.selectionStart) ? field.selectionStart : value.length;
+    const end = Number.isFinite(field.selectionEnd) ? field.selectionEnd : start;
+    const nextValue = `${value.slice(0, start)}\n${value.slice(end)}`;
+    setNativeTextValue(field, nextValue, "\n", start + 1, start + 1);
+    return true;
+  }
+
+  function visibleSendButton(field = null) {
+    const isVisibleEnabledButton = button => {
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      const style = getComputedStyle(button);
+      return style.display !== "none" && style.visibility !== "hidden" && button.getClientRects().length > 0;
+    };
+
+    const explicit = DS.qsa(
+      'button[aria-label="send-message"], button[aria-label*="send" i], button[data-testid*="send" i], button[title*="send" i]'
+    ).find(isVisibleEnabledButton);
+    if (explicit) return explicit;
+
+    // SpicyChat currently swaps the right-side voice button for Send when the
+    // composer has text. Keep a narrow structural fallback for markup variants
+    // where that Send button has no stable aria-label/test id. Never use it for
+    // an empty composer and never mistake voice/image/OOC controls for Send.
+    const text = field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement
+      ? String(field.value || "")
+      : String(field?.textContent || "");
+    if (!field || !text.trim()) return null;
+
+    let shell = field.parentElement;
+    for (let depth = 0; shell && depth < 6; depth += 1, shell = shell.parentElement) {
+      const buttons = DS.qsa("button", shell).filter(isVisibleEnabledButton);
+      if (!buttons.length) continue;
+      const fallback = [...buttons].reverse().find(button => {
+        const descriptor = [
+          button.getAttribute("aria-label"),
+          button.getAttribute("data-testid"),
+          button.getAttribute("title"),
+          button.textContent
+        ].filter(Boolean).join(" ").toLowerCase();
+        return !/(voice|record|microphone|image|ooc|suggest|auto.?generate|plus|attach|upload)/i.test(descriptor);
+      });
+      if (fallback && fallback !== field) return fallback;
+    }
+    return null;
+  }
+
+  function sendComposerMessage(field) {
+    const button = visibleSendButton(field);
+    if (!button) {
+      DS.setQuickStatus?.("SpicyChat's Send button is not ready yet.");
+      return false;
+    }
+    try { field?.focus?.({ preventScroll: true }); } catch {}
+    button.click();
+    return true;
+  }
+
+  function handleConfiguredEnter(event, source) {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !DS.isSingleChatPage?.()) return false;
+    const mode = composerEnterBehavior();
+    if (mode === "site-default") return false;
+
+    const inputType = String(event.inputType || "");
+    const isBeforeInput = source === "beforeinput";
+    const isLineBreak = isBeforeInput
+      ? (inputType === "insertLineBreak" || inputType === "insertParagraph")
+      : event.key === "Enter";
+    if (!isLineBreak || event.isComposing) return false;
+
+    const field = event.target?.closest?.("textarea, input, [contenteditable='true']") || event.target;
+    if (!isComposerTypingField(field)) return false;
+
+    const now = Date.now();
+    if (isBeforeInput && allowNativeLineBreakField === field && now < allowNativeLineBreakUntil) {
+      allowNativeLineBreakField = null;
+      allowNativeLineBreakUntil = 0;
+      return false;
+    }
+
+    if (!isBeforeInput && (event.ctrlKey || event.metaKey || event.altKey)) return false;
+
+    if (mode === "send") {
+      // Hardware Shift+Enter keeps SpicyChat's native line-break behavior. Mark
+      // the following beforeinput so the mobile/IME listener does not turn that
+      // same physical keypress into a send.
+      if (!isBeforeInput && event.shiftKey) {
+        allowNativeLineBreakField = field;
+        allowNativeLineBreakUntil = now + 350;
+        return false;
+      }
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      if (isBeforeInput && lastHandledEnterField === field && now - lastHandledEnterAt < 180) return true;
+      lastHandledEnterField = field;
+      lastHandledEnterAt = now;
+      sendComposerMessage(field);
+      return true;
+    }
+
+    // newline mode: Return/Enter always edits the existing composer and the
+    // visible Send button remains the explicit submit action. This catches both
+    // desktop keydown and Android/iOS beforeinput/IME line-break events.
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    if (isBeforeInput && lastHandledEnterField === field && now - lastHandledEnterAt < 180) return true;
+    lastHandledEnterField = field;
+    lastHandledEnterAt = now;
+    insertComposerNewline(field);
+    return true;
+  }
+
+  function installChatEnterBehavior() {
+    if (chatEnterBehaviorInstalled) return;
+    chatEnterBehaviorInstalled = true;
+    document.addEventListener("keydown", event => handleConfiguredEnter(event, "keydown"), true);
+    document.addEventListener("beforeinput", event => handleConfiguredEnter(event, "beforeinput"), true);
+  }
+
   function findComposerControlsRow(field) {
     if (!field) return null;
 
@@ -873,6 +1034,7 @@
     function applyChatUiCleanup() {
       const { settings } = DS.state;
       const onChat = !!settings.enabled && DS.isSingleChatPage();
+      installChatEnterBehavior();
       const stackedLayout = !!onChat && !!settings.stackChatMessages;
       if (stackedLayout) DS.setAttributeIfChanged?.(document.documentElement, "data-ds-chat-message-layout", "stacked");
       else if (document.documentElement.hasAttribute("data-ds-chat-message-layout")) document.documentElement.removeAttribute("data-ds-chat-message-layout");
@@ -885,6 +1047,7 @@
         settings.replaceChatImageWithOocButton ||
         settings.showAsteriskButton ||
         settings.autoPairAsterisks ||
+        settings.chatEnterKeyBehavior !== "site-default" ||
         settings.hideChatVoiceButton ||
         settings.hideUnlockCustomVoices
       );

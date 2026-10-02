@@ -1116,9 +1116,22 @@
   function quickPanelStateSignature(panel, settings, onChatListPage, onSingleChatPage) {
     const page = DS.getPageState?.() || {};
     const refill = !onSingleChatPage && !onChatListPage ? (DS.getListingAutoFillStatus?.() || {}) : {};
-    const sound = DS.getSoundscapePanelState?.() || {};
-    const story = DS.getStoryDaySnapshot?.() || {};
-    const rpState = DS.getRpStateSnapshot?.() || {};
+
+    // Do not ask disabled panel features for snapshots on every scheduler pass.
+    // Some of those helpers inspect native chat UI or normalize larger stores;
+    // they used to run even when their Mini Panel rows were hidden.
+    const wantsSound = !!(settings?.enableSoundscapes && settings?.quickPanelShowSoundscapes);
+    const wantsStory = !!(onSingleChatPage && settings?.enableStoryDayTracker && settings?.storyDayTrackerShowQuickPanel !== false);
+    const wantsRpState = !!(onSingleChatPage && settings?.enableRpStateTracker && settings?.rpStateShowQuickPanel !== false);
+    const wantsCharacterProfile = !!(onSingleChatPage && settings?.enableCharacterQolProfiles);
+    const wantsAutoVoice = !!(onSingleChatPage && settings?.quickPanelShowAutoVoice !== false);
+
+    const sound = wantsSound ? (DS.getSoundscapePanelState?.() || {}) : {};
+    const story = wantsStory ? (DS.getStoryDaySnapshot?.() || {}) : {};
+    const rpState = wantsRpState ? (DS.getRpStateSnapshot?.() || {}) : {};
+    const autoVoiceEnabled = wantsAutoVoice ? !!DS.isAutoVoiceEnabled?.() : false;
+    const nativeVoiceAvailable = wantsAutoVoice ? !!DS.isNativeVoiceAvailable?.() : false;
+
     const settingsPart = PANEL_SIGNATURE_SETTINGS.map(key => `${key}:${String(settings?.[key] ?? "")}`).join("|");
     const visibleChats = onChatListPage && settings.quickPanelShowStatus !== false
       ? (document.querySelectorAll("a[href*='/chat/']")?.length || 0)
@@ -1134,10 +1147,10 @@
       (DS.state.blockedBots?.ids?.length || 0) + (DS.state.blockedBots?.names?.length || 0),
       DS.state.savedPersonas?.length || 0,
       DS.state.manualImportRunning ? 1 : 0,
-      onSingleChatPage ? (DS.isFocusModeActive?.() ? 1 : 0) : 0,
-      onSingleChatPage ? (DS.hasCurrentCharacterQolProfile?.() ? 1 : 0) : 0,
-      onSingleChatPage ? (DS.isAutoVoiceEnabled?.() ? 1 : 0) : 0,
-      onSingleChatPage ? (DS.isNativeVoiceAvailable?.() ? 1 : 0) : 0,
+      onSingleChatPage && settings?.enableFocusMode ? (DS.isFocusModeActive?.() ? 1 : 0) : 0,
+      wantsCharacterProfile ? (DS.hasCurrentCharacterQolProfile?.() ? 1 : 0) : 0,
+      autoVoiceEnabled ? 1 : 0,
+      nativeVoiceAvailable ? 1 : 0,
       `${sound.playing ? 1 : 0}:${sound.activeId || ""}:${(sound.scenes || []).map(scene => `${scene.id}:${scene.name}`).join(",")}`,
       `${story.code || ""}:${story.pending || 0}`,
       `${rpState.count || 0}:${rpState.pending || 0}:${(rpState.items || []).map(item => `${item.id || item.key}:${item.updatedAt || 0}:${item.includeInContext === false ? 0 : 1}`).join(",")}`,
@@ -1366,8 +1379,30 @@
 
   DS.updateQuickPanel = function updateQuickPanel({ forceLayout = false, bypassThrottle = false } = {}) {
     const panel = getSingleQuickPanel();
-    if (!panel) return;
-    if (panelInteractionActive(panel)) return;
+    if (!panel) return false;
+    if (panelInteractionActive(panel)) return false;
+
+    // Never make the Mini Panel compete with SpicyChat while a chat is mounting
+    // history or painting a fresh reply. One trailing refresh is enough once the
+    // native render quiet window ends.
+    if (!forceLayout && DS.isSingleChatPage?.()) {
+      const now = Date.now();
+      const quietUntil = Math.max(
+        Number(DS.state?.chatStartupQuietUntil || 0),
+        Number(DS.state?.chatReplyRenderQuietUntil || 0),
+        Number(DS.state?.chatEnhancerQuietUntil || 0)
+      );
+      if (quietUntil > now) {
+        const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+        counters.quickPanelRenderQuietDeferrals = Number(counters.quickPanelRenderQuietDeferrals || 0) + 1;
+        clearTimeout(DS.state.quickPanelRenderQuietTimer);
+        DS.state.quickPanelRenderQuietTimer = setTimeout(() => {
+          DS.state.quickPanelRenderQuietTimer = 0;
+          DS.updateQuickPanel?.({ bypassThrottle: true });
+        }, Math.min(2200, Math.max(50, quietUntil - now + 30)));
+        return false;
+      }
+    }
 
     // Busy chat pages can ask the panel to refresh several times during one React
     // burst. Keep forced layout work immediate, but fold ordinary refreshes into a
@@ -1386,7 +1421,7 @@
             DS.updateQuickPanel?.({ bypassThrottle: true });
           }, Math.max(16, minGap - elapsed));
         }
-        return;
+        return false;
       }
       DS.state.quickPanelLastUpdateAt = now;
     } else {
@@ -1411,7 +1446,7 @@
     if (!forceLayout && panel.dataset.dsStateSignature === stateSignature) {
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.quickPanelStateSkips = Number(counters.quickPanelStateSkips || 0) + 1;
-      return;
+      return false;
     }
     panel.dataset.dsStateSignature = stateSignature;
 
@@ -1692,7 +1727,7 @@
       if (unchangedLayout) {
         const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
         counters.quickPanelLayoutSkips = Number(counters.quickPanelLayoutSkips || 0) + 1;
-        return;
+        return true;
       }
       panel.dataset.dsLayoutSignature = layoutSignature;
 
@@ -1707,6 +1742,7 @@
         }
       });
     }
+    return true;
   };
 
   DS.removeQuickPanelIfDisabled = function removeQuickPanelIfDisabled() {

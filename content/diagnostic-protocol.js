@@ -275,6 +275,7 @@
       scheduler: pick([
         "schedules", "criticalSchedules", "slowSchedules", "messageLaneSchedules", "messageLaneRuns",
         "messageLaneScheduleCoalesced", "deferredWhileScrolling", "hiddenSkips", "slowLaneQuietDeferrals",
+        "criticalMessageEnhancerPassesDeferred", "quickPanelRenderQuietDeferrals",
         "routeFeatureStepSkips", "routeFeatureGroupSkips", "buildBundleStepSkips"
       ]),
       listing: pick([
@@ -285,6 +286,8 @@
       chat: pick([
         "historyBatches", "historyBatchDeferrals", "messageCountIncrementalUpdates", "messageCountIncrementalRoots",
         "loadedMessageRootCacheHits", "loadedMessageRootCacheMisses", "messageLaneDirtyRoots",
+        "messageLaneChunkedPasses", "messageLaneChunkedRoots", "messageLaneDeferredRoots",
+        "messageEnhancerIncrementalLanePasses", "messageEnhancerIncrementalLaneRoots",
         "rpFormatHistoryDeferrals", "rpFormatChunkPasses", "rpFormatChunkMessages",
         "generationMetadataScopedPasses", "generationMetadataScopedMessages", "generationMetadataHistoryDeferrals",
         "chatExportApiRuns", "chatExportApiFailures", "chatExportApiLastMessages", "chatExportApiLastExpected",

@@ -316,11 +316,28 @@
     });
   }
 
+  let moderationRevision = 0;
+  let lastAppliedRoute = "";
+  let lastAppliedSignature = "";
+
+  function moderationSettingsSignature() {
+    const settings = DS.state?.settings || {};
+    return [
+      settings.creatorModerationWarnings ? 1 : 0,
+      settings.creatorModerationWarningsChatbots ? 1 : 0,
+      String(settings.creatorModerationWarningMode || "balanced"),
+      String(settings.creatorModerationWarningIgnoredTerms || ""),
+      String(settings.creatorModerationWarningCustomTerms || "")
+    ].join("|");
+  }
+
   function cleanup() {
     DS.state.creatorModerationWarningsWasActive = false;
     document.querySelectorAll(".ds-moderation-warning-wrap").forEach(el => el.remove());
     document.querySelectorAll("[data-ds-moderation-warned]").forEach(el => el.removeAttribute("data-ds-moderation-warned"));
     document.querySelectorAll(".ds-moderation-list-warning").forEach(el => el.remove());
+    lastAppliedRoute = "";
+    lastAppliedSignature = "";
   }
 
   let scanTimer = null;
@@ -334,6 +351,15 @@
       cleanup();
       return;
     }
+
+    // Main can be re-entered for many unrelated React mutations. Do not rescan
+    // every creator/editor field unless the relevant DOM/content/settings have
+    // actually changed. Input/relevant-field mutations advance the revision.
+    const route = `${location.pathname}${location.search}`;
+    const signature = `${moderationRevision}|${moderationSettingsSignature()}`;
+    if (route === lastAppliedRoute && signature === lastAppliedSignature) return;
+    lastAppliedRoute = route;
+    lastAppliedSignature = signature;
 
     DS.state.creatorModerationWarningsWasActive = true;
     for (const field of editableFields()) renderWarning(field);
@@ -353,6 +379,7 @@
   document.addEventListener("input", event => {
     const field = event.target?.closest?.("textarea, input[type='text'], [contenteditable='true']");
     if (!field || shouldIgnoreField(field) || !featureEnabledForPage()) return;
+    moderationRevision += 1;
     scheduleScan();
   }, true);
 
@@ -363,7 +390,10 @@
       return node.matches?.("textarea, input[type='text'], [contenteditable='true']") ||
         !!node.querySelector?.("textarea, input[type='text'], [contenteditable='true']");
     }));
-    if (relevant) scheduleScan();
+    if (relevant) {
+      moderationRevision += 1;
+      scheduleScan();
+    }
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });

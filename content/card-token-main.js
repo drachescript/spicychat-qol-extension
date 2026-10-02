@@ -41,11 +41,15 @@
   let capturedGuest = "";
   let capturedAt = 0;
   let recombeePublicToken = "";
+  let recombeePublicTokenValidated = false;
   let recombeeTokenCandidatesPromise = null;
   let recombeeTokenCandidatesCache = [];
   let recombeeTokenCandidatesCachedAt = 0;
+  let recombeeTokenCandidatesExhaustive = false;
   const RECOMBEE_TOKEN_CACHE_MS = 10 * 60 * 1000;
   const RECOMBEE_TOKEN_EMPTY_CACHE_MS = 5 * 1000;
+  const RECOMBEE_BROAD_CANDIDATE_LIMIT = 20000;
+  const RECOMBEE_HMAC_BATCH_SIZE = 64;
   const recombeeFeedbackInFlight = new Map();
   const recombeeSignedRequestSamples = [];
   const RECOMBEE_SIGNED_SAMPLE_LIMIT = 24;
@@ -888,27 +892,100 @@
     return scored;
   }
 
-  async function discoverRecombeeTokenCandidates() {
-    if (recombeePublicToken) return [recombeePublicToken];
+  function collectBroadRecombeeTokensFromText(text, scored = new Map(), limit = RECOMBEE_BROAD_CANDIDATE_LIMIT) {
+    const source = String(text || "");
+    if (!source) return scored;
+    const max = Math.max(100, Number(limit || RECOMBEE_BROAD_CANDIDATE_LIMIT));
+    const add = (raw, score) => {
+      if (scored.size >= max) return false;
+      const token = plausibleRecombeeToken(raw);
+      if (!token) return false;
+      // Random-looking public tokens almost always contain both letters and
+      // digits. Keep plain identifiers/English strings out of the exhaustive
+      // set so HMAC validation stays cheap even on the multi-megabyte vendor
+      // bundle. Contextual token/key assignments below are kept regardless.
+      scored.set(token, Math.max(Number(scored.get(token) || 0), Number(score || 0)));
+      return true;
+    };
+
+    // Current SpicyChat builds can keep the public token in a different module
+    // from the literal `spicychat-prod` database id. Look for token-ish
+    // assignments anywhere in a loaded bundle instead of requiring both to be
+    // adjacent in minified output.
+    const contextual = [
+      /(?:recombee\w*(?:token|key)|publicToken|public_token|frontendToken|clientToken)\s*[:=]\s*["'`]([A-Za-z0-9_-]{16,180})["'`]/gi,
+      /["'`](?:recombee\w*(?:token|key)|publicToken|public_token|frontendToken|clientToken)["'`]\s*:\s*["'`]([A-Za-z0-9_-]{16,180})["'`]/gi
+    ];
+    for (const pattern of contextual) {
+      let match;
+      while (scored.size < max && (match = pattern.exec(source))) add(match[1], 90);
+    }
+
+    // Last-resort offline candidate set. Nothing from this set is ever sent to
+    // Recombee merely because it looks token-like: when a native signed request
+    // exists, every candidate must reproduce that exact HMAC-SHA1 signature
+    // before QoL is allowed to issue a ratings POST.
+    const quoted = /["'`]([A-Za-z0-9_-]{16,180})["'`]/g;
+    let match;
+    while (scored.size < max && (match = quoted.exec(source))) {
+      const raw = match[1];
+      if (!/[A-Za-z]/.test(raw) || !/\d/.test(raw)) continue;
+      let score = 2;
+      if (raw.length >= 20 && raw.length <= 96) score += 2;
+      if (/[A-Z]/.test(raw) && /[a-z]/.test(raw)) score += 1;
+      if (/[_-]/.test(raw)) score += 1;
+      add(raw, score);
+    }
+    return scored;
+  }
+
+  function rankedRecombeeTokens(scored, limit = 20) {
+    return [...(scored || new Map()).entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([token]) => token)
+      .slice(0, Math.max(1, Number(limit || 20)));
+  }
+
+  async function discoverRecombeeTokenCandidates(options = {}) {
+    const exhaustive = !!options?.exhaustive;
+    const force = !!options?.force;
+    collectPerformanceRecombeeSamples();
+    const hasSignedSample = recombeeSignedRequestSamples.length > 0;
+
+    if (recombeePublicToken && (recombeePublicTokenValidated || !exhaustive)) return [recombeePublicToken];
     const cacheAge = Date.now() - Number(recombeeTokenCandidatesCachedAt || 0);
     const cacheTtl = recombeeTokenCandidatesCache.length ? RECOMBEE_TOKEN_CACHE_MS : RECOMBEE_TOKEN_EMPTY_CACHE_MS;
-    if (recombeeTokenCandidatesCachedAt && cacheAge >= 0 && cacheAge < cacheTtl) {
+    const cacheCoversRequest = !exhaustive || recombeeTokenCandidatesExhaustive;
+    if (!force && cacheCoversRequest && recombeeTokenCandidatesCachedAt && cacheAge >= 0 && cacheAge < cacheTtl) {
       return [...recombeeTokenCandidatesCache];
     }
-    if (recombeeTokenCandidatesPromise) return recombeeTokenCandidatesPromise;
+    if (recombeeTokenCandidatesPromise && !force) return recombeeTokenCandidatesPromise;
+
     recombeeTokenCandidatesPromise = (async () => {
       const scored = collectRecombeeTokensFromGlobals(new Map());
       try {
         Array.from(document.scripts || []).forEach(script => {
-          if (!script.src && String(script.textContent || "").includes("spicychat-prod")) {
-            collectRecombeeTokensFromText(script.textContent, scored);
-          }
+          if (script.src) return;
+          const text = String(script.textContent || "");
+          if (text.includes("spicychat-prod")) collectRecombeeTokensFromText(text, scored);
+          if (exhaustive && hasSignedSample) collectBroadRecombeeTokensFromText(text, scored);
         });
       } catch {}
-      if ([...scored.values()].some(score => score >= 100)) {
-        const found = [...scored.entries()].sort((a, b) => b[1] - a[1]).map(([token]) => token).slice(0, 20);
+
+      if (hasSignedSample) {
+        const immediate = rankedRecombeeTokens(scored, exhaustive ? RECOMBEE_BROAD_CANDIDATE_LIMIT : 250);
+        const matched = await identifyRecombeeTokenFromSignedRequests(immediate);
+        if (matched) {
+          recombeeTokenCandidatesCache = [matched];
+          recombeeTokenCandidatesCachedAt = Date.now();
+          recombeeTokenCandidatesExhaustive = true;
+          return [matched];
+        }
+      } else if (!exhaustive && [...scored.values()].some(score => score >= 100)) {
+        const found = rankedRecombeeTokens(scored, 20);
         recombeeTokenCandidatesCache = found;
         recombeeTokenCandidatesCachedAt = Date.now();
+        recombeeTokenCandidatesExhaustive = false;
         return [...found];
       }
 
@@ -922,17 +999,13 @@
       };
       try { Array.from(document.scripts || []).forEach(script => addUrl(script.src)); } catch {}
       try {
-        performance.getEntriesByType("resource")
-          .filter(entry => entry.initiatorType === "script")
-          .forEach(entry => addUrl(entry.name));
+        // Vite/modulepreload dependencies are reported as initiatorType "other"
+        // in current SpicyChat builds. Restricting this to "script" silently
+        // skipped the common/vendor bundles that can contain the Recombee
+        // client configuration.
+        performance.getEntriesByType("resource").forEach(entry => addUrl(entry?.name));
       } catch {}
 
-      // Recombee's browser token is public and bundled into SpicyChat's own
-      // same-origin app code. Prefer the main app bundles and read a few cached
-      // bundles in parallel. The worker normally waits for Home's first native
-      // signed recommendation request before reaching this point, so these
-      // files should already be in the browser cache instead of competing with
-      // SpicyChat's initial page boot.
       const bundlePriority = raw => {
         const value = String(raw || "");
         if (/\/assets\/index-[^/]+\.js(?:$|\?)/i.test(value)) return 0;
@@ -941,8 +1014,8 @@
         if (/\/assets\//i.test(value)) return 3;
         return 4;
       };
-      const prioritized = urls.slice(0, 36).sort((a, b) => bundlePriority(a) - bundlePriority(b));
-      const batchSize = 4;
+      const prioritized = urls.sort((a, b) => bundlePriority(a) - bundlePriority(b)).slice(0, 36);
+      const batchSize = 6;
       for (let offset = 0; offset < prioritized.length; offset += batchSize) {
         const batch = prioritized.slice(offset, offset + batchSize);
         const texts = await Promise.all(batch.map(async url => {
@@ -954,17 +1027,31 @@
             return "";
           }
         }));
+
         for (const text of texts) {
+          if (!text) continue;
           if (text.includes("spicychat-prod")) collectRecombeeTokensFromText(text, scored);
+          if (exhaustive && hasSignedSample) collectBroadRecombeeTokensFromText(text, scored);
         }
-        if ([...scored.values()].some(score => score >= 100)) break;
+
+        if (hasSignedSample) {
+          const candidates = rankedRecombeeTokens(scored, exhaustive ? RECOMBEE_BROAD_CANDIDATE_LIMIT : 500);
+          const matched = await identifyRecombeeTokenFromSignedRequests(candidates);
+          if (matched) {
+            recombeeTokenCandidatesCache = [matched];
+            recombeeTokenCandidatesCachedAt = Date.now();
+            recombeeTokenCandidatesExhaustive = true;
+            return [matched];
+          }
+        } else if (!exhaustive && [...scored.values()].some(score => score >= 100)) {
+          break;
+        }
       }
-      const found = [...scored.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([token]) => token)
-        .slice(0, 20);
+
+      const found = rankedRecombeeTokens(scored, exhaustive ? RECOMBEE_BROAD_CANDIDATE_LIMIT : 20);
       recombeeTokenCandidatesCache = found;
       recombeeTokenCandidatesCachedAt = Date.now();
+      recombeeTokenCandidatesExhaustive = exhaustive;
       return [...found];
     })().finally(() => { recombeeTokenCandidatesPromise = null; });
     return recombeeTokenCandidatesPromise;
@@ -987,20 +1074,30 @@
     const tokens = [...new Set((candidates || []).map(plausibleRecombeeToken).filter(Boolean))];
     if (!tokens.length) return "";
     collectPerformanceRecombeeSamples();
-    const samples = recombeeSignedRequestSamples.slice(0, RECOMBEE_SIGNED_SAMPLE_LIMIT);
+    // One authentic request/signature pair is already a sufficient exact
+    // offline oracle. Keep a couple of samples as a fallback, but validate
+    // candidates in parallel chunks instead of performing thousands of serial
+    // WebCrypto imports/signs on a minified bundle candidate set.
+    const samples = recombeeSignedRequestSamples.slice(0, 3);
     if (!samples.length) return "";
 
     for (const sample of samples) {
-      for (const token of tokens) {
-        try {
-          const signature = await hmacSha1Hex(token, sample.message);
-          if (signature.toLowerCase() === sample.signature) {
-            recombeePublicToken = token;
-            recombeeTokenCandidatesCache = [token, ...recombeeTokenCandidatesCache.filter(value => value !== token)];
-            recombeeTokenCandidatesCachedAt = Date.now();
-            return token;
-          }
-        } catch {}
+      for (let offset = 0; offset < tokens.length; offset += RECOMBEE_HMAC_BATCH_SIZE) {
+        const batch = tokens.slice(offset, offset + RECOMBEE_HMAC_BATCH_SIZE);
+        const signatures = await Promise.all(batch.map(async token => {
+          try { return (await hmacSha1Hex(token, sample.message)).toLowerCase(); }
+          catch { return ""; }
+        }));
+        const matchedIndex = signatures.findIndex(signature => signature === sample.signature);
+        if (matchedIndex >= 0) {
+          const token = batch[matchedIndex];
+          recombeePublicToken = token;
+          recombeePublicTokenValidated = true;
+          recombeeTokenCandidatesCache = [token, ...recombeeTokenCandidatesCache.filter(value => value !== token)];
+          recombeeTokenCandidatesCachedAt = Date.now();
+          recombeeTokenCandidatesExhaustive = true;
+          return token;
+        }
       }
     }
     return "";
@@ -1162,9 +1259,10 @@
     const signedSamples = recombeeSignedRequestSamples.length;
     const bootAgeMs = Math.max(0, Date.now() - recommendationWorkerBootAt);
 
-    // A token supplied by the isolated-world cache came from a previous
-    // successful Less Like transaction, so it is already safe to reuse. Do not
-    // rescan SpicyChat bundles just to re-prove it on every worker boot.
+    // The isolated-world cache only stores tokens after a successful Less Like.
+    // Keep that fast path, but do not mark it as matching the *current* native
+    // signature until we have actually checked it; SpicyChat can rotate the
+    // public token between deployments.
     if (!recombeePublicToken && preferred) recombeePublicToken = preferred;
 
     let candidates = [...new Set([
@@ -1173,39 +1271,36 @@
       ...recombeeTokenCandidatesCache
     ].map(plausibleRecombeeToken).filter(Boolean))];
 
-    // The old worker started bundle discovery immediately after opening Home.
-    // On a cold page that competed with SpicyChat's own boot and could take
-    // ~20 seconds, eventually triggering an unnecessary full-page reload. Home
-    // naturally makes a signed Recombee recommendation request once its native
-    // client is ready. Wait for that signal first, then inspect already-cached
-    // bundles and verify the correct token OFFLINE against the native signature.
-    // If Home never makes such a request, fall back after a short grace period.
-    const shouldDiscover = !recombeePublicToken && (
-      signedSamples > 0 ||
-      bootAgeMs >= RECOMBEE_DISCOVERY_FALLBACK_MS
-    );
+    const waitingForNativeSample = !signedSamples && !preferred && !recombeePublicToken && bootAgeMs < RECOMBEE_DISCOVERY_FALLBACK_MS;
 
-    if (shouldDiscover) {
+    // Once Home has emitted a genuine signed Recombee request the worker is
+    // alive enough to accept a Less Like job. Do NOT spend another 12-18 seconds
+    // making the prepare step rediscover the signing token. The actual feedback
+    // path below performs exact offline signature validation before any ratings
+    // POST is allowed to leave the page.
+    if (!signedSamples && !waitingForNativeSample && !candidates.length) {
       try {
         const discovered = await discoverRecombeeTokenCandidates();
         candidates = [...new Set([...candidates, ...discovered].map(plausibleRecombeeToken).filter(Boolean))];
       } catch {}
     }
 
-    if (!recombeePublicToken && candidates.length && signedSamples) {
+    // A cached token can be checked cheaply if a native signature is already
+    // present. Failure here is harmless: the first feedback job will run the
+    // exhaustive loaded-bundle scan rather than pausing the entire queue.
+    if (signedSamples && candidates.length && !recombeePublicTokenValidated) {
       try { await identifyRecombeeTokenFromSignedRequests(candidates); } catch {}
     }
 
-    const validatedTokenReady = !!plausibleRecombeeToken(recombeePublicToken);
+    const currentToken = plausibleRecombeeToken(recombeePublicToken);
+    const cachedSuccessReady = !!preferred && currentToken === preferred;
+    const validatedTokenReady = !!currentToken && recombeePublicTokenValidated;
     const candidateTokens = [...new Set(candidates.filter(plausibleRecombeeToken))];
-    const waitingForNativeSample = !validatedTokenReady && !signedSamples && bootAgeMs < RECOMBEE_DISCOVERY_FALLBACK_MS;
-    // If Home has already produced a native signed Recombee request, do not
-    // knowingly probe unverified candidates against the ratings endpoint. The
-    // native signature gives us an offline oracle; wait for a matching token.
-    // Network candidate probing remains only as the fallback for pages where
-    // Home never emits a signed recommendation request at all.
-    const recombeeReady = validatedTokenReady || (!signedSamples && !waitingForNativeSample && candidateTokens.length > 0);
+    const nativeSignatureReady = signedSamples > 0;
+    const fallbackCandidateReady = !signedSamples && !waitingForNativeSample && candidateTokens.length > 0;
+    const recombeeReady = validatedTokenReady || cachedSuccessReady || nativeSignatureReady || fallbackCandidateReady;
     const ready = authReady && !!userId && recombeeReady;
+
     return {
       ok: ready,
       ready,
@@ -1221,49 +1316,89 @@
       nativeSignedSamples: signedSamples,
       workerBootAgeMs: bootAgeMs,
       tokenSource: validatedTokenReady
-        ? (signedSamples ? "native-signed-request" : "cached-success-token")
-        : (candidateTokens.length ? "bundle-candidates" : ""),
-      publicToken: validatedTokenReady ? recombeePublicToken : ""
+        ? "native-signed-request"
+        : (cachedSuccessReady ? "cached-success-token" : (nativeSignatureReady ? "native-signature-observed" : (candidateTokens.length ? "bundle-candidates" : ""))),
+      publicToken: (validatedTokenReady || cachedSuccessReady) ? currentToken : ""
     };
   }
 
   async function postRecombeeLessLike(botId, userId, preferredToken = "") {
     const preferred = plausibleRecombeeToken(preferredToken);
+    collectPerformanceRecombeeSamples();
+    const hasNativeSignature = recombeeSignedRequestSamples.length > 0;
     let discovered = [];
     let discoveredFallbackLoaded = false;
+    let initial = [...new Set([
+      recombeePublicToken,
+      preferred,
+      ...recombeeTokenCandidatesCache
+    ].map(plausibleRecombeeToken).filter(Boolean))];
 
-    // A token learned from an earlier success is the cheapest path. Do not
-    // rescan SpicyChat's bundles before trying a token we already know worked.
-    if (!recombeePublicToken && !preferred) {
-      discovered = await discoverRecombeeTokenCandidates();
+    let observedToken = "";
+
+    if (hasNativeSignature) {
+      // Never fall back to network-probing alternate candidates after a native
+      // signature exists. Either we identify its exact key offline or we send
+      // nothing.
       discoveredFallbackLoaded = true;
+      // Current SpicyChat Home has already proved exactly how its Recombee
+      // requests are signed. First check anything we already know, then scan
+      // *all loaded same-origin JS bundles* (including modulepreload resources
+      // reported as initiatorType "other") and validate token-looking literals
+      // against that native signature. No unverified candidate is ever probed
+      // against /ratings/ in this mode.
+      if (initial.length) observedToken = await identifyRecombeeTokenFromSignedRequests(initial);
+      if (!observedToken) {
+        discovered = await discoverRecombeeTokenCandidates({
+          exhaustive: true,
+          force: !recombeeTokenCandidatesExhaustive
+        });
+        discoveredFallbackLoaded = true;
+        observedToken = await identifyRecombeeTokenFromSignedRequests(discovered);
+      }
+
+      if (!observedToken) {
+        return {
+          ok: false,
+          status: "recombee-token-not-validated",
+          stage: "token-discovery",
+          reason: "SpicyChat made a signed Recombee request, but no loaded-bundle token reproduced its signature. No ratings request was sent.",
+          characterId: botId,
+          httpStatus: 0,
+          attempts: 0,
+          networkAttempts: 0,
+          requestSent: false,
+          nativeSignedSamples: recombeeSignedRequestSamples.length,
+          candidateTokenCount: recombeeTokenCandidatesCache.length
+        };
+      }
+    } else {
+      // Legacy/fallback path for a page that never emits a native recommendation
+      // request. A previously successful token is tried first; otherwise retain
+      // the old bounded candidate behavior.
+      if (!initial.length) {
+        discovered = await discoverRecombeeTokenCandidates();
+        discoveredFallbackLoaded = true;
+        initial = [...new Set(discovered.map(plausibleRecombeeToken).filter(Boolean))];
+      }
+      if (!initial.length) {
+        return {
+          ok: false,
+          status: "recombee-token-not-found",
+          stage: "token-discovery",
+          reason: "No SpicyChat Recombee public-token candidate was found.",
+          characterId: botId,
+          httpStatus: 0,
+          attempts: 0,
+          networkAttempts: 0,
+          requestSent: false
+        };
+      }
     }
 
-    let initial = [...new Set([recombeePublicToken, preferred, ...discovered].filter(Boolean))];
-    if (!initial.length) {
-      discovered = await discoverRecombeeTokenCandidates();
-      discoveredFallbackLoaded = true;
-      initial = [...new Set(discovered.filter(Boolean))];
-    }
-    if (!initial.length) {
-      return {
-        ok: false,
-        status: "recombee-token-not-found",
-        stage: "token-discovery",
-        reason: "No SpicyChat Recombee public-token candidate was found.",
-        characterId: botId,
-        httpStatus: 0,
-        attempts: 0,
-        networkAttempts: 0,
-        requestSent: false
-      };
-    }
-
-    // If SpicyChat already made any signed Recombee request on this page, use
-    // its valid signature as an offline oracle to identify the correct public
-    // token. This avoids probing candidates against the network at all.
-    let observedToken = await identifyRecombeeTokenFromSignedRequests(initial);
-    let ordered = [...new Set([observedToken, recombeePublicToken, preferred, ...initial].filter(Boolean))];
+    let ordered = hasNativeSignature
+      ? [observedToken]
+      : [...new Set([recombeePublicToken, preferred, ...initial].filter(Boolean))];
     let lastStatus = 0;
     let lastReason = "";
     let attempts = 0;
@@ -1313,6 +1448,7 @@
 
         if (response.ok) {
           recombeePublicToken = token;
+          recombeePublicTokenValidated = true;
           recombeeTokenCandidatesCache = [token, ...recombeeTokenCandidatesCache.filter(value => value !== token)];
           recombeeTokenCandidatesCachedAt = Date.now();
           return {
@@ -1387,7 +1523,10 @@
           };
         }
 
-        if (token === recombeePublicToken) recombeePublicToken = "";
+        if (token === recombeePublicToken) {
+          recombeePublicToken = "";
+          recombeePublicTokenValidated = false;
+        }
       } catch (error) {
         lastReason = String(error?.message || error || "").slice(0, 300);
         // A transport failure says nothing about token validity. Keep the
