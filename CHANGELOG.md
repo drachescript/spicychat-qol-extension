@@ -1,21 +1,13 @@
 ## 0.2.31
 
-- Hotfix: Saved Bot Copies / Recovery and Deleted / Unavailable Saved Bots now read large IndexedDB stores in bounded pages instead of one oversized extension message, so existing recovery copies can repopulate without rescanning thousands of bots.
-- Hotfix: Settings bot images keep their real CDN `src` instead of stripping it when tabs/sections change. Animated GIF/WebP avatars stay on a frozen frame and animate only while the image is hovered and Settings is focused.
-- Hotfix: Lorebook Public-index checks now use SpicyChat's current scoped Lorebook and Lorebook-entry search keys; Public-index hits stay Available even if recovery refresh fails, and previous recovery copies are preserved.
-- Hotfix: public Lorebook recovery saves entry data from `lorebook_entries_public` first, with the signed-in helper kept only as fallback. Entry-level history tracks added/removed/changed entries.
-- Hotfix: Saved Bot Copies / Recovery and Deleted / Unavailable Saved Bots load first from IndexedDB and retry a transient empty large-store read instead of looking wiped until Settings is reopened.
-- Hotfix: Tracked Lorebook Status & History now loads automatically when Saved Lists opens; pager buttons stay hidden when there are no rows.
-- Hotfix: normal QoL backups now include Lorebook Status / recovery history, retry large IndexedDB recovery data before export, and cancel instead of silently omitting saved bot/status data if those stores are still loading. Support info also reports the Lorebook Status record count.
-- Added local Lorebook Archive export (`.json.gz`) for Public-index-confirmed Lorebooks only; private/restricted/unconfirmed recovery data remains local.
-- Fixed Group creation being hidden when real member/Lorebook UI was mistaken for a promotional banner.
-- Added opt-in Public Lorebook blocking that can reuse the normal blocked words, tags, and creators, plus exact Lorebook UUID blocks and an optional quick Block button. All new Lorebook controls default off.
-- Added incremental Lorebook tag resolution only when inherited normal tag rules need metadata that is not visible on the card.
-- Added a separate Lorebook Status & History store in IndexedDB. Its saved/history controls now live in Saved Bots & Lists immediately under Bot Status Center instead of inside discovery filters.
-- Reordered Discovery & Filters so Card filters and bot blocking come first; Public Lorebook controls now sit at the same level as the normal card-blocking controls inside Bot Blocking & Dislikes.
-- Fixed Public Lorebook filtering leaving empty grid holes. Hidden Lorebook wrappers now collapse like normal bot cards, and Listing Refill can use later Lorebook pages to replace filtered cards.
-- Moved Lorebook Status & History to the bottom of Saved Bots & Lists directly below Bot Status Center and rebuilt its saved/history view with the same manager-style layout, search, sorting, paging, and change-history cards.
-- Lorebook Status & History can now scan/refresh only Lorebooks QoL already tracks, check only unchecked Lorebooks, refresh stale checks, stop safely after the current request, and recheck individual Lorebooks from their cards. Bulk scans query those exact tracked UUIDs against the Public index in small batches first and only use the signed-in direct API helper for tracked records missing from the public result; QoL does not crawl or save the whole Public Lorebook index.
+- Fixed Saved Bot Copies / Recovery and Deleted / Unavailable Saved Bots loading from IndexedDB without needing to rescan thousands of bots.
+- Fixed missing Settings bot pictures and made animated avatars play only while hovered.
+- Improved Lorebook Status & History with tracked-only scans, automatic loading, safer availability handling, recovery copies, and entry change history.
+- Added local Lorebook Archive export for confirmed Public Lorebooks; private/restricted/unconfirmed recovery data stays local.
+- Added optional Public Lorebook blocking using normal blocked words, tags, creators, exact Lorebook UUIDs, and a quick Block button.
+- Fixed Public Lorebook filtering/refill leaving empty grid spaces and improved Lorebook tag lookup when needed.
+- Improved backups and support info for Lorebook Status and large recovery datasets.
+- Fixed Group creation being hidden when normal member/Lorebook UI was mistaken for a promo banner.
 
 ## 0.2.30
 
