@@ -26,6 +26,8 @@
   const HISTORY_NATIVE_RESPONSE_EVENT = "ds-qol-chat-history-native-response-v1";
   const CONVERSATION_LIST_REQUEST_EVENT = "ds-qol-conversation-list-request-v1";
   const CONVERSATION_LIST_RESPONSE_EVENT = "ds-qol-conversation-list-response-v1";
+  const LOREBOOK_REQUEST_EVENT = "ds-qol-lorebook-request-v1";
+  const LOREBOOK_RESPONSE_EVENT = "ds-qol-lorebook-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
   const FEEDBACK_REQUEST_EVENT = "ds-qol-character-feedback-request-v1";
   const FEEDBACK_RESPONSE_EVENT = "ds-qol-character-feedback-response-v1";
@@ -33,12 +35,15 @@
   const RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT = "ds-qol-recommendation-worker-probe-response-v1";
   const API_BASE = "https://prod.nd-api.com/v2/characters/";
   const MESSAGE_API_BASE = "https://prod.nd-api.com/characters/";
+  const LOREBOOK_API_BASE = "https://prod.nd-api.com/lorebooks/";
   const API_HOST = "prod.nd-api.com";
   const MAX_TOKEN = 12000;
   const TIMEOUT_MS = 7000;
 
   let capturedToken = "";
   let capturedGuest = "";
+  let capturedCountry = "";
+  let capturedAppVersion = "";
   let capturedAt = 0;
   let recombeePublicToken = "";
   let recombeePublicTokenValidated = false;
@@ -337,6 +342,10 @@
     } else if (key === "x-guest-userid" && isGuest(raw)) {
       capturedGuest = raw;
       announceCapturedAuth();
+    } else if (key === "x-country" && /^[A-Z]{2}$/i.test(raw)) {
+      capturedCountry = raw.toUpperCase();
+    } else if (key === "x-app-version" && raw && raw.length < 80) {
+      capturedAppVersion = raw;
     }
   }
 
@@ -545,6 +554,105 @@
     if (!isGuest(guest) && isGuest(capturedGuest)) guest = capturedGuest;
     return { token, guest, authSource };
   }
+
+  function lorebookSend(detail) {
+    try { window.dispatchEvent(new CustomEvent(LOREBOOK_RESPONSE_EVENT, { detail })); } catch {}
+  }
+
+  window.addEventListener(LOREBOOK_REQUEST_EVENT, async event => {
+    const detail = event?.detail || {};
+    if (!active) return;
+    const requestId = clean(detail.requestId);
+    const lorebookId = clean(detail.lorebookId).toLowerCase();
+    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lorebookId)) return;
+
+    const initial = resolveAuth(detail);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(TIMEOUT_MS, 15000));
+    const started = Date.now();
+
+    const runRequest = async ({ token, guest, authSource }) => {
+      const headers = {
+        Accept: "application/json, text/plain, */*",
+        "x-app-id": "spicychat",
+        "x-platform": "WEB",
+        "x-platform-os": "DESKTOP"
+      };
+      const appVersion = clean(capturedAppVersion || document.querySelector('meta[name="app-version"]')?.content || "");
+      if (appVersion) headers["x-app-version"] = appVersion;
+      if (capturedCountry) headers["x-country"] = capturedCountry;
+      if (isJwt(token) && token.length < MAX_TOKEN) headers.Authorization = `Bearer ${token}`;
+      if (isGuest(guest)) headers["x-guest-userid"] = guest;
+
+      const url = `${LOREBOOK_API_BASE}${encodeURIComponent(lorebookId)}?sortBy=priority&lastSortPriority=0&view=live`;
+      const response = await nativeFetch(url, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers,
+        signal: controller.signal
+      });
+      const text = await response.text().catch(() => "");
+      return { response, text, headers, authSource, token, guest };
+    };
+
+    try {
+      let attempt = await runRequest(initial);
+      let authRefreshes = 0;
+
+      if (attempt.response.status === 401 && attempt.authSource === "captured-main-world") {
+        capturedToken = "";
+        capturedAt = 0;
+        exposeCapturedAuthState();
+
+        const fallbackToken = clean(detail.authToken);
+        const fallbackGuest = isGuest(clean(detail.guestUserId)) ? clean(detail.guestUserId) : attempt.guest;
+        const fallbackSource = clean(detail.authSource) || "refreshed-isolated-world";
+        if (isJwt(fallbackToken) && fallbackToken !== attempt.token) {
+          authRefreshes += 1;
+          attempt = await runRequest({ token: fallbackToken, guest: fallbackGuest, authSource: fallbackSource });
+        }
+      }
+
+      const { response, text, headers, authSource } = attempt;
+      const elapsedMs = Date.now() - started;
+      if (!response.ok) {
+        lorebookSend({
+          requestId, ok: false, status: "http", httpStatus: response.status,
+          elapsedMs, authSource, authProvided: !!headers.Authorization, authRefreshes
+        });
+        return;
+      }
+
+      let data = null;
+      try { data = JSON.parse(text); } catch {}
+      if (!data || typeof data !== "object") {
+        lorebookSend({
+          requestId, ok: false, status: "parse-failure", httpStatus: response.status,
+          elapsedMs, authSource, authProvided: !!headers.Authorization, authRefreshes
+        });
+        return;
+      }
+
+      lorebookSend({
+        requestId, ok: true, status: "success", httpStatus: response.status,
+        elapsedMs, authSource, authProvided: !!headers.Authorization, authRefreshes, data
+      });
+    } catch (error) {
+      lorebookSend({
+        requestId,
+        ok: false,
+        status: error?.name === "AbortError" ? "timeout" : "network-failure",
+        elapsedMs: Date.now() - started,
+        authSource: initial.authSource,
+        authProvided: isJwt(initial.token),
+        authRefreshes: 0,
+        error: clean(error?.message || error)
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   function historySend(detail) {
     try { window.dispatchEvent(new CustomEvent(HISTORY_RESPONSE_EVENT, { detail })); } catch {}

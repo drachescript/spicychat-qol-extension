@@ -23,6 +23,7 @@
   DS.CONTEXT_KEEPER_DATA_KEY = "contextKeeperData";
   DS.BOT_ARCHIVE_KEY = "botArchive";
   DS.BOT_AVAILABILITY_KEY = "botAvailability";
+  DS.LOREBOOK_STATUS_KEY = "lorebookStatus";
   DS.LOREBOOK_BACKUPS_KEY = "lorebookBackups";
   DS.LOCAL_CHANGE_HISTORY_KEY = "localActionHistory";
   DS.CHAT_BOOKMARKS_KEY = "chatBookmarks";
@@ -219,6 +220,11 @@
     lorebookBulkKeywordPaste: false,
     lorebookExpandEntryEditor: false,
     lorebookExpandTags: false,
+    lorebookBlockingEnabled: false,
+    applyBotBlockingToLorebooks: false,
+    showLorebookBlockButtons: false,
+    lorebookTrackHistory: false,
+    lorebookBlockedIds: [],
     botTagBulkPaste: false,
     showLorebookEntryExpandButtons: false,
     botEditorDefaultVisibility: "ignore",
@@ -2061,7 +2067,8 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       "quickDislikeOptInMigrationV019119",
       "oocHardPresetMigrationV022",
       "chatExportPanelMigrationV0217",
-      "performanceDefaultsMigrationV0230"
+      "performanceDefaultsMigrationV0230",
+      "lorebookPublicOptInMigrationV031"
     ]);
 
     const rawSettings = result.settings || {};
@@ -2103,6 +2110,19 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
         shouldSaveMigratedSettings = true;
       }
       migrationPayload.performanceDefaultsMigrationV0230 = true;
+    }
+
+    // v0.2.31: Public Lorebook blocking/history is opt-in from first release.
+    // Reset the prerelease test controls once so development installs also
+    // get the intended OFF defaults before the .31 feature ships.
+    if (result.lorebookPublicOptInMigrationV031 !== true) {
+      settings.lorebookBlockingEnabled = false;
+      settings.applyBotBlockingToLorebooks = false;
+      settings.showLorebookBlockButtons = false;
+      settings.lorebookTrackHistory = false;
+      settings.lorebookPublicToolsEnabled = false; // legacy prerelease master switch
+      shouldSaveMigratedSettings = true;
+      migrationPayload.lorebookPublicOptInMigrationV031 = true;
     }
 
     // v0.1.9.86: the old immediate Quick Dislike flag is migrated to the

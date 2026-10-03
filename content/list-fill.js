@@ -18,6 +18,7 @@
   let refillFavoriteFrameUrl = "";
   let refillFavoriteFrameLoad = null;
   const FALLBACK_PAGE_KEY = "public_characters_alias/sort/_text_match(buckets: 3):desc,num_messages_24h:desc[page]";
+  const FALLBACK_LOREBOOK_PAGE_KEY = "lorebooks_public/sort/_text_match(buckets: 3):desc,createdAt:desc[page]";
   const LAST_HOME_DISCOVERY_URL_KEY = "dsLastHomeDiscoveryUrl";
   const LISTING_REFILL_WORKER = (() => {
     try { return new URLSearchParams(location.search || "").get("dsListingRefill") === "1"; }
@@ -235,9 +236,18 @@
   }
 
   function uniqueTargets() {
-    const cards = DS.collectCards?.() || [];
     const targets = new Set();
 
+    if (listingKindForUrl() === "lorebook") {
+      const grid = cardGridInDocument(document);
+      if (!grid) return [];
+      for (const wrapper of wrappersFromFetchedDocument(document)) {
+        if (wrapper) targets.add(wrapper);
+      }
+      return [...targets];
+    }
+
+    const cards = DS.collectCards?.() || [];
     for (const { card } of cards) {
       const target = DS.getBestHideTarget?.(card) || card;
       if (target) targets.add(target);
@@ -304,8 +314,21 @@
 
   function listingNoResults() {
     const listing = document.querySelector("[data-testid='SearchClientCharacterListing']");
-    if (!listing) return false;
-    return /\bNo Results Found\b/i.test(listing.textContent || "");
+    if (listing && /\bNo Results Found\b/i.test(listing.textContent || "")) return true;
+    if (listingKindForUrl() === "lorebook") {
+      const text = String((document.querySelector("main, [role='main']") || document.body)?.textContent || "");
+      return /\b(?:No Results Found|0 results found)\b/i.test(text);
+    }
+    return false;
+  }
+
+  function isLorebookExploreUrl(urlLike = location.href) {
+    try {
+      const url = new URL(urlLike, location.href);
+      return /^\/lorebooks\/explore(?:\/|$)/i.test(url.pathname);
+    } catch {
+      return /^\/lorebooks\/explore(?:\/|$)/i.test(String(location.pathname || ""));
+    }
   }
 
   function pageKeyForUrl(url) {
@@ -313,11 +336,12 @@
       if (/\[page\]$/i.test(key)) return key;
     }
     for (const key of url.searchParams.keys()) {
-      if (!key.toLowerCase().includes("public_characters_alias")) continue;
+      const lower = key.toLowerCase();
+      if (!lower.includes("public_characters_alias") && !lower.includes("lorebooks_public")) continue;
       const bracket = key.indexOf("[");
       if (bracket > 0) return `${key.slice(0, bracket)}[page]`;
     }
-    return FALLBACK_PAGE_KEY;
+    return isLorebookExploreUrl(url.href) ? FALLBACK_LOREBOOK_PAGE_KEY : FALLBACK_PAGE_KEY;
   }
 
   function canonicalListingSignature(urlLike = location.href) {
@@ -428,6 +452,25 @@
     return DS.botIdFromHref?.(link?.href || "") || DS.chatIdFromHref?.(link?.href || "") || "";
   }
 
+  function lorebookIdFromLink(link) {
+    const href = String(link?.href || link?.getAttribute?.("href") || "");
+    return href.match(/\/lorebook\/([0-9a-f-]{20,})(?:[/?#]|$)/i)?.[1]?.toLowerCase?.() || "";
+  }
+
+  function listingKindForUrl(urlLike = location.href) {
+    return isLorebookExploreUrl(urlLike) ? "lorebook" : "bot";
+  }
+
+  function listingLinkSelector(kind = listingKindForUrl()) {
+    return kind === "lorebook"
+      ? "a[href*='/lorebook/']"
+      : "a[href*='/chat/'], a[href*='/chatbot/']";
+  }
+
+  function listingIdFromLink(link, kind = listingKindForUrl()) {
+    return kind === "lorebook" ? lorebookIdFromLink(link) : botIdFromLink(link);
+  }
+
   function currentBotIds() {
     const ids = new Set();
     for (const anchor of document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
@@ -437,17 +480,30 @@
     return ids;
   }
 
+  function currentListingIds(kind = listingKindForUrl()) {
+    if (kind !== "lorebook") return currentBotIds();
+    const ids = new Set();
+    for (const anchor of document.querySelectorAll(listingLinkSelector(kind))) {
+      const id = listingIdFromLink(anchor, kind);
+      if (id) ids.add(id);
+    }
+    return ids;
+  }
+
   function removeDuplicateExtraCards() {
     const extras = [...document.querySelectorAll(`[${EXTRA_CARD_ATTR}="1"]`)];
     if (!extras.length) return 0;
+
+    const kind = listingKindForUrl();
+    const selector = listingLinkSelector(kind);
 
     // Refill cards can be appended before SpicyChat finishes mounting its own
     // next batch. If the native card later appears, prefer the native React card
     // (it keeps all of SpicyChat's handlers) and remove the temporary refill copy.
     const nativeIds = new Set();
-    for (const anchor of document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
+    for (const anchor of document.querySelectorAll(selector)) {
       if (anchor.closest?.(`[${EXTRA_CARD_ATTR}="1"]`)) continue;
-      const id = botIdFromLink(anchor);
+      const id = listingIdFromLink(anchor, kind);
       if (id) nativeIds.add(id);
     }
 
@@ -455,8 +511,8 @@
     let removed = 0;
     for (const extra of extras) {
       if (!extra.classList.contains("ds-autofill-extra-card")) extra.classList.add("ds-autofill-extra-card");
-      const identity = extra.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
-      const id = botIdFromLink(identity);
+      const identity = extra.querySelector?.(selector);
+      const id = listingIdFromLink(identity, kind);
       if (!id) continue;
       if (nativeIds.has(id) || seenExtraIds.has(id)) {
         extra.remove();
@@ -482,22 +538,23 @@
 
   DS.removeDuplicateListingRefillCards = removeDuplicateExtraCards;
 
-  function directBotLinksForGrid(grid) {
-    return [...grid.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")].filter(anchor => {
-      const href = String(anchor.getAttribute("href") || "");
-      if (!/\/(?:chat|chatbot)\/[0-9a-f-]{20,}/i.test(href)) return false;
+  function directListingLinksForGrid(grid, kind = listingKindForUrl(grid?.ownerDocument?.location?.href || location.href)) {
+    const selector = listingLinkSelector(kind);
+    return [...grid.querySelectorAll(selector)].filter(anchor => {
+      const id = listingIdFromLink(anchor, kind);
+      if (!id) return false;
       // SpicyChat's page shell is itself a CSS grid and contains the entire
       // listing farther down. Only count links whose nearest grid is this one,
       // otherwise the outer app-shell grid can tie the real card grid and be
-      // selected by mistake. Accept both chat and profile links so a card-layout
-      // change that drops one of those anchors does not break Refill detection.
+      // selected by mistake.
       return anchor.closest?.("div.grid") === grid;
     });
   }
 
   function cardGridInDocument(doc = document) {
+    const kind = listingKindForUrl(doc?.location?.href || location.href);
     const grids = [...doc.querySelectorAll("div.grid")]
-      .map(grid => ({ grid, links: directBotLinksForGrid(grid) }))
+      .map(grid => ({ grid, links: directListingLinksForGrid(grid, kind) }))
       .filter(entry => entry.links.length >= 3);
     grids.sort((a, b) => b.links.length - a.links.length);
     return grids[0]?.grid || null;
@@ -530,12 +587,13 @@
   function wrappersFromFetchedDocument(doc) {
     const grid = cardGridInDocument(doc);
     if (!grid) return [];
+    const kind = listingKindForUrl(doc?.location?.href || location.href);
+    const selector = listingLinkSelector(kind);
     const out = [];
     const seen = new Set();
 
-    for (const anchor of grid.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
-      const href = String(anchor.getAttribute("href") || "");
-      if (!/\/(?:chat|chatbot)\/[0-9a-f-]{20,}/i.test(href)) continue;
+    for (const anchor of grid.querySelectorAll(selector)) {
+      if (!listingIdFromLink(anchor, kind)) continue;
       const card = anchor.closest("div.relative.group.rounded-xl") || anchor.closest("div[class*='rounded-xl']");
       if (!card) continue;
       const wrapper = card.parentElement && card.parentElement.parentElement === grid ? card.parentElement : card;
@@ -557,17 +615,21 @@
   }
 
   function extractCardMetadata(wrapper, baseUrl = location.href) {
-    const chat = wrapper?.querySelector?.("a[href*='/chat/']");
-    const profile = wrapper?.querySelector?.("a[href*='/chatbot/']");
+    const lorebook = wrapper?.querySelector?.("a[href*='/lorebook/']");
+    const kind = lorebook ? "lorebook" : "bot";
+    const chat = kind === "bot" ? wrapper?.querySelector?.("a[href*='/chat/']") : null;
+    const profile = kind === "bot" ? wrapper?.querySelector?.("a[href*='/chatbot/']") : lorebook;
     const creator = wrapper?.querySelector?.("a[href*='/creator/']");
     const image = wrapper?.querySelector?.("img[src]");
-    const id = botIdFromLink(chat || profile);
+    const id = kind === "lorebook" ? lorebookIdFromLink(lorebook) : botIdFromLink(chat || profile);
     const tags = [...(wrapper?.querySelectorAll?.("button") || [])]
       .filter(isNativeTagPillButton)
       .map(button => String(button.getAttribute("aria-label") || button.textContent || "").replace(/\s+/g, " ").trim())
       .filter(Boolean);
     const uniqueTags = [...new Set(tags)];
-    const titleLink = wrapper?.querySelector?.("a[aria-label^='chat-with-'][title], a[href*='/chat/'][title]");
+    const titleLink = kind === "lorebook"
+      ? (wrapper?.querySelector?.("a[aria-label^='chat-with-'][href*='/lorebook/']") || lorebook)
+      : wrapper?.querySelector?.("a[aria-label^='chat-with-'][title], a[href*='/chat/'][title]");
     const descCandidates = [...(wrapper?.querySelectorAll?.("p") || [])]
       .filter(node => !node.closest("a[href*='/creator/']"))
       .filter(node => !node.closest("button"))
@@ -576,16 +638,39 @@
     const absolute = href => {
       try { return href ? new URL(href, baseUrl).href : ""; } catch { return String(href || ""); }
     };
+
+    let entryCount = 0;
+    if (kind === "lorebook") {
+      for (const el of wrapper?.querySelectorAll?.("p, span") || []) {
+        const value = String(el.textContent || "").trim();
+        if (!/^\d{1,6}$/.test(value)) continue;
+        if (el.parentElement?.querySelector?.("svg.lucide-book-open, svg[class*='lucide-book-open']")) {
+          entryCount = Number(value) || 0;
+          break;
+        }
+      }
+    }
+
+    const name = String(
+      titleLink?.getAttribute?.("title") ||
+      image?.getAttribute?.("alt") ||
+      titleLink?.getAttribute?.("aria-label")?.replace(/^chat-with-/i, "") ||
+      titleLink?.textContent ||
+      ""
+    ).replace(/\s+/g, " ").trim();
+
     return {
+      kind,
       id,
-      name: String(titleLink?.getAttribute("title") || titleLink?.textContent || "").replace(/\s+/g, " ").trim(),
+      name,
       creator: String(creator?.textContent || "").replace(/\s+/g, " ").trim(),
       creatorUrl: absolute(creator?.getAttribute("href")),
       chatUrl: absolute(chat?.getAttribute("href")),
       profileUrl: absolute(profile?.getAttribute("href")),
       image: absolute(image?.getAttribute("src")),
       tags: uniqueTags.slice(0, 40),
-      description: descCandidates.find(text => text.length > 2 && !uniqueTags.includes(text)) || ""
+      description: descCandidates.find(value => value.length > 2 && value !== name && !uniqueTags.includes(value)) || "",
+      entryCount
     };
   }
 
@@ -710,12 +795,13 @@
     await DS.saveFavoriteBots?.(store);
   }
 
-  function refillFavoriteCardInDocument(doc, botId) {
-    const id = String(botId || "").trim();
+  function refillFavoriteCardInDocument(doc, itemId) {
+    const id = String(itemId || "").trim();
     if (!id || !doc?.querySelectorAll) return null;
-    for (const anchor of doc.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
-      if (botIdFromLink(anchor) !== id) continue;
-      const card = anchor.closest("div.relative.group.rounded-xl") || anchor.closest("div[class*='rounded-xl']") || DS.getCardFromChatLink?.(anchor);
+    const kind = listingKindForUrl(doc?.location?.href || location.href);
+    for (const anchor of doc.querySelectorAll(listingLinkSelector(kind))) {
+      if (listingIdFromLink(anchor, kind) !== id) continue;
+      const card = anchor.closest("div.relative.group.rounded-xl") || anchor.closest("div[class*='rounded-xl']") || (kind === "bot" ? DS.getCardFromChatLink?.(anchor) : null);
       if (findFavoriteActionButton(card)) return card;
     }
     return null;
@@ -811,7 +897,7 @@
     return { ok: false, status: active ? "favorite-timeout" : "unfavorite-timeout" };
   }
 
-  function wireRefillFavoriteButton(root, id, sourceUrl) {
+  function wireRefillFavoriteButton(root, id, sourceUrl, kind = listingKindForUrl(sourceUrl)) {
     const button = findFavoriteActionButton(root);
     if (!button) return;
 
@@ -846,18 +932,21 @@
             targetActive,
             targetActive ? "Favorited on SpicyChat" : "Removed from SpicyChat Favorites"
           );
-          if (targetActive) {
+          if (targetActive && kind === "bot") {
             const anchor = root.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
             await rememberRefillFavoriteLocally(id, root, anchor);
           }
-          DS.setQuickStatus?.(targetActive ? "Bot favorited." : "Bot removed from Favorites.");
+          const label = kind === "lorebook" ? "Lorebook" : "Bot";
+          DS.setQuickStatus?.(targetActive ? `${label} favorited.` : `${label} removed from Favorites.`);
         } else {
           setRefillFavoriteVisual(button, previousActive, `Could not ${targetActive ? "favorite" : "unfavorite"}: ${response?.status || "helper failed"}`);
-          DS.setQuickStatus?.(`Could not ${targetActive ? "favorite" : "unfavorite"} filled bot: ${response?.status || "helper failed"}`);
+          const label = kind === "lorebook" ? "Lorebook" : "bot";
+          DS.setQuickStatus?.(`Could not ${targetActive ? "favorite" : "unfavorite"} filled ${label}: ${response?.status || "helper failed"}`);
         }
       } catch (error) {
         setRefillFavoriteVisual(button, previousActive, `Could not ${targetActive ? "favorite" : "unfavorite"}: ${error?.message || "helper failed"}`);
-        DS.setQuickStatus?.(`Could not update filled bot favorite: ${error?.message || "helper failed"}`);
+        const label = kind === "lorebook" ? "Lorebook" : "bot";
+        DS.setQuickStatus?.(`Could not update filled ${label} favorite: ${error?.message || "helper failed"}`);
       } finally {
         button.disabled = false;
       }
@@ -896,7 +985,7 @@
         if (attr.name.startsWith("data-ds-")) node.removeAttribute(attr.name);
       });
     }
-    root.querySelectorAll(".ds-card-block-button, .ds-listing-refill-button, [id^='ds-qol-']").forEach(el => el.remove());
+    root.querySelectorAll(".ds-card-block-button, .ds-lorebook-block-button, .ds-listing-refill-button, [id^='ds-qol-']").forEach(el => el.remove());
   }
 
   function wrapperFromHtml(html) {
@@ -910,7 +999,10 @@
     if (!wrapper) return null;
 
     // Do not append an arbitrary serialized element if SpicyChat/helper output
-    // changes unexpectedly. A refill payload must still identify a bot card.
+    // changes unexpectedly. A refill payload must still identify a bot or
+    // Public Lorebook card.
+    const lorebook = wrapper.querySelector?.("a[href*='/lorebook/']");
+    if (lorebook && lorebookIdFromLink(lorebook)) return wrapper;
     const identityLink = wrapper.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
     if (!botIdFromLink(identityLink)) return null;
     return wrapper;
@@ -922,15 +1014,15 @@
   }
 
   function hardBlockRefillReason(reason) {
-    return /^(?:blocked bot(?: id)?|blocked word|blocked tag|blocked creator):?/i.test(String(reason || ""));
+    return /^(?:blocked bot(?: id)?|blocked word|blocked tag|blocked creator|blocked lorebook(?: id| word| tag| creator)?):?/i.test(String(reason || ""));
   }
 
   function rejectionBucket(reason, kind = "") {
     const value = String(reason || "").toLowerCase();
-    if (/^blocked bot(?: id)?:/.test(value)) return "blockedBotRejected";
-    if (/^blocked creator:/.test(value)) return "blockedCreatorRejected";
-    if (/^blocked word:/.test(value)) return "blockedWordRejected";
-    if (/^blocked tag:/.test(value) || /excluded tag|missing included tag/.test(value)) return "blockedTagRejected";
+    if (/^blocked bot(?: id)?:/.test(value) || /^blocked lorebook id:/.test(value)) return "blockedBotRejected";
+    if (/^blocked creator:/.test(value) || /^blocked lorebook creator:/.test(value)) return "blockedCreatorRejected";
+    if (/^blocked word:/.test(value) || /^blocked lorebook word:/.test(value)) return "blockedWordRejected";
+    if (/^blocked tag:/.test(value) || /^blocked lorebook tag:/.test(value) || /excluded tag|missing included tag/.test(value)) return "blockedTagRejected";
     if (/^language:/.test(value)) return "languageRejected";
     if (/opened chat/.test(value)) return "openedRejected";
     if (/saved for later/.test(value)) return "laterRejected";
@@ -950,7 +1042,7 @@
   }
 
   function classifyLiveHiddenReason(reason) {
-    return rejectionBucket(String(reason || "").replace(/^card:/i, "").trim());
+    return rejectionBucket(String(reason || "").replace(/^card:/i, "").replace(/^lorebook:block:/i, "").trim());
   }
 
   function liveListingFilterCounts() {
@@ -960,11 +1052,13 @@
       notInterestedRejected: 0, smartFilterRejected: 0, otherRejected: 0
     };
     const seen = new Set();
+    const kind = listingKindForUrl();
+    const selector = listingLinkSelector(kind);
     for (const target of document.querySelectorAll("[data-ds-hidden='1'], .ds-smart-filter-hidden")) {
       if (target.closest?.("#ds-qol-panel")) continue;
-      const link = target.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+      const link = target.querySelector?.(selector);
       if (!link) continue;
-      const id = botIdFromLink(link);
+      const id = listingIdFromLink(link, kind);
       const key = id || target;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1003,7 +1097,9 @@
     const live = liveListingFilterCounts();
     const stats = runStats();
     const total = live.total + Number(stats.filtered || 0);
-    let text = ` · QoL: ${total} bot${total === 1 ? "" : "s"} blocked/filtered`;
+    const lorebooks = listingKindForUrl() === "lorebook";
+    const noun = lorebooks ? `Lorebook${total === 1 ? "" : "s"}` : `bot${total === 1 ? "" : "s"}`;
+    let text = ` · QoL: ${total} ${noun} blocked/filtered`;
     if (settings.showListingFilterStatsDetails) {
       const sum = key => Number(live[key] || 0) + Number(stats[key] || 0);
       const bots = sum("blockedBotRejected");
@@ -1013,7 +1109,7 @@
       const savedOpened = sum("openedRejected") + sum("laterRejected") + sum("notInterestedRejected");
       const smartOther = sum("smartFilterRejected") + sum("otherRejected");
       const parts = [
-        bots ? `${bots} blocked bot${bots === 1 ? "" : "s"}` : "",
+        bots ? `${bots} blocked ${lorebooks ? `Lorebook${bots === 1 ? "" : "s"}` : `bot${bots === 1 ? "" : "s"}`}` : "",
         creators ? `${creators} creator${creators === 1 ? "" : "s"}` : "",
         tagsWords ? `${tagsWords} tag/word` : "",
         language ? `${language} language` : "",
@@ -1075,8 +1171,13 @@
 
   function fastMetadataRejection(meta, known, rejectedIds, nativeRules) {
     const id = String(meta?.id || "").trim();
-    if (id && (known.has(id) || rejectedIds.has(id))) return { kind: "duplicate", reason: "duplicate bot id", id };
-    if (id && DS.state.blockedBotIdSet?.has(id)) return { kind: "blocked", reason: `blocked bot id: ${id}`, id };
+    const kind = String(meta?.kind || listingKindForUrl());
+    if (id && (known.has(id) || rejectedIds.has(id))) {
+      return { kind: "duplicate", reason: kind === "lorebook" ? "duplicate Lorebook id" : "duplicate bot id", id };
+    }
+    if (kind !== "lorebook" && id && DS.state.blockedBotIdSet?.has(id)) {
+      return { kind: "blocked", reason: `blocked bot id: ${id}`, id };
+    }
 
     const nativeReason = nativeTagRejection(meta, null, nativeRules);
     if (nativeReason) return { kind: "native", reason: nativeReason, id };
@@ -1120,6 +1221,12 @@
     const nativeReason = nativeTagRejection(meta, wrapper, nativeRules);
     if (nativeReason) return { kind: "native", reason: nativeReason };
 
+    const itemKind = String(meta?.kind || (lorebookIdFromLink(link) ? "lorebook" : "bot"));
+    if (itemKind === "lorebook") {
+      const lorebookReason = DS.getPublicLorebookBlockReason?.(meta || extractCardMetadata(wrapper)) || "";
+      return lorebookReason ? { kind: "blocked", reason: lorebookReason } : null;
+    }
+
     const cardReason = DS.shouldHideCard?.(wrapper, link, {
       discovery: true,
       home: refillHomeContext(),
@@ -1134,6 +1241,15 @@
     const smartReason = DS.getSmartFilterRefillRejection?.(wrapper, link) || "";
     if (smartReason) return { kind: "smart", reason: smartReason };
     return null;
+  }
+
+  async function applyPostRefillFilters() {
+    if (listingKindForUrl() === "lorebook") {
+      await DS.applyPublicLorebookQoL?.();
+      return;
+    }
+    await DS.applyCardHiding?.({ force: true });
+    await DS.applySmartFilterPresets?.();
   }
 
   function refillCandidateCacheStore() {
@@ -1213,7 +1329,7 @@
     const host = extraGrid();
     if (!host) return 0;
 
-    const known = currentBotIds();
+    const known = currentListingIds();
     const rejectedIds = DS.state.autoFillRejectedBotIds instanceof Set
       ? DS.state.autoFillRejectedBotIds
       : (DS.state.autoFillRejectedBotIds = new Set());
@@ -1251,8 +1367,9 @@
       const resolvedMeta = meta || extractCardMetadata(wrapper, payload.baseUrl || location.href);
       stripWorkerArtifacts(wrapper);
 
-      const link = wrapper.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
-      const id = botIdFromLink(link);
+      const kind = String(resolvedMeta?.kind || listingKindForUrl(payload.baseUrl || location.href));
+      const link = wrapper.querySelector(listingLinkSelector(kind));
+      const id = listingIdFromLink(link, kind);
       if (!id) continue;
       if (known.has(id) || rejectedIds.has(id)) {
         stats.duplicates = Number(stats.duplicates || 0) + 1;
@@ -1284,13 +1401,13 @@
         if (button === favoriteButton || isNativeTagPillButton(button)) return;
         button.remove();
       });
-      stats.tagsRestored += ensureTagPillsFromMetadata(clone, resolvedMeta);
+      if (kind !== "lorebook") stats.tagsRestored += ensureTagPillsFromMetadata(clone, resolvedMeta);
       clone.querySelectorAll("svg.lucide-ellipsis-vertical").forEach(svg => {
         const shell = svg.closest("div.relative");
         if (shell && !shell.querySelector("a[href]") && !shell.querySelector("button")) shell.remove();
         else svg.remove();
       });
-      wireRefillFavoriteButton(clone, id, payload.baseUrl || location.href);
+      wireRefillFavoriteButton(clone, id, payload.baseUrl || location.href, kind);
 
       stats.domNodesCreated = Number(stats.domNodesCreated || 0) + 1 + clone.querySelectorAll("*").length;
       host.appendChild(clone);
@@ -1313,8 +1430,7 @@
     }
 
     DS.bumpDomRevision?.();
-    await DS.applyCardHiding?.({ force: true });
-    await DS.applySmartFilterPresets?.();
+    await applyPostRefillFilters();
 
     let postRejected = 0;
     for (const clone of inserted) {
@@ -1427,7 +1543,7 @@
       return 0;
     }
 
-    const known = currentBotIds();
+    const known = currentListingIds();
     const rejectedIds = DS.state.autoFillRejectedBotIds instanceof Set
       ? DS.state.autoFillRejectedBotIds
       : (DS.state.autoFillRejectedBotIds = new Set());
@@ -1472,8 +1588,9 @@
       const meta = payload.meta || extractCardMetadata(wrapper, response.baseUrl || url);
       stripWorkerArtifacts(wrapper);
 
-      const link = wrapper.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
-      const id = botIdFromLink(link);
+      const kind = String(meta?.kind || listingKindForUrl(response.baseUrl || url));
+      const link = wrapper.querySelector(listingLinkSelector(kind));
+      const id = listingIdFromLink(link, kind);
       if (!id) continue;
       if (known.has(id) || rejectedIds.has(id)) {
         stats.duplicates = Number(stats.duplicates || 0) + 1;
@@ -1518,7 +1635,7 @@
         if (button === favoriteButton || isNativeTagPillButton(button)) return;
         button.remove();
       });
-      stats.tagsRestored += ensureTagPillsFromMetadata(clone, meta);
+      if (kind !== "lorebook") stats.tagsRestored += ensureTagPillsFromMetadata(clone, meta);
 
       clone.querySelectorAll("svg.lucide-ellipsis-vertical").forEach(svg => {
         const shell = svg.closest("div.relative");
@@ -1526,7 +1643,7 @@
         else svg.remove();
       });
 
-      wireRefillFavoriteButton(clone, id, response.baseUrl || url);
+      wireRefillFavoriteButton(clone, id, response.baseUrl || url, kind);
       stats.domNodesCreated = Number(stats.domNodesCreated || 0) + 1 + clone.querySelectorAll("*").length;
       host.appendChild(clone);
       insertedThisPage.push(clone);
@@ -1552,8 +1669,7 @@
     // remove a refill clone if a later/dynamic check still rejects it. Hidden
     // refill cards therefore do not accumulate in the live DOM.
     DS.bumpDomRevision?.();
-    await DS.applyCardHiding?.({ force: true });
-    await DS.applySmartFilterPresets?.();
+    await applyPostRefillFilters();
 
     let postRejected = 0;
     for (const clone of insertedThisPage) {
@@ -1589,7 +1705,7 @@
 
     DS.runtimeLog?.("info", "listing-refill", "Processed rendered helper-page cards", {
       page,
-      received: wrappers.length,
+      received: payloads.length,
       appended,
       visible: afterVisible,
       duplicates: stats.duplicates || 0,
@@ -1747,7 +1863,9 @@
     // *current* block/filter state before it is inserted.
     const cachedAppended = await appendCachedRefillCandidates();
     if (cachedAppended > 0) {
-      DS.setQuickStatus?.(`Auto-fill reused ${cachedAppended} cached ${cachedAppended === 1 ? "bot" : "bots"}.`, true);
+      const kind = listingKindForUrl();
+      const noun = kind === "lorebook" ? (cachedAppended === 1 ? "Lorebook" : "Lorebooks") : (cachedAppended === 1 ? "bot" : "bots");
+      DS.setQuickStatus?.(`Auto-fill reused ${cachedAppended} cached ${noun}.`, true);
       return true;
     }
 
@@ -1767,7 +1885,7 @@
       DS.setQuickStatus?.(`Auto-fill loading more... ${DS.state.autoFillClicks}/${maxClicks}`, true);
       DS.realClick(loadMore, { scroll: manual });
       const result = await waitForListingGrowth(beforeTotal);
-      await DS.applyCardHiding?.();
+      await applyPostRefillFilters();
       DS.updateQuickPanel?.();
       if (!result.grew && manual) DS.setQuickStatus?.("Load More was clicked, but no new cards appeared.");
       return result.grew;
@@ -1876,7 +1994,7 @@
       DS.state.autoFillResumeAfterScrollY = 0;
       resetRunStats();
       removeExtraCards();
-      await DS.applyCardHiding?.();
+      await applyPostRefillFilters();
 
       const target = Math.max(1, Math.min(200, Number(DS.state.settings.autoFillTargetCards || 50)));
       const maxClicks = Math.max(1, Math.min(30, Number(DS.state.settings.autoFillMaxClicks || 8)));

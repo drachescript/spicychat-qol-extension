@@ -422,207 +422,7 @@ Testing"></textarea></label>
 
 
 </div>
-<div class="tab-page" data-page="saved"><p class="page-intro">Review Bot Status Center history/checks first, then Saved Bots Hub, local organization, Favorite, Followed, Later, and saved-copy data.</p>
-<section class="card" id="botAvailabilityCard">
-<h2>Bot Status Center</h2>
-<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data. Large scans keep new results in memory and save them when you press Stop or when the scan finishes, so leave Settings open while a scan is running.</p>
-<fieldset class="bot-status-opened-tracking">
-<legend>Opened history tracking</legend>
-<label class="row"><input id="trackOpenedChats" type="checkbox"/><span>Track chats I open in Bot Status Center</span></label>
-<label class="row"><input id="importOpenedFromChatsPage" type="checkbox"/><span>When I visit /chat or /chats, import those into opened history</span></label>
-<label class="row"><input id="hideOpenedChats" type="checkbox"/><span>Hide bots already in opened history from recommendations/listings</span></label>
-<label class="row"><input id="compactAfterHiding" type="checkbox"/><span>Compact card grids after hiding cards</span></label>
-</fieldset>
-<fieldset class="bot-status-opened-history">
-<legend>Opened history</legend>
-<p class="hint">Bots logged by Bot Status Center opened-history tracking. Blocked bots always take priority: blocking a bot removes it from opened history, and it cannot be re-added here while the block remains active.</p>
-<div class="bot-manager-toolbar">
-<input id="openedBotSearch" placeholder="Search opened history — comma = multiple terms" type="search"/>
-<select id="openedBotSortMode">
-<option value="newest">Newest first</option>
-<option value="oldest">Oldest first</option>
-<option value="name-asc">Name A-Z</option>
-<option value="name-desc">Name Z-A</option>
-</select>
-<span class="manager-count" id="openedBotManagerSummary">0 saved</span>
-</div>
-<div class="bot-manager-list" id="openedBotManager"></div>
-<div class="bot-manager-pager">
-<button id="openedBotShowMore" type="button">Show 20 more</button>
-<button id="openedBotShowLess" type="button">Show first 20</button>
-<button id="openedBotCollapse" type="button">Show 100</button>
-</div>
-<div class="button-row"><button id="clearOpened" type="button">Clear opened history</button><span class="count" id="openedCount"></span></div>
-</fieldset>
-<fieldset class="bot-status-creator-watch">
-<legend>Followed creator new-bot watch</legend>
-<p class="hint">Shows the background status for the optional followed-creator notification feature below. New detections are also added to Saved Bots Hub as a separate local source.</p>
-<p class="hint" id="creatorBotWatchStatusCenter">New-bot watch is disabled.</p>
-<div class="button-row"><button id="creatorBotStatusCenterCheckNow" type="button">Check approved followed creators now</button></div>
-</fieldset>
-<div class="bot-availability-controls">
-<select aria-label="Bots to scan" id="botAvailabilityScope">
-<option value="all">All tracked bots</option>
-<option value="favorite">Favorites only</option>
-<option value="later">Later only</option>
-<option value="blocked">Blocked bots only</option>
-<option value="notInterested">Not Interested only</option>
-<option value="recent">Recently Seen only</option>
-<option value="creatorWatch">Followed creator detections only</option>
-<option value="organizer">Bot Organizer only</option>
-<option value="opened">Opened history only</option>
-<option value="archive">Saved bot copies only</option>
-</select>
-<select aria-label="Bot status filter" id="botAvailabilityStatusFilter">
-<option value="all">All tracked bots</option>
-<option value="updated">Has detected changes</option>
-<option value="archived">Has saved local copy</option>
-<option value="unarchived">No saved local copy</option>
-<option value="exact">Exact duplicate matches</option>
-<option value="likely">Likely duplicates</option>
-<option value="possible">Possible duplicates</option>
-<option value="unavailable">Unavailable / deleted</option>
-<option value="restricted">Private / restricted</option>
-<option value="unknown">Unknown / not checked</option>
-<option value="available">Available</option>
-</select>
-<input id="botAvailabilitySearch" placeholder="Search bot status, changes or duplicates" type="search"/>
-<span class="manager-count" id="botAvailabilitySummary">0 tracked</span>
-</div>
-<div class="bot-availability-controls">
-<label>Scan speed
-<select id="botStatusScanSpeed" aria-label="Bot Status scan speed">
-<option value="safe">Safe · ~600 ms after response</option>
-<option value="normal">Normal · ~450 ms after response</option>
-<option value="fast">Fast · ~350 ms after response</option>
-</select>
-</label>
-<label>Refresh stale after
-<select id="botStatusStaleDays" aria-label="Refresh Bot Status entries stale after">
-<option value="1">1 day</option>
-<option value="7">7 days</option>
-<option value="14">14 days</option>
-<option value="30">30 days</option>
-</select>
-</label>
-<span class="manager-count" id="botAvailabilityUnavailableSummary"></span>
-</div>
-<div class="button-row">
-<button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
-<button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
-<button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
-<button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
-<span class="count" id="botAvailabilityScanStatus"></span>
-</div>
-<p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
-<details class="sub-card bot-status-maintenance-card">
-<summary>Cleanup, export &amp; reset tools</summary>
-<p class="hint">These are occasional maintenance tools. Normal Bot Status scans do not need them.</p>
-<div class="button-row">
-<button id="cleanUnavailableBots" type="button">Move confirmed unavailable to recovery</button>
-<button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies (.json.gz)</button>
-<button id="clearBotAvailabilityResults" type="button">Clear status history</button>
-<button id="clearBotArchive" type="button">Clear all saved bot copies</button>
-<span class="count" id="botStatusArchiveExportStatus"></span>
-</div>
-</details>
-<div class="button-row" id="botStatusArchiveUploadActions" hidden>
-<button id="sendBotStatusArchiveChanged" type="button">Send saved copies to Archive</button>
-<button id="sendBotStatusArchiveAll" type="button" hidden>Send all saved copies</button>
-<span class="count" id="botStatusArchiveUploadStatus"></span>
-</div>
-<fieldset id="botStatusArchiveContributionSettings">
-<legend>Public Archive contribution</legend>
-<label class="row"><input id="enableBotStatusArchiveContribution" type="checkbox"/><span>Allow my saved Bot Status copies to be submitted anonymously to the public SpicyChat Archive for review</span></label>
-<p class="hint">Only saved bot snapshots are submitted. QoL does not include chats, personas, Favorites/Later membership, settings, account details, cookies, or SpicyChat login/session data. A random extension-install identifier is hashed locally and sent only for basic anti-spam/rate limiting.</p>
-<div class="button-row" id="botStatusArchiveContributionActions" hidden>
-<button id="submitBotStatusArchiveChanged" type="button">Submit saved copies for review</button>
-<button id="submitBotStatusArchiveAll" type="button" hidden>Submit all saved copies for review</button>
-<span class="count" id="botStatusArchiveContributionStatus"></span>
-</div>
-<p class="hint" id="botStatusArchiveContributionSummary">Contribution is off.</p>
-</fieldset>
-<fieldset id="botStatusArchiveUploadSettings">
-<legend>Archive owner upload (private)</legend>
-<label>Endpoint
-<input id="botStatusArchiveEndpoint" type="url" spellcheck="false" value="https://spicychat-archive-import.dragongraf.workers.dev/api/imports/bot-status"/>
-</label>
-<label>Import token
-<input id="botStatusArchiveToken" type="password" autocomplete="off" spellcheck="false" placeholder="SPICYCHAT_ARCHIVE_IMPORT_TOKEN"/>
-</label>
-<div class="button-row"><button id="testBotStatusArchiveEndpoint" type="button">Test endpoint</button><span class="count" id="botStatusArchiveConfigStatus"></span></div>
-<p class="hint" id="botStatusArchiveUploadSummary">Configure the endpoint and private import token to enable archive upload.</p>
-<p class="hint">The import token is stored only in extension local storage. It is deliberately excluded from QoL settings backup/export/import. Uploading never deletes your local Bot Status saved copies.</p>
-</fieldset>
-<fieldset id="botAvailabilityResultsCard">
-<legend>Tracked Bot Status Results</legend>
-<p class="hint">Live availability results for all tracked bots. Available bots belong here; only confirmed deleted/unavailable recovery copies appear in the separate section below.</p>
-<div class="bot-manager-list" id="botAvailabilityManager"></div>
-<div class="bot-manager-pager">
-<button id="botAvailabilityShowMore" type="button">Show 10 more</button>
-<button id="botAvailabilityShowLess" type="button">Show first 10</button>
-<button id="botAvailabilityCollapse" type="button">Show 100</button>
-</div>
-</fieldset>
-<fieldset>
-<legend>Local Bot Archive</legend>
-<label class="row"><input id="botArchiveRememberSeenPublic" type="checkbox"/><span>Remember the last public bot data QoL sees (including Greeting when available)</span></label>
-<label class="row"><input id="botArchiveOnProfileVisit" type="checkbox"/><span>Automatically save a Bot Profile Snapshot/history when I visit a chatbot profile</span></label>
-<label class="row"><input id="botArchiveOnChatOpen" type="checkbox"/><span>Refresh the saved bot copy when I open one of its chats</span></label>
-<label>Chat-open refresh interval
-            <select id="botArchiveRefreshHours">
-<option value="6">6 hours</option>
-<option value="24">24 hours</option>
-<option value="72">3 days</option>
-<option value="168">7 days</option>
-</select>
-</label>
-<p class="hint"><strong>Bot Profile Snapshots:</strong> when enabled, opening a chatbot profile stores the bot ID, name/title, creator, image, tags, Greeting, description and any definition/scenario/example fields, stats or other metadata that SpicyChat actually exposes to QoL. Meaningful profile changes are kept in profile history; stats-only observations stay separate where possible. QoL never unlocks or guesses private/hidden definition fields.</p>
-<p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh only updates an older saved copy when live SpicyChat character data is still readable; opening an old chat by itself never overwrites a recovery copy for a deleted/unavailable bot.</p>
-<p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
-</fieldset>
-<fieldset id="savedBotInfoCard">
-<legend>Saved Bot Copies / Recovery</legend>
-<p class="hint">Browse bot data QoL has saved locally. This list can include bots that are still Available; confirmed deleted/unavailable recovery copies are shown separately below. Currently blocked bots stay out of recovery views and are not added by Bot Status scans; any older recovery data is kept locally rather than deleted. Only fields SpicyChat actually exposed to QoL are stored.</p>
-<div class="bot-manager-toolbar">
-<input id="savedBotInfoSearch" placeholder="Search saved bot copies, creators or IDs" type="search"/>
-<span class="manager-count" id="savedBotInfoSummary">0 saved copies</span>
-</div>
-<div class="bot-manager-list" id="savedBotInfoManager"></div>
-<div class="bot-manager-pager">
-<button id="savedBotInfoShowMore" type="button">Show 20 more</button>
-<button id="savedBotInfoShowLess" type="button">Show first 20</button>
-<button id="savedBotInfoCollapse" type="button">Show 100</button>
-</div>
-</fieldset>
-<fieldset id="deletedSavedBotsCard">
-<legend>Deleted / Unavailable Saved Bots</legend>
-<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Open an old chat when one is still available, keep the saved fields for recovery, or use <strong>Forget from QoL</strong> to remove that exact character ID and all of its local QoL data. Forgotten IDs are kept only as a tiny ignore entry so Load all / future scans do not immediately recreate them; this never deletes the real SpicyChat conversation.</p>
-<div class="bot-manager-toolbar">
-<input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
-<span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
-</div>
-<div class="button-row">
-<button id="recheckDeletedSavedBots" type="button">Recheck archived bots</button>
-<span class="count" id="deletedSavedBotRecheckStatus"></span>
-</div>
-<div class="bot-manager-list" id="deletedSavedBotManager"></div>
-<div class="bot-manager-pager">
-<button id="deletedSavedBotShowMore" type="button">Show 10 more</button>
-<button id="deletedSavedBotShowLess" type="button">Show first 10</button>
-<button id="deletedSavedBotCollapse" type="button">Show 100</button>
-</div>
-<div class="button-row" id="forgottenBotStatusIdsWrap" hidden>
-<span class="manager-count" id="forgottenBotStatusIdsCount">0 forgotten character IDs</span>
-<button id="clearForgottenBotStatusIds" type="button">Allow forgotten IDs to be tracked again</button>
-</div>
-</fieldset>
-<p class="hint"><strong>Saved bot copies:</strong> successful profile checks can preserve the accessible name, description, greeting, personality/definition, scenario, example dialogues, tags, creator, visible stats and avatar URL in extension storage. A saved copy stays available here even if the live bot later disappears. Clearing status history does not clear these copies.</p>
-<p class="hint"><strong>Archive export:</strong> creates a versioned compressed JSON backup for the SpicyChat Archive importer. It exports only public / Bot Status snapshot data, skips manual creator/editor backups and private local notes, makes no live API calls, and treats unavailable/private status as historical observations that still need current verification.</p>
-<p class="hint"><strong>Profile change history:</strong> the first successful profile check becomes the starting snapshot. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Meaningful changes are preserved automatically as history and the newest snapshot becomes the next baseline; cards show only the fields that changed. Missing fields and comparison-only noise such as repeated adjacent words are ignored instead of being treated as edits.</p>
-<p class="hint"><strong>Duplicate / Reupload Finder:</strong> compares local names, avatars and captured profile text and labels matches as Exact, Likely or Possible. These are hints only and can have false positives; QoL never hides, blocks or deletes a bot because of a match.</p>
-<p class="hint">Availability checks only mark clear results. Deleted/404 pages show as unavailable, private/restricted pages stay restricted, and timeouts or rate limits stay Unknown instead of being guessed as deleted.</p>
-</section>
+<div class="tab-page" data-page="saved"><p class="page-intro">Review saved lists and local organization first; Bot Status Center and Lorebook Status & History are grouped together at the bottom.</p>
 <section class="card" id="savedBotsHubCard">
 <h2>Saved Bots Hub</h2>
 <p class="hint">One local overview for bots QoL already knows from Favorite history, Later, Recently Seen, followed-creator new-bot detections, Bot Organizer, or Bot Status Center opened history. Use the bulk controls to organize the full filtered known-bot set into folders/tags without first adding everything to Later. The underlying lists stay separate.</p>
@@ -888,6 +688,278 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="laterBotShowLess" type="button">Show first 20</button>
 <button id="laterBotCollapse" type="button">Show 100</button>
 </div>
+</section>
+<section class="card" id="botAvailabilityCard">
+<h2>Bot Status Center</h2>
+<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data. Large scans keep new results in memory and save them when you press Stop or when the scan finishes, so leave Settings open while a scan is running.</p>
+<fieldset class="bot-status-opened-tracking">
+<legend>Opened history tracking</legend>
+<label class="row"><input id="trackOpenedChats" type="checkbox"/><span>Track chats I open in Bot Status Center</span></label>
+<label class="row"><input id="importOpenedFromChatsPage" type="checkbox"/><span>When I visit /chat or /chats, import those into opened history</span></label>
+<label class="row"><input id="hideOpenedChats" type="checkbox"/><span>Hide bots already in opened history from recommendations/listings</span></label>
+<label class="row"><input id="compactAfterHiding" type="checkbox"/><span>Compact card grids after hiding cards</span></label>
+</fieldset>
+<fieldset class="bot-status-opened-history">
+<legend>Opened history</legend>
+<p class="hint">Bots logged by Bot Status Center opened-history tracking. Blocked bots always take priority: blocking a bot removes it from opened history, and it cannot be re-added here while the block remains active.</p>
+<div class="bot-manager-toolbar">
+<input id="openedBotSearch" placeholder="Search opened history — comma = multiple terms" type="search"/>
+<select id="openedBotSortMode">
+<option value="newest">Newest first</option>
+<option value="oldest">Oldest first</option>
+<option value="name-asc">Name A-Z</option>
+<option value="name-desc">Name Z-A</option>
+</select>
+<span class="manager-count" id="openedBotManagerSummary">0 saved</span>
+</div>
+<div class="bot-manager-list" id="openedBotManager"></div>
+<div class="bot-manager-pager">
+<button id="openedBotShowMore" type="button">Show 20 more</button>
+<button id="openedBotShowLess" type="button">Show first 20</button>
+<button id="openedBotCollapse" type="button">Show 100</button>
+</div>
+<div class="button-row"><button id="clearOpened" type="button">Clear opened history</button><span class="count" id="openedCount"></span></div>
+</fieldset>
+<fieldset class="bot-status-creator-watch">
+<legend>Followed creator new-bot watch</legend>
+<p class="hint">Shows the background status for the optional followed-creator notification feature below. New detections are also added to Saved Bots Hub as a separate local source.</p>
+<p class="hint" id="creatorBotWatchStatusCenter">New-bot watch is disabled.</p>
+<div class="button-row"><button id="creatorBotStatusCenterCheckNow" type="button">Check approved followed creators now</button></div>
+</fieldset>
+<div class="bot-availability-controls">
+<select aria-label="Bots to scan" id="botAvailabilityScope">
+<option value="all">All tracked bots</option>
+<option value="favorite">Favorites only</option>
+<option value="later">Later only</option>
+<option value="blocked">Blocked bots only</option>
+<option value="notInterested">Not Interested only</option>
+<option value="recent">Recently Seen only</option>
+<option value="creatorWatch">Followed creator detections only</option>
+<option value="organizer">Bot Organizer only</option>
+<option value="opened">Opened history only</option>
+<option value="archive">Saved bot copies only</option>
+</select>
+<select aria-label="Bot status filter" id="botAvailabilityStatusFilter">
+<option value="all">All tracked bots</option>
+<option value="updated">Has detected changes</option>
+<option value="archived">Has saved local copy</option>
+<option value="unarchived">No saved local copy</option>
+<option value="exact">Exact duplicate matches</option>
+<option value="likely">Likely duplicates</option>
+<option value="possible">Possible duplicates</option>
+<option value="unavailable">Unavailable / deleted</option>
+<option value="restricted">Private / restricted</option>
+<option value="unknown">Unknown / not checked</option>
+<option value="available">Available</option>
+</select>
+<input id="botAvailabilitySearch" placeholder="Search bot status, changes or duplicates" type="search"/>
+<span class="manager-count" id="botAvailabilitySummary">0 tracked</span>
+</div>
+<div class="bot-availability-controls">
+<label>Scan speed
+<select id="botStatusScanSpeed" aria-label="Bot Status scan speed">
+<option value="safe">Safe · ~600 ms after response</option>
+<option value="normal">Normal · ~450 ms after response</option>
+<option value="fast">Fast · ~350 ms after response</option>
+</select>
+</label>
+<label>Refresh stale after
+<select id="botStatusStaleDays" aria-label="Refresh Bot Status entries stale after">
+<option value="1">1 day</option>
+<option value="7">7 days</option>
+<option value="14">14 days</option>
+<option value="30">30 days</option>
+</select>
+</label>
+<span class="manager-count" id="botAvailabilityUnavailableSummary"></span>
+</div>
+<div class="button-row">
+<button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
+<button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
+<button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
+<button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
+<span class="count" id="botAvailabilityScanStatus"></span>
+</div>
+<p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
+<details class="sub-card bot-status-maintenance-card">
+<summary>Cleanup, export &amp; reset tools</summary>
+<p class="hint">These are occasional maintenance tools. Normal Bot Status scans do not need them.</p>
+<div class="button-row">
+<button id="cleanUnavailableBots" type="button">Move confirmed unavailable to recovery</button>
+<button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies (.json.gz)</button>
+<button id="clearBotAvailabilityResults" type="button">Clear status history</button>
+<button id="clearBotArchive" type="button">Clear all saved bot copies</button>
+<span class="count" id="botStatusArchiveExportStatus"></span>
+</div>
+</details>
+<div class="button-row" id="botStatusArchiveUploadActions" hidden>
+<button id="sendBotStatusArchiveChanged" type="button">Send saved copies to Archive</button>
+<button id="sendBotStatusArchiveAll" type="button" hidden>Send all saved copies</button>
+<span class="count" id="botStatusArchiveUploadStatus"></span>
+</div>
+<fieldset id="botStatusArchiveContributionSettings">
+<legend>Public Archive contribution</legend>
+<label class="row"><input id="enableBotStatusArchiveContribution" type="checkbox"/><span>Allow my saved Bot Status copies to be submitted anonymously to the public SpicyChat Archive for review</span></label>
+<p class="hint">Only saved bot snapshots are submitted. QoL does not include chats, personas, Favorites/Later membership, settings, account details, cookies, or SpicyChat login/session data. A random extension-install identifier is hashed locally and sent only for basic anti-spam/rate limiting.</p>
+<div class="button-row" id="botStatusArchiveContributionActions" hidden>
+<button id="submitBotStatusArchiveChanged" type="button">Submit saved copies for review</button>
+<button id="submitBotStatusArchiveAll" type="button" hidden>Submit all saved copies for review</button>
+<span class="count" id="botStatusArchiveContributionStatus"></span>
+</div>
+<p class="hint" id="botStatusArchiveContributionSummary">Contribution is off.</p>
+</fieldset>
+<fieldset id="botStatusArchiveUploadSettings">
+<legend>Archive owner upload (private)</legend>
+<label>Endpoint
+<input id="botStatusArchiveEndpoint" type="url" spellcheck="false" value="https://spicychat-archive-import.dragongraf.workers.dev/api/imports/bot-status"/>
+</label>
+<label>Import token
+<input id="botStatusArchiveToken" type="password" autocomplete="off" spellcheck="false" placeholder="SPICYCHAT_ARCHIVE_IMPORT_TOKEN"/>
+</label>
+<div class="button-row"><button id="testBotStatusArchiveEndpoint" type="button">Test endpoint</button><span class="count" id="botStatusArchiveConfigStatus"></span></div>
+<p class="hint" id="botStatusArchiveUploadSummary">Configure the endpoint and private import token to enable archive upload.</p>
+<p class="hint">The import token is stored only in extension local storage. It is deliberately excluded from QoL settings backup/export/import. Uploading never deletes your local Bot Status saved copies.</p>
+</fieldset>
+<fieldset id="botAvailabilityResultsCard">
+<legend>Tracked Bot Status Results</legend>
+<p class="hint">Live availability results for all tracked bots. Available bots belong here; only confirmed deleted/unavailable recovery copies appear in the separate section below.</p>
+<div class="bot-manager-list" id="botAvailabilityManager"></div>
+<div class="bot-manager-pager">
+<button id="botAvailabilityShowMore" type="button">Show 10 more</button>
+<button id="botAvailabilityShowLess" type="button">Show first 10</button>
+<button id="botAvailabilityCollapse" type="button">Show 100</button>
+</div>
+</fieldset>
+<fieldset>
+<legend>Local Bot Archive</legend>
+<label class="row"><input id="botArchiveRememberSeenPublic" type="checkbox"/><span>Remember the last public bot data QoL sees (including Greeting when available)</span></label>
+<label class="row"><input id="botArchiveOnProfileVisit" type="checkbox"/><span>Automatically save a Bot Profile Snapshot/history when I visit a chatbot profile</span></label>
+<label class="row"><input id="botArchiveOnChatOpen" type="checkbox"/><span>Refresh the saved bot copy when I open one of its chats</span></label>
+<label>Chat-open refresh interval
+            <select id="botArchiveRefreshHours">
+<option value="6">6 hours</option>
+<option value="24">24 hours</option>
+<option value="72">3 days</option>
+<option value="168">7 days</option>
+</select>
+</label>
+<p class="hint"><strong>Bot Profile Snapshots:</strong> when enabled, opening a chatbot profile stores the bot ID, name/title, creator, image, tags, Greeting, description and any definition/scenario/example fields, stats or other metadata that SpicyChat actually exposes to QoL. Meaningful profile changes are kept in profile history; stats-only observations stay separate where possible. QoL never unlocks or guesses private/hidden definition fields.</p>
+<p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh only updates an older saved copy when live SpicyChat character data is still readable; opening an old chat by itself never overwrites a recovery copy for a deleted/unavailable bot.</p>
+<p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
+</fieldset>
+<fieldset id="savedBotInfoCard">
+<legend>Saved Bot Copies / Recovery</legend>
+<p class="hint">Browse bot data QoL has saved locally. This list can include bots that are still Available; confirmed deleted/unavailable recovery copies are shown separately below. Currently blocked bots stay out of recovery views and are not added by Bot Status scans; any older recovery data is kept locally rather than deleted. Only fields SpicyChat actually exposed to QoL are stored.</p>
+<div class="bot-manager-toolbar">
+<input id="savedBotInfoSearch" placeholder="Search saved bot copies, creators or IDs" type="search"/>
+<span class="manager-count" id="savedBotInfoSummary">0 saved copies</span>
+</div>
+<div class="bot-manager-list" id="savedBotInfoManager"></div>
+<div class="bot-manager-pager">
+<button id="savedBotInfoShowMore" type="button">Show 20 more</button>
+<button id="savedBotInfoShowLess" type="button">Show first 20</button>
+<button id="savedBotInfoCollapse" type="button">Show 100</button>
+</div>
+</fieldset>
+<fieldset id="deletedSavedBotsCard">
+<legend>Deleted / Unavailable Saved Bots</legend>
+<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Open an old chat when one is still available, keep the saved fields for recovery, or use <strong>Forget from QoL</strong> to remove that exact character ID and all of its local QoL data. Forgotten IDs are kept only as a tiny ignore entry so Load all / future scans do not immediately recreate them; this never deletes the real SpicyChat conversation.</p>
+<div class="bot-manager-toolbar">
+<input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
+<span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
+</div>
+<div class="button-row">
+<button id="recheckDeletedSavedBots" type="button">Recheck archived bots</button>
+<span class="count" id="deletedSavedBotRecheckStatus"></span>
+</div>
+<div class="bot-manager-list" id="deletedSavedBotManager"></div>
+<div class="bot-manager-pager">
+<button id="deletedSavedBotShowMore" type="button">Show 10 more</button>
+<button id="deletedSavedBotShowLess" type="button">Show first 10</button>
+<button id="deletedSavedBotCollapse" type="button">Show 100</button>
+</div>
+<div class="button-row" id="forgottenBotStatusIdsWrap" hidden>
+<span class="manager-count" id="forgottenBotStatusIdsCount">0 forgotten character IDs</span>
+<button id="clearForgottenBotStatusIds" type="button">Allow forgotten IDs to be tracked again</button>
+</div>
+</fieldset>
+<p class="hint"><strong>Saved bot copies:</strong> successful profile checks can preserve the accessible name, description, greeting, personality/definition, scenario, example dialogues, tags, creator, visible stats and avatar URL in extension storage. A saved copy stays available here even if the live bot later disappears. Clearing status history does not clear these copies.</p>
+<p class="hint"><strong>Archive export:</strong> creates a versioned compressed JSON backup for the SpicyChat Archive importer. It exports only public / Bot Status snapshot data, skips manual creator/editor backups and private local notes, makes no live API calls, and treats unavailable/private status as historical observations that still need current verification.</p>
+<p class="hint"><strong>Profile change history:</strong> the first successful profile check becomes the starting snapshot. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Meaningful changes are preserved automatically as history and the newest snapshot becomes the next baseline; cards show only the fields that changed. Missing fields and comparison-only noise such as repeated adjacent words are ignored instead of being treated as edits.</p>
+<p class="hint"><strong>Duplicate / Reupload Finder:</strong> compares local names, avatars and captured profile text and labels matches as Exact, Likely or Possible. These are hints only and can have false positives; QoL never hides, blocks or deletes a bot because of a match.</p>
+<p class="hint">Availability checks only mark clear results. Deleted/404 pages show as unavailable, private/restricted pages stay restricted, and timeouts or rate limits stay Unknown instead of being guessed as deleted.</p>
+</section>
+<section class="card" id="lorebookStatusHistoryCard">
+<h2>Lorebook Status &amp; History</h2>
+<p class="hint">Lorebooks stay keyed by exact Lorebook UUID and remain separate from bot records. This section intentionally follows Bot Status Center in Saved Bots &amp; Lists.</p>
+<fieldset class="bot-status-opened-tracking">
+<legend>Lorebook history tracking</legend>
+<label class="row"><input id="lorebookTrackHistory" type="checkbox"/><span>Track and save Lorebooks I encounter</span></label>
+<p class="hint">Off by default. When enabled, QoL saves exposed Lorebook metadata and meaningful changes in IndexedDB. A missing listing result is not treated as proof that a Lorebook was deleted.</p>
+</fieldset>
+<div class="bot-availability-controls">
+<select aria-label="Lorebook status filter" id="lorebookCenterStatusFilter">
+<option value="all">All tracked Lorebooks</option>
+<option value="updated">Has detected changes</option>
+<option value="available">Available</option>
+<option value="candidate">Unavailable candidate</option>
+<option value="restricted">Private / restricted</option>
+<option value="unknown">Unknown / failed check</option>
+<option value="unchecked">Not checked yet</option>
+</select>
+<input id="lorebookCenterSearch" placeholder="Search Lorebook status, creators or UUIDs" type="search"/>
+<span class="manager-count" id="lorebookCenterStats">History loads on demand.</span>
+</div>
+<div class="bot-availability-controls">
+<label>Scan speed
+<select id="lorebookStatusScanSpeed" aria-label="Lorebook Status scan speed">
+<option value="safe">Safe · ~600 ms after response</option>
+<option value="normal">Normal · ~450 ms after response</option>
+<option value="fast">Fast · ~350 ms after response</option>
+</select>
+</label>
+<label>Refresh stale after
+<select id="lorebookStatusStaleDays" aria-label="Refresh Lorebook Status entries stale after">
+<option value="1">1 day</option>
+<option value="7">7 days</option>
+<option value="14">14 days</option>
+<option value="30">30 days</option>
+</select>
+</label>
+<span class="manager-count" id="lorebookCenterAvailabilitySummary"></span>
+</div>
+<div class="button-row">
+<button id="scanLorebookAvailability" type="button">Scan / refresh tracked Lorebooks</button>
+<button id="scanUncheckedLorebookAvailability" type="button">Check unchecked Lorebooks</button>
+<button id="scanStaleLorebookAvailability" type="button">Refresh stale Lorebooks</button>
+<button disabled="" id="stopLorebookAvailabilityScan" type="button">Stop scan</button>
+<span class="count" id="lorebookCenterScanStatus"></span>
+</div>
+<p class="hint">Bulk status checks only query the exact Lorebook UUIDs already tracked by QoL. Public records are verified with SpicyChat's current Lorebook search key, and public recovery copies come from the same public Lorebook-entry collection used by the Archive. The signed-in Home helper is only a fallback for index misses or failed public-entry recovery. A Public-index hit is immediately <strong>Available</strong> even if recovery temporarily fails; the previous recovery copy is kept. QoL never crawls or saves the whole Public Lorebook index. A missing/404 Lorebook stays an unavailable candidate until deleted/private behavior is fully confirmed.</p>
+<fieldset class="bot-status-opened-history">
+<legend>Tracked Lorebook Status &amp; History</legend>
+<div class="bot-manager-toolbar">
+<select id="lorebookCenterSortMode">
+<option value="newest">Newest seen first</option>
+<option value="oldest">Oldest seen first</option>
+<option value="checked-newest">Recently checked first</option>
+<option value="checked-oldest">Least recently checked</option>
+<option value="name-asc">Name A-Z</option>
+<option value="name-desc">Name Z-A</option>
+<option value="creator-asc">Creator A-Z</option>
+<option value="creator-desc">Creator Z-A</option>
+<option value="changes">Most changes first</option>
+</select>
+</div>
+<div class="button-row"><button id="refreshLorebookCenter" type="button">Reload saved Lorebooks</button><button id="exportLorebookHistory" type="button">Export history</button><button id="exportLorebookArchiveData" type="button">Export Lorebook archive data (.json.gz)</button><button id="clearLorebookHistory" type="button">Clear history</button><span class="count" id="lorebookArchiveExportStatus"></span></div>
+<p class="hint"><strong>Lorebook archive export:</strong> exports only Lorebooks confirmed by the Public index and includes saved public recovery entries when available. Private, restricted, unknown and unconfirmed recovery copies stay local and are excluded.</p>
+<div id="lorebookCenterRecent" class="bot-manager-list"></div>
+<div class="bot-manager-pager">
+<button hidden id="lorebookCenterShowMore" type="button">Show 20 more</button>
+<button hidden id="lorebookCenterShowLess" type="button">Show first 20</button>
+<button hidden id="lorebookCenterCollapse" type="button">Show 100</button>
+</div>
+</fieldset>
 </section>
 </div>
 <div class="tab-page" data-page="writing"><p class="page-intro">Composer helpers, generation controls, translation, OOC presets, and reusable text tools.</p><section class="card">
@@ -2202,26 +2274,6 @@ cash =&gt; Bingo Coins
 </div>
 
 <div class="tab-page" data-page="blocking"><p class="page-intro">Discovery filters, bot blocking and dislikes, recommendation helpers, listing refill, language cleanup, and Not Interested entries.</p>
-<section class="card" id="randomChatSettingsCard">
-<h2>Random Chat</h2>
-<label class="row"><input id="showRandomChatButton" type="checkbox"/><span>Show Random Chat on Home / Recommended and Favorites</span></label>
-<div class="sub-card">
-<label class="row"><input id="randomChatUseLastHomeFilters" type="checkbox"/><span>Reuse my current/last Home search when available</span></label>
-<label class="row"><input id="randomChatIncludeOpened" type="checkbox"/><span>Allow bots already known as opened</span></label>
-<label class="row"><input id="randomChatIncludeLater" type="checkbox"/><span>Allow bots saved for Later</span></label>
-<label class="row"><input id="randomChatIncludeFavorites" type="checkbox"/><span>Allow Favorite-history bots when picking from Home / Recommended</span></label>
-<p class="hint">Random Chat now uses SpicyChat's public character search API instead of opening temporary rendered Home helper tabs. On Favorites it picks from your saved Favorite bot IDs and confirms the chosen bot through the API. On Home / Recommended it picks from the API discovery pool and can reuse your current/last Home text search.</p>
-</div>
-</section>
-<section class="card">
-<h2>Tag defaults</h2>
-<label class="row"><input id="autoTags" type="checkbox"/><span>Automatically include/exclude tags</span></label>
-<label class="row"><input id="showTagTemplateButton" type="checkbox"/><span>Show Copy button beside Narrow by tag Reset to apply this saved template</span></label>
-<p class="hint">Exact spelling matters. Leave empty unless you really want tags preselected. The in-page Copy button applies this saved include/exclude template on demand.</p>
-<label>Include tags, one per line<textarea id="includeTags" placeholder="English
-Fantasy" spellcheck="false"></textarea></label>
-<label>Exclude tags, one per line<textarea id="excludeTags" placeholder="Low Quality" spellcheck="false"></textarea></label>
-</section>
 <section class="card">
 <h2>Card filters</h2>
 <label class="row"><input id="hideHomeForYouCards" type="checkbox"/><span>Hide cards tagged "For You" on the Home page only</span></label>
@@ -2278,6 +2330,11 @@ Anime" spellcheck="false"></textarea></label>
 step sister" spellcheck="false"></textarea></label>
 <label>Blocked creators, one per line<textarea id="blockedCreators" placeholder="@creatorname" spellcheck="false"></textarea></label>
 <p class="hint">Blocked tag/word/creator lists are used when <strong>Block character cards by text</strong> is enabled. Word matching is always case-insensitive (for example enigma = Enigma = ENIGMA), ignores common quote/punctuation/spacing differences, recognizes compact forms such as TF141 / TF 141 / TaskForce 141, and can match multi-word name entries such as Ghost Simon against Simon “Ghost” Riley. Creator blocking checks both the visible creator name and the @handle from the profile link when available.</p>
+<label class="row"><input id="lorebookBlockingEnabled" type="checkbox"/><span>Block Lorebook cards with QoL rules</span></label>
+<label class="row"><input id="applyBotBlockingToLorebooks" type="checkbox"/><span>Use my normal blocked words, tags, and creators for Lorebooks too</span></label>
+<label class="row"><input id="showLorebookBlockButtons" type="checkbox"/><span>Show a quick Block × on Lorebook cards</span></label>
+<label>Blocked Lorebook UUIDs, one per line<textarea id="lorebookBlockedIds" placeholder="01a0fb21-3f8e-7171-a7e1-f869236bea19" spellcheck="false"></textarea></label>
+<p class="hint"><strong>Public Lorebooks:</strong> all Lorebook controls are opt-in and default off. Normal blocked words check Lorebook names/descriptions, normal blocked tags check Lorebook tags, and normal blocked creators check the Lorebook creator. Exact UUID blocks stay Lorebook-only.</p>
 <details class="sub-card blocker-test-card">
 <summary>Advanced: test blocking rules</summary>
 <p class="hint">Optional troubleshooting tool. Paste a sample only when you want to check exactly why a word, creator, or tag rule does or does not match. It is not needed for normal blocking.</p>
@@ -2373,7 +2430,15 @@ step sister" spellcheck="false"></textarea></label>
 <span class="manager-count" id="blockedBotNameRepairStatus"></span>
 </div>
 </section>
-
+<section class="card">
+<h2>Tag defaults</h2>
+<label class="row"><input id="autoTags" type="checkbox"/><span>Automatically include/exclude tags</span></label>
+<label class="row"><input id="showTagTemplateButton" type="checkbox"/><span>Show Copy button beside Narrow by tag Reset to apply this saved template</span></label>
+<p class="hint">Exact spelling matters. Leave empty unless you really want tags preselected. The in-page Copy button applies this saved include/exclude template on demand.</p>
+<label>Include tags, one per line<textarea id="includeTags" placeholder="English
+Fantasy" spellcheck="false"></textarea></label>
+<label>Exclude tags, one per line<textarea id="excludeTags" placeholder="Low Quality" spellcheck="false"></textarea></label>
+</section>
 <section class="card">
 <h2>Smart filter presets</h2>
 <label class="row"><input id="enableSmartFilterPresets" type="checkbox"/><span>Enable Smart Filter Presets</span></label>
@@ -2399,46 +2464,6 @@ Multiple Characters"></textarea></label>
 NTR"></textarea></label>
 </div>
 <p class="hint">These apply to /recommended-bots and Home cards marked For You. “Hide my own bots” learns your creator handle when you visit My Creations. Temporary hides last only until that tab is closed.</p>
-</section>
-<section class="card" id="cardWorkflowCard">
-<h2>Card / discovery workflow</h2>
-<p class="hint">Optional local tools for browsing lots of bots without changing the public bot or SpicyChat account data.</p>
-<label>Card density
-          <select id="cardDensityMode">
-<option value="normal">Normal</option>
-<option value="compact">Compact</option>
-<option value="dense">Dense</option>
-</select>
-</label>
-<label>Discovery/listing card click behavior
-          <select id="cardClickBehavior">
-<option value="default">SpicyChat default</option>
-<option value="profile">Open character profile</option>
-</select>
-</label>
-<p class="hint">Profile mode redirects normal bot-card body clicks on discovery/listing pages to the bot profile so you can inspect it before chatting. Explicit creator/Profile/Info/Chat controls keep their normal behavior, and Chats/My Creations rows are left alone.</p>
-<label class="row"><input id="showCopyBotInfoButtons" type="checkbox"/><span>Add Copy Bot Info to bot cards</span></label>
-<label class="row"><input id="trackRecentlySeenBots" type="checkbox"/><span>Keep a local Recently Seen bot history</span></label>
-<label class="row"><input id="showRecentlySeenButton" type="checkbox"/><span>Show Recently Seen on bot listing pages</span></label>
-<label>Recently Seen history limit<input id="recentlySeenLimit" max="250" min="10" step="10" type="number"/></label>
-<label class="row"><input id="enableBotComparison" type="checkbox"/><span>Enable local side-by-side bot comparison</span></label>
-<label class="row"><input id="showQuickNotInterestedButtons" type="checkbox"/><span>Add a quick Not Interested button to bot cards</span></label>
-<label class="row"><input id="showQuickLessLikeButtons" type="checkbox"/><span>Add a quick Stop recommending me this button to bot cards</span></label>
-<label class="row"><input id="showQuickDislikeButtons" type="checkbox"/><span>Add a separate quick Dislike button to bot cards (desktop browser only)</span></label>
-<p class="hint">All three are separate and opt-in: Not Interested is only a local QoL filter; Stop recommending me this uses SpicyChat's own Less Like This action for recommendation preferences; Dislike uses the persistent signed feedback helper and is tracked in the handled Dislike history.</p>
-</section>
-
-
-<section class="card">
-<h2>Listing refill</h2>
-<p class="hint">Can load extra listing pages in a temporary inactive SpicyChat helper tab (or use Load More on older layouts) after QoL hides cards so the page has enough visible results. Disabled on phone/mobile for now.</p>
-<label class="row"><input id="autoFillListings" type="checkbox"/><span>Enable Listing Refill</span></label>
-<label class="row"><input id="paginationTopJumpBox" type="checkbox"/><span>Show a page-number box above chatbot listings</span></label>
-<label class="row"><input id="paginationQuickJumpMenu" type="checkbox"/><span>Show a quick page-jump dropdown beside bottom pagination</span></label>
-<p class="hint">The three-dots controls in bottom pagination are editable page-number boxes (1–20,000). QoL also expands the native page window and adds an estimated last-page shortcut when the listing exposes a result count. The optional dropdown adds Random page plus useful page landmarks.</p>
-<label>Target visible cards<input id="autoFillTargetCards" max="200" min="1" step="1" type="number"/></label>
-<label>Max extra pages / Load More attempts per listing<input id="autoFillMaxClicks" max="30" min="1" step="1" type="number"/></label>
-<p class="hint">Default target is 50 visible cards; you can raise it up to 200. On current paginated listings QoL briefly opens later pages in an inactive helper tab, copies only candidates that pass the current filters back into your listing, skips duplicate bots, and closes/reuses the helper automatically. Listing filter statistics are configured separately under Bot Blocking &amp; Dislikes.</p>
 </section>
 <section class="card">
 <h2>Language filter</h2>
@@ -2489,7 +2514,44 @@ NTR"></textarea></label>
 <code id="textNormalizationPreviewOutput"></code>
 </div>
 </section>
-
+<section class="card" id="cardWorkflowCard">
+<h2>Card / discovery workflow</h2>
+<p class="hint">Optional local tools for browsing lots of bots without changing the public bot or SpicyChat account data.</p>
+<label>Card density
+          <select id="cardDensityMode">
+<option value="normal">Normal</option>
+<option value="compact">Compact</option>
+<option value="dense">Dense</option>
+</select>
+</label>
+<label>Discovery/listing card click behavior
+          <select id="cardClickBehavior">
+<option value="default">SpicyChat default</option>
+<option value="profile">Open character profile</option>
+</select>
+</label>
+<p class="hint">Profile mode redirects normal bot-card body clicks on discovery/listing pages to the bot profile so you can inspect it before chatting. Explicit creator/Profile/Info/Chat controls keep their normal behavior, and Chats/My Creations rows are left alone.</p>
+<label class="row"><input id="showCopyBotInfoButtons" type="checkbox"/><span>Add Copy Bot Info to bot cards</span></label>
+<label class="row"><input id="trackRecentlySeenBots" type="checkbox"/><span>Keep a local Recently Seen bot history</span></label>
+<label class="row"><input id="showRecentlySeenButton" type="checkbox"/><span>Show Recently Seen on bot listing pages</span></label>
+<label>Recently Seen history limit<input id="recentlySeenLimit" max="250" min="10" step="10" type="number"/></label>
+<label class="row"><input id="enableBotComparison" type="checkbox"/><span>Enable local side-by-side bot comparison</span></label>
+<label class="row"><input id="showQuickNotInterestedButtons" type="checkbox"/><span>Add a quick Not Interested button to bot cards</span></label>
+<label class="row"><input id="showQuickLessLikeButtons" type="checkbox"/><span>Add a quick Stop recommending me this button to bot cards</span></label>
+<label class="row"><input id="showQuickDislikeButtons" type="checkbox"/><span>Add a separate quick Dislike button to bot cards (desktop browser only)</span></label>
+<p class="hint">All three are separate and opt-in: Not Interested is only a local QoL filter; Stop recommending me this uses SpicyChat's own Less Like This action for recommendation preferences; Dislike uses the persistent signed feedback helper and is tracked in the handled Dislike history.</p>
+</section>
+<section class="card">
+<h2>Listing refill</h2>
+<p class="hint">Can load extra listing pages in a temporary inactive SpicyChat helper tab (or use Load More on older layouts) after QoL hides cards so the page has enough visible results. Disabled on phone/mobile for now.</p>
+<label class="row"><input id="autoFillListings" type="checkbox"/><span>Enable Listing Refill</span></label>
+<label class="row"><input id="paginationTopJumpBox" type="checkbox"/><span>Show a page-number box above chatbot listings</span></label>
+<label class="row"><input id="paginationQuickJumpMenu" type="checkbox"/><span>Show a quick page-jump dropdown beside bottom pagination</span></label>
+<p class="hint">The three-dots controls in bottom pagination are editable page-number boxes (1–20,000). QoL also expands the native page window and adds an estimated last-page shortcut when the listing exposes a result count. The optional dropdown adds Random page plus useful page landmarks.</p>
+<label>Target visible cards<input id="autoFillTargetCards" max="200" min="1" step="1" type="number"/></label>
+<label>Max extra pages / Load More attempts per listing<input id="autoFillMaxClicks" max="30" min="1" step="1" type="number"/></label>
+<p class="hint">Default target is 50 visible cards; you can raise it up to 200. On current paginated listings QoL briefly opens later pages in an inactive helper tab, copies only candidates that pass the current filters back into your listing, skips duplicate bots, and closes/reuses the helper automatically. Listing filter statistics are configured separately under Bot Blocking &amp; Dislikes.</p>
+</section>
 <section class="card">
 <h2>Not interested</h2>
 <p class="hint">Softer than blocking. Useful for hiding recommendations without treating it as a full block.</p>
@@ -2509,6 +2571,11 @@ NTR"></textarea></label>
 <button id="notInterestedBotCollapse" type="button">Show 100</button>
 </div>
 </section>
+<section class="card">
+<h2>Favorite protection</h2>
+<label class="row"><input id="neverHideFavorites" type="checkbox"/><span>Never hide anything on the Favorites page</span></label>
+<label class="row"><input id="protectFavoritesFromBlocking" type="checkbox"/><span>Do not block favorites from card buttons</span></label>
+</section>
 <section class="card" id="tagAliasesCard">
 <h2>Local tag aliases / emoji</h2>
 <label class="row"><input id="enableTagAliases" type="checkbox"/><span>Enable local tag aliases and emoji display helpers</span></label>
@@ -2518,10 +2585,16 @@ poly => Multiple Characters | 👥
 myth => Fantasy | ✨"></textarea></label>
 <p class="hint">Aliases are personal and never replace SpicyChat's real tags. Because shorthand such as “wlw” is used inconsistently by different creators, QoL does not hardcode meanings. Format: alias =&gt; exact SpicyChat tag | optional emoji.</p>
 </section>
-<section class="card">
-<h2>Favorite protection</h2>
-<label class="row"><input id="neverHideFavorites" type="checkbox"/><span>Never hide anything on the Favorites page</span></label>
-<label class="row"><input id="protectFavoritesFromBlocking" type="checkbox"/><span>Do not block favorites from card buttons</span></label>
+<section class="card" id="randomChatSettingsCard">
+<h2>Random Chat</h2>
+<label class="row"><input id="showRandomChatButton" type="checkbox"/><span>Show Random Chat on Home / Recommended and Favorites</span></label>
+<div class="sub-card">
+<label class="row"><input id="randomChatUseLastHomeFilters" type="checkbox"/><span>Reuse my current/last Home search when available</span></label>
+<label class="row"><input id="randomChatIncludeOpened" type="checkbox"/><span>Allow bots already known as opened</span></label>
+<label class="row"><input id="randomChatIncludeLater" type="checkbox"/><span>Allow bots saved for Later</span></label>
+<label class="row"><input id="randomChatIncludeFavorites" type="checkbox"/><span>Allow Favorite-history bots when picking from Home / Recommended</span></label>
+<p class="hint">Random Chat now uses SpicyChat's public character search API instead of opening temporary rendered Home helper tabs. On Favorites it picks from your saved Favorite bot IDs and confirms the chosen bot through the API. On Home / Recommended it picks from the API discovery pool and can reuse your current/last Home text search.</p>
+</div>
 </section></div>
 
 
@@ -2610,6 +2683,7 @@ myth => Fantasy | ✨"></textarea></label>
 <label class="row"><input data-export-scope="characterQolProfiles" type="checkbox"/><span>Character QoL profiles <span class="hint" data-export-count-for="characterQolProfiles"></span></span></label>
 <label class="row"><input data-export-scope="botAvailability" type="checkbox"/><span>Bot Status Center data <span class="hint" data-export-count-for="botAvailability"></span></span></label>
 <label class="row"><input data-export-scope="botArchive" type="checkbox"/><span>Saved bot copies <span class="hint" data-export-count-for="botArchive"></span></span></label>
+<label class="row"><input data-export-scope="lorebookStatus" type="checkbox"/><span>Lorebook Status / recovery history <span class="hint" data-export-count-for="lorebookStatus"></span></span></label>
 <label class="row"><input data-export-scope="lorebookBackups" type="checkbox"/><span>Lorebook backups <span class="hint" data-export-count-for="lorebookBackups"></span></span></label>
 <label class="row"><input data-export-scope="chatbotLorebookLinks" type="checkbox"/><span>Chatbot ↔ Lorebook links <span class="hint" data-export-count-for="chatbotLorebookLinks"></span></span></label>
 <label class="row"><input data-export-scope="savedTextSnippets" type="checkbox"/><span>Saved snippets <span class="hint" data-export-count-for="savedTextSnippets"></span></span></label>

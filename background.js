@@ -52,6 +52,19 @@ const EXACT_MESSAGE_TYPESENSE_URL = "https://ts-lb.nd-api.com/multi_search";
 const EXACT_MESSAGE_TYPESENSE_KEY = "STHKtT6jrC5z1IozTJHIeSN4qN9oL1s3";
 const EXACT_MESSAGE_TYPESENSE_COLLECTION = "public_characters_alias";
 const EXACT_MESSAGE_TYPESENSE_QUERY_BY = "name,title,tags,creator_username,character_id,type";
+const PUBLIC_LOREBOOK_TYPESENSE_COLLECTION = "lorebooks_public";
+const PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION = "lorebook_entries_public";
+const PUBLIC_LOREBOOK_TYPESENSE_QUERY_BY = "name,tags,lorebook_id";
+const PUBLIC_LOREBOOK_ENTRY_TYPESENSE_QUERY_BY = "name,keywords";
+const SPICYCHAT_APPLICATION_CONFIG_URL = "https://prod.nd-api.com/v2/applications/spicychat";
+const LOREBOOK_TYPESENSE_CONFIG_TTL_MS = 10 * 60 * 1000;
+const LOREBOOK_CONFIG_GUEST_ID = (() => {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch {}
+  return `00000000-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0").slice(0, 12)}`;
+})();
+let lorebookTypesenseConfigCache = null;
 const EXACT_MESSAGE_MAX_IDS = 60;
 let cardTokenDiagWriteTimer = null;
 const cardTokenDiag = {
@@ -1554,9 +1567,9 @@ function settingNameFromStorageKey(key) {
 
 
 const LARGE_STORAGE_DB_NAME = "dragon-spicychat-qol-large-v1";
-const LARGE_STORAGE_DB_VERSION = 1;
+const LARGE_STORAGE_DB_VERSION = 2;
 const LARGE_STORAGE_META_STORE = "__meta";
-const LARGE_STORAGE_KEYS = new Set(["botAvailability", "botArchive"]);
+const LARGE_STORAGE_KEYS = new Set(["botAvailability", "botArchive", "lorebookStatus"]);
 let largeStorageDbPromise = null;
 const largeStorageMigrationPromises = new Map();
 
@@ -1711,6 +1724,31 @@ async function readLargeStorageRecords(key, ids = []) {
     if (value && typeof value === "object") out[cleanIds[i]] = value;
   }
   return out;
+}
+
+async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return { key, rows: [], nextAfterId: "", done: true };
+  await ensureLargeStorageMigrated(key);
+  const db = await openLargeStorageDb();
+  const tx = db.transaction(key, "readonly");
+  const store = tx.objectStore(key);
+  const safeLimit = Math.max(25, Math.min(500, Number(limit) || 250));
+  const cursorAfter = String(afterId || "").trim();
+  const range = cursorAfter ? IDBKeyRange.lowerBound(cursorAfter, true) : null;
+  const rows = await idbRequest(store.getAll(range, safeLimit));
+  const cleanRows = [];
+  for (const row of rows || []) {
+    const id = String(row?.id || "").trim();
+    if (!id || !row?.value || typeof row.value !== "object") continue;
+    cleanRows.push({ id, value: row.value });
+  }
+  const nextAfterId = cleanRows.length ? cleanRows[cleanRows.length - 1].id : cursorAfter;
+  return {
+    key,
+    rows: cleanRows,
+    nextAfterId,
+    done: (rows || []).length < safeLimit
+  };
 }
 
 async function clearLargeStorage(key) {
@@ -5071,7 +5109,7 @@ function randomChatHomeQueryFromUrl(rawUrl) {
   return q || "*";
 }
 
-async function typesenseMultiSearch(searches, timeoutMs = 8000) {
+async function typesenseMultiSearch(searches, timeoutMs = 8000, apiKey = EXACT_MESSAGE_TYPESENSE_KEY) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 8000));
   try {
@@ -5083,7 +5121,7 @@ async function typesenseMultiSearch(searches, timeoutMs = 8000) {
       headers: {
         "Accept": "application/json",
         "Content-Type": "text/plain",
-        "X-TYPESENSE-API-KEY": EXACT_MESSAGE_TYPESENSE_KEY
+        "X-TYPESENSE-API-KEY": String(apiKey || EXACT_MESSAGE_TYPESENSE_KEY)
       },
       body: JSON.stringify({ searches })
     });
@@ -5094,6 +5132,290 @@ async function typesenseMultiSearch(searches, timeoutMs = 8000) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function getLorebookTypesenseConfig({ force = false } = {}) {
+  const now = Date.now();
+  const cached = lorebookTypesenseConfigCache;
+  if (!force && cached?.lorebookKey && cached?.entryKey && now - Number(cached.fetchedAt || 0) < LOREBOOK_TYPESENSE_CONFIG_TTL_MS) {
+    return { ok: true, ...cached, cached: true };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(SPICYCHAT_APPLICATION_CONFIG_URL, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/json",
+        "x-app-id": "spicychat",
+        "x-guest-userid": LOREBOOK_CONFIG_GUEST_ID,
+        "x-country": "US",
+        "x-platform": "WEB",
+        "x-platform-os": "DESKTOP"
+      }
+    });
+    if (!response.ok) throw new Error(`SpicyChat application config returned HTTP ${response.status}.`);
+    const payload = await response.json();
+    const config = payload?.typesenseConfig && typeof payload.typesenseConfig === "object" ? payload.typesenseConfig : {};
+    const next = {
+      fetchedAt: now,
+      lorebookKey: String(config.apiKeyLorebook || "").trim(),
+      entryKey: String(config.apiKeyLorebookEntries || "").trim(),
+      lorebookCollection: String(config.collectionNameLorebook || PUBLIC_LOREBOOK_TYPESENSE_COLLECTION).trim() || PUBLIC_LOREBOOK_TYPESENSE_COLLECTION,
+      entryCollection: String(config.collectionNameLorebookEntries || PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION).trim() || PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION
+    };
+    if (!next.lorebookKey) throw new Error("SpicyChat application config did not provide apiKeyLorebook.");
+    lorebookTypesenseConfigCache = next;
+    return { ok: true, ...next, cached: false };
+  } catch (error) {
+    if (cached?.lorebookKey) {
+      return { ok: true, ...cached, cached: true, stale: true, warning: error?.message || String(error) };
+    }
+    return {
+      ok: false,
+      status: error?.name === "AbortError" ? "timeout" : "config-error",
+      error: error?.message || String(error)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
+function normalizePublicLorebookId(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id) ? id : "";
+}
+
+function cleanPublicLorebookList(value) {
+  const raw = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/[,;|]/g) : []);
+  return [...new Set(raw.map(item => String(item || "").replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
+
+function publicLorebookIndexDocument(doc) {
+  if (!doc || typeof doc !== "object") return null;
+  const id = normalizePublicLorebookId(doc.lorebook_id || doc.lorebookId || doc.id);
+  if (!id) return null;
+  return {
+    id,
+    name: String(doc.name || doc.title || "").replace(/\s+/g, " ").trim().slice(0, 300),
+    description: String(doc.description || "").replace(/\s+/g, " ").trim().slice(0, 8000),
+    creator: String(doc.creator_username || doc.creatorUsername || "").replace(/\s+/g, " ").trim().slice(0, 300),
+    creatorId: String(doc.creator_user_id || doc.creatorUserId || "").trim(),
+    image: String(doc.avatar_url || doc.avatarUrl || doc.image || "").trim().slice(0, 3000),
+    tags: cleanPublicLorebookList(doc.tags).slice(0, 120),
+    visibility: String(doc.visibility || "").trim().slice(0, 80),
+    status: String(doc.status || "").trim().slice(0, 80),
+    entryCount: Math.max(0, Number(doc.num_entries ?? doc.numEntries ?? doc.entries_count ?? 0) || 0),
+    version: Math.max(0, Number(doc.version || 0) || 0),
+    numAttachedCharacters: Math.max(0, Number(doc.numAttachedCharacters ?? doc.num_attached_characters ?? 0) || 0),
+    createdAt: String(doc.createdAt || doc.created_at || "").trim(),
+    updatedAt: String(doc.updatedAt || doc.updated_at || "").trim(),
+    isNsfw: doc.is_nsfw === true || doc.isNsfw === true,
+    avatarIsNsfw: doc.avatar_is_nsfw === true || doc.avatarIsNsfw === true,
+    profileUrl: `https://spicychat.ai/lorebook/${id}`
+  };
+}
+
+async function checkPublicLorebookIndexBatch(message) {
+  const ids = [...new Set((Array.isArray(message?.ids) ? message.ids : [])
+    .map(normalizePublicLorebookId)
+    .filter(Boolean))].slice(0, 60);
+  if (!ids.length) return { ok: true, results: [] };
+
+  const config = await getLorebookTypesenseConfig();
+  if (!config?.ok || !config.lorebookKey) {
+    return { ok: false, status: config?.status || "config-error", error: config?.error || "Could not load the current public Lorebook search key." };
+  }
+
+  const searches = ids.map(id => ({
+    collection: config.lorebookCollection || PUBLIC_LOREBOOK_TYPESENSE_COLLECTION,
+    q: "*",
+    query_by: PUBLIC_LOREBOOK_TYPESENSE_QUERY_BY,
+    filter_by: `lorebook_id:=${id}`,
+    per_page: 1
+  }));
+  const response = await typesenseMultiSearch(searches, 10000, config.lorebookKey);
+  if (!response.ok) return response;
+  const buckets = Array.isArray(response.data?.results) ? response.data.results : [];
+  const results = [];
+  for (let index = 0; index < ids.length; index += 1) {
+    const requestedId = ids[index];
+    const bucket = buckets[index];
+    if (bucket?.error) {
+      results.push({ id: requestedId, found: false, meta: null, error: String(bucket.error || "Typesense query failed.") });
+      continue;
+    }
+    const doc = bucket?.hits?.[0]?.document;
+    const meta = publicLorebookIndexDocument(doc);
+    results.push({ id: requestedId, found: !!meta, meta: meta || null });
+  }
+  return {
+    ok: true,
+    results,
+    source: `typesense:${config.lorebookCollection || PUBLIC_LOREBOOK_TYPESENSE_COLLECTION}`,
+    configCached: !!config.cached
+  };
+}
+
+function normalizePublicLorebookEntry(doc) {
+  if (!doc || typeof doc !== "object") return null;
+  const id = String(doc.id || doc.entry_id || doc.entryId || "").trim();
+  const keywords = cleanPublicLorebookList(doc.keywords || doc.keys || doc.keywords_list || []);
+  const secondaryKeywords = cleanPublicLorebookList(doc.secondaryKeywords || doc.secondary_keywords || doc.secondary_keys || []);
+  const numberOrNull = value => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    id,
+    name: String(doc.name || doc.title || "").replace(/\s+/g, " ").trim().slice(0, 500),
+    keywords,
+    secondaryKeywords,
+    content: String(doc.content || doc.text || ""),
+    version: doc.version ?? "",
+    createdAt: String(doc.createdAt || doc.created_at || "").trim(),
+    updatedAt: String(doc.updatedAt || doc.updated_at || "").trim(),
+    priority: numberOrNull(doc.priority ?? doc.sortPriority ?? doc.sort_priority),
+    sortPriority: numberOrNull(doc.sortPriority ?? doc.sort_priority ?? doc.priority),
+    status: String(doc.status || "").trim().slice(0, 120),
+    enabled: doc.enabled !== false,
+    constant: doc.constant === true,
+    selective: doc.selective === true,
+    caseSensitive: doc.caseSensitive === true || doc.case_sensitive === true,
+    probability: numberOrNull(doc.probability),
+    depth: numberOrNull(doc.depth),
+    role: String(doc.role || doc.position || "").trim().slice(0, 120),
+    isNsfw: doc.is_nsfw === true || doc.isNsfw === true
+  };
+}
+
+async function fetchPublicLorebookRecovery(message) {
+  const lorebookId = normalizePublicLorebookId(message?.lorebookId);
+  if (!lorebookId) return { ok: false, status: "invalid-id", error: "Missing or invalid Lorebook UUID." };
+  const expectedCount = Math.max(0, Number(message?.expectedCount || 0) || 0);
+
+  const config = await getLorebookTypesenseConfig();
+  if (!config?.ok || !config.entryKey) {
+    return { ok: false, status: config?.status || "config-error", error: config?.error || "Could not load the current public Lorebook-entry search key." };
+  }
+
+  const pageSize = 250;
+  const maxPages = 100;
+  const filterFields = ["lorebook_id", "lorebookId"];
+  const queryFields = [PUBLIC_LOREBOOK_ENTRY_TYPESENSE_QUERY_BY, "name"];
+  let lastError = "";
+  let emptySuccess = null;
+
+  for (const filterField of filterFields) {
+    for (const queryBy of queryFields) {
+      const entries = [];
+      let found = null;
+      let complete = false;
+      let failed = false;
+
+      for (let page = 1; page <= maxPages; page += 1) {
+        const search = {
+          collection: config.entryCollection || PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION,
+          q: "*",
+          query_by: queryBy,
+          page,
+          per_page: pageSize,
+          filter_by: `${filterField}:=${lorebookId}`
+        };
+        const response = await typesenseMultiSearch([search], 12000, config.entryKey);
+        if (!response?.ok) {
+          lastError = response?.error || `Public Lorebook-entry search failed (${response?.status || "unknown"}).`;
+          failed = true;
+          break;
+        }
+
+        const bucket = Array.isArray(response.data?.results) ? response.data.results[0] : null;
+        if (bucket?.error) {
+          lastError = String(bucket.error || "Public Lorebook-entry query failed.");
+          failed = true;
+          break;
+        }
+
+        if (found === null && Number.isFinite(Number(bucket?.found))) found = Math.max(0, Number(bucket.found));
+        const docs = Array.isArray(bucket?.hits) ? bucket.hits.map(hit => hit?.document).filter(Boolean) : [];
+        for (const doc of docs) {
+          const normalized = normalizePublicLorebookEntry(doc);
+          if (normalized) entries.push(normalized);
+        }
+
+        if (docs.length < pageSize || (found !== null && entries.length >= found)) {
+          complete = true;
+          break;
+        }
+      }
+
+      if (failed) continue;
+      if (!complete) {
+        lastError = `Public Lorebook-entry recovery exceeded ${maxPages * pageSize} entries before completing.`;
+        continue;
+      }
+
+      const result = {
+        ok: true,
+        lorebookId,
+        entries,
+        found: found === null ? entries.length : found,
+        complete: true,
+        source: `typesense:${config.entryCollection || PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION}`,
+        filterField,
+        queryBy
+      };
+      if (entries.length) return result;
+      if (!emptySuccess) emptySuccess = result;
+    }
+  }
+
+  if (emptySuccess) {
+    if (expectedCount > 0) {
+      return {
+        ok: false,
+        status: "empty-recovery",
+        error: `Public index reports ${expectedCount} entr${expectedCount === 1 ? "y" : "ies"}, but the public entry collection returned none. The previous recovery copy was kept.`,
+        source: emptySuccess.source
+      };
+    }
+    return emptySuccess;
+  }
+
+  return {
+    ok: false,
+    status: "entry-query-failed",
+    error: lastError || "Public Lorebook-entry recovery produced no usable result."
+  };
+}
+
+async function runLorebookStatusHelperCheck(message) {
+  const lorebookId = normalizePublicLorebookId(message?.lorebookId);
+  if (!lorebookId) return { ok: false, status: "unknown", httpStatus: 0, reason: "Missing or invalid Lorebook UUID." };
+
+  const forceOwnHelper = !!message?.forceOwnHelper;
+  const worker = await prepareBotStatusWorker({ forceOwnHelper });
+  const tabId = Number(worker?.tabId || 0);
+  if (!tabId) return { ok: false, status: "unknown", httpStatus: 0, reason: "Could not create or reuse the signed-in Lorebook Status helper." };
+
+  let response = await runTrackedBotStatusRequest(() => withBackgroundJob("bot-status", {
+    ownerTabId: tabId,
+    detail: `lorebook:${lorebookId}`,
+    maxHoldMs: 28000
+  }, async () => {
+    const result = await tabsSendMessageWithTimeout(tabId, { type: "DS_LOREBOOK_STATUS_API_CHECK", lorebookId }, 24000);
+    if (result?.__dsTimeout) return { ok: false, status: "unknown", httpStatus: 0, reason: "Lorebook Status helper timed out during the authenticated recovery-copy request.", recoveryAttempted: true };
+    return result;
+  }));
+
+  if (!message?.keepHelper) await releaseBotStatusWorker({ reason: "lorebook-status-normal-release" });
+  return response || { ok: false, status: "unknown", httpStatus: 0, reason: "Lorebook Status helper returned no response." };
 }
 
 async function pickRandomChatCandidates(message) {
@@ -5513,6 +5835,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_LARGE_STORAGE_GET_PAGE") {
+    const key = String(message?.key || "");
+    readLargeStoragePage(key, { afterId: message?.afterId || "", limit: message?.limit })
+      .then(page => sendResponse({ ok: true, ...page }))
+      .catch(error => sendResponse({ ok: false, key, rows: [], done: true, error: String(error?.message || error || "") }));
+    return true;
+  }
+
   if (message?.type === "DS_LARGE_STORAGE_STATS") {
     getLargeStorageStats()
       .then(stats => sendResponse({ ok: true, stats }))
@@ -5595,6 +5925,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     runBotStatusHelperCheck(message)
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_LOREBOOK_STATUS_HELPER_CHECK") {
+    runLorebookStatusHelperCheck(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "unknown", httpStatus: 0, reason: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_LOREBOOK_STATUS_PUBLIC_CHECK_BATCH") {
+    checkPublicLorebookIndexBatch(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_LOREBOOK_PUBLIC_RECOVERY_FETCH") {
+    fetchPublicLorebookRecovery(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "entry-query-failed", error: error?.message || String(error) }));
     return true;
   }
 

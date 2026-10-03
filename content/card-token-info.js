@@ -16,7 +16,10 @@
   const HISTORY_RESPONSE_EVENT = "ds-qol-chat-history-response-v1";
   const CONVERSATION_LIST_REQUEST_EVENT = "ds-qol-conversation-list-request-v1";
   const CONVERSATION_LIST_RESPONSE_EVENT = "ds-qol-conversation-list-response-v1";
+  const LOREBOOK_REQUEST_EVENT = "ds-qol-lorebook-request-v1";
+  const LOREBOOK_RESPONSE_EVENT = "ds-qol-lorebook-response-v1";
   const MAIN_BRIDGE_TIMEOUT_MS = 8200;
+  const LOREBOOK_BRIDGE_TIMEOUT_MS = 16500;
   const MAIN_BRIDGE_FAILURE_LIMIT = 2;
   const MAIN_BRIDGE_COOLDOWN_MS = 5 * 60 * 1000;
   const BOT_LINK_RE = /\/(?:chat|chatbot)\/([0-9a-f-]{20,})(?:[/?#]|$)/i;
@@ -245,6 +248,56 @@
     }
     state.characterAuthRejectedUntil = 0;
     return response.data;
+  }
+
+  async function mainWorldLorebookRequest(lorebookId, auth) {
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+    const ready = await waitForMainBridge(2200);
+    if (!ready) throw new Error("main-world Lorebook bridge unavailable");
+
+    const requestId = `dslb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const response = await new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener(LOREBOOK_RESPONSE_EVENT, onResponse);
+        resolve(value || null);
+      };
+      const onResponse = event => {
+        if (String(event?.detail?.requestId || "") !== requestId) return;
+        finish(event.detail);
+      };
+      const timer = setTimeout(() => finish({ ok: false, status: "bridge-timeout", elapsedMs: LOREBOOK_BRIDGE_TIMEOUT_MS }), LOREBOOK_BRIDGE_TIMEOUT_MS + 700);
+      window.addEventListener(LOREBOOK_RESPONSE_EVENT, onResponse);
+      try {
+        window.dispatchEvent(new CustomEvent(LOREBOOK_REQUEST_EVENT, {
+          detail: {
+            requestId,
+            lorebookId,
+            authToken: auth?.token || "",
+            guestUserId: auth?.guest || "",
+            authSource: auth?.source || "none"
+          }
+        }));
+      } catch {
+        finish({ ok: false, status: "bridge-dispatch-failure" });
+      }
+    });
+
+    if (!response) throw new Error("main-world Lorebook bridge did not respond");
+    if (!response.ok) {
+      const suffix = response.httpStatus ? ` HTTP ${response.httpStatus}` : "";
+      const error = new Error(`main-world Lorebook API ${response.status || "failed"}${suffix}`);
+      error.httpStatus = Number(response.httpStatus || 0);
+      error.authProvided = !!response.authProvided;
+      error.authSource = String(response.authSource || "none");
+      error.bridgeStatus = String(response.status || "failed");
+      error.authRefreshes = Number(response.authRefreshes || 0);
+      throw error;
+    }
+    return response;
   }
 
   async function ensureCache() {
@@ -627,6 +680,53 @@
     state.auth = { token, guest: discoverGuestUserId(), source };
     return state.auth;
   }
+
+  DS.fetchLorebookArchiveData = async function fetchLorebookArchiveData(lorebookId, forceAuth = false) {
+    const id = cleanText(lorebookId).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) {
+      const error = new Error("Invalid Lorebook UUID.");
+      error.httpStatus = 0;
+      throw error;
+    }
+
+    try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
+    let auth = await discoverSpicychatAuth(forceAuth);
+
+    // Give a freshly opened helper tab a brief chance to observe SpicyChat's
+    // own authenticated API traffic before concluding that auth is unavailable.
+    if (!auth?.token && !mainBridgeHasCapturedAuth()) {
+      const started = Date.now();
+      while (Date.now() - started < 2800 && !mainBridgeHasCapturedAuth()) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (!mainBridgeHasCapturedAuth() && !auth?.token) auth = await discoverSpicychatAuth(true);
+    }
+
+    const net = DS.diagNetworkStart?.(
+      "lorebook-status",
+      "GET",
+      `https://prod.nd-api.com/lorebooks/${id}?sortBy=priority&lastSortPriority=0&view=live`,
+      { transport: "main-world-auth" }
+    );
+    try {
+      const response = await mainWorldLorebookRequest(id, auth);
+      DS.diagNetworkEnd?.(net, {
+        status: Number(response?.httpStatus || 200),
+        ok: true,
+        outcome: "recovery-copy-success",
+        authSource: String(response?.authSource || "none")
+      });
+      return response;
+    } catch (error) {
+      DS.diagNetworkEnd?.(net, {
+        status: Number(error?.httpStatus || 0),
+        ok: false,
+        outcome: error?.bridgeStatus || (error?.name === "AbortError" ? "timeout" : "recovery-copy-failed"),
+        authSource: String(error?.authSource || auth?.source || "none")
+      });
+      throw error;
+    }
+  };
 
   function definitionVisibleFromCard(card) {
     if (!(card instanceof Element)) return false;

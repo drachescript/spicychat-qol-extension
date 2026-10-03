@@ -63,8 +63,24 @@
     catch { return false; }
   }
 
+  function isBotStatusWorkerRoute() {
+    try {
+      const params = new URLSearchParams(location.search || "");
+      if (params.get("dsQolBotStatusWorker") === "1") {
+        try { sessionStorage.setItem("dsQolBackgroundWorkerKind", "bot-status"); } catch {}
+        return true;
+      }
+      return String(sessionStorage.getItem("dsQolBackgroundWorkerKind") || "") === "bot-status";
+    } catch {
+      return false;
+    }
+  }
+
   if (isRecommendationWorkerRoute()) {
     try { document.documentElement?.setAttribute("data-ds-qol-recommendation-worker", "1"); } catch {}
+  }
+  if (isBotStatusWorkerRoute()) {
+    try { document.documentElement?.setAttribute("data-ds-qol-bot-status-worker", "1"); } catch {}
   }
 
   function syncFromSettings(settings) {
@@ -79,7 +95,8 @@
       publicArchiveNeedsProfileBridge ||
       chatExportNeedsAuthBridge ||
       chatListImportNeedsAuthBridge ||
-      isRecommendationWorkerRoute()
+      isRecommendationWorkerRoute() ||
+      isBotStatusWorkerRoute()
     ));
     bridgeWanted = enabled;
     if (enabled) inject();
@@ -90,7 +107,7 @@
   // lightweight MAIN-world bridge immediately on chat routes so it can observe
   // SpicyChat's own authenticated /messages XHR before an export is requested.
   // Settings still decide whether the hooks remain active after startup.
-  if (isChatRoute() || isChatListRoute() || isRecommendationWorkerRoute()) {
+  if (isChatRoute() || isChatListRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }

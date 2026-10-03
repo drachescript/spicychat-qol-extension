@@ -118,31 +118,169 @@
     }
   }
 
+  function lorebookPayload(value) {
+    if (!value || typeof value !== "object") return null;
+    const data = value.data && typeof value.data === "object" && !Array.isArray(value.data) ? value.data : null;
+    const directLorebook = value.lorebook && typeof value.lorebook === "object" ? value.lorebook : null;
+    const dataLorebook = data?.lorebook && typeof data.lorebook === "object" ? data.lorebook : null;
+    if (dataLorebook) {
+      return {
+        ...dataLorebook,
+        entries: dataLorebook.entries ?? data.entries ?? value.entries,
+        lorebookEntries: dataLorebook.lorebookEntries ?? data.lorebookEntries ?? value.lorebookEntries,
+        lorebook_entries: dataLorebook.lorebook_entries ?? data.lorebook_entries ?? value.lorebook_entries
+      };
+    }
+    if (directLorebook) {
+      return {
+        ...directLorebook,
+        entries: directLorebook.entries ?? value.entries ?? data?.entries,
+        lorebookEntries: directLorebook.lorebookEntries ?? value.lorebookEntries ?? data?.lorebookEntries,
+        lorebook_entries: directLorebook.lorebook_entries ?? value.lorebook_entries ?? data?.lorebook_entries
+      };
+    }
+    return data || value;
+  }
+  function normalizeLorebookMeta(value, id = "") {
+    const payload = lorebookPayload(value);
+    if (!payload || typeof payload !== "object") return null;
+    const creator = payload.creator_username || payload.creatorUsername || payload.creator?.username || payload.creator?.name || "";
+    const entryCount = Number(payload.num_entries ?? payload.numEntries ?? payload.entries_count ?? payload.entriesCount ?? (Array.isArray(payload.entries) ? payload.entries.length : 0)) || 0;
+    return {
+      id: clean(payload.id || payload.lorebook_id || payload.lorebookId || id),
+      name: clean(payload.name || payload.title || ""),
+      description: clean(payload.description || ""),
+      creator: clean(creator),
+      creatorId: clean(payload.creator_user_id || payload.creatorUserId || payload.creator?.id || ""),
+      image: clean(payload.avatar_url || payload.avatarUrl || payload.image || ""),
+      tags: listField(payload, ["tags", "tagNames", "tag_names", "lorebookTags", "lorebook_tags", "categories"]),
+      visibility: clean(payload.visibility || payload.privacy || ""),
+      status: clean(payload.status || ""),
+      version: Number(payload.version || 0) || 0,
+      entryCount,
+      numAttachedCharacters: Number(payload.numAttachedCharacters ?? payload.num_attached_characters ?? 0) || 0,
+      createdAt: clean(payload.createdAt || payload.created_at || ""),
+      updatedAt: clean(payload.updatedAt || payload.updated_at || ""),
+      isNsfw: payload.is_nsfw === true || payload.isNsfw === true,
+      avatarIsNsfw: payload.avatar_is_nsfw === true || payload.avatarIsNsfw === true
+    };
+  }
+
+  function normalizeEntryKeywordList(value) {
+    const source = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/[,;|]/g) : []);
+    return [...new Set(source.map(item => {
+      if (typeof item === "string") return clean(item);
+      if (item && typeof item === "object") return clean(item.keyword ?? item.name ?? item.value ?? item.label ?? "");
+      return "";
+    }).filter(Boolean))];
+  }
+
+  function normalizeLorebookEntry(value, index = 0) {
+    const entry = value && typeof value === "object" ? value : {};
+    const id = clean(entry.id || entry.entry_id || entry.entryId || entry.uuid || entry._id || "");
+    const versionRaw = entry.version ?? entry.revision ?? entry.rev ?? "";
+    const priorityRaw = entry.priority ?? entry.sortPriority ?? entry.sort_priority ?? entry.order ?? entry.position ?? entry.rank ?? "";
+    const content = String(entry.content ?? entry.text ?? entry.value ?? entry.body ?? "");
+    const keywords = normalizeEntryKeywordList(entry.keywords ?? entry.keyword ?? entry.keys ?? entry.triggers ?? entry.key ?? []);
+    const secondaryKeywords = normalizeEntryKeywordList(entry.secondaryKeywords ?? entry.secondary_keywords ?? entry.secondary_keys ?? []);
+    return {
+      id: id || `index:${index}`,
+      name: clean(entry.name || entry.title || entry.label || entry.comment || ""),
+      keywords,
+      secondaryKeywords,
+      content,
+      version: typeof versionRaw === "number" ? versionRaw : clean(versionRaw),
+      createdAt: clean(entry.createdAt || entry.created_at || entry.created || ""),
+      updatedAt: clean(entry.updatedAt || entry.updated_at || entry.modifiedAt || entry.modified_at || ""),
+      priority: typeof priorityRaw === "number" ? priorityRaw : clean(priorityRaw),
+      status: clean(entry.status || entry.state || ""),
+      enabled: entry.enabled !== false && entry.disabled !== true,
+      constant: entry.constant === true,
+      selective: entry.selective === true,
+      caseSensitive: entry.caseSensitive === true || entry.case_sensitive === true,
+      probability: Number.isFinite(Number(entry.probability)) ? Number(entry.probability) : null,
+      depth: Number.isFinite(Number(entry.depth)) ? Number(entry.depth) : null,
+      role: clean(entry.role || entry.position_role || ""),
+      isNsfw: entry.is_nsfw === true || entry.isNsfw === true
+    };
+  }
+
+  function lorebookEntryArray(payload) {
+    const candidates = [
+      payload?.entries,
+      payload?.lorebookEntries,
+      payload?.lorebook_entries,
+      payload?.items,
+      payload?.data?.entries,
+      payload?.data?.lorebookEntries,
+      payload?.data?.lorebook_entries
+    ];
+    return candidates.find(Array.isArray) || [];
+  }
+
+  function normalizeLorebookRecoveryCopy(value, id = "") {
+    const payload = lorebookPayload(value);
+    if (!payload || typeof payload !== "object") return null;
+    const meta = normalizeLorebookMeta(payload, id);
+    if (!meta?.id) return null;
+    const entries = lorebookEntryArray(payload).map((entry, index) => normalizeLorebookEntry(entry, index));
+    return {
+      schema: "spicychat-qol-lorebook-recovery-copy",
+      version: 1,
+      savedAt: Date.now(),
+      lorebook: meta,
+      entries
+    };
+  }
+
   async function getTags(id) {
     const saved = cache.get(id);
     if (saved && Date.now() - saved.checkedAt < MAX_AGE) return saved.tags;
     if (inFlight.has(id)) return inFlight.get(id);
 
     const request = (async () => {
+      let tags = [];
       try {
-        const response = await fetch(`${location.origin}/lorebook/${encodeURIComponent(id)}`, {
-          credentials: "include",
-          cache: "no-store"
-        });
-        if (!response.ok) return [];
-        const tags = tagsFromHtml(await response.text(), id);
-        cache.set(id, { tags, checkedAt: Date.now() });
-        return tags;
-      } catch {
-        return [];
-      } finally {
-        inFlight.delete(id);
+        // Use the same authenticated MAIN-world bridge as Lorebook Status.
+        // Current SpicyChat rejects this endpoint when QoL sends cookies alone.
+        if (typeof DS.fetchLorebookArchiveData === "function") {
+          const api = await DS.fetchLorebookArchiveData(id);
+          const payload = lorebookPayload(api?.data);
+          const meta = normalizeLorebookMeta(payload, id);
+          const recoveryCopy = normalizeLorebookRecoveryCopy(payload, id);
+          tags = meta?.tags || [];
+          cache.set(id, { tags, meta, recoveryCopy, checkedAt: Date.now() });
+        }
+      } catch {}
+
+      if (!tags.length) {
+        try {
+          const response = await fetch(`${location.origin}/lorebook/${encodeURIComponent(id)}`, {
+            credentials: "include",
+            cache: "no-store"
+          });
+          if (response.ok) tags = tagsFromHtml(await response.text(), id);
+        } catch {}
       }
-    })();
+
+      const previous = cache.get(id) || {};
+      cache.set(id, { ...previous, tags, checkedAt: Date.now() });
+      return tags;
+    })().finally(() => inFlight.delete(id));
 
     inFlight.set(id, request);
     return request;
   }
+
+  DS.getLorebookTagsForId = getTags;
+  DS.getLorebookMetaForId = async function getLorebookMetaForId(id) {
+    const key = clean(id).toLowerCase();
+    if (!key) return null;
+    const saved = cache.get(key);
+    if (saved?.meta && Date.now() - Number(saved.checkedAt || 0) < MAX_AGE) return saved.meta;
+    await getTags(key);
+    return cache.get(key)?.meta || null;
+  };
 
   function findCollapsedTagRow(card) {
     const counters = [...card.querySelectorAll("p, span")].filter(el => /^\+\d+$/.test(clean(el.textContent)));
@@ -179,6 +317,123 @@
     row.classList.add("ds-lorebook-tags-expanded");
     counter.style.display = "none";
   }
+
+
+  async function checkLorebookStatusApi(idValue) {
+    const id = clean(idValue).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) {
+      return { ok: false, status: "unknown", httpStatus: 0, reason: "Missing or invalid Lorebook UUID.", recoveryAttempted: false };
+    }
+
+    if (typeof DS.fetchLorebookArchiveData !== "function") {
+      return {
+        ok: false,
+        status: "unknown",
+        httpStatus: 0,
+        reason: "Authenticated Lorebook API bridge is not available on this helper tab.",
+        recoveryAttempted: true
+      };
+    }
+
+    try {
+      const api = await DS.fetchLorebookArchiveData(id);
+      const payload = lorebookPayload(api?.data);
+      const meta = normalizeLorebookMeta(payload, id);
+      const recoveryCopy = normalizeLorebookRecoveryCopy(payload, id);
+      const httpStatus = Number(api?.httpStatus || 200) || 200;
+
+      if (!meta || !meta.id) {
+        return {
+          ok: false,
+          status: "unknown",
+          httpStatus,
+          reason: "Lorebook API returned HTTP 200 without a usable Lorebook object.",
+          recoveryAttempted: true
+        };
+      }
+
+      cache.set(id, {
+        tags: meta.tags || [],
+        meta,
+        recoveryCopy,
+        checkedAt: Date.now()
+      });
+
+      const entryCount = Array.isArray(recoveryCopy?.entries) ? recoveryCopy.entries.length : Number(meta.entryCount || 0);
+      return {
+        ok: true,
+        status: "available",
+        httpStatus,
+        meta,
+        recoveryCopy,
+        recoveryAttempted: true,
+        recoveryAuthSource: String(api?.authSource || ""),
+        reason: `Lorebook API confirmed this Lorebook and saved a recovery copy with ${entryCount} entr${entryCount === 1 ? "y" : "ies"}.`
+      };
+    } catch (error) {
+      const httpStatus = Math.max(0, Number(error?.httpStatus || 0) || 0);
+      if (httpStatus === 403) {
+        return {
+          ok: false,
+          status: "restricted",
+          httpStatus,
+          reason: "Lorebook API returned HTTP 403 (private / restricted).",
+          recoveryAttempted: true
+        };
+      }
+      if (httpStatus === 404) {
+        return {
+          ok: false,
+          status: "candidate",
+          httpStatus,
+          reason: "Lorebook API returned HTTP 404. QoL keeps this as an unavailable candidate until deleted/private Lorebook behavior is fully confirmed.",
+          recoveryAttempted: true
+        };
+      }
+      if (httpStatus === 401) {
+        return {
+          ok: false,
+          status: "unknown",
+          httpStatus,
+          reason: "Lorebook recovery request returned HTTP 401 even after using SpicyChat's authenticated request bridge.",
+          recoveryAttempted: true
+        };
+      }
+      if (httpStatus === 429) {
+        return {
+          ok: false,
+          status: "unknown",
+          httpStatus,
+          reason: "Lorebook API rate-limited this recovery request (HTTP 429); retry later.",
+          recoveryAttempted: true
+        };
+      }
+      if (httpStatus >= 500) {
+        return {
+          ok: false,
+          status: "unknown",
+          httpStatus,
+          reason: `Lorebook API returned HTTP ${httpStatus}; retry later.`,
+          recoveryAttempted: true
+        };
+      }
+      return {
+        ok: false,
+        status: "unknown",
+        httpStatus,
+        reason: error?.message || "Authenticated Lorebook API request failed.",
+        recoveryAttempted: true
+      };
+    }
+  }
+
+  chrome.runtime?.onMessage?.addListener?.((message, _sender, sendResponse) => {
+    if (message?.type !== "DS_LOREBOOK_STATUS_API_CHECK") return;
+    checkLorebookStatusApi(message.lorebookId)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "unknown", httpStatus: 0, reason: error?.message || String(error) }));
+    return true;
+  });
 
   DS.applyLorebookTagExpansion = async function applyLorebookTagExpansion() {
     const settings = DS.state?.settings || {};

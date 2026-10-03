@@ -355,6 +355,15 @@
       return;
     }
 
+    // Group creation can legitimately contain bot/lorebook names and now also
+    // has a real Lorebook attachment section. A descendant text match such as a
+    // selected bot named "Lorebook Trigger Lab" must never promote the entire
+    // Group Members/form container into an ad-banner candidate.
+    if (/^\/group\/create(?:\/|$)/i.test(String(location.pathname || ""))) {
+      unhideOldAdvertBanners();
+      return;
+    }
+
     if (!settingEnabled()) {
       unhideOldAdvertBanners();
       return;

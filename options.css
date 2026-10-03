@@ -473,6 +473,23 @@ footer.hidden { display: none; }
   border: 1px solid #333;
 }
 
+.bot-manager-media {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  align-self: start;
+}
+
+.bot-manager-media > .bot-manager-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.ds-manager-image-freeze-frame[hidden] {
+  display: none !important;
+}
+
 .bot-manager-placeholder {
   width: 54px;
   height: 54px;

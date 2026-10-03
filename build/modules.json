@@ -200,7 +200,8 @@
         "content/lorebook-search-filter.js",
         "content/lorebook-tags.js",
         "content/lorebook-workflow.js",
-        "content/wiki-lorebook-importer.js"
+        "content/wiki-lorebook-importer.js",
+        "content/lorebook-public-qol.js"
       ]
     },
     "profiles": {
