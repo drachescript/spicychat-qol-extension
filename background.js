@@ -165,6 +165,156 @@ let backgroundJobLease = null;
 const backgroundJobQueue = [];
 let backgroundJobSeq = 0;
 
+// Diagnostic Protocol v2 background bridge. It stays dormant until a SpicyChat
+// content page tells us a v2 Inspector recording is active. While active, safe
+// summaries are mirrored back through the content-script page bus and the last
+// few thousand service-worker events are retained for short disconnects.
+const QOL_DIAG_BACKGROUND_BUFFER_MAX = 5000;
+const qolDiagnosticSubscribers = new Map();
+const qolDiagnosticBackgroundBuffer = [];
+let qolDiagnosticBackgroundSeq = 0;
+
+function qolDiagnosticLevelRank(level) {
+  return String(level || "normal") === "deep" ? 2 : 1;
+}
+
+function qolDiagnosticSensitiveKey(key = "") {
+  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html)/i.test(String(key || ""));
+}
+
+function qolDiagnosticFingerprint(value) {
+  const text = String(value || "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function qolDiagnosticSafe(value, depth = 0, keyHint = "") {
+  if (qolDiagnosticSensitiveKey(keyHint)) {
+    if (typeof value === "string") return { changed: true, chars: value.length, fingerprint: `fnv1a-${qolDiagnosticFingerprint(value)}` };
+    if (Array.isArray(value)) return { changed: true, count: value.length };
+    if (value && typeof value === "object") return { changed: true, keys: Object.keys(value).length };
+    return value == null ? value : { changed: true, kind: typeof value };
+  }
+  if (value == null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") return value.slice(0, 180);
+  if (depth >= 4) return undefined;
+  if (Array.isArray(value)) return value.slice(0, 32).map(item => qolDiagnosticSafe(item, depth + 1, keyHint)).filter(item => item !== undefined);
+  if (typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value).slice(0, 60)) {
+      const safe = qolDiagnosticSafe(item, depth + 1, key);
+      if (safe !== undefined) out[String(key).slice(0, 90)] = safe;
+    }
+    return out;
+  }
+  return undefined;
+}
+
+function qolDiagnosticHasSubscribers(level = "normal") {
+  const needed = qolDiagnosticLevelRank(level);
+  for (const sub of qolDiagnosticSubscribers.values()) {
+    if (sub?.active && qolDiagnosticLevelRank(sub.traceLevel) >= needed) return true;
+  }
+  return false;
+}
+
+function qolDiagnosticForwardToTab(tabId, event) {
+  try {
+    chrome.tabs.sendMessage(Number(tabId), { type: "DS_QOL_DIAGNOSTIC_BACKGROUND_EVENT", event }, () => {
+      try { void chrome.runtime.lastError; } catch {}
+    });
+  } catch {}
+}
+
+function qolBackgroundTrace(type, feature = "background", meta = {}, options = {}) {
+  const level = options?.level === "deep" ? "deep" : "normal";
+  if (!qolDiagnosticHasSubscribers(level)) return null;
+  const row = {
+    seq: ++qolDiagnosticBackgroundSeq,
+    ts: Date.now(),
+    type: String(type || "background-event").slice(0, 80),
+    feature: String(feature || "background").slice(0, 80),
+    level,
+    critical: !!options?.critical,
+    meta: qolDiagnosticSafe(meta || {}) || {}
+  };
+  qolDiagnosticBackgroundBuffer.push(row);
+  if (qolDiagnosticBackgroundBuffer.length > QOL_DIAG_BACKGROUND_BUFFER_MAX) qolDiagnosticBackgroundBuffer.splice(0, qolDiagnosticBackgroundBuffer.length - QOL_DIAG_BACKGROUND_BUFFER_MAX);
+  const needed = qolDiagnosticLevelRank(level);
+  for (const [tabId, sub] of qolDiagnosticSubscribers.entries()) {
+    if (!sub?.active || qolDiagnosticLevelRank(sub.traceLevel) < needed) continue;
+    qolDiagnosticForwardToTab(tabId, row);
+  }
+  return row;
+}
+
+let qolDiagnosticBackgroundNetworkSeq = 0;
+function qolDiagnosticEndpoint(value) {
+  try {
+    const url = new URL(String(value || ""), "https://spicychat.ai");
+    const path = url.pathname
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, ":id")
+      .replace(/\/webhooks\/[^/]+\/[^/]+/ig, "/webhooks/:redacted");
+    return `${url.origin}${path}`.slice(0, 240);
+  } catch {
+    return String(value || "").split(/[?#]/, 1)[0].slice(0, 240);
+  }
+}
+
+function qolBackgroundNetworkStart(feature, method, url, meta = {}) {
+  if (!qolDiagnosticHasSubscribers("normal")) return null;
+  const token = {
+    requestId: `bgnet-${(++qolDiagnosticBackgroundNetworkSeq).toString(36)}`,
+    feature: String(feature || "background-network").slice(0, 80),
+    method: String(method || "GET").toUpperCase().slice(0, 12),
+    endpoint: qolDiagnosticEndpoint(url),
+    startedAt: Date.now()
+  };
+  qolBackgroundTrace("network-start", token.feature, {
+    requestId: token.requestId, method: token.method, endpoint: token.endpoint, ...meta
+  });
+  return token;
+}
+
+function qolBackgroundNetworkEnd(token, result = {}) {
+  if (!token || token.ended) return;
+  token.ended = true;
+  qolBackgroundTrace("network-end", token.feature, {
+    requestId: token.requestId,
+    method: token.method,
+    endpoint: token.endpoint,
+    durationMs: Math.max(0, Date.now() - Number(token.startedAt || Date.now())),
+    status: Number(result?.status || 0),
+    ok: result?.ok === true,
+    outcome: String(result?.outcome || (result?.ok ? "ok" : "failed")).slice(0, 80)
+  }, { critical: result?.ok === false });
+}
+
+function qolDiagnosticSubscribe(sender, message) {
+  const tabId = Number(sender?.tab?.id || 0);
+  if (!tabId) return { ok: false, error: "No sender tab." };
+  if (message?.active === false) {
+    qolDiagnosticSubscribers.delete(tabId);
+    return { ok: true, active: false, latestSeq: qolDiagnosticBackgroundSeq };
+  }
+  const traceLevel = String(message?.traceLevel || "normal") === "deep" ? "deep" : "normal";
+  const afterSeq = Math.max(0, Number(message?.afterSeq || 0));
+  qolDiagnosticSubscribers.set(tabId, {
+    active: true,
+    traceLevel,
+    pageSessionId: String(message?.pageSessionId || "").slice(0, 120),
+    subscribedAt: Date.now()
+  });
+  const replay = qolDiagnosticBackgroundBuffer.filter(row => Number(row.seq || 0) > afterSeq && qolDiagnosticLevelRank(row.level) <= qolDiagnosticLevelRank(traceLevel)).slice(-QOL_DIAG_BACKGROUND_BUFFER_MAX);
+  for (const row of replay) qolDiagnosticForwardToTab(tabId, row);
+  return { ok: true, active: true, traceLevel, replayed: replay.length, latestSeq: qolDiagnosticBackgroundSeq };
+}
+
 function grantNextBackgroundJob() {
   if (backgroundJobLease || !backgroundJobQueue.length) return;
   const next = backgroundJobQueue.shift();
@@ -185,7 +335,9 @@ function grantNextBackgroundJob() {
     grantedAt: now,
     timer
   };
-  next.resolve({ ok: true, leaseId, jobType: next.jobType, waitMs: Math.max(0, now - next.requestedAt) });
+  const waitMs = Math.max(0, now - next.requestedAt);
+  qolBackgroundTrace("scheduler", "background-job", { action: "granted", leaseId, jobType: next.jobType, waitMs, queueDepth: backgroundJobQueue.length, ownerTabId: Number(next.ownerTabId || 0) }, { level: "deep" });
+  next.resolve({ ok: true, leaseId, jobType: next.jobType, waitMs });
 }
 
 function acquireBackgroundJob(jobType, options = {}) {
@@ -213,9 +365,17 @@ function releaseBackgroundJob(leaseId) {
 }
 
 async function withBackgroundJob(jobType, options, callback) {
+  const requestedAt = Date.now();
   const lease = await acquireBackgroundJob(jobType, options);
+  const startedAt = Date.now();
+  qolBackgroundTrace("operation-start", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", waitMs: Number(lease?.waitMs || 0), ownerTabId: Number(options?.ownerTabId || 0), detail: String(options?.detail || "").slice(0, 120) });
   try {
-    return await callback(lease);
+    const result = await callback(lease);
+    qolBackgroundTrace("operation-end", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", outcome: "ok", durationMs: Date.now() - startedAt, totalMs: Date.now() - requestedAt });
+    return result;
+  } catch (error) {
+    qolBackgroundTrace("error", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", class: String(error?.name || "Error"), message: String(error?.message || error || "").slice(0, 180), durationMs: Date.now() - startedAt }, { critical: true });
+    throw error;
   } finally {
     releaseBackgroundJob(lease?.leaseId);
   }
@@ -1679,6 +1839,7 @@ async function replaceLargeStorage(key, value, { markMigrated = true } = {}) {
 
 async function mergeLargeStorageEntries(key, entries) {
   if (!LARGE_STORAGE_KEYS.has(key)) return false;
+  const startedAt = Date.now();
   await ensureLargeStorageMigrated(key);
   const records = normalizeLargeStorageRecords({ meta: entries });
   if (!records.length) return true;
@@ -1686,17 +1847,15 @@ async function mergeLargeStorageEntries(key, entries) {
   const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
   const store = tx.objectStore(key);
   for (const record of records) store.put(record);
-  tx.objectStore(LARGE_STORAGE_META_STORE).put({
-    key,
-    migrated: true,
-    updatedAt: Date.now()
-  });
+  tx.objectStore(LARGE_STORAGE_META_STORE).put({ key, migrated: true, updatedAt: Date.now() });
   await idbTransactionDone(tx);
+  qolBackgroundTrace("storage", "indexeddb", { action: "merge", key, records: records.length, durationMs: Date.now() - startedAt });
   return true;
 }
 
 async function readLargeStorage(key) {
   if (!LARGE_STORAGE_KEYS.has(key)) return { meta: {} };
+  const startedAt = Date.now();
   await ensureLargeStorageMigrated(key);
   const db = await openLargeStorageDb();
   const tx = db.transaction(key, "readonly");
@@ -1706,11 +1865,13 @@ async function readLargeStorage(key) {
     const id = String(row?.id || "").trim();
     if (id && row?.value && typeof row.value === "object") meta[id] = row.value;
   }
+  qolBackgroundTrace("storage", "indexeddb", { action: "read-all", key, records: Object.keys(meta).length, durationMs: Date.now() - startedAt });
   return { meta };
 }
 
 async function readLargeStorageRecords(key, ids = []) {
   if (!LARGE_STORAGE_KEYS.has(key)) return {};
+  const startedAt = Date.now();
   await ensureLargeStorageMigrated(key);
   const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
   if (!cleanIds.length) return {};
@@ -1723,11 +1884,13 @@ async function readLargeStorageRecords(key, ids = []) {
     const value = rows[i]?.value;
     if (value && typeof value === "object") out[cleanIds[i]] = value;
   }
+  qolBackgroundTrace("storage", "indexeddb", { action: "read-records", key, requested: cleanIds.length, records: Object.keys(out).length, durationMs: Date.now() - startedAt }, { level: "deep" });
   return out;
 }
 
 async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
   if (!LARGE_STORAGE_KEYS.has(key)) return { key, rows: [], nextAfterId: "", done: true };
+  const startedAt = Date.now();
   await ensureLargeStorageMigrated(key);
   const db = await openLargeStorageDb();
   const tx = db.transaction(key, "readonly");
@@ -1743,12 +1906,9 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
     cleanRows.push({ id, value: row.value });
   }
   const nextAfterId = cleanRows.length ? cleanRows[cleanRows.length - 1].id : cursorAfter;
-  return {
-    key,
-    rows: cleanRows,
-    nextAfterId,
-    done: (rows || []).length < safeLimit
-  };
+  const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit };
+  qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt }, { level: "deep" });
+  return result;
 }
 
 async function clearLargeStorage(key) {
@@ -1799,6 +1959,7 @@ async function getLargeStorageValues(keys) {
 }
 
 async function getLargeStorageStats() {
+  const startedAt = Date.now();
   const stats = {};
   for (const key of LARGE_STORAGE_KEYS) {
     await ensureLargeStorageMigrated(key);
@@ -1806,10 +1967,12 @@ async function getLargeStorageStats() {
     const tx = db.transaction(key, "readonly");
     stats[key] = Number(await idbRequest(tx.objectStore(key).count())) || 0;
   }
+  qolBackgroundTrace("storage", "indexeddb", { action: "stats", stores: Object.keys(stats).length, records: Object.values(stats).reduce((sum, value) => sum + Number(value || 0), 0), durationMs: Date.now() - startedAt }, { level: "deep" });
   return stats;
 }
 
 async function setLargeStorageValues(values) {
+  const startedAt = Date.now();
   const source = values && typeof values === "object" && !Array.isArray(values) ? values : {};
   const changed = [];
   for (const key of LARGE_STORAGE_KEYS) {
@@ -1818,6 +1981,7 @@ async function setLargeStorageValues(values) {
     try { await new Promise(resolve => chrome.storage.local.remove([key], () => resolve())); } catch {}
     changed.push(key);
   }
+  qolBackgroundTrace("storage", "indexeddb", { action: "replace", keys: changed, stores: changed.length, durationMs: Date.now() - startedAt });
   return { ok: true, keys: changed };
 }
 
@@ -2025,6 +2189,8 @@ async function recordHelperLifecycle(event, detail = {}) {
   diag.lastAt = Date.now();
   diag.lastDetail = Object.fromEntries(Object.entries(detail || {}).slice(0, 12).map(([key, value]) => [String(key).slice(0, 60), typeof value === "number" || typeof value === "boolean" ? value : String(value ?? "").slice(0, 180)]));
   await storageSet({ [HELPER_LIFECYCLE_DIAG_KEY]: diag });
+  const workerFeature = /bot-status/i.test(name) ? "bot-status" : /less-like|recommendation/i.test(name) ? "less-like" : /dislike/i.test(name) ? "quick-dislike" : /listing/i.test(name) ? "listing-refill" : /persona/i.test(name) ? "persona-refresh" : "helper";
+  qolBackgroundTrace("worker", workerFeature, { action: name, ...diag.lastDetail }, { critical: /lost|timeout|restart|error|closed-unexpected/i.test(name) });
   return diag;
 }
 
@@ -2188,6 +2354,7 @@ async function fetchCardTokenCharacter(message) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CARD_TOKEN_TIMEOUT_MS);
   const started = Date.now();
+  const network = qolBackgroundNetworkStart("card-token-info", "GET", `${CARD_TOKEN_API_BASE}${encodeURIComponent(botId)}`, { transport: "background" });
   const headers = { Accept: "application/json", "x-app-id": "spicychat" };
   if (authToken && authToken.length < 12000) headers.Authorization = `Bearer ${authToken}`;
   if (/^[0-9a-f-]{20,}$/i.test(guestUserId)) headers["x-guest-userid"] = guestUserId;
@@ -2201,18 +2368,22 @@ async function fetchCardTokenCharacter(message) {
     });
     const elapsedMs = Date.now() - started;
     if (!response.ok) {
+      qolBackgroundNetworkEnd(network, { status: response.status, ok: false, outcome: "http" });
       recordCardTokenFetch("http", { httpStatus: response.status, elapsedMs });
       return { ok: false, status: "http", httpStatus: response.status, elapsedMs };
     }
     let data;
     try { data = await response.json(); }
     catch (error) {
+      qolBackgroundNetworkEnd(network, { status: response.status, ok: false, outcome: "parse-failure" });
       recordCardTokenFetch("parse-failure", { elapsedMs });
       return { ok: false, status: "parse-failure", elapsedMs, error: error?.message || String(error) };
     }
+    qolBackgroundNetworkEnd(network, { status: response.status, ok: true, outcome: "success" });
     recordCardTokenFetch("success", { httpStatus: response.status, elapsedMs });
     return { ok: true, status: "success", httpStatus: response.status, elapsedMs, data };
   } catch (error) {
+    qolBackgroundNetworkEnd(network, { status: 0, ok: false, outcome: error?.name === "AbortError" ? "timeout" : "network-failure" });
     const elapsedMs = Date.now() - started;
     if (error?.name === "AbortError") {
       recordCardTokenFetch("timeout", { elapsedMs });
@@ -4363,6 +4534,26 @@ async function syncAutoAfkTabs() {
 }
 
 let lowMemoryProtectionScanTimer = 0;
+const LOW_MEMORY_WAKE_GRACE_MS = 90000;
+const LOW_MEMORY_WAKE_BURST_ALLOWANCE = 2;
+const lowMemoryWakeGraceUntil = new Map();
+
+function markLowMemoryWakeGrace(tabId, now = Date.now()) {
+  const id = Number(tabId || 0);
+  if (!id) return;
+  lowMemoryWakeGraceUntil.set(id, now + LOW_MEMORY_WAKE_GRACE_MS);
+}
+
+function lowMemoryWakeGraceActive(tabId, now = Date.now()) {
+  const id = Number(tabId || 0);
+  const until = Number(lowMemoryWakeGraceUntil.get(id) || 0);
+  if (!until) return false;
+  if (until <= now) {
+    lowMemoryWakeGraceUntil.delete(id);
+    return false;
+  }
+  return true;
+}
 
 function normalizedAutoAfkMinutes(settings = {}) {
   const raw = Number(settings.autoAfkMinutes);
@@ -4510,26 +4701,81 @@ async function runAutoAfkScan() {
   summary.discardedNormal = normalTabs.filter(tab => !!tab.discarded).length;
 
   // Low-memory protection is independent from the AFK timer. Dedicated active
-  // workers never count against the limit. Normal tabs are discarded oldest
-  // first while current/pinned/audible tabs remain protected.
+  // workers never count against the limit. Recently visited/woken tabs get a
+  // short grace period so switching among a large discarded-tab pile does not
+  // immediately ping-pong the tab back to sleep. During that grace we allow a
+  // tiny +2 burst, then the normal one-minute scan trims back by LRU.
   if (lowMemoryEnabled && summary.loadedNormal > awakeLimit) {
-    const candidates = normalTabs
-      .filter(tab => !tab.discarded && !lowMemoryProtectedTab(tab))
-      .sort((a, b) => autoAfkLastActivity(a, activity) - autoAfkLastActivity(b, activity));
-    let needed = Math.max(0, summary.loadedNormal - awakeLimit);
+    const loadedCandidates = normalTabs.filter(tab => !tab.discarded && !lowMemoryProtectedTab(tab));
+    const graceCount = loadedCandidates.filter(tab => lowMemoryWakeGraceActive(tab.id, now)).length;
+    const severeOverflow = summary.loadedNormal > awakeLimit + LOW_MEMORY_WAKE_BURST_ALLOWANCE + 2;
+    const effectiveLimit = graceCount && !severeOverflow
+      ? Math.min(20, awakeLimit + LOW_MEMORY_WAKE_BURST_ALLOWANCE)
+      : awakeLimit;
+    const candidates = loadedCandidates
+      .filter(tab => severeOverflow || !lowMemoryWakeGraceActive(tab.id, now))
+      .sort((a, b) => {
+        const aGrace = lowMemoryWakeGraceActive(a.id, now) ? 1 : 0;
+        const bGrace = lowMemoryWakeGraceActive(b.id, now) ? 1 : 0;
+        if (aGrace !== bGrace) return aGrace - bGrace;
+        return autoAfkLastActivity(a, activity) - autoAfkLastActivity(b, activity);
+      });
+    let needed = Math.max(0, summary.loadedNormal - effectiveLimit);
+    summary.wakeGraceTabs = graceCount;
+    summary.effectiveAwakeLimit = effectiveLimit;
+    qolBackgroundTrace("pc-protection", "pc-protection", {
+      action: "evaluate",
+      loadedNormal: summary.loadedNormal,
+      discardedNormal: summary.discardedNormal,
+      loadedWorkers: summary.loadedWorkers,
+      awakeLimit,
+      effectiveAwakeLimit: effectiveLimit,
+      wakeGraceTabs: graceCount,
+      severeOverflow,
+      candidateCount: candidates.length,
+      needed
+    }, { level: "deep" });
     for (const tab of candidates) {
       if (needed <= 0) break;
+      const lastActive = autoAfkLastActivity(tab, activity);
       const result = await tabsDiscard(tab.id);
       if (result.ok) {
         summary.lruDiscarded += 1;
         summary.loadedNormal = Math.max(0, summary.loadedNormal - 1);
         summary.discardedNormal += 1;
         needed -= 1;
+        qolBackgroundTrace("pc-protection", "pc-protection", {
+          action: "discard-success",
+          lastUsedAgoMs: Math.max(0, now - Number(lastActive || now)),
+          loadedNormal: summary.loadedNormal,
+          awakeLimit,
+          effectiveAwakeLimit: Number(summary.effectiveAwakeLimit || awakeLimit),
+          remainingNeeded: needed
+        });
       } else {
         summary.failed += 1;
         if (result.error && summary.errors.length < 3) summary.errors.push(result.error);
+        qolBackgroundTrace("pc-protection", "pc-protection", {
+          action: "discard-failed",
+          lastUsedAgoMs: Math.max(0, now - Number(lastActive || now)),
+          loadedNormal: summary.loadedNormal,
+          awakeLimit,
+          effectiveAwakeLimit: Number(summary.effectiveAwakeLimit || awakeLimit),
+          remainingNeeded: needed,
+          errorClass: result.error ? "discard-error" : "unknown"
+        }, { critical: true });
       }
     }
+  } else if (lowMemoryEnabled) {
+    qolBackgroundTrace("pc-protection", "pc-protection", {
+      action: "evaluate",
+      loadedNormal: summary.loadedNormal,
+      discardedNormal: summary.discardedNormal,
+      loadedWorkers: summary.loadedWorkers,
+      awakeLimit,
+      candidateCount: 0,
+      needed: 0
+    }, { level: "deep" });
   }
 
   if (timerEnabled) {
@@ -5109,8 +5355,9 @@ function randomChatHomeQueryFromUrl(rawUrl) {
   return q || "*";
 }
 
-async function typesenseMultiSearch(searches, timeoutMs = 8000, apiKey = EXACT_MESSAGE_TYPESENSE_KEY) {
+async function typesenseMultiSearch(searches, timeoutMs = 8000, apiKey = EXACT_MESSAGE_TYPESENSE_KEY, diagnosticFeature = "typesense") {
   const controller = new AbortController();
+  const network = qolBackgroundNetworkStart(diagnosticFeature, "POST", EXACT_MESSAGE_TYPESENSE_URL, { searches: Array.isArray(searches) ? searches.length : 0 });
   const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 8000));
   try {
     const response = await fetch(EXACT_MESSAGE_TYPESENSE_URL, {
@@ -5125,9 +5372,15 @@ async function typesenseMultiSearch(searches, timeoutMs = 8000, apiKey = EXACT_M
       },
       body: JSON.stringify({ searches })
     });
-    if (!response.ok) return { ok: false, status: response.status, error: `Typesense returned HTTP ${response.status}.` };
-    return { ok: true, data: await response.json() };
+    if (!response.ok) {
+      qolBackgroundNetworkEnd(network, { status: response.status, ok: false, outcome: "http" });
+      return { ok: false, status: response.status, error: `Typesense returned HTTP ${response.status}.` };
+    }
+    const data = await response.json();
+    qolBackgroundNetworkEnd(network, { status: response.status, ok: true, outcome: "success" });
+    return { ok: true, data };
   } catch (error) {
+    qolBackgroundNetworkEnd(network, { status: 0, ok: false, outcome: error?.name === "AbortError" ? "timeout" : "network-error" });
     return { ok: false, status: error?.name === "AbortError" ? "timeout" : "network-error", error: error?.message || String(error) };
   } finally {
     clearTimeout(timeout);
@@ -5143,6 +5396,7 @@ async function getLorebookTypesenseConfig({ force = false } = {}) {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
+  const network = qolBackgroundNetworkStart("lorebook-status", "GET", SPICYCHAT_APPLICATION_CONFIG_URL, { purpose: "typesense-config" });
   try {
     const response = await fetch(SPICYCHAT_APPLICATION_CONFIG_URL, {
       method: "GET",
@@ -5158,8 +5412,12 @@ async function getLorebookTypesenseConfig({ force = false } = {}) {
         "x-platform-os": "DESKTOP"
       }
     });
-    if (!response.ok) throw new Error(`SpicyChat application config returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      qolBackgroundNetworkEnd(network, { status: response.status, ok: false, outcome: "http" });
+      throw new Error(`SpicyChat application config returned HTTP ${response.status}.`);
+    }
     const payload = await response.json();
+    qolBackgroundNetworkEnd(network, { status: response.status, ok: true, outcome: "success" });
     const config = payload?.typesenseConfig && typeof payload.typesenseConfig === "object" ? payload.typesenseConfig : {};
     const next = {
       fetchedAt: now,
@@ -5172,6 +5430,7 @@ async function getLorebookTypesenseConfig({ force = false } = {}) {
     lorebookTypesenseConfigCache = next;
     return { ok: true, ...next, cached: false };
   } catch (error) {
+    if (network) qolBackgroundNetworkEnd(network, { status: 0, ok: false, outcome: error?.name === "AbortError" ? "timeout" : "error" });
     if (cached?.lorebookKey) {
       return { ok: true, ...cached, cached: true, stale: true, warning: error?.message || String(error) };
     }
@@ -5239,7 +5498,7 @@ async function checkPublicLorebookIndexBatch(message) {
     filter_by: `lorebook_id:=${id}`,
     per_page: 1
   }));
-  const response = await typesenseMultiSearch(searches, 10000, config.lorebookKey);
+  const response = await typesenseMultiSearch(searches, 10000, config.lorebookKey, "lorebook-status");
   if (!response.ok) return response;
   const buckets = Array.isArray(response.data?.results) ? response.data.results : [];
   const results = [];
@@ -5328,7 +5587,7 @@ async function fetchPublicLorebookRecovery(message) {
           per_page: pageSize,
           filter_by: `${filterField}:=${lorebookId}`
         };
-        const response = await typesenseMultiSearch([search], 12000, config.entryKey);
+        const response = await typesenseMultiSearch([search], 12000, config.entryKey, "lorebook-recovery");
         if (!response?.ok) {
           lastError = response?.error || `Public Lorebook-entry search failed (${response?.status || "unknown"}).`;
           failed = true;
@@ -5441,7 +5700,7 @@ async function pickRandomChatCandidates(message) {
       include_fields: includeFields,
       per_page: 1
     }));
-    const result = await typesenseMultiSearch(searches);
+    const result = await typesenseMultiSearch(searches, 8000, EXACT_MESSAGE_TYPESENSE_KEY, "random-chat");
     if (!result.ok) return result;
     const candidates = [];
     for (const item of Array.isArray(result.data?.results) ? result.data.results : []) {
@@ -5464,7 +5723,7 @@ async function pickRandomChatCandidates(message) {
       include_fields: includeFields,
       per_page: 1
     }));
-    const result = await typesenseMultiSearch(searches);
+    const result = await typesenseMultiSearch(searches, 8000, EXACT_MESSAGE_TYPESENSE_KEY, "random-chat");
     if (!result.ok) return result;
     const candidates = [];
     for (const item of Array.isArray(result.data?.results) ? result.data.results : []) {
@@ -5486,7 +5745,7 @@ async function pickRandomChatCandidates(message) {
     per_page: 1,
     page: 1
   };
-  const meta = await typesenseMultiSearch([baseSearch]);
+  const meta = await typesenseMultiSearch([baseSearch], 8000, EXACT_MESSAGE_TYPESENSE_KEY, "random-chat");
   if (!meta.ok) return meta;
   const first = Array.isArray(meta.data?.results) ? meta.data.results[0] : null;
   const found = Math.max(0, Number(first?.found || 0) || 0);
@@ -5497,7 +5756,7 @@ async function pickRandomChatCandidates(message) {
   const perPage = 250;
   const pageCount = Math.max(1, Math.min(168, Math.ceil(found / perPage)));
   const page = secureBackgroundRandomInt(pageCount) + 1;
-  const pageResult = await typesenseMultiSearch([{ ...baseSearch, page, per_page: perPage }]);
+  const pageResult = await typesenseMultiSearch([{ ...baseSearch, page, per_page: perPage }], 8000, EXACT_MESSAGE_TYPESENSE_KEY, "random-chat");
   if (!pageResult.ok) return pageResult;
   const result = Array.isArray(pageResult.data?.results) ? pageResult.data.results[0] : null;
   const candidates = shuffleBackgroundRandom((Array.isArray(result?.hits) ? result.hits : [])
@@ -5529,6 +5788,7 @@ async function fetchExactMessageCounts(message) {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
+  const network = qolBackgroundNetworkStart("exact-message-counts", "POST", EXACT_MESSAGE_TYPESENSE_URL, { botCount: ids.length });
   try {
     const response = await fetch(EXACT_MESSAGE_TYPESENSE_URL, {
       method: "POST",
@@ -5544,10 +5804,12 @@ async function fetchExactMessageCounts(message) {
     });
 
     if (!response.ok) {
+      qolBackgroundNetworkEnd(network, { status: response.status, ok: false, outcome: "http" });
       return { ok: false, status: response.status, error: `Typesense returned HTTP ${response.status}.`, counts: [] };
     }
 
     const data = await response.json();
+    qolBackgroundNetworkEnd(network, { status: response.status, ok: true, outcome: "success" });
     const counts = [];
     const found = new Set();
     const results = Array.isArray(data?.results) ? data.results : [];
@@ -5573,6 +5835,7 @@ async function fetchExactMessageCounts(message) {
       missing: ids.filter(id => !found.has(id))
     };
   } catch (error) {
+    qolBackgroundNetworkEnd(network, { status: 0, ok: false, outcome: error?.name === "AbortError" ? "timeout" : "network-error" });
     return {
       ok: false,
       status: error?.name === "AbortError" ? "timeout" : "network-error",
@@ -5633,6 +5896,28 @@ async function runLorebookExportHelperTab(tabId, message) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "DS_QOL_DIAGNOSTIC_SUBSCRIBE") {
+    sendResponse(qolDiagnosticSubscribe(sender, message));
+    return false;
+  }
+
+  if (message?.type === "DS_QOL_DIAGNOSTIC_STATUS_QUERY") {
+    let traceLevel = "off";
+    for (const sub of qolDiagnosticSubscribers.values()) {
+      if (!sub?.active) continue;
+      if (sub.traceLevel === "deep") { traceLevel = "deep"; break; }
+      traceLevel = "normal";
+    }
+    sendResponse({ ok: true, active: traceLevel !== "off", traceLevel, subscribers: qolDiagnosticSubscribers.size, latestSeq: qolDiagnosticBackgroundSeq });
+    return false;
+  }
+
+  if (message?.type === "DS_QOL_DIAGNOSTIC_BACKGROUND_EMIT") {
+    const level = message?.level === "deep" ? "deep" : "normal";
+    const event = qolBackgroundTrace(String(message?.event || "event"), String(message?.feature || "options"), message?.meta || {}, { level, critical: !!message?.critical });
+    sendResponse({ ok: true, seq: Number(event?.seq || 0) });
+    return false;
+  }
   const tabId = sender.tab?.id;
 
   if (message?.type === "DS_BOT_STATUS_PERSIST_DELTA") {
@@ -6464,6 +6749,7 @@ chrome.tabs.onActivated.addListener(async activeInfo => {
 
   const tab = await tabsGet(activeInfo.tabId);
   if (!tab || !isSpicyChatUrl(tab.url) || isDedicatedWorkerTab(tab)) return;
+  if (settings.lowMemoryProtectionEnabled) markLowMemoryWakeGrace(tab.id);
 
   // LRU protection needs real "last used" ordering even when the timer's
   // reset-on-activate option is off.
@@ -6496,6 +6782,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   const settings = await getAutoAfkSettings();
   if (settings.enabled === false) return;
+  if (settings.lowMemoryProtectionEnabled && (changeInfo.discarded === false || (changeInfo.status === "complete" && tab?.active))) {
+    markLowMemoryWakeGrace(tabId);
+  }
 
   // A URL change means a new normal SpicyChat page was opened in this tab.
   if ((settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) &&
@@ -6563,6 +6852,8 @@ chrome.windows.onFocusChanged.addListener(windowId => {
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
+  qolDiagnosticSubscribers.delete(Number(tabId));
+  lowMemoryWakeGraceUntil.delete(Number(tabId));
   // Close any refill helper that belongs to a source tab the user just closed.
   for (const [runId, sourceTabId] of [...listingRefillSourceTabs.entries()]) {
     if (Number(sourceTabId) !== Number(tabId)) continue;

@@ -16,7 +16,8 @@
     mobileListenersInstalled: false,
     mobileNormalizeRaf: 0,
     editResizeRaf: 0,
-    editResizeTimer: 0
+    editResizeTimer: 0,
+    pendingComposerHeightRepairs: new WeakSet()
   };
 
   function settings() {
@@ -50,6 +51,68 @@
       .filter(textarea => !textarea.closest("#ds-qol-panel, #ds-chat-export-modal"));
   }
 
+  function isPrimaryComposerTextarea(textarea) {
+    return !!(
+      textarea &&
+      textarea.isConnected &&
+      isMessageTextarea(textarea) &&
+      !textarea.closest("div[id^='message-']")
+    );
+  }
+
+  function composerHeightLooksCollapsed(textarea) {
+    if (!isPrimaryComposerTextarea(textarea)) return false;
+
+    const rect = textarea.getBoundingClientRect?.();
+    if (!rect || rect.width < 120) return false;
+
+    let computed = null;
+    try { computed = getComputedStyle(textarea); } catch {}
+    if (computed && (computed.display === "none" || computed.visibility === "hidden")) return false;
+
+    const inlineHeight = Number.parseFloat(String(textarea.style.height || ""));
+    const rectCollapsed = rect.height > 0 && rect.height < 18;
+    const inlineCollapsed = Number.isFinite(inlineHeight) && inlineHeight <= 4;
+    return inlineCollapsed || rectCollapsed;
+  }
+
+  function repairCollapsedComposerHeight(textarea) {
+    if (!composerHeightLooksCollapsed(textarea)) return false;
+
+    const previousInlineHeight = Number.parseFloat(String(textarea.style.height || ""));
+    const previousRectHeight = Number(textarea.getBoundingClientRect?.().height || 0);
+    const scrollHeight = Math.ceil(Number(textarea.scrollHeight || 0));
+    const wantedHeight = Math.max(28, Math.min(188, scrollHeight || 28));
+
+    // SpicyChat's normal empty composer is 28px tall. A rare autosize race can
+    // leave the textarea at 0px while the surrounding composer remains mounted,
+    // making the whole input bar look like a thin line. Only repair clearly
+    // collapsed, visible main composers; normal autosizing remains native.
+    textarea.style.height = `${wantedHeight}px`;
+
+    DS.diagEvent?.("composer-control", "collapsed-height-repaired", {
+      previousInlineHeight: Number.isFinite(previousInlineHeight) ? previousInlineHeight : null,
+      previousRectHeight: Math.round(previousRectHeight * 10) / 10,
+      wantedHeight
+    });
+
+    return true;
+  }
+
+  function scheduleComposerHeightRepair(textarea) {
+    if (!composerHeightLooksCollapsed(textarea)) return;
+    if (state.pendingComposerHeightRepairs.has(textarea)) return;
+    state.pendingComposerHeightRepairs.add(textarea);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        state.pendingComposerHeightRepairs.delete(textarea);
+        if (!shouldKeepComposerEnabled()) return;
+        repairCollapsedComposerHeight(textarea);
+      });
+    });
+  }
+
   function forceEnableTextarea(textarea) {
     if (!shouldKeepComposerEnabled() || !textarea) return;
 
@@ -61,6 +124,7 @@
     if (textarea.getAttribute("aria-readonly") === "true") textarea.setAttribute("aria-readonly", "false");
 
     DS.setClassState?.(textarea, "ds-composer-forced-enabled", true);
+    scheduleComposerHeightRepair(textarea);
   }
 
   function shouldKeepChatPositionWhileTyping() {
@@ -168,7 +232,9 @@
 
         for (const mutation of mutations) {
           const textarea = mutation.target;
-          if (isMessageTextarea(textarea)) forceEnableTextarea(textarea);
+          if (!isMessageTextarea(textarea)) continue;
+          forceEnableTextarea(textarea);
+          if (mutation.attributeName === "style") scheduleComposerHeightRepair(textarea);
         }
       });
     }
@@ -178,7 +244,7 @@
       state.observedTextareas.add(textarea);
       state.composerObserver.observe(textarea, {
         attributes: true,
-        attributeFilter: ["disabled", "readonly", "aria-disabled", "aria-readonly"]
+        attributeFilter: ["disabled", "readonly", "aria-disabled", "aria-readonly", "style"]
       });
     }
   }
@@ -485,6 +551,9 @@
 
     DS.state.composerControlWasActive = true;
     ensureComposerObserver();
-    getMessageTextareas().forEach(forceEnableTextarea);
+    getMessageTextareas().forEach(textarea => {
+      forceEnableTextarea(textarea);
+      scheduleComposerHeightRepair(textarea);
+    });
   };
 })();

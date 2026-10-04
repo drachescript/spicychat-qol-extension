@@ -747,8 +747,13 @@
   function createOocShortcut(original) {
     const button = original.cloneNode(false);
 
+    // The replacement is cloned from SpicyChat's Image button so it keeps the
+    // native sizing/classes. Never inherit QoL's marker or inline display:none
+    // from the original Image control, otherwise Hide Image also hides OOC.
     button.removeAttribute("data-testid");
     button.removeAttribute("id");
+    button.removeAttribute("data-ds-ooc-original-image");
+    button.style.removeProperty("display");
     button.classList.add(OOC_SHORTCUT_CLASS);
     button.type = "button";
     button.setAttribute("aria-label", "Insert OOC message");
@@ -799,8 +804,14 @@
         original.dataset.dsOocOriginalImage = "1";
         original.style.setProperty("display", "none", "important");
 
-        if (!wrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`)) {
+        const existingShortcut = wrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`);
+        if (!existingShortcut) {
           wrapper.appendChild(createOocShortcut(original));
+        } else {
+          // Repair buttons created by the older replacement bug without
+          // requiring the user to reload the conversation.
+          existingShortcut.removeAttribute("data-ds-ooc-original-image");
+          existingShortcut.style.removeProperty("display");
         }
         return;
       }

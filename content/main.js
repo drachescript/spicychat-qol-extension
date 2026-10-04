@@ -34,7 +34,74 @@
   const messageEditSettleTimers = new Map();
   const slowStepThrottle = new Map();
   const CREATOR_PROFILE_STARTUP_QUIET_MS = 5000;
+  const SLOW_SLICE_BUDGET_MS = 10;
   let creatorProfileQuietTimer = 0;
+  const slowDirtyGroups = new Set(["all"]);
+  let slowSliceState = null;
+
+  function normalizeSlowDirtyGroups(groups) {
+    if (groups == null) return [];
+    const list = Array.isArray(groups) ? groups : [groups];
+    return [...new Set(list.map(value => String(value || "").trim()).filter(Boolean))];
+  }
+
+  function markSlowDirty(groups, source = "runtime") {
+    const clean = normalizeSlowDirtyGroups(groups);
+    if (!clean.length) return false;
+    if (clean.includes("all")) {
+      slowDirtyGroups.clear();
+      slowDirtyGroups.add("all");
+    } else if (!slowDirtyGroups.has("all")) {
+      clean.forEach(group => slowDirtyGroups.add(group));
+    }
+    const counters = runtimeCounters();
+    counters.slowDirtyInvalidations = Number(counters.slowDirtyInvalidations || 0) + 1;
+    counters.lastSlowDirtySource = String(source || "runtime").slice(0, 120);
+    counters.lastSlowDirtyGroups = [...slowDirtyGroups].join(",");
+    return true;
+  }
+
+  function takeSlowDirtyGroups(options = {}) {
+    if (options.force) {
+      slowDirtyGroups.clear();
+      return new Set(["all"]);
+    }
+    if (!slowDirtyGroups.size) return new Set();
+    const snapshot = new Set(slowDirtyGroups);
+    slowDirtyGroups.clear();
+    return snapshot;
+  }
+
+  function slowDirtyHas(dirty, ...groups) {
+    if (!dirty?.size) return false;
+    if (dirty.has("all")) return true;
+    return groups.some(group => dirty.has(group));
+  }
+
+  async function maybeYieldSlowSlice(stepName = "slow-step") {
+    if (!slowSliceState || typeof performance === "undefined") return;
+    // Critical/message lanes may interleave while an async slow feature is
+    // awaiting. Their runStep() calls must never be charged to or delayed by
+    // the slow-pass slice budget.
+    if (criticalRunning || messageLaneRunning) return;
+    const now = performance.now();
+    const elapsed = Math.max(0, now - Number(slowSliceState.sliceStarted || now));
+    if (elapsed < SLOW_SLICE_BUDGET_MS) return;
+    slowSliceState.activeMs += elapsed;
+    slowSliceState.slices += 1;
+    DS.diagScheduler?.("deferred", {
+      lane: "slow",
+      reason: "slice-budget",
+      afterStep: String(stepName || "slow-step").slice(0, 100),
+      activeSliceMs: Math.round(elapsed * 10) / 10,
+      budgetMs: SLOW_SLICE_BUDGET_MS
+    });
+    await new Promise(resolve => {
+      if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+      else setTimeout(resolve, 0);
+    });
+    slowSliceState.sliceStarted = performance.now();
+  }
 
   function creatorProfileStartupQuietActive() {
     return Date.now() < Number(DS.state?.creatorProfileStartupQuietUntil || 0);
@@ -475,35 +542,132 @@
     return !!(settings.enabled && settings.pauseQolInHiddenTabs && document.hidden);
   }
 
-  const CHAT_STARTUP_QUIET_MS = 8000;
+  const CHAT_STARTUP_QUIET_MS = 20000;
   const CHAT_STARTUP_SETTLE_MIN_MS = 2500;
+  const CHAT_STARTUP_LARGE_SETTLE_MIN_MS = 8000;
+  const CHAT_STARTUP_LARGE_MESSAGE_COUNT = 35;
   const CHAT_STARTUP_SETTLED_IDLE_MS = 1800;
+  const CHAT_STARTUP_LONG_TASK_IDLE_MS = 1500;
+  const CHAT_STARTUP_WARMUP_MS = 25000;
+  const DISCARDED_WAKE_VISIBLE_QUIET_MS = 8000;
+
+  function discardedWakeSessionActive() {
+    return !!(DS.state?.discardedWakeActive && DS.isSingleChatPage?.());
+  }
+
+  function noteDiscardedWakeVisible(source = "visible") {
+    if (!discardedWakeSessionActive() || document.hidden) return false;
+    const now = Date.now();
+    if (!Number(DS.state.discardedWakeVisibleAt || 0)) {
+      DS.state.discardedWakeVisibleAt = now;
+      DS.state.discardedWakeMinUntil = now + DISCARDED_WAKE_VISIBLE_QUIET_MS;
+      DS.state.chatStartupQuietUntil = Math.max(Number(DS.state.chatStartupQuietUntil || 0), now + CHAT_STARTUP_QUIET_MS);
+      DS.state.chatStartupWarmupUntil = Math.max(Number(DS.state.chatStartupWarmupUntil || 0), now + CHAT_STARTUP_WARMUP_MS);
+      DS.state.chatStartupLastMessageMutationAt = now;
+      DS.runtimeLog?.("info", "performance", `Discarded chat tab became visible (${source})`, { quietMs: DISCARDED_WAKE_VISIBLE_QUIET_MS });
+      DS.diagPerformance?.("discarded-wake-visible", { source: String(source || "visible"), quietMs: DISCARDED_WAKE_VISIBLE_QUIET_MS });
+    }
+    return true;
+  }
+
+  function finishDiscardedWake(reason = "settled") {
+    if (!DS.state?.discardedWakeActive) return;
+    DS.state.discardedWakeActive = false;
+    DS.state.discardedWakeFinishedAt = Date.now();
+    DS.runtimeLog?.("info", "performance", `Discarded chat wake protection ended (${reason})`);
+    DS.diagPerformance?.("discarded-wake-end", { reason: String(reason || "settled") });
+    if (!document.hidden) {
+      setTimeout(() => {
+        DS.maybeAutoReadNotifications?.("discarded-wake-settled");
+        scheduleSavedOpenedLane("discarded-wake-settled", 40);
+        primeLargeChatMessageLane("discarded-wake-settled");
+      }, 0);
+    }
+  }
+
+  function chatStartupMinimumQuietMs() {
+    return loadedChatMessageCount() >= CHAT_STARTUP_LARGE_MESSAGE_COUNT
+      ? CHAT_STARTUP_LARGE_SETTLE_MIN_MS
+      : CHAT_STARTUP_SETTLE_MIN_MS;
+  }
 
   function startChatStartupQuietWindow(source = "route") {
     if (!DS.isSingleChatPage?.()) return false;
     DS.state = DS.state || {};
     const now = Date.now();
+    const discardedWake = source === "startup" && document.wasDiscarded === true;
     DS.state.chatStartupQuietRoute = `${location.pathname || ""}${location.search || ""}`;
     DS.state.chatStartupQuietStartedAt = now;
     DS.state.chatStartupQuietUntil = now + CHAT_STARTUP_QUIET_MS;
+    DS.state.chatStartupWarmupUntil = now + CHAT_STARTUP_WARMUP_MS;
     DS.state.chatStartupLastMessageMutationAt = now;
-    DS.runtimeLog?.("info", "performance", `Chat startup quiet window started (${source})`, { quietMs: CHAT_STARTUP_QUIET_MS });
+    DS.state.chatStartupLastLongTaskAt = 0;
+    if (discardedWake) {
+      DS.state.discardedWakeActive = true;
+      DS.state.discardedWakeVisibleAt = document.hidden ? 0 : now;
+      DS.state.discardedWakeMinUntil = document.hidden ? 0 : now + DISCARDED_WAKE_VISIBLE_QUIET_MS;
+      DS.state.discardedWakeStartedAt = now;
+    } else if (source === "route-change") {
+      DS.state.discardedWakeActive = false;
+      DS.state.discardedWakeVisibleAt = 0;
+      DS.state.discardedWakeMinUntil = 0;
+    }
+    DS.runtimeLog?.("info", "performance", `Chat startup quiet window started (${source})`, {
+      quietMs: CHAT_STARTUP_QUIET_MS,
+      discardedWake
+    });
+    DS.diagPerformance?.("startup-quiet-start", { source: String(source || "route"), durationTargetMs: CHAT_STARTUP_QUIET_MS, discardedWake });
     return true;
   }
 
   function chatStartupQuietActive() {
     if (!DS.isSingleChatPage?.()) return false;
     const now = Date.now();
+    if (discardedWakeSessionActive()) {
+      if (document.hidden) return true;
+      noteDiscardedWakeVisible("quiet-check");
+      const discardedMinUntil = Number(DS.state?.discardedWakeMinUntil || 0);
+      if (discardedMinUntil && now < discardedMinUntil) return true;
+    }
     const until = Number(DS.state?.chatStartupQuietUntil || 0);
-    if (!until || now >= until) return false;
+    if (!until) {
+      finishDiscardedWake("quiet-cleared");
+      return false;
+    }
+    if (now >= until) {
+      DS.state.chatStartupQuietUntil = 0;
+      finishDiscardedWake("timeout");
+      DS.diagPerformance?.("startup-quiet-end", { reason: "timeout", elapsedMs: Math.max(0, now - Number(DS.state?.chatStartupQuietStartedAt || now)) });
+      return false;
+    }
     const started = Number(DS.state?.chatStartupQuietStartedAt || now);
     const lastMutation = Number(DS.state?.chatStartupLastMessageMutationAt || started);
-    if (now - started >= CHAT_STARTUP_SETTLE_MIN_MS && now - lastMutation >= CHAT_STARTUP_SETTLED_IDLE_MS) {
+    const lastLongTask = Number(DS.state?.chatStartupLastLongTaskAt || 0);
+    const minimumQuietMs = chatStartupMinimumQuietMs();
+    const mutationIdleMs = now - lastMutation;
+    const longTaskIdleMs = lastLongTask > 0 ? now - lastLongTask : Number.POSITIVE_INFINITY;
+    if (
+      now - started >= minimumQuietMs &&
+      mutationIdleMs >= CHAT_STARTUP_SETTLED_IDLE_MS &&
+      longTaskIdleMs >= CHAT_STARTUP_LONG_TASK_IDLE_MS
+    ) {
       DS.state.chatStartupQuietUntil = 0;
-      DS.runtimeLog?.("info", "performance", "Chat startup quiet window ended early after message history settled", {
+      DS.runtimeLog?.("info", "performance", "Chat startup quiet window ended after history and Long Tasks settled", {
         elapsedMs: now - started,
-        settledMs: now - lastMutation
+        settledMs: mutationIdleMs,
+        longTaskIdleMs: Number.isFinite(longTaskIdleMs) ? longTaskIdleMs : -1,
+        minimumQuietMs,
+        mountedMessages: loadedChatMessageCount()
       });
+      DS.diagPerformance?.("startup-quiet-end", {
+        reason: "settled",
+        elapsedMs: now - started,
+        settledMs: mutationIdleMs,
+        longTaskIdleMs: Number.isFinite(longTaskIdleMs) ? longTaskIdleMs : -1,
+        minimumQuietMs,
+        mountedMessages: loadedChatMessageCount()
+      });
+      finishDiscardedWake("settled");
       return false;
     }
     return true;
@@ -511,11 +675,23 @@
 
   function scheduleChatStartupQuietResume(source = "startup") {
     if (!chatStartupQuietActive()) return false;
+    if (discardedWakeSessionActive() && document.hidden) {
+      clearTimeout(DS.state.chatStartupQuietTimer);
+      DS.state.chatStartupQuietTimer = 0;
+      return true;
+    }
+    if (discardedWakeSessionActive()) noteDiscardedWakeVisible(`resume-${source}`);
     const now = Date.now();
     const until = Number(DS.state.chatStartupQuietUntil || now);
     const started = Number(DS.state.chatStartupQuietStartedAt || now);
     const lastMutation = Number(DS.state.chatStartupLastMessageMutationAt || started);
-    const earliestSettleCheck = Math.max(started + CHAT_STARTUP_SETTLE_MIN_MS, lastMutation + CHAT_STARTUP_SETTLED_IDLE_MS);
+    const lastLongTask = Number(DS.state.chatStartupLastLongTaskAt || 0);
+    const earliestSettleCheck = Math.max(
+      started + chatStartupMinimumQuietMs(),
+      lastMutation + CHAT_STARTUP_SETTLED_IDLE_MS,
+      lastLongTask > 0 ? lastLongTask + CHAT_STARTUP_LONG_TASK_IDLE_MS : 0,
+      Number(DS.state?.discardedWakeMinUntil || 0)
+    );
     const wakeAt = Math.min(until, earliestSettleCheck);
     clearTimeout(DS.state.chatStartupQuietTimer);
     DS.state.chatStartupQuietTimer = setTimeout(() => {
@@ -527,8 +703,29 @@
     return true;
   }
 
+  function chatStartupWarmupActive() {
+    if (!DS.isSingleChatPage?.()) return false;
+    return Date.now() < Number(DS.state?.chatStartupWarmupUntil || 0);
+  }
+
+  function chatStartupWarmupRemainingMs() {
+    return Math.max(0, Number(DS.state?.chatStartupWarmupUntil || 0) - Date.now());
+  }
+
   DS.startChatStartupQuietWindow = startChatStartupQuietWindow;
   DS.isChatStartupQuiet = chatStartupQuietActive;
+  DS.isChatStartupWarmup = chatStartupWarmupActive;
+  DS.chatStartupWarmupRemainingMs = chatStartupWarmupRemainingMs;
+  DS.isDiscardedWakeProtected = discardedWakeSessionActive;
+
+  async function runDiscardedWakeEssentialChatPass(settings) {
+    if (!discardedWakeSessionActive() || !DS.isSingleChatPage?.()) return;
+    // A discarded-tab wake should be almost passive, but the composer and
+    // layout still need their safety fixes immediately so the tab is usable.
+    await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());
+    await runFeatureStep("composer", composerWanted(settings) || !!DS.state.composerControlWasActive, () => DS.applyComposerControl?.());
+    await runFeatureStep("mobile chat layout", true, () => DS.applyMobileChatLayoutFixes?.());
+  }
 
   function runtimeProfile() {
     const settings = DS.state?.settings || {};
@@ -818,6 +1015,18 @@
 
   async function runStep(name, fn) {
     if (typeof fn !== "function") return null;
+    const laneParentOperationId = String(
+      DS.state?.diagMessageLaneOperationId ||
+      DS.state?.diagCriticalOperationId ||
+      DS.state?.diagSlowOperationId ||
+      ""
+    );
+    const diagToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime-step", String(name || "step"), {
+      trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
+      bundle: String(DS.runtimeTaskGroupForName?.(name) || "core"),
+      parentOperationId: laneParentOperationId
+    }) : null;
+    let diagOutcome = "ok";
 
     // Lite/custom builds can physically omit whole bundles. Direct runStep
     // callers are gated here as a final safety net so an omitted bundle does
@@ -826,17 +1035,20 @@
     if (hintedBundle !== "core" && !DS.isRuntimeBundleAvailable?.(hintedBundle)) {
       const counters = runtimeCounters();
       counters.buildBundleStepSkips = Number(counters.buildBundleStepSkips || 0) + 1;
+      if (diagToken) DS.diagOperationEnd?.(diagToken, { outcome: "skipped", meta: { reason: "bundle-unavailable", bundle: hintedBundle } });
       return null;
     }
 
     const debug = !!DS.state?.settings?.debug;
-    const inspectorConnected = !!DS.isDiagnosticInspectorConnected?.();
-    const collectTiming = debug || !!DS.state?.settings?.performanceDiagnostics || inspectorConnected;
+    const traceRecording = !!DS.isDiagnosticTraceActive?.("normal");
+    const collectTiming = debug || !!DS.state?.settings?.performanceDiagnostics || traceRecording;
     const started = collectTiming && typeof performance !== "undefined" ? performance.now() : 0;
 
     try {
       return await fn();
     } catch (error) {
+      diagOutcome = "error";
+      DS.diagError?.("runtime-step", String(name || "step"), error, { trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120) });
       DS.runtimeLog?.("error", "runStep", `${name} failed`, error);
       if (debug) {
         console.warn(`[${DS.EXT_NAME}] ${name} skipped`, error);
@@ -856,6 +1068,8 @@
         entry.lastAt = Date.now();
         entry.lastTrigger = String(DS.state.lastRunTrigger || "").slice(0, 120);
       }
+      if (diagToken) DS.diagOperationEnd?.(diagToken, { outcome: diagOutcome });
+      await maybeYieldSlowSlice(name);
     }
   }
 
@@ -968,7 +1182,14 @@
   }
 
   async function runChatMessageLane() {
-    if (messageLaneRunning) { messageLanePending = true; return; }
+    if (messageLaneRunning) { messageLanePending = true; DS.diagScheduler?.("coalesced", { lane: "message", reason: "already-running" }); return; }
+    const laneStartedAt = typeof performance !== "undefined" ? performance.now() : 0;
+    const laneToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("message-lane", "run", {
+      source: String(DS.state?.diagMessageLaneSource || "message-mutation"),
+      queueDelayMs: Math.max(0, Date.now() - Number(DS.state?.diagMessageLaneScheduledAt || Date.now())),
+      parentOperationId: ""
+    }) : null;
+    DS.state.diagMessageLaneOperationId = laneToken?.id || "";
     messageLaneRunning = true;
     const counters = runtimeCounters();
     counters.messageLaneRuns = Number(counters.messageLaneRuns || 0) + 1;
@@ -1006,6 +1227,7 @@
         const wait = Math.max(40, enhancerQuietUntil - Date.now() + 20);
         messageEnhancerQuietTimer = window.setTimeout(() => {
           messageEnhancerQuietTimer = null;
+          DS.diagPerformance?.("reply-quiet-end", { reason: "timer", waitedMs: wait });
           const resume = () => DS.scheduleMessageLane?.("post-native-render-quiet");
           if (typeof requestIdleCallback === "function") requestIdleCallback(resume, { timeout: 700 });
           else setTimeout(resume, 0);
@@ -1049,18 +1271,29 @@
             slowQuietTimer = null;
             if (Date.now() - Number(DS.state.lastChatMutationAt || 0) >= 850) {
               DS.state.lastMessageLaneSlowAt = Date.now();
-              DS.scheduleRun?.({ priority: "slow", source: "message-lane-quiet" });
+              if (DS.state?.settings?.showQuickPanel || document.getElementById("ds-qol-panel")) {
+                DS.scheduleRun?.({ priority: "slow", source: "message-lane-quiet", dirty: ["message-ui"] });
+              } else {
+                DS.diagScheduler?.("skipped", { lane: "slow", reason: "message-lane-no-slow-dirty", source: "message-lane-quiet" });
+              }
             }
           }, Math.max(120, 920 - quietFor));
         } else {
           clearTimeout(slowQuietTimer);
           slowQuietTimer = null;
           DS.state.lastMessageLaneSlowAt = now;
-          DS.scheduleRun?.({ priority: "slow", source: "message-lane-settled" });
+          if (settings.showQuickPanel || document.getElementById("ds-qol-panel")) {
+            DS.scheduleRun?.({ priority: "slow", source: "message-lane-settled", dirty: ["message-ui"] });
+          } else {
+            DS.diagScheduler?.("skipped", { lane: "slow", reason: "message-lane-no-slow-dirty", source: "message-lane-settled" });
+          }
         }
       }
     } finally {
+      if (laneToken) DS.diagOperationEnd?.(laneToken, { outcome: "ok", meta: { durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 } });
+      DS.diagScheduler?.("finished", { lane: "message", source: String(DS.state?.diagMessageLaneSource || ""), durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 });
       DS.state.messageLaneRoots = null;
+      DS.state.diagMessageLaneOperationId = "";
       messageLaneRunning = false;
       if (messageLanePending) {
         messageLanePending = false;
@@ -1099,8 +1332,12 @@
       counters.typingDeferrals = Number(counters.typingDeferrals || 0) + 1;
     }
     messageLaneDueAt = Date.now() + delay;
+    DS.state.diagMessageLaneScheduledAt = Date.now();
+    DS.state.diagMessageLaneSource = String(source || "message-mutation").slice(0, 120);
+    DS.diagScheduler?.("scheduled", { lane: "message", source: DS.state.diagMessageLaneSource, delayMs: delay, profile, huge, hidden: !!document.hidden });
     if (messageLaneTimer) {
       counters.messageLaneScheduleCoalesced = Number(counters.messageLaneScheduleCoalesced || 0) + 1;
+      DS.diagScheduler?.("coalesced", { lane: "message", source: DS.state.diagMessageLaneSource, dueInMs: Math.max(0, messageLaneDueAt - Date.now()) });
       return;
     }
 
@@ -1265,11 +1502,17 @@
   }
 
   DS.runCritical = async function runCritical() {
+    const passToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "critical-pass", {
+      trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
+      parentOperationId: ""
+    }) : null;
     if (criticalRunning) {
+      if (passToken) DS.diagOperationEnd?.(passToken, { outcome: "coalesced" });
       criticalPending = true;
       return;
     }
 
+    DS.state.diagCriticalOperationId = passToken?.id || "";
     criticalRunning = true;
 
     try {
@@ -1329,8 +1572,9 @@
           await runFeatureStep("failed message helper", !!settings.failedMessageHelper || !!settings.autoRetryFailedMessageSends || !!document.querySelector(".ds-failed-message-helper,[data-ds-failed-message-helper],[data-testid='ChatSendErrorBanner']"), () => DS.applyFailedMessageHelper?.());
         }
         await runStep("performance mode", () => DS.applyPerformanceMode?.());
-        await runSavedOpenedLane("critical-single-chat");
+        if (!discardedWakeSessionActive()) await runSavedOpenedLane("critical-single-chat");
         if (chatStartupQuietActive()) {
+          if (discardedWakeSessionActive()) await runDiscardedWakeEssentialChatPass(settings);
           runtimeCounters().chatStartupQuietCriticalDeferrals = Number(runtimeCounters().chatStartupQuietCriticalDeferrals || 0) + 1;
           scheduleChatStartupQuietResume("critical");
           return;
@@ -1381,7 +1625,17 @@
       await runFeatureStep("bot editor save actions", !!settings.botEditorSaveActions || !!document.querySelector("[data-ds-bot-editor-save-action]"), () => DS.applyBotEditorSaveActions?.());
       await runRoutedFeatureStep(plan, "botEditor", "bot editor draft history", () => !!settings.enableBotEditorDraftHistory || !!document.querySelector("[data-ds-bot-editor-history]"), () => DS.applyBotEditorDraftHistory?.());
       if (settings.botArchiveOnChatOpen && singleChat) {
-        await runStep("bot archive chat refresh", () => DS.applyBotArchive?.());
+        const warmupMs = chatStartupWarmupRemainingMs();
+        if (typeof DS.scheduleBotArchiveChatRefresh === "function") {
+          DS.scheduleBotArchiveChatRefresh({
+            delayMs: Math.max(250, warmupMs + 250),
+            reason: warmupMs > 0 ? "chat-startup-warmup" : "chat-open"
+          });
+        } else if (!chatStartupWarmupActive()) {
+          // Compatibility fallback for a partially-updated bundle: still never
+          // await archive/network work inside the critical chat pass.
+          setTimeout(() => { DS.applyBotArchive?.().catch?.(() => {}); }, 250);
+        }
       }
 
       if (listing) {
@@ -1507,6 +1761,8 @@
       await runRoutedFeatureStep(plan, "botEditor", "creator backup field restore", () => !!botEditorRoute() || !!document.getElementById("ds-qol-field-restore-banner"), () => DS.applyCreatorWorkspaceRestore?.());
       await runRoutedFeatureStep(plan, "lorebookEditor", "lorebook backup", () => (!!settings.lorebookBackupToolsEnabled && lorebookEditorRoute()) || !!DS.state.lorebookBackupWasActive || !!document.getElementById("ds-lorebook-backup-tools"), () => DS.applyLorebookBackup?.());
     } finally {
+      if (passToken) DS.diagOperationEnd?.(passToken, { outcome: "ok" });
+      DS.state.diagCriticalOperationId = "";
       if (runtimeProfile() === "normal") DS.state.messageLaneRoots = null;
       criticalRunning = false;
 
@@ -1517,6 +1773,50 @@
       }
     }
   };
+
+  async function runTargetedChatSlowPass(dirty, settings, plan, options = {}) {
+    const counters = runtimeCounters();
+    counters.targetedChatSlowPasses = Number(counters.targetedChatSlowPasses || 0) + 1;
+    counters.lastTargetedChatSlowGroups = [...dirty].join(",");
+
+    if (slowDirtyHas(dirty, "interface")) {
+      await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
+      await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
+      const sidebarWanted = !!settings.showQolSidebarButton || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), () => DS.applySidebarCleanup?.());
+      await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
+      await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
+    }
+
+    if (slowDirtyHas(dirty, "adverts")) {
+      const advertWanted = !!settings.hideAdvertBanners || !!document.querySelector("[data-ds-reason^='advert']");
+      if (advertWanted || DS.isAdvertBannerCleanupDirty?.()) {
+        await runFeatureStep("advert banners", true, () => DS.applyAdvertBannerCleanup?.());
+      }
+    }
+
+    if (slowDirtyHas(dirty, "model")) {
+      const wanted = modelSelectorWanted(settings) || !!DS.state.modelQuickMenuWasActive || !!document.querySelector(".ds-model-favorite-button,.ds-model-upgrade-hidden,[data-ds-reason^='model-selector:']");
+      if (wanted || DS.isModelSelectorDirty?.()) {
+        await runFeatureStep("model selector", true, () => DS.applyModelSelectorTools?.());
+      }
+    }
+
+    if (slowDirtyHas(dirty, "chat-chrome")) {
+      await runRoutedFeatureStep(plan, "chat", "generation profiles", () => !!settings.enableGenerationProfiles || !!document.querySelector("[data-ds-generation-profile]"), () => DS.applyGenerationProfileTools?.());
+      await runFeatureStep("chat tags", !!settings.showChatTagLinks || !!settings.showChatTagAddButtons, () => DS.applyChatTagTools?.());
+      await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
+      await runFeatureStep("OOC", !!settings.showOocTools || !!settings.replaceChatImageWithOocButton || !!settings.quickPanelShowOoc, () => DS.applyOocTools?.());
+      if (settings.enableReplyInstructions || settings.enableGlobalMemory || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
+      if (settings.enableLorebookConsistency || document.querySelector(".ds-lorebook-consistency-bar")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
+    }
+
+    if (slowDirtyHas(dirty, "message-ui")) {
+      if (settings.showQuickPanel || document.getElementById("ds-qol-panel")) {
+        await runFeatureStep("update panel", true, () => DS.updateQuickPanel?.());
+      }
+    }
+  }
 
   DS.runSlow = async function runSlow(options = {}) {
     if (slowRunning) {
@@ -1533,7 +1833,16 @@
     // its own lane and the slow lane is refreshed immediately when the tab is shown.
     if (document.hidden && !options.force) return;
 
+    const slowQueueDelayMs = Math.max(0, Date.now() - Number(DS.state?.diagSlowScheduledAt || Date.now()));
+    const slowToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "slow-pass", {
+      trigger: String(DS.state?.diagSlowSource || DS.state?.lastRunTrigger || "").slice(0, 120),
+      force: !!options.force,
+      queueDelayMs: slowQueueDelayMs,
+      parentOperationId: ""
+    }) : null;
+    DS.state.diagSlowOperationId = slowToken?.id || "";
     slowRunning = true;
+    slowSliceState = typeof performance !== "undefined" ? { sliceStarted: performance.now(), activeMs: 0, slices: 1, dirtyGroups: [] } : null;
 
     try {
       const settings = DS.state?.settings || {};
@@ -1575,6 +1884,22 @@
         return;
       }
 
+      const dirty = takeSlowDirtyGroups(options);
+      if (slowSliceState) slowSliceState.dirtyGroups = [...dirty];
+      if (!dirty.size) {
+        runtimeCounters().slowPassCleanSkips = Number(runtimeCounters().slowPassCleanSkips || 0) + 1;
+        DS.diagScheduler?.("skipped", { lane: "slow", reason: "nothing-dirty" });
+        return;
+      }
+
+      // A settled message/reply should never wake unrelated document-wide
+      // cosmetic work. Only explicitly invalidated chat groups run here. Route,
+      // settings and non-chat passes still use the full compatibility path.
+      if (singleChat && !dirty.has("all")) {
+        await runTargetedChatSlowPass(dirty, settings, plan, options);
+        return;
+      }
+
       await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
       await runFeatureStep("S.AI Toolkit detection", !!settings.saiToolkitCompatibility, () => DS.startSaiToolkitDetection?.());
       syncNativeScrollBackToTopVisibility();
@@ -1607,10 +1932,14 @@
       await runRoutedFeatureStep(plan, "listings", "tag template button", () => !!settings.showTagTemplateButton || !!document.querySelector(".ds-tag-template-button"), () => DS.addTagTemplateButton?.());
       if (listing) {
         await runThrottledFeatureStep("premium cleanup", !!settings.hidePremium || !!settings.hideFloatingPremiumPopups || !!document.querySelector("[data-ds-reason^='premium']"), listingMaintenanceInterval, () => DS.hidePremiumStuff?.(), !!options.force);
-        await runThrottledFeatureStep("advert banners", !!settings.hideAdvertBanners || !!document.querySelector("[data-ds-reason^='advert']"), listingMaintenanceInterval, () => DS.applyAdvertBannerCleanup?.(), !!options.force);
+        if (options.force || DS.isAdvertBannerCleanupDirty?.()) {
+          await runThrottledFeatureStep("advert banners", !!settings.hideAdvertBanners || !!document.querySelector("[data-ds-reason^='advert']") || !!DS.isAdvertBannerCleanupDirty?.(), listingMaintenanceInterval, () => DS.applyAdvertBannerCleanup?.(), !!options.force);
+        }
       } else {
         await runFeatureStep("premium cleanup", !!settings.hidePremium || !!settings.hideFloatingPremiumPopups || !!document.querySelector("[data-ds-reason^='premium']"), () => DS.hidePremiumStuff?.());
-        await runFeatureStep("advert banners", !!settings.hideAdvertBanners || !!document.querySelector("[data-ds-reason^='advert']"), () => DS.applyAdvertBannerCleanup?.());
+        if (options.force || DS.isAdvertBannerCleanupDirty?.()) {
+          await runFeatureStep("advert banners", true, () => DS.applyAdvertBannerCleanup?.());
+        }
       }
       await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
 
@@ -1640,7 +1969,9 @@
       }
 
       if (singleChat) {
-        await runFeatureStep("model selector", modelSelectorWanted(settings), () => DS.applyModelSelectorTools?.());
+        if (options.force || DS.isModelSelectorDirty?.()) {
+          await runFeatureStep("model selector", modelSelectorWanted(settings) || !!DS.state.modelQuickMenuWasActive || !!DS.isModelSelectorDirty?.(), () => DS.applyModelSelectorTools?.());
+        }
         await runFeatureStep("chat tags", !!settings.showChatTagLinks || !!settings.showChatTagAddButtons, () => DS.applyChatTagTools?.());
         await runFeatureStep("generation metadata", generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning"), () => DS.applyGenerationMetadata?.());
         await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
@@ -1719,6 +2050,19 @@
       await runFeatureStep("animation controls", !!settings.reduceAnimatedBotImages || anySetting(settings, ["animatedImagesListings", "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"]) || !!DS.state.animationControlsWasActive, () => DS.applyAnimationControls?.());
       await runFeatureStep("update panel", !!settings.showQuickPanel || !!document.getElementById("ds-qol-panel"), () => DS.updateQuickPanel?.());
     } finally {
+      let activeMs = 0;
+      let slices = 0;
+      let dirtyGroups = [];
+      if (slowSliceState && typeof performance !== "undefined") {
+        activeMs = Number(slowSliceState.activeMs || 0) + Math.max(0, performance.now() - Number(slowSliceState.sliceStarted || performance.now()));
+        slices = Number(slowSliceState.slices || 1);
+        dirtyGroups = Array.isArray(slowSliceState.dirtyGroups) ? slowSliceState.dirtyGroups : [];
+      }
+      if (slowToken) DS.diagOperationEnd?.(slowToken, { outcome: "ok", meta: { activeMs: Math.round(activeMs * 10) / 10, slices, dirtyGroups, queueDelayMs: slowQueueDelayMs } });
+      DS.diagScheduler?.("finished", { lane: "slow", durationActiveMs: Math.round(activeMs * 10) / 10, slices, dirtyGroups });
+      slowSliceState = null;
+      DS.state.diagSlowOperationId = "";
+      DS.state.diagSlowScheduledAt = 0;
       slowRunning = false;
 
       if (slowPending) {
@@ -1777,6 +2121,12 @@
 
       const run = () => {
         idleHandle = null;
+        DS.diagScheduler?.("ran", {
+          lane: "slow",
+          source: String(DS.state?.diagSlowSource || DS.state?.lastRunTrigger || "scheduled").slice(0, 120),
+          queueDelayMs: Math.max(0, Date.now() - Number(DS.state?.diagSlowScheduledAt || Date.now())),
+          dirtyGroups: [...slowDirtyGroups]
+        });
         DS.runSlow?.();
       };
 
@@ -1852,6 +2202,8 @@
       counters.hiddenSkips++;
     }
 
+    DS.diagScheduler?.("scheduled", { lane: "runtime", source, priority, immediate, criticalDelayMs: criticalDelay, slowDelayMs: slowDelay, profile, messageCount, hidden: !!document.hidden });
+
     if (priority !== "slow") {
       counters.criticalSchedules++;
       clearTimeout(criticalTimer);
@@ -1860,6 +2212,15 @@
 
     if (priority !== "critical") {
       counters.slowSchedules++;
+      if (options.dirty != null || options.slowDirty != null) {
+        markSlowDirty(options.dirty ?? options.slowDirty, source);
+      } else if (!slowDirtyGroups.size) {
+        // Existing callers that do not opt into targeted invalidation keep the
+        // legacy full slow-pass behavior. Targeted callers never get widened.
+        markSlowDirty("all", source);
+      }
+      DS.state.diagSlowScheduledAt = Number(DS.state.diagSlowScheduledAt || Date.now());
+      DS.state.diagSlowSource = source;
       scheduleSlowRun(slowDelay);
     }
   };
@@ -1916,6 +2277,26 @@
 
   function mutationAddedNativeChatHeader(mutation) {
     return [...mutation.addedNodes].some(nodeContainsNativeChatHeader);
+  }
+
+  function mutationTouchesNativeChatHeader(mutation) {
+    const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
+    if (target && (nodeContainsNativeChatHeader(target) || target.closest?.("a[aria-label='chatbot-profile'], button[aria-label='chat-dropdown']"))) return true;
+    return [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])].some(nodeContainsNativeChatHeader);
+  }
+
+  function nodeIsOrContainsChatMessage(node) {
+    const el = node instanceof Element ? node : node?.parentElement;
+    if (!el) return false;
+    return !!(el.matches?.("[id^='message-']") || el.closest?.("[id^='message-']") || el.querySelector?.("[id^='message-']"));
+  }
+
+  function mutationIsMessageScoped(mutation) {
+    const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
+    if (target?.closest?.("[id^='message-']")) return true;
+    const changed = [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])]
+      .filter(node => node?.nodeType === Node.ELEMENT_NODE || node?.parentElement);
+    return changed.length > 0 && changed.every(nodeIsOrContainsChatMessage);
   }
 
   function mutationIsOnlyQolUi(mutation) {
@@ -2095,7 +2476,9 @@
     setTimeout(() => scheduleSavedOpenedLane("route-change-settled", 0), 450);
 
     pauseReruns(1000);
-    DS.scheduleRun?.({ immediate: true, source: "route-change" });
+    DS.markModelSelectorDirty?.("route-change");
+    DS.markAdvertBannerDirty?.("route-change");
+    DS.scheduleRun?.({ immediate: true, source: "route-change", dirty: ["all"] });
     return true;
   }
 
@@ -2324,6 +2707,13 @@
 
       const isChatPage = !!DS.isSingleChatPage?.();
       const messageRootsChanged = isChatPage ? mutationsAddOrRemoveMessageRoots(mutations) : false;
+      const nonMessageMutations = isChatPage ? mutations.filter(mutation => !mutationIsMessageScoped(mutation)) : mutations;
+      // Model/banner invalidation is intentionally evaluated only against
+      // non-message mutations. A newly mounted/re-rendered chat message must
+      // never make either global UI feature inspect the chat tree.
+      const modelSelectorMutation = isChatPage && nonMessageMutations.length > 0 && !!DS.modelSelectorMutationsRelevant?.(nonMessageMutations);
+      const advertBannerMutation = nonMessageMutations.length > 0 && !!DS.advertBannerMutationsRelevant?.(nonMessageMutations);
+      const chatHeaderMutation = isChatPage && nonMessageMutations.some(mutationTouchesNativeChatHeader);
 
       // Contenteditable composers can emit many tiny character/child mutations
       // while the user types. Persistent shortcut/header repair has already run
@@ -2374,6 +2764,7 @@
         DS.state.chatReplyRenderQuietUntil = Math.max(Number(DS.state.chatReplyRenderQuietUntil || 0), now + quietMs);
         DS.state.chatEnhancerQuietUntil = Math.max(Number(DS.state.chatEnhancerQuietUntil || 0), now + quietMs);
         counters.replyRenderQuietWindows = Number(counters.replyRenderQuietWindows || 0) + 1;
+        DS.diagPerformance?.("reply-quiet-start", { durationTargetMs: quietMs, addedMessageRoots: addedRoots, profile: runtimeProfile() });
       }
       if (
         !DS.state.bulkChatHistoryLoadActive &&
@@ -2405,6 +2796,7 @@
           const quietMs = profile === "maximum" ? 1400 : (profile === "aggressive" ? 1150 : 950);
           DS.state.chatEnhancerQuietUntil = Math.max(Number(DS.state.chatEnhancerQuietUntil || 0), now + quietMs);
           counters.chatEnhancerQuietExtensions = Number(counters.chatEnhancerQuietExtensions || 0) + 1;
+          DS.diagPerformance?.("reply-quiet-extend", { durationTargetMs: quietMs, profile });
         }
       }
 
@@ -2442,6 +2834,24 @@
         // cosmetic lane instead of rescanning every loaded bot card.
         counters.listingNonCardCriticalSkips = Number(counters.listingNonCardCriticalSkips || 0) + 1;
         DS.scheduleRun?.({ priority: "slow", source: "listing-non-card-mutation" });
+      } else if (isChatPage) {
+        // Chat DOM changes still get the interactive/critical repair lane, but
+        // the slow lane is invalidation-driven. A new message or unrelated
+        // React mutation must not wake Model Selector / Advert Banners.
+        DS.scheduleRun?.({ priority: "critical", source: "dom-mutation" });
+        const dirty = [];
+        if (chatHeaderMutation) {
+          dirty.push("interface", "chat-chrome", "model");
+          DS.markModelSelectorDirty?.("chat-header-mutation");
+        }
+        if (modelSelectorMutation && !dirty.includes("model")) dirty.push("model");
+        if (advertBannerMutation) dirty.push("adverts");
+        if (dirty.length) {
+          DS.scheduleRun?.({ priority: "slow", source: "chat-targeted-mutation", dirty });
+        } else {
+          counters.chatUnrelatedSlowPassSkips = Number(counters.chatUnrelatedSlowPassSkips || 0) + 1;
+          DS.diagScheduler?.("skipped", { lane: "slow", reason: "chat-mutation-no-slow-dirty" });
+        }
       } else {
         DS.scheduleRun?.({ source: "dom-mutation" });
       }
@@ -2519,20 +2929,30 @@
       DS.applyPerformanceMode?.();
 
       if (document.hidden) {
-        DS.maybeAutoReadNotifications?.("tab-hidden");
+        if (!discardedWakeSessionActive()) DS.maybeAutoReadNotifications?.("tab-hidden");
+      } else if (discardedWakeSessionActive()) {
+        noteDiscardedWakeVisible("visibilitychange");
+        DS.scheduleRun?.({ priority: "critical", immediate: true, source: "discarded-wake-visible" });
+        scheduleChatStartupQuietResume("discarded-visible");
       } else {
         scheduleNonChatPresentationRecovery("visible");
         scheduleSavedOpenedLane("visible", 40);
         primeLargeChatMessageLane("visible");
-        DS.scheduleRun?.({ immediate: true, source: "visible" });
+        DS.scheduleRun?.({ immediate: true, source: "visible", dirty: ["all"] });
       }
     }, true);
 
     window.addEventListener("pageshow", () => {
+      if (discardedWakeSessionActive()) {
+        if (!document.hidden) noteDiscardedWakeVisible("pageshow");
+        DS.scheduleRun?.({ priority: "critical", immediate: true, source: "discarded-wake-pageshow" });
+        scheduleChatStartupQuietResume("discarded-pageshow");
+        return;
+      }
       scheduleNonChatPresentationRecovery("pageshow");
       scheduleSavedOpenedLane("pageshow", 40);
       primeLargeChatMessageLane("pageshow");
-      DS.scheduleRun?.({ immediate: true, source: "pageshow" });
+      DS.scheduleRun?.({ immediate: true, source: "pageshow", dirty: ["all"] });
     }, true);
 
     window.addEventListener("popstate", () => {
@@ -2550,9 +2970,14 @@
     try {
       if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
         const observer = new PerformanceObserver(list => {
-          if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticInspectorConnected?.()) return;
+          const entries = list.getEntries();
+          if (entries.length && DS.isSingleChatPage?.()) {
+            DS.state = DS.state || {};
+            DS.state.chatStartupLastLongTaskAt = Date.now();
+          }
+          if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticTraceActive?.("normal")) return;
           const counters = runtimeCounters();
-          for (const entry of list.getEntries()) {
+          for (const entry of entries) {
             const ms = Number(entry.duration || 0);
             const rounded = Math.round(ms * 10) / 10;
             const start = Number(entry.startTime || 0);
@@ -2574,6 +2999,43 @@
         DS.state.longTaskObserver = observer;
       }
     } catch {}
+  }
+
+  function changedSettingNames(changes = {}) {
+    const names = new Set();
+    const prefix = "dsSettingV1:";
+    for (const key of Object.keys(changes || {})) {
+      if (String(key).startsWith(prefix)) names.add(String(key).slice(prefix.length));
+    }
+    const monolithic = changes.settings;
+    if (monolithic) {
+      const oldValue = monolithic.oldValue && typeof monolithic.oldValue === "object" ? monolithic.oldValue : {};
+      const newValue = monolithic.newValue && typeof monolithic.newValue === "object" ? monolithic.newValue : {};
+      for (const key of new Set([...Object.keys(oldValue), ...Object.keys(newValue)])) {
+        try {
+          if (JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key])) names.add(key);
+        } catch { names.add(key); }
+      }
+    }
+    return names;
+  }
+
+  function slowDirtyForSettingChanges(changes = {}) {
+    const names = changedSettingNames(changes);
+    if (!names.size) return ["all"];
+    const modelKeys = new Set(["expandModelSelectorDescriptions", "hideModelUpgradeButtons", "customizeModelQuickMenu", "modelFavoriteNames", "modelHiddenNames", "modelQuickFavoritesOnly"]);
+    const advertKeys = new Set(["hideAdvertBanners"]);
+    const dirty = new Set();
+    let hasOther = false;
+    for (const name of names) {
+      if (modelKeys.has(name)) dirty.add("model");
+      else if (advertKeys.has(name)) dirty.add("adverts");
+      else hasOther = true;
+    }
+    if (names.has("hideAdvertBanners")) DS.markAdvertBannerDirty?.("settings-change");
+    if ([...names].some(name => modelKeys.has(name))) DS.markModelSelectorDirty?.("settings-change");
+    if (hasOther) return ["all"];
+    return dirty.size ? [...dirty] : ["all"];
   }
 
   try {
@@ -2645,7 +3107,8 @@
             scheduleBlockedRefreshAfterBurst("blocked-storage");
           } else {
             if (blockedChange) clearBlockedRefreshBatch();
-            DS.scheduleRun?.({ immediate: true, source: "storage-change" });
+            const storageDirty = settingsChanged ? slowDirtyForSettingChanges(changes) : ["all"];
+            DS.scheduleRun?.({ immediate: true, source: "storage-change", dirty: storageDirty });
           }
 
           // A few SpicyChat layouts keep React/inline layout state after a large
@@ -2696,11 +3159,11 @@
     applyRuntimePerformancePresentation();
     if (DS.isSingleChatPage?.()) startChatStartupQuietWindow("startup");
     DS.observePage();
-    DS.maybeAutoReadNotifications?.("startup");
+    if (!discardedWakeSessionActive()) DS.maybeAutoReadNotifications?.("startup");
 
-    // Saved/opened state has a tiny dedicated lane so it cannot be starved by
-    // aggressive/maximum performance throttles or chat edit quiet periods.
-    scheduleSavedOpenedLane("startup", 0);
+    // A discarded tab that wakes in the background stays nearly passive until
+    // the user actually shows it. Normal tabs keep the tiny saved/opened lane.
+    if (!discardedWakeSessionActive()) scheduleSavedOpenedLane("startup", 0);
 
     // Get filtering/chat controls in place first, then let cosmetic/heavier QoL
     // work enter the existing idle lane. Previously startup awaited the full slow

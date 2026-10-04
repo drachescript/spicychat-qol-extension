@@ -1,3 +1,22 @@
+## 0.2.32
+
+- Added Diagnostic Protocol v2 for Dragon's SpicyChat Diagnostic Extension with privacy-safe QoL operation, scheduler, storage, worker, performance and user-action tracing.
+- Added batched trace delivery, sequence/drop tracking, nested operation IDs and Normal/Deep trace levels so long captures stay lightweight.
+- Added background-service-worker forwarding and a short replay buffer so Bot Status, Less Like and other helper activity can be correlated with page captures.
+- Added safer diagnostic redaction for private text, Lorebook content/keywords, prompts, tokens, headers, cookies and request bodies.
+- Added central tracing for runtime feature work, scheduling, storage, route changes and QoL-owned DOM activity, with detailed tracing only while Inspector is recording.
+- Kept Diagnostic Protocol v1 compatibility so older Inspector builds can still detect and record QoL.
+- Fixed a rare chat composer autosize race that could collapse the message box to a thin line; clearly collapsed visible composers now repair themselves.
+- Reduced chat slow-pass microstutters by making Model Selector and advert cleanup targeted/dirty-driven, preventing settled messages from waking unrelated global work, and yielding longer slow passes in small slices.
+- Pressure-triggered Maximum now starts lightweight old-message treatment earlier while keeping the newest messages fully rendered; Inspector v2 tracing also avoids duplicate v1/v2 detailed events and reports clearer parent/outcome metadata.
+- Improved chat startup protection so larger chats wait for both history and recent Long Tasks to settle, and pressure-triggered Maximum can survive a reload of the same conversation for up to an hour.
+- Moved chat-open Bot Archive refresh out of the critical startup path, switched its freshness check to one IndexedDB record, and reduced Deep-trace ownership marking on nested QoL controls.
+- Kept pressure-triggered Maximum lightweight rendering early, but stopped it from auto-folding ordinary 40-50 message chats; folding is reserved for genuinely larger chats and its control now sits below the chat header instead of over the bot name.
+- Fixed the chat-input OOC replacement button disappearing when the Image button is hidden.
+- Added a low-work wake path for discarded chat tabs and a short PC Protection grace period so recently visited tabs are not immediately discarded again.
+- Reduced Settings startup work by lazy-loading the large Bot Status/recovery datasets and showing saved-bot managers in smaller 10-item pages.
+
+
 ## 0.2.31
 
 - Fixed Saved Bot Copies / Recovery and Deleted / Unavailable Saved Bots loading from IndexedDB without needing to rescan thousands of bots.

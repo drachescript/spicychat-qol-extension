@@ -19,6 +19,8 @@
 
   let inflight = false;
   let lastRouteKey = "";
+  let chatRefreshTimer = 0;
+  let scheduledChatRefreshRoute = "";
   let writeChain = Promise.resolve();
   const seenPending = new Map();
   let seenFlushTimer = null;
@@ -673,9 +675,22 @@
   async function refreshFromChat() {
     const id = chatBotIdFromPath();
     if (!id) return false;
-    const result = await DS.storageGet?.([KEY]) || {};
-    const store = normalize(result[KEY]);
-    const current = store.meta[id];
+    let current = null;
+    let directRecordRead = false;
+    if (typeof DS.largeStorageGetRecord === "function") {
+      try {
+        current = await DS.largeStorageGetRecord(KEY, id);
+        directRecordRead = true;
+      } catch {}
+    }
+    if (!directRecordRead) {
+      // Compatibility only for an older/partial runtime that does not expose
+      // the single-record IndexedDB bridge. A valid null result means the bot
+      // simply has no previous copy and must not trigger a 4k+ record read.
+      const result = await DS.storageGet?.([KEY]) || {};
+      const store = normalize(result[KEY]);
+      current = store.meta[id] || null;
+    }
     const hours = [6, 24, 72, 168].includes(Number(DS.state?.settings?.botArchiveRefreshHours))
       ? Number(DS.state.settings.botArchiveRefreshHours)
       : 24;
@@ -931,6 +946,52 @@
       .catch(error => sendResponse({ ok: false, ready: true, status: "worker-error", error: String(error?.message || error || "") }));
     return true;
   });
+
+  DS.scheduleBotArchiveChatRefresh = function scheduleBotArchiveChatRefresh(options = {}) {
+    const id = chatBotIdFromPath();
+    if (!id || !DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveOnChatOpen) return false;
+    const route = `${location.pathname}|${id}`;
+    const profileEnabled = !!DS.state.settings.botArchiveOnProfileVisit || !!DS.state.settings.botArchiveRememberSeenPublic;
+    const applyRouteKey = `${location.pathname}|${profileEnabled ? 1 : 0}|1`;
+    if (lastRouteKey === applyRouteKey) return false;
+    const delayMs = Math.max(0, Math.min(60000, Number(options.delayMs) || 0));
+    const reason = clean(options.reason || "chat-open", 120) || "chat-open";
+
+    if (scheduledChatRefreshRoute === route) return true;
+    if (chatRefreshTimer) clearTimeout(chatRefreshTimer);
+    scheduledChatRefreshRoute = route;
+
+    const run = () => {
+      chatRefreshTimer = 0;
+      if (`${location.pathname}|${chatBotIdFromPath()}` !== route) {
+        scheduledChatRefreshRoute = "";
+        return;
+      }
+      const invoke = async () => {
+        if (`${location.pathname}|${chatBotIdFromPath()}` !== route) {
+          scheduledChatRefreshRoute = "";
+          return;
+        }
+        const token = DS.isDiagnosticTraceActive?.("normal")
+          ? DS.diagOperationStart?.("bot-archive", "chat-refresh", { reason, botId: id, deferred: true })
+          : null;
+        try {
+          await DS.applyBotArchive?.();
+          if (token) DS.diagOperationEnd?.(token, { outcome: "complete" });
+        } catch (error) {
+          if (token) DS.diagOperationEnd?.(token, { outcome: "error", meta: { error: String(error?.name || "Error").slice(0, 80) } });
+        } finally {
+          scheduledChatRefreshRoute = "";
+        }
+      };
+      if (typeof requestIdleCallback === "function") requestIdleCallback(() => invoke(), { timeout: 3000 });
+      else setTimeout(() => invoke(), 0);
+    };
+
+    chatRefreshTimer = setTimeout(run, delayMs);
+    DS.diagScheduler?.("scheduled", { lane: "background", feature: "bot-archive", operation: "chat-refresh", delayMs, reason });
+    return true;
+  };
 
   DS.applyBotArchive = async function applyBotArchive() {
     if (inflight || !DS.state?.settings?.enabled) return;

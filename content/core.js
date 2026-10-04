@@ -1374,6 +1374,32 @@
     return payload;
   }
 
+  // Bounded size estimate for diagnostics only. It samples containers rather
+  // than serializing large saved-bot/chat datasets, so tracing cannot create a
+  // second copy of a multi-megabyte value just to report storage cost.
+  function diagnosticApproxBytes(value, depth = 0, budget = { nodes: 0 }) {
+    if (value == null) return 4;
+    if (++budget.nodes > 160 || depth > 4) return 0;
+    if (typeof value === "boolean") return 4;
+    if (typeof value === "number") return 8;
+    if (typeof value === "string") return Math.min(2_000_000, value.length * 2);
+    if (Array.isArray(value)) {
+      const count = value.length;
+      const sampleCount = Math.min(count, 16);
+      let sampled = 8;
+      for (let i = 0; i < sampleCount; i++) sampled += diagnosticApproxBytes(value[i], depth + 1, budget);
+      return sampleCount && count > sampleCount ? Math.round(sampled * (count / sampleCount)) : sampled;
+    }
+    if (typeof value === "object") {
+      const entries = Object.entries(value);
+      const sample = entries.slice(0, 24);
+      let sampled = 16;
+      for (const [key, item] of sample) sampled += key.length * 2 + diagnosticApproxBytes(item, depth + 1, budget);
+      return sample.length && entries.length > sample.length ? Math.round(sampled * (entries.length / sample.length)) : sampled;
+    }
+    return 0;
+  }
+
   DS.saveSettingsPatch = function saveSettingsPatch(patch, options = {}) {
     const clean = patch && typeof patch === "object" && !Array.isArray(patch) ? { ...patch } : {};
     const names = Object.keys(clean).filter(name => String(name || "").trim());
@@ -1487,6 +1513,7 @@
     storageWriteQueue.payload = {};
     storageWriteQueue.waiters = [];
     const keys = Object.keys(payload || {});
+    const diagWriteStarted = keys.length && DS.isDiagnosticTraceActive?.("normal") && typeof performance !== "undefined" ? performance.now() : 0;
     if (!keys.length) {
       waiters.forEach(resolve => resolve(true));
       return true;
@@ -1545,6 +1572,18 @@
     const ok = await storageWriteQueue.flushing;
     storageWriteQueue.flushing = null;
     storageWriteQueue.flushingKeys.clear();
+    if (diagWriteStarted) {
+      DS.diagStorage?.("write", {
+        backend: keys.some(key => LARGE_STORAGE_KEYS.has(key)) ? (keys.some(key => !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
+        keyCount: keys.length,
+        largeKeyCount: keys.filter(key => LARGE_STORAGE_KEYS.has(key)).length,
+        keys: keys.slice(0, 24),
+        approxBytes: diagnosticApproxBytes(payload),
+        durationMs: Math.round((performance.now() - diagWriteStarted) * 10) / 10,
+        ok: !!ok,
+        batched: true
+      });
+    }
     if (ok) {
       const persisted = { ...(DS.state?.persistedSettings || {}) };
       for (const [storageKey, value] of Object.entries(payload || {})) {
@@ -1564,6 +1603,7 @@
   DS.flushStorageWrites = flushStorageWriteQueue;
 
   DS.storageGet = async function storageGet(keys) {
+    const diagReadStarted = DS.isDiagnosticTraceActive?.("normal") && typeof performance !== "undefined" ? performance.now() : 0;
     if (pendingWriteTouches(keys)) await flushStorageWriteQueue();
 
     const wantsLarge = largeStorageRequestedKeys(keys).length > 0;
@@ -1595,7 +1635,25 @@
       if (hadLegacy || found) result.settings = merged;
       else delete result.settings;
     }
-    return largeSupported ? { ...result, ...(largeData || {}) } : result;
+    const finalResult = largeSupported ? { ...result, ...(largeData || {}) } : result;
+    if (diagReadStarted) {
+      const requestedKeys = keys == null ? ["*"] : (typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys.map(String) : Object.keys(keys || {})));
+      let largeRecords = 0;
+      for (const key of largeStorageRequestedKeys(keys)) {
+        const value = finalResult?.[key];
+        const meta = value?.meta && typeof value.meta === "object" ? value.meta : value;
+        if (meta && typeof meta === "object") largeRecords += Object.keys(meta).length;
+      }
+      DS.diagStorage?.("read", {
+        backend: wantsLarge ? (requestedKeys.some(key => key !== "*" && !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
+        keyCount: requestedKeys.length,
+        keys: requestedKeys.slice(0, 24),
+        largeRecords,
+        approxBytes: diagnosticApproxBytes(finalResult),
+        durationMs: Math.round((performance.now() - diagReadStarted) * 10) / 10
+      });
+    }
+    return finalResult;
   };
 
   DS.storageSet = function storageSet(obj, options = {}) {
@@ -1605,6 +1663,14 @@
 
     const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
     counters.storageWriteRequests = Number(counters.storageWriteRequests || 0) + 1;
+    if (DS.isDiagnosticTraceActive?.("normal")) {
+      DS.diagStorage?.("write-queued", {
+        keyCount: keys.length,
+        keys: keys.slice(0, 24),
+        largeKeyCount: keys.filter(key => LARGE_STORAGE_KEYS.has(key)).length,
+        immediate: !!options?.immediate
+      });
+    }
     let merged = 0;
     for (const key of keys) {
       if (Object.prototype.hasOwnProperty.call(storageWriteQueue.payload, key)) merged += 1;
@@ -1623,12 +1689,16 @@
   };
 
   DS.largeStorageGetRecords = async function largeStorageGetRecords(key, ids = []) {
+    const diagStarted = DS.isDiagnosticTraceActive?.("deep") && typeof performance !== "undefined" ? performance.now() : 0;
     key = String(key || "");
     if (!LARGE_STORAGE_KEYS.has(key)) return {};
     const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
     if (!cleanIds.length) return {};
     const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key, ids: cleanIds });
-    if (response?.ok && response.records && typeof response.records === "object") return response.records;
+    if (response?.ok && response.records && typeof response.records === "object") {
+      if (diagStarted) DS.diagStorage?.("read-records", { backend: "indexeddb", key, requested: cleanIds.length, records: Object.keys(response.records).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
+      return response.records;
+    }
 
     // Android/WebView can inject a newer content bundle before the native
     // wrapper/background learns the IDB message protocol. Fall back to the
@@ -1647,12 +1717,16 @@
   };
 
   DS.largeStorageMerge = async function largeStorageMerge(key, entries = {}) {
+    const diagStarted = DS.isDiagnosticTraceActive?.("normal") && typeof performance !== "undefined" ? performance.now() : 0;
     key = String(key || "");
     if (!LARGE_STORAGE_KEYS.has(key)) return false;
     const clean = entries && typeof entries === "object" && !Array.isArray(entries) ? entries : {};
     if (!Object.keys(clean).length) return true;
     const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_MERGE", key, entries: clean });
-    if (response?.ok) return true;
+    if (response?.ok) {
+      if (diagStarted) DS.diagStorage?.("merge", { backend: "indexeddb", key, records: Object.keys(clean).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10, ok: true });
+      return true;
+    }
 
     // Same compatibility fallback as reads: merge into the legacy local object
     // when the companion background does not expose the v0.2.29 IDB service.

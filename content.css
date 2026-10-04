@@ -1054,7 +1054,7 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
 
 #ds-long-chat-window-control {
   position: fixed;
-  top: 78px;
+  top: var(--ds-long-chat-window-top, 124px);
   left: 50%;
   z-index: 2147483000;
   transform: translateX(-50%);

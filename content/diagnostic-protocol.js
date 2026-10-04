@@ -6,6 +6,8 @@
   DS.__diagnosticProtocolInstalled = true;
 
   const PROTOCOL = "dragon-spicychat-qol-diagnostics-v1";
+  const PROTOCOL_V2 = "dragon-spicychat-qol-diagnostics-v2";
+  const SUPPORTED_PROTOCOLS = Object.freeze([PROTOCOL, PROTOCOL_V2]);
   const SOURCE = "dragons-spicychat-qol";
   // Compatibility source intentionally starts with `spicychat-qol` because
   // older Inspector builds discovered QoL telemetry through that prefix.
@@ -17,27 +19,27 @@
   const PRESENCE_INTERVAL_MS = 60000;
   const ACTIVE_TTL_MS = 30 * 60 * 1000;
   const MODULE_HASHES = Object.freeze({
-    main: "sha256-4fd1aecdce301c47",
+    main: "sha256-371e87f8723a9678",
     chatExport: "sha256-a915b9a4154e4613",
-    performanceMode: "sha256-45de174d5cabc231",
+    performanceMode: "sha256-ada42fe35568ff31",
     failedMessageHelper: "sha256-3ef0a4001b7b450c",
     cardTokenInfo: "sha256-2f91f11a928a5585",
     cardTokenMain: "sha256-8cfce077e7384568",
     composer: "sha256-3dfe6a03ed53d28b",
     quickDislikePage: "sha256-4d6511d16af0d917",
-    background: "sha256-e6889b3dc9285137",
+    background: "sha256-f4d2a2005d6bd60c",
     listings: "sha256-6f962e90cff0f8ea",
     sidebar: "sha256-5da9ff3689094626",
-    core: "sha256-68a26fdf61ed89ba",
+    core: "sha256-431d9df59ff729ba",
     messageOptions: "sha256-31b04492a9aeeeaf",
     generationMetadata: "sha256-2ea2eeaf12f7cda0",
     exactMessageCounts: "sha256-15fe59ecf8e0f621",
     exactMessageCountsLoader: "sha256-e8f887f052840a62",
     generationMetadataLoader: "sha256-57fc7a5f0e2088a1",
-    options: "sha256-31d5b370d72836d0",
-    botStatusWorkerManager: "sha256-4860a9fd79ddb904",
+    options: "sha256-c99be5a78e74c435",
+    botStatusWorkerManager: "sha256-f4d2a2005d6bd60c",
     runtimePlan: "sha256-55adb9a5b251865f",
-    backgroundWorkerCoordinator: "sha256-e6889b3dc9285137",
+    backgroundWorkerCoordinator: "sha256-f4d2a2005d6bd60c",
     topBar: "sha256-0bfe298c950c4fb0",
     premiumNotifications: "sha256-51db5eaf035bdd13",
     alternateDialogue: "sha256-48e127cb8c009b8f",
@@ -46,6 +48,13 @@
     contextKeeper: "sha256-84cc997669a2d44d",
     textReplacements: "sha256-50c3a17a336a277d",
     translation: "sha256-4da617738c52b5bb",
+    lorebookBackup: "sha256-2e6c579a8ef94337",
+    botBackup: "sha256-97332168dc5a61d5",
+    personas: "sha256-36591f179bd2083e",
+    featureRegistry: "sha256-99e0d66674c43758",
+    runtimeImprovements: "sha256-2935f06569916433",
+    modelSelector: "sha256-019827b2425c2069",
+    adBanners: "sha256-504c2528443a9146",
   });
 
   const sessionId = (() => {
@@ -74,6 +83,430 @@
     ownershipMarked: 0,
     ownershipNoopSkips: 0
   };
+
+  const v2State = {
+    recording: false,
+    traceLevel: "off",
+    traceSeq: 0,
+    queued: [],
+    flushTimer: null,
+    emitted: 0,
+    dropped: 0,
+    coalesced: 0,
+    maxDetailed: 50000,
+    aggregate: new Map(),
+    operationStack: [],
+    routeTimer: null,
+    lastRoute: `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`,
+    userActionInstalled: false,
+    settingsListenerInstalled: false,
+    backgroundListenerInstalled: false,
+    backgroundLastSeq: 0,
+    domSummaryTimer: null,
+    domSummary: null,
+    performanceMode: "",
+    peerProtocol: PROTOCOL,
+    peerSupportsV2: false
+  };
+
+  function traceLevelRank(level) {
+    if (level === "deep") return 2;
+    if (level === "normal") return 1;
+    return 0;
+  }
+
+  function v2Active(minLevel = "normal") {
+    return active() && v2State.recording && traceLevelRank(v2State.traceLevel) >= traceLevelRank(minLevel);
+  }
+
+  function workerContext() {
+    try {
+      const url = new URL(location.href);
+      const html = document.documentElement;
+      let worker = String(DS.state?.qolBackgroundWorker || html?.getAttribute("data-ds-qol-background-worker") || "").slice(0, 80);
+      let helperSession = String(DS.state?.qolBackgroundWorkerSessionId || html?.getAttribute("data-ds-qol-background-worker-session") || url.searchParams.get("dsHelperSession") || "").slice(0, 120);
+      if (!worker) {
+        if (url.searchParams.get("dsQolBotStatusWorker") === "1") worker = "bot-status";
+        else if (url.searchParams.get("dsQolRecommendationWorker") === "1" || url.searchParams.get("dsQuickLessLike") === "1") worker = "less-like";
+        else if (url.searchParams.get("dsQuickDislike") === "1") worker = "quick-dislike";
+        else if (url.searchParams.get("dsListingRefill") === "1" || url.searchParams.get("dsListFill") === "1") worker = "listing-refill";
+        else if (url.searchParams.get("dsPersonaRefresh") === "1") worker = "persona-refresh";
+      }
+      return { worker, workerSessionId: helperSession };
+    } catch { return { worker: "", workerSessionId: "" }; }
+  }
+
+  function sensitiveKey(key = "") {
+    return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html)/i.test(String(key || ""));
+  }
+
+  function summarizeSensitive(value) {
+    if (value == null) return value;
+    if (typeof value === "string") return { changed: true, chars: value.length, fingerprint: `fnv1a-${fnv1a(value)}` };
+    if (Array.isArray(value)) return { changed: true, count: value.length };
+    if (typeof value === "object") return { changed: true, keys: Object.keys(value).length };
+    return { changed: true, kind: typeof value };
+  }
+
+  function safeTraceValue(value, depth = 0, keyHint = "") {
+    if (sensitiveKey(keyHint)) return summarizeSensitive(value);
+    if (value == null) return value;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value === "string") {
+      if (/url$/i.test(keyHint) || /^url$/i.test(keyHint)) return sanitizedEndpoint(value);
+      return value.slice(0, 180);
+    }
+    if (depth >= 4) return undefined;
+    if (Array.isArray(value)) return value.slice(0, 32).map(item => safeTraceValue(item, depth + 1, keyHint)).filter(item => item !== undefined);
+    if (typeof value === "object") {
+      const out = {};
+      for (const [key, item] of Object.entries(value).slice(0, 60)) {
+        const safe = safeTraceValue(item, depth + 1, key);
+        if (safe !== undefined) out[String(key).slice(0, 90)] = safe;
+      }
+      return out;
+    }
+    return undefined;
+  }
+
+  // v2 has exactly one canonical page transport. Older Inspectors still use
+  // the legacy v1 postMessage/CustomEvent compatibility path below, but once
+  // a v2 peer is negotiated detailed telemetry must not be duplicated across
+  // multiple page channels.
+  function postProtocolMessage(message) {
+    try { window.postMessage(message, location.origin); } catch {}
+  }
+
+  function v2Envelope(type, payload = {}) {
+    const worker = workerContext();
+    return {
+      protocol: PROTOCOL_V2,
+      protocolVersion: 2,
+      source: SOURCE,
+      type,
+      ts: Date.now(),
+      monoMs: Math.round((performance?.now?.() || 0) * 1000) / 1000,
+      pageSessionId: sessionId,
+      runtimeSessionId: sessionId,
+      worker: worker.worker,
+      workerSessionId: worker.workerSessionId,
+      payload: safeTraceValue(payload) || {}
+    };
+  }
+
+  function emitV2Control(type, payload = {}, { force = false } = {}) {
+    if (!force && !active()) return false;
+    postProtocolMessage(v2Envelope(type, payload));
+    return true;
+  }
+
+  function aggregateTrace(event) {
+    const feature = String(event.feature || "qol").slice(0, 80);
+    const name = String(event.event || event.operation || event.action || event.type || "event").slice(0, 100);
+    const key = `${event.type}|${feature}|${name}`;
+    const row = v2State.aggregate.get(key) || { type: event.type, feature, name, count: 0, firstTs: event.ts, lastTs: event.ts };
+    row.count += 1;
+    row.lastTs = event.ts;
+    v2State.aggregate.set(key, row);
+    v2State.coalesced += 1;
+  }
+
+  function flushTraceBatch(force = false) {
+    clearTimeout(v2State.flushTimer);
+    v2State.flushTimer = null;
+    if (!active() || !v2State.recording) {
+      v2State.queued.length = 0;
+      return false;
+    }
+    if (!v2State.queued.length && !force) return false;
+    const events = v2State.queued.splice(0, 250);
+    if (events.length) {
+      emitV2Control("trace-batch", {
+        traceLevel: v2State.traceLevel,
+        firstSeq: events[0]?.seq || 0,
+        lastSeq: events[events.length - 1]?.seq || 0,
+        events,
+        dropped: v2State.dropped,
+        coalesced: v2State.coalesced
+      }, { force: true });
+    }
+    if (v2State.queued.length) v2State.flushTimer = setTimeout(() => flushTraceBatch(), 0);
+    return !!events.length;
+  }
+
+  function queueTrace(type, payload = {}, { level = "normal", critical = false } = {}) {
+    if (!v2Active(level)) return false;
+    const seq = ++v2State.traceSeq;
+    const event = {
+      seq,
+      ts: Date.now(),
+      monoMs: Math.round((performance?.now?.() || 0) * 1000) / 1000,
+      type: String(type || "event").slice(0, 80),
+      pageSessionId: sessionId,
+      ...safeTraceValue(payload || {})
+    };
+    const preserve = critical || event.type === "error" || event.type === "performance-mode-change" || Number(event.durationMs || 0) >= 50;
+    if (v2State.emitted >= v2State.maxDetailed && !preserve) {
+      aggregateTrace(event);
+      return false;
+    }
+    if (v2State.queued.length >= 5000 && !preserve) {
+      v2State.dropped += 1;
+      return false;
+    }
+    v2State.emitted += 1;
+    v2State.queued.push(event);
+    if (critical || v2State.queued.length >= 200) flushTraceBatch(true);
+    else if (!v2State.flushTimer) v2State.flushTimer = setTimeout(() => flushTraceBatch(), 75);
+    return true;
+  }
+
+  function flushTraceAggregates() {
+    if (!v2Active("normal") || !v2State.aggregate.size) return;
+    const rows = [...v2State.aggregate.values()].slice(0, 250);
+    v2State.aggregate.clear();
+    queueTrace("trace-aggregate", { rows, coalescedTotal: v2State.coalesced }, { critical: true });
+  }
+
+  function currentParentOperationId() {
+    return String(v2State.operationStack[v2State.operationStack.length - 1] || "");
+  }
+
+  function safeSettingSummary(value) {
+    if (value == null || typeof value === "boolean" || typeof value === "number") return value;
+    if (typeof value === "string") return value.length <= 40 && !/[\n\r]/.test(value) ? value : summarizeSensitive(value);
+    if (Array.isArray(value)) return { count: value.length, fingerprint: `fnv1a-${fnv1a(JSON.stringify(value).slice(0, 20000))}` };
+    if (typeof value === "object") return { keys: Object.keys(value).length, fingerprint: `fnv1a-${fnv1a(JSON.stringify(value).slice(0, 20000))}` };
+    return { kind: typeof value };
+  }
+
+  function configureOwnershipObserver() {
+    state.ownershipObserver?.disconnect?.();
+    state.ownershipObserver = null;
+    // A v2 Inspector that is merely installed/connected should add virtually
+    // no diagnostic work. Ownership observation is useful only while a v2
+    // recording is active. Keep the old behavior for a legacy v1 Inspector.
+    if (!active() || !document.documentElement) return;
+    if (v2State.peerSupportsV2 && !v2State.recording) return;
+    const deep = v2Active("deep");
+    state.ownershipObserver = new MutationObserver(mutations => {
+      let added = 0, removed = 0, attributes = 0, qolOwned = 0;
+      const features = {};
+      for (const mutation of mutations) {
+        if (mutation.type === "attributes") {
+          attributes += 1;
+          const target = mutation.target;
+          if (looksQolOwned(target)) {
+            qolOwned += 1;
+            const feature = String(target?.dataset?.dsFeature || "qol-ui").slice(0, 80);
+            features[feature] = Number(features[feature] || 0) + 1;
+          }
+          continue;
+        }
+        added += mutation.addedNodes?.length || 0;
+        removed += mutation.removedNodes?.length || 0;
+        for (const node of mutation.addedNodes || []) {
+          if (node instanceof Element) {
+            markOwnedSubtree(node);
+            if (looksQolOwned(node)) {
+              qolOwned += 1;
+              const feature = String(node.dataset?.dsFeature || "qol-ui").slice(0, 80);
+              features[feature] = Number(features[feature] || 0) + 1;
+            }
+          }
+        }
+        for (const node of mutation.removedNodes || []) {
+          if (node instanceof Element && looksQolOwned(node)) qolOwned += 1;
+        }
+      }
+      if (deep && (added || removed || attributes || qolOwned)) {
+        const summary = v2State.domSummary || (v2State.domSummary = { added: 0, removed: 0, attributes: 0, qolOwned: 0, batches: 0, features: {} });
+        summary.added += added; summary.removed += removed; summary.attributes += attributes; summary.qolOwned += qolOwned; summary.batches += 1;
+        for (const [feature, count] of Object.entries(features)) summary.features[feature] = Number(summary.features[feature] || 0) + Number(count || 0);
+        if (!v2State.domSummaryTimer) v2State.domSummaryTimer = setTimeout(() => {
+          const out = v2State.domSummary;
+          v2State.domSummary = null;
+          v2State.domSummaryTimer = null;
+          if (out) queueTrace("dom-summary", out, { level: "deep" });
+        }, 100);
+      }
+    });
+    state.ownershipObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: deep, attributeFilter: deep ? ["class", "style", "hidden", "aria-hidden", "data-ds-owned", "data-ds-owner", "data-ds-feature"] : undefined });
+    document.querySelectorAll?.("[id^='ds-'], [data-ds-owned='1']").forEach(autoMarkOwned);
+  }
+
+  function installUserActionTrace() {
+    if (v2State.userActionInstalled) return;
+    v2State.userActionInstalled = true;
+    document.addEventListener("click", event => {
+      if (!v2Active("normal")) return;
+      const target = event.target instanceof Element ? event.target.closest("[data-ds-owned='1'],[data-ds-owner='qol'],[id^='ds-'],[class*='ds-']") : null;
+      if (!target) return;
+      const feature = String(target.dataset?.dsFeature || target.closest?.("[data-ds-feature]")?.dataset?.dsFeature || "qol-ui").slice(0, 80);
+      const action = String(target.id || [...(target.classList || [])].find(name => String(name).startsWith("ds-")) || target.getAttribute?.("role") || target.tagName || "click").slice(0, 100);
+      queueTrace("user-action", { feature, action, inputType: String(target.getAttribute?.("type") || "").slice(0, 30) });
+    }, true);
+  }
+
+  function installSettingTrace() {
+    if (v2State.settingsListenerInstalled) return;
+    v2State.settingsListenerInstalled = true;
+    try {
+      chrome.storage?.onChanged?.addListener((changes, area) => {
+        if (!v2Active("normal") || area !== "local") return;
+        for (const [key, change] of Object.entries(changes || {})) {
+          if (!String(key).startsWith("dsSettingV1:")) continue;
+          const name = String(key).slice("dsSettingV1:".length, 120);
+          queueTrace("setting-change", {
+            feature: "settings",
+            name,
+            old: safeSettingSummary(change?.oldValue),
+            new: safeSettingSummary(change?.newValue)
+          });
+        }
+      });
+    } catch {}
+  }
+
+  function installBackgroundTraceListener() {
+    if (v2State.backgroundListenerInstalled) return;
+    v2State.backgroundListenerInstalled = true;
+    try {
+      chrome.runtime?.onMessage?.addListener(message => {
+        if (message?.type !== "DS_QOL_DIAGNOSTIC_BACKGROUND_EVENT") return;
+        const row = message.event && typeof message.event === "object" ? message.event : {};
+        v2State.backgroundLastSeq = Math.max(v2State.backgroundLastSeq, Number(row.seq || 0));
+        const eventType = String(row.type || "background").slice(0, 80);
+        const safeMeta = safeTraceValue(row.meta || {}) || {};
+        const payload = {
+          source: "background",
+          backgroundSeq: Number(row.seq || 0),
+          backgroundTs: Number(row.ts || 0),
+          feature: String(row.feature || "background").slice(0, 80),
+          ...safeMeta
+        };
+        if (eventType === "operation-start" || eventType === "operation-end") {
+          payload.id = String(safeMeta.operationId || safeMeta.leaseId || `bgop-${Number(row.seq || 0)}`).slice(0, 120);
+          payload.parentOperationId = String(safeMeta.parentOperationId || "").slice(0, 120);
+          payload.attribution = "confirmed-qol-background";
+        }
+        queueTrace(eventType, payload, { level: row.level === "deep" ? "deep" : "normal", critical: !!row.critical });
+      });
+    } catch {}
+  }
+
+  function setTracePeer(data = {}) {
+    const peer = data?.payload && typeof data.payload === "object" ? { ...data, ...data.payload } : data;
+    const requestedLevel = String(peer.traceLevel || peer.level || (peer.recording === false ? "off" : "normal")).toLowerCase();
+    const incomingV2 = data?.protocol === PROTOCOL_V2 || Number(peer.protocolVersion || 0) >= 2;
+    // A newer Inspector may still emit legacy v1 discovery/ping messages for
+    // compatibility. Do not let those messages silently turn an active v2
+    // recording back off.
+    if (incomingV2) {
+      v2State.peerSupportsV2 = true;
+      v2State.peerProtocol = PROTOCOL_V2;
+      if (peer.recording === false) v2State.recording = false;
+      else if (peer.recording === true || data?.type === "recording-start") v2State.recording = true;
+      v2State.traceLevel = v2State.recording ? (requestedLevel === "deep" ? "deep" : (v2State.traceLevel === "deep" && !peer.traceLevel ? "deep" : "normal")) : "off";
+    } else if (!v2State.peerSupportsV2) {
+      v2State.peerProtocol = PROTOCOL;
+      v2State.recording = false;
+      v2State.traceLevel = "off";
+    }
+    configureOwnershipObserver();
+    installUserActionTrace();
+    installSettingTrace();
+    installBackgroundTraceListener();
+    try {
+      chrome.runtime?.sendMessage?.({
+        type: "DS_QOL_DIAGNOSTIC_SUBSCRIBE",
+        active: !!v2State.recording,
+        traceLevel: v2State.traceLevel,
+        pageSessionId: sessionId,
+        afterSeq: Number(v2State.backgroundLastSeq || 0)
+      });
+    } catch {}
+  }
+
+  function stopTracePeer() {
+    flushTraceAggregates();
+    flushTraceBatch(true);
+    v2State.recording = false;
+    v2State.traceLevel = "off";
+    clearInterval(v2State.routeTimer);
+    v2State.routeTimer = null;
+    clearInterval(state.metricsTimer);
+    state.metricsTimer = null;
+    try { chrome.runtime?.sendMessage?.({ type: "DS_QOL_DIAGNOSTIC_SUBSCRIBE", active: false, pageSessionId: sessionId }); } catch {}
+    configureOwnershipObserver();
+  }
+
+  function v2HandshakePayload(reason = "hello") {
+    const versions = manifestInfo();
+    const page = pageState();
+    return {
+      reason,
+      protocolVersion: 2,
+      supportedProtocols: [1, 2],
+      protocolIds: SUPPORTED_PROTOCOLS,
+      qolVersion: versions.version,
+      browser: browserName(),
+      presenceState: "present",
+      runState: runState(),
+      recording: !!v2State.recording,
+      traceLevel: v2State.traceLevel,
+      pageSessionId: sessionId,
+      routeType: page.routeType,
+      runtimePlan: page.runtimePlan,
+      build: page.build,
+      activeBundles: page.activeBundles,
+      capabilities: ["operations", "nested-operations", "network", "storage", "scheduler", "dom-summary", "workers", "settings", "background", "user-actions", "performance", "route", "batching", "sequence", "drop-tracking"],
+      privacy: {
+        chatText: false,
+        lorebookContent: false,
+        lorebookKeywords: false,
+        personaContent: false,
+        oocText: false,
+        privateDefinitions: false,
+        authSecrets: false,
+        requestHeaders: false,
+        requestBodies: false
+      },
+      trace: {
+        maxDetailedEventsPerPage: v2State.maxDetailed,
+        batchDelayMs: 75,
+        maxBatchEvents: 250,
+        backgroundReplaySupported: true,
+        sequence: v2State.traceSeq,
+        dropped: v2State.dropped,
+        coalesced: v2State.coalesced
+      }
+    };
+  }
+
+  function sendV2Handshake(reason = "hello") {
+    return emitV2Control("handshake", v2HandshakePayload(reason), { force: true });
+  }
+
+  function startV2RouteMonitor() {
+    if (v2State.routeTimer || !v2State.recording) return;
+    v2State.routeTimer = setInterval(() => {
+      if (!v2Active("normal")) return;
+      const route = `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
+      if (route !== v2State.lastRoute) {
+        const previous = v2State.lastRoute;
+        v2State.lastRoute = route;
+        queueTrace("route-change", { feature: "runtime", from: previous.slice(0, 220), to: route.slice(0, 220), routeType: pageState().routeType }, { critical: true });
+      }
+      const mode = String(DS.state?.runtimePerformance?.mode || document.documentElement?.dataset?.dsQolAutoPerformanceTier || DS.state?.settings?.runtimePerformanceMode || "adaptive");
+      if (mode && mode !== v2State.performanceMode) {
+        const old = v2State.performanceMode;
+        v2State.performanceMode = mode;
+        if (old) queueTrace("performance-mode-change", { feature: "performance", from: old, to: mode }, { critical: true });
+      }
+    }, 500);
+  }
 
   function manifestInfo() {
     try {
@@ -185,6 +618,11 @@
 
   function autoMarkOwned(element) {
     if (!(element instanceof Element) || !looksQolOwned(element)) return false;
+    const ownedAncestor = element.parentElement?.closest?.("[data-ds-owned='1'],[data-ds-owner='qol']");
+    if (ownedAncestor) {
+      state.ownershipAncestorSkips = Number(state.ownershipAncestorSkips || 0) + 1;
+      return false;
+    }
     let changed = false;
     if (element.dataset.dsOwned !== "1") { element.dataset.dsOwned = "1"; changed = true; }
     if (element.dataset.dsOwner !== "qol") { element.dataset.dsOwner = "qol"; changed = true; }
@@ -201,14 +639,7 @@
   }
 
   function startOwnershipObserver() {
-    if (state.ownershipObserver || !document.documentElement) return;
-    state.ownershipObserver = new MutationObserver(mutations => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes || []) markOwnedSubtree(node);
-      }
-    });
-    state.ownershipObserver.observe(document.documentElement, { childList: true, subtree: true });
-    document.querySelectorAll?.("[id^='ds-'], [data-ds-owned='1']").forEach(autoMarkOwned);
+    configureOwnershipObserver();
   }
 
   function activatePeer(data = {}) {
@@ -217,7 +648,9 @@
     if (typeof peer.inspectorVersion === "string") state.inspectorVersion = peer.inspectorVersion.slice(0, 80);
     if (typeof peer.inspectorSessionId === "string") state.inspectorSessionId = peer.inspectorSessionId.slice(0, 120);
     startMetricsTimer();
+    setTracePeer(data);
     startOwnershipObserver();
+    startV2RouteMonitor();
   }
 
   function envelope(type, payload = {}) {
@@ -233,6 +666,14 @@
 
   function emit(type, payload = {}, { force = false } = {}) {
     if (!force && !active()) return false;
+    // A v2 Inspector gets detailed activity from the single batched v2
+    // transport. Do not also emit the same logical operation through the two
+    // legacy v1 transports. Discovery/handshake still remains compatible.
+    const legacyDetailed = new Set([
+      "feature-event", "operation-start", "operation-end",
+      "network-start", "network-end"
+    ]);
+    if (v2State.peerSupportsV2 && legacyDetailed.has(String(type || ""))) return false;
     const message = envelope(type, payload);
     try { window.postMessage(message, location.origin); } catch {}
 
@@ -335,13 +776,27 @@
       },
       settings: settingsSnapshot(),
       timings: DS.getPerformanceReport?.().slice(0, 30) || [],
-      counters: selectedRuntimeCounters()
+      counters: selectedRuntimeCounters(),
+      trace: {
+        protocolVersion: 2,
+        recording: !!v2State.recording,
+        traceLevel: v2State.traceLevel,
+        sequence: v2State.traceSeq,
+        emitted: v2State.emitted,
+        dropped: v2State.dropped,
+        coalesced: v2State.coalesced,
+        queued: v2State.queued.length,
+        backgroundLastSeq: v2State.backgroundLastSeq
+      }
     };
   }
 
   function emitMetrics(reason = "interval") {
     state.lastMetricsAt = Date.now();
-    emit("metrics", metricsSnapshot(reason));
+    flushTraceAggregates();
+    const snapshot = metricsSnapshot(reason);
+    if (v2State.peerSupportsV2) emitV2Control("metrics", snapshot, { force: true });
+    else emit("metrics", snapshot);
   }
 
   function startMetricsTimer() {
@@ -354,6 +809,7 @@
         state.ownershipObserver = null;
         return;
       }
+      if (v2State.peerSupportsV2 && !v2State.recording) return;
       emitMetrics("interval");
     }, METRICS_INTERVAL_MS);
   }
@@ -364,6 +820,8 @@
     return {
       reason,
       protocolVersion: 1,
+      supportedProtocolVersions: [1, 2],
+      supportedProtocols: SUPPORTED_PROTOCOLS,
       qolVersion: versions.version,
       browser: browserName(),
       presenceState: "present",
@@ -555,13 +1013,168 @@
     return true;
   };
 
+  // Diagnostic Protocol v2 layers richer, batched telemetry on top of the
+  // established v1 calls. Existing feature code does not need to know which
+  // Inspector version is connected.
+  const legacyDiagEvent = DS.diagEvent;
+  const legacyDiagOperationStart = DS.diagOperationStart;
+  const legacyDiagOperationEnd = DS.diagOperationEnd;
+  const legacyDiagNetworkStart = DS.diagNetworkStart;
+  const legacyDiagNetworkEnd = DS.diagNetworkEnd;
+
+  DS.diagEvent = function diagEventV2(feature, event, meta = {}) {
+    if (v2State.peerSupportsV2 && !v2State.recording) return false;
+    const result = legacyDiagEvent?.(feature, event, meta);
+    queueTrace("feature-event", { feature: String(feature || "qol").slice(0, 80), event: String(event || "event").slice(0, 100), ...safeTraceValue(meta || {}) });
+    return result;
+  };
+
+  DS.diagOperationStart = function diagOperationStartV2(feature, operation = "run", meta = {}) {
+    if (v2State.peerSupportsV2 && !v2State.recording) return null;
+    const token = legacyDiagOperationStart?.(feature, operation, meta);
+    if (!token) return token;
+    token.parentOperationId = Object.prototype.hasOwnProperty.call(meta || {}, "parentOperationId")
+      ? String(meta?.parentOperationId || "")
+      : String(currentParentOperationId() || "");
+    token.heapBefore = Number(performance?.memory?.usedJSHeapSize || 0);
+    v2State.operationStack.push(token.id);
+    queueTrace("operation-start", {
+      id: token.id,
+      parentOperationId: token.parentOperationId,
+      attribution: "confirmed-qol",
+      feature: token.feature,
+      operation: token.operation,
+      heapBefore: token.heapBefore || 0,
+      meta: safeTraceValue(meta || {})
+    });
+    return token;
+  };
+
+  DS.diagOperationEnd = function diagOperationEndV2(token, result = {}) {
+    if (token) {
+      const index = v2State.operationStack.lastIndexOf(token.id);
+      if (index >= 0) v2State.operationStack.splice(index, 1);
+      const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
+      const heapAfter = Number(performance?.memory?.usedJSHeapSize || 0);
+      const safeResult = safeTraceValue(result || {}) || {};
+      queueTrace("operation-end", {
+        id: token.id,
+        parentOperationId: String(token.parentOperationId || ""),
+        attribution: "confirmed-qol",
+        feature: String(token.feature || "unknown").slice(0, 80),
+        operation: String(token.operation || "run").slice(0, 80),
+        outcome: String(result?.outcome || "ok").slice(0, 60),
+        counts: safeTraceValue(result?.counts || {}) || {},
+        meta: safeTraceValue(result?.meta || {}) || {},
+        durationMs: Math.round(durationMs * 10) / 10,
+        heapBefore: Number(token.heapBefore || 0),
+        heapAfter,
+        heapDelta: token.heapBefore && heapAfter ? heapAfter - token.heapBefore : 0,
+        result: safeResult
+      }, { critical: durationMs >= 200 });
+    }
+    return legacyDiagOperationEnd?.(token, result) || false;
+  };
+
+  DS.diagNetworkStart = function diagNetworkStartV2(feature, method, url, meta = {}) {
+    if (v2State.peerSupportsV2 && !v2State.recording) return null;
+    const token = legacyDiagNetworkStart?.(feature, method, url, meta);
+    if (!token) return token;
+    token.parentOperationId = token.triggerOperationId || currentParentOperationId();
+    queueTrace("network-start", {
+      requestId: token.id,
+      parentOperationId: token.parentOperationId,
+      attribution: "confirmed-qol",
+      feature: token.feature,
+      method: token.method,
+      endpoint: token.endpoint,
+      fingerprint: token.fingerprint,
+      meta: safeTraceValue(meta || {})
+    });
+    return token;
+  };
+
+  DS.diagNetworkEnd = function diagNetworkEndV2(token, result = {}) {
+    if (token) {
+      const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
+      queueTrace("network-end", {
+        requestId: token.id,
+        parentOperationId: String(token.parentOperationId || token.triggerOperationId || ""),
+        attribution: "confirmed-qol",
+        feature: token.feature,
+        method: token.method,
+        endpoint: token.endpoint,
+        fingerprint: token.fingerprint,
+        durationMs: Math.round(durationMs * 10) / 10,
+        status: Number(result?.status || 0),
+        ok: result?.ok === true,
+        outcome: String(result?.outcome || (result?.ok ? "ok" : "failed")).slice(0, 60)
+      }, { critical: !result?.ok || durationMs >= 1000 });
+    }
+    return legacyDiagNetworkEnd?.(token, result) || false;
+  };
+
+  DS.traceEvent = function traceEvent(feature, event, meta = {}, options = {}) {
+    return queueTrace("feature-event", { feature: String(feature || "qol").slice(0, 80), event: String(event || "event").slice(0, 100), ...safeTraceValue(meta || {}) }, options);
+  };
+
+  DS.trace = function trace(feature = "qol") {
+    const safeFeature = String(feature || "qol").slice(0, 80);
+    return {
+      event: (event, meta = {}, options = {}) => DS.traceEvent(safeFeature, event, meta, options),
+      start: (operation, meta = {}) => DS.diagOperationStart(safeFeature, operation, meta),
+      end: (token, result = {}) => DS.diagOperationEnd(token, result)
+    };
+  };
+
+  DS.diagScheduler = function diagScheduler(action, meta = {}) {
+    return queueTrace("scheduler", { feature: String(meta?.feature || "runtime-scheduler").slice(0, 80), action: String(action || "event").slice(0, 80), ...safeTraceValue(meta || {}) }, { level: "deep", critical: action === "error" });
+  };
+
+  DS.diagStorage = function diagStorage(action, meta = {}) {
+    return queueTrace("storage", { feature: "storage", action: String(action || "event").slice(0, 80), parentOperationId: currentParentOperationId(), ...safeTraceValue(meta || {}) });
+  };
+
+  DS.diagWorker = function diagWorker(action, meta = {}) {
+    return queueTrace("worker", { feature: String(meta?.feature || "worker").slice(0, 80), action: String(action || "event").slice(0, 80), ...safeTraceValue(meta || {}) }, { critical: /crash|lost|replace|error/i.test(String(action || "")) });
+  };
+
+  DS.diagUserAction = function diagUserAction(feature, action, meta = {}) {
+    return queueTrace("user-action", { feature: String(feature || "qol").slice(0, 80), action: String(action || "action").slice(0, 100), ...safeTraceValue(meta || {}) });
+  };
+
+  DS.diagPerformance = function diagPerformance(event, meta = {}) {
+    const name = String(event || "sample").slice(0, 80);
+    if (name === "mode-change" && meta?.to) v2State.performanceMode = String(meta.to).slice(0, 40);
+    return queueTrace("performance", { feature: "performance", event: name, ...safeTraceValue(meta || {}) }, { critical: name === "mode-change" });
+  };
+
+  DS.diagError = function diagError(feature, operation, error, meta = {}) {
+    const message = String(error?.message || error || "error").slice(0, 180);
+    const stack = String(error?.stack || "").split("\n").slice(0, 6).map(line => line.replace(/https?:\/\/[^\s)]+/g, match => sanitizedEndpoint(match))).join("\n");
+    return queueTrace("error", {
+      feature: String(feature || "qol").slice(0, 80),
+      operation: String(operation || "run").slice(0, 100),
+      class: String(error?.name || "Error").slice(0, 80),
+      message,
+      stack,
+      parentOperationId: currentParentOperationId(),
+      meta: safeTraceValue(meta || {})
+    }, { critical: true });
+  };
+
   DS.isDiagnosticInspectorConnected = () => active();
+  DS.isDiagnosticTraceActive = (level = "normal") => v2Active(level);
+  DS.getDiagnosticTraceLevel = () => v2State.traceLevel;
 
   DS.getDiagnosticProtocolState = function getDiagnosticProtocolState() {
     const versions = manifestInfo();
     return {
-      protocol: PROTOCOL,
-      protocolVersion: 1,
+      protocol: v2State.peerSupportsV2 ? PROTOCOL_V2 : PROTOCOL,
+      protocolVersion: v2State.peerSupportsV2 ? 2 : 1,
+      supportedProtocols: SUPPORTED_PROTOCOLS,
+      traceLevel: v2State.traceLevel,
+      recording: !!v2State.recording,
       qolVersion: versions.version,
       buildRevision: pageState().build.revision,
       moduleHashes: MODULE_HASHES,
@@ -585,19 +1198,38 @@
   };
 
   function handleRequest(data) {
-    if (!data || data.protocol !== PROTOCOL || data.source !== INSPECTOR_SOURCE) return;
+    if (!data || !SUPPORTED_PROTOCOLS.includes(data.protocol) || data.source !== INSPECTOR_SOURCE) return;
     const type = String(data.type || "");
+    const isV2 = data.protocol === PROTOCOL_V2 || Number(data?.protocolVersion || data?.payload?.protocolVersion || 0) >= 2;
     activatePeer(data);
-    if (type === "hello" || type === "ping") {
-      if (sendHandshake(type)) emitMetrics(type);
+    if (type === "recording-stop" || type === "stop" || data?.recording === false || data?.payload?.recording === false) {
+      stopTracePeer();
+      if (isV2) sendV2Handshake("recording-stop");
+      else sendHandshake("recording-stop");
+      return;
+    }
+    if (type === "hello" || type === "ping" || type === "recording-start") {
+      if (isV2) {
+        sendV2Handshake(type);
+        emitMetrics(type);
+      } else if (sendHandshake(type)) {
+        emitMetrics(type);
+      }
       return;
     }
     if (type === "request-metrics" || type === "snapshot") {
       emitMetrics(type);
+      if (isV2) flushTraceBatch(true);
+      return;
+    }
+    if (type === "request-trace-flush") {
+      flushTraceAggregates();
+      flushTraceBatch(true);
       return;
     }
     if (type === "request-handshake") {
-      sendHandshake(type);
+      if (isV2) sendV2Handshake(type);
+      else sendHandshake(type);
     }
   }
 
@@ -619,11 +1251,20 @@
     const versions = manifestInfo();
     const page = pageState();
     DS.setDatasetIfChanged?.(root, "dsQolDiagnosticProtocol", PROTOCOL);
+    DS.setDatasetIfChanged?.(root, "dsQolDiagnosticProtocolLatest", PROTOCOL_V2);
+    DS.setDatasetIfChanged?.(root, "dsQolDiagnosticProtocols", "v1,v2");
     if (versions.version !== "unknown" || !root.dataset.dsQolVersion) DS.setDatasetIfChanged?.(root, "dsQolVersion", versions.version);
     if (root.hasAttribute("data-ds-qol-technical-version")) root.removeAttribute("data-ds-qol-technical-version");
     DS.setDatasetIfChanged?.(root, "dsQolBuild", String(page?.build?.id || "full"));
     DS.setDatasetIfChanged?.(root, "dsQolRevision", String(page?.build?.revision || "unknown"));
     DS.setDatasetIfChanged?.(root, "dsQolPageSession", sessionId);
+  }
+
+  function sendDiscoveryHandshake(reason = "presence") {
+    if (v2State.peerSupportsV2) return sendV2Handshake(reason);
+    const legacy = sendHandshake(reason);
+    sendV2Handshake(reason);
+    return legacy;
   }
 
   function startPresenceHeartbeat() {
@@ -632,19 +1273,19 @@
       // Hidden/AFK tabs do not need another page message every minute. The
       // marker remains on <html>, and a fresh presence event is sent when the
       // page becomes visible again.
-      if (document.visibilityState === "visible") sendHandshake("presence");
+      if (document.visibilityState === "visible") sendDiscoveryHandshake("presence");
     }, PRESENCE_INTERVAL_MS);
   }
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     publishDiscoveryMarkers();
-    sendHandshake("visible");
+    sendDiscoveryHandshake("visible");
   }, false);
 
   publishDiscoveryMarkers();
   startPresenceHeartbeat();
-  setTimeout(() => sendHandshake("startup"), 0);
+  setTimeout(() => { sendDiscoveryHandshake("startup"); }, 0);
   // Firefox/early document_start can briefly expose the page before the
   // extension runtime manifest is reachable. Retry a few cheap discovery-only
   // publishes so the marker recovers instead of staying `unknown` for the
@@ -654,7 +1295,7 @@
     if (before.version !== "unknown") return;
     publishDiscoveryMarkers();
     const after = manifestInfo();
-    if (after.version !== "unknown") sendHandshake("version-recovery");
+    if (after.version !== "unknown") sendDiscoveryHandshake("version-recovery");
   }, delay));
 
   // A tiny discovery marker lets the Inspector know which protocol to ask for
@@ -662,7 +1303,8 @@
   try { publishDiscoveryMarkers(); } catch {}
 
   DS.runtimeLog?.("info", "diagnostic-protocol", "Dragon's SpicyChat Diagnostic Extension compatibility protocol ready", {
-    protocol: PROTOCOL,
+    protocol: PROTOCOL_V2,
+    supportedProtocols: SUPPORTED_PROTOCOLS,
     sessionId
   });
 })();

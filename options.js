@@ -88,6 +88,51 @@ const BULK_LESS_LIKE_PACING = Object.freeze({
   uiUpdateEveryMs: 300,
   latencyWindowSize: 31
 });
+
+const optionsDiagnosticState = { active: false, traceLevel: "off", checkedAt: 0 };
+
+function optionsDiagLevelRank(level) {
+  return String(level || "normal") === "deep" ? 2 : 1;
+}
+
+async function refreshOptionsDiagnosticState(force = false) {
+  if (!force && Date.now() - Number(optionsDiagnosticState.checkedAt || 0) < 5000) return optionsDiagnosticState;
+  optionsDiagnosticState.checkedAt = Date.now();
+  try {
+    const response = await runtimeMessageWithTimeout({ type: "DS_QOL_DIAGNOSTIC_STATUS_QUERY" }, 1200);
+    optionsDiagnosticState.active = !!response?.active;
+    optionsDiagnosticState.traceLevel = response?.traceLevel === "deep" ? "deep" : (response?.active ? "normal" : "off");
+  } catch {
+    optionsDiagnosticState.active = false;
+    optionsDiagnosticState.traceLevel = "off";
+  }
+  return optionsDiagnosticState;
+}
+
+function optionsDiag(feature, event, meta = {}, { level = "normal", critical = false } = {}) {
+  if (!optionsDiagnosticState.active || optionsDiagLevelRank(optionsDiagnosticState.traceLevel) < optionsDiagLevelRank(level)) return false;
+  try {
+    chrome.runtime?.sendMessage?.({
+      type: "DS_QOL_DIAGNOSTIC_BACKGROUND_EMIT",
+      feature: String(feature || "options").slice(0, 80),
+      event: String(event || "event").slice(0, 80),
+      meta,
+      level,
+      critical: !!critical
+    });
+    return true;
+  } catch { return false; }
+}
+
+setTimeout(() => { refreshOptionsDiagnosticState(true).catch(() => {}); }, 0);
+document.addEventListener("click", event => {
+  if (!optionsDiagnosticState.active) return;
+  const control = event.target?.closest?.("button, a, summary");
+  if (!control) return;
+  const controlId = String(control.id || control.getAttribute?.("data-action") || control.classList?.[0] || control.tagName || "control").slice(0, 100);
+  optionsDiag("options", "user-action", { action: "click", controlId });
+}, true);
+
 const BULK_DISLIKE_TRANSIENT_STATUSES = new Set([
   "worker-timeout",
   "worker-tab-failed",
@@ -941,8 +986,12 @@ let botDuplicateCacheScope = "";
 let botDuplicateCacheReady = false;
 let blockingDataLoaded = false;
 let savedListsDataLoaded = false;
+let savedRecoveryDataLoaded = false;
 let blockingDataLoadPromise = null;
 let savedListsDataLoadPromise = null;
+let savedRecoveryDataLoadPromise = null;
+let savedRecoveryLazySetup = false;
+let savedRecoveryLazyObserver = null;
 let loadedSettingsSnapshot = { ...DEFAULT_SETTINGS };
 let granularSettingsIndexCache = new Set();
 let granularSettingsMigrationSeen = false;
@@ -965,10 +1014,12 @@ const SAVED_LIST_DATA_KEYS = [
   LATER_BOTS_KEY,
   RECENTLY_SEEN_BOTS_KEY,
   BOT_ORGANIZER_KEY,
+  BOT_STATUS_IGNORED_KEY
+];
+const SAVED_RECOVERY_DATA_KEYS = [
   BOT_AVAILABILITY_KEY,
   BOT_ARCHIVE_KEY,
-  BOT_UNAVAILABLE_RECOVERY_KEY,
-  BOT_STATUS_IGNORED_KEY
+  BOT_UNAVAILABLE_RECOVERY_KEY
 ];
 
 function nextUiFrame() {
@@ -1323,6 +1374,9 @@ function setSettingsCardCollapsed(card, collapsed, { persist = false } = {}) {
   card.classList.toggle("ds-settings-card-collapsed", next);
   body.hidden = next;
   toggle.setAttribute("aria-expanded", next ? "false" : "true");
+  if (!next) {
+    try { card.dispatchEvent(new CustomEvent("ds-settings-card-opened")); } catch {}
+  }
   if (persist) persistSettingsCardCollapsed(card, next);
 }
 
@@ -1468,27 +1522,27 @@ function markSavedStoreDirty(kind) {
 const botManagerUiState = {
   blocked: {
     query: "",
-    visible: 20,
+    visible: 10,
     collapsed: true
   },
   notInterested: {
     query: "",
-    visible: 20,
+    visible: 10,
     collapsed: true
   },
   later: {
     query: "",
-    visible: 20,
+    visible: 10,
     collapsed: true
   },
   favorite: {
     query: "",
-    visible: 20,
+    visible: 10,
     collapsed: true
   },
   opened: {
     query: "",
-    visible: 20,
+    visible: 10,
     collapsed: true
   }
 };
@@ -1579,6 +1633,7 @@ function chromeLocalGet(keys) {
 }
 
 async function readLargeStorageKeyPaged(key) {
+  const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
   const meta = {};
   let afterId = "";
   let pageCount = 0;
@@ -1599,7 +1654,10 @@ async function readLargeStorageKeyPaged(key) {
       meta[id] = row.value;
     }
 
-    if (response.done || !response.rows.length) return { meta };
+    if (response.done || !response.rows.length) {
+      if (diagStarted) optionsDiag("options-storage", "read-large-paged", { key, pages: pageCount, records: Object.keys(meta).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
+      return { meta };
+    }
     const nextAfterId = String(response.nextAfterId || "").trim();
     if (!nextAfterId || nextAfterId === afterId) return null;
     afterId = nextAfterId;
@@ -1643,6 +1701,10 @@ async function storageGetChecked(keys) {
   const finish = value => {
     const elapsed = optionsPerfFinish("read", started);
     recordSlowStorageRead(keys, elapsed);
+    if (optionsDiagnosticState.active) {
+      const requestedKeys = keys == null ? ["*"] : (typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys.map(String) : Object.keys(keys || {})));
+      optionsDiag("options-storage", "read", { keys: requestedKeys.slice(0, 24), keyCount: requestedKeys.length, durationMs: Math.round(Number(elapsed || 0) * 10) / 10, largeKeyCount: largeStorageKeysForRequest(keys).length }, { critical: Number(elapsed || 0) >= 200 });
+    }
     return value;
   };
 
@@ -4719,8 +4781,15 @@ function setVersionText() {
 function resetHeavySavedDataState() {
   blockingDataLoaded = false;
   savedListsDataLoaded = false;
+  savedRecoveryDataLoaded = false;
   blockingDataLoadPromise = null;
   savedListsDataLoadPromise = null;
+  savedRecoveryDataLoadPromise = null;
+  savedRecoveryLazySetup = false;
+  if (savedRecoveryLazyObserver) {
+    try { savedRecoveryLazyObserver.disconnect(); } catch {}
+    savedRecoveryLazyObserver = null;
+  }
   blockedState = { ids: [], names: [], meta: {} };
   notInterestedState = { ids: [], meta: {} };
   quickDislikeHistoryState = { version: 1, bots: {} };
@@ -4822,7 +4891,7 @@ async function cleanupMalformedBlockingRecords(settings = {}) {
   return true;
 }
 
-async function cleanupMalformedSavedBotRecords() {
+async function cleanupMalformedSavedBotRecords({ includeAvailability = true } = {}) {
   let changed = false;
   const cleanBotStore = storeValue => {
     const store = normalizeBotStore(storeValue);
@@ -4851,10 +4920,12 @@ async function cleanupMalformedSavedBotRecords() {
   if (Object.keys(orgMeta).length !== Object.keys(org.meta || {}).length) changed = true;
   botOrganizationState = { ...org, meta: orgMeta };
 
-  const availability = normalizeBotAvailability(botAvailabilityState);
-  const availabilityMeta = filterMetaToValidBotIds(availability.meta);
-  if (Object.keys(availabilityMeta).length !== Object.keys(availability.meta || {}).length) changed = true;
-  botAvailabilityState = { meta: availabilityMeta };
+  if (includeAvailability) {
+    const availability = normalizeBotAvailability(botAvailabilityState);
+    const availabilityMeta = filterMetaToValidBotIds(availability.meta);
+    if (Object.keys(availabilityMeta).length !== Object.keys(availability.meta || {}).length) changed = true;
+    botAvailabilityState = { meta: availabilityMeta };
+  }
 
   const watch = normalizeCreatorBotWatchState(creatorBotWatchState);
   const recentWatch = watch.recent.filter(item => validBotId(item.id));
@@ -4876,7 +4947,7 @@ async function cleanupMalformedSavedBotRecords() {
     [LATER_BOTS_KEY]: laterBotState,
     [RECENTLY_SEEN_BOTS_KEY]: recentlySeenBotState,
     [BOT_ORGANIZER_KEY]: botOrganizationState,
-    [BOT_AVAILABILITY_KEY]: botAvailabilityState,
+    ...(includeAvailability ? { [BOT_AVAILABILITY_KEY]: botAvailabilityState } : {}),
     [CREATOR_BOT_WATCH_KEY]: creatorBotWatchState
   });
   return true;
@@ -4952,12 +5023,9 @@ async function ensureSavedListsDataLoaded() {
     laterBotState = normalizeBotStore(result[LATER_BOTS_KEY]);
     recentlySeenBotState = normalizeRecentlySeenStore(result[RECENTLY_SEEN_BOTS_KEY]);
     botOrganizationState = normalizeBotOrganization(result[BOT_ORGANIZER_KEY]);
-    botAvailabilityState = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
-    botArchiveState = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
-    botUnavailableRecoveryState = normalizeBotUnavailableRecovery(result[BOT_UNAVAILABLE_RECOVERY_KEY]);
     setBotStatusIgnoredIds(result[BOT_STATUS_IGNORED_KEY]);
     await ensureBlockingDataLoaded();
-    await cleanupMalformedSavedBotRecords();
+    await cleanupMalformedSavedBotRecords({ includeAvailability: false });
     const blockedPriorityCleanup = enforceBlockedPriorityOverOpenedState({ markDirty: false });
     if (blockedPriorityCleanup.removed) {
       await storageSet({
@@ -4975,6 +5043,27 @@ async function ensureSavedListsDataLoaded() {
   return savedListsDataLoadPromise;
 }
 
+async function ensureSavedRecoveryDataLoaded() {
+  if (savedRecoveryDataLoaded) return true;
+  if (savedRecoveryDataLoadPromise) return savedRecoveryDataLoadPromise;
+
+  savedRecoveryDataLoadPromise = (async () => {
+    await ensureSavedListsDataLoaded();
+    let result = await storageGet(SAVED_RECOVERY_DATA_KEYS);
+    result = await retryMissingLargeSavedStores(result, [BOT_ARCHIVE_KEY, BOT_AVAILABILITY_KEY]);
+    botAvailabilityState = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
+    botArchiveState = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
+    botUnavailableRecoveryState = normalizeBotUnavailableRecovery(result[BOT_UNAVAILABLE_RECOVERY_KEY]);
+    savedRecoveryDataLoaded = true;
+    await cleanupMalformedSavedBotRecords({ includeAvailability: true });
+    invalidateDuplicateCache();
+    return true;
+  })().finally(() => {
+    savedRecoveryDataLoadPromise = null;
+  });
+  return savedRecoveryDataLoadPromise;
+}
+
 async function ensureHeavySavedDataLoaded(tabName = "all") {
   if (tabName === "blocking") return ensureBlockingDataLoaded();
   // Saved Bots Hub includes Blocked and Not Interested status, so the Saved
@@ -4984,8 +5073,81 @@ async function ensureHeavySavedDataLoaded(tabName = "all") {
     await Promise.all([ensureBlockingDataLoaded(), ensureSavedListsDataLoaded()]);
     return true;
   }
-  await Promise.all([ensureBlockingDataLoaded(), ensureSavedListsDataLoaded()]);
+  await Promise.all([ensureBlockingDataLoaded(), ensureSavedListsDataLoaded(), ensureSavedRecoveryDataLoaded()]);
   return true;
+}
+
+async function renderSavedRecoveryPlaceholders() {
+  if (savedRecoveryDataLoaded) return;
+  let stats = {};
+  try { stats = await readLargeStorageStats(); } catch {}
+  const archiveCount = Math.max(0, Number(stats?.[BOT_ARCHIVE_KEY] || 0));
+  const availabilityCount = Math.max(0, Number(stats?.[BOT_AVAILABILITY_KEY] || 0));
+  const messages = {
+    savedBotInfoManager: archiveCount
+      ? `${archiveCount.toLocaleString()} saved ${archiveCount === 1 ? "copy" : "copies"} available. Open this section to load them.`
+      : "Saved recovery copies load only when this section is opened.",
+    deletedSavedBotManager: "Deleted / unavailable recovery loads only when this section is opened.",
+    botAvailabilityManager: availabilityCount
+      ? `${availabilityCount.toLocaleString()} Bot Status ${availabilityCount === 1 ? "record" : "records"} available. Open this section to load them.`
+      : "Bot Status data loads only when this section is opened."
+  };
+  for (const [id, message] of Object.entries(messages)) {
+    const host = $(id);
+    if (host) setEmptyState(host, message);
+  }
+}
+
+async function loadAndRenderSavedRecoveryManagers(source = "opened") {
+  if (savedRecoveryDataLoaded) return true;
+  ["savedBotInfoManager", "deletedSavedBotManager", "botAvailabilityManager"].forEach(id => {
+    const host = $(id);
+    if (host) setEmptyState(host, "Loading recovery/status data...");
+  });
+  const started = typeof performance !== "undefined" ? performance.now() : 0;
+  await ensureSavedRecoveryDataLoaded();
+  if (activeOptionsTab() !== "saved") return true;
+  const sameNameCollisions = botSameNameCollisionIndex();
+  renderSavedBotInfo({ sameNameCollisions });
+  renderDeletedSavedBots({ sameNameCollisions });
+  renderBotAvailability({ sameNameCollisions, skipRecoveryRerender: true });
+  refreshArchiveTransferUi().catch(() => {});
+  if (started && optionsDiagnosticState.active) {
+    optionsDiag("options-saved-bots", "lazy-recovery-load", {
+      source: String(source || "opened"),
+      durationMs: Math.round((performance.now() - started) * 10) / 10,
+      archiveRecords: Object.keys(normalizeBotArchive(botArchiveState).meta).length,
+      availabilityRecords: Object.keys(normalizeBotAvailability(botAvailabilityState).meta).length
+    }, { critical: (performance.now() - started) >= 200 });
+  }
+  return true;
+}
+
+function setupSavedRecoveryLazyActivation() {
+  if (savedRecoveryLazySetup || savedRecoveryDataLoaded) return;
+  savedRecoveryLazySetup = true;
+  const cards = [...new Set(["savedBotInfoManager", "deletedSavedBotManager", "botAvailabilityManager"]
+    .map(id => $(id)?.closest?.("section.card.ds-settings-card-collapsible"))
+    .filter(Boolean))];
+  if (!cards.length) return;
+
+  const activate = source => {
+    if (savedRecoveryDataLoaded || activeOptionsTab() !== "saved") return;
+    loadAndRenderSavedRecoveryManagers(source).catch(() => {});
+  };
+
+  for (const card of cards) card.addEventListener("ds-settings-card-opened", () => activate("section-opened"));
+  if (typeof IntersectionObserver === "function") {
+    savedRecoveryLazyObserver = new IntersectionObserver(entries => {
+      if (savedRecoveryDataLoaded || activeOptionsTab() !== "saved") return;
+      for (const entry of entries) {
+        if (!entry.isIntersecting || entry.target.classList.contains("ds-settings-card-collapsed")) continue;
+        activate("section-visible");
+        break;
+      }
+    }, { root: null, rootMargin: "240px 0px", threshold: 0.01 });
+    cards.forEach(card => savedRecoveryLazyObserver.observe(card));
+  }
 }
 
 async function renderHeavyManagersForTab(tabName) {
@@ -5003,31 +5165,23 @@ async function renderHeavyManagersForTab(tabName) {
 
   await ensureHeavySavedDataLoaded(tabName);
   if (tabName === "saved") {
-    // Lorebook Status lives in the same large IndexedDB but is intentionally
-    // separate from the bot stores. Load it automatically whenever Saved Lists
-    // opens so existing tracked rows never look missing until Reload is clicked.
+    // Lorebook status is normally tiny compared with Bot Status / recovery.
+    // Keep its existing automatic load so the section does not appear empty,
+    // while the multi-thousand-record bot datasets remain lazy below.
     try { await refreshLorebookCenter(); }
     catch { renderLorebookCenter(); }
   }
   if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
 
-  let sharedSameNameCollisions = null;
-  const renderRecoveryManagers = () => {
-    sharedSameNameCollisions = botSameNameCollisionIndex();
-    renderSavedBotInfo({ sameNameCollisions: sharedSameNameCollisions });
-    renderDeletedSavedBots({ sameNameCollisions: sharedSameNameCollisions });
-  };
   const renderers = tabName === "saved"
     ? [
-        renderRecoveryManagers,
         renderSavedBotsHub,
         renderFavoriteCreators,
         renderFollowedCreators,
         renderCreatorBotWatchStatus,
         () => renderBotManager("favorite"),
         () => renderBotManager("later"),
-        () => renderBotManager("opened"),
-        () => renderBotAvailability({ sameNameCollisions: sharedSameNameCollisions || botSameNameCollisionIndex(), skipRecoveryRerender: true })
+        () => renderBotManager("opened")
       ]
     : [
         () => renderBotManager("blocked"),
@@ -5045,7 +5199,10 @@ async function renderHeavyManagersForTab(tabName) {
   }
 
   renderedHeavyTabs.add(tabName);
-  if (tabName === "saved") refreshArchiveTransferUi().catch(() => {});
+  if (tabName === "saved") {
+    renderSavedRecoveryPlaceholders().catch(() => {});
+    setupSavedRecoveryLazyActivation();
+  }
 }
 
 function releaseTemporaryOptionsMemory() {
@@ -8927,7 +9084,7 @@ async function exportLorebookArchiveData() {
       exportedAt: new Date().toISOString(),
       generatedBy: {
         product: "SpicyChat QoL",
-        version: String(chrome.runtime?.getManifest?.().version || "0.2.31")
+        version: String(chrome.runtime?.getManifest?.().version || "0.2.32")
       },
       source: "qol-lorebook-status-export",
       semantics: {
@@ -10895,6 +11052,7 @@ function sortBotStatusRefreshQueue(entries, availability, archives) {
 
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
+  await ensureSavedRecoveryDataLoaded();
   if (botAvailabilityScanRunning) return;
   const requestedScope = String($("botAvailabilityScope")?.value || "all");
   const mode = options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all");
@@ -11734,9 +11892,10 @@ async function cleanConfirmedUnavailableBots() {
   );
 }
 
-const savedBotInfoUiState = { query: "", visible: 20, collapsed: true };
+const savedBotInfoUiState = { query: "", visible: 10, collapsed: true };
 
 function renderSavedBotInfo(renderOptions = {}) {
+  const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
   const host = $("savedBotInfoManager");
   if (!host) return;
   const query = String($("savedBotInfoSearch")?.value || savedBotInfoUiState.query || "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -11757,7 +11916,7 @@ function renderSavedBotInfo(renderOptions = {}) {
     .sort((a, b) => Number(b.lastSavedAt || 0) - Number(a.lastSavedAt || 0));
   const total = visibleArchives.length;
   const blockedHidden = Math.max(0, Object.keys(archives).length - total);
-  const limit = Math.max(20, Number(savedBotInfoUiState.visible || 20) || 20);
+  const limit = Math.max(10, Number(savedBotInfoUiState.visible || 10) || 10);
   const shown = items.slice(0, limit);
   if ($("savedBotInfoSummary")) {
     $("savedBotInfoSummary").textContent = `${total} saved cop${total === 1 ? "y" : "ies"}${blockedHidden ? ` · ${blockedHidden} blocked hidden` : ""}${query ? ` · ${items.length} matching` : ""} · showing ${shown.length}`;
@@ -11767,15 +11926,16 @@ function renderSavedBotInfo(renderOptions = {}) {
   const collapse = $("savedBotInfoCollapse");
   if (showMore) {
     showMore.style.display = items.length > shown.length ? "" : "none";
-    showMore.textContent = `Show 20 more (${Math.max(0, items.length - shown.length)} left)`;
+    showMore.textContent = `Show 10 more (${Math.max(0, items.length - shown.length)} left)`;
   }
-  if (showLess) showLess.style.display = shown.length > 20 || !savedBotInfoUiState.collapsed ? "" : "none";
+  if (showLess) showLess.style.display = shown.length > 10 || !savedBotInfoUiState.collapsed ? "" : "none";
   if (collapse) {
-    collapse.style.display = items.length > 20 ? "" : "none";
+    collapse.style.display = items.length > 10 ? "" : "none";
     collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
   if (!items.length) {
     setEmptyState(host, query ? "No saved recovery copies match that search." : "No saved bot recovery copies yet. Run Bot Status Center on saved bots or enable archive capture to build them.");
+    if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "saved-copies", total, shown: 0, matching: 0, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
     return;
   }
   const nodes = shown.map(archive => {
@@ -11830,6 +11990,7 @@ function renderSavedBotInfo(renderOptions = {}) {
     renderSavedBotInfo();
     renderBotAvailability();
   }));
+  if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "saved-copies", total, shown: shown.length, matching: items.length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 }, { critical: (performance.now() - diagStarted) >= 200 });
 }
 
 
@@ -11926,6 +12087,7 @@ function deletedSavedBotCard(entry) {
 }
 
 function renderDeletedSavedBots(renderOptions = {}) {
+  const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
   const host = $("deletedSavedBotManager");
   if (!host) return;
   const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
@@ -11952,7 +12114,7 @@ function renderDeletedSavedBots(renderOptions = {}) {
   if (showLess) showLess.style.display = shown.length > 10 || !deletedSavedBotsUiState.collapsed ? "" : "none";
   if (collapse) {
     collapse.style.display = all.length > 10 ? "" : "none";
-    collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
+    collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
   const forgottenWrap = $("forgottenBotStatusIdsWrap");
   const forgottenCount = $("forgottenBotStatusIdsCount");
@@ -11960,6 +12122,7 @@ function renderDeletedSavedBots(renderOptions = {}) {
   if (forgottenCount) forgottenCount.textContent = `${botStatusIgnoredIdsState.length} forgotten character ID${botStatusIgnoredIdsState.length === 1 ? "" : "s"}`;
   if (!all.length) {
     setEmptyState(host, deletedSavedBotsUiState.query ? "No deleted recovery copies match that search." : "No confirmed deleted/unavailable bots with recovery copies yet.");
+    if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "deleted-recovery", total: totalRecoverable, shown: 0, matching: 0, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
     return;
   }
   host.replaceChildren(...shown.map(deletedSavedBotCard));
@@ -12012,6 +12175,7 @@ function renderDeletedSavedBots(renderOptions = {}) {
     const archive = normalizeBotArchive(botArchiveState).meta[id];
     if (archive) downloadBotArchiveEntry(archive);
   }));
+  if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "deleted-recovery", total: totalRecoverable, shown: shown.length, matching: all.length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 }, { critical: (performance.now() - diagStarted) >= 200 });
 }
 
 async function clearBotAvailabilityResults() {
@@ -12052,27 +12216,27 @@ function setupBotAvailabilityControls() {
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
   $("savedBotInfoSearch")?.addEventListener("input", event => {
     savedBotInfoUiState.query = event?.target?.value || "";
-    savedBotInfoUiState.visible = 20;
+    savedBotInfoUiState.visible = 10;
     savedBotInfoUiState.collapsed = true;
     renderSavedBotInfo();
   });
   $("savedBotInfoShowMore")?.addEventListener("click", () => {
-    savedBotInfoUiState.visible = Math.min(5000, Number(savedBotInfoUiState.visible || 20) + 20);
+    savedBotInfoUiState.visible = Math.min(5000, Number(savedBotInfoUiState.visible || 10) + 10);
     savedBotInfoUiState.collapsed = true;
     renderSavedBotInfo();
   });
   $("savedBotInfoShowLess")?.addEventListener("click", () => {
-    savedBotInfoUiState.visible = 20;
+    savedBotInfoUiState.visible = 10;
     savedBotInfoUiState.collapsed = true;
     renderSavedBotInfo();
   });
   $("savedBotInfoCollapse")?.addEventListener("click", () => {
-    if (Number(savedBotInfoUiState.visible || 20) <= 20) {
+    if (Number(savedBotInfoUiState.visible || 10) <= 10) {
       const archiveCount = Object.keys(normalizeBotArchive(botArchiveState).meta).length;
       savedBotInfoUiState.visible = Math.min(100, archiveCount);
       savedBotInfoUiState.collapsed = false;
     } else {
-      savedBotInfoUiState.visible = 20;
+      savedBotInfoUiState.visible = 10;
       savedBotInfoUiState.collapsed = true;
     }
     renderSavedBotInfo();
@@ -13088,7 +13252,7 @@ function normalizeRecentlySeenStore(value) {
 
 const savedBotsHubUiState = {
   query: "",
-  visible: 20,
+  visible: 10,
   collapsed: true,
   selected: new Set()
 };
@@ -13371,8 +13535,8 @@ function renderSavedBotsHub() {
   const knownIds = new Set(all.map(entry => entry.id).filter(Boolean));
   for (const id of [...savedBotsHubUiState.selected]) if (!knownIds.has(id)) savedBotsHubUiState.selected.delete(id);
   const entries = savedBotsHubFilteredEntries();
-  let limit = Number(savedBotsHubUiState.visible || 20);
-  if (!Number.isFinite(limit) || limit < 1) limit = 20;
+  let limit = Number(savedBotsHubUiState.visible || 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = 10;
   const shown = entries.slice(0, limit);
 
   const summary = $("savedBotsHubSummary");
@@ -13403,12 +13567,12 @@ function renderSavedBotsHub() {
   const collapse = $("savedBotsHubCollapse");
   if (showMore) {
     showMore.style.display = entries.length > shown.length ? "" : "none";
-    showMore.textContent = `Show 20 more (${Math.max(0, entries.length - shown.length)} left)`;
+    showMore.textContent = `Show 10 more (${Math.max(0, entries.length - shown.length)} left)`;
   }
-  if (showLess) showLess.style.display = shown.length > 20 || !savedBotsHubUiState.collapsed ? "" : "none";
+  if (showLess) showLess.style.display = shown.length > 10 || !savedBotsHubUiState.collapsed ? "" : "none";
   if (collapse) {
-    collapse.style.display = entries.length > 20 ? "" : "none";
-    collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
+    collapse.style.display = entries.length > 10 ? "" : "none";
+    collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
 
   if (!all.length) {
@@ -13518,7 +13682,7 @@ function setupSavedBotsHubControls() {
   const search = $("savedBotsHubSearch");
   const refresh = debounceCallback(() => {
     savedBotsHubUiState.query = search?.value || "";
-    savedBotsHubUiState.visible = 20;
+    savedBotsHubUiState.visible = 10;
     savedBotsHubUiState.collapsed = true;
     renderSavedBotsHub();
   });
@@ -13526,28 +13690,28 @@ function setupSavedBotsHubControls() {
 
   ["savedBotsHubSourceFilter", "savedBotsHubOverlapFilter", "savedBotsHubSortMode"].forEach(id => {
     $(id)?.addEventListener("change", () => {
-      savedBotsHubUiState.visible = 20;
+      savedBotsHubUiState.visible = 10;
       savedBotsHubUiState.collapsed = true;
       renderSavedBotsHub();
     });
   });
   $("savedBotsHubShowMore")?.addEventListener("click", () => {
-    savedBotsHubUiState.visible = Math.min(5000, Number(savedBotsHubUiState.visible || 20) + 20);
+    savedBotsHubUiState.visible = Math.min(5000, Number(savedBotsHubUiState.visible || 10) + 10);
     savedBotsHubUiState.collapsed = true;
     renderSavedBotsHub();
   });
   $("savedBotsHubShowLess")?.addEventListener("click", () => {
-    savedBotsHubUiState.visible = 20;
+    savedBotsHubUiState.visible = 10;
     savedBotsHubUiState.collapsed = true;
     renderSavedBotsHub();
   });
   $("savedBotsHubCollapse")?.addEventListener("click", () => {
-    savedBotsHubUiState.visible = Number(savedBotsHubUiState.visible || 20) <= 20 ? 100 : 20;
-    savedBotsHubUiState.collapsed = savedBotsHubUiState.visible <= 20;
+    savedBotsHubUiState.visible = Number(savedBotsHubUiState.visible || 10) <= 10 ? 100 : 10;
+    savedBotsHubUiState.collapsed = savedBotsHubUiState.visible <= 10;
     renderSavedBotsHub();
   });
   $("savedBotsHubSelectShown")?.addEventListener("click", () => {
-    const entries = savedBotsHubFilteredEntries().slice(0, Math.max(1, Number(savedBotsHubUiState.visible || 20)));
+    const entries = savedBotsHubFilteredEntries().slice(0, Math.max(1, Number(savedBotsHubUiState.visible || 10)));
     entries.forEach(entry => savedBotsHubUiState.selected.add(entry.id));
     updateSavedBotsHubSelectionUi();
   });
@@ -15490,14 +15654,14 @@ function renderBotManager(kind) {
 
   const allEntries = botEntriesFromStore(storeForManagerKind(kind), isBlocked);
   const entries = getBotManagerEntries(kind, allEntries);
-  const ui = botManagerUiState[kind] || { visible: 20, collapsed: true, query: "" };
+  const ui = botManagerUiState[kind] || { visible: 10, collapsed: true, query: "" };
   const hasSearch = !!getBotManagerSearch(kind);
 
-  let limit = Number(ui.visible || 20);
-  if (!Number.isFinite(limit) || limit < 1) limit = 20;
+  let limit = Number(ui.visible || 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = 10;
 
   // Never create thousands of cards in one synchronous DOM operation. Search
-  // results are paged too; users can still reveal more in 20-item chunks.
+  // results are paged too; users can reveal more in small 10-item chunks.
   const shownEntries = entries.slice(0, limit);
 
   updateBotManagerSummary(kind, allEntries.length, entries.length, shownEntries.length);
@@ -15518,16 +15682,16 @@ function renderBotManager(kind) {
 
   if (showMore) {
     showMore.style.display = entries.length > shownEntries.length ? "" : "none";
-    showMore.textContent = `Show 20 more (${Math.max(0, entries.length - shownEntries.length)} left)`;
+    showMore.textContent = `Show 10 more (${Math.max(0, entries.length - shownEntries.length)} left)`;
   }
 
   if (showLess) {
-    showLess.style.display = shownEntries.length > 20 || !ui.collapsed ? "" : "none";
+    showLess.style.display = shownEntries.length > 10 || !ui.collapsed ? "" : "none";
   }
 
   if (collapse) {
-    collapse.style.display = entries.length > 20 ? "" : "none";
-    collapse.textContent = limit <= 20 ? "Show 100" : "Collapse to 20";
+    collapse.style.display = entries.length > 10 ? "" : "none";
+    collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
 
   if (!allEntries.length) {
@@ -18635,6 +18799,16 @@ async function flushSettingsAutosave({ force = false } = {}) {
   const previous = Object.fromEntries([...settingsAutosavePending.keys()].map(key => [key, settingsAutosavePrevious.get(key)]));
   settingsAutosavePending.clear();
   settingsAutosavePrevious.clear();
+  const diagStarted = typeof performance !== "undefined" ? performance.now() : 0;
+  const diagOperationId = optionsDiagnosticState.active
+    ? `settings-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    : "";
+  if (diagOperationId) optionsDiag("settings", "operation-start", {
+    operationId: diagOperationId,
+    operation: "autosave-flush",
+    settingCount: Object.keys(patch).length,
+    forced: !!force
+  });
   settingsAutosaveFlushPromise = (async () => {
     setAutosaveStatus(force ? "Saving now…" : "Saving automatically…", "saving");
     const ok = await persistGranularSettingsPatch(patch, previous, { verify: force });
@@ -18651,6 +18825,13 @@ async function flushSettingsAutosave({ force = false } = {}) {
         settingsAutosavePending.set(key, value);
       }
       setAutosaveStatus("Couldn’t save — press Save now to retry", "error");
+      if (diagOperationId) {
+        const durationMs = diagStarted ? Math.round((performance.now() - diagStarted) * 10) / 10 : 0;
+        optionsDiag("settings", "operation-end", {
+          operationId: diagOperationId, operation: "autosave-flush", outcome: "failed",
+          settingCount: Object.keys(patch).length, forced: !!force, durationMs
+        }, { critical: durationMs >= 200 });
+      }
       return false;
     }
     // Do not let an older in-flight batch overwrite a newer optimistic edit
@@ -18663,6 +18844,13 @@ async function flushSettingsAutosave({ force = false } = {}) {
     applyOptionsPerformancePreferences(loadedSettingsSnapshot);
     applyOptionsAccessibilityPreview(loadedSettingsSnapshot);
     setAutosaveStatus("Saved automatically", "saved");
+    if (diagOperationId) {
+      const durationMs = diagStarted ? Math.round((performance.now() - diagStarted) * 10) / 10 : 0;
+      optionsDiag("settings", "operation-end", {
+        operationId: diagOperationId, operation: "autosave-flush", outcome: "ok",
+        settingCount: Object.keys(patch).length, forced: !!force, durationMs
+      }, { critical: durationMs >= 200 });
+    }
     return true;
   })();
   const ok = await settingsAutosaveFlushPromise;
@@ -22530,12 +22718,12 @@ function setupBotManagerControls(kind) {
     $("clearBlockedLessLikeHistory")?.addEventListener("click", () => clearBlockedLessLikeHistory().catch(() => showSettingsToast("Could not clear Stop recommending history.")));
     $("resetAndRedoBlockedLessLikes")?.addEventListener("click", () => resetAndRedoBlockedLessLikes().catch(() => showSettingsToast("Could not reset and redo Stop recommending history.")));
     $("blockedBotDislikeFilter")?.addEventListener("change", () => {
-      botManagerUiState.blocked.visible = 20;
+      botManagerUiState.blocked.visible = 10;
       botManagerUiState.blocked.collapsed = true;
       renderBotManager("blocked");
     });
     $("blockedBotLessLikeFilter")?.addEventListener("change", () => {
-      botManagerUiState.blocked.visible = 20;
+      botManagerUiState.blocked.visible = 10;
       botManagerUiState.blocked.collapsed = true;
       renderBotManager("blocked");
     });
@@ -22573,7 +22761,7 @@ function setupBotManagerControls(kind) {
     : null;
 
   sort?.addEventListener("change", () => {
-    botManagerUiState[kind].visible = 20;
+    botManagerUiState[kind].visible = 10;
     botManagerUiState[kind].collapsed = true;
     renderBotManager(kind);
   });
@@ -22583,7 +22771,7 @@ function setupBotManagerControls(kind) {
   const stateFilter = ["favorite", "later"].includes(kind) ? $(managerElementId(kind, "StateFilter")) : null;
   for (const control of [relation, folder, stateFilter]) {
     control?.addEventListener("change", () => {
-      botManagerUiState[kind].visible = 20;
+      botManagerUiState[kind].visible = 10;
       botManagerUiState[kind].collapsed = true;
       renderBotManager(kind);
     });
@@ -22591,14 +22779,14 @@ function setupBotManagerControls(kind) {
 
   const renderSearch = debounceCallback(() => {
     botManagerUiState[kind].query = search?.value || "";
-    botManagerUiState[kind].visible = 20;
+    botManagerUiState[kind].visible = 10;
     botManagerUiState[kind].collapsed = true;
     renderBotManager(kind);
   });
   search?.addEventListener("input", renderSearch);
   const creatorFilter = ["favorite", "later"].includes(kind) ? $(managerElementId(kind, "CreatorFilter")) : null;
   creatorFilter?.addEventListener("input", debounceCallback(() => {
-    botManagerUiState[kind].visible = 20;
+    botManagerUiState[kind].visible = 10;
     botManagerUiState[kind].collapsed = true;
     renderBotManager(kind);
   }));
@@ -22607,26 +22795,26 @@ function setupBotManagerControls(kind) {
     botManagerUiState[kind].collapsed = true;
     botManagerUiState[kind].visible = Math.min(
       5000,
-      Number(botManagerUiState[kind].visible || 20) + 20
+      Number(botManagerUiState[kind].visible || 10) + 10
     );
     renderBotManager(kind);
   });
 
   showLess?.addEventListener("click", () => {
-    botManagerUiState[kind].visible = 20;
+    botManagerUiState[kind].visible = 10;
     botManagerUiState[kind].collapsed = true;
     renderBotManager(kind);
   });
 
   collapse?.addEventListener("click", () => {
     const entries = getBotManagerEntries(kind);
-    const current = Number(botManagerUiState[kind].visible || 20);
-    if (current <= 20) {
+    const current = Number(botManagerUiState[kind].visible || 10);
+    if (current <= 10) {
       botManagerUiState[kind].collapsed = false;
       botManagerUiState[kind].visible = Math.min(100, entries.length);
     } else {
       botManagerUiState[kind].collapsed = true;
-      botManagerUiState[kind].visible = 20;
+      botManagerUiState[kind].visible = 10;
     }
     renderBotManager(kind);
   });
@@ -24607,3 +24795,5 @@ setupSettingsAutosave();
 load();
 
 $("refreshPersonalUsage")?.addEventListener("click", refreshPersonalUsageSummary);
+
+try { window.addEventListener("focus", () => refreshOptionsDiagnosticState(true).catch(() => {})); } catch {}

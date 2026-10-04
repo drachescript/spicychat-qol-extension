@@ -15,6 +15,7 @@
     aggressive: Object.freeze({ threshold: 100, keep: 50, reveal: 50 }),
     maximum: Object.freeze({ threshold: 80, keep: 40, reveal: 40 })
   });
+  const PRESSURE_MAXIMUM_WINDOW = Object.freeze({ threshold: 38, keep: 24, reveal: 30 });
   let listingPaintRevision = -1;
   let listingPaintKey = "";
   let listingPaintCards = new Set();
@@ -53,7 +54,15 @@
     return "adaptive";
   }
 
+  function pressureMaximumActive() {
+    return document.documentElement?.dataset?.dsQolAutoPerformanceTier === "maximum";
+  }
+
   function chatWindowConfig() {
+    // Pressure-triggered Maximum still applies the lightweight/content-visibility
+    // treatment early, but it should not automatically fold ordinary ~40-50
+    // message chats. Folding only becomes useful once the chat is genuinely
+    // large because React still owns/reconciles every mounted message either way.
     let profile = performanceProfile();
     if (desktopAppGuardActive() && (profile === "normal" || profile === "adaptive")) profile = "aggressive";
     return CHAT_WINDOW_CONFIG[profile] || CHAT_WINDOW_CONFIG.adaptive;
@@ -131,7 +140,9 @@
   }
 
   function applyStaticLightweightClasses(roots) {
-    const keepRendered = desktopAppGuardActive() ? DESKTOP_APP_KEEP_FULLY_RENDERED : KEEP_FULLY_RENDERED;
+    const keepRendered = pressureMaximumActive()
+      ? PRESSURE_MAXIMUM_WINDOW.keep
+      : (desktopAppGuardActive() ? DESKTOP_APP_KEEP_FULLY_RENDERED : KEEP_FULLY_RENDERED);
     const liteUntil = Math.max(0, roots.length - keepRendered);
 
     scheduleChunkedDomWork("message-lite", roots, (root, index) => {
@@ -340,6 +351,22 @@
     }));
   }
 
+  function positionChatWindowControl() {
+    if (!chatWindowControl?.isConnected) return;
+    let top = 124;
+    const profileLink = document.querySelector("a[aria-label='chatbot-profile']");
+    let node = profileLink;
+    for (let depth = 0; node && depth < 8; depth += 1, node = node.parentElement) {
+      if (!(node instanceof HTMLElement)) continue;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.height < 40 || rect.height > 120) continue;
+      if (!node.querySelector?.("button[aria-label='chat-dropdown']")) continue;
+      top = Math.max(72, Math.round(rect.bottom + 8));
+      break;
+    }
+    chatWindowControl.style.setProperty("--ds-long-chat-window-top", `${top}px`);
+  }
+
   function ensureChatWindowControl({ hiddenCount, total, config }) {
     if (!chatWindowControl?.isConnected) {
       const control = document.createElement("div");
@@ -367,6 +394,8 @@
       (document.body || document.documentElement).appendChild(control);
       chatWindowControl = control;
     }
+
+    positionChatWindowControl();
 
     const status = chatWindowControl.querySelector(".ds-long-chat-window-status");
     const older = chatWindowControl.querySelector("button[data-action='older']");
@@ -609,7 +638,9 @@
     }
 
     const roots = messageRoots();
-    const threshold = desktopAppGuardActive() ? DESKTOP_APP_LONG_CHAT_THRESHOLD : LONG_CHAT_THRESHOLD;
+    const threshold = pressureMaximumActive()
+      ? PRESSURE_MAXIMUM_WINDOW.threshold
+      : (desktopAppGuardActive() ? DESKTOP_APP_LONG_CHAT_THRESHOLD : LONG_CHAT_THRESHOLD);
     const longChat = roots.length >= threshold;
     DS.setClassState?.(document.documentElement, "ds-chat-performance", longChat);
 

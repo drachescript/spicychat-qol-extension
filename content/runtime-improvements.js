@@ -203,7 +203,10 @@
   const AUTO_TIER_DATASET = "dsQolAutoPerformanceTier";
   const HEAP_SOFT = 650 * 1024 * 1024;
   const HEAP_HARD = 850 * 1024 * 1024;
-  const STARTUP_QUIET_MS = 8000;
+  const STARTUP_QUIET_MS = 20000;
+  const STARTUP_WARMUP_MS = 25000;
+  const PRESSURE_SESSION_KEY = "dsQolChatPressureV1";
+  const PRESSURE_SESSION_TTL_MS = 60 * 60 * 1000;
   let baselineTier = "";
   let escalated = false;
   let clearPasses = 0;
@@ -215,6 +218,63 @@
     return `${location.pathname || ""}${location.search || ""}`;
   }
 
+  function conversationRouteKey() {
+    const match = String(location.pathname || "").match(/^\/(?:[a-z]{2}\/)?chat\/([0-9a-f-]{20,})(?:[/?#]|$)/i);
+    return match?.[1] ? `/chat/${String(match[1]).toLowerCase()}` : "";
+  }
+
+  function readPersistedPressure() {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(PRESSURE_SESSION_KEY) || "null");
+      if (!parsed || parsed.tier !== "maximum" || !parsed.route || !Number(parsed.at)) return null;
+      if (Date.now() - Number(parsed.at) > PRESSURE_SESSION_TTL_MS) {
+        sessionStorage.removeItem(PRESSURE_SESSION_KEY);
+        return null;
+      }
+      return parsed;
+    } catch { return null; }
+  }
+
+  function clearPersistedPressure(reason = "clear") {
+    try { sessionStorage.removeItem(PRESSURE_SESSION_KEY); } catch {}
+    DS.diagPerformance?.("pressure-memory-clear", { reason: String(reason || "clear").slice(0, 80) });
+  }
+
+  function rememberPressureMaximum(reason = "pressure") {
+    const route = conversationRouteKey();
+    if (!route) return;
+    try {
+      sessionStorage.setItem(PRESSURE_SESSION_KEY, JSON.stringify({
+        route, tier: "maximum", at: Date.now(), baselineTier: baselineTier || String(DS.state?.settings?.runtimePerformanceMode || "adaptive"), reason: String(reason || "pressure").slice(0, 80)
+      }));
+    } catch {}
+  }
+
+  function restorePersistedPressure() {
+    const settings = DS.state?.settings;
+    const route = conversationRouteKey();
+    if (!route || !settings?.enabled || !settings.chatPerformanceMode) return false;
+    const saved = readPersistedPressure();
+    if (!saved || saved.route !== route) return false;
+    if (escalated && escalatedRouteKey === routeKey()) return true;
+    baselineTier = String(saved.baselineTier || settings.runtimePerformanceMode || "adaptive");
+    if (baselineTier === "maximum") baselineTier = "adaptive";
+    settings.runtimePerformanceMode = "maximum";
+    escalated = true;
+    escalatedRouteKey = routeKey();
+    document.documentElement.dataset.dsQolAutoPerformanceTier = "maximum";
+    DS.state.performanceModeRevision = -1;
+    DS.diagPerformance?.("mode-change", { from: baselineTier, to: "maximum", reason: "same-chat-reload-memory", pressureTriggered: true, restoredFromSession: true });
+    DS.applyPerformanceMode?.();
+    return true;
+  }
+
+  function restorePersistedPressureWhenReady(attempt = 0) {
+    if (restorePersistedPressure()) return;
+    if (attempt >= 20 || !conversationRouteKey()) return;
+    setTimeout(() => restorePersistedPressureWhenReady(attempt + 1), 100);
+  }
+
   function startChatStartupQuiet(reason = "route") {
     if (!DS.isSingleChatPage?.()) return;
     const now = Date.now();
@@ -222,7 +282,9 @@
     DS.state.chatStartupQuietRoute = routeKey();
     DS.state.chatStartupQuietStartedAt = now;
     DS.state.chatStartupQuietUntil = now + STARTUP_QUIET_MS;
+    DS.state.chatStartupWarmupUntil = now + STARTUP_WARMUP_MS;
     DS.state.chatStartupLastMessageMutationAt = now;
+    DS.state.chatStartupLastLongTaskAt = 0;
     DS.runtimeLog?.("info", "performance", `Chat startup quiet window started (${reason})`, {
       route: DS.state.chatStartupQuietRoute,
       quietMs: STARTUP_QUIET_MS
@@ -231,8 +293,14 @@
 
   function resetPerformancePressure(reason = "route") {
     const nextRoute = routeKey();
+    const savedPressure = readPersistedPressure();
+    const nextConversation = conversationRouteKey();
+    if (savedPressure && (!nextConversation || savedPressure.route !== nextConversation)) clearPersistedPressure("left-conversation");
     if (escalated && escalatedRouteKey && escalatedRouteKey !== nextRoute) {
-      DS.state.settings.runtimePerformanceMode = baselineTier || DS.state.settings.runtimePerformanceMode || "adaptive";
+      const fromTier = String(DS.state.settings.runtimePerformanceMode || "maximum");
+      const restoreTier = baselineTier || DS.state.settings.runtimePerformanceMode || "adaptive";
+      DS.state.settings.runtimePerformanceMode = restoreTier;
+      DS.diagPerformance?.("mode-change", { from: fromTier, to: restoreTier, reason: "route-change", stickyRouteEnded: true });
       escalated = false;
       escalatedRouteKey = "";
       document.documentElement.removeAttribute("data-ds-qol-auto-performance-tier");
@@ -248,7 +316,13 @@
   try {
     new PerformanceObserver(list => {
       const now = performance.now();
-      for (const entry of list.getEntries()) longTasks.push({ at: now, duration: Number(entry.duration || 0) });
+      for (const entry of list.getEntries()) {
+        longTasks.push({ at: now, duration: Number(entry.duration || 0) });
+        if (DS.isSingleChatPage?.()) {
+          DS.state = DS.state || {};
+          DS.state.chatStartupLastLongTaskAt = Date.now();
+        }
+      }
       while (longTasks.length && now - longTasks[0].at > 30000) longTasks.shift();
     }).observe({ type: "longtask", buffered: true });
   } catch {}
@@ -309,6 +383,7 @@
 
   function evaluatePerformance() {
     const currentRoute = routeKey();
+    restorePersistedPressure();
     if (currentRoute !== performanceRouteKey) {
       resetPerformancePressure("route-change");
       return;
@@ -325,7 +400,10 @@
     if (!DS.isSingleChatPage?.() || !DS.state?.settings?.enabled || !DS.state?.settings?.chatPerformanceMode) {
       document.documentElement.removeAttribute("data-ds-qol-severe-chat-lag");
       if (escalated) {
-        DS.state.settings.runtimePerformanceMode = baselineTier || DS.state.settings.runtimePerformanceMode;
+        const fromTier = String(DS.state.settings.runtimePerformanceMode || "maximum");
+        const restoreTier = baselineTier || DS.state.settings.runtimePerformanceMode;
+        DS.state.settings.runtimePerformanceMode = restoreTier;
+        DS.diagPerformance?.("mode-change", { from: fromTier, to: restoreTier, reason: "performance-mode-disabled" });
         escalated = false;
         escalatedRouteKey = "";
         document.documentElement.removeAttribute(`data-${AUTO_TIER_DATASET.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}`);
@@ -357,7 +435,21 @@
         escalated = true;
         escalatedRouteKey = currentRoute;
         document.documentElement.dataset.dsQolAutoPerformanceTier = "maximum";
+        DS.diagPerformance?.("mode-change", {
+          from: baselineTier,
+          to: "maximum",
+          reason: reasons.join("+") || "pressure",
+          pressureTriggered: true,
+          mountedMessages: m.mounted,
+          domNodes: m.dom,
+          heapBytes: m.heap,
+          recentLongTaskMs10s: Math.round(m.longTaskMs10),
+          recentLongTaskMs30s: Math.round(m.longTaskMs30),
+          focused: m.focused,
+          visibilityState: m.visibilityState
+        });
         DS.state.performanceModeRevision = -1;
+        rememberPressureMaximum(reasons.join("+") || "pressure");
         DS.applyPerformanceMode?.();
         console.info(`[SpicyChat QoL] chat performance escalated: ${formatMetrics(m)}, reason=${reasons.join("+")}`);
       }
@@ -387,6 +479,15 @@
   }
 
   resetPerformancePressure("startup");
+  restorePersistedPressureWhenReady();
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes["dsSettingV1:runtimePerformanceMode"] || changes["dsSettingV1:chatPerformanceMode"]) {
+        clearPersistedPressure("manual-performance-setting-change");
+      }
+    });
+  } catch {}
   setInterval(evaluatePerformance, 5000);
   setTimeout(evaluatePerformance, 2500);
 })();
@@ -508,6 +609,16 @@
   async function captureCurrentPage() {
     const id = currentBotId();
     if (!id) return;
+
+    // Bot/profile metadata recovery is useful but never startup-critical. On a
+    // discarded chat wake, or during the normal chat warm-up, let SpicyChat
+    // finish mounting first instead of reading/writing the metadata index while
+    // the browser is already busy restoring the tab.
+    if (DS.isSingleChatPage?.() && (DS.isDiscardedWakeProtected?.() || DS.isChatStartupWarmup?.())) {
+      const remaining = Math.max(500, Number(DS.chatStartupWarmupRemainingMs?.() || 0) + 250);
+      schedule(Math.min(30000, remaining));
+      return;
+    }
 
     const name = visibleName(id);
     const creator = currentCreator();

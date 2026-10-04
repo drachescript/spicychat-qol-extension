@@ -390,15 +390,26 @@
   async function saveOwnBackup(reason = "Own bot editor", options = {}) {
     const profile = captureProfile();
     if (!profile?.info?.id || profile.info.mode !== "edit") return false;
+    const op = DS.diagOperationStart?.("creator-backup", "save-own-bot", {
+      botId: profile.info.id,
+      reason,
+      manual: !!options.manual,
+      readOnly: !!profile.readOnlyEditor
+    });
+    if (options.manual) DS.diagUserAction?.("creator-backup", "manual-save", { botId: profile.info.id });
 
     const version = await versionSnapshot(profile, reason);
     const nextSignature = `${signature(profile)}|${versionSnapshotSignature(version)}`;
 
     if (!options.manual && profile.readOnlyEditor) {
       if (nextSignature) lastSavedSignature = nextSignature;
+      DS.diagOperationEnd?.(op, { outcome: "skipped-read-only" });
       return false;
     }
-    if (!options.manual && nextSignature && nextSignature === lastSavedSignature) return false;
+    if (!options.manual && nextSignature && nextSignature === lastSavedSignature) {
+      DS.diagOperationEnd?.(op, { outcome: "unchanged" });
+      return false;
+    }
 
     const fields = sanitizeBackupFields(profile.fields);
     const snapshot = {
@@ -428,6 +439,7 @@
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.ownBotBackupSaves = Number(counters.ownBotBackupSaves || 0) + 1;
     }
+    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", coverageFields: Object.keys(profile.coverage || {}).length });
     return !!ok;
   }
 

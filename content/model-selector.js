@@ -46,22 +46,132 @@
     "upgrade"
   ]);
 
+  const MODEL_SETTING_KEYS = Object.freeze([
+    "expandModelSelectorDescriptions",
+    "hideModelUpgradeButtons",
+    "customizeModelQuickMenu",
+    "modelFavoriteNames",
+    "modelHiddenNames",
+    "modelQuickFavoritesOnly"
+  ]);
+  let selectorDirty = true;
+  let selectorDirtyReason = "startup";
+  let selectorDirtyNodes = new Set();
+  let selectorRouteKey = "";
+  let selectorSettingsKey = "";
+  let cachedSurfaces = [];
+  const processedSurfaceState = new WeakMap();
+
+  function routeKey() {
+    return `${location.pathname || ""}${location.search || ""}`;
+  }
+
+  function settingsKey(settings = DS.state?.settings || {}) {
+    return MODEL_SETTING_KEYS.map(key => `${key}:${typeof settings[key] === "string" ? settings[key] : JSON.stringify(settings[key] ?? null)}`).join("|");
+  }
+
+  function tinyHash(value) {
+    const text = String(value || "");
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
+  }
+
+  function normalizeDirtyNode(node) {
+    if (node instanceof Element) return node;
+    if (node?.parentElement instanceof Element) return node.parentElement;
+    return null;
+  }
+
+  function markSelectorDirty(reason = "mutation", nodes = []) {
+    selectorDirty = true;
+    selectorDirtyReason = String(reason || "mutation").slice(0, 80);
+    for (const raw of Array.isArray(nodes) ? nodes : [nodes]) {
+      const node = normalizeDirtyNode(raw);
+      if (node?.isConnected) selectorDirtyNodes.add(node);
+    }
+    if (selectorDirtyNodes.size > 24) selectorDirtyNodes = new Set([...selectorDirtyNodes].slice(-24));
+  }
+
+  function compactNodeText(node) {
+    if (!(node instanceof Element)) return "";
+    const direct = cleanText(node.getAttribute?.("aria-label") || node.getAttribute?.("title") || "");
+    if (direct) return direct.slice(0, 500);
+    const text = cleanText(node.textContent || "");
+    return text.length <= 1800 ? text : text.slice(0, 1800);
+  }
+
+  function nodeLooksModelRelevant(node) {
+    const el = normalizeDirtyNode(node);
+    if (!el || el.closest?.("[id^='message-'], #ds-qol-panel, #ds-chat-export-modal")) return false;
+    if (cachedSurfaces.some(surface => surface.root?.isConnected && (surface.root === el || surface.root.contains(el)))) return true;
+    if (el.matches?.("[data-testid*='model' i], [aria-label*='model' i], [data-translate-key*='model' i]")) return true;
+    if (el.querySelector?.("[data-testid*='model' i], [aria-label*='model' i], [data-translate-key*='model' i]")) return true;
+    if (el === document.documentElement || el === document.body || el.id === "root" || Number(el.childElementCount || 0) > 80) return false;
+    // A message-list/container mutation must never invalidate the model picker.
+    if (el.querySelector?.("[id^='message-']") && !el.matches?.("header, [role='dialog'], [aria-modal='true'], [data-testid*='model' i], [aria-label*='model' i]")) return false;
+    const text = norm(compactNodeText(el));
+    if (!/(?:available models|select a model|explore all models|generation settings|set model|premium ai models)/.test(text)) return false;
+    const exactLabel = [...(el.querySelectorAll?.("p, span") || [])].slice(0, 80).some(node => {
+      const label = norm(node.textContent || "");
+      return label === "available models" || label === "select a model" || label === "explore all models" || label === "generation settings";
+    });
+    return exactLabel || !!el.closest?.("header, [role='dialog'], [aria-modal='true']") || !!el.matches?.("div.fixed, [data-testid*='model' i], [aria-label*='model' i]");
+  }
+
+  function mutationsRelevant(mutations = []) {
+    const nodes = [];
+    let relevant = false;
+    for (const mutation of mutations || []) {
+      const target = normalizeDirtyNode(mutation?.target);
+      if (target && nodeLooksModelRelevant(target)) { relevant = true; nodes.push(target); }
+      for (const node of [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])]) {
+        const el = normalizeDirtyNode(node);
+        if (el && nodeLooksModelRelevant(el)) { relevant = true; nodes.push(el); }
+      }
+    }
+    if (relevant) markSelectorDirty("model-subtree-mutation", nodes);
+    return relevant;
+  }
+
+  DS.markModelSelectorDirty = markSelectorDirty;
+  DS.modelSelectorMutationsRelevant = mutationsRelevant;
+  DS.isModelSelectorDirty = function isModelSelectorDirty() {
+    const currentRoute = routeKey();
+    const currentSettings = settingsKey();
+    if (currentRoute !== selectorRouteKey) markSelectorDirty("route");
+    if (currentSettings !== selectorSettingsKey) markSelectorDirty("settings");
+    return selectorDirty;
+  };
+
   function directCursorChildrenCount(node) {
     return [...(node?.querySelectorAll?.("div[class*='cursor-pointer']") || [])]
       .filter(el => !el.querySelector("div[class*='cursor-pointer']"))
       .length;
   }
 
-  function exactTextNodes(value) {
+  function queryWithin(scope, selector) {
+    if (!scope) return [];
+    if (scope === document) return DS.qsa(selector);
+    const out = [];
+    if (scope instanceof Element && scope.matches?.(selector)) out.push(scope);
+    scope.querySelectorAll?.(selector).forEach(el => out.push(el));
+    return out;
+  }
+
+  function exactTextNodes(value, scope = document) {
     const wanted = norm(value);
-    return DS.qsa("p, span")
+    return queryWithin(scope, "p, span")
       .filter(el => norm(el.textContent) === wanted && isVisible(el));
   }
 
-  function findCompactModelRoots() {
+  function findCompactModelRoots(scope = document) {
     const roots = [];
 
-    exactTextNodes("Available models").forEach(label => {
+    exactTextNodes("Available models", scope).forEach(label => {
       let node = label.parentElement;
       for (let i = 0; node && node !== document.body && i < 9; i++, node = node.parentElement) {
         if (!isVisible(node)) continue;
@@ -75,10 +185,10 @@
     return roots;
   }
 
-  function findExploreModelRoots() {
+  function findExploreModelRoots(scope = document) {
     const roots = [];
 
-    exactTextNodes("Select a model").forEach(label => {
+    exactTextNodes("Select a model", scope).forEach(label => {
       let node = label.parentElement;
       for (let i = 0; node && node !== document.body && i < 10; i++, node = node.parentElement) {
         if (!isVisible(node)) continue;
@@ -99,11 +209,38 @@
     return "available";
   }
 
-  function findModelSelectorSurfaces() {
-    const all = [
-      ...findCompactModelRoots().map(root => ({ root, kind: surfaceKind(root) })),
-      ...findExploreModelRoots().map(root => ({ root, kind: "explore" }))
-    ];
+  function searchScopesFromDirtyNodes() {
+    const scopes = new Set();
+    for (const raw of selectorDirtyNodes) {
+      let node = normalizeDirtyNode(raw);
+      for (let i = 0; node && node !== document.body && i < 6; i++, node = node.parentElement) {
+        scopes.add(node);
+        if (node.matches?.("header, [role='dialog'], [aria-modal='true']")) break;
+      }
+    }
+    return [...scopes].slice(0, 24);
+  }
+
+  function modelDiscoveryScopes() {
+    const scopes = new Set();
+    // Query only the small UI regions where SpicyChat can mount model controls.
+    // This deliberately avoids the old document-wide p/span walk.
+    document.querySelectorAll?.("header, [role='dialog'], [aria-modal='true'], div.fixed, [data-testid*='model' i], [aria-label*='model' i]").forEach(node => {
+      if (!(node instanceof Element) || node.closest?.("[id^='message-']")) return;
+      if (node === document.body || node === document.documentElement || node.id === "root") return;
+      scopes.add(node);
+    });
+    for (const surface of cachedSurfaces) if (surface.root?.isConnected) scopes.add(surface.root);
+    return [...scopes].slice(0, 40);
+  }
+
+  function findModelSelectorSurfaces(scopes = null) {
+    const all = [];
+    const searchScopes = Array.isArray(scopes) ? scopes : modelDiscoveryScopes();
+    for (const scope of searchScopes) {
+      all.push(...findCompactModelRoots(scope).map(root => ({ root, kind: surfaceKind(root) })));
+      all.push(...findExploreModelRoots(scope).map(root => ({ root, kind: "explore" })));
+    }
 
     const seen = new Set();
     return all.filter(surface => {
@@ -113,8 +250,12 @@
     });
   }
 
-  function findModelSelectorRoots() {
-    return findModelSelectorSurfaces().map(surface => surface.root);
+  function surfaceRevision(root) {
+    if (!root?.isConnected) return "detached";
+    const rows = root.querySelectorAll?.("div[class*='cursor-pointer']")?.length || 0;
+    const buttons = root.querySelectorAll?.("button")?.length || 0;
+    const text = cleanText(root.textContent || "").slice(0, 5000);
+    return `${rows}|${buttons}|${text.length}|${tinyHash(text)}`;
   }
 
   function expandDescriptions(root) {
@@ -171,26 +312,33 @@
     });
   }
 
-  function hideUpgradePopups() {
-    if (DS.state?.settings?.hideModelUpgradeButtons === false) return;
-    DS.qsa("[role='dialog'], [aria-modal='true'], div.fixed").forEach(el => {
-      if (!isVisible(el)) return;
-      const text = norm(textOf(el));
-      const isNativeModelPickerShell =
-        text.includes("available models") ||
-        text.includes("explore all models") ||
-        text.includes("generation settings") ||
-        text.includes("select a model");
+  function hideUpgradePopups(scopes = [document]) {
+    if (DS.state?.settings?.hideModelUpgradeButtons === false) return 0;
+    let changed = 0;
+    const seen = new Set();
+    for (const scope of scopes.length ? scopes : [document]) {
+      queryWithin(scope, "[role='dialog'], [aria-modal='true'], div.fixed").forEach(el => {
+        if (seen.has(el) || !isVisible(el)) return;
+        seen.add(el);
+        const text = norm(textOf(el));
+        const isNativeModelPickerShell =
+          text.includes("available models") ||
+          text.includes("explore all models") ||
+          text.includes("generation settings") ||
+          text.includes("select a model");
 
-      // Never hide a container that is itself SpicyChat's model picker. On mobile
-      // the compact picker can be a fixed/modal surface and also contain Upgrade
-      // text, which previously made it look like an upgrade popup.
-      if (isNativeModelPickerShell) return;
+        // Never hide a container that is itself SpicyChat's model picker. On mobile
+        // the compact picker can be a fixed/modal surface and also contain Upgrade
+        // text, which previously made it look like an upgrade popup.
+        if (isNativeModelPickerShell) return;
 
-      if (text.includes("upgrade") && (text.includes("model") || text.includes("premium") || text.includes("subscribe"))) {
-        DS.hideElement?.(el, "model-selector:upgrade-popup");
-      }
-    });
+        if (text.includes("upgrade") && (text.includes("model") || text.includes("premium") || text.includes("subscribe"))) {
+          if (el.dataset?.dsHidden !== "1") changed += 1;
+          DS.hideElement?.(el, "model-selector:upgrade-popup");
+        }
+      });
+    }
+    return changed;
   }
 
   function parseNameList(value) {
@@ -270,7 +418,10 @@
         const index = current.findIndex(name => norm(name) === norm(modelName));
         if (index >= 0) current.splice(index, 1);
         else current.push(modelName);
-        saveFavoriteNames(current).then(() => DS.applyModelSelectorTools?.());
+        saveFavoriteNames(current).then(() => {
+          markSelectorDirty("favorite-setting", entry.row);
+          DS.scheduleRun?.({ priority: "slow", source: "model-favorite-setting", dirty: ["model"] });
+        });
       }, true);
 
       const { parent, before } = favoriteButtonHost(entry);
@@ -413,30 +564,97 @@
 
   DS.applyModelSelectorTools = function applyModelSelectorTools() {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !DS.isSingleChatPage?.()) {
-      if (DS.state.modelQuickMenuWasActive) cleanupModelQuickMenu();
-      DS.state.modelQuickMenuWasActive = false;
-      return;
-    }
+    const currentRoute = routeKey();
+    const currentSettings = settingsKey(settings);
+    if (currentRoute !== selectorRouteKey) markSelectorDirty("route");
+    if (currentSettings !== selectorSettingsKey) markSelectorDirty("settings");
 
-    const surfaces = findModelSelectorSurfaces();
-    const roots = surfaces.map(surface => surface.root);
+    const trigger = selectorDirtyReason || "unknown";
+    const traceToken = DS.isDiagnosticTraceActive?.("deep")
+      ? DS.diagOperationStart?.("model-selector", "refresh", { trigger })
+      : null;
+    const started = typeof performance !== "undefined" ? performance.now() : 0;
+    let rootsChecked = 0;
+    let changed = 0;
+    let skipped = 0;
+    let cacheHit = false;
 
-    if (settings.expandModelSelectorDescriptions) roots.forEach(expandDescriptions);
+    try {
+      if (!settings.enabled || !DS.isSingleChatPage?.()) {
+        if (DS.state.modelQuickMenuWasActive) cleanupModelQuickMenu();
+        DS.state.modelQuickMenuWasActive = false;
+        selectorRouteKey = currentRoute;
+        selectorSettingsKey = currentSettings;
+        selectorDirty = false;
+        selectorDirtyNodes.clear();
+        return;
+      }
 
-    if (settings.hideModelUpgradeButtons) {
-      roots.forEach(hideUpgradeButtons);
-      hideUpgradePopups();
-    } else {
-      cleanupHiddenUpgradeButtons();
-    }
+      if (!selectorDirty) {
+        cacheHit = true;
+        return;
+      }
 
-    if (settings.customizeModelQuickMenu) {
-      DS.state.modelQuickMenuWasActive = true;
-      surfaces.forEach(surface => applyModelMenu(surface, settings));
-    } else if (DS.state.modelQuickMenuWasActive) {
-      cleanupModelQuickMenu();
-      DS.state.modelQuickMenuWasActive = false;
+      const routeChanged = selectorRouteKey !== currentRoute;
+      const settingsChanged = selectorSettingsKey !== currentSettings;
+      const dirtyScopes = searchScopesFromDirtyNodes();
+      const connectedCached = cachedSurfaces.filter(surface => surface.root?.isConnected);
+      const fullDiscovery = routeChanged || !connectedCached.length || (!dirtyScopes.length && trigger !== "model-subtree-mutation");
+      const discoveryScopes = fullDiscovery ? modelDiscoveryScopes() : dirtyScopes;
+      const discovered = findModelSelectorSurfaces(discoveryScopes);
+      const byRoot = new Map();
+      for (const surface of [...connectedCached, ...discovered]) if (surface.root?.isConnected) byRoot.set(surface.root, surface);
+      const surfaces = [...byRoot.values()];
+      cachedSurfaces = surfaces;
+      rootsChecked = surfaces.length;
+
+      const processSurface = surface => {
+        const revision = surfaceRevision(surface.root);
+        const stateKey = `${currentSettings}|${revision}`;
+        if (!settingsChanged && processedSurfaceState.get(surface.root) === stateKey) {
+          skipped += 1;
+          return;
+        }
+        if (settings.expandModelSelectorDescriptions) expandDescriptions(surface.root);
+        if (settings.hideModelUpgradeButtons) hideUpgradeButtons(surface.root);
+        if (settings.customizeModelQuickMenu) {
+          DS.state.modelQuickMenuWasActive = true;
+          applyModelMenu(surface, settings);
+        }
+        processedSurfaceState.set(surface.root, stateKey);
+        changed += 1;
+      };
+
+      surfaces.forEach(processSurface);
+
+      if (settings.hideModelUpgradeButtons) {
+        const popupScopes = fullDiscovery ? modelDiscoveryScopes() : [...dirtyScopes, ...surfaces.map(surface => surface.root)];
+        changed += hideUpgradePopups(popupScopes);
+      } else if (settingsChanged || document.querySelector(".ds-model-upgrade-hidden")) {
+        cleanupHiddenUpgradeButtons();
+      }
+
+      if (!settings.customizeModelQuickMenu && DS.state.modelQuickMenuWasActive) {
+        cleanupModelQuickMenu();
+        DS.state.modelQuickMenuWasActive = false;
+        changed += 1;
+      }
+
+      selectorRouteKey = currentRoute;
+      selectorSettingsKey = currentSettings;
+      selectorDirty = false;
+      selectorDirtyReason = "";
+      selectorDirtyNodes.clear();
+    } finally {
+      const durationMs = started ? Math.round((performance.now() - started) * 10) / 10 : 0;
+      DS.traceEvent?.("model-selector", "refresh-summary", {
+        trigger, rootsChecked, changed, skipped, cacheHit, durationMs
+      }, { level: "deep" });
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: cacheHit ? "skipped" : "ok",
+        counts: { scanned: rootsChecked, changed, skipped, errors: 0 },
+        meta: { trigger, cacheHit, durationMs }
+      });
     }
   };
 

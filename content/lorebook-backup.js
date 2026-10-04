@@ -261,6 +261,13 @@
     if (!capture?.info?.id) return false;
     const signature = JSON.stringify({ details: capture.details, entries: capture.entries });
     if (signature && signature === lastSignature) return false;
+    const op = DS.diagOperationStart?.("lorebook-backup", "save", {
+      reason,
+      page: capture.info.page,
+      lorebookId: capture.info.id,
+      entryCount: capture.entries.length,
+      hasDetails: !!capture.details
+    });
 
     const result = await DS.storageGet?.([KEY]) || {};
     const store = normalizeStore(result[KEY]);
@@ -292,11 +299,13 @@
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.lorebookBackupSaves = Number(counters.lorebookBackupSaves || 0) + 1;
     }
+    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: capture.entries.length });
     return ok;
   }
 
   async function updateStoredEntries(id, entries, reason = "Full Lorebook export") {
     if (!id || !Array.isArray(entries)) return false;
+    const op = DS.diagOperationStart?.("lorebook-backup", "update-entries", { lorebookId: id, entryCount: entries.length, reason });
     const result = await DS.storageGet?.([KEY]) || {};
     const store = normalizeStore(result[KEY]);
     const previous = store.meta[id] || { id, name: currentLorebookDisplayName() || id, entries: {} };
@@ -322,12 +331,15 @@
       next.entries[incoming.key] = mergeEntry(next.entries[incoming.key], incoming);
     }
     if (!next.name) next.name = currentLorebookDisplayName() || id;
-    return !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
+    const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
+    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: entries.length });
+    return ok;
   }
 
   async function captureFullEntriesHere(exportToken = "") {
     const info = routeInfo();
     if (!info?.id || info.page !== "entries") return false;
+    const op = DS.diagOperationStart?.("lorebook-backup", "capture-full-entries", { lorebookId: info.id, exportJob: !!exportToken });
     const capture = DS.captureLorebookEntriesFully;
     if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
     const result = await capture({
@@ -347,8 +359,13 @@
         }
       }
     });
-    if (!result?.entries?.length && !captureListEntries().length) return false;
-    return updateStoredEntries(info.id, result.entries || [], "Full Lorebook export");
+    if (!result?.entries?.length && !captureListEntries().length) {
+      DS.diagOperationEnd?.(op, { outcome: "empty", entryCount: 0 });
+      return false;
+    }
+    const ok = await updateStoredEntries(info.id, result.entries || [], "Full Lorebook export");
+    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries?.length || 0 });
+    return ok;
   }
 
   function jobKey(token) { return `${EXPORT_JOB_PREFIX}${clean(token, 140)}`; }
@@ -533,13 +550,18 @@
   async function exportCurrent() {
     const info = routeInfo();
     if (!info?.id) return false;
+    const op = DS.diagOperationStart?.("lorebook-backup", "export", { lorebookId: info.id, page: info.page });
+    DS.diagUserAction?.("lorebook-backup", "export-json", { page: info.page });
     setStatus("Collecting full Lorebook data…");
     await saveCapture("Manual Lorebook backup");
     if (info.page === "entries") await captureFullEntriesHere();
     await requestOppositePageCapture(info);
     const result = await DS.storageGet?.([KEY]) || {};
     const item = normalizeStore(result[KEY]).meta[info.id];
-    if (!item) return false;
+    if (!item) {
+      DS.diagOperationEnd?.(op, { outcome: "missing-copy" });
+      return false;
+    }
     const entries = Object.values(item.entries || {});
     const incompleteKeywords = entries.filter(entry => !entry.keywordsComplete).length;
     const download = await downloadJson({
@@ -552,6 +574,7 @@
     if (!download?.ok) throw new Error(download?.error || "The Lorebook JSON could not be handed to the browser download system.");
     if (incompleteKeywords) setStatus(`Lorebook JSON download started, but ${incompleteKeywords} entr${incompleteKeywords === 1 ? "y has" : "ies have"} incomplete keyword data.`);
     else setStatus("Full Lorebook JSON download started.");
+    DS.diagOperationEnd?.(op, { outcome: "ok", entryCount: entries.length, incompleteKeywordEntries: incompleteKeywords });
     return true;
   }
 
