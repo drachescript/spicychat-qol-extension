@@ -1,4 +1,5 @@
 ## 0.2.33
+- Fixed Context Keeper message Keep buttons disappearing after SpicyChat rerenders/rebuilds a message toolbar; Keep now lives outside the replaceable quick-action bar and self-repairs on visible/new messages.
 
 - Restored Auto-AFK as a true per-tab inactivity timer based on when each matching SpicyChat tab was last focused, independent of PC Protection.
 - Made Auto-AFK fall back to chat pages if an older install has the feature enabled with no saved scope, and improved its default chat/active-tab safety settings.

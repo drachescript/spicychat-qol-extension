@@ -849,6 +849,30 @@
     renderStatus();
   }
 
+  function placeMessageKeepButton(root, button) {
+    if (!(root instanceof Element) || !(button instanceof Element)) return;
+
+    const dropdown = root.querySelector("button[aria-label='message-dropdown']");
+    const holder = dropdown?.closest?.(".relative") || dropdown?.parentElement || null;
+    if (!holder) {
+      if (button.parentElement !== root) root.append(button);
+      return;
+    }
+
+    // Keep Context Keeper OUTSIDE message-options' quick-action bar. That bar is
+    // intentionally rebuilt with replaceChildren() when SpicyChat rerenders a
+    // message toolbar, which used to delete Keep while leaving this message's
+    // ready marker behind. As a sibling, Keep survives quick-action rebuilds.
+    const dropdownWrapper = dropdown?.parentElement;
+    if (dropdownWrapper && dropdownWrapper.parentElement === holder) {
+      if (button.parentElement !== holder || button.nextSibling !== dropdownWrapper) {
+        holder.insertBefore(button, dropdownWrapper);
+      }
+    } else if (button.parentElement !== holder) {
+      holder.append(button);
+    }
+  }
+
   function ensureMessageButtons() {
     if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) {
       if (DS.state.contextKeeperWasActive) {
@@ -859,13 +883,28 @@
       return;
     }
     DS.state.contextKeeperWasActive = true;
-    const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-context-keeper-ready", readyValue: "1", newest: 24, margin: 1400 })
-      || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`);
+
+    // First process genuinely new/unready messages. Then include the current
+    // dirty/visible/newest message roots WITHOUT filtering by the ready marker.
+    // React can replace only a message toolbar, removing extension children
+    // while the outer message root (and its ready marker) survives.
+    const pending = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-context-keeper-ready", readyValue: "1", newest: 24, margin: 1400 })
+      || Array.from(document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`));
+    const repair = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 12, margin: 1000 })
+      || Array.from(document.querySelectorAll(MESSAGE_SELECTOR)).slice(-12);
+    const roots = Array.from(new Set([...(pending || []), ...(repair || [])]));
+
     roots.forEach(root => {
-      if (root.querySelector(`.${BUTTON_CLASS}`)) { root.dataset.dsContextKeeperReady = "1"; return; }
+      let button = root.querySelector(`.${BUTTON_CLASS}`);
+      if (button) {
+        placeMessageKeepButton(root, button);
+        root.dataset.dsContextKeeperReady = "1";
+        return;
+      }
+
       const text = messageText(root);
       if (!text) return;
-      const button = make("button", { type: "button", className: BUTTON_CLASS, title: "Remember this message for Context Keeper" }, "Keep");
+      button = make("button", { type: "button", className: BUTTON_CLASS, title: "Remember this message for Context Keeper" }, "Keep");
       button.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
@@ -881,17 +920,28 @@
         button.classList.add("ds-context-kept");
         setTimeout(() => { if (document.contains(button)) button.textContent = "Keep"; }, 1600);
       });
-      const dropdown = root.querySelector("button[aria-label='message-dropdown']");
-      const holder = dropdown?.closest?.(".relative") || dropdown?.parentElement || null;
-      const target = root.querySelector(".ds-message-quick-actions") || holder || root;
-      if (holder && target === holder && dropdown && dropdown.parentElement === holder) {
-        holder.insertBefore(button, dropdown);
-      } else {
-        target.append(button);
-      }
+      placeMessageKeepButton(root, button);
       root.dataset.dsContextKeeperReady = "1";
     });
   }
+
+  // Small repair watchdog for toolbar-only React rerenders. It checks only the
+  // visible/newest message set and does no Context Keeper capture work.
+  let messageButtonRepairTimer = 0;
+  function scheduleMessageButtonRepair(delay = 450) {
+    clearTimeout(messageButtonRepairTimer);
+    messageButtonRepairTimer = window.setTimeout(() => {
+      messageButtonRepairTimer = 0;
+      if (document.hidden) return;
+      ensureMessageButtons();
+    }, Math.max(150, Number(delay) || 450));
+  }
+
+  window.setInterval(() => scheduleMessageButtonRepair(300), 7000);
+  window.addEventListener("pageshow", () => scheduleMessageButtonRepair(450), true);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) scheduleMessageButtonRepair(450);
+  }, true);
 
   DS.openContextKeeper = openManager;
   DS.addContextKeeperDetails = addManyDetails;
