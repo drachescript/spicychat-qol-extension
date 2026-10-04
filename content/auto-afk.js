@@ -19,8 +19,9 @@
   function sendActivity(reason, force = false) {
     if (!enabled()) return;
 
-    // A background tab can receive pageshow/load events without the user ever
-    // selecting it. Those must not reset its AFK timer.
+    // Background pages can receive lifecycle events without ever being shown.
+    // Only visible/open events count as focus; hidden/blurred events are sent
+    // deliberately to record when the user's focused period ended.
     if (reason === "opened" && !pageIsActuallyVisible()) return;
 
     const now = Date.now();
@@ -49,9 +50,11 @@
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) sendActivity("opened", true);
+    else sendActivity("blurred", true);
   }, true);
 
-  window.addEventListener("focus", () => sendActivity("opened"), true);
+  window.addEventListener("focus", () => sendActivity("opened", true), true);
+  window.addEventListener("blur", () => sendActivity("blurred", true), true);
   window.addEventListener("pageshow", () => {
     if (!pageIsActuallyVisible()) return;
     setTimeout(() => sendActivity("opened", true), 800);

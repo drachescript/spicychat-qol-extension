@@ -19,6 +19,10 @@
   let asteriskRepairSafetyTimer = 0;
   let asteriskAutoPairInstalled = false;
   const asteriskRepairTimeouts = new Set();
+  let oocHealthTimer = 0;
+  let oocHealthConfirmTimer = 0;
+  const OOC_HEALTH_RELOAD_KEY = "dsQolOocHealthReloadV1";
+  const OOC_HEALTH_RELOAD_GUARD_MS = 5 * 60 * 1000;
 
   function restoreOocShortcuts() {
     DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
@@ -744,21 +748,31 @@
     return Number(DS.getPreferredOocTemplateIndex?.() || 0);
   }
 
-  function createOocShortcut(original) {
-    const button = original.cloneNode(false);
+  function normalizeOocShortcut(button) {
+    if (!button) return null;
 
-    // The replacement is cloned from SpicyChat's Image button so it keeps the
-    // native sizing/classes. Never inherit QoL's marker or inline display:none
-    // from the original Image control, otherwise Hide Image also hides OOC.
-    button.removeAttribute("data-testid");
-    button.removeAttribute("id");
-    button.removeAttribute("data-ds-ooc-original-image");
+    // SpicyChat temporarily disables its native Image control while a reply is
+    // being generated. OOC is cloned from that control for native sizing, but
+    // transient disabled state must never become permanent on the QoL clone.
+    button.removeAttribute("disabled");
+    button.removeAttribute("aria-disabled");
+    button.removeAttribute("data-disabled");
+    button.removeAttribute("data-ds-hidden");
+    button.removeAttribute("data-ds-reason");
+    button.classList.remove("ds-hidden", "opacity-60", "cursor-not-allowed", "pointer-events-none");
+    button.classList.add("cursor-pointer");
     button.style.removeProperty("display");
-    button.classList.add(OOC_SHORTCUT_CLASS);
+    button.style.removeProperty("pointer-events");
+    button.style.removeProperty("opacity");
     button.type = "button";
-    button.setAttribute("aria-label", "Insert OOC message");
-    button.title = "Insert selected OOC message";
-    button.textContent = "OOC";
+
+    if (button.getAttribute("tabindex") === "-1") button.removeAttribute("tabindex");
+    return button;
+  }
+
+  function bindOocShortcut(button) {
+    if (!button || button.dataset.dsOocBound === "1") return button;
+    button.dataset.dsOocBound = "1";
 
     button.addEventListener("click", event => {
       event.preventDefault();
@@ -772,6 +786,118 @@
       DS.insertOocTemplate(preferredOocTemplateIndex());
     });
 
+    return button;
+  }
+
+  function nativeImageForOoc(button) {
+    const wrapper = button?.closest?.("[data-ds-ooc-image-wrapper='1']") || button?.parentElement;
+    return wrapper?.querySelector?.(
+      'button[data-ds-ooc-original-image="1"], button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]'
+    ) || null;
+  }
+
+  function composerIsUsableForOoc(button) {
+    const field = composerFieldNear(button);
+    if (!field) return false;
+    if (field.disabled || field.readOnly) return false;
+    if (field.getAttribute("aria-disabled") === "true") return false;
+    return isVisibleElement(field);
+  }
+
+  function oocShortcutLooksUsable(button) {
+    if (!button || !document.contains(button) || !isVisibleElement(button)) return false;
+    if (button.disabled || button.matches?.(":disabled")) return false;
+    if (button.getAttribute("aria-disabled") === "true") return false;
+    const style = getComputedStyle(button);
+    if (style.pointerEvents === "none" || style.visibility === "hidden" || style.display === "none") return false;
+    if (button.classList.contains("cursor-not-allowed") || button.classList.contains("pointer-events-none")) return false;
+    return true;
+  }
+
+  function requestOocHealthReload() {
+    if (!DS.isSingleChatPage?.()) return;
+    if (document.visibilityState !== "visible") return;
+
+    const route = `${location.pathname}${location.search}`;
+    const version = String(document.documentElement.dataset.dsQolVersion || "unknown");
+    const now = Date.now();
+
+    try {
+      const previous = JSON.parse(sessionStorage.getItem(OOC_HEALTH_RELOAD_KEY) || "null");
+      if (
+        previous &&
+        previous.route === route &&
+        previous.version === version &&
+        Number(previous.at || 0) > now - OOC_HEALTH_RELOAD_GUARD_MS
+      ) {
+        return;
+      }
+      sessionStorage.setItem(OOC_HEALTH_RELOAD_KEY, JSON.stringify({ route, version, at: now }));
+    } catch {}
+
+    DS.setQuickStatus?.("QoL chat control got stuck. Reloading this page once…");
+    setTimeout(() => {
+      try { location.reload(); } catch {}
+    }, 120);
+  }
+
+  function scheduleOocShortcutHealthCheck() {
+    if (oocHealthTimer) return;
+
+    oocHealthTimer = window.setTimeout(() => {
+      oocHealthTimer = 0;
+      const { settings } = DS.state;
+      if (!settings?.enabled || !settings.replaceChatImageWithOocButton || !DS.isSingleChatPage?.()) return;
+
+      const buttons = DS.qsa(`.${OOC_SHORTCUT_CLASS}`).filter(button => !button.closest("#ds-qol-panel"));
+      if (!buttons.length) return;
+
+      let needsConfirm = false;
+      buttons.forEach(button => {
+        bindOocShortcut(normalizeOocShortcut(button));
+
+        // Do not treat SpicyChat's legitimate in-generation disabled window as
+        // a broken QoL control. Only escalate once the native source control and
+        // composer are usable again.
+        const nativeImage = nativeImageForOoc(button);
+        const nativeReady = !nativeImage || (!nativeImage.disabled && nativeImage.getAttribute("aria-disabled") !== "true");
+        if (nativeReady && composerIsUsableForOoc(button) && !oocShortcutLooksUsable(button)) {
+          needsConfirm = true;
+        }
+      });
+
+      if (!needsConfirm || oocHealthConfirmTimer) return;
+
+      oocHealthConfirmTimer = window.setTimeout(() => {
+        oocHealthConfirmTimer = 0;
+        const broken = DS.qsa(`.${OOC_SHORTCUT_CLASS}`).some(button => {
+          if (button.closest("#ds-qol-panel")) return false;
+          bindOocShortcut(normalizeOocShortcut(button));
+          const nativeImage = nativeImageForOoc(button);
+          const nativeReady = !nativeImage || (!nativeImage.disabled && nativeImage.getAttribute("aria-disabled") !== "true");
+          return nativeReady && composerIsUsableForOoc(button) && !oocShortcutLooksUsable(button);
+        });
+        if (broken) requestOocHealthReload();
+      }, 850);
+    }, 250);
+  }
+
+  function createOocShortcut(original) {
+    const button = original.cloneNode(false);
+
+    // The replacement is cloned from SpicyChat's Image button so it keeps the
+    // native sizing/classes. Never inherit QoL's marker, inline display:none,
+    // or SpicyChat's transient generation-time disabled state.
+    button.removeAttribute("data-testid");
+    button.removeAttribute("id");
+    button.removeAttribute("data-ds-ooc-original-image");
+    button.classList.add(OOC_SHORTCUT_CLASS);
+    button.setAttribute("aria-label", "Insert OOC message");
+    button.title = "Insert selected OOC message";
+    button.textContent = "OOC";
+
+    normalizeOocShortcut(button);
+    bindOocShortcut(button);
     return button;
   }
 
@@ -808,11 +934,13 @@
         if (!existingShortcut) {
           wrapper.appendChild(createOocShortcut(original));
         } else {
-          // Repair buttons created by the older replacement bug without
-          // requiring the user to reload the conversation.
+          // Repair buttons created from a transiently-disabled native Image
+          // control without requiring the user to reload the conversation.
           existingShortcut.removeAttribute("data-ds-ooc-original-image");
-          existingShortcut.style.removeProperty("display");
+          normalizeOocShortcut(existingShortcut);
+          bindOocShortcut(existingShortcut);
         }
+        scheduleOocShortcutHealthCheck();
         return;
       }
 
@@ -847,6 +975,13 @@
       if (wrapper.nextElementSibling !== shortcutWrapper) {
         wrapper.insertAdjacentElement("afterend", shortcutWrapper);
       }
+
+      const shortcut = shortcutWrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`);
+      if (shortcut) {
+        normalizeOocShortcut(shortcut);
+        bindOocShortcut(shortcut);
+      }
+      scheduleOocShortcutHealthCheck();
     });
   }
 

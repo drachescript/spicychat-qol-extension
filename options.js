@@ -282,12 +282,12 @@ const DEFAULT_SETTINGS = {
   autoAfkMinutes: 720,
   lowMemoryProtectionEnabled: false,
   maxAwakeSpicyTabs: 3,
-  autoAfkChats: false,
+  autoAfkChats: true,
   autoAfkHome: false,
   autoAfkProfiles: false,
   autoAfkAction: "discard",
-  autoAfkProtectActive: false,
-  autoAfkResetOnActivate: false,
+  autoAfkProtectActive: true,
+  autoAfkResetOnActivate: true,
   duplicateTabGuardEnabled: false,
   duplicateTabChats: true,
   duplicateTabHome: false,
@@ -9084,7 +9084,7 @@ async function exportLorebookArchiveData() {
       exportedAt: new Date().toISOString(),
       generatedBy: {
         product: "SpicyChat QoL",
-        version: String(chrome.runtime?.getManifest?.().version || "0.2.32")
+        version: String(chrome.runtime?.getManifest?.().version || "0.2.33")
       },
       source: "qol-lorebook-status-export",
       semantics: {
@@ -19443,12 +19443,26 @@ function requestBrowserDownloadsPermission() {
   });
 }
 
-function browserManagerDownload(text, filename, mimeType, permissionAlreadyGranted = false) {
-  return new Promise(async resolve => {
-    if (!chrome.downloads?.download) { resolve(false); return; }
-    const allowed = permissionAlreadyGranted || await requestBrowserDownloadsPermission();
-    if (!allowed) { resolve(false); return; }
-    const blob = new Blob([text], { type: mimeType });
+async function browserManagerDownload(text, filename, mimeType, permissionAlreadyGranted = false) {
+  const allowed = permissionAlreadyGranted || await requestBrowserDownloadsPermission();
+  if (!allowed) return false;
+
+  // Prefer the background download path. It survives the async backup build on
+  // Firefox/Opera where an extension-page <a download> can lose its user
+  // gesture and silently do nothing.
+  try {
+    const response = await runtimeMessage({
+      type: "DS_DOWNLOAD_TEXT_FILE",
+      text: String(text ?? ""),
+      filename: String(filename || "spicychat-qol-export.txt"),
+      mimeType: String(mimeType || "text/plain;charset=utf-8")
+    });
+    if (response?.ok) return true;
+  } catch {}
+
+  if (!chrome.downloads?.download) return false;
+  return new Promise(resolve => {
+    const blob = new Blob([String(text ?? "")], { type: mimeType });
     const url = URL.createObjectURL(blob);
     let settled = false;
     const finish = ok => {
@@ -19473,7 +19487,7 @@ async function downloadBackupFile(ext = "json") {
   // extension page. Ask for the optional browser download-manager permission
   // directly from the user's click before other async work can consume the
   // user gesture. Desktop keeps the normal permission-free link path.
-  const browserManagerAllowed = optionsLooksMobile() && !!chrome.downloads?.download
+  const browserManagerAllowed = chrome.permissions?.request
     ? await requestBrowserDownloadsPermission()
     : false;
   const text = await ensureBackupTextInBox();
@@ -21870,8 +21884,11 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
   } catch {}
 
   try {
-    if (optionsLooksMobile() && chrome.downloads?.download) {
-      const allowed = await requestBrowserDownloadsPermission();
+    if (chrome.permissions?.contains) {
+      const allowed = await new Promise(resolve => {
+        try { chrome.permissions.contains({ permissions: ["downloads"] }, value => resolve(!chrome.runtime.lastError && !!value)); }
+        catch { resolve(false); }
+      });
       if (allowed && await browserManagerDownload(body, filename, mime, true)) {
         if (status) status.textContent = successMessage;
         return true;
@@ -22160,7 +22177,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
       `Composer shortcuts: ${context.pageDiagnostics.chatLayout.shortcutPlacement || "none"}; holder ${Number(context.pageDiagnostics.chatLayout.shortcutWidth || 0)} px; ${Number(context.pageDiagnostics.chatLayout.shortcutControls || 0)} controls; textarea right padding ${context.pageDiagnostics.chatLayout.textareaPaddingRight || "unknown"}; overlap ${context.pageDiagnostics.chatLayout.shortcutOverlap ? "YES" : "no"}`
     ] : []),
     `Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`,
-    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${[settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean).join(", ") || "none"}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} awake tabs` : "off"}`,
+    `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${(() => { const scopes = [settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean); return scopes.length ? scopes.join(", ") : (settings.autoAfkEnabled ? "chats (legacy fallback)" : "none"); })()}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} awake tabs` : "off"}`,
     `Disabled-feature deep sleep: ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
     `Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`,
     `Blocked-bot refresh batching: ${Number(runtime.blockedBotRefreshDeferrals || 0)} deferred single-block changes; ${Number(runtime.blockedBotRefreshFlushes || 0)} settled refreshes; ${Number(runtime.blockedBotMutationSkips || 0)} immediate listing mutations skipped; ${runtime.blockedBotRefreshPending ? `pending (${Math.max(0, Math.ceil((Number(runtime.blockedBotRefreshSettleAt || 0) - Date.now()) / 1000))}s remaining)` : "idle"}`,

@@ -121,6 +121,18 @@
       background: #14243a;
     }
 
+
+    .runtime-reload-notice {
+      margin: 0 0 10px;
+      padding: 9px;
+      border: 1px solid #8b5a21;
+      border-radius: 9px;
+      background: #2a1d0e;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .runtime-reload-notice button { margin-top: 7px; padding: 6px 8px; font-size: 12px; }
+
     .release-notice strong { display: block; margin-bottom: 4px; }
     .release-notice p { margin: 4px 0 8px; color: #c8d8eb; font-size: 12px; line-height: 1.35; }
     .release-actions { display: flex; gap: 6px; }
@@ -181,6 +193,12 @@
       <button id="viewChanges" type="button">View changes</button>
       <button id="dismissReleaseNotice" type="button">Dismiss</button>
     </div>
+  </div>
+
+
+  <div id="runtimeReloadNotice" class="runtime-reload-notice" hidden>
+    This SpicyChat tab is not running the current QoL runtime yet. Stale tabs normally reload once automatically when they become active; use this button if the automatic reload did not happen.
+    <button id="reloadStaleTab" type="button">Reload this SpicyChat tab</button>
   </div>
 
   <label>

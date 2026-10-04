@@ -215,15 +215,15 @@
 </select>
 </label>
 <h3>Applies to</h3>
-<label class="row"><input id="autoAfkChats" type="checkbox"/><span>Chat pages (/chat/*)</span></label>
+<label class="row"><input checked="" id="autoAfkChats" type="checkbox"/><span>Chat pages (/chat/*)</span></label>
 <label class="row"><input id="autoAfkHome" type="checkbox"/><span>SpicyChat Home</span></label>
 <label class="row"><input id="autoAfkProfiles" type="checkbox"/><span>Character / profile pages</span></label>
 <h3>When the timer expires</h3>
 <label class="row"><input id="autoAfkActionDiscard" name="autoAfkAction" type="radio" value="discard"/><span>Unload tab and keep it open</span></label>
 <label class="row"><input id="autoAfkActionClose" name="autoAfkAction" type="radio" value="close"/><span>Close tab</span></label>
-<label class="row"><input id="autoAfkProtectActive" type="checkbox"/><span>Never unload or close the currently active tab</span></label>
-<label class="row"><input id="autoAfkResetOnActivate" type="checkbox"/><span>Reset the timer when the tab is opened or selected</span></label>
-<p class="hint">Unload uses the browser's normal tab discard behavior, so the tab stays in the tab bar and reloads when you return to it.</p>
+<label class="row"><input checked="" id="autoAfkProtectActive" type="checkbox"/><span>Never unload or close the currently active tab</span></label>
+<label class="row"><input checked="" id="autoAfkResetOnActivate" type="checkbox"/><span>Reset the timer when the tab is opened or selected</span></label>
+<p class="hint">Auto-AFK is independent from Low memory / PC protection. When enabled, QoL tracks when each matching SpicyChat tab was last focused and unloads/closes it after the selected inactive time. Unload keeps the tab in the tab bar and it reloads when you return.</p>
 <div class="button-row">
 <button id="autoAfkCheckNow" type="button">Run cleanup check now</button>
 </div>

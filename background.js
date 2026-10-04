@@ -17,6 +17,8 @@ const CREATOR_DEFAULT_SORT_INDEX = "public_characters_alias/sort/_text_match(buc
 const CREATOR_LATEST_SORT_INDEX = "public_characters_alias/sort/_text_match(buckets: 3):desc,createdAt:desc";
 const AUTO_AFK_ACTIVITY_KEY = "dsAutoAfkTabActivity";
 const AUTO_AFK_STATUS_KEY = "dsAutoAfkLastScan";
+const STALE_RUNTIME_TABS_KEY = "dsQolStaleRuntimeTabsV1";
+const STALE_RUNTIME_AUTO_RELOAD_SESSION_KEY = "dsQolStaleRuntimeAutoReloadsV1";
 const DUPLICATE_TAB_STATUS_KEY = "dsDuplicateTabLastScan";
 const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
 const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
@@ -80,12 +82,12 @@ const AUTO_AFK_DEFAULTS = {
   autoAfkMinutes: 720,
   lowMemoryProtectionEnabled: false,
   maxAwakeSpicyTabs: 3,
-  autoAfkChats: false,
+  autoAfkChats: true,
   autoAfkHome: false,
   autoAfkProfiles: false,
   autoAfkAction: "discard",
-  autoAfkProtectActive: false,
-  autoAfkResetOnActivate: false
+  autoAfkProtectActive: true,
+  autoAfkResetOnActivate: true
 };
 
 const DUPLICATE_TAB_DEFAULTS = {
@@ -2248,6 +2250,23 @@ function tabsDiscard(tabId) {
   });
 }
 
+function tabsReload(tabId, reloadProperties = {}) {
+  return new Promise(resolve => {
+    if (typeof chrome.tabs?.reload !== "function") {
+      resolve({ ok: false, error: "tabs.reload is not available in this browser" });
+      return;
+    }
+    try {
+      chrome.tabs.reload(tabId, reloadProperties, () => {
+        const error = chrome.runtime.lastError?.message || "";
+        resolve({ ok: !error, error });
+      });
+    } catch (error) {
+      resolve({ ok: false, error: error?.message || String(error) });
+    }
+  });
+}
+
 function tabsRemove(tabId) {
   return new Promise(resolve => {
     chrome.tabs.remove(tabId, () => {
@@ -2447,7 +2466,12 @@ function autoAfkScopeForUrl(url) {
 
 function autoAfkApplies(url, settings) {
   const scope = autoAfkScopeForUrl(url);
-  if (scope === "chat") return settings.autoAfkChats !== false;
+  const noExplicitScope = settings?.autoAfkEnabled === true &&
+    settings.autoAfkChats === false && !settings.autoAfkHome && !settings.autoAfkProfiles;
+  // Auto-AFK should never be silently "on but monitoring nothing". Older
+  // installs can carry all-false scope values from the pre-granular defaults;
+  // in that legacy state, chat pages remain the safe/default target.
+  if (scope === "chat") return settings.autoAfkChats !== false || noExplicitScope;
   if (scope === "home") return !!settings.autoAfkHome;
   if (scope === "profile") return !!settings.autoAfkProfiles;
   return false;
@@ -4839,6 +4863,169 @@ async function runAutoAfkScan() {
   return summary;
 }
 
+async function readStaleRuntimeTabs() {
+  const result = await storageGet([STALE_RUNTIME_TABS_KEY]);
+  const value = result?.[STALE_RUNTIME_TABS_KEY];
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+async function writeStaleRuntimeTabs(value = {}) {
+  const clean = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  await storageSet({ [STALE_RUNTIME_TABS_KEY]: clean });
+  return clean;
+}
+
+function markRuntimeReloadBadge(tabId, stale = true) {
+  const id = Number(tabId || 0);
+  if (!id || !chrome.action) return;
+  try { chrome.action.setBadgeText({ tabId: id, text: stale ? "↻" : "" }, () => void chrome.runtime.lastError); } catch {}
+  if (stale) {
+    try { chrome.action.setBadgeBackgroundColor({ tabId: id, color: "#9a5a00" }, () => void chrome.runtime.lastError); } catch {}
+    try { chrome.action.setTitle({ tabId: id, title: "SpicyChat QoL updated — stale tabs reload once automatically when active" }, () => void chrome.runtime.lastError); } catch {}
+  } else {
+    try { chrome.action.setTitle({ tabId: id, title: "SpicyChat QoL" }, () => void chrome.runtime.lastError); } catch {}
+  }
+}
+
+async function markOpenSpicyTabsStaleAfterUpdate(version = "", previousVersion = "") {
+  const tabs = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
+  const stale = {};
+  const now = Date.now();
+  for (const tab of tabs) {
+    if (!tab?.id || isDedicatedWorkerTab(tab)) continue;
+    stale[String(tab.id)] = {
+      at: now,
+      version: String(version || ""),
+      previousVersion: String(previousVersion || ""),
+      url: String(tab.url || tab.pendingUrl || "").slice(0, 500),
+      reason: "extension-update"
+    };
+    markRuntimeReloadBadge(tab.id, true);
+  }
+  await writeStaleRuntimeTabs(stale);
+  return stale;
+}
+
+async function readStaleRuntimeAutoReloads() {
+  const stored = await storageSessionGet([STALE_RUNTIME_AUTO_RELOAD_SESSION_KEY]);
+  const value = stored?.[STALE_RUNTIME_AUTO_RELOAD_SESSION_KEY];
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+async function writeStaleRuntimeAutoReloads(value = {}) {
+  const clean = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  await storageSessionSet({ [STALE_RUNTIME_AUTO_RELOAD_SESSION_KEY]: clean });
+  return clean;
+}
+
+async function maybeAutoReloadStaleActiveTab(tabOrId, trigger = "active") {
+  const tab = typeof tabOrId === "object" && tabOrId
+    ? tabOrId
+    : await tabsGet(Number(tabOrId || 0));
+  const id = Number(tab?.id || 0);
+  if (!id || !tab?.active || tab.discarded || tab.status === "loading" || !isSpicyChatUrl(tab.url || tab.pendingUrl) || isDedicatedWorkerTab(tab)) return false;
+
+  const stale = await readStaleRuntimeTabs();
+  const entry = stale[String(id)];
+  if (!entry) return false;
+
+  // Auto-reload only when we know the page is stale because QoL itself was
+  // updated, or when a live diagnostic ping explicitly reported an older
+  // runtime version. A generic timeout/non-response keeps the manual fallback
+  // instead of risking a reload loop for an unrelated page problem.
+  const reason = String(entry.reason || "");
+  if (!new Set(["extension-update", "runtime-version-mismatch"]).has(reason)) return false;
+
+  const version = String(chrome.runtime.getManifest?.().version || entry.version || "unknown");
+  const guardKey = `${id}:${version}`;
+  const attempts = await readStaleRuntimeAutoReloads();
+  if (attempts[guardKey]) return false;
+
+  attempts[guardKey] = { at: Date.now(), reason, trigger: String(trigger || "active") };
+  await writeStaleRuntimeAutoReloads(attempts);
+
+  const result = await tabsReload(id, {});
+  if (!result.ok) {
+    delete attempts[guardKey];
+    await writeStaleRuntimeAutoReloads(attempts);
+    markRuntimeReloadBadge(id, true);
+    return false;
+  }
+  return true;
+}
+
+async function autoReloadFocusedStaleTab(trigger = "extension-update") {
+  const tabs = await tabsQuery({
+    active: true,
+    lastFocusedWindow: true,
+    url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"]
+  });
+  const tab = tabs.find(item => item?.id && !isDedicatedWorkerTab(item));
+  if (!tab) return false;
+  return maybeAutoReloadStaleActiveTab(tab, trigger);
+}
+
+async function clearStaleRuntimeTab(tabId) {
+  const id = Number(tabId || 0);
+  if (!id) return false;
+  const stale = await readStaleRuntimeTabs();
+  const key = String(id);
+  if (Object.prototype.hasOwnProperty.call(stale, key)) {
+    delete stale[key];
+    await writeStaleRuntimeTabs(stale);
+  }
+  markRuntimeReloadBadge(id, false);
+  return true;
+}
+
+async function verifyOneSpicyTabRuntime(tabId) {
+  const id = Number(tabId || 0);
+  if (!id) return false;
+  const tab = await tabsGet(id);
+  if (!tab || tab.discarded || !isSpicyChatUrl(tab.url || tab.pendingUrl) || isDedicatedWorkerTab(tab)) {
+    await clearStaleRuntimeTab(id);
+    return true;
+  }
+  const expected = String(chrome.runtime.getManifest?.().version || "");
+  const response = await tabsSendMessageWithTimeout(id, { type: "DS_TAB_DIAGNOSTIC_PING" }, 1800);
+  const fresh = !!(response?.ok && String(response?.version || "") === expected);
+  if (fresh) {
+    await clearStaleRuntimeTab(id);
+    return true;
+  }
+  const staleReason = response?.__dsTimeout
+    ? "runtime-ping-timeout"
+    : (response?.ok ? "runtime-version-mismatch" : "runtime-not-responding");
+  const stale = await readStaleRuntimeTabs();
+  stale[String(id)] = {
+    at: Date.now(),
+    version: expected,
+    url: String(tab.url || tab.pendingUrl || "").slice(0, 500),
+    reason: staleReason
+  };
+  await writeStaleRuntimeTabs(stale);
+  markRuntimeReloadBadge(id, true);
+
+  // A confirmed older runtime on the active tab is safe to repair
+  // automatically. Timeouts/non-responses keep the manual fallback because
+  // they can indicate an unrelated page problem rather than a version gap.
+  if (staleReason === "runtime-version-mismatch" && tab.active) {
+    const settings = await getAutoAfkSettings();
+    if (settings.enabled !== false) {
+      await maybeAutoReloadStaleActiveTab(tab, "runtime-version-mismatch");
+    }
+  }
+  return false;
+}
+
+async function verifyOpenSpicyTabRuntimes() {
+  const tabs = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
+  for (const tab of tabs) {
+    if (!tab?.id || tab.discarded || isDedicatedWorkerTab(tab)) continue;
+    await verifyOneSpicyTabRuntime(tab.id);
+  }
+}
+
 async function rememberReleaseNotice(details = {}) {
   const version = chrome.runtime.getManifest?.().version || "";
   const reason = String(details.reason || "");
@@ -6380,12 +6567,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      if (message.reason === "opened" && settings.autoAfkResetOnActivate === false && !settings.lowMemoryProtectionEnabled) {
-        sendResponse({ ok: true, ignored: true });
-        return;
+      // Auto-AFK is independent from PC Protection. Focus/open/blur/activity
+      // updates are useful to the AFK clock whenever Auto-AFK itself is on.
+      if (settings.autoAfkEnabled || settings.lowMemoryProtectionEnabled) {
+        await markAutoAfkActivity(tabId);
       }
-
-      await markAutoAfkActivity(tabId);
       if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(350);
       sendResponse({ ok: true });
     })();
@@ -6745,15 +6931,22 @@ if (chrome.notifications?.onClicked) {
 
 chrome.tabs.onActivated.addListener(async activeInfo => {
   const settings = await getAutoAfkSettings();
-  if (settings.enabled === false) return;
-
   const tab = await tabsGet(activeInfo.tabId);
   if (!tab || !isSpicyChatUrl(tab.url) || isDedicatedWorkerTab(tab)) return;
+
+  // After a QoL update, inactive SpicyChat pages still contain the previous
+  // content-script runtime. The first time one becomes the active tab, reload
+  // it once so the current version attaches automatically. This is separate
+  // from PC Protection and Auto-AFK and is guarded per tab+version.
+  if (settings.enabled !== false && await maybeAutoReloadStaleActiveTab(tab, "tab-activated")) return;
+  if (settings.enabled === false) return;
+
   if (settings.lowMemoryProtectionEnabled) markLowMemoryWakeGrace(tab.id);
 
-  // LRU protection needs real "last used" ordering even when the timer's
-  // reset-on-activate option is off.
-  if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
+  // Auto-AFK is fundamentally "not focused for X time". Selecting a
+  // SpicyChat tab always refreshes its own AFK timestamp, regardless of PC
+  // Protection. PC Protection merely reuses the same timestamp for LRU order.
+  if (settings.autoAfkEnabled || settings.lowMemoryProtectionEnabled) {
     await markAutoAfkActivity(tab.id);
   }
   if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(250);
@@ -6773,6 +6966,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
   if (quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
 
+  // A real page load after an extension update receives the current content
+  // scripts again, so its stale-runtime warning can be cleared safely.
+  if (changeInfo.status === "complete") {
+    setTimeout(() => verifyOneSpicyTabRuntime(tabId).catch(() => {}), 900);
+  }
+
   if (changeInfo.url) {
     const duplicateSettings = await getDuplicateTabSettings();
     if (duplicateSettings.enabled !== false && duplicateSettings.duplicateTabGuardEnabled) {
@@ -6787,7 +6986,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 
   // A URL change means a new normal SpicyChat page was opened in this tab.
-  if ((settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) &&
+  if ((settings.autoAfkEnabled || settings.lowMemoryProtectionEnabled) &&
       (changeInfo.url || (changeInfo.status === "complete" && tab?.active))) {
     await markAutoAfkActivity(tabId);
   }
@@ -6828,7 +7027,7 @@ chrome.tabs.onCreated.addListener(tab => {
 
   getAutoAfkSettings().then(settings => {
     if (settings.enabled === false) return;
-    if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
+    if (settings.autoAfkEnabled || settings.lowMemoryProtectionEnabled) {
       markAutoAfkActivity(tab.id);
     }
     if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(500);
@@ -6843,7 +7042,7 @@ chrome.windows.onFocusChanged.addListener(windowId => {
     const tabs = await tabsQuery({ active: true, windowId });
     const tab = tabs[0];
     if (tab?.id && isSpicyChatUrl(tab.url) && !isDedicatedWorkerTab(tab)) {
-      if (settings.lowMemoryProtectionEnabled || (settings.autoAfkEnabled && settings.autoAfkResetOnActivate !== false)) {
+      if (settings.autoAfkEnabled || settings.lowMemoryProtectionEnabled) {
         await markAutoAfkActivity(tab.id);
       }
       if (settings.lowMemoryProtectionEnabled) scheduleLowMemoryProtectionScan(250);
@@ -6854,6 +7053,7 @@ chrome.windows.onFocusChanged.addListener(windowId => {
 chrome.tabs.onRemoved.addListener(tabId => {
   qolDiagnosticSubscribers.delete(Number(tabId));
   lowMemoryWakeGraceUntil.delete(Number(tabId));
+  clearStaleRuntimeTab(tabId).catch(() => {});
   // Close any refill helper that belongs to a source tab the user just closed.
   for (const [runId, sourceTabId] of [...listingRefillSourceTabs.entries()]) {
     if (Number(sourceTabId) !== Number(tabId)) continue;
@@ -6981,6 +7181,19 @@ chrome.runtime.onInstalled.addListener(details => {
         chrome.runtime.openOptionsPage(() => void chrome.runtime.lastError);
       }
     });
+  if (details?.reason === "update") {
+    // Existing content scripts keep running the old extension context until the
+    // site reloads. Mark all normal SpicyChat tabs stale, then reload only the
+    // currently focused active one. Other stale tabs reload once when the user
+    // activates them later. The per-tab+version guard prevents reload loops.
+    markOpenSpicyTabsStaleAfterUpdate(
+      chrome.runtime.getManifest?.().version || "",
+      details?.previousVersion || ""
+    ).then(async () => {
+      const settings = await getAutoAfkSettings();
+      if (settings.enabled !== false) await autoReloadFocusedStaleTab("extension-update");
+    }).catch(() => {});
+  }
   syncAutoAfkTabs().finally(() => configureAutoAfkAlarm(false));
   getDuplicateTabSettings().then(settings => {
     if (settings.enabled !== false && settings.duplicateTabGuardEnabled) queueDuplicateTabScan({ focusExisting: false });
@@ -6992,6 +7205,10 @@ chrome.runtime.onInstalled.addListener(details => {
 
 chrome.runtime.onStartup.addListener(() => {
   syncAutoAfkTabs().finally(() => configureAutoAfkAlarm(false));
+  // Restored/pinned tabs can occasionally survive browser startup without the
+  // current content runtime. Detect that case passively and show a reload badge
+  // instead of pretending QoL is active or forcing a page reload.
+  setTimeout(() => verifyOpenSpicyTabRuntimes().catch(() => {}), 4500);
   getDuplicateTabSettings().then(settings => {
     if (settings.enabled !== false && settings.duplicateTabGuardEnabled) queueDuplicateTabScan({ focusExisting: false });
   });

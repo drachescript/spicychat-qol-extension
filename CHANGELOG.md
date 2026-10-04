@@ -1,3 +1,11 @@
+## 0.2.33
+
+- Restored Auto-AFK as a true per-tab inactivity timer based on when each matching SpicyChat tab was last focused, independent of PC Protection.
+- Made Auto-AFK fall back to chat pages if an older install has the feature enabled with no saved scope, and improved its default chat/active-tab safety settings.
+- Added stale-runtime checks after extension updates and browser startup; the active stale SpicyChat tab reloads once automatically, inactive stale tabs reload when first activated, and the popup keeps a manual reload fallback.
+- Fixed JSON/TXT backup downloads on browsers that can lose the extension-page download gesture after the backup is built by using the extension download manager when permission is available.
+- Fixed the chat OOC shortcut inheriting SpicyChat's temporary generation-time disabled state; QoL now repairs it after composer rerenders and performs one guarded page reload only if the control remains genuinely stuck.
+
 ## 0.2.32
 
 - Added Diagnostic Protocol v2 for Dragon's SpicyChat Diagnostic Extension with privacy-safe QoL operation, scheduler, storage, worker, performance and user-action tracing.

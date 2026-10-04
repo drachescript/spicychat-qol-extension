@@ -1,4 +1,5 @@
 const RELEASE_NOTICE_KEY = "dsReleaseNotice";
+const STALE_RUNTIME_TABS_KEY = "dsQolStaleRuntimeTabsV1";
 const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
 const FAVORITE_CREATORS_KEY = "favoriteCreators";
 const FOLLOWED_CREATORS_KEY = "followedCreators";
@@ -292,7 +293,8 @@ async function load() {
       LEGACY_PERSONAS_KEY,
       OOC_TEMPLATES_KEY,
       GENERATION_PROFILES_KEY,
-      RELEASE_NOTICE_KEY
+      RELEASE_NOTICE_KEY,
+      STALE_RUNTIME_TABS_KEY
     ]);
 
   const settings = {
@@ -343,6 +345,16 @@ async function load() {
       : `There are new or changed features since v${notice.previousVersion || "your last build"}. New settings stay marked until you dismiss this notice.`;
   } else if (noticeHost) {
     noticeHost.hidden = true;
+  }
+
+
+  const activeTab = await getActiveTab();
+  const staleRuntimeTabs = result[STALE_RUNTIME_TABS_KEY] && typeof result[STALE_RUNTIME_TABS_KEY] === "object"
+    ? result[STALE_RUNTIME_TABS_KEY]
+    : {};
+  const runtimeReloadNotice = document.getElementById("runtimeReloadNotice");
+  if (runtimeReloadNotice) {
+    runtimeReloadNotice.hidden = !(activeTab?.id && staleRuntimeTabs[String(activeTab.id)]);
   }
 
   const storageDetails = document.getElementById("storageDetails");
@@ -550,5 +562,12 @@ document.getElementById("dismissReleaseNotice")?.addEventListener("click", async
   await load();
 });
 
+document.getElementById("reloadStaleTab")?.addEventListener("click", async () => {
+  const tab = await getActiveTab();
+  if (!tab?.id) return;
+  try {
+    chrome.tabs.reload(tab.id, {}, () => window.close());
+  } catch {}
+});
 
 load();

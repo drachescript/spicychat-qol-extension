@@ -285,7 +285,12 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "DS_TAB_DIAGNOSTIC_PING") {
-      sendResponse({ ok: true, pageType: pageType(), at: Date.now() });
+      sendResponse({
+        ok: true,
+        pageType: pageType(),
+        version: String(chrome.runtime?.getManifest?.().version || ""),
+        at: Date.now()
+      });
       return false;
     }
 
