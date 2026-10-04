@@ -17,6 +17,9 @@
     mobileNormalizeRaf: 0,
     editResizeRaf: 0,
     editResizeTimer: 0,
+    editLayoutOriginalStyles: new WeakMap(),
+    editLayoutTouchedNodes: new Set(),
+    editLayoutDiagRoots: new WeakSet(),
     pendingComposerHeightRepairs: new WeakSet()
   };
 
@@ -297,11 +300,16 @@
 
   function buttonLabels(node) {
     return Array.from(node?.querySelectorAll?.("button") || [])
-      .map(button => String(
-        button.getAttribute("aria-label") ||
-        button.textContent ||
-        ""
-      ).trim().toLowerCase())
+      .map(button => [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        button.getAttribute("data-translate-key"),
+        button.textContent
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+        .toLowerCase())
       .filter(Boolean);
   }
 
@@ -345,14 +353,200 @@
     return textarea.parentElement;
   }
 
+  function buttonDescriptor(button) {
+    return [
+      button?.getAttribute?.("aria-label"),
+      button?.getAttribute?.("title"),
+      button?.getAttribute?.("data-translate-key"),
+      button?.textContent
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function findMessageEditControls(textarea) {
+    const messageRoot = textarea.closest("div[id^='message-']");
+    if (!messageRoot) {
+      return { messageRoot: null, save: null, cancel: null, group: null };
+    }
+
+    const buttons = Array.from(messageRoot.querySelectorAll("button"));
+    const save = buttons.find(button => buttonDescriptor(button).includes("save")) || null;
+    const cancel = buttons.find(button => buttonDescriptor(button).includes("cancel")) || null;
+
+    if (!save || !cancel) {
+      return { messageRoot, save, cancel, group: null };
+    }
+
+    let group = save;
+    while (group && group !== messageRoot && !group.contains(cancel)) {
+      group = group.parentElement;
+    }
+
+    if (!(group instanceof HTMLElement)) group = null;
+
+    // Include the character counter when it lives in the same compact controls
+    // footer. This is the block that SpicyChat currently pushes to the bottom
+    // of a very tall edit card on Android.
+    const counter = Array.from(
+      messageRoot.querySelectorAll("span, p, div")
+    ).find(element => {
+      if (!(element instanceof HTMLElement)) return false;
+      if (element.contains(textarea)) return false;
+      const value = String(element.textContent || "").trim();
+      return /^\d+\s*\/\s*10000$/.test(value);
+    }) || null;
+
+    if (group && counter) {
+      let candidate = group;
+      while (
+        candidate &&
+        candidate !== messageRoot &&
+        !candidate.contains(counter)
+      ) {
+        candidate = candidate.parentElement;
+      }
+
+      if (
+        candidate instanceof HTMLElement &&
+        candidate !== messageRoot &&
+        !candidate.contains(textarea)
+      ) {
+        group = candidate;
+      }
+    }
+
+    return { messageRoot, save, cancel, group };
+  }
+
+  function rememberEditLayoutStyle(node, property) {
+    if (!(node instanceof HTMLElement)) return;
+
+    let saved = state.editLayoutOriginalStyles.get(node);
+    if (!saved) {
+      saved = new Map();
+      state.editLayoutOriginalStyles.set(node, saved);
+      state.editLayoutTouchedNodes.add(node);
+    }
+
+    if (!saved.has(property)) {
+      saved.set(property, {
+        value: node.style.getPropertyValue(property),
+        priority: node.style.getPropertyPriority(property)
+      });
+    }
+  }
+
+  function setEditLayoutStyle(node, property, value) {
+    if (!(node instanceof HTMLElement)) return;
+    rememberEditLayoutStyle(node, property);
+    node.style.setProperty(property, value, "important");
+  }
+
+  function restoreEditLayoutNode(node) {
+    const saved = state.editLayoutOriginalStyles.get(node);
+    if (saved) {
+      for (const [property, original] of saved.entries()) {
+        if (original.value) {
+          node.style.setProperty(
+            property,
+            original.value,
+            original.priority || ""
+          );
+        } else {
+          node.style.removeProperty(property);
+        }
+      }
+    }
+
+    node.removeAttribute?.("data-ds-mobile-message-edit-shell");
+    node.removeAttribute?.("data-ds-mobile-message-edit-gap");
+    state.editLayoutOriginalStyles.delete(node);
+    state.editLayoutTouchedNodes.delete(node);
+  }
+
+  function cleanupStaleMessageEditLayoutFixes() {
+    for (const node of [...state.editLayoutTouchedNodes]) {
+      const messageRoot = node.matches?.("div[id^='message-']")
+        ? node
+        : node.closest?.("div[id^='message-']");
+
+      const stillEditing = !!messageRoot && Array.from(
+        messageRoot.querySelectorAll("textarea")
+      ).some(isMessageEditTextarea);
+
+      if (!node.isConnected || !stillEditing) {
+        restoreEditLayoutNode(node);
+      }
+    }
+  }
+
+  function compactMessageEditNode(node, { allowOverflow = false } = {}) {
+    if (!(node instanceof HTMLElement)) return;
+
+    const style = getComputedStyle(node);
+
+    setEditLayoutStyle(node, "min-height", "0px");
+    setEditLayoutStyle(node, "height", "auto");
+    setEditLayoutStyle(node, "max-height", "none");
+
+    if (allowOverflow) {
+      setEditLayoutStyle(node, "overflow", "visible");
+      setEditLayoutStyle(node, "overflow-y", "visible");
+    }
+
+    const flexGrow = Number.parseFloat(style.flexGrow || "0");
+    if (Number.isFinite(flexGrow) && flexGrow > 0) {
+      setEditLayoutStyle(node, "flex-grow", "0");
+      setEditLayoutStyle(node, "flex-basis", "auto");
+    }
+
+    if (style.marginTop === "auto") {
+      setEditLayoutStyle(node, "margin-top", "0px");
+    }
+
+    if (
+      (style.display.includes("flex") || style.display.includes("grid")) &&
+      /space-between|space-around|space-evenly/.test(style.justifyContent)
+    ) {
+      setEditLayoutStyle(node, "justify-content", "flex-start");
+    }
+
+    if (
+      (style.display.includes("flex") || style.display.includes("grid")) &&
+      /space-between|space-around|space-evenly/.test(style.alignContent)
+    ) {
+      setEditLayoutStyle(node, "align-content", "flex-start");
+    }
+  }
+
   function repairMessageEditAncestors(textarea, wantedHeight) {
     const shell = messageEditShell(textarea);
-    const messageRoot = textarea.closest("div[id^='message-']");
-    let node = textarea.parentElement;
+    const {
+      messageRoot,
+      group: controlsGroup
+    } = findMessageEditControls(textarea);
 
-    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+    if (!messageRoot) return;
+
+    const textareaRect = textarea.getBoundingClientRect();
+    const controlsRect = controlsGroup?.getBoundingClientRect?.() || null;
+    const measuredGap = controlsRect
+      ? Math.max(0, controlsRect.top - textareaRect.bottom)
+      : 0;
+
+    // SpicyChat's mobile edit card can retain a full-height/flex spacer after
+    // the textarea itself has already been resized. That leaves Save/Cancel
+    // several screens below the actual field. Only switch to the aggressive
+    // compact path when the real measured gap is clearly abnormal.
+    const gapIsHuge = measuredGap > 56;
+
+    let node = textarea.parentElement;
+    for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
       if (!(node instanceof HTMLElement)) continue;
-      if (messageRoot && node === messageRoot) break;
 
       const rect = node.getBoundingClientRect();
       const style = getComputedStyle(node);
@@ -361,18 +555,58 @@
         style.overflow === "clip" ||
         style.overflowY === "hidden" ||
         style.overflowY === "clip";
-
       const tooShort = rect.height > 0 && rect.height + 4 < wantedHeight;
 
-      if (clips || tooShort || node === shell) {
+      if (clips || tooShort || node === shell || gapIsHuge) {
         node.dataset.dsMobileMessageEditShell = "1";
-        node.style.setProperty("height", "auto", "important");
-        node.style.setProperty("max-height", "none", "important");
-        node.style.setProperty("overflow", "visible", "important");
-        node.style.setProperty("overflow-y", "visible", "important");
+        compactMessageEditNode(node, {
+          allowOverflow: node !== messageRoot
+        });
       }
 
-      if (node === shell) break;
+      if (node === messageRoot) break;
+    }
+
+    if (gapIsHuge && controlsGroup) {
+      // Collapse the controls side of the flex tree as well. In the current
+      // SpicyChat mobile DOM, an mt-auto/flex-grow ancestor is what creates the
+      // giant blank area seen between the editor and character count/buttons.
+      let controlNode = controlsGroup;
+      for (
+        let depth = 0;
+        controlNode && depth < 8;
+        depth++, controlNode = controlNode.parentElement
+      ) {
+        if (!(controlNode instanceof HTMLElement)) continue;
+
+        controlNode.dataset.dsMobileMessageEditGap = "1";
+        compactMessageEditNode(controlNode);
+
+        if (controlNode === controlsGroup) {
+          setEditLayoutStyle(controlNode, "margin-top", "8px");
+
+          const style = getComputedStyle(controlNode);
+          if (style.position === "absolute" || style.position === "fixed") {
+            setEditLayoutStyle(controlNode, "position", "static");
+            setEditLayoutStyle(controlNode, "top", "auto");
+            setEditLayoutStyle(controlNode, "bottom", "auto");
+          }
+        }
+
+        if (controlNode === shell || controlNode === messageRoot) break;
+      }
+
+      // The message root itself may carry the minimum height that survives
+      // textarea autosizing, so compact it only after the large-gap check.
+      compactMessageEditNode(messageRoot);
+
+      if (!state.editLayoutDiagRoots.has(messageRoot)) {
+        state.editLayoutDiagRoots.add(messageRoot);
+        DS.diagEvent?.("composer-control", "message-edit-gap-compacted", {
+          measuredGap: Math.round(measuredGap),
+          wantedHeight: Math.round(wantedHeight)
+        });
+      }
     }
   }
 
@@ -446,6 +680,8 @@
 
   function normalizeAndroidMessageEditors() {
     if (!androidAppRuntime() || !mobileLayoutActive()) return;
+
+    cleanupStaleMessageEditLayoutFixes();
 
     document.querySelectorAll("textarea").forEach(textarea => {
       if (isMessageEditTextarea(textarea)) {
