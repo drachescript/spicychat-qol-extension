@@ -39,7 +39,7 @@
     es: ["el","la","los","las","que","de","del","con","para","por","una","uno","eres","está","esta","como","pero","cuando","donde","tiene","sus","muy","más","mas","sin","sobre","entre","ella","él","hombre","mujer","chica","chico","cuerpo","suave","pesado","pesada","obsceno","obscena","pervertido","pervertida","extremadamente","caótico","caótica","caotico","caotica","quiere","quiero","quieres","puede","puedo","puedes","tengo","tienes","dormir","contigo","conmigo","temo","miedo","oscuridad","porque","porqué","siempre","nunca","solo","sola","corrupción","corrupcion","femenina","femenino","novio","novia","ciudad","chico","chica","hacia","desde","vida","amor"],
     fr: ["le","la","les","des","une","un","avec","pour","dans","est","vous","tu","elle","il","mais","comme","quand","où","sur","pas","son"],
     it: ["il","lo","la","gli","le","una","uno","con","per","che","sei","è","sono","ma","come","quando","dove","non","suo","sua","nel"],
-    pt: ["o","a","os","as","uma","um","com","para","que","você","voce","está","esta","não","nao","mas","como","quando","onde","seu","sua"],
+    pt: ["o","a","os","as","uma","um","com","para","que","você","voce","vc","está","esta","não","nao","mas","como","quando","onde","seu","sua","versão","versao","português","portugues","feito","feita","fazem","fazer","bebida","competição","competicao"],
     nl: ["de","het","een","en","met","voor","van","dat","dit","niet","jij","je","zij","hij","maar","als","waar","heeft","zijn","haar"],
     pl: ["jest","nie","dla","oraz","ale","jak","kiedy","gdzie","jego","jej","się","sie","ten","ta","to","który","ktory","przez","zawsze","może","moze"],
     tr: ["bir","ve","ile","için","icin","bu","şu","su","değil","degil","sen","siz","o","ama","gibi","zaman","nerede","onun","var","olan"]

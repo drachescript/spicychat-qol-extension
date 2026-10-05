@@ -1890,6 +1890,30 @@ async function readLargeStorageRecords(key, ids = []) {
   return out;
 }
 
+async function removeLargeStorageRecords(key, ids = []) {
+  if (!LARGE_STORAGE_KEYS.has(key)) return { ok: false, key, removed: 0, count: 0 };
+  const startedAt = Date.now();
+  await ensureLargeStorageMigrated(key);
+  const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
+  if (!cleanIds.length) return { ok: true, key, removed: 0, count: Number((await largeStorageMeta(key).catch(() => null))?.count || 0) };
+
+  const db = await openLargeStorageDb();
+  const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
+  const store = tx.objectStore(key);
+  let removed = 0;
+  for (const id of cleanIds) {
+    const existing = await idbRequest(store.get(id)).catch(() => null);
+    if (!existing) continue;
+    store.delete(id);
+    removed += 1;
+  }
+  const count = Number(await idbRequest(store.count()).catch(() => 0)) || 0;
+  tx.objectStore(LARGE_STORAGE_META_STORE).put({ key, migrated: true, updatedAt: Date.now(), count });
+  await idbTransactionDone(tx);
+  qolBackgroundTrace("storage", "indexeddb", { action: "remove-records", key, requested: cleanIds.length, removed, count, durationMs: Date.now() - startedAt }, { level: "deep" });
+  return { ok: true, key, removed, count };
+}
+
 async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
   if (!LARGE_STORAGE_KEYS.has(key)) return { key, rows: [], nextAfterId: "", done: true };
   const startedAt = Date.now();
@@ -2207,6 +2231,33 @@ function tabsGet(tabId) {
 
 function tabsQuery(queryInfo) {
   return new Promise(resolve => chrome.tabs.query(queryInfo, tabs => resolve(tabs || [])));
+}
+
+async function querySpicyChatTabsRobust() {
+  const filtered = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
+  if (filtered.length) return filtered;
+
+  // Some Chromium/Firefox extension-update states have returned an empty
+  // URL-filtered query even while an allowed SpicyChat tab is visibly open.
+  // Fall back to the ordinary tab list and filter locally before diagnostics
+  // claims the browser has zero SpicyChat tabs. Host permission still limits
+  // which URLs the extension can inspect.
+  const all = await tabsQuery({});
+  return all.filter(tab => isSpicyChatUrl(tab?.url || tab?.pendingUrl || ""));
+}
+
+async function getSpicyChatTabSummary() {
+  const tabs = await querySpicyChatTabsRobust();
+  const workers = tabs.filter(isDedicatedWorkerTab);
+  const normal = tabs.filter(tab => !isDedicatedWorkerTab(tab));
+  return {
+    at: Date.now(),
+    totalSpicyTabs: tabs.length,
+    loadedNormal: normal.filter(tab => !tab.discarded).length,
+    discardedNormal: normal.filter(tab => !!tab.discarded).length,
+    workerTabs: workers.length,
+    loadedWorkers: workers.filter(tab => !tab.discarded).length
+  };
 }
 
 function tabsSendMessage(tabId, message) {
@@ -5074,9 +5125,7 @@ async function getOptionsSourceTab() {
     if (tab && isSpicyChatUrl(tab.url)) return tab;
   }
 
-  const tabs = await tabsQuery({
-    url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"]
-  });
+  const tabs = await querySpicyChatTabsRobust();
 
   const candidates = tabs
     .filter(tab => tab?.id)
@@ -5115,7 +5164,7 @@ async function getReachableDiagnosticContext() {
   const stored = await storageGet([OPTIONS_SOURCE_TAB_KEY, HELPER_LIFECYCLE_DIAG_KEY]);
   const storedId = Number(stored[OPTIONS_SOURCE_TAB_KEY]);
   const helperLifecycleDiagnostics = stored[HELPER_LIFECYCLE_DIAG_KEY] || null;
-  const tabs = await tabsQuery({ url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"] });
+  const tabs = await querySpicyChatTabsRobust();
   const allCandidates = tabs.filter(tab => tab?.id);
   const loaded = allCandidates.filter(tab => !tab.discarded);
   const candidates = (loaded.length ? loaded : allCandidates).sort((a, b) => {
@@ -6307,6 +6356,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_LARGE_STORAGE_REMOVE_RECORDS") {
+    const key = String(message?.key || "");
+    removeLargeStorageRecords(key, message?.ids || [])
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ ok: false, key, removed: 0, error: String(error?.message || error || "") }));
+    return true;
+  }
+
   if (message?.type === "DS_LARGE_STORAGE_GET_PAGE") {
     const key = String(message?.key || "");
     readLargeStoragePage(key, { afterId: message?.afterId || "", limit: message?.limit })
@@ -6702,6 +6759,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         characterLimit: Number(data.character_limit || 0)
       }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_GET_SPICYCHAT_TAB_SUMMARY") {
+    getSpicyChatTabSummary()
+      .then(summary => sendResponse({ ok: true, summary }))
+      .catch(error => sendResponse({ ok: false, summary: null, error: String(error?.message || error || "") }));
     return true;
   }
 

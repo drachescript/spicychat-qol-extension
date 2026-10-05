@@ -1,3 +1,10 @@
+## 0.2.34
+- Fixed Context Keeper Keep-button repair so message-toolbar rebuilds restore it even outside the current Message Lane.
+- Improved support diagnostics with partial timeout handling, live SpicyChat tab discovery, and no empty baseline-comparison section when no baseline exists.
+- Expanded fancy-text normalization for Unicode small caps/decorative marks and improved Portuguese detection for short listing descriptions.
+- Added safe blocked-bot storage cleanup: confirmed unavailable bots can drop heavy local copies only after exact remote Archive preservation is verified, while their block/tombstone stays local.
+- Made private Lorebook transfer simpler with clear Download/Import JSON controls directly on Lorebook editors; importing uses SpicyChat's normal entry form and skips same-name entries by default.
+
 ## 0.2.33
 - Fixed Context Keeper message Keep buttons disappearing after SpicyChat rerenders/rebuilds a message toolbar; Keep now lives outside the replaceable quick-action bar and self-repairs on visible/new messages.
 

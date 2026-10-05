@@ -1696,6 +1696,13 @@ async function readLargeStorageStats() {
   return response?.ok && response.stats && typeof response.stats === "object" ? response.stats : {};
 }
 
+async function removeLargeStorageRecords(key, ids = []) {
+  const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
+  if (!LARGE_STORAGE_KEYS.has(String(key || "")) || !cleanIds.length) return { ok: true, key: String(key || ""), removed: 0 };
+  const response = await runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_REMOVE_RECORDS", key: String(key), ids: cleanIds }, 15000);
+  return response?.ok ? response : { ok: false, key: String(key), removed: 0, error: response?.error || "Large-storage record removal failed." };
+}
+
 async function storageGetChecked(keys) {
   const started = typeof performance !== "undefined" ? performance.now() : 0;
   const finish = value => {
@@ -1952,6 +1959,13 @@ function promiseWithSupportTimeout(promise, timeoutMs, fallbackText) {
   return Promise.race([
     Promise.resolve(promise),
     new Promise(resolve => setTimeout(() => resolve(String(fallbackText || `Timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), Math.max(1000, Number(timeoutMs) || 15000)))
+  ]);
+}
+
+function promiseWithValueTimeout(promise, timeoutMs, fallbackValue = null) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallbackValue),
+    new Promise(resolve => setTimeout(() => resolve(fallbackValue), Math.max(250, Number(timeoutMs) || 15000)))
   ]);
 }
 
@@ -4690,6 +4704,33 @@ function normalizeMathematicalLatinFallback(value) {
   return output;
 }
 
+const SMALL_CAP_LATIN_MAP = new Map(Object.entries({
+  "ᴀ":"a", "ʙ":"b", "ᴄ":"c", "ᴅ":"d", "ᴇ":"e", "ꜰ":"f", "ɢ":"g", "ʜ":"h",
+  "ɪ":"i", "ᴊ":"j", "ᴋ":"k", "ʟ":"l", "ᴍ":"m", "ɴ":"n", "ᴏ":"o", "ᴘ":"p",
+  "ʀ":"r", "ꜱ":"s", "ᴛ":"t", "ᴜ":"u", "ᴠ":"v", "ᴡ":"w", "ʏ":"y", "ᴢ":"z"
+}));
+
+function normalizeSmallCapLatin(value) {
+  let output = "";
+  for (const character of String(value || "")) output += SMALL_CAP_LATIN_MAP.get(character) || character;
+  return output;
+}
+
+function stripOrphanCombiningMarks(value) {
+  let output = "";
+  let previousBase = false;
+  for (const character of String(value || "")) {
+    if (/\p{M}/u.test(character)) {
+      if (previousBase) output += character;
+      continue;
+    }
+    output += character;
+    previousBase = /[\p{L}\p{N}]/u.test(character);
+    if (/\s|[\p{P}\p{S}]/u.test(character)) previousBase = false;
+  }
+  return output;
+}
+
 function normalizeTextPreviewValue(value) {
   const settings = readTextNormalizationSettingsFromPage();
   let text = String(value || "");
@@ -4709,6 +4750,7 @@ function normalizeTextPreviewValue(value) {
       } catch {}
     }
     text = normalizeMathematicalLatinFallback(text);
+    text = normalizeSmallCapLatin(text);
   }
 
   if (settings.normalizePunctuation) {
@@ -4726,9 +4768,11 @@ function normalizeTextPreviewValue(value) {
       .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, " ")
       .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥❤💕💖💗💘💝💞💟]/gu, " ")
       .replace(/[꧁꧂◦°⋆]+/gu, " ")
+      .replace(/[ᩚ]/gu, " ")
       .replace(/[\u{13000}-\u{1342F}]/gu, " ")
       .replace(/[\u08E3-\u0902₊₋₌⁺⁻⁼]+/gu, " ")
       .replace(/[|｜¦]+/g, " | ");
+    text = stripOrphanCombiningMarks(text);
   }
 
   return text.replace(/\s+/g, " ").trim();
@@ -6968,6 +7012,10 @@ function normalizeBotUnavailableRecovery(value) {
       profileUrl: String(raw.profileUrl || `https://spicychat.ai/chatbot/${id}`).trim(),
       sources: uniqueClean(Array.isArray(raw.sources) ? raw.sources : []),
       archiveAvailable: !!raw.archiveAvailable,
+      archiveRemotePreserved: !!raw.archiveRemotePreserved,
+      archiveRemotePreservedAt: Number(raw.archiveRemotePreservedAt) || 0,
+      archiveRemotePreservationSource: String(raw.archiveRemotePreservationSource || "").slice(0, 80),
+      localArchivePurgedAt: Number(raw.localArchivePurgedAt) || 0,
       memberships: {
         blocked: !!memberships.blocked,
         notInterested: !!memberships.notInterested,
@@ -9749,6 +9797,9 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
     });
     setStatus(`✓ ${selected.length.toLocaleString()} saved cop${selected.length === 1 ? "y" : "ies"} submitted for Archive review${chunks.length > 1 ? ` in ${chunks.length} bundles` : ""}. ${finalStatus === "pending" ? "Pending approval." : `Status: ${finalStatus}.`}`);
     showSettingsToast(`Archive contribution submitted: ${selected.length.toLocaleString()} saved bot cop${selected.length === 1 ? "y" : "ies"}.`);
+    if (finalStatus === "approved") {
+      setTimeout(() => cleanupArchivedBlockedBots({ automatic: true, maxItems: 25, candidateIds: selected.map(record => record.botId) }).catch(() => {}), 250);
+    }
   } catch (error) {
     console.error("SpicyChat QoL public archive submission failed", error);
     setStatus(`Archive submission failed: ${String(error?.message || error || "unknown error")}`);
@@ -9911,6 +9962,7 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
     });
     setStatus(`✓ ${selected.length.toLocaleString()} saved cop${selected.length === 1 ? "y" : "ies"} queued for archive import${chunks.length > 1 ? ` in ${chunks.length} bundles` : ""}. They'll be processed during the next archive run.`);
     showSettingsToast(`Archive upload queued: ${selected.length.toLocaleString()} saved bot cop${selected.length === 1 ? "y" : "ies"}.`);
+    setTimeout(() => cleanupArchivedBlockedBots({ automatic: true, maxItems: 25, candidateIds: selected.map(record => record.botId) }).catch(() => {}), 250);
   } catch (error) {
     console.error("SpicyChat QoL archive upload failed", error);
     setStatus(`Archive upload failed: ${String(error?.message || error || "unknown error")}`);
@@ -11301,6 +11353,18 @@ async function runBotAvailabilityScan(options = {}) {
     });
     botAvailabilityStopRequested = false;
 
+    // Auto-clean only the blocked IDs touched by this scan, and only after an
+    // exact remotely-preserved archive fingerprint is confirmed. Keep this as
+    // idle/background work so scan completion stays responsive.
+    const blockedCleanupCandidateIds = [...availabilityChangedIds];
+    if (blockedCleanupCandidateIds.length) {
+      setTimeout(() => {
+        nextOptionsIdleSlice(500)
+          .then(() => cleanupArchivedBlockedBots({ automatic: true, maxItems: 25, candidateIds: blockedCleanupCandidateIds }))
+          .catch(() => {});
+      }, 350);
+    }
+
     // Paint the light Bot Status view first. Recovery/archive managers and
     // storage-size accounting are deferred so they cannot all rebuild in the
     // same task immediately after a large scan commits.
@@ -11722,6 +11786,229 @@ function preserveUnavailableRecoveryCopy(idValue, availabilityEntry = {}) {
   return true;
 }
 
+function blockedArchiveRemotePreservation(archiveEntry, availabilityEntry, uploadState, contributionState) {
+  const archive = archiveEntry && typeof archiveEntry === "object" ? archiveEntry : null;
+  const availability = availabilityEntry && typeof availabilityEntry === "object" ? availabilityEntry : null;
+  const id = String(archive?.id || availability?.id || "").trim();
+  if (!archive || !BOT_ID_RE.test(id) || !botStatusArchiveExportSourceAllowed(archive)) {
+    return { safe: false, id, fingerprint: "", source: "" };
+  }
+
+  const record = archiveUploadSavedCopyRecord(archive, availability);
+  const fingerprint = fastArchiveFingerprint(record);
+  if (fingerprint && uploadState?.fingerprints?.[id] === fingerprint) {
+    return { safe: true, id, fingerprint, source: "archive-import-queue" };
+  }
+  if (fingerprint && contributionState?.lastStatus === "approved" && contributionState?.fingerprints?.[id] === fingerprint) {
+    return { safe: true, id, fingerprint, source: "public-archive-approved" };
+  }
+  return { safe: false, id, fingerprint, source: "" };
+}
+
+function compactUnavailableAvailabilityRecord(entryValue, recoveryEntry = null) {
+  const entry = entryValue && typeof entryValue === "object" ? entryValue : {};
+  const id = String(entry.id || "").trim();
+  const now = Date.now();
+  return normalizeBotAvailability({ meta: { [id]: {
+    id,
+    name: entry.name || recoveryEntry?.name || "",
+    creator: entry.creator || recoveryEntry?.creator || "",
+    image: entry.image || "",
+    profileUrl: entry.profileUrl || recoveryEntry?.profileUrl || `https://spicychat.ai/chatbot/${id}`,
+    chatUrl: entry.chatUrl || `https://spicychat.ai/chat/${id}`,
+    sources: uniqueClean(["blocked", "remote-archive", ...(entry.sources || [])]).slice(0, 12),
+    status: "unavailable",
+    reason: String(entry.reason || "Confirmed unavailable.").slice(0, 500),
+    httpStatus: Number(entry.httpStatus) || 0,
+    checkedAt: Number(entry.checkedAt) || now,
+    updateStatus: entry.updateStatus || "unchanged",
+    updateDetectedAt: Number(entry.updateDetectedAt) || 0,
+    baselineAcceptedAt: Number(entry.baselineAcceptedAt) || 0,
+    unavailableEvidenceCount: Math.max(2, Number(entry.unavailableEvidenceCount) || 0),
+    unavailableCandidateAt: Number(entry.unavailableCandidateAt) || 0,
+    unavailableConfirmedAt: Number(entry.unavailableConfirmedAt) || Number(entry.checkedAt) || now,
+    unavailableEvidenceType: String(entry.unavailableEvidenceType || "archive-cleanup").slice(0, 80),
+    recoverySources: uniqueClean([...(entry.recoverySources || []), "remote-archive-cleanup"]),
+    cleanupAppliedAt: Number(entry.cleanupAppliedAt) || now,
+    recoveredAt: 0
+  } } }).meta[id];
+}
+
+function compactBlockedBotTombstone(id, availabilityEntry = null, recoveryEntry = null) {
+  const current = normalizeBotStore(blockedState);
+  if (!current.ids.includes(id)) current.ids.push(id);
+  current.ids = uniqueClean(current.ids).filter(validBotId);
+  current.names = [];
+  const old = current.meta?.[id] && typeof current.meta[id] === "object" ? current.meta[id] : {};
+  const name = cleanAuthoritativeBotName(availabilityEntry?.name || recoveryEntry?.name || old.name || "", id) || id;
+  current.meta = { ...(current.meta || {}), [id]: {
+    id,
+    name,
+    creator: canonicalBotCreator(availabilityEntry?.creator || recoveryEntry?.creator || old.creator || ""),
+    status: "unavailable",
+    archiveRemotePreserved: true,
+    compactedAt: Date.now()
+  } };
+  return current;
+}
+
+function compactBlockedRecoveryEntry(id, availabilityEntry, preservation) {
+  const recoveryState = normalizeBotUnavailableRecovery(botUnavailableRecoveryState);
+  const previous = recoveryState.meta[id] || {};
+  const now = Date.now();
+  recoveryState.meta[id] = normalizeBotUnavailableRecovery({ meta: { [id]: {
+    id,
+    capturedAt: Number(previous.capturedAt) || now,
+    recoveredAt: 0,
+    name: previous.name || availabilityEntry?.name || id,
+    creator: previous.creator || availabilityEntry?.creator || "",
+    image: "",
+    profileUrl: previous.profileUrl || availabilityEntry?.profileUrl || `https://spicychat.ai/chatbot/${id}`,
+    sources: uniqueClean([...(previous.sources || []), "blocked", "remote-archive"]),
+    archiveAvailable: false,
+    archiveRemotePreserved: true,
+    archiveRemotePreservedAt: now,
+    archiveRemotePreservationSource: preservation.source,
+    localArchivePurgedAt: now,
+    memberships: {
+      ...(previous.memberships || {}),
+      blocked: true
+    },
+    records: {
+      blocked: null,
+      notInterested: null,
+      favorite: null,
+      later: null,
+      openedMeta: null,
+      organizer: null,
+      recent: null,
+      creatorWatch: null
+    }
+  } } }).meta[id];
+  botUnavailableRecoveryState = recoveryState;
+  return recoveryState.meta[id];
+}
+
+async function blockedArchiveCleanupCandidates({ candidateIds = null, maxItems = Infinity } = {}) {
+  await ensureSavedListsDataLoaded();
+  await ensureSavedRecoveryDataLoaded();
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.filter(validBotId));
+  const requested = candidateIds == null
+    ? null
+    : new Set((Array.isArray(candidateIds) ? candidateIds : [candidateIds]).map(value => String(value || "").trim()).filter(validBotId));
+  const availability = normalizeBotAvailability(botAvailabilityState).meta;
+  const archives = normalizeBotArchive(botArchiveState).meta;
+  const stored = await storageGet([ARCHIVE_UPLOAD_STATE_KEY, ARCHIVE_CONTRIBUTION_STATE_KEY]);
+  const uploadState = normalizeArchiveUploadState(stored[ARCHIVE_UPLOAD_STATE_KEY]);
+  const contributionState = normalizeArchiveContributionState(stored[ARCHIVE_CONTRIBUTION_STATE_KEY]);
+  const safe = [];
+  let waitingRemote = 0;
+  let unavailableBlocked = 0;
+
+  for (const id of blockedIds) {
+    if (requested && !requested.has(id)) continue;
+    const status = availability[id];
+    const archive = archives[id];
+    if (!isConfirmedUnavailableBotStatus(status) || !archive) continue;
+    unavailableBlocked += 1;
+    const preservation = blockedArchiveRemotePreservation(archive, status, uploadState, contributionState);
+    if (!preservation.safe) {
+      waitingRemote += 1;
+      continue;
+    }
+    safe.push({ id, availability: status, archive, preservation });
+    if (safe.length >= Math.max(1, Number(maxItems) || 1)) break;
+  }
+  return { safe, waitingRemote, unavailableBlocked };
+}
+
+async function refreshBlockedArchiveCleanupStatus() {
+  const status = $("blockedArchiveCleanupStatus");
+  if (!status) return;
+  try {
+    const result = await blockedArchiveCleanupCandidates({ maxItems: 5000 });
+    if (!result.unavailableBlocked) {
+      status.textContent = "No blocked deleted bots with local saved copies need cleanup.";
+    } else if (result.safe.length) {
+      status.textContent = `${result.safe.length.toLocaleString()} remotely preserved blocked cop${result.safe.length === 1 ? "y is" : "ies are"} ready to purge${result.waitingRemote ? ` · ${result.waitingRemote.toLocaleString()} waiting for confirmed Archive preservation` : ""}.`;
+    } else {
+      status.textContent = `${result.waitingRemote.toLocaleString()} blocked deleted cop${result.waitingRemote === 1 ? "y is" : "ies are"} still being kept locally until Archive preservation is confirmed.`;
+    }
+  } catch {
+    status.textContent = "Cleanup status unavailable; local copies were left untouched.";
+  }
+}
+
+async function cleanupArchivedBlockedBots({ automatic = false, maxItems = 25, candidateIds = null } = {}) {
+  const status = $("blockedArchiveCleanupStatus");
+  const result = await blockedArchiveCleanupCandidates({ candidateIds, maxItems });
+  if (!result.safe.length) {
+    if (!automatic && status) {
+      status.textContent = result.waitingRemote
+        ? `${result.waitingRemote.toLocaleString()} blocked deleted cop${result.waitingRemote === 1 ? "y is" : "ies are"} waiting for confirmed Archive preservation; nothing was deleted.`
+        : "No remotely preserved blocked/deleted saved copies are ready to purge.";
+    }
+    return { cleaned: 0, waitingRemote: result.waitingRemote };
+  }
+
+  const ids = result.safe.map(item => item.id);
+  if (!automatic) {
+    const ok = confirm(
+      `Delete the heavy local recovery cop${ids.length === 1 ? "y" : "ies"} for ${ids.length} blocked + confirmed unavailable bot${ids.length === 1 ? "" : "s"}?\n\n` +
+      "QoL verified that the exact current saved snapshot was preserved remotely. The blocked IDs/tombstones stay on this device, so restored bots remain blocked."
+    );
+    if (!ok) return { cleaned: 0, waitingRemote: result.waitingRemote };
+  }
+
+  if (status) status.textContent = automatic ? `Cleaning ${ids.length} safely archived blocked cop${ids.length === 1 ? "y" : "ies"} in the background…` : `Cleaning ${ids.length} remotely preserved blocked cop${ids.length === 1 ? "y" : "ies"}…`;
+  await nextOptionsIdleSlice(180);
+
+  const removed = await removeLargeStorageRecords(BOT_ARCHIVE_KEY, ids);
+  if (!removed?.ok) {
+    if (status) status.textContent = "Local archive cleanup failed; no block records were changed.";
+    return { cleaned: 0, waitingRemote: result.waitingRemote };
+  }
+
+  const availabilityUpdates = {};
+  for (const item of result.safe) {
+    delete botArchiveState?.meta?.[item.id];
+    const recovery = compactBlockedRecoveryEntry(item.id, item.availability, item.preservation);
+    blockedState = compactBlockedBotTombstone(item.id, item.availability, recovery);
+    const compactAvailability = compactUnavailableAvailabilityRecord(item.availability, recovery);
+    botAvailabilityState.meta[item.id] = compactAvailability;
+    availabilityUpdates[item.id] = compactAvailability;
+  }
+
+  const stored = await storageGet(["settings"]);
+  const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+  settings.blockedBotIds = uniqueClean([...(settings.blockedBotIds || []), ...normalizeBotStore(blockedState).ids]).filter(validBotId);
+  settings.blockedBotNames = [];
+
+  botStatusStorageSelfWriteUntil = Date.now() + 8000;
+  const [availabilitySaved, metadataSaved] = await Promise.all([
+    runtimeMessage({ type: "DS_LARGE_STORAGE_MERGE", key: BOT_AVAILABILITY_KEY, entries: availabilityUpdates }),
+    storageSet({
+      settings,
+      [BLOCKED_BOTS_KEY]: blockedState,
+      [BOT_UNAVAILABLE_RECOVERY_KEY]: botUnavailableRecoveryState
+    })
+  ]);
+  if (!availabilitySaved?.ok || !metadataSaved) {
+    if (status) status.textContent = "Heavy copies were safely removed, but compact cleanup metadata could not be fully saved. Blocks remain intact.";
+    return { cleaned: ids.length, waitingRemote: result.waitingRemote, partial: true };
+  }
+
+  invalidateDuplicateCache();
+  if (!automatic) {
+    renderBotAvailability({ skipRecoveryRerender: true });
+    renderBotManager("blocked");
+    refreshStorageUsageIfVisible();
+  }
+  if (status) status.textContent = `Cleaned ${ids.length.toLocaleString()} heavy local cop${ids.length === 1 ? "y" : "ies"}; blocked tombstones kept${result.waitingRemote ? ` · ${result.waitingRemote.toLocaleString()} still waiting for Archive preservation` : ""}.`;
+  if (!automatic) showSettingsToast(`Storage cleanup finished: ${ids.length.toLocaleString()} archived blocked bot cop${ids.length === 1 ? "y" : "ies"} purged locally; blocks kept.`);
+  return { cleaned: ids.length, waitingRemote: result.waitingRemote };
+}
+
 async function cleanConfirmedUnavailableBots() {
   await ensureSavedListsDataLoaded();
   const unavailable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
@@ -11734,8 +12021,8 @@ async function cleanConfirmedUnavailableBots() {
   const ids = new Set(unavailable.map(entry => entry.id));
   if (!confirm(
     `Archive + clean ${ids.size} confirmed unavailable/deleted bot${ids.size === 1 ? "" : "s"} from active QoL lists?\n\n` +
-    "QoL will save a recovery ledger first. Saved bot copies, old chat/history data, and recommendation-feedback history are kept. " +
-    "If a cleaned bot becomes available again, QoL can restore the memberships it removed."
+    "QoL will save a recovery ledger first. Blocked IDs stay blocked; saved bot copies, old chat/history data, and recommendation-feedback history are kept. " +
+    "If a cleaned bot becomes available again, QoL can restore the other memberships it removed."
   )) return;
 
   // Phase 1: build and VERIFY a compact recovery ledger before removing any ID
@@ -11777,9 +12064,9 @@ async function cleanConfirmedUnavailableBots() {
     }
   }
 
-  // Phase 2: remove only active memberships. Historical evidence stays intact.
+  // Phase 2: remove only disposable active memberships. Blocked IDs are a
+  // durable user decision and stay blocked even while the bot is unavailable.
   // In particular, Less Like / Dislike history is NEVER erased by cleanup.
-  blockedState = removeBotIdsFromStore(blockedState, ids);
   notInterestedState = removeBotIdsFromStore(notInterestedState, ids);
   favoriteBotState = removeBotIdsFromStore(favoriteBotState, ids);
   laterBotState = removeBotIdsFromStore(laterBotState, ids);
@@ -11819,7 +12106,7 @@ async function cleanConfirmedUnavailableBots() {
 
   const stored = await storageGet(["settings"]);
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-  settings.blockedBotIds = uniqueClean(settings.blockedBotIds || []).filter(id => !ids.has(id) && validBotId(id));
+  settings.blockedBotIds = uniqueClean([...(settings.blockedBotIds || []), ...normalizeBotStore(blockedState).ids]).filter(validBotId);
   settings.blockedBotNames = [];
 
   const availability = normalizeBotAvailability(botAvailabilityState);
@@ -11887,7 +12174,7 @@ async function cleanConfirmedUnavailableBots() {
   }, 120);
 
   showSettingsToast(
-    `Cleaned ${ids.size} unavailable bot${ids.size === 1 ? "" : "s"} from active lists. ` +
+    `Cleaned ${ids.size} unavailable bot${ids.size === 1 ? "" : "s"} from other active lists; blocked IDs were kept. ` +
     `Recovery ledger saved${newArchiveCopies ? ` · ${newArchiveCopies} new saved cop${newArchiveCopies === 1 ? "y" : "ies"} recovered` : ""}.`
   );
 }
@@ -12209,11 +12496,16 @@ async function clearBotArchive() {
 }
 
 function setupBotAvailabilityControls() {
+  const maintenanceCard = document.querySelector(".bot-status-maintenance-card");
+  maintenanceCard?.addEventListener("toggle", () => {
+    if (maintenanceCard.open) refreshBlockedArchiveCleanupStatus().catch(() => {});
+  });
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
+  $("cleanArchivedBlockedBotsNow")?.addEventListener("click", () => cleanupArchivedBlockedBots({ automatic: false, maxItems: 5000 }).catch(() => showSettingsToast("Could not clean archived blocked bots.")));
   $("savedBotInfoSearch")?.addEventListener("input", event => {
     savedBotInfoUiState.query = event?.target?.value || "";
     savedBotInfoUiState.visible = 10;
@@ -21590,16 +21882,32 @@ async function collectDataHealth({ lightweight = false } = {}) {
     ? BACKUP_STORAGE_KEYS.filter(key => !LARGE_STORAGE_KEYS.has(key) && ![SOUNDSCAPE_AUDIO_KEY, CHAT_BACKGROUNDS_KEY].includes(key))
     : BACKUP_STORAGE_KEYS;
   const keys = [...new Set([...backupKeys, RECOVERY_SNAPSHOT_META_KEY, CHATBOT_LOREBOOK_LINKS_KEY, LOCAL_CHANGE_HISTORY_KEY, CARD_TOKEN_CACHE_KEY])];
-  const [checked, totalBytes, largeStats] = await Promise.all([
-    storageGetChecked(keys),
-    storageBytesInUse(null),
-    readLargeStorageStats().catch(() => ({}))
+  const [checkedValue, totalBytesValue, largeStatsValue] = await Promise.all([
+    lightweight
+      ? promiseWithValueTimeout(storageGetChecked(keys), 3200, { ok: false, data: {}, error: "Lightweight local-data check timed out." })
+      : storageGetChecked(keys),
+    lightweight ? promiseWithValueTimeout(storageBytesInUse(null), 1800, null) : storageBytesInUse(null),
+    lightweight ? promiseWithValueTimeout(readLargeStorageStats(), 2200, null) : readLargeStorageStats().catch(() => ({}))
   ]);
+  const checked = checkedValue && typeof checkedValue === "object" ? checkedValue : { ok: false, data: {}, error: "Local-data check unavailable." };
+  const totalBytes = Number(totalBytesValue);
+  const largeStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
   const rows = [];
-  if (!checked.ok) return { ok: false, rows: [{ state: "bad", label: "Browser storage", detail: checked.error || "Could not read local storage." }], summaryText: `Browser storage read failed: ${checked.error || "unknown error"}` };
-  const result = checked.data;
-  rows.push({ state: "ok", label: "Browser storage", detail: `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} in chrome.storage.local` : ""}.` });
-  rows.push({ state: "ok", label: "Large-data IndexedDB", detail: `${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records.` });
+  const result = checked.data && typeof checked.data === "object" ? checked.data : {};
+  rows.push({
+    state: checked.ok ? "ok" : "warn",
+    label: "Browser storage",
+    detail: checked.ok
+      ? `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} in chrome.storage.local` : " · size check timed out"}.`
+      : `${checked.error || "Could not read the lightweight local-data summary."} Other health checks continued.`
+  });
+  rows.push({
+    state: largeStatsValue ? "ok" : "warn",
+    label: "Large-data IndexedDB",
+    detail: largeStatsValue
+      ? `${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records.`
+      : "Count check timed out; the rest of Data Health continued without loading the large stores."
+  });
 
   if (lightweight) {
     rows.push({ state: "ok", label: "Backup schema", detail: `Schema v${BACKUP_FORMAT_VERSION} supported; the combined support report skips the expensive full backup round-trip.` });
@@ -21615,7 +21923,11 @@ async function collectDataHealth({ lightweight = false } = {}) {
   }
 
   let snapshotMeta = normalizeRecoverySnapshotMeta(result[RECOVERY_SNAPSHOT_META_KEY]);
-  if (!snapshotMeta) snapshotMeta = await readRecoverySnapshotMeta().catch(() => null);
+  if (!snapshotMeta) {
+    snapshotMeta = lightweight
+      ? await promiseWithValueTimeout(readRecoverySnapshotMeta(), 1200, null)
+      : await readRecoverySnapshotMeta().catch(() => null);
+  }
   rows.push({ state: "ok", label: "Recovery snapshot", detail: snapshotMeta
     ? (snapshotMeta.createdAt ? `Available from ${creatorBackupDate(snapshotMeta.createdAt)} (${snapshotMeta.reason || "manual snapshot"}).` : "Available (legacy snapshot; details load on demand).")
     : "None saved. This is normal until a protected import/cleanup or manual snapshot creates one." });
@@ -21936,36 +22248,48 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building diagnostic info...";
 
-  const [result, context, bytes, largeStorageStats, recoverySnapshotMeta] = await Promise.all([
-    storageGet([
-      "settings",
-      OPENED_KEY,
-      BLOCKED_BOTS_KEY,
-      NOT_INTERESTED_KEY,
-      FAVORITE_CREATORS_KEY,
-      FOLLOWED_CREATORS_KEY,
-      FAVORITE_BOTS_KEY,
-      LATER_BOTS_KEY,
-      BOT_ORGANIZER_KEY,
-      CHAT_ORGANIZER_KEY,
-      PERSONAS_KEY,
-      LEGACY_PERSONAS_KEY,
-      PERSONA_ORG_KEY,
-      OOC_TEMPLATES_KEY,
-      GENERATION_PROFILES_KEY,
-      SMART_FILTER_PRESETS_KEY,
-      SMART_FILTER_PINNED_KEY,
-      BOT_EDITOR_DRAFT_HISTORY_KEY,
-      CHAT_BOOKMARKS_KEY,
-      SAI_TOOLKIT_PRESENCE_KEY,
-      SPICYCHAT_BETA_CAPABILITIES_KEY,
-      "cardTokenFetchDiagnosticsV1"
-    ]),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000),
-    storageBytesInUse(null),
-    readLargeStorageStats().catch(() => ({})),
-    readRecoverySnapshotMeta().catch(() => null)
+  const diagnosticStorageKeys = [
+    "settings",
+    OPENED_KEY,
+    BLOCKED_BOTS_KEY,
+    NOT_INTERESTED_KEY,
+    FAVORITE_CREATORS_KEY,
+    FOLLOWED_CREATORS_KEY,
+    FAVORITE_BOTS_KEY,
+    LATER_BOTS_KEY,
+    BOT_ORGANIZER_KEY,
+    CHAT_ORGANIZER_KEY,
+    PERSONAS_KEY,
+    LEGACY_PERSONAS_KEY,
+    PERSONA_ORG_KEY,
+    OOC_TEMPLATES_KEY,
+    GENERATION_PROFILES_KEY,
+    SMART_FILTER_PRESETS_KEY,
+    SMART_FILTER_PINNED_KEY,
+    BOT_EDITOR_DRAFT_HISTORY_KEY,
+    CHAT_BOOKMARKS_KEY,
+    SAI_TOOLKIT_PRESENCE_KEY,
+    SPICYCHAT_BETA_CAPABILITIES_KEY,
+    "cardTokenFetchDiagnosticsV1"
+  ];
+
+  // Support diagnostics must degrade per source instead of losing the whole
+  // section because one large/local store stalls after an extension restart.
+  const [resultValue, context, bytesValue, largeStatsValue, recoverySnapshotMeta] = await Promise.all([
+    promiseWithValueTimeout(storageGet(diagnosticStorageKeys), 3500, null),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    promiseWithValueTimeout(storageBytesInUse(null), 2000, null),
+    promiseWithValueTimeout(readLargeStorageStats(), 2500, null),
+    promiseWithValueTimeout(readRecoverySnapshotMeta(), 2000, null)
   ]);
+  const result = resultValue && typeof resultValue === "object" ? resultValue : {};
+  const bytes = Number(bytesValue);
+  const largeStorageStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
+  const partialSources = [];
+  if (!resultValue) partialSources.push("local dataset summary");
+  if (!Number.isFinite(bytes)) partialSources.push("storage size");
+  if (!largeStatsValue) partialSources.push("large-data counts");
+
   const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
   const enabledFeatures = OPTIONAL_FEATURE_KEYS.filter(key => settings[key] === true);
   const personas = Array.isArray(result[PERSONAS_KEY]) ? result[PERSONAS_KEY] : result[LEGACY_PERSONAS_KEY];
@@ -22013,7 +22337,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Smart filter presets: ${normalizeSmartFilterPresets(result[SMART_FILTER_PRESETS_KEY]).length}; pinned: ${normalizeSmartFilterPins(result[SMART_FILTER_PINNED_KEY], result[SMART_FILTER_PRESETS_KEY]).length}`,
     `Editor draft snapshots: ${Object.values(normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]).entries).reduce((n, list) => n + list.length, 0)}`,
     `Message bookmarks: ${Object.values(result[CHAT_BOOKMARKS_KEY] || {}).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0)}`,
-    `Enabled optional features (${enabledFeatures.length}): ${enabledFeatures.join(", ") || "none"}`
+    `Enabled optional features (${enabledFeatures.length}): ${enabledFeatures.join(", ") || "none"}`,
+    ...(partialSources.length ? [`Partial diagnostics: ${partialSources.join(", ")} timed out or were unavailable; the rest of this section is still valid.`] : [])
   ];
 
   const runtimeLog = Array.isArray(context?.pageDiagnostics?.runtimeLog) ? context.pageDiagnostics.runtimeLog.slice(-60) : [];
@@ -22135,10 +22460,12 @@ function performanceWarningLines(context, settings) {
 async function copyPerformanceReport({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building performance report...";
-  const [stored, context] = await Promise.all([
+  const [stored, context, liveTabValue] = await Promise.all([
     storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000)
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1500)
   ]);
+  const liveTabSummary = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
   const manifest = chrome.runtime.getManifest?.() || {};
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
@@ -22164,7 +22491,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
     (() => { const c = context?.pageDiagnostics?.runtimeContext || {}; return `Runtime context: visibility ${c.visibilityState || "unknown"}; focus ${c.focused == null ? "unknown" : (c.focused ? "yes" : "no")}; mounted ${Number(c.mountedMessages || runtime.loadedChatMessages || 0)}; DOM ${Number(c.domNodes || 0)}; heap ${Number(c.heapBytes || 0) ? `${Math.round(Number(c.heapBytes) / 1048576)} MB` : "n/a"}; Long Task 10s ${Number(c.recentLongTaskMs10s || 0)} ms; 30s ${Number(c.recentLongTaskMs30s || 0)} ms`; })(),
     `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
-    (() => { const a = stored[AUTO_AFK_STATUS_KEY] || {}; return `SpicyChat tabs: ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${a.lowMemoryEnabled ? `on, limit ${Number(a.awakeLimit || 5)}, LRU unloaded ${Number(a.lruDiscarded || 0)} last check` : "off"}`; })(),
+    (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
     `Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots processed in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes deferred; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`,
@@ -22258,19 +22585,25 @@ async function buildPerformanceSelfCheckText() {
 
 async function buildFastSupportSnapshot() {
   const manifest = chrome.runtime.getManifest?.() || {};
-  const quickStored = await promiseWithSupportTimeout(
-    storageGet(["settings", AUTO_AFK_STATUS_KEY]),
-    1500,
-    null
-  );
-  const bytesValue = await promiseWithSupportTimeout(storageBytesInUse(null), 1500, null);
-  const largeStatsValue = await promiseWithSupportTimeout(readLargeStorageStats(), 1500, null);
+  const [quickStored, bytesValue, largeStatsValue, liveTabValue] = await Promise.all([
+    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY]), 1500, null),
+    promiseWithValueTimeout(storageBytesInUse(null), 1500, null),
+    promiseWithValueTimeout(readLargeStorageStats(), 1500, null),
+    promiseWithValueTimeout(runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1200), 1400, null)
+  ]);
   const stored = quickStored && typeof quickStored === "object" ? quickStored : {};
   const largeStatsReady = !!(largeStatsValue && typeof largeStatsValue === "object");
   const largeStats = largeStatsReady ? largeStatsValue : {};
   const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
   const afk = stored[AUTO_AFK_STATUS_KEY] || {};
+  const liveTabs = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
+  const tabState = liveTabs || afk;
   const bytes = Number(bytesValue);
+  const tabLabel = liveTabs
+    ? "Live tab check"
+    : afk.at
+      ? `Last tab scan ${new Date(Number(afk.at)).toISOString()}`
+      : "Tab check unavailable";
   return [
     "SpicyChat QoL fast support snapshot",
     `Generated: ${new Date().toISOString()}`,
@@ -22282,44 +22615,47 @@ async function buildFastSupportSnapshot() {
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,
     largeStatsReady
       ? `Large-data IndexedDB: ${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records`
-      : "Large-data IndexedDB: fast check timed out; full support sections can finish migration/counting",
+      : "Large-data IndexedDB: fast check timed out; full support sections continue independently",
     `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} normal tabs awake` : "off"}`,
-    `Last tab scan: ${afk.at ? new Date(Number(afk.at)).toISOString() : "none"}; ${Number(afk.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(afk.loadedNormal || 0)} normal loaded; ${Number(afk.discardedNormal || 0)} normal unloaded; ${Number(afk.workerTabs || 0)} workers`,
+    `${tabLabel}: ${Number(tabState.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(tabState.loadedNormal || 0)} normal loaded; ${Number(tabState.discardedNormal || 0)} normal unloaded; ${Number(tabState.workerTabs || 0)} workers`,
     "This snapshot is deliberately lightweight and should still appear when a content runtime or a heavier support section is stuck."
   ].join("\n");
 }
 
 async function buildAllSupportInfo() {
-  const sectionTimeoutMs = 6500;
+  const sectionTimeoutMs = 7000;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
     sectionTimeoutMs,
     `${label} timed out after ${Math.round(sectionTimeoutMs / 1000)} seconds. Other support sections still continued.`
   );
 
-  // Start everything together. The old sequential builder could spend 40+
-  // seconds waiting on four independent failures even after per-section caps.
+  // Diagnostics and lightweight Data Health have their own per-source caps, so
+  // they return useful partial results instead of letting one slow store erase
+  // the entire section. Independent report sections still run in parallel.
   const fastSnapshotPromise = buildFastSupportSnapshot().catch(error =>
     `Fast snapshot could not be built: ${error?.message || String(error || "unknown error")}`
   );
-  const diagnosticPromise = timed(copyDiagnostics({ returnOnly: true }), "Diagnostic info")
+  const diagnosticPromise = copyDiagnostics({ returnOnly: true })
     .catch(error => `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`);
   const performancePromise = timed(copyPerformanceReport({ returnOnly: true }), "Performance report")
     .catch(error => `Performance report could not be built: ${error?.message || String(error || "unknown error")}`);
   const selfCheckPromise = timed(buildPerformanceSelfCheckText(), "Performance self-check")
     .catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
-  const healthPromise = timed((async () => {
+  const healthPromise = (async () => {
     const health = await collectDataHealth({ lightweight: true });
     return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
-  })(), "Data health").catch(error => `Data health check failed: ${error?.message || String(error)}`);
-  const baselinePromise = timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison")
-    .catch(() => "No performance baseline comparison available.");
+  })().catch(error => `Data health check failed: ${error?.message || String(error)}`);
+  const baselinePromise = promiseWithValueTimeout(storageGet([PERFORMANCE_BASELINE_KEY]), 1500, {})
+    .then(stored => stored?.[PERFORMANCE_BASELINE_KEY]
+      ? timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison").catch(() => "")
+      : "");
 
   const [fastSnapshot, diagnosticText, performanceText, selfCheckText, healthValue, baselineText] =
     await Promise.all([fastSnapshotPromise, diagnosticPromise, performancePromise, selfCheckPromise, healthPromise, baselinePromise]);
   lastPerformanceSelfCheckText = selfCheckText;
 
-  return [
+  const sections = [
     "SpicyChat QoL support info",
     `Generated: ${new Date().toISOString()}`,
     "Paste or attach this whole report when someone asks for QoL diagnostics/support info.",
@@ -22338,11 +22674,12 @@ async function buildAllSupportInfo() {
     selfCheckText,
     "",
     "===== DATA HEALTH =====",
-    healthValue,
-    "",
-    "===== PERFORMANCE BASELINE COMPARISON =====",
-    baselineText
-  ].join("\n");
+    healthValue
+  ];
+  if (String(baselineText || "").trim()) {
+    sections.push("", "===== PERFORMANCE BASELINE COMPARISON =====", baselineText);
+  }
+  return sections.join("\n");
 }
 
 async function copyAllSupportInfo() {

@@ -873,37 +873,20 @@
     }
   }
 
-  function ensureMessageButtons() {
-    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) {
-      if (DS.state.contextKeeperWasActive) {
-        document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => button.remove());
-        document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-context-keeper-ready]`).forEach(root => delete root.dataset.dsContextKeeperReady);
-      }
-      DS.state.contextKeeperWasActive = false;
-      return;
-    }
-    DS.state.contextKeeperWasActive = true;
+  function ensureMessageButtonForRoot(root) {
+    if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
+    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) return false;
 
-    // First process genuinely new/unready messages. Then include the current
-    // dirty/visible/newest message roots WITHOUT filtering by the ready marker.
-    // React can replace only a message toolbar, removing extension children
-    // while the outer message root (and its ready marker) survives.
-    const pending = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-context-keeper-ready", readyValue: "1", newest: 24, margin: 1400 })
-      || Array.from(document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`));
-    const repair = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 12, margin: 1000 })
-      || Array.from(document.querySelectorAll(MESSAGE_SELECTOR)).slice(-12);
-    const roots = Array.from(new Set([...(pending || []), ...(repair || [])]));
+    // React can leave an obsolete Keep node behind while replacing the native
+    // toolbar. Keep exactly one live button attached to the current dropdown
+    // holder and discard stale duplicates from older toolbar instances.
+    const buttons = Array.from(root.querySelectorAll(`.${BUTTON_CLASS}`));
+    let button = buttons.find(candidate => candidate.isConnected) || null;
+    buttons.forEach(candidate => { if (candidate !== button) candidate.remove(); });
 
-    roots.forEach(root => {
-      let button = root.querySelector(`.${BUTTON_CLASS}`);
-      if (button) {
-        placeMessageKeepButton(root, button);
-        root.dataset.dsContextKeeperReady = "1";
-        return;
-      }
-
+    if (!button) {
       const text = messageText(root);
-      if (!text) return;
+      if (!text) return false;
       button = make("button", { type: "button", className: BUTTON_CLASS, title: "Remember this message for Context Keeper" }, "Keep");
       button.addEventListener("click", async event => {
         event.preventDefault();
@@ -920,9 +903,34 @@
         button.classList.add("ds-context-kept");
         setTimeout(() => { if (document.contains(button)) button.textContent = "Keep"; }, 1600);
       });
-      placeMessageKeepButton(root, button);
-      root.dataset.dsContextKeeperReady = "1";
-    });
+    }
+
+    placeMessageKeepButton(root, button);
+    root.dataset.dsContextKeeperReady = "1";
+    return true;
+  }
+
+  function ensureMessageButtons() {
+    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) {
+      if (DS.state.contextKeeperWasActive) {
+        document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => button.remove());
+        document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-context-keeper-ready]`).forEach(root => delete root.dataset.dsContextKeeperReady);
+      }
+      DS.state.contextKeeperWasActive = false;
+      return;
+    }
+    DS.state.contextKeeperWasActive = true;
+
+    // First process genuinely new/unready messages. Then repair a small
+    // visible/newest set even while Message Lane is active. The repair pass
+    // must explicitly bypass lane restriction: toolbar-only React rerenders
+    // can remove Keep from a message that is not one of the current dirty roots.
+    const pending = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-context-keeper-ready", readyValue: "1", newest: 24, margin: 1400 })
+      || Array.from(document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-context-keeper-ready='1'])`));
+    const repair = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 12, margin: 1000, respectLane: false })
+      || Array.from(document.querySelectorAll(MESSAGE_SELECTOR)).slice(-12);
+    const roots = Array.from(new Set([...(pending || []), ...(repair || [])]));
+    roots.forEach(ensureMessageButtonForRoot);
   }
 
   // Small repair watchdog for toolbar-only React rerenders. It checks only the
@@ -945,6 +953,7 @@
 
   DS.openContextKeeper = openManager;
   DS.addContextKeeperDetails = addManyDetails;
+  DS.ensureContextKeeperMessageButtonForRoot = ensureMessageButtonForRoot;
   DS.applyContextKeeper = function applyContextKeeper() {
     ensureMessageButtons();
     scheduleAutomaticCapture();

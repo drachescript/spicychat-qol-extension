@@ -311,6 +311,12 @@
     return runMenuAction(sourceButton, action.label);
   }
 
+  function repairContextKeeperForDropdown(dropdownButton) {
+    const root = getMessageRoot(dropdownButton);
+    if (!root) return;
+    try { DS.ensureContextKeeperMessageButtonForRoot?.(root); } catch {}
+  }
+
   function ensureQuickActions(dropdownButton, settingsSignature) {
     if (!dropdownButton || dropdownButton.closest("#ds-qol-panel, .ds-message-quick-actions")) return;
 
@@ -331,6 +337,7 @@
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
       const root = getMessageRoot(dropdownButton);
       quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar: null, hasActions: false });
+      repairContextKeeperForDropdown(dropdownButton);
       return;
     }
 
@@ -346,6 +353,7 @@
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
       const root = getMessageRoot(dropdownButton);
       quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
+      repairContextKeeperForDropdown(dropdownButton);
       return;
     }
 
@@ -379,6 +387,7 @@
     DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
     const root = getMessageRoot(dropdownButton);
     quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
+    repairContextKeeperForDropdown(dropdownButton);
   }
 
   function cleanup() {

@@ -1164,6 +1164,47 @@
     anchor.append(btn);
   }
 
+  DS.importLorebookEntryBatch = async function importLorebookEntryBatch(rawEntries, options = {}) {
+    const route = routeInfo();
+    if (!route?.id) throw new Error("Open the Lorebook Entries tab before importing a Lorebook backup.");
+    if (busy) throw new Error("Another Lorebook import is already running.");
+
+    const duplicatePolicy = ["skip", "replace", "merge", "duplicate"].includes(String(options.duplicatePolicy || ""))
+      ? String(options.duplicatePolicy)
+      : "skip";
+    const source = Array.isArray(rawEntries) ? rawEntries : Object.values(rawEntries || {});
+    const items = source.map((entry, index) => ({
+      name: clean(entry?.name || `Imported entry ${index + 1}`, 50),
+      content: clean(entry?.content, 24000),
+      keywords: unique(Array.isArray(entry?.keywords) ? entry.keywords : String(entry?.keywords || "").split(/[,;\n]/g), 12)
+    })).filter(item => item.name && item.content);
+    if (!items.length) throw new Error("That file does not contain any usable Lorebook entries.");
+
+    const counts = { total: items.length, created: 0, skipped: 0, replaced: 0, merged: 0, duplicated: 0, failed: 0 };
+    busy = true;
+    try {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        try {
+          const result = await importOne(item, duplicatePolicy);
+          const action = String(result?.action || "");
+          if (Object.prototype.hasOwnProperty.call(counts, action)) counts[action] += 1;
+        } catch (error) {
+          counts.failed += 1;
+          if (typeof options.onError === "function") {
+            try { options.onError(error, item, index); } catch {}
+          }
+        }
+        if (typeof options.onProgress === "function") {
+          try { options.onProgress({ ...counts, completed: index + 1, current: item.name }); } catch {}
+        }
+      }
+    } finally {
+      busy = false;
+    }
+    return counts;
+  };
+
   DS.removeWikiLorebookImporter = function removeWikiLorebookImporter() {
     document.getElementById(BUTTON_ID)?.remove();
     document.getElementById(MODAL_ID)?.remove();

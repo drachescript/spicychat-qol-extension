@@ -1952,6 +1952,33 @@
     return output;
   }
 
+  const SMALL_CAP_LATIN_MAP = new Map(Object.entries({
+    "ᴀ":"a", "ʙ":"b", "ᴄ":"c", "ᴅ":"d", "ᴇ":"e", "ꜰ":"f", "ɢ":"g", "ʜ":"h",
+    "ɪ":"i", "ᴊ":"j", "ᴋ":"k", "ʟ":"l", "ᴍ":"m", "ɴ":"n", "ᴏ":"o", "ᴘ":"p",
+    "ʀ":"r", "ꜱ":"s", "ᴛ":"t", "ᴜ":"u", "ᴠ":"v", "ᴡ":"w", "ʏ":"y", "ᴢ":"z"
+  }));
+
+  function normalizeSmallCapLatin(value) {
+    let output = "";
+    for (const character of String(value || "")) output += SMALL_CAP_LATIN_MAP.get(character) || character;
+    return output;
+  }
+
+  function stripOrphanCombiningMarks(value) {
+    let output = "";
+    let previousBase = false;
+    for (const character of String(value || "")) {
+      if (/\p{M}/u.test(character)) {
+        if (previousBase) output += character;
+        continue;
+      }
+      output += character;
+      previousBase = /[\p{L}\p{N}]/u.test(character);
+      if (/\s|[\p{P}\p{S}]/u.test(character)) previousBase = false;
+    }
+    return output;
+  }
+
   DS.normalizeTextForMatching = function normalizeTextForMatching(value, options = {}) {
     const settings = DS.state?.settings || DS.DEFAULT_SETTINGS || {};
     const enabled = settings.textNormalizationEnabled !== false;
@@ -1976,6 +2003,7 @@
       }
 
       text = normalizeMathematicalLatinFallback(text);
+      text = normalizeSmallCapLatin(text);
     }
 
     if (settings.normalizePunctuation !== false) {
@@ -1993,12 +2021,14 @@
         .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, " ")
         .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥❤💕💖💗💘💝💞💟]/gu, " ")
         .replace(/[꧁꧂◦°⋆]+/gu, " ")
+        .replace(/[ᩚ]/gu, " ")
         // Decorative title suffixes often mix historic glyph blocks, combining
         // marks and sub/superscript operators (for example 𓏲࣪₊). Only strip
         // these when the user explicitly enables decorative-symbol cleanup.
         .replace(/[\u{13000}-\u{1342F}]/gu, " ")
         .replace(/[\u08E3-\u0902₊₋₌⁺⁻⁼]+/gu, " ")
         .replace(/[|｜¦]+/g, " | ");
+      text = stripOrphanCombiningMarks(text);
     }
 
     return text;

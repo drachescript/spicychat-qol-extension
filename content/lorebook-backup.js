@@ -17,6 +17,8 @@
   const EXPORT_HELPER_PARAM = "dsQolLorebookExport";
   const EXPORT_TARGET_PARAM = "dsQolLorebookTarget";
   const EXPORT_JOB_PREFIX = "dsLorebookExportJob:";
+  const IMPORT_SESSION_KEY = "dsQolPendingLorebookImportV1";
+  let importRunning = false;
 
   function clean(value, max = 24000) {
     return String(value ?? "")
@@ -547,6 +549,107 @@
     }
   }
 
+  function parseLorebookImportPayload(raw) {
+    const payload = raw && typeof raw === "object" ? raw : null;
+    if (!payload) throw new Error("That file is not a JSON Lorebook backup.");
+    const book = payload.lorebook && typeof payload.lorebook === "object" ? payload.lorebook : payload;
+    const rawEntries = Array.isArray(book.entries) ? book.entries : Object.values(book.entries || {});
+    const entries = rawEntries.map((entry, index) => ({
+      name: clean(entry?.name || `Imported entry ${index + 1}`, 500),
+      content: clean(entry?.content, 24000),
+      keywords: unique(Array.isArray(entry?.keywords) ? entry.keywords : String(entry?.keywords || "").split(/[,;\n]/g), 12)
+    })).filter(entry => entry.name && entry.content);
+    if (!entries.length) throw new Error("That file does not contain any Lorebook entries to import.");
+    return {
+      name: clean(book.name || payload.name || "Imported Lorebook", 500),
+      entries
+    };
+  }
+
+  function readJsonFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("No Lorebook file was selected."));
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("The Lorebook file could not be read."));
+      reader.onload = () => {
+        try { resolve(JSON.parse(String(reader.result || ""))); }
+        catch { reject(new Error("That file is not valid JSON.")); }
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  async function runLorebookImport(payload, info) {
+    if (importRunning) return false;
+    if (info?.page !== "entries") throw new Error("Open the Lorebook Entries tab before importing.");
+    if (typeof DS.importLorebookEntryBatch !== "function") throw new Error("The Lorebook entry importer is not available on this page.");
+    const count = payload.entries.length;
+    const sourceName = payload.name || "this Lorebook";
+    if (!confirm(`Import ${count} entr${count === 1 ? "y" : "ies"} from “${sourceName}” into this Lorebook?\n\nExisting entries with the same name will be skipped, so this import will not silently overwrite them.`)) {
+      setStatus("Lorebook import cancelled.");
+      return false;
+    }
+
+    importRunning = true;
+    try {
+      setStatus(`Importing 0 / ${count} entries…`);
+      const result = await DS.importLorebookEntryBatch(payload.entries, {
+        duplicatePolicy: "skip",
+        onProgress(progress) {
+          setStatus(`Importing ${progress.completed} / ${progress.total} entries…`);
+        }
+      });
+      await saveCapture("Imported Lorebook JSON").catch(() => false);
+      const parts = [];
+      if (result.created) parts.push(`${result.created} added`);
+      if (result.skipped) parts.push(`${result.skipped} already existed`);
+      if (result.failed) parts.push(`${result.failed} failed`);
+      setStatus(`Import finished: ${parts.join(" · ") || "no changes"}.`);
+      setTimeout(() => refreshPanelStatus().catch(() => {}), 3500);
+      return true;
+    } finally {
+      importRunning = false;
+    }
+  }
+
+  function storePendingLorebookImport(payload, info) {
+    const record = {
+      version: 1,
+      targetId: info.id,
+      queuedAt: Date.now(),
+      payload
+    };
+    try { sessionStorage.setItem(IMPORT_SESSION_KEY, JSON.stringify(record)); }
+    catch { throw new Error("The Lorebook import is too large to carry to the Entries tab in this browser session."); }
+  }
+
+  async function handleLorebookImportFile(file) {
+    const info = routeInfo();
+    if (!info?.id) throw new Error("Open a Lorebook editor before importing.");
+    const payload = parseLorebookImportPayload(await readJsonFile(file));
+    if (info.page === "entries") return runLorebookImport(payload, info);
+    storePendingLorebookImport(payload, info);
+    setStatus(`Loaded ${payload.entries.length} entries. Opening the Entries tab…`);
+    location.href = `/lorebook/edit/${encodeURIComponent(info.id)}/entries`;
+    return true;
+  }
+
+  function maybeRunPendingLorebookImport(info) {
+    if (importRunning || info?.page !== "entries" || !info?.id) return;
+    let record = null;
+    try { record = JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY) || "null"); } catch {}
+    if (!record || record.targetId !== info.id || !record.payload) return;
+    if (Date.now() - Number(record.queuedAt || 0) > 15 * 60 * 1000) {
+      try { sessionStorage.removeItem(IMPORT_SESSION_KEY); } catch {}
+      return;
+    }
+    try { sessionStorage.removeItem(IMPORT_SESSION_KEY); } catch {}
+    setTimeout(() => runLorebookImport(record.payload, info).catch(error => {
+      console.error("[SpicyChat QoL] Lorebook JSON import failed", error);
+      setStatus(`Import failed: ${error?.message || String(error)}`);
+    }), 250);
+  }
+
   async function exportCurrent() {
     const info = routeInfo();
     if (!info?.id) return false;
@@ -663,7 +766,7 @@
     });
     const exp = document.createElement("button");
     exp.type = "button";
-    exp.textContent = "Export full Lorebook JSON";
+    exp.textContent = "Download Lorebook (.json)";
     exp.addEventListener("click", async () => {
       exp.disabled = true;
       try {
@@ -681,12 +784,33 @@
       }
     });
     const info = routeInfo();
+    const importInput = document.createElement("input");
+    importInput.type = "file";
+    importInput.accept = ".json,application/json";
+    importInput.hidden = true;
+    importInput.addEventListener("change", async () => {
+      const file = importInput.files?.[0] || null;
+      importInput.value = "";
+      if (!file) return;
+      try {
+        setStatus("Reading Lorebook JSON…");
+        await handleLorebookImportFile(file);
+      } catch (error) {
+        console.error("[SpicyChat QoL] Lorebook JSON import failed", error);
+        setStatus(`Import failed: ${error?.message || String(error)}`);
+      }
+    });
+    const imp = document.createElement("button");
+    imp.type = "button";
+    imp.textContent = "Import Lorebook (.json)";
+    imp.addEventListener("click", () => importInput.click());
+
     const history = document.createElement("button");
     history.type = "button";
     history.textContent = "History";
     history.addEventListener("click", () => openBackupHistory(info));
-    actions.append(save, exp, history);
-    panel.append(copy, actions);
+    actions.append(save, exp, imp, history);
+    panel.append(copy, actions, importInput);
 
     const route = routeInfo();
     const entriesHeader = document.querySelector("[data-testid='EntriesListServer-Header']");
@@ -794,6 +918,7 @@
       }
     }
     if (!document.getElementById(PANEL_ID)) buildPanel();
+    if (info.page === "entries") maybeRunPendingLorebookImport(info);
     if (lastPanelAutoState !== !!cfg.lorebookBackupsEnabled) refreshPanelStatus().catch(() => {});
   };
 

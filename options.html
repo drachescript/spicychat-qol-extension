@@ -786,11 +786,14 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <p class="hint">These are occasional maintenance tools. Normal Bot Status scans do not need them.</p>
 <div class="button-row">
 <button id="cleanUnavailableBots" type="button">Move confirmed unavailable to recovery</button>
+<button id="cleanArchivedBlockedBotsNow" type="button">Clean archived blocked bots now</button>
 <button id="exportBotStatusArchiveJsonGz" type="button">Export saved copies (.json.gz)</button>
 <button id="clearBotAvailabilityResults" type="button">Clear status history</button>
 <button id="clearBotArchive" type="button">Clear all saved bot copies</button>
 <span class="count" id="botStatusArchiveExportStatus"></span>
 </div>
+<p class="hint">Blocked + confirmed unavailable bots keep their block/tombstone forever. Heavy local saved copies are removed only when the exact current public/Bot Status snapshot is confirmed preserved in the Archive import queue or as an approved public Archive submission.</p>
+<span class="count" id="blockedArchiveCleanupStatus"></span>
 </details>
 <div class="button-row" id="botStatusArchiveUploadActions" hidden>
 <button id="sendBotStatusArchiveChanged" type="button">Send saved copies to Archive</button>
@@ -2081,10 +2084,11 @@ cash =&gt; Bingo Coins
 <p class="hint">With automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too.</p>
 </div>
 <div class="sub-card">
-<strong>Lorebook backups</strong>
-<label class="row"><input id="lorebookBackupToolsEnabled" type="checkbox"/><span>Enable compact Save / Export / History backup controls on Lorebook editors</span></label>
+<strong>Lorebook download / import / backups</strong>
+<label class="row"><input id="lorebookBackupToolsEnabled" type="checkbox"/><span>Show Download / Import / Save / History controls on Lorebook editors</span></label>
 <label class="row"><input id="lorebookBackupsEnabled" type="checkbox"/><span>Automatically save Lorebook changes while I view or edit them</span></label>
-<p class="hint">Lorebook backups are separate from chatbot JSON. When automatic saves are off, the compact controls stay manual-only.</p>
+<p class="hint"><strong>Just want to move a private Lorebook?</strong> Turn on the first option, open the Lorebook, then click <strong>Download Lorebook (.json)</strong>. On the destination Lorebook, use <strong>Import Lorebook (.json)</strong>. Automatic backups are optional.</p>
+<p class="hint">Imports use SpicyChat's normal entry editor and skip entries with the same name by default, so nothing is silently overwritten. Lorebook backups stay separate from chatbot JSON.</p>
 </div>
 <p class="hint">Backup tools remain opt-in. Once chatbot backup tools are enabled, automatic chatbot backups start On by default unless you turn them off. The Backup manager can still review or delete backups you already created after the editor controls are disabled.</p>
 </section>
@@ -2874,7 +2878,7 @@ myth => Fantasy | ✨"></textarea></label>
 <div><strong>Chatbot Editor Draft History</strong><span>Takes local snapshots while you edit so you can recover older field text without publishing anything automatically.</span></div>
 <div><strong>Bot Version History</strong><span>Keeps meaningful versions when creator-controlled bot content changes, separate from rotating safety revisions.</span></div>
 <div><strong>Own chatbot backups</strong><span>Adds Save/Export/History controls and safety checkpoints. Restoring fills the editor for review; it never auto-publishes.</span></div>
-<div><strong>Lorebook backups</strong><span>Backs up Lorebooks separately from chatbot JSON and can keep manual or automatic history.</span></div>
+<div><strong>Lorebook download / import / backups</strong><span>Adds simple Download and Import JSON controls to Lorebook editors, plus optional manual or automatic local history.</span></div>
 <div><strong>Lorebook Entry Manager</strong><span>Adds optional token/keyword info plus rename, copy, duplicate, sorting, and bulk entry tools.</span></div>
 <div><strong>Wiki / Web Lorebook Importer</strong><span>Turns supported wiki/article content into reviewable Lorebook entries instead of making you copy everything by hand.</span></div>
 <div><strong>Creation Audit</strong><span>Checks loaded creations for missing/short fields, tag/placeholder issues, Lorebook problems, and other things you may want to review.</span></div>
