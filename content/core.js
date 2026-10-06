@@ -414,6 +414,8 @@
     enableProfileExport: false,
     enablePersonalUsageSummary: false,
     enableMyCreationsFilters: false,
+    enableMyCreationsBulkBackup: false,
+    showMyLorebookEditButtons: false,
     rememberMyCreationsView: false,
     autoLoadMyCreations: false,
     myCreationsAutoLoadPages: 1,

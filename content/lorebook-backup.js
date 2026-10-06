@@ -14,6 +14,7 @@
   let listenersInstalled = false;
   let lastPanelAutoState = null;
   let helperRunning = false;
+  let currentEditorFallbackQueue = Promise.resolve();
   const EXPORT_HELPER_PARAM = "dsQolLorebookExport";
   const EXPORT_TARGET_PARAM = "dsQolLorebookTarget";
   const EXPORT_JOB_PREFIX = "dsLorebookExportJob:";
@@ -305,7 +306,7 @@
     return ok;
   }
 
-  async function updateStoredEntries(id, entries, reason = "Full Lorebook export") {
+  async function updateStoredEntries(id, entries, reason = "Full Lorebook export", options = {}) {
     if (!id || !Array.isArray(entries)) return false;
     const op = DS.diagOperationStart?.("lorebook-backup", "update-entries", { lorebookId: id, entryCount: entries.length, reason });
     const result = await DS.storageGet?.([KEY]) || {};
@@ -317,7 +318,7 @@
       firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
       lastSavedAt: Date.now(),
       source: reason,
-      entries: { ...(previous.entries || {}) }
+      entries: options.replace === true ? {} : { ...(previous.entries || {}) }
     };
     for (const entry of entries) {
       if (!entry?.name) continue;
@@ -344,28 +345,56 @@
     const op = DS.diagOperationStart?.("lorebook-backup", "capture-full-entries", { lorebookId: info.id, exportJob: !!exportToken });
     const capture = DS.captureLorebookEntriesFully;
     if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
-    const result = await capture({
-      progress: state => {
-        const message = state?.message || "Reading Lorebook entries…";
-        setStatus(message);
-        if (exportToken) {
-          setExportJob(exportToken, {
-            status: "working",
-            id: info.id,
-            target: "entries",
-            current: Number(state?.current) || 0,
-            total: Number(state?.total) || 0,
-            message,
-            updatedAt: Date.now()
-          }).catch(() => {});
+    let result = null;
+    try {
+      result = await capture({
+        progress: state => {
+          const message = state?.message || "Reading Lorebook entries…";
+          setStatus(message);
+          if (exportToken) {
+            setExportJob(exportToken, {
+              status: "working",
+              id: info.id,
+              target: "entries",
+              current: Number(state?.current) || 0,
+              total: Number(state?.total) || 0,
+              message,
+              updatedAt: Date.now()
+            }).catch(() => {});
+          }
         }
+      });
+    } catch (error) {
+      // An owned Lorebook with zero entries is still a valid, complete backup.
+      // Give the editor a short chance to finish mounting rows before treating
+      // the explicit empty-list state as current truth.
+      if (!/No Lorebook entries are loaded yet\./i.test(String(error?.message || error))) throw error;
+      for (let attempt = 0; attempt < 5 && !captureListEntries().length; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
-    });
-    if (!result?.entries?.length && !captureListEntries().length) {
-      DS.diagOperationEnd?.(op, { outcome: "empty", entryCount: 0 });
-      return false;
+      if (captureListEntries().length) {
+        result = await capture({
+          progress: state => {
+            const message = state?.message || "Reading Lorebook entries…";
+            setStatus(message);
+            if (exportToken) {
+              setExportJob(exportToken, {
+                status: "working",
+                id: info.id,
+                target: "entries",
+                current: Number(state?.current) || 0,
+                total: Number(state?.total) || 0,
+                message,
+                updatedAt: Date.now()
+              }).catch(() => {});
+            }
+          }
+        });
+      } else {
+        result = { id: info.id, entries: [], complete: true };
+      }
     }
-    const ok = await updateStoredEntries(info.id, result.entries || [], "Full Lorebook export");
+    const ok = await updateStoredEntries(info.id, result?.entries || [], "Full Lorebook export", { replace: true });
     DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries?.length || 0 });
     return ok;
   }
@@ -387,13 +416,13 @@
     try { await chrome.storage.local.remove(jobKey(token)); } catch {}
   }
 
-  async function requestOppositePageCapture(info) {
-    if (!info?.id) return false;
-    const target = info.page === "entries" ? "details" : "entries";
+  async function requestEditorPageCapture(id, target, { statusPrefix = "" } = {}) {
+    const safeId = clean(id, 200);
+    if (!safeId || !["details", "entries"].includes(target)) return false;
     const token = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const path = target === "entries" ? `/lorebook/edit/${encodeURIComponent(info.id)}/entries` : `/lorebook/edit/${encodeURIComponent(info.id)}`;
+    const path = target === "entries" ? `/lorebook/edit/${encodeURIComponent(safeId)}/entries` : `/lorebook/edit/${encodeURIComponent(safeId)}`;
     const url = new URL(path, location.origin);
-    await setExportJob(token, { status: "pending", id: info.id, target, startedAt: Date.now() });
+    await setExportJob(token, { status: "pending", id: safeId, target, startedAt: Date.now() });
     const opened = await new Promise(resolve => {
       try {
         chrome.runtime.sendMessage({
@@ -401,7 +430,7 @@
           url: url.href,
           token,
           target,
-          id: info.id
+          id: safeId
         }, response => {
           if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
           else resolve(response || { ok: false });
@@ -419,7 +448,7 @@
       const job = await getExportJob(token);
       if (job?.message && job.message !== lastMessage) {
         lastMessage = job.message;
-        setStatus(job.message);
+        setStatus(`${statusPrefix}${job.message}`);
       }
       if (job?.status === "done") { await removeExportJob(token); return true; }
       if (job?.status === "error") {
@@ -428,8 +457,104 @@
       }
     }
     await removeExportJob(token);
-    throw new Error("Timed out while collecting the other Lorebook tab. Try again after the Lorebook Entries page has fully loaded.");
+    throw new Error(`Timed out while collecting Lorebook ${target}.`);
   }
+
+  async function requestOppositePageCapture(info) {
+    if (!info?.id) return false;
+    const target = info.page === "entries" ? "details" : "entries";
+    return requestEditorPageCapture(info.id, target);
+  }
+
+  function lorebookSnapshotFromStoredItem(id, item) {
+    if (!item) return null;
+    const entries = Object.values(item.entries || {}).map((entry, index) => ({
+      id: `editor:${index + 1}`,
+      name: clean(entry?.name, 500),
+      keywords: unique(entry?.keywords || [], 12),
+      secondaryKeywords: [],
+      content: clean(entry?.content, 24000),
+      version: "",
+      createdAt: "",
+      updatedAt: "",
+      priority: "",
+      status: "",
+      enabled: true,
+      constant: false,
+      selective: false,
+      caseSensitive: false,
+      probability: null,
+      depth: null,
+      role: "",
+      isNsfw: false
+    })).filter(entry => entry.name);
+    return {
+      schema: "spicychat-qol-lorebook-recovery-copy",
+      version: 1,
+      savedAt: Date.now(),
+      fetchedAt: new Date().toISOString(),
+      source: "current-live-editor",
+      completeness: { details: true, entries: true, entryCountVerified: true },
+      lorebook: {
+        id,
+        name: clean(item.name || id, 500),
+        description: clean(item.description, 4000),
+        creator: "",
+        creatorId: "",
+        image: clean(item.image, 3000),
+        tags: unique(item.tags || [], 12),
+        visibility: clean(item.visibility, 40),
+        status: "",
+        version: 0,
+        entryCount: entries.length,
+        numAttachedCharacters: 0,
+        createdAt: "",
+        updatedAt: "",
+        isNsfw: false,
+        avatarIsNsfw: false
+      },
+      entries
+    };
+  }
+
+  async function captureCurrentLorebookThroughEditors(lorebookId) {
+    const id = clean(lorebookId, 200).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
+
+    const task = async () => {
+      const beforeResult = await DS.storageGet?.([KEY]) || {};
+      const beforeStore = normalizeStore(beforeResult[KEY]);
+      const previous = beforeStore.meta[id] ? JSON.parse(JSON.stringify(beforeStore.meta[id])) : null;
+      let snapshot = null;
+      try {
+        await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
+        await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
+        const currentResult = await DS.storageGet?.([KEY]) || {};
+        const current = normalizeStore(currentResult[KEY]).meta[id] || null;
+        snapshot = lorebookSnapshotFromStoredItem(id, current);
+        if (!snapshot) throw new Error("The Lorebook editor fallback did not produce a current snapshot.");
+        return snapshot;
+      } finally {
+        // Bulk backup may use the editor as a fallback even when the user has
+        // not enabled persistent Lorebook backups. Restore the pre-existing
+        // local backup record so a one-time export does not silently create or
+        // replace history on the device.
+        try {
+          const latestResult = await DS.storageGet?.([KEY]) || {};
+          const latest = normalizeStore(latestResult[KEY]);
+          if (previous) latest.meta[id] = previous;
+          else delete latest.meta[id];
+          await DS.storageSet?.({ [KEY]: latest });
+        } catch {}
+      }
+    };
+
+    const queued = currentEditorFallbackQueue.then(task, task);
+    currentEditorFallbackQueue = queued.catch(() => {});
+    return queued;
+  }
+
+  DS.getCurrentOwnLorebookBackupDataFromEditor = captureCurrentLorebookThroughEditors;
 
   async function waitForExportHelperReady(target, timeout = 30_000) {
     const startedAt = Date.now();
@@ -466,10 +591,7 @@
         updatedAt: Date.now()
       });
       await saveCapture("Lorebook full export helper");
-      if (target === "entries") {
-        const listed = captureListEntries();
-        if (listed.length) await captureFullEntriesHere(token);
-      }
+      if (target === "entries") await captureFullEntriesHere(token);
       await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
       return { ok: true };
     } catch (error) {

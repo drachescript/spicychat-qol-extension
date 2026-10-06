@@ -250,7 +250,7 @@
     return response.data;
   }
 
-  async function mainWorldLorebookRequest(lorebookId, auth) {
+  async function mainWorldLorebookRequest(lorebookId, auth, lastSortPriority = 0) {
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     const ready = await waitForMainBridge(2200);
     if (!ready) throw new Error("main-world Lorebook bridge unavailable");
@@ -276,6 +276,7 @@
           detail: {
             requestId,
             lorebookId,
+            lastSortPriority: Number.isFinite(Number(lastSortPriority)) ? Number(lastSortPriority) : 0,
             authToken: auth?.token || "",
             guestUserId: auth?.guest || "",
             authSource: auth?.source || "none"
@@ -681,7 +682,7 @@
     return state.auth;
   }
 
-  DS.fetchLorebookArchiveData = async function fetchLorebookArchiveData(lorebookId, forceAuth = false) {
+  DS.fetchLorebookArchiveData = async function fetchLorebookArchiveData(lorebookId, forceAuth = false, options = {}) {
     const id = cleanText(lorebookId).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) {
       const error = new Error("Invalid Lorebook UUID.");
@@ -702,14 +703,15 @@
       if (!mainBridgeHasCapturedAuth() && !auth?.token) auth = await discoverSpicychatAuth(true);
     }
 
+    const lastSortPriority = Number.isFinite(Number(options?.lastSortPriority)) ? Number(options.lastSortPriority) : 0;
     const net = DS.diagNetworkStart?.(
       "lorebook-status",
       "GET",
-      `https://prod.nd-api.com/lorebooks/${id}?sortBy=priority&lastSortPriority=0&view=live`,
+      `https://prod.nd-api.com/lorebooks/${id}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}&view=live`,
       { transport: "main-world-auth" }
     );
     try {
-      const response = await mainWorldLorebookRequest(id, auth);
+      const response = await mainWorldLorebookRequest(id, auth, lastSortPriority);
       DS.diagNetworkEnd?.(net, {
         status: Number(response?.httpStatus || 200),
         ok: true,
@@ -795,7 +797,21 @@
   function characterPayload(data) {
     if (!data || typeof data !== "object") return null;
     const direct = data?.data && typeof data.data === "object" ? data.data : data;
-    if (direct?.greeting || direct?.persona || direct?.name || direct?.id) return direct;
+
+    // Keep wrapper-level metadata when SpicyChat nests the character itself
+    // under `data`/`character`. Some current responses put owner definition
+    // fields on the nested object while timestamps and other public metadata
+    // remain on an outer wrapper. Returning only the nested object silently
+    // dropped that metadata from fresh My Creations backups.
+    const withWrapperMetadata = value => {
+      if (!value || typeof value !== "object" || value === data) return value;
+      const merged = { ...data };
+      if (direct && typeof direct === "object" && direct !== data && direct !== value) Object.assign(merged, direct);
+      Object.assign(merged, value);
+      return merged;
+    };
+
+    if (direct?.greeting || direct?.persona || direct?.name || direct?.id) return withWrapperMetadata(direct);
     // Be defensive about wrapper changes (for example { data: { character: ... } }).
     const seen = new Set();
     const stack = [direct];
@@ -803,10 +819,10 @@
       const value = stack.pop();
       if (!value || typeof value !== "object" || seen.has(value)) continue;
       seen.add(value);
-      if (!Array.isArray(value) && (value.greeting || value.first_message || value.firstMessage) && (value.id || value.name || value.persona || value.title)) return value;
+      if (!Array.isArray(value) && (value.greeting || value.first_message || value.firstMessage) && (value.id || value.name || value.persona || value.title)) return withWrapperMetadata(value);
       for (const child of Object.values(value)) if (child && typeof child === "object") stack.push(child);
     }
-    return direct;
+    return withWrapperMetadata(direct);
   }
 
   async function fetchProfileApi(botId, card, forceAuth = false, includePublicMeta = false, requireGreeting = true) {
@@ -1382,6 +1398,87 @@
     };
   };
 
+  DS.getCurrentOwnBotBackupData = async function getCurrentOwnBotBackupData(botId) {
+    const id = cleanText(botId).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid chatbot UUID.");
+
+    // Bulk My Creations backups deliberately bypass local backup/history data.
+    // Both sources below are fetched fresh so the export represents the bot as
+    // it exists on SpicyChat when the user presses Backup all.
+    const [apiResult, ownerResult] = await Promise.allSettled([
+      fetchAuditCharacter(id, true),
+      fetchOwnerEditorHtml(id)
+    ]);
+
+    const sc = apiResult.status === "fulfilled" ? apiResult.value : null;
+    const ownerFields = ownerResult.status === "fulfilled" ? ownerResult.value : null;
+    const ownerHasCurrentData = !!(ownerFields && (
+      ["greeting", "description", "personality", "scenario", "examples"].some(key => !!cleanText(ownerFields[key] || "")) ||
+      (Array.isArray(ownerFields.tags) && ownerFields.tags.length > 0) ||
+      Object.values(ownerFields.verified || {}).some(Boolean)
+    ));
+    if (!sc && !ownerHasCurrentData) {
+      const reasons = [apiResult.reason?.message, ownerResult.reason?.message].filter(Boolean).join("; ");
+      throw new Error(reasons || "Current chatbot data could not be read. The owner editor page returned only an app shell, so QoL refused to save an empty backup.");
+    }
+
+    const apiFields = fieldsFromApiCharacter(sc, true);
+    // Owner-editor data is strongest for creator-only definition fields; API
+    // data fills anything the SSR editor did not expose.
+    const fields = mergeAuditFields(ownerFields, apiFields);
+    const meta = publicMetadataFromApiCharacter(sc || {});
+    const tags = ownerFields?.verified?.tags && Array.isArray(ownerFields.tags) && ownerFields.tags.length
+      ? ownerFields.tags
+      : characterTags(sc || {});
+
+    const listText = value => {
+      const input = Array.isArray(value) ? value : [];
+      return [...new Set(input.map(item => cleanText(
+        typeof item === "string" ? item : (item?.greeting || item?.text || item?.message || item?.content || "")
+      )).filter(Boolean))];
+    };
+    const alternateGreetings = listText(
+      sc?.alternate_greetings || sc?.alternateGreetings || sc?.greetings || sc?.alternate_messages || sc?.alternateMessages || []
+    );
+    const lorebookValues = [
+      sc?.lorebook_id, sc?.lorebookId,
+      ...(Array.isArray(sc?.lorebook_ids) ? sc.lorebook_ids : []),
+      ...(Array.isArray(sc?.lorebookIds) ? sc.lorebookIds : []),
+      ...(Array.isArray(sc?.lorebooks) ? sc.lorebooks.map(item => typeof item === "string" ? item : item?.id || item?.uuid || "") : [])
+    ];
+    const lorebookIds = [...new Set(lorebookValues.map(value => cleanText(value)).filter(Boolean))];
+
+    const snapshot = {
+      schema: "spicychat-qol-current-own-bot",
+      version: 1,
+      fetchedAt: new Date().toISOString(),
+      source: [sc ? "character-api" : "", ownerHasCurrentData ? "owner-editor-html" : ""].filter(Boolean).join("+") || "unknown",
+      id,
+      name: meta.name || cleanText(sc?.name || sc?.character_name || sc?.characterName || id),
+      title: meta.title || cleanText(sc?.tagline || sc?.subtitle || ""),
+      description: cleanText(fields.description || meta.description || ""),
+      greeting: cleanText(fields.greeting || ""),
+      personality: cleanText(fields.personality || ""),
+      scenario: cleanText(fields.scenario || ""),
+      exampleDialogues: cleanText(fields.examples || ""),
+      alternateGreetings,
+      tags: [...new Set((tags || []).map(cleanText).filter(Boolean))],
+      image: meta.image || cleanText(sc?.avatar_url || sc?.avatarUrl || sc?.avatar || sc?.image_url || sc?.imageUrl || ""),
+      visibility: meta.visibility || cleanText(sc?.status || sc?.privacy || ""),
+      creator: meta.creator || cleanText(sc?.creator_username || sc?.creatorUsername || ""),
+      lorebookIds,
+      createdAt: sc?.createdAt ?? sc?.created_at ?? sc?.created ?? sc?.meta?.createdAt ?? sc?.meta?.created_at ?? sc?.metadata?.createdAt ?? sc?.metadata?.created_at ?? null,
+      updatedAt: sc?.updatedAt ?? sc?.updated_at ?? sc?.modifiedAt ?? sc?.modified_at ?? sc?.meta?.updatedAt ?? sc?.meta?.updated_at ?? sc?.metadata?.updatedAt ?? sc?.metadata?.updated_at ?? null
+    };
+
+    const coreDefinitionFields = [snapshot.greeting, snapshot.personality, snapshot.scenario, snapshot.exampleDialogues]
+      .filter(value => !!cleanText(value));
+    if (!snapshot.name || snapshot.name === id || !coreDefinitionFields.length) {
+      throw new Error("SpicyChat did not return enough current creator data for a trustworthy chatbot backup. QoL refused to mark an empty/redacted file as successful.");
+    }
+    return snapshot;
+  };
+
   function tagNames(value) {
     const out = [];
     const add = item => {
@@ -1923,6 +2020,10 @@
   };
 
   DS.applyCardGreetingTokenInfo = async function applyCardGreetingTokenInfo() {
+    // My Creations pages should stay quiet unless the user explicitly starts
+    // a creator tool. Creation Audit can still call getCardProfileFieldInfo()
+    // directly after its Scan loaded button is pressed.
+    if (DS.isMyCreationsPage?.()) return DS.removeCardGreetingTokenInfo();
     if (!enabled()) return DS.removeCardGreetingTokenInfo();
     await ensureCache();
     ensureObserver();

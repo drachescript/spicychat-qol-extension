@@ -58,6 +58,18 @@
     return /^\/(?:[a-z]{2}\/)?chats?\/?$/i.test(String(location.pathname || ""));
   }
 
+  function isMyChatbotsRoute() {
+    return /^\/(?:[a-z]{2}\/)?my-creations\/chatbots\/?$/i.test(String(location.pathname || ""));
+  }
+
+  function isMyLorebooksRoute() {
+    return /^\/(?:[a-z]{2}\/)?my-creations\/lorebooks\/?$/i.test(String(location.pathname || ""));
+  }
+
+  function isMyCreationsBackupRoute() {
+    return isMyChatbotsRoute() || isMyLorebooksRoute();
+  }
+
   function isRecommendationWorkerRoute() {
     try { return new URLSearchParams(location.search || "").get("dsQolRecommendationWorker") === "1"; }
     catch { return false; }
@@ -89,12 +101,14 @@
     // Export button is hidden, so every enabled chat route needs auth capture.
     const chatExportNeedsAuthBridge = isChatRoute();
     const chatListImportNeedsAuthBridge = isChatListRoute();
+    const myCreationsBackupNeedsAuthBridge = !!settings?.enableMyCreationsBulkBackup && isMyCreationsBackupRoute();
     const enabled = !!(settings && settings.enabled !== false && (
       settings.showCardGreetingTokenInfo ||
       settings.deepSleepDisabledFeatures === false ||
       publicArchiveNeedsProfileBridge ||
       chatExportNeedsAuthBridge ||
       chatListImportNeedsAuthBridge ||
+      myCreationsBackupNeedsAuthBridge ||
       isRecommendationWorkerRoute() ||
       isBotStatusWorkerRoute()
     ));
@@ -107,13 +121,13 @@
   // lightweight MAIN-world bridge immediately on chat routes so it can observe
   // SpicyChat's own authenticated /messages XHR before an export is requested.
   // Settings still decide whether the hooks remain active after startup.
-  if (isChatRoute() || isChatListRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
+  if (isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
-  const watchedSettingNames = ["enabled", "showCardGreetingTokenInfo", "deepSleepDisabledFeatures", "botArchiveRememberSeenPublic"];
+  const watchedSettingNames = ["enabled", "showCardGreetingTokenInfo", "deepSleepDisabledFeatures", "botArchiveRememberSeenPublic", "enableMyCreationsBulkBackup"];
   const watchedSettings = {};
 
   function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }

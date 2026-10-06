@@ -1934,3 +1934,17 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 .favorite-creator-override input {
   margin: 0;
 }
+
+/* First-install setup */
+.first-run-setup-dialog{border:1px solid rgba(148,163,184,.32);border-radius:14px;padding:0;background:#17191d;color:inherit;max-width:min(720px,calc(100vw - 32px));width:680px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+.first-run-setup-dialog::backdrop{background:rgba(0,0,0,.68);backdrop-filter:blur(2px)}
+.first-run-setup-shell{padding:20px}
+.first-run-setup-shell>h2{margin:0 0 8px}
+.first-run-setup-shell>p{margin:0 0 16px;opacity:.86}
+.first-run-setup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.first-run-setup-grid button{display:flex;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;min-height:92px;padding:12px;border:1px solid rgba(148,163,184,.3);border-radius:10px;background:rgba(55,65,81,.42);color:inherit;cursor:pointer}
+.first-run-setup-grid button:hover{background:rgba(75,85,99,.68);border-color:rgba(148,163,184,.55)}
+.first-run-setup-grid button strong{font-size:14px}
+.first-run-setup-grid button span{font-size:12px;opacity:.78;line-height:1.35}
+.first-run-setup-footer{margin-top:14px}
+@media (max-width:620px){.first-run-setup-grid{grid-template-columns:1fr}}

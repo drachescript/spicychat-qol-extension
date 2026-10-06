@@ -1487,6 +1487,7 @@
     await runStep("smart filter cleanup", () => DS.removeSmartFilterPresets?.());
     await runStep("creation audit cleanup", () => DS.removeCreationAudit?.());
     await runStep("my creations filter cleanup", () => DS.removeMyCreationsFilters?.());
+    await runStep("my creations backup cleanup", () => DS.removeMyCreationsBackupTools?.());
     await runStep("recommendation helper cleanup", () => DS.removeRecommendationHelpers?.());
     await runStep("bot organizer cleanup", () => DS.removeBotOrganizer?.());
     await runStep("card workflow cleanup", () => DS.removeCardWorkflow?.());
@@ -2005,6 +2006,7 @@
         await runThrottledFeatureStep("exact message counts / creation dates", !!settings.showExactMessageCounts || !!settings.showBotCreationDates || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"], .ds-bot-created-date"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
         await runFeatureStep("my creations view memory", !!settings.rememberMyCreationsView, () => DS.applyMyCreationsViewMemory?.());
         await runFeatureStep("my creations auto-load", !!settings.autoLoadMyCreations, () => DS.applyMyCreationsAutoLoad?.());
+        await runFeatureStep("my creations backup", true, () => DS.applyMyCreationsBackupTools?.());
         await runThrottledFeatureStep("creation audit", !!settings.enableCreationAudit || !!document.querySelector("[data-ds-creation-audit]"), listingCardInterval, () => DS.applyCreationAudit?.(), !!options.force);
         await runThrottledFeatureStep("my creations filters", !!settings.enableMyCreationsFilters || !!document.querySelector("[data-ds-my-creations-filter]"), listingCardInterval, () => DS.applyMyCreationsFilters?.(), !!options.force);
         await runFeatureStep("bot organizer settled", !!settings.enableBotOrganizer || !!document.querySelector("[data-ds-bot-organizer],.ds-bot-organizer"), () => DS.applyBotOrganizer?.());
@@ -2025,6 +2027,7 @@
         await runFeatureStep("my creations view memory cleanup", !!settings.rememberMyCreationsView, () => DS.removeMyCreationsViewMemory?.());
         await runFeatureStep("creation audit cleanup", !!DS.state.creationAuditWasActive || !!document.querySelector("[data-ds-creation-audit]"), () => DS.removeCreationAudit?.());
         await runFeatureStep("my creations filter cleanup", !!DS.state.myCreationsFiltersWasActive || !!document.querySelector("[data-ds-my-creations-filter]"), () => DS.removeMyCreationsFilters?.());
+        await runFeatureStep("my creations backup cleanup", !!DS.state.myCreationsBackupWasActive || !!document.getElementById("ds-my-creations-backup-bar") || !!document.querySelector(".ds-my-lorebook-edit-button"), () => DS.removeMyCreationsBackupTools?.());
         if (!singleChat && !page.isBotProfilePage) {
           await runFeatureStep("bot organizer cleanup", !!DS.state.botOrganizerWasActive || !!document.querySelector("[data-ds-bot-organizer],.ds-bot-organizer,#ds-bot-organizer-toolbar,#ds-bot-organizer-context-button"), () => DS.removeBotOrganizer?.());
         }

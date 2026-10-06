@@ -151,6 +151,11 @@
   DS.isFavoriteBotsPage = () => !!DS.getPageState().isFavoriteBotsPage;
   DS.isSubscribePage = () => !!DS.getPageState().isSubscribePage;
   DS.isMyCreationsChatbotsPage = () => !!DS.getPageState().isMyCreationsChatbotsPage;
+  DS.isMyCreationsLorebooksPage = () => !!DS.getPageState().isMyCreationsLorebooksPage;
+  DS.isMyCreationsPage = () => {
+    const page = DS.getPageState();
+    return !!(page.isMyCreationsChatbotsPage || page.isMyCreationsLorebooksPage);
+  };
   DS.isLorebookPage = () => !!DS.getPageState().isLorebookPage;
   DS.isLorebookExplorePage = () => !!DS.getPageState().isLorebookExplorePage;
 

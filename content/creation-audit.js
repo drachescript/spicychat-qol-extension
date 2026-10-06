@@ -460,10 +460,12 @@
 
         const refresh = event.target.closest("button[data-audit-refresh]");
         if (refresh) {
-          for (const entry of entries()) {
+          const current = entries();
+          const hasAnyResult = current.some(entry => entry.id && auditById.has(entry.id));
+          for (const entry of current) {
             if (!entry.id) continue;
-            auditById.delete(entry.id);
-            queueProfile(entry.id, true);
+            if (hasAnyResult) auditById.delete(entry.id);
+            queueProfile(entry.id, hasAnyResult);
           }
           DS.applyCreationAudit?.();
           return;
@@ -522,8 +524,11 @@
     refresh.type = "button";
     refresh.dataset.auditRefresh = "1";
     refresh.className = "ds-creation-audit-refresh";
-    refresh.textContent = "Refresh loaded";
-    refresh.title = "Re-check currently loaded bot profiles using SpicyChat's normal profile pages";
+    const hasAuditResults = entries().some(entry => entry.id && auditById.has(entry.id));
+    refresh.textContent = hasAuditResults ? "Refresh loaded" : "Scan loaded";
+    refresh.title = hasAuditResults
+      ? "Re-check currently loaded bot profiles using SpicyChat's normal profile pages"
+      : "Scan the currently loaded bots now. Creation Audit does not fetch profiles automatically on My Creations.";
     headActions.append(copyReport, downloadReport, downloadCsv, reviewNext, refresh);
     head.append(titleWrap, headActions);
 
@@ -628,10 +633,9 @@
     DS.state.creationAuditFilter ||= "all";
     const list = entries();
 
-    for (const entry of list) {
-      if (entry.id && !auditById.has(entry.id) && !pendingIds.has(entry.id)) queueProfile(entry.id);
-    }
-
+    // Deliberately do not queue profile requests on page load. My Creations is
+    // a management surface; profile scanning only starts after the user clicks
+    // Scan loaded / Refresh loaded in the audit panel.
     const metas = list.map(entry => ({ entry, meta: baseMeta(entry) }));
     const stats = {
       total: metas.length,

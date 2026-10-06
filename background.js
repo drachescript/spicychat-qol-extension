@@ -6008,6 +6008,56 @@ function normalizeExactMessageBotId(value) {
   return /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id) ? id : "";
 }
 
+async function fetchCharacterIndexMetadata(message) {
+  const rawIds = Array.isArray(message?.ids) ? message.ids : [];
+  const ids = [...new Set(rawIds.map(normalizeExactMessageBotId).filter(Boolean))].slice(0, EXACT_MESSAGE_MAX_IDS);
+  if (!ids.length) return { ok: true, metadata: [], missing: [] };
+
+  const searches = ids.map(id => ({
+    collection: EXACT_MESSAGE_TYPESENSE_COLLECTION,
+    q: "*",
+    query_by: EXACT_MESSAGE_TYPESENSE_QUERY_BY,
+    filter_by: `application_ids:spicychat && character_id:=${id}`,
+    include_fields: "character_id,createdAt,updatedAt",
+    per_page: 1
+  }));
+
+  const result = await typesenseMultiSearch(searches, 8000, EXACT_MESSAGE_TYPESENSE_KEY, "my-creations-backup");
+  if (!result?.ok) {
+    return {
+      ok: false,
+      status: result?.status || "typesense-failed",
+      error: result?.error || "SpicyChat character index metadata request failed.",
+      metadata: [],
+      missing: ids
+    };
+  }
+
+  const metadata = [];
+  const found = new Set();
+  const results = Array.isArray(result.data?.results) ? result.data.results : [];
+  for (let index = 0; index < results.length; index += 1) {
+    const requestedId = ids[index];
+    const hit = Array.isArray(results[index]?.hits) ? results[index].hits[0] : null;
+    const doc = hit?.document && typeof hit.document === "object" ? hit.document : null;
+    const id = normalizeExactMessageBotId(doc?.character_id || requestedId);
+    if (!id || !doc) continue;
+    metadata.push({
+      id,
+      createdAt: String(doc.createdAt || doc.created_at || "").trim() || null,
+      updatedAt: String(doc.updatedAt || doc.updated_at || "").trim() || null
+    });
+    found.add(requestedId);
+  }
+
+  return {
+    ok: true,
+    metadata,
+    missing: ids.filter(id => !found.has(id)),
+    source: `typesense:${EXACT_MESSAGE_TYPESENSE_COLLECTION}`
+  };
+}
+
 async function fetchExactMessageCounts(message) {
   const rawIds = Array.isArray(message?.ids) ? message.ids : [];
   const ids = [...new Set(rawIds.map(normalizeExactMessageBotId).filter(Boolean))].slice(0, EXACT_MESSAGE_MAX_IDS);
@@ -6276,6 +6326,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+
+  if (message?.type === "DS_CHARACTER_INDEX_METADATA_FETCH") {
+    fetchCharacterIndexMetadata(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "worker-error", error: error?.message || String(error), metadata: [], missing: [] }));
+    return true;
+  }
 
   if (message?.type === "DS_EXACT_MESSAGE_COUNTS_FETCH") {
     fetchExactMessageCounts(message)
@@ -7242,7 +7299,13 @@ chrome.runtime.onInstalled.addListener(details => {
     .catch(() => {})
     .finally(() => {
       if (details?.reason === "install") {
-        chrome.runtime.openOptionsPage(() => void chrome.runtime.lastError);
+        try {
+          chrome.storage.local.set({ dsFirstRunSetupPendingV1: true, dsFirstRunSetupCompletedV1: false, dsFirstRunOptInDefaultsAppliedV1: false }, () => {
+            chrome.runtime.openOptionsPage(() => void chrome.runtime.lastError);
+          });
+        } catch {
+          chrome.runtime.openOptionsPage(() => void chrome.runtime.lastError);
+        }
       }
     });
   if (details?.reason === "update") {

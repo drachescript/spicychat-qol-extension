@@ -145,17 +145,31 @@
 </section>
 <section class="card" id="quickSetupCard">
 <h2>Quick setup</h2>
-<p class="hint">Optional features stay off on a fresh install until you enable them yourself. These presets are just a faster starting point and can be changed afterwards.</p>
+<p class="hint">Fresh installs start from a clean opt-in baseline: user-facing optional features are off until you choose them. Only the main extension switch and lightweight safety/performance guards stay on. These presets are a faster starting point and can be changed afterwards.</p>
 <div class="button-row">
 <button id="applyMinimalPreset" type="button">Apply minimal</button>
 <button id="applyRecommendedPreset" type="button">Apply recommended</button>
 <button id="applyCreatorPreset" type="button">Apply creator setup</button>
-<button id="startCustomSetup" type="button">Customize manually</button>
+<button id="startCustomSetup" type="button">Run easy setup</button>
 <button id="disableOptionalFeatures" type="button">Turn optional features off</button>
 </div>
 <p class="hint">Creator setup turns off unrelated optional QoL features and enables the chatbot/Lorebook editor, import, audit, token and My Creations helpers. Community wording warnings stay off until you enable them yourself. It never changes bot visibility or publishes anything automatically.</p>
 <p class="hint" id="presetStatus"></p>
 </section>
+<dialog id="firstRunSetupDialog" class="first-run-setup-dialog" aria-labelledby="firstRunSetupTitle">
+<div class="first-run-setup-shell">
+<h2 id="firstRunSetupTitle">What are you using SpicyChat QoL for?</h2>
+<p>Fresh installs start with optional features off. Pick a starting setup, or keep everything off and enable features yourself later.</p>
+<div class="first-run-setup-grid">
+<button type="button" data-first-run-choice="chatting"><strong>Chatting / roleplay</strong><span>Useful chat navigation, draft protection, Later/Favorites and a few everyday helpers.</span></button>
+<button type="button" data-first-run-choice="creator"><strong>Creating bots &amp; Lorebooks</strong><span>Creator/editor, Lorebook, My Creations and backup tools.</span></button>
+<button type="button" data-first-run-choice="both"><strong>Both</strong><span>Combine the chatting and creator starting setups.</span></button>
+<button type="button" data-first-run-choice="off"><strong>Start clean</strong><span>Leave user-facing optional features off. You can turn on exactly what you want later.</span></button>
+</div>
+<div class="button-row first-run-setup-footer"><button id="firstRunCustomize" type="button">Choose manually</button></div>
+<p class="hint">Nothing is published or sent anywhere by these setup choices. They only change local QoL settings.</p>
+</div>
+</dialog>
 <section class="card" id="compatibilityCard">
 <h2>S.AI Toolkit compatibility</h2>
 <label class="row"><input id="saiToolkitCompatibility" type="checkbox"/><span>Enable S.AI Toolkit compatibility handling</span></label>
@@ -2161,8 +2175,8 @@ cash =&gt; Bingo Coins
 <label class="row"><input id="lorebookAutoStartNew" type="checkbox"/><span>Automatically click Start New when opening Create Lorebook</span></label>
 <label class="row"><input id="lorebookBulkKeywordPaste" type="checkbox"/><span>Add an Insert copied button for Lorebook keywords</span></label>
 <label class="row"><input id="lorebookExpandEntryEditor" type="checkbox"/><span>Make the Lorebook entry editor/content field taller</span></label>
-<label class="row"><input disabled="" id="lorebookExpandTags" type="checkbox"/><span>Expand collapsed Lorebook tag lists when full tag data is available</span></label>
-<p class="hint">Currently not possible: SpicyChat does not expose enough full collapsed tag/keyword data on the list page for this to update reliably.</p>
+<label class="row"><input id="lorebookExpandTags" type="checkbox"/><span>Expand collapsed Lorebook tag lists</span></label>
+<p class="hint">Uses SpicyChat's current Lorebook search index to restore the complete public tag list when a card shows +N. QoL only expands a row when the returned tag count is complete.</p>
 <label class="row"><input id="botTagBulkPaste" type="checkbox"/><span>Add an Insert copied button for chatbot tags</span></label>
 <label class="row"><input id="botEditorSaveActions" type="checkbox"/><span>Add Save &amp; Stay and Save &amp; Chat buttons to the chatbot editor</span></label>
 <label class="row"><input id="botEditorSaveChatNewTab" type="checkbox"/><span>Make Save &amp; Chat open the chat in a new tab and keep the editor available</span></label>
@@ -2232,6 +2246,13 @@ cash =&gt; Bingo Coins
 <p class="hint">Auto-load uses SpicyChat's own My Chatbots Load More button. The default is 1 extra page/batch each time the listing is opened or changes. QoL waits for React to mount/re-enable the native control and for real card growth before continuing, then stops early when no more bots are available.</p>
 <p class="hint">Adds a separate QoL Filter beside SpicyChat's own list controls. It starts on All and lets you combine visibility, message-count ranges, Lorebook presence, definition visibility and card-token ranges. Filters only affect currently loaded cards and never change a bot's actual visibility.</p>
 <p class="hint">View memory also restores SpicyChat's own My Chatbots sort choice (for example Oldest instead of resetting to Recent). If SpicyChat changes or removes a saved sort option, QoL leaves the native control alone instead of guessing.</p>
+</section>
+<section class="card" id="myCreationsBackupCard">
+<h2>My Creations backup &amp; shortcuts</h2>
+<label class="row"><input id="enableMyCreationsBulkBackup" type="checkbox"/><span>Show bulk backup controls on My Creations</span></label>
+<p class="hint">Adds Backup all chatbots / Backup all Lorebooks on your My Creations pages. Bulk backup always fetches the current live version from SpicyChat when you start it; local QoL revision/history copies are not used as the source.</p>
+<label class="row"><input id="showMyLorebookEditButtons" type="checkbox"/><span>Show an Edit button on my Lorebook cards</span></label>
+<p class="hint">Adds a normal Edit link to owned Lorebook cards, so click, Ctrl/Cmd+click, middle-click, and the browser context menu work normally. Ctrl/Cmd+clicking the native three-dot button also opens Edit in a new tab.</p>
 </section>
 <section class="card">
 <h2>Creation audit</h2>

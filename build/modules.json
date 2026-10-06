@@ -181,6 +181,7 @@
         "content/creator-workspace.js",
         "content/creator-writing-assistant.js",
         "content/moderation-warnings.js",
+        "content/my-creations-backup.js",
         "content/my-creations-filters.js",
         "content/my-creations-view-memory.js"
       ]

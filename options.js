@@ -37,6 +37,9 @@ const SAI_TOOLKIT_PRESENCE_KEY = "dsSaiToolkitPresence";
 const SPICYCHAT_BETA_CAPABILITIES_KEY = "dsSpicyChatBetaCapabilitiesV1";
 const RELEASE_NOTICE_KEY = "dsReleaseNotice";
 const LAST_SEEN_VERSION_KEY = "dsLastSeenReleaseVersion";
+const FIRST_RUN_SETUP_PENDING_KEY = "dsFirstRunSetupPendingV1";
+const FIRST_RUN_SETUP_COMPLETED_KEY = "dsFirstRunSetupCompletedV1";
+const FIRST_RUN_OPT_IN_DEFAULTS_KEY = "dsFirstRunOptInDefaultsAppliedV1";
 const SMART_FILTER_PRESETS_KEY = "dsSmartFilterPresets";
 const SMART_FILTER_PINNED_KEY = "dsSmartFilterPinnedPresets";
 const BOT_EDITOR_DRAFT_HISTORY_KEY = "dsBotEditorDraftHistory";
@@ -556,6 +559,8 @@ const DEFAULT_SETTINGS = {
   enableProfileExport: false,
   enablePersonalUsageSummary: false,
   enableMyCreationsFilters: false,
+  enableMyCreationsBulkBackup: false,
+  showMyLorebookEditButtons: false,
   rememberMyCreationsView: false,
   autoLoadMyCreations: false,
   myCreationsAutoLoadPages: 1,
@@ -2107,7 +2112,7 @@ const FEATURE_CHANGE_MARKERS = {
   cardTokenShowExamples: { version: "0.1.8.97", label: "New" },
   lorebookBulkKeywordPaste: { version: "0.1.8.93", label: "New" },
   lorebookExpandEntryEditor: { version: "0.1.8.93", label: "New" },
-  lorebookExpandTags: { version: "0.1.9.25", label: "New" },
+  lorebookExpandTags: { version: "0.2.36", label: "Updated" },
   botTagBulkPaste: { version: "0.1.8.93", label: "New" },
   showLorebookFilters: { version: "0.1.9.109", label: "Updated" },
   rememberBotImagePrompt: { version: "0.1.9.109", label: "New" },
@@ -2248,6 +2253,19 @@ const CARD_CHANGE_MARKERS = [
 ];
 
 const OPTIONAL_FEATURE_KEYS = [
+  "enableCommandPalette",
+  "enableContextKeeper",
+  "enableCreatorWritingAssistant",
+  "enableNativeRatingHelpers",
+  "enablePersonalUsageSummary",
+  "enableProfileExport",
+  "enableRpStateTracker",
+  "enableSavedListsOverlay",
+  "enableStoryDayTracker",
+  "enableTagAliases",
+  "lorebookTrackHistory",
+  "quickDislikeIdleEnabled",
+  "styleAlternateDialogue",
   "saiToolkitCompatibility",
   "autoAfkEnabled",
   "duplicateTabGuardEnabled",
@@ -2369,6 +2387,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableSmartFilterPresets",
   "enableCreationAudit",
   "enableMyCreationsFilters",
+  "enableMyCreationsBulkBackup",
+  "showMyLorebookEditButtons",
   "rememberMyCreationsView",
   "autoLoadMyCreations",
   "enableRecommendationHelpers",
@@ -2520,6 +2540,12 @@ const OPTIONAL_FEATURE_KEYS = [
   "debug"
 ];
 
+const BASELINE_SAFETY_ON_KEYS = [
+  // These do not add visible/content features. They only make the extension
+  // yield more aggressively on installed-app/desktop pressure.
+  "desktopAppPerformanceGuard"
+];
+
 const PRESET_VALUES = {
   minimal: {
     trackOpenedChats: true,
@@ -2590,6 +2616,8 @@ const PRESET_VALUES = {
     showLorebookEntryExpandButtons: true,
     autoAgreeCreationGuidelines: true,
     enableMyCreationsFilters: true,
+    enableMyCreationsBulkBackup: true,
+    showMyLorebookEditButtons: true,
     rememberMyCreationsView: true,
     autoLoadMyCreations: true,
     myCreationsAutoLoadPages: 1,
@@ -5891,10 +5919,13 @@ function setPageSetting(id, value) {
 }
 
 async function applyPreset(name) {
-  const preset = PRESET_VALUES[name];
+  const preset = name === "both"
+    ? { ...PRESET_VALUES.recommended, ...PRESET_VALUES.creator }
+    : PRESET_VALUES[name];
   if (!preset) return;
 
   OPTIONAL_FEATURE_KEYS.forEach(key => setPageSetting(key, false));
+  BASELINE_SAFETY_ON_KEYS.forEach(key => setPageSetting(key, true));
   Object.entries(preset).forEach(([key, value]) => setPageSetting(key, value));
   setPageSetting("enabled", true);
 
@@ -5910,24 +5941,99 @@ async function applyPreset(name) {
   await save();
   const status = $("presetStatus");
   if (status) {
-    const labels = { minimal: "Minimal", recommended: "Recommended", creator: "Creator-only" };
+    const labels = { minimal: "Minimal", recommended: "Recommended", creator: "Creator-only", both: "Chatting + creator" };
     status.textContent = `${labels[name] || "Quick"} setup applied and saved.`;
   }
 }
 
-async function disableOptionalFeatures() {
+async function applyOptInBaseline({ showStatus = false } = {}) {
   OPTIONAL_FEATURE_KEYS.forEach(key => setPageSetting(key, false));
+  BASELINE_SAFETY_ON_KEYS.forEach(key => setPageSetting(key, true));
   setPageSetting("enabled", true);
   await save();
-  const status = $("presetStatus");
-  if (status) status.textContent = "Optional features turned off. Your saved lists and presets were kept.";
+  if (showStatus) {
+    const status = $("presetStatus");
+    if (status) status.textContent = "Optional features turned off. Your saved lists and presets were kept.";
+  }
+}
+
+async function disableOptionalFeatures() {
+  await applyOptInBaseline({ showStatus: true });
+}
+
+async function finishFirstRunSetup() {
+  await storageSet({
+    [FIRST_RUN_SETUP_PENDING_KEY]: false,
+    [FIRST_RUN_SETUP_COMPLETED_KEY]: true
+  });
+}
+
+function closeFirstRunSetupDialog() {
+  const dialog = $("firstRunSetupDialog");
+  if (!dialog) return;
+  try { dialog.close(); } catch { dialog.removeAttribute("open"); }
+}
+
+async function chooseFirstRunSetup(choice) {
+  const normalized = String(choice || "").toLowerCase();
+  if (normalized === "chatting") await applyPreset("recommended");
+  else if (normalized === "creator") await applyPreset("creator");
+  else if (normalized === "both") await applyPreset("both");
+  else if (normalized === "off") await disableOptionalFeatures();
+  else return false;
+  await finishFirstRunSetup();
+  closeFirstRunSetupDialog();
+  return true;
+}
+
+async function showFirstRunSetupDialog({ manual = false } = {}) {
+  const dialog = $("firstRunSetupDialog");
+  if (!dialog) return false;
+  if (!manual) {
+    const state = await storageGet([FIRST_RUN_SETUP_PENDING_KEY, FIRST_RUN_SETUP_COMPLETED_KEY, FIRST_RUN_OPT_IN_DEFAULTS_KEY]);
+    if (state[FIRST_RUN_SETUP_COMPLETED_KEY] === true || state[FIRST_RUN_SETUP_PENDING_KEY] !== true) return false;
+    // A genuinely fresh install should not inherit checked child/sub-options
+    // just because their parent feature has sensible historical defaults. Save
+    // a clean opt-in baseline once; the user's wizard choice is applied after.
+    if (state[FIRST_RUN_OPT_IN_DEFAULTS_KEY] !== true) {
+      await applyOptInBaseline();
+      await storageSet({ [FIRST_RUN_OPT_IN_DEFAULTS_KEY]: true });
+    }
+  }
+  try {
+    if (!dialog.open) dialog.showModal();
+  } catch {
+    dialog.setAttribute("open", "");
+  }
+  return true;
+}
+
+function setupFirstRunWizard() {
+  document.querySelectorAll("[data-first-run-choice]").forEach(button => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      const buttons = [...document.querySelectorAll("[data-first-run-choice]")];
+      buttons.forEach(item => { item.disabled = true; });
+      chooseFirstRunSetup(button.dataset.firstRunChoice).catch(error => {
+        console.error("[SpicyChat QoL] first-run setup failed", error);
+      }).finally(() => buttons.forEach(item => { item.disabled = false; }));
+    });
+  });
+  $("firstRunCustomize")?.addEventListener("click", async () => {
+    await finishFirstRunSetup();
+    closeFirstRunSetupDialog();
+    const card = $("quickSetupCard");
+    card?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  });
 }
 
 function setupPresets() {
   $("applyMinimalPreset")?.addEventListener("click", () => applyPreset("minimal"));
   $("applyRecommendedPreset")?.addEventListener("click", () => applyPreset("recommended"));
   $("applyCreatorPreset")?.addEventListener("click", () => applyPreset("creator"));
+  $("startCustomSetup")?.addEventListener("click", () => showFirstRunSetupDialog({ manual: true }));
   $("disableOptionalFeatures")?.addEventListener("click", disableOptionalFeatures);
+  setupFirstRunWizard();
 }
 
 function oocNameFromText(text, index = 0) {
@@ -17121,8 +17227,7 @@ async function load() {
   setChecked("lorebookAutoStartNew", !!settings.lorebookAutoStartNew);
   setChecked("lorebookBulkKeywordPaste", !!settings.lorebookBulkKeywordPaste);
   setChecked("lorebookExpandEntryEditor", !!settings.lorebookExpandEntryEditor);
-  settings.lorebookExpandTags = false;
-  setChecked("lorebookExpandTags", false);
+  setChecked("lorebookExpandTags", !!settings.lorebookExpandTags);
   setChecked("botTagBulkPaste", !!settings.botTagBulkPaste);
   setChecked("showLorebookEntryExpandButtons", !!settings.showLorebookEntryExpandButtons);
   setChecked("creatorModerationWarnings", !!settings.creatorModerationWarnings);
@@ -17646,6 +17751,8 @@ async function load() {
   setValue("creatorWritingTargetLanguage", settings.creatorWritingTargetLanguage || "English");
   setChecked("enableProfileExport", !!settings.enableProfileExport);
   setChecked("enableMyCreationsFilters", !!settings.enableMyCreationsFilters);
+  setChecked("enableMyCreationsBulkBackup", !!settings.enableMyCreationsBulkBackup);
+  setChecked("showMyLorebookEditButtons", !!settings.showMyLorebookEditButtons);
   setChecked("rememberMyCreationsView", !!settings.rememberMyCreationsView);
   setChecked("autoLoadMyCreations", !!settings.autoLoadMyCreations);
   setValue("myCreationsAutoLoadPages", String(Math.max(1, Math.min(30, Number(settings.myCreationsAutoLoadPages) || 1))));
@@ -17746,6 +17853,7 @@ async function load() {
   dirtySavedStores.clear();
   setAutosaveStatus("Saved automatically", "saved");
   if (loadStarted && typeof performance !== "undefined") OPTIONS_PERFORMANCE.loadMs = Math.max(0, performance.now() - loadStarted);
+  showFirstRunSetupDialog().catch(() => {});
 }
 
 function readSettingsFromPage() {
@@ -17830,7 +17938,7 @@ function readSettingsFromPage() {
     lorebookAutoStartNew: checked("lorebookAutoStartNew"),
     lorebookBulkKeywordPaste: checked("lorebookBulkKeywordPaste"),
     lorebookExpandEntryEditor: checked("lorebookExpandEntryEditor"),
-    lorebookExpandTags: false,
+    lorebookExpandTags: checked("lorebookExpandTags"),
     botTagBulkPaste: checked("botTagBulkPaste"),
     showLorebookEntryExpandButtons: checked("showLorebookEntryExpandButtons"),
     creatorModerationWarnings: checked("creatorModerationWarnings"),
@@ -18317,6 +18425,8 @@ function readSettingsFromPage() {
     creatorWritingTargetLanguage: value("creatorWritingTargetLanguage", "English"),
     enableProfileExport: checked("enableProfileExport"),
     enableMyCreationsFilters: checked("enableMyCreationsFilters"),
+    enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
+    showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
     rememberMyCreationsView: checked("rememberMyCreationsView"),
     autoLoadMyCreations: checked("autoLoadMyCreations"),
     myCreationsAutoLoadPages: Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)),
@@ -18466,7 +18576,7 @@ function readSingleSettingFromPage(settingKey) {
     case "lorebookAutoStartNew": return (checked("lorebookAutoStartNew"));
     case "lorebookBulkKeywordPaste": return (checked("lorebookBulkKeywordPaste"));
     case "lorebookExpandEntryEditor": return (checked("lorebookExpandEntryEditor"));
-    case "lorebookExpandTags": return (false);
+    case "lorebookExpandTags": return (checked("lorebookExpandTags"));
     case "botTagBulkPaste": return (checked("botTagBulkPaste"));
     case "showLorebookEntryExpandButtons": return (checked("showLorebookEntryExpandButtons"));
     case "creatorModerationWarnings": return (checked("creatorModerationWarnings"));
@@ -18936,6 +19046,8 @@ function readSingleSettingFromPage(settingKey) {
     case "creatorWritingTargetLanguage": return (value("creatorWritingTargetLanguage", "English"));
     case "enableProfileExport": return (checked("enableProfileExport"));
     case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
+    case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
+    case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
     case "rememberMyCreationsView": return (checked("rememberMyCreationsView"));
     case "autoLoadMyCreations": return (checked("autoLoadMyCreations"));
     case "myCreationsAutoLoadPages": return (Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)));
@@ -24886,7 +24998,7 @@ function reorderOptionsUi() {
     writing: ["Composer and draft helpers", "OOC presets", "Reply Instructions", "Saved Text / Snippets", "Model quick menu", "Generation profiles", "Timestamps and generation details", "Translation (DeepL)"],
     "personas-memory": ["Persona helpers", "Memory manager", "Context Keeper", "Global Memory / Baseline Notes", "Internal Day Tracker", "RP State Tracker", "Chat Nudges"],
     "chat-ui": ["Chat top bar", "Character shortcuts", "Message options", "Search inside current chat", "Message bookmarks / multiple local pins", "Scroll navigation", "Chat export", "Native rating helpers", "Chat text replacements", "Focus / Immersive Mode"],
-    "bot-tools": ["Creation helpers", "Bot editor snippets", "My Creations filters", "Creator Writing Assistant", "Creation audit", "Bot & Lorebook backups", "Backup manager", "Bot / profile export", "Bot tags in chats"],
+    "bot-tools": ["Creation helpers", "Bot editor snippets", "My Creations filters", "My Creations backup & shortcuts", "Creator Writing Assistant", "Creation audit", "Bot & Lorebook backups", "Backup manager", "Bot / profile export", "Bot tags in chats"],
     appearance: ["Accessibility & text size", "Mini panel", "Panel size", "Panel items", "Layout preview", "Top bar cleanup", "Avatar name", "Sidebar cleanup", "Premium & promo cleanup", "Chat bubble customization", "Custom chat backgrounds", "RP Format Repair", "Alternate dialogue styling", "Soundscapes / Ambience", "Animated bot images"],
     browser: ["Extension popup", "Notifications", "Inactive tab cleanup (Auto-AFK)", "Duplicate SpicyChat tab guard", "Tab cleanup & session analysis"],
     data: ["Backup and restore", "Local storage & recovery", "Recently changed / Undo", "Personal usage & context", "What's New notification", "Settings check", "Debug"]

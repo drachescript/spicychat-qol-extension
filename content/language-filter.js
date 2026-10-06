@@ -493,6 +493,11 @@
   };
 
   DS.applyLanguageFilterToCards = function applyLanguageFilterToCards() {
+    if (DS.isMyCreationsPage?.()) {
+      document.querySelectorAll(".ds-detected-language-badge").forEach(node => node.remove());
+      document.querySelectorAll("[data-ds-reason^='language:']").forEach(node => DS.unhideElement?.(node));
+      return;
+    }
     if (!languageFilterEnabled()) {
       document.querySelectorAll(".ds-detected-language-badge").forEach(node => node.remove());
       return;

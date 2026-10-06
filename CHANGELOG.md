@@ -1,3 +1,14 @@
+## 0.2.36
+- Added My Creations bulk backups: Chatbots and Lorebooks pages can download one ZIP containing fresh live/current JSON for every owned item found after loading the remaining native listing batches; local revision/history copies are not used as the source.
+- Added direct Edit links to owned Lorebook cards with normal browser Ctrl-click/middle-click behavior, plus Ctrl/Command-click on the native three-dot control as a shortcut to open the Lorebook editor in a new tab.
+- Made the new My Creations backup and Lorebook-card Edit controls opt-in, audited fresh-install optional defaults, and added a first-install setup that asks whether you mainly chat, create, do both, or want to start clean.
+- Fixed bulk Lorebook backup so authenticated My Lorebooks traffic is available to the live API reader, with a current-editor fallback when needed; bulk chatbot backup now uses the same early auth capture and refuses empty/redacted files instead of counting them as successful.
+- Fixed chatbot bulk-backup metadata preservation when SpicyChat wraps the character payload: outer creation/update timestamps are now retained instead of being dropped while extracting the nested current definition.
+- Filled chatbot backup creation/update timestamps from SpicyChat's Typesense character index when the authenticated owner-character response omits them, using batched lookups instead of one extra request per bot.
+- Re-enabled collapsed public Lorebook tag expansion using SpicyChat's current scoped Lorebook Typesense key, with batched lookups and a completeness check before hiding the native +N counter.
+- Fixed My Creations bulk-backup controls mounting above the SpicyChat shell during early startup; the bar now waits for the creation-tab row and stays directly below Chatbots / Lorebooks / Groups / Voices and above the card grid.
+- Kept My Creations management pages quiet: discovery/language/token/Lorebook auto-scanners no longer run on owned Chatbots/Lorebooks pages, and Creation Audit only fetches profiles after an explicit Scan loaded / Refresh loaded click.
+
 ## 0.2.35
 - Added opt-in blocked-word auto-blocking: when a bot name or description matches a blocked word, QoL can add that bot to the normal Blocked bots list just like pressing the card Block button. Explicit manual unblocks are remembered for the current blocked-word rules so the bot is not immediately re-added.
 - Fixed stale browser-extension content runtimes after extension updates/reloads: a tab that started with a valid QoL runtime now reloads once if that extension context is later invalidated, so maintained controls such as Context Keeper and blocking can recover.

@@ -564,6 +564,7 @@
     if (!active) return;
     const requestId = clean(detail.requestId);
     const lorebookId = clean(detail.lorebookId).toLowerCase();
+    const lastSortPriority = Number.isFinite(Number(detail.lastSortPriority)) ? Number(detail.lastSortPriority) : 0;
     if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lorebookId)) return;
 
     const initial = resolveAuth(detail);
@@ -584,7 +585,7 @@
       if (isJwt(token) && token.length < MAX_TOKEN) headers.Authorization = `Bearer ${token}`;
       if (isGuest(guest)) headers["x-guest-userid"] = guest;
 
-      const url = `${LOREBOOK_API_BASE}${encodeURIComponent(lorebookId)}?sortBy=priority&lastSortPriority=0&view=live`;
+      const url = `${LOREBOOK_API_BASE}${encodeURIComponent(lorebookId)}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}&view=live`;
       const response = await nativeFetch(url, {
         method: "GET",
         credentials: "include",

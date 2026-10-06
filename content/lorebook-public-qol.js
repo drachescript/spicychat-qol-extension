@@ -21,9 +21,11 @@
 
   function onLorebookSurface() {
     const path = String(location.pathname || "");
+    // My Creations is a management surface. Do not run public/discovery
+    // Lorebook scanners there; the dedicated creator tools remain available.
+    if (/^\/my-creations\/lorebooks(?:\/|$)/i.test(path)) return false;
     return /^\/lorebooks(?:\/|$)/i.test(path)
-      || /^\/lorebook(?:\/|$)/i.test(path)
-      || /^\/my-creations\/lorebooks(?:\/|$)/i.test(path);
+      || /^\/lorebook(?:\/|$)/i.test(path);
   }
 
   function idFromHref(href) {
@@ -341,6 +343,7 @@
     if (!onLorebookSurface()) {
       restoreLorebookHides();
       document.querySelectorAll(".ds-lorebook-block-button").forEach(el => el.remove());
+      await DS.applyLorebookTagExpansion?.();
       return;
     }
     const settings = DS.state?.settings || {};
@@ -348,10 +351,12 @@
     const active = settings.lorebookBlockingEnabled === true
       || settings.showLorebookBlockButtons === true
       || settings.lorebookTrackHistory === true
+      || settings.lorebookExpandTags === true
       || list(settings.lorebookBlockedIds).length > 0;
     if (!active) {
       restoreLorebookHides();
       document.querySelectorAll(".ds-lorebook-block-button").forEach(el => el.remove());
+      await DS.applyLorebookTagExpansion?.();
       return;
     }
 
@@ -400,6 +405,7 @@
     }
 
     await hydrateMissingTags(processedItems, settings);
+    await DS.applyLorebookTagExpansion?.();
   };
 
   chrome.storage?.onChanged?.addListener?.((changes, area) => {

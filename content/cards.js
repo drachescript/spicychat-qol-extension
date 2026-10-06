@@ -500,6 +500,12 @@
     const blockedReason = DS.shouldHideBlockedBot(card, anchor, preparedText, getPreparedFields);
     if (blockedReason) return blockedReason;
 
+    // My Creations is a management surface, not discovery. Keep explicit
+    // user blocks authoritative, but do not run automatic discovery filters,
+    // language scans, recommendation filters or blocked-word auto-actions
+    // against the user's own chatbot cards.
+    if (!discoveryContext && DS.isMyCreationsChatbotsPage?.()) return null;
+
     const favoriteCreator = DS.favoriteCreatorContextForCard?.(card) || null;
     const favoritePrefs = favoriteCreator?.preferences || {};
     const legacyProtectAll = !!favoriteCreator && settings.protectFavoriteCreatorsFromFiltering === true;

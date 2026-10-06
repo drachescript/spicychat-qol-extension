@@ -233,25 +233,84 @@
     };
   }
 
+  function runtimeMessage(message) {
+    return new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage(message, response => {
+          try { if (chrome.runtime?.lastError) return resolve(null); } catch {}
+          resolve(response || null);
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async function fetchIndexedLorebookMetaBatch(ids) {
+    const wanted = [...new Set((Array.isArray(ids) ? ids : [])
+      .map(id => clean(id).toLowerCase())
+      .filter(id => /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)))].slice(0, 60);
+    const found = new Map();
+    if (!wanted.length) return found;
+
+    try {
+      const response = await runtimeMessage({ type: "DS_LOREBOOK_STATUS_PUBLIC_CHECK_BATCH", ids: wanted });
+      if (!response?.ok || !Array.isArray(response.results)) return found;
+      for (const row of response.results) {
+        const id = clean(row?.id).toLowerCase();
+        const meta = row?.found && row?.meta && typeof row.meta === "object" ? row.meta : null;
+        if (!id || !meta) continue;
+        const tags = listField(meta, ["tags", "tagNames", "tag_names", "lorebookTags", "lorebook_tags", "categories"]);
+        const normalized = {
+          ...meta,
+          id: clean(meta.id || id),
+          tags
+        };
+        const previous = cache.get(id) || {};
+        cache.set(id, {
+          ...previous,
+          tags,
+          meta: { ...(previous.meta || {}), ...normalized },
+          checkedAt: Date.now(),
+          indexSource: clean(response.source || "typesense:lorebooks_public")
+        });
+        found.set(id, normalized);
+      }
+    } catch {}
+    return found;
+  }
+
   async function getTags(id) {
     const saved = cache.get(id);
-    if (saved && Date.now() - saved.checkedAt < MAX_AGE) return saved.tags;
+    if (saved && Date.now() - saved.checkedAt < MAX_AGE && saved.tags?.length) return saved.tags;
     if (inFlight.has(id)) return inFlight.get(id);
 
     const request = (async () => {
       let tags = [];
+
+      // Public Lorebook cards already have a current scoped Typesense key
+      // available through SpicyChat's application config. Prefer that cheap
+      // index lookup for complete public tag lists before touching the heavier
+      // authenticated Lorebook endpoint.
       try {
-        // Use the same authenticated MAIN-world bridge as Lorebook Status.
-        // Current SpicyChat rejects this endpoint when QoL sends cookies alone.
-        if (typeof DS.fetchLorebookArchiveData === "function") {
-          const api = await DS.fetchLorebookArchiveData(id);
-          const payload = lorebookPayload(api?.data);
-          const meta = normalizeLorebookMeta(payload, id);
-          const recoveryCopy = normalizeLorebookRecoveryCopy(payload, id);
-          tags = meta?.tags || [];
-          cache.set(id, { tags, meta, recoveryCopy, checkedAt: Date.now() });
-        }
+        const indexed = await fetchIndexedLorebookMetaBatch([id]);
+        tags = indexed.get(clean(id).toLowerCase())?.tags || [];
       } catch {}
+
+      if (!tags.length) {
+        try {
+          // Use the same authenticated MAIN-world bridge as Lorebook Status.
+          // Current SpicyChat rejects this endpoint when QoL sends cookies alone.
+          if (typeof DS.fetchLorebookArchiveData === "function") {
+            const api = await DS.fetchLorebookArchiveData(id);
+            const payload = lorebookPayload(api?.data);
+            const meta = normalizeLorebookMeta(payload, id);
+            const recoveryCopy = normalizeLorebookRecoveryCopy(payload, id);
+            tags = meta?.tags || [];
+            cache.set(id, { tags, meta, recoveryCopy, checkedAt: Date.now() });
+          }
+        } catch {}
+      }
 
       if (!tags.length) {
         try {
@@ -282,6 +341,85 @@
     return cache.get(key)?.meta || null;
   };
 
+  async function getCurrentOwnLorebookBackupDataApi(lorebookId) {
+    const id = clean(lorebookId).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
+    if (typeof DS.fetchLorebookArchiveData !== "function") throw new Error("The current Lorebook API bridge is not available.");
+
+    // Do not use the local Lorebook backup/history store here. The bulk backup
+    // feature promises the newest live version, so always ask SpicyChat now.
+    // The Lorebook endpoint is priority-paged on large books; walk it until the
+    // API-reported entry count is satisfied, deduping stable entry UUIDs.
+    let cursor = 0;
+    let meta = null;
+    const entries = [];
+    const seen = new Set();
+    let expected = 0;
+
+    for (let page = 0; page < 120; page += 1) {
+      const api = await DS.fetchLorebookArchiveData(id, page === 0, { lastSortPriority: cursor });
+      const payload = lorebookPayload(api?.data);
+      const copy = normalizeLorebookRecoveryCopy(payload, id);
+      if (!copy?.lorebook?.id) throw new Error("Current Lorebook data could not be normalized.");
+      if (!meta) meta = copy.lorebook;
+      expected = Math.max(expected, Number(copy.lorebook.entryCount) || 0);
+
+      let added = 0;
+      for (const entry of copy.entries || []) {
+        const key = clean(entry.id || `${entry.name}:${entry.priority}:${entry.content.length}`, 900).toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        entries.push(entry);
+        added += 1;
+      }
+
+      if (!expected || entries.length >= expected) break;
+      if (!copy.entries.length || !added) break;
+      const tail = copy.entries[copy.entries.length - 1];
+      const nextCursor = Number(tail?.priority);
+      if (!Number.isFinite(nextCursor) || nextCursor === cursor) break;
+      cursor = nextCursor;
+      await new Promise(resolve => setTimeout(resolve, 80));
+    }
+
+    if (!meta) throw new Error("Current Lorebook data could not be read.");
+    if (expected && entries.length < expected) {
+      const error = new Error(`SpicyChat returned ${entries.length} of ${expected} Lorebook entries; refusing to create an incomplete backup.`);
+      error.code = "incomplete-lorebook";
+      error.expectedEntries = expected;
+      error.receivedEntries = entries.length;
+      throw error;
+    }
+
+    return {
+      schema: "spicychat-qol-lorebook-recovery-copy",
+      version: 1,
+      savedAt: Date.now(),
+      fetchedAt: new Date().toISOString(),
+      source: "current-live-api",
+      completeness: { details: true, entries: true, entryCountVerified: !expected || entries.length >= expected },
+      lorebook: { ...meta, entryCount: expected || entries.length },
+      entries
+    };
+  }
+
+  DS.getCurrentOwnLorebookBackupData = async function getCurrentOwnLorebookBackupData(lorebookId) {
+    try {
+      return await getCurrentOwnLorebookBackupDataApi(lorebookId);
+    } catch (apiError) {
+      if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") throw apiError;
+      try {
+        return await DS.getCurrentOwnLorebookBackupDataFromEditor(lorebookId);
+      } catch (editorError) {
+        const apiMessage = clean(apiError?.message || apiError, 500);
+        const editorMessage = clean(editorError?.message || editorError, 500);
+        const combined = new Error(`Live API failed: ${apiMessage || "unknown error"}. Editor fallback failed: ${editorMessage || "unknown error"}.`);
+        combined.cause = editorError;
+        throw combined;
+      }
+    }
+  };
+
   function findCollapsedTagRow(card) {
     const counters = [...card.querySelectorAll("p, span")].filter(el => /^\+\d+$/.test(clean(el.textContent)));
     for (const counter of counters) {
@@ -306,16 +444,70 @@
     return [...new Set(best)];
   }
 
+  function collapsedTagCount(rowInfo) {
+    const match = clean(rowInfo?.counter?.textContent).match(/^\+(\d+)$/);
+    return match ? Math.max(0, Number(match[1]) || 0) : 0;
+  }
+
+  function visibleCollapsedTags(rowInfo) {
+    return [...new Set(clean(rowInfo?.textNode?.textContent)
+      .split(/[,;|]/g)
+      .map(clean)
+      .filter(Boolean))];
+  }
+
+  function tagListLooksComplete(rowInfo, tags) {
+    const list = [...new Set((Array.isArray(tags) ? tags : []).map(clean).filter(Boolean))];
+    if (!list.length) return false;
+    const hidden = collapsedTagCount(rowInfo);
+    const visible = visibleCollapsedTags(rowInfo);
+    return hidden <= 0 || list.length >= visible.length + hidden;
+  }
+
   function showExpanded(rowInfo, tags) {
-    if (!rowInfo || !tags?.length) return;
+    if (!rowInfo || !tagListLooksComplete(rowInfo, tags)) return false;
     const { row, textNode, counter } = rowInfo;
-    textNode.textContent = tags.join(", ");
+    if (!textNode.dataset.dsLorebookTagsOriginalText) {
+      textNode.dataset.dsLorebookTagsOriginalText = textNode.textContent || "";
+      textNode.dataset.dsLorebookTagsOriginalClass = textNode.getAttribute("class") || "";
+      textNode.dataset.dsLorebookTagsOriginalStyle = textNode.getAttribute("style") || "";
+      counter.dataset.dsLorebookTagsOriginalStyle = counter.getAttribute("style") || "";
+    }
+    textNode.dataset.dsLorebookTagsExpansionText = "1";
+    counter.dataset.dsLorebookTagsExpansionCounter = "1";
+    textNode.textContent = [...new Set(tags.map(clean).filter(Boolean))].join(", ");
     textNode.classList.remove("line-clamp-1");
     textNode.style.webkitLineClamp = "unset";
     textNode.style.whiteSpace = "normal";
     textNode.style.overflow = "visible";
     row.classList.add("ds-lorebook-tags-expanded");
     counter.style.display = "none";
+    return true;
+  }
+
+  function restoreExpandedRows() {
+    document.querySelectorAll(".ds-lorebook-tags-expanded").forEach(row => {
+      const textNode = row.querySelector("[data-ds-lorebook-tags-expansion-text='1']");
+      const counter = row.querySelector("[data-ds-lorebook-tags-expansion-counter='1']");
+      if (textNode) {
+        textNode.textContent = textNode.dataset.dsLorebookTagsOriginalText || "";
+        const cls = textNode.dataset.dsLorebookTagsOriginalClass || "";
+        const style = textNode.dataset.dsLorebookTagsOriginalStyle || "";
+        if (cls) textNode.setAttribute("class", cls); else textNode.removeAttribute("class");
+        if (style) textNode.setAttribute("style", style); else textNode.removeAttribute("style");
+        delete textNode.dataset.dsLorebookTagsOriginalText;
+        delete textNode.dataset.dsLorebookTagsOriginalClass;
+        delete textNode.dataset.dsLorebookTagsOriginalStyle;
+        delete textNode.dataset.dsLorebookTagsExpansionText;
+      }
+      if (counter) {
+        const style = counter.dataset.dsLorebookTagsOriginalStyle || "";
+        if (style) counter.setAttribute("style", style); else counter.removeAttribute("style");
+        delete counter.dataset.dsLorebookTagsOriginalStyle;
+        delete counter.dataset.dsLorebookTagsExpansionCounter;
+      }
+      row.classList.remove("ds-lorebook-tags-expanded");
+    });
   }
 
 
@@ -437,8 +629,13 @@
 
   DS.applyLorebookTagExpansion = async function applyLorebookTagExpansion() {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !settings.lorebookExpandTags) {
-      document.querySelectorAll(".ds-lorebook-tags-expanded").forEach(row => row.classList.remove("ds-lorebook-tags-expanded"));
+    const path = String(location.pathname || "");
+    const supportedSurface = /^\/lorebooks(?:\/|$)/i.test(path) || /^\/lorebook(?:\/|$)/i.test(path);
+
+    // My Lorebooks is deliberately a quiet management surface. Do not turn the
+    // expansion option into another automatic scanner there.
+    if (!settings.enabled || !settings.lorebookExpandTags || !supportedSurface || /^\/my-creations\/lorebooks(?:\/|$)/i.test(path)) {
+      restoreExpandedRows();
       return;
     }
 
@@ -453,19 +650,36 @@
       const card = findCard(anchor);
       const rowInfo = card ? findCollapsedTagRow(card) : null;
       if (!rowInfo || rowInfo.row.classList.contains("ds-lorebook-tags-expanded")) continue;
-      work.push({ id, rowInfo });
+      work.push({ id: id.toLowerCase(), rowInfo });
+    }
+    if (!work.length) return;
+
+    // First use complete data already embedded in the card DOM, when present.
+    const unresolved = [];
+    for (const item of work) {
+      const localTags = tagsFromDom(item.rowInfo);
+      if (showExpanded(item.rowInfo, localTags)) continue;
+      const saved = cache.get(item.id);
+      if (saved?.tags?.length && showExpanded(item.rowInfo, saved.tags)) continue;
+      unresolved.push(item);
+    }
+    if (!unresolved.length) return;
+
+    // SpicyChat exposes current scoped Lorebook search keys in application
+    // config. Query all collapsed cards in one batched Typesense request instead
+    // of doing one profile/API request per card.
+    await fetchIndexedLorebookMetaBatch(unresolved.map(item => item.id));
+    const stillMissing = [];
+    for (const item of unresolved) {
+      const indexedTags = cache.get(item.id)?.tags || [];
+      if (!showExpanded(item.rowInfo, indexedTags)) stillMissing.push(item);
     }
 
-    // Keep this deliberately light. The normal QoL slow pass will pick up the
-    // rest instead of firing a burst of profile requests on a large lorebook list.
-    await Promise.all(work.slice(0, 2).map(async item => {
-      const localTags = tagsFromDom(item.rowInfo);
-      if (localTags.length > 3) {
-        showExpanded(item.rowInfo, localTags);
-        return;
-      }
+    // Conservative fallback for non-indexed/unlisted cards: at most two heavier
+    // authenticated/profile lookups per pass, preserving the old low-work limit.
+    await Promise.all(stillMissing.slice(0, 2).map(async item => {
       const tags = await getTags(item.id);
-      if (tags.length) showExpanded(item.rowInfo, tags);
+      showExpanded(item.rowInfo, tags);
     }));
   };
 })();
