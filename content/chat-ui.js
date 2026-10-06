@@ -21,8 +21,6 @@
   const asteriskRepairTimeouts = new Set();
   let oocHealthTimer = 0;
   let oocHealthConfirmTimer = 0;
-  const OOC_HEALTH_RELOAD_KEY = "dsQolOocHealthReloadV1";
-  const OOC_HEALTH_RELOAD_GUARD_MS = 5 * 60 * 1000;
 
   function restoreOocShortcuts() {
     DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
@@ -814,31 +812,12 @@
     return true;
   }
 
-  function requestOocHealthReload() {
-    if (!DS.isSingleChatPage?.()) return;
-    if (document.visibilityState !== "visible") return;
-
-    const route = `${location.pathname}${location.search}`;
-    const version = String(document.documentElement.dataset.dsQolVersion || "unknown");
-    const now = Date.now();
-
-    try {
-      const previous = JSON.parse(sessionStorage.getItem(OOC_HEALTH_RELOAD_KEY) || "null");
-      if (
-        previous &&
-        previous.route === route &&
-        previous.version === version &&
-        Number(previous.at || 0) > now - OOC_HEALTH_RELOAD_GUARD_MS
-      ) {
-        return;
-      }
-      sessionStorage.setItem(OOC_HEALTH_RELOAD_KEY, JSON.stringify({ route, version, at: now }));
-    } catch {}
-
-    DS.setQuickStatus?.("QoL chat control got stuck. Reloading this page once…");
-    setTimeout(() => {
-      try { location.reload(); } catch {}
-    }, 120);
+  function reportOocHealthFailure() {
+    if (!DS.isSingleChatPage?.() || document.visibilityState !== "visible") return;
+    DS.runtimeLog?.("warn", "chat-ui", "OOC shortcut remained unusable after local repair", {
+      route: String(location.pathname || "").slice(0, 160)
+    });
+    DS.setQuickStatus?.("OOC control could not be repaired. Reload this chat manually if it stays unavailable.");
   }
 
   function scheduleOocShortcutHealthCheck() {
@@ -877,7 +856,7 @@
           const nativeReady = !nativeImage || (!nativeImage.disabled && nativeImage.getAttribute("aria-disabled") !== "true");
           return nativeReady && composerIsUsableForOoc(button) && !oocShortcutLooksUsable(button);
         });
-        if (broken) requestOocHealthReload();
+        if (broken) reportOocHealthFailure();
       }, 850);
     }, 250);
   }

@@ -575,12 +575,18 @@
       // the same name tokens in a different order (for example Ghost Simon ->
       // Simon “Ghost” Riley).
       const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
+      const strictWordFields = [...fields.nameCandidates, fields.description, ...fields.descriptionCandidates].filter(Boolean);
+      const strictWordMatch = findPreparedMatchInFields(strictWordFields, wordMatchers)
+        || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
       const wordFields = fields.nameDescriptionCandidates.length
         ? fields.nameDescriptionCandidates
         : [fields.title, fields.description, fields.all].filter(Boolean);
-      const wordMatch = findPreparedMatchInFields(wordFields, wordMatchers)
+      const wordMatch = strictWordMatch || findPreparedMatchInFields(wordFields, wordMatchers)
         || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
-      if (wordMatch) return `blocked word: ${wordMatch.raw}`;
+      if (wordMatch) {
+        if (strictWordMatch) DS.queueAutoBlockWordMatch?.(card, anchor, strictWordMatch);
+        return `blocked word: ${wordMatch.raw}`;
+      }
 
       const creatorMatch = findPreparedMatchInFields(
         fields.creatorCandidates?.length ? fields.creatorCandidates : (fields.creator ? [fields.creator] : [fields.all]),

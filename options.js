@@ -54,6 +54,7 @@ const QUICK_DISLIKE_HISTORY_KEY = "quickDislikeHistoryV1";
 const QUICK_DISLIKE_BULK_STATE_KEY = "quickDislikeBulkStateV1";
 const QUICK_LESS_LIKE_HISTORY_KEY = "quickLessLikeHistoryV1";
 const QUICK_LESS_LIKE_BULK_STATE_KEY = "quickLessLikeBulkStateV1";
+const AUTO_BLOCK_WORD_EXCEPTIONS_KEY = "autoBlockWordExceptionsV1";
 const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
 const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
 const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
@@ -480,6 +481,7 @@ const DEFAULT_SETTINGS = {
   translationProtectedTerms: "",
 
   blockCards: false,
+  autoBlockWordMatches: false,
   blockedTags: [],
   blockedWords: [],
   blockedCreators: [],
@@ -4346,6 +4348,41 @@ function blockerSearchableText(value) {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function blockedWordRulesKeyFromValues(values) {
+  const normalized = [...new Set((values || []).map(value => {
+    let text = String(value || "").trim();
+    try { text = text.normalize("NFKC"); } catch {}
+    return text.toLocaleLowerCase();
+  }).filter(Boolean))].sort();
+  let hash = 2166136261;
+  const payload = normalized.join("\u001f");
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${normalized.length}:${(hash >>> 0).toString(16)}`;
+}
+
+async function rememberAutoBlockWordExceptions(ids) {
+  const cleanIds = [...new Set((ids || []).map(id => String(id || "").trim().toLowerCase()).filter(Boolean))];
+  if (!cleanIds.length) return;
+  const rulesKey = blockedWordRulesKeyFromValues(linesToArray(value("blockedWords", "")));
+  if (!rulesKey || rulesKey.startsWith("0:")) return;
+  try {
+    const result = await storageGet([AUTO_BLOCK_WORD_EXCEPTIONS_KEY]);
+    const stored = result?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY];
+    const entries = stored?.rulesKey === rulesKey && stored?.ids && typeof stored.ids === "object" && !Array.isArray(stored.ids)
+      ? { ...stored.ids }
+      : {};
+    const now = Date.now();
+    cleanIds.forEach(id => { entries[id] = now; });
+    const trimmed = Object.fromEntries(Object.entries(entries)
+      .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+      .slice(0, 1000));
+    await storageSet({ [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: trimmed } });
+  } catch {}
 }
 
 function prepareBlockerTestRules(values) {
@@ -13893,6 +13930,7 @@ function renderSavedBotsHub() {
       const id = String(button.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       if (!id) return;
       blockedState = normalizeBotStore(blockedState);
+      await rememberAutoBlockWordExceptions([id]);
       blockedState.ids = blockedState.ids.filter(item => item !== id);
       delete blockedState.meta[id];
       await storageSet({ [BLOCKED_BOTS_KEY]: blockedState });
@@ -14387,6 +14425,7 @@ async function applyBlockedBotBulkAction() {
     if (!window.confirm(`Unblock ${entries.length} selected bot${entries.length === 1 ? "" : "s"}?`)) return;
     blockedState = normalizeBotStore(blockedState);
     const ids = new Set(entries.map(entry => entry.id));
+    await rememberAutoBlockWordExceptions([...ids]);
     blockedState.ids = blockedState.ids.filter(id => !ids.has(id));
     entries.forEach(entry => delete blockedState.meta[entry.id]);
     await storageSet({ [BLOCKED_BOTS_KEY]: blockedState });
@@ -16042,7 +16081,7 @@ function renderBotManager(kind) {
   });
 
   host.querySelectorAll(".bot-manager-remove").forEach(button => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const card = button.closest(".bot-manager-card");
       const id = card?.dataset.id || "";
       const name = card?.dataset.name || "";
@@ -16053,6 +16092,7 @@ function renderBotManager(kind) {
 
       if (kind === "blocked") {
         if (type === "id") {
+          await rememberAutoBlockWordExceptions([id]);
           blockedState.ids = blockedState.ids.filter(x => x !== id);
           delete blockedState.meta[id];
         } else {
@@ -17594,6 +17634,7 @@ async function load() {
   }
 
   setChecked("blockCards", settings.blockCards);
+  setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
   setChecked("hideGroupChats", settings.hideGroupChats);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
   setChecked("enableSmartFilterPresets", !!settings.enableSmartFilterPresets);
@@ -18252,6 +18293,7 @@ function readSettingsFromPage() {
     hideMainFooter2257: checked("hideMainFooter2257"),
 
     blockCards: checked("blockCards"),
+    autoBlockWordMatches: checked("autoBlockWordMatches"),
     hideHomeForYouCards: checked("hideHomeForYouCards"),
     expandLongCardDescriptions: checked("expandLongCardDescriptions"),
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
@@ -18870,6 +18912,7 @@ function readSingleSettingFromPage(settingKey) {
     case "hideMainFooterAppDownload": return (checked("hideMainFooterAppDownload"));
     case "hideMainFooter2257": return (checked("hideMainFooter2257"));
     case "blockCards": return (checked("blockCards"));
+    case "autoBlockWordMatches": return (checked("autoBlockWordMatches"));
     case "hideHomeForYouCards": return (checked("hideHomeForYouCards"));
     case "expandLongCardDescriptions": return (checked("expandLongCardDescriptions"));
     case "showCardGreetingTokenInfo": return (checked("showCardGreetingTokenInfo"));
@@ -21892,6 +21935,11 @@ async function collectDataHealth({ lightweight = false } = {}) {
   const checked = checkedValue && typeof checkedValue === "object" ? checkedValue : { ok: false, data: {}, error: "Local-data check unavailable." };
   const totalBytes = Number(totalBytesValue);
   const largeStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
+  const largeHealthCount = key => {
+    if (!largeStatsValue || typeof largeStatsValue !== "object" || !Object.prototype.hasOwnProperty.call(largeStats, key)) return null;
+    const value = Number(largeStats[key]);
+    return Number.isFinite(value) ? value : null;
+  };
   const rows = [];
   const result = checked.data && typeof checked.data === "object" ? checked.data : {};
   rows.push({
@@ -21945,9 +21993,14 @@ async function collectDataHealth({ lightweight = false } = {}) {
   const lorebooks = normalizeLorebookBackups(result[LOREBOOK_BACKUPS_KEY]);
   const badLorebookEntries = Object.values(lorebooks.meta).reduce((n, book) => n + Object.values(book.entries || {}).filter(entry => !entry.name).length, 0);
   if (lightweight) {
+    const botCopyCount = largeHealthCount(BOT_ARCHIVE_KEY);
+    const lorebookStatusCount = largeHealthCount(LOREBOOK_STATUS_KEY);
+    const largeBackupSummary = botCopyCount == null || lorebookStatusCount == null
+      ? "IndexedDB bot-copy / tracked-Lorebook counts unavailable"
+      : `${botCopyCount} bot copies and ${lorebookStatusCount} tracked Lorebook status records in IndexedDB`;
     rows.push({ state: badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badLorebookEntries
-      ? `${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} bot copies and ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} tracked Lorebook status records in IndexedDB; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.`
-      : `${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} bot copies and ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} tracked Lorebook status records in IndexedDB, plus ${Object.keys(lorebooks.meta).length} Lorebook backups; deep bot-copy validation is skipped in the combined support report.` });
+      ? `${largeBackupSummary}; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.`
+      : `${largeBackupSummary}, plus ${Object.keys(lorebooks.meta).length} Lorebook backups; deep bot-copy validation is skipped in the combined support report.` });
   } else {
     const botArchive = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
     const badArchives = Object.values(botArchive.meta).filter(bot => !bot.coverage?.length).length;
@@ -22285,6 +22338,12 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const result = resultValue && typeof resultValue === "object" ? resultValue : {};
   const bytes = Number(bytesValue);
   const largeStorageStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
+  const largeStorageStatsAvailable = !!(largeStatsValue && typeof largeStatsValue === "object");
+  const largeStorageCount = key => {
+    if (!largeStorageStatsAvailable || !Object.prototype.hasOwnProperty.call(largeStorageStats, key)) return "unavailable";
+    const value = Number(largeStorageStats[key]);
+    return Number.isFinite(value) ? String(value) : "unavailable";
+  };
   const partialSources = [];
   if (!resultValue) partialSources.push("local dataset summary");
   if (!Number.isFinite(bytes)) partialSources.push("storage size");
@@ -22326,10 +22385,10 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Later: ${countStoreItems(result[LATER_BOTS_KEY])}`,
     `Bot organization: ${Object.keys(result[BOT_ORGANIZER_KEY]?.meta || {}).length}`,
     `Chat organization: ${Object.keys(normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]).meta).length}`,
-    `Bot availability checks: ${Number(largeStorageStats[BOT_AVAILABILITY_KEY] || 0)}`,
-    `Saved bot copies: ${Number(largeStorageStats[BOT_ARCHIVE_KEY] || 0)}`,
-    `Tracked Lorebook status: ${Number(largeStorageStats[LOREBOOK_STATUS_KEY] || 0)}`,
-    `Large-data IndexedDB: ${Number(largeStorageStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStorageStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStorageStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records`,
+    `Bot availability checks: ${largeStorageCount(BOT_AVAILABILITY_KEY)}`,
+    `Saved bot copies: ${largeStorageCount(BOT_ARCHIVE_KEY)}`,
+    `Tracked Lorebook status: ${largeStorageCount(LOREBOOK_STATUS_KEY)}`,
+    `Large-data IndexedDB: ${largeStorageCount(BOT_AVAILABILITY_KEY)} availability records · ${largeStorageCount(BOT_ARCHIVE_KEY)} archive records · ${largeStorageCount(LOREBOOK_STATUS_KEY)} Lorebook status records`,
     `Personas: ${countStoreItems(personas, "persona")}`,
     `Persona organization: ${Object.keys(result[PERSONA_ORG_KEY]?.meta || {}).length}`,
     `OOC presets: ${countStoreItems(result[OOC_TEMPLATES_KEY], "ooc")}`,
@@ -23676,6 +23735,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols"] },
   { parent: "autoFillListings", name: "Listing refill", children: ["showListingRefillButton"] },
   { parent: "showListingFilterStats", name: "Listing filter stats", children: ["showListingFilterStatsDetails"] },
+  { parent: "blockCards", name: "Blocked tag / word / creator rules", children: ["autoBlockWordMatches"] },
   { parent: "showRandomChatButton", name: "Random Chat", children: ["randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites"] },
   { parent: "showChatTopBarTools", name: "Chat top-bar tools", children: ["chatTopBarInlineCreator", "hideChatTopBarRatingButton", "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell", "hideChatDropdownMemoryItem"] },
   { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview"] },

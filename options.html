@@ -2332,6 +2332,8 @@ cash =&gt; Bingo Coins
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
+<label class="row"><input id="autoBlockWordMatches" type="checkbox"/><span>Automatically add blocked-word matches to Blocked bots</span></label>
+<p class="hint">Opt-in. When a bot name or description matches one of your blocked words, QoL performs the same local block as pressing the card Block ×: the bot is added to Blocked bots and stays blocked on future listings. Optional Less Like / Dislike-after-block settings apply the same way. If you explicitly unblock that bot, QoL will not auto-block it again until your blocked-word list changes.</p>
 <label>Blocked creators, one per line<textarea id="blockedCreators" placeholder="@creatorname" spellcheck="false"></textarea></label>
 <p class="hint">Blocked tag/word/creator lists are used when <strong>Block character cards by text</strong> is enabled. Word matching is always case-insensitive (for example enigma = Enigma = ENIGMA), ignores common quote/punctuation/spacing differences, recognizes compact forms such as TF141 / TF 141 / TaskForce 141, and can match multi-word name entries such as Ghost Simon against Simon “Ghost” Riley. Creator blocking checks both the visible creator name and the @handle from the profile link when available.</p>
 <label class="row"><input id="lorebookBlockingEnabled" type="checkbox"/><span>Block Lorebook cards with QoL rules</span></label>

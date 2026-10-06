@@ -219,6 +219,7 @@
     if (!snapshot?.id || !DS.state.blockedBotIdSet?.has(snapshot.id)) return;
     const before = JSON.parse(JSON.stringify(DS.state.blockedBots || { ids: [], names: [], meta: {} }));
     const store = DS.state.blockedBots || { ids: [], names: [], meta: {} };
+    await DS.rememberAutoBlockWordException?.(snapshot.id);
     store.ids = (store.ids || []).filter(id => id !== snapshot.id);
     if (store.meta) delete store.meta[snapshot.id];
 

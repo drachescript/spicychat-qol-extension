@@ -27,6 +27,176 @@
     DS.queueQuickDislikeAfterBlock?.(meta);
   }
 
+  const AUTO_BLOCK_WORD_EXCEPTIONS_KEY = "autoBlockWordExceptionsV1";
+  const AUTO_BLOCK_WORD_EXCEPTION_LIMIT = 1000;
+  const autoBlockWordQueue = [];
+  const autoBlockWordQueuedIds = new Set();
+  const autoBlockWordFailureCooldown = new Map();
+  let autoBlockWordPumpRunning = false;
+  let autoBlockWordExceptionCache = { rulesKey: "", ids: new Map() };
+
+  function blockedWordRulesKeyFromValues(values) {
+    const normalized = [...new Set((values || []).map(value => {
+      let text = String(value || "").trim();
+      try { text = text.normalize("NFKC"); } catch {}
+      return text.toLocaleLowerCase();
+    }).filter(Boolean))].sort();
+    let hash = 2166136261;
+    const payload = normalized.join("\u001f");
+    for (let index = 0; index < payload.length; index += 1) {
+      hash ^= payload.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${normalized.length}:${(hash >>> 0).toString(16)}`;
+  }
+
+  function currentBlockedWordRulesKey() {
+    return blockedWordRulesKeyFromValues(DS.state?.settings?.blockedWords || []);
+  }
+
+  function normalizeExceptionEntries(value) {
+    if (!value || typeof value !== "object") return new Map();
+    const source = Array.isArray(value)
+      ? value.map(id => [id, Date.now()])
+      : Object.entries(value);
+    const entries = new Map();
+    for (const [idValue, atValue] of source) {
+      const id = String(idValue || "").trim().toLowerCase();
+      if (!id) continue;
+      entries.set(id, Number(atValue || 0) || Date.now());
+    }
+    return entries;
+  }
+
+  async function loadAutoBlockWordExceptions() {
+    const rulesKey = currentBlockedWordRulesKey();
+    if (autoBlockWordExceptionCache.rulesKey === rulesKey) return autoBlockWordExceptionCache.ids;
+
+    let stored = null;
+    try {
+      stored = (await DS.storageGet?.([AUTO_BLOCK_WORD_EXCEPTIONS_KEY]))?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY] || null;
+    } catch {}
+
+    const ids = stored?.rulesKey === rulesKey ? normalizeExceptionEntries(stored.ids) : new Map();
+    autoBlockWordExceptionCache = { rulesKey, ids };
+
+    if (stored && stored.rulesKey !== rulesKey) {
+      DS.storageSet?.({
+        [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: {} }
+      }).catch?.(() => {});
+    }
+    return ids;
+  }
+
+  async function persistAutoBlockWordExceptions(rulesKey, ids) {
+    const trimmed = [...ids.entries()]
+      .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+      .slice(0, AUTO_BLOCK_WORD_EXCEPTION_LIMIT);
+    const next = new Map(trimmed);
+    autoBlockWordExceptionCache = { rulesKey, ids: next };
+    await DS.storageSet?.({
+      [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: Object.fromEntries(trimmed) }
+    });
+  }
+
+  try {
+    chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
+      if (areaName !== "local" || !changes?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY]) return;
+      const stored = changes[AUTO_BLOCK_WORD_EXCEPTIONS_KEY]?.newValue || null;
+      const rulesKey = currentBlockedWordRulesKey();
+      autoBlockWordExceptionCache = {
+        rulesKey,
+        ids: stored?.rulesKey === rulesKey ? normalizeExceptionEntries(stored.ids) : new Map()
+      };
+    });
+  } catch {}
+
+  DS.rememberAutoBlockWordException = async function rememberAutoBlockWordException(idValue) {
+    const id = String(idValue || "").trim().toLowerCase();
+    const rulesKey = currentBlockedWordRulesKey();
+    if (!id || !rulesKey || rulesKey.startsWith("0:")) return false;
+    try {
+      const ids = await loadAutoBlockWordExceptions();
+      ids.set(id, Date.now());
+      await persistAutoBlockWordExceptions(rulesKey, ids);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  function autoBlockFavoriteProtected(card, id) {
+    const settings = DS.state?.settings || {};
+    if (!settings.protectFavoritesFromBlocking) return false;
+    if (DS.state?.favoriteBotIdSet?.has?.(id)) return true;
+    return !!card?.querySelector?.("button[aria-label='unfavorite'], button[aria-label*='unfavorite' i]");
+  }
+
+  async function runAutoBlockWordQueue() {
+    if (autoBlockWordPumpRunning) return;
+    autoBlockWordPumpRunning = true;
+    try {
+      while (autoBlockWordQueue.length) {
+        const job = autoBlockWordQueue.shift();
+        const id = String(job?.id || "").trim().toLowerCase();
+        if (!id) continue;
+        try {
+          const settings = DS.state?.settings || {};
+          if (!settings.enabled || !settings.blockCards || !settings.autoBlockWordMatches) continue;
+          if (DS.state?.blockedBotIdSet?.has?.(id)) continue;
+          if (currentBlockedWordRulesKey() !== job.rulesKey) continue;
+          if (autoBlockFavoriteProtected(job.card, id)) continue;
+          if (DS.isMyCreationsChatbotsPage?.() && settings.showBlockButtonOnMyCreations !== true) continue;
+
+          const exceptions = await loadAutoBlockWordExceptions();
+          if (exceptions.has(id)) continue;
+
+          const result = await DS.blockBotFromCard?.(job.card, job.anchor, {
+            source: "blocked-word",
+            blockedWord: job.blockedWord || "",
+            blockedWordRulesKey: job.rulesKey
+          });
+          if (result?.ok || DS.state?.blockedBotIdSet?.has?.(id)) {
+            const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+            perf.autoBlockedWordBots = Number(perf.autoBlockedWordBots || 0) + 1;
+          } else {
+            autoBlockWordFailureCooldown.set(id, Date.now() + 30000);
+          }
+        } catch {
+          autoBlockWordFailureCooldown.set(id, Date.now() + 30000);
+        } finally {
+          autoBlockWordQueuedIds.delete(id);
+        }
+        if (autoBlockWordQueue.length) await new Promise(resolve => setTimeout(resolve, 120));
+      }
+    } finally {
+      autoBlockWordPumpRunning = false;
+    }
+  }
+
+  DS.queueAutoBlockWordMatch = function queueAutoBlockWordMatch(card, anchor, match = null) {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !settings.blockCards || !settings.autoBlockWordMatches) return false;
+    const id = String(DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref?.(anchor?.href || "") || "").trim().toLowerCase();
+    if (!id || DS.state?.blockedBotIdSet?.has?.(id) || autoBlockWordQueuedIds.has(id)) return false;
+    if (Number(autoBlockWordFailureCooldown.get(id) || 0) > Date.now()) return false;
+    if (autoBlockFavoriteProtected(card, id)) return false;
+    if (DS.isMyCreationsChatbotsPage?.() && settings.showBlockButtonOnMyCreations !== true) return false;
+
+    const rulesKey = currentBlockedWordRulesKey();
+    if (!rulesKey || rulesKey.startsWith("0:")) return false;
+    autoBlockWordQueuedIds.add(id);
+    autoBlockWordQueue.push({
+      id,
+      card,
+      anchor,
+      blockedWord: String(match?.raw || "").trim().slice(0, 240),
+      rulesKey
+    });
+    queueMicrotask(() => { runAutoBlockWordQueue().catch(() => {}); });
+    return true;
+  };
+
   function visibleElement(el) {
     if (!el) return false;
     const rect = el.getBoundingClientRect?.();
@@ -435,10 +605,10 @@
     return null;
   };
 
-  DS.blockBotFromCard = async function blockBotFromCard(card, anchor) {
+  DS.blockBotFromCard = async function blockBotFromCard(card, anchor, options = {}) {
     if (DS.isFavoriteBotsPage?.() && DS.state.settings.protectFavoritesFromBlocking !== false) {
       DS.setQuickStatus?.("Favorites are protected from blocking.");
-      return;
+      return { ok: false, error: "favorite-protected" };
     }
 
     const id =
@@ -447,7 +617,7 @@
     const { blockedBots } = DS.state;
     const beforeBlocked = JSON.parse(JSON.stringify(blockedBots));
 
-    if (!id) return;
+    if (!id) return { ok: false, error: "missing-id" };
 
     if (!DS.state.blockedBotIdSet?.has(id)) {
       blockedBots.ids.push(id);
@@ -457,7 +627,13 @@
     blockedBots.meta = blockedBots.meta || {};
     blockedBots.meta[id] = {
       ...(blockedBots.meta[id] || {}),
-      ...DS.makeBotMeta({ id, card, anchor })
+      ...DS.makeBotMeta({ id, card, anchor }),
+      ...(options?.source === "blocked-word" ? {
+        autoBlockedByWord: true,
+        autoBlockedWord: String(options.blockedWord || "").slice(0, 240),
+        autoBlockedWordRulesKey: String(options.blockedWordRulesKey || "").slice(0, 80),
+        autoBlockedAt: Date.now()
+      } : {})
     };
 
     const blockedMeta = blockedBots.meta[id];
@@ -485,6 +661,7 @@
     } catch {}
 
     queueQuickDislike(blockedMeta);
+    return { ok: true, id, meta: blockedMeta };
   };
 
   DS.markBotNotInterestedFromCard = async function markBotNotInterestedFromCard(card, anchor) {

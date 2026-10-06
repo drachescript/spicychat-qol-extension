@@ -1,3 +1,9 @@
+## 0.2.35
+- Added opt-in blocked-word auto-blocking: when a bot name or description matches a blocked word, QoL can add that bot to the normal Blocked bots list just like pressing the card Block button. Explicit manual unblocks are remembered for the current blocked-word rules so the bot is not immediately re-added.
+- Fixed stale browser-extension content runtimes after extension updates/reloads: a tab that started with a valid QoL runtime now reloads once if that extension context is later invalidated, so maintained controls such as Context Keeper and blocking can recover.
+- Removed the OOC health check's automatic chat reload fallback; OOC repairs/rebinds locally and only reports a manual reload suggestion if it still cannot recover.
+- Fixed support reports showing timed-out IndexedDB counts as zero; unavailable large-data counts now stay explicitly unavailable.
+
 ## 0.2.34
 - Fixed Context Keeper Keep-button repair so message-toolbar rebuilds restore it even outside the current Message Lane.
 - Improved support diagnostics with partial timeout handling, live SpicyChat tab discovery, and no empty baseline-comparison section when no baseline exists.

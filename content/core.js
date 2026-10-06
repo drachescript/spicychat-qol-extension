@@ -345,6 +345,7 @@
     translationProtectedTerms: "",
 
     blockCards: false,
+    autoBlockWordMatches: false,
     blockedTags: [],
     blockedWords: [],
     blockedCreators: [],
@@ -1304,6 +1305,54 @@
       return false;
     }
   };
+
+  // Browser extension updates/reloads can invalidate an already-injected
+  // content-script context while leaving its old DOM decorations behind.
+  // Only self-reload when this page STARTED with a real extension context and
+  // later lost it; Android/WebView shims that never had chrome.runtime are not
+  // affected. This fixes stale pages where controls such as Keep/blocking stop
+  // being maintained even though their previously-created DOM is still visible.
+  const EXTENSION_CONTEXT_WAS_VALID_AT_START = DS.isExtensionContextValid();
+  const EXTENSION_CONTEXT_RECOVERY_KEY = "dsQolInvalidatedContextReloadV1";
+  const EXTENSION_CONTEXT_RECOVERY_GUARD_MS = 5 * 60 * 1000;
+  let extensionContextRecoveryPending = false;
+
+  function extensionContextRecoveryRoute() {
+    return `${String(location.pathname || "")}${String(location.search || "")}`.slice(0, 600);
+  }
+
+  function recoverInvalidatedExtensionContext(trigger = "watchdog") {
+    if (!EXTENSION_CONTEXT_WAS_VALID_AT_START || extensionContextRecoveryPending) return false;
+    if (DS.isExtensionContextValid()) return false;
+    if (document.visibilityState !== "visible") return false;
+
+    const route = extensionContextRecoveryRoute();
+    const now = Date.now();
+    try {
+      const previous = JSON.parse(sessionStorage.getItem(EXTENSION_CONTEXT_RECOVERY_KEY) || "null");
+      if (previous && previous.route === route && Number(previous.at || 0) > now - EXTENSION_CONTEXT_RECOVERY_GUARD_MS) {
+        return false;
+      }
+      sessionStorage.setItem(EXTENSION_CONTEXT_RECOVERY_KEY, JSON.stringify({ route, at: now, trigger: String(trigger || "watchdog") }));
+    } catch {}
+
+    extensionContextRecoveryPending = true;
+    try {
+      DS.runtimeLog?.("warn", "core", "Extension context invalidated; reloading page once", { trigger: String(trigger || "watchdog") });
+    } catch {}
+    setTimeout(() => {
+      try { location.reload(); } catch {}
+    }, 120);
+    return true;
+  }
+
+  if (EXTENSION_CONTEXT_WAS_VALID_AT_START) {
+    window.setInterval(() => recoverInvalidatedExtensionContext("interval"), 15000);
+    window.addEventListener("focus", () => recoverInvalidatedExtensionContext("focus"), true);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) recoverInvalidatedExtensionContext("visible");
+    }, true);
+  }
 
   const storageWriteQueue = {
     payload: {},

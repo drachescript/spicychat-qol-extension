@@ -729,11 +729,46 @@
     if (!mobileLayoutActive() || state.mobileListenersInstalled) return;
     state.mobileListenersInstalled = true;
 
-    state.mobileObserver = new MutationObserver(() => scheduleMobileSendWrapperNormalize());
-    state.mobileObserver.observe(document.body || document.documentElement, {
-      childList: true,
-      subtree: true
+    const mobileMutationTouchesComposer = records => records.some(record => {
+      if (record.type !== "childList") return false;
+
+      const nodes = [
+        ...Array.from(record.addedNodes || []),
+        ...Array.from(record.removedNodes || [])
+      ];
+
+      return nodes.some(node => {
+        if (!(node instanceof Element)) return false;
+
+        const selector = [
+          "textarea",
+          "[contenteditable='true']",
+          "button[aria-label='generate-image']",
+          "button[data-testid='ImageGenerationButton']"
+        ].join(",");
+
+        if (node.matches?.(selector)) return true;
+        if (node.querySelector?.(selector)) return true;
+
+        // A composer/edit wrapper can be replaced while the actual textarea is
+        // a sibling rather than a descendant of the changed node.
+        const parent = node.parentElement;
+        return !!parent?.querySelector?.(selector);
+      });
     });
+
+    state.mobileObserver = new MutationObserver(records => {
+      if (!mobileMutationTouchesComposer(records)) return;
+      scheduleMobileSendWrapperNormalize();
+    });
+
+    const mobileObserveRoot = document.body || document.documentElement;
+    if (mobileObserveRoot instanceof Node) {
+      state.mobileObserver.observe(mobileObserveRoot, {
+        childList: true,
+        subtree: true
+      });
+    }
 
     document.addEventListener("focusin", event => {
       const textarea = event.target;
