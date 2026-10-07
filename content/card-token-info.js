@@ -693,14 +693,21 @@
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     let auth = await discoverSpicychatAuth(forceAuth);
 
-    // Give a freshly opened helper tab a brief chance to observe SpicyChat's
-    // own authenticated API traffic before concluding that auth is unavailable.
+    // Give the document-start MAIN bridge time to observe SpicyChat's own
+    // working Authorization header. Never send a direct Lorebook request
+    // anonymously: current SpicyChat returns 403 for view=live without it.
     if (!auth?.token && !mainBridgeHasCapturedAuth()) {
-      const started = Date.now();
-      while (Date.now() - started < 2800 && !mainBridgeHasCapturedAuth()) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      await waitForMainBridgeCapturedAuth(6500);
       if (!mainBridgeHasCapturedAuth() && !auth?.token) auth = await discoverSpicychatAuth(true);
+    }
+    if (!auth?.token && !mainBridgeHasCapturedAuth()) {
+      const error = new Error("Lorebook API auth unavailable; waiting for authenticated SpicyChat traffic.");
+      error.status = "auth-unavailable";
+      error.bridgeStatus = "auth-unavailable";
+      error.httpStatus = 0;
+      error.authProvided = false;
+      error.authSource = String(auth?.source || "none");
+      throw error;
     }
 
     const lastSortPriority = Number.isFinite(Number(options?.lastSortPriority)) ? Number(options.lastSortPriority) : 0;
@@ -1061,7 +1068,7 @@
     return mainWorldChatHistoryRequest(character, conversation, options);
   };
 
-  async function waitForConversationListCapturedAuth(timeoutMs = 5000) {
+  async function waitForMainBridgeCapturedAuth(timeoutMs = 5000) {
     if (mainBridgeHasCapturedAuth()) return true;
     return new Promise(resolve => {
       let done = false;
@@ -1090,7 +1097,7 @@
     // that exact working bearer token before QoL creates its first API page.
     // This avoids falling back to DOM Load More just because isolated-world
     // storage cannot see SpicyChat's in-memory auth token.
-    if (!mainBridgeHasCapturedAuth()) await waitForConversationListCapturedAuth(5000);
+    if (!mainBridgeHasCapturedAuth()) await waitForMainBridgeCapturedAuth(5000);
 
     const requestOnce = async (forceAuth, previousIsolatedToken = null) => {
       const auth = await discoverSpicychatAuth(forceAuth);

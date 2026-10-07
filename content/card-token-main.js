@@ -559,6 +559,28 @@
     try { window.dispatchEvent(new CustomEvent(LOREBOOK_RESPONSE_EVENT, { detail })); } catch {}
   }
 
+  function waitForLorebookAuth(detail = {}, timeoutMs = 6500) {
+    const immediate = resolveAuth(detail);
+    if (isJwt(immediate.token)) return Promise.resolve(immediate);
+
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener("ds-qol-card-token-auth-captured-v1", onCaptured);
+        resolve(value);
+      };
+      const onCaptured = () => {
+        const next = resolveAuth(detail);
+        if (isJwt(next.token)) finish(next);
+      };
+      const timer = setTimeout(() => finish(resolveAuth(detail)), Math.max(0, Number(timeoutMs) || 0));
+      window.addEventListener("ds-qol-card-token-auth-captured-v1", onCaptured);
+    });
+  }
+
   window.addEventListener(LOREBOOK_REQUEST_EVENT, async event => {
     const detail = event?.detail || {};
     if (!active) return;
@@ -567,12 +589,25 @@
     const lastSortPriority = Number.isFinite(Number(detail.lastSortPriority)) ? Number(detail.lastSortPriority) : 0;
     if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lorebookId)) return;
 
-    const initial = resolveAuth(detail);
+    const initial = await waitForLorebookAuth(detail, 6500);
+    if (!isJwt(initial.token)) {
+      lorebookSend({
+        requestId, ok: false, status: "auth-unavailable", httpStatus: 0,
+        elapsedMs: 0, authSource: initial.authSource || "none", authProvided: false, authRefreshes: 0
+      });
+      return;
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(TIMEOUT_MS, 15000));
     const started = Date.now();
 
     const runRequest = async ({ token, guest, authSource }) => {
+      if (!isJwt(token)) {
+        const error = new Error("Lorebook auth unavailable");
+        error.name = "AuthUnavailableError";
+        throw error;
+      }
       const headers = {
         Accept: "application/json, text/plain, */*",
         "x-app-id": "spicychat",

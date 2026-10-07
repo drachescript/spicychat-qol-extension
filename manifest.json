@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -106,6 +106,7 @@
         "content/lorebook-backup.js",
         "content/lorebook-workflow.js",
         "content/my-creations-backup.js",
+        "content/my-chatbot-card-shortcuts.js",
         "content/smart-filter-presets.js",
         "content/my-creations-view-memory.js",
         "content/my-creations-filters.js",
@@ -166,6 +167,7 @@
         "content/persona-organizer.js",
         "content/lorebook-entries.js",
         "content/moderation-warnings.js",
+        "content/creator-editor-privacy-guard.js",
         "content/chat-export.js",
         "content/ooc.js",
         "content/generation-metadata.js",
@@ -219,6 +221,5 @@
   "optional_permissions": [
     "downloads",
     "notifications"
-  ],
-  "version_name": "0.2.37"
+  ]
 }

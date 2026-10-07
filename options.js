@@ -855,6 +855,8 @@ const DEFAULT_SETTINGS = {
   pauseQolInHiddenTabs: false,
   autoPerformanceLargeChats: true,
   largeChatPerformanceThreshold: 300,
+  autoReloadLargeChats: false,
+  autoReloadLargeChatsThreshold: 250,
   deferQolWhileTyping: false,
   pauseQolWhileMessageEditing: true,
   reduceQolAnimations: false,
@@ -2675,9 +2677,6 @@ function displayReleaseVersion(value) {
   }
 
   const manifest = chrome.runtime.getManifest?.() || {};
-  if (raw === String(manifest.version || "") && manifest.version_name) {
-    return String(manifest.version_name);
-  }
   return raw;
 }
 
@@ -4884,7 +4883,7 @@ function setVersionText() {
   if (!versionEl) return;
 
   const manifest = chrome.runtime.getManifest();
-  versionEl.textContent = `v${manifest.version_name || displayReleaseVersion(manifest.version)}`;
+  versionEl.textContent = `v${displayReleaseVersion(manifest.version)}`;
 }
 
 function resetHeavySavedDataState() {
@@ -17652,6 +17651,8 @@ async function load() {
   setChecked("pauseQolInHiddenTabs", !!settings.pauseQolInHiddenTabs);
   setChecked("autoPerformanceLargeChats", !!settings.autoPerformanceLargeChats);
   setValue("largeChatPerformanceThreshold", Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 300)));
+  setChecked("autoReloadLargeChats", !!settings.autoReloadLargeChats);
+  setValue("autoReloadLargeChatsThreshold", Math.max(150, Math.min(2000, Number(settings.autoReloadLargeChatsThreshold) || 250)));
   setChecked("deferQolWhileTyping", !!settings.deferQolWhileTyping);
   setChecked("pauseQolWhileMessageEditing", settings.pauseQolWhileMessageEditing !== false);
   setChecked("reduceQolAnimations", !!settings.reduceQolAnimations);
@@ -18305,6 +18306,8 @@ function readSettingsFromPage() {
     pauseQolInHiddenTabs: checked("pauseQolInHiddenTabs"),
     autoPerformanceLargeChats: checked("autoPerformanceLargeChats"),
     largeChatPerformanceThreshold: Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)),
+    autoReloadLargeChats: checked("autoReloadLargeChats"),
+    autoReloadLargeChatsThreshold: Math.max(150, Math.min(2000, Number(value("autoReloadLargeChatsThreshold", "250")) || 250)),
     deferQolWhileTyping: checked("deferQolWhileTyping"),
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
@@ -18934,6 +18937,8 @@ function readSingleSettingFromPage(settingKey) {
     case "pauseQolInHiddenTabs": return (checked("pauseQolInHiddenTabs"));
     case "autoPerformanceLargeChats": return (checked("autoPerformanceLargeChats"));
     case "largeChatPerformanceThreshold": return (Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)));
+    case "autoReloadLargeChats": return (checked("autoReloadLargeChats"));
+    case "autoReloadLargeChatsThreshold": return (Math.max(150, Math.min(2000, Number(value("autoReloadLargeChatsThreshold", "250")) || 250)));
     case "deferQolWhileTyping": return (checked("deferQolWhileTyping"));
     case "pauseQolWhileMessageEditing": return (checked("pauseQolWhileMessageEditing", true));
     case "reduceQolAnimations": return (checked("reduceQolAnimations"));
@@ -22345,7 +22350,7 @@ let lastPerformanceSelfCheckText = "";
 
 function supportReportFilename(kind = "support-info") {
   const manifest = chrome.runtime.getManifest?.() || {};
-  const version = String(manifest.version_name || displayReleaseVersion(manifest.version || "unknown") || "unknown")
+  const version = String(displayReleaseVersion(manifest.version || "unknown") || "unknown")
     .replace(/[^0-9A-Za-z._-]+/g, "-");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "support-info").replace(/[^0-9A-Za-z._-]+/g, "-");
@@ -22476,7 +22481,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const diagnosticLines = [
     "SpicyChat QoL diagnostics",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${chrome.runtime.getManifest?.().version_name || displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
+    `Version: ${displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -22657,7 +22662,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   let lines = [
     "SpicyChat QoL performance report",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -22669,7 +22674,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Bot archive preservation: ${Number(runtime.botArchiveSeenQueued || 0)} public observations queued; ${Number(runtime.botArchiveSeenMerged || 0)} merged in ${Number(runtime.botArchiveSeenBatches || 0)} batches; ${Number(runtime.botArchiveSeenUnchanged || 0)} unchanged snapshots skipped; ${Number(runtime.botArchiveWrites || 0)} archive writes; ${Number(runtime.ownBotBackupSaves || 0)} own-bot editor saves`,
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
     (() => { const c = context?.pageDiagnostics?.runtimeContext || {}; return `Runtime context: visibility ${c.visibilityState || "unknown"}; focus ${c.focused == null ? "unknown" : (c.focused ? "yes" : "no")}; mounted ${Number(c.mountedMessages || runtime.loadedChatMessages || 0)}; DOM ${Number(c.domNodes || 0)}; heap ${Number(c.heapBytes || 0) ? `${Math.round(Number(c.heapBytes) / 1048576)} MB` : "n/a"}; Long Task 10s ${Number(c.recentLongTaskMs10s || 0)} ms; 30s ${Number(c.recentLongTaskMs30s || 0)} ms`; })(),
-    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
+    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; auto refresh ${settings.autoReloadLargeChats ? `on @ ${Number(settings.autoReloadLargeChatsThreshold || 250)}` : "off"}; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
@@ -22746,7 +22751,7 @@ async function buildPerformanceSelfCheckText() {
   const lines = [
     "SpicyChat QoL performance self-check",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
@@ -22786,7 +22791,7 @@ async function buildFastSupportSnapshot() {
   return [
     "SpicyChat QoL fast support snapshot",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `Options DOM: ${document.getElementsByTagName("*").length} nodes`,

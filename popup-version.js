@@ -2,9 +2,6 @@
   "use strict";
 
   function getDisplayVersion(manifest) {
-    const named = String(manifest?.version_name || "").trim();
-    if (named) return named;
-
     const technical = String(manifest?.version || "").trim();
     const match = technical.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
     if (!match) return technical;

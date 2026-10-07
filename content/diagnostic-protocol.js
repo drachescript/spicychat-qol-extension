@@ -512,7 +512,7 @@
     try {
       const runtime = globalThis.chrome?.runtime || globalThis.browser?.runtime || null;
       const manifest = runtime?.getManifest?.() || {};
-      const version = String(manifest.version_name || manifest.version || "").trim();
+      const version = String(manifest.version || "").trim();
       if (version && version !== "unknown") state.lastKnownVersion = version;
     } catch {}
     return {

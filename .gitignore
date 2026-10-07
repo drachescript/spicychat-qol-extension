@@ -34,7 +34,7 @@ Thumbs.db
 *_diagnostic*.json
 *_diagnostic*.txt
 /dev_build
-SETUP-NOTES.md
-REPLACE_THESE_FILES.txt
-APPLY-QOL14-HOTFIX.bat
-apply_qol14_patch.py
+
+# others
+PATCH_EXTENSION_NEXT_BATCH.bat
+patch_extension_next_batch.ps1

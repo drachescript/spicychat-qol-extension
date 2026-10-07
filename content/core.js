@@ -704,6 +704,8 @@
     pauseQolInHiddenTabs: false,
     autoPerformanceLargeChats: true,
     largeChatPerformanceThreshold: 300,
+    autoReloadLargeChats: false,
+    autoReloadLargeChatsThreshold: 250,
     deferQolWhileTyping: false,
     pauseQolWhileMessageEditing: true,
     reduceQolAnimations: false,

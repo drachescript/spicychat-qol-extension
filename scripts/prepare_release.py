@@ -27,14 +27,13 @@ def main() -> int:
     data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     old = str(data.get("version") or "")
     data["version"] = version
-    data["version_name"] = version
+    data.pop("version_name", None)
     MANIFEST.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     changelog = CHANGELOG.read_text(encoding="utf-8") if CHANGELOG.exists() else ""
     has_heading = re.search(rf"^##\s+{re.escape(version)}(?:\s|$)", changelog, re.MULTILINE) is not None
 
     print(f"manifest.json: {old or '(missing)'} -> {version}")
-    print(f"version_name: {version}")
     if has_heading:
         print(f"CHANGELOG.md: found section for {version}")
     else:

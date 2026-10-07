@@ -370,27 +370,13 @@
   function findMessageEditControls(textarea) {
     const messageRoot = textarea.closest("div[id^='message-']");
     if (!messageRoot) {
-      return { messageRoot: null, save: null, cancel: null, group: null };
+      return { messageRoot: null, save: null, cancel: null, counter: null, group: null };
     }
 
     const buttons = Array.from(messageRoot.querySelectorAll("button"));
     const save = buttons.find(button => buttonDescriptor(button).includes("save")) || null;
     const cancel = buttons.find(button => buttonDescriptor(button).includes("cancel")) || null;
 
-    if (!save || !cancel) {
-      return { messageRoot, save, cancel, group: null };
-    }
-
-    let group = save;
-    while (group && group !== messageRoot && !group.contains(cancel)) {
-      group = group.parentElement;
-    }
-
-    if (!(group instanceof HTMLElement)) group = null;
-
-    // Include the character counter when it lives in the same compact controls
-    // footer. This is the block that SpicyChat currently pushes to the bottom
-    // of a very tall edit card on Android.
     const counter = Array.from(
       messageRoot.querySelectorAll("span, p, div")
     ).find(element => {
@@ -400,6 +386,19 @@
       return /^\d+\s*\/\s*10000$/.test(value);
     }) || null;
 
+    if (!save || !cancel) {
+      return { messageRoot, save, cancel, counter, group: null };
+    }
+
+    let group = save;
+    while (group && group !== messageRoot && !group.contains(cancel)) {
+      group = group.parentElement;
+    }
+
+    if (!(group instanceof HTMLElement)) group = null;
+
+    // Include the character counter only when it can be grouped with the
+    // buttons without swallowing the textarea itself.
     if (group && counter) {
       let candidate = group;
       while (
@@ -419,9 +418,8 @@
       }
     }
 
-    return { messageRoot, save, cancel, group };
+    return { messageRoot, save, cancel, counter, group };
   }
-
   function rememberEditLayoutStyle(node, property) {
     if (!(node instanceof HTMLElement)) return;
 
@@ -508,8 +506,15 @@
       setEditLayoutStyle(node, "margin-top", "0px");
     }
 
+    // Only collapse justify-content spacing when it controls the vertical
+    // edit flow. Row flex containers are usually the actual Save/Cancel row;
+    // changing those can distort horizontal button placement.
+    const verticalFlow =
+      style.display.includes("grid") ||
+      (style.display.includes("flex") && !/^row/.test(style.flexDirection || "row"));
+
     if (
-      (style.display.includes("flex") || style.display.includes("grid")) &&
+      verticalFlow &&
       /space-between|space-around|space-evenly/.test(style.justifyContent)
     ) {
       setEditLayoutStyle(node, "justify-content", "flex-start");
@@ -522,27 +527,44 @@
       setEditLayoutStyle(node, "align-content", "flex-start");
     }
   }
-
   function repairMessageEditAncestors(textarea, wantedHeight) {
     const shell = messageEditShell(textarea);
     const {
       messageRoot,
+      save,
+      cancel,
+      counter,
       group: controlsGroup
     } = findMessageEditControls(textarea);
 
     if (!messageRoot) return;
 
     const textareaRect = textarea.getBoundingClientRect();
-    const controlsRect = controlsGroup?.getBoundingClientRect?.() || null;
-    const measuredGap = controlsRect
-      ? Math.max(0, controlsRect.top - textareaRect.bottom)
-      : 0;
+    const saveRect = save?.getBoundingClientRect?.() || null;
+    const cancelRect = cancel?.getBoundingClientRect?.() || null;
+    const counterRect = counter?.getBoundingClientRect?.() || null;
 
-    // SpicyChat's mobile edit card can retain a full-height/flex spacer after
-    // the textarea itself has already been resized. That leaves Save/Cancel
-    // several screens below the actual field. Only switch to the aggressive
-    // compact path when the real measured gap is clearly abnormal.
+    const buttonTops = [saveRect?.top, cancelRect?.top]
+      .filter(value => Number.isFinite(value));
+    const buttonTop = buttonTops.length ? Math.min(...buttonTops) : null;
+    const buttonGap = buttonTop == null
+      ? 0
+      : Math.max(0, buttonTop - textareaRect.bottom);
+    const counterGap = Number.isFinite(counterRect?.top)
+      ? Math.max(0, counterRect.top - textareaRect.bottom)
+      : 0;
+    const measuredGap = Math.max(buttonGap, counterGap);
+
+    // Measure the actual Save/Cancel positions instead of trusting their outer
+    // wrapper. SpicyChat can leave the counter nearby while pushing the buttons
+    // hundreds of pixels farther down.
     const gapIsHuge = measuredGap > 56;
+    const layoutReady = textarea.dataset.dsMobileMessageEditLayoutReady === "1";
+
+    // Once a stable edit layout has been repaired, normal typing only needs the
+    // cheap geometry check above. Avoid repeatedly walking/restyling ancestors
+    // on every character unless the controls drift away again.
+    if (!gapIsHuge && layoutReady) return;
 
     let node = textarea.parentElement;
     for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
@@ -568,9 +590,6 @@
     }
 
     if (gapIsHuge && controlsGroup) {
-      // Collapse the controls side of the flex tree as well. In the current
-      // SpicyChat mobile DOM, an mt-auto/flex-grow ancestor is what creates the
-      // giant blank area seen between the editor and character count/buttons.
       let controlNode = controlsGroup;
       for (
         let depth = 0;
@@ -596,20 +615,31 @@
         if (controlNode === shell || controlNode === messageRoot) break;
       }
 
-      // The message root itself may carry the minimum height that survives
-      // textarea autosizing, so compact it only after the large-gap check.
+      // Kill any direct auto-margin that can push individual controls down even
+      // when their shared wrapper has already been compacted.
+      for (const control of [counter, cancel, save]) {
+        if (!(control instanceof HTMLElement)) continue;
+        const style = getComputedStyle(control);
+        if (style.marginTop === "auto") {
+          setEditLayoutStyle(control, "margin-top", control === counter ? "8px" : "0px");
+        }
+      }
+
       compactMessageEditNode(messageRoot);
 
       if (!state.editLayoutDiagRoots.has(messageRoot)) {
         state.editLayoutDiagRoots.add(messageRoot);
         DS.diagEvent?.("composer-control", "message-edit-gap-compacted", {
           measuredGap: Math.round(measuredGap),
+          buttonGap: Math.round(buttonGap),
+          counterGap: Math.round(counterGap),
           wantedHeight: Math.round(wantedHeight)
         });
       }
     }
-  }
 
+    textarea.dataset.dsMobileMessageEditLayoutReady = "1";
+  }
   function resizeAndroidMessageEdit(textarea) {
     if (!androidAppRuntime() || !mobileLayoutActive()) return false;
     if (!isMessageEditTextarea(textarea) || !textarea.isConnected) return false;
@@ -620,14 +650,13 @@
     );
 
     const minHeight = 96;
-    // Leave enough room for Save/Cancel and the keyboard, but give long edits
-    // more space before switching to an internal scroll area.
-    const maxHeight = Math.max(240, Math.min(640, viewportHeight * 0.78));
+    // Grow enough to make editing comfortable, then stop. Long edits scroll
+    // inside the textarea so Save/Cancel stay reachable above the keyboard.
+    const maxHeight = Math.max(200, Math.min(360, viewportHeight * 0.46));
     const previousScrollTop = Number(textarea.scrollTop || 0);
     const selectionEnd = Number(textarea.selectionEnd ?? textarea.value.length);
     const editingAtEnd = selectionEnd >= Math.max(0, textarea.value.length - 1);
 
-    // Measure from the content, not the previous explicit height.
     textarea.style.setProperty("height", "auto", "important");
     textarea.style.setProperty("min-height", `${minHeight}px`, "important");
     textarea.style.setProperty("max-height", `${maxHeight}px`, "important");
@@ -655,9 +684,6 @@
     textarea.dataset.dsMobileMessageEditFixed = "1";
     repairMessageEditAncestors(textarea, wantedHeight);
 
-    // Once a long edit reaches the cap, keeping the textarea at the correct
-    // height is not enough: Android WebView can leave the newest line partly
-    // below the internal scroll viewport. Keep the active caret/end visible.
     const restoreEditScroll = () => {
       if (!textarea.isConnected) return;
       const maxScroll = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
@@ -677,7 +703,6 @@
     requestAnimationFrame(restoreEditScroll);
     return true;
   }
-
   function normalizeAndroidMessageEditors() {
     if (!androidAppRuntime() || !mobileLayoutActive()) return;
 

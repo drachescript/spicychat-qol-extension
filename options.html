@@ -1305,6 +1305,11 @@ Testing" spellcheck="false"></textarea></label>
 <label>Large-chat threshold
 <input id="largeChatPerformanceThreshold" max="5000" min="100" step="50" type="number"/>
 </label>
+<label class="row"><input id="autoReloadLargeChats" type="checkbox"/><span>Automatically refresh very long chats</span></label>
+<label>Auto-refresh threshold
+<input id="autoReloadLargeChatsThreshold" max="2000" min="150" step="50" type="number" value="250"/>
+</label>
+<p class="hint">Default: 250 mounted messages. QoL waits for the current reply or message edit to finish, preserves the composer draft, reloads the same chat, and avoids reload loops if SpicyChat comes back above the limit.</p>
 <label class="row"><input id="deferQolWhileTyping" type="checkbox"/><span>Delay non-essential chat QoL while I am actively typing</span></label>
 <label class="row"><input id="pauseQolWhileMessageEditing" type="checkbox"/><span>Keep non-essential QoL quiet while a message is being edited</span></label>
 <label class="row"><input id="reduceQolAnimations" type="checkbox"/><span>Reduce QoL-added animations and transitions</span></label>

@@ -1,3 +1,9 @@
+## 0.2.38
+- Kept Private chatbot and Lorebook editors out of automatic QoL content scans; Public/Unlisted editors and manual creator actions still work normally.
+- Added optional Edit buttons to My Chatbot cards and made favorite-creator stars there a separate opt-in.
+- Added optional automatic chat refresh for very long chats, with a 250-message default limit and draft-safe reloads.
+- Fixed Lorebook API reads so QoL waits for authenticated access instead of sending anonymous requests.
+
 ## 0.2.37
 - Added beta Rulebook support for Rulebook Explore, editor, public Rulebook, and My Rulebooks pages; normal accounts stay unaffected and My Rulebooks stays quiet until more Rulebook tools are ready.
 - Fixed collapsed Lorebook tag/keyword expansion on public Lorebook cards and Lorebook entry editors.

@@ -38,7 +38,8 @@
         "content/runtime-plan.js",
         "content/tab-diagnostics.js",
         "content/tag-aliases.js",
-        "content/update-toast.js"
+        "content/update-toast.js",
+        "content/creator-editor-privacy-guard.js"
       ]
     },
     "interface": {
@@ -183,6 +184,7 @@
         "content/creator-writing-assistant.js",
         "content/moderation-warnings.js",
         "content/my-creations-backup.js",
+        "content/my-chatbot-card-shortcuts.js",
         "content/my-creations-filters.js",
         "content/my-creations-view-memory.js"
       ]

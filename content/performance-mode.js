@@ -9,6 +9,7 @@
   const KEEP_FULLY_RENDERED = 10;
   const DESKTOP_APP_KEEP_FULLY_RENDERED = 6;
   const PERFORMANCE_RELOAD_STATE_KEY = "dsQolPerformanceReloadV1";
+  const AUTO_RELOAD_GUARD_KEY = "dsQolAutoLongChatReloadV1";
   const CHAT_WINDOW_CONFIG = Object.freeze({
     normal: Object.freeze({ threshold: 140, keep: 70, reveal: 50 }),
     adaptive: Object.freeze({ threshold: 120, keep: 60, reveal: 50 }),
@@ -27,6 +28,7 @@
   let chatWindowApplied = false;
   let chatWindowControl = null;
   let performanceReloadRestoreTimer = 0;
+  let autoReloadTimer = 0;
   const chunkedDomJobs = new Map();
   let deferredPerformanceTimer = 0;
 
@@ -257,10 +259,10 @@
     }, delay));
   }
 
-  function refreshChatForPerformance() {
+  function refreshChatForPerformance({ automatic = false } = {}) {
     if (generationLikelyActive()) {
-      window.alert("Wait for the current reply to finish before refreshing the chat for performance.");
-      return;
+      if (!automatic) window.alert("Wait for the current reply to finish before refreshing the chat for performance.");
+      return false;
     }
 
     const field = findComposerField();
@@ -274,6 +276,79 @@
       sessionStorage.setItem(PERFORMANCE_RELOAD_STATE_KEY, JSON.stringify(payload));
     } catch {}
     location.reload();
+    return true;
+  }
+
+  function readAutoReloadGuard() {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(AUTO_RELOAD_GUARD_KEY) || "null");
+      if (!parsed || !parsed.routeKey) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function clearAutoReloadGuard() {
+    try { sessionStorage.removeItem(AUTO_RELOAD_GUARD_KEY); } catch {}
+  }
+
+  function rememberAutoReloadGuard(routeKey, mounted, threshold) {
+    try {
+      sessionStorage.setItem(AUTO_RELOAD_GUARD_KEY, JSON.stringify({
+        routeKey,
+        mounted: Math.max(0, Number(mounted) || 0),
+        threshold: Math.max(0, Number(threshold) || 0),
+        at: Date.now()
+      }));
+    } catch {}
+  }
+
+  function autoReloadComposerBusy() {
+    const field = findComposerField();
+    if (!field || document.activeElement !== field) return false;
+    return !!composerText(field).trim();
+  }
+
+  function evaluateAutoLongChatReload() {
+    clearTimeout(autoReloadTimer);
+    autoReloadTimer = 0;
+
+    const s = settings();
+    if (!s.enabled || !s.autoReloadLargeChats || !DS.isSingleChatPage?.()) return;
+    if (DS.isChatStartupWarmup?.() || DS.state?.bulkChatHistoryLoadActive) {
+      autoReloadTimer = setTimeout(evaluateAutoLongChatReload, 1800);
+      return;
+    }
+
+    const threshold = Math.max(150, Math.min(2000, Number(s.autoReloadLargeChatsThreshold) || 250));
+    const routeKey = chatRouteKey();
+    const mounted = messageRoots().length;
+    const guard = readAutoReloadGuard();
+
+    if (guard && guard.routeKey !== routeKey) clearAutoReloadGuard();
+
+    if (mounted < threshold) {
+      if (guard?.routeKey === routeKey) clearAutoReloadGuard();
+      return;
+    }
+
+    // If SpicyChat reloads the same chat and immediately mounts at/above the
+    // threshold again, stay disarmed instead of entering a refresh loop. The
+    // guard is re-armed once this route is observed below the threshold.
+    if (guard?.routeKey === routeKey) return;
+
+    if (generationLikelyActive() || DS.hasActiveMessageEditor?.() || autoReloadComposerBusy()) {
+      autoReloadTimer = setTimeout(evaluateAutoLongChatReload, 1200);
+      return;
+    }
+
+    rememberAutoReloadGuard(routeKey, mounted, threshold);
+    DS.diagPerformance?.("auto-chat-reload", { mountedMessages: mounted, threshold, routeKey });
+    if (!refreshChatForPerformance({ automatic: true })) {
+      clearAutoReloadGuard();
+      autoReloadTimer = setTimeout(evaluateAutoLongChatReload, 1200);
+    }
   }
 
   function readPendingReloadState() {
@@ -657,4 +732,6 @@
   };
 
   schedulePerformanceReloadRestore();
+  setInterval(evaluateAutoLongChatReload, 2500);
+  setTimeout(evaluateAutoLongChatReload, 1400);
 })();

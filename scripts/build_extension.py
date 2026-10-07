@@ -306,7 +306,6 @@ def chrome_manifest(source: dict, dev: bool, profile: dict) -> dict:
     )
     manifest["background"] = {"service_worker": "background.js"}
     manifest.pop("browser_specific_settings", None)
-    manifest["version_name"] = str(manifest["version"])
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()
     return manifest
@@ -319,7 +318,6 @@ def firefox_manifest(source: dict, dev: bool, profile: dict) -> dict:
         or ("SpicyChat QoL DEV" if dev else "SpicyChat QoL")
     )
     manifest["background"] = {"scripts": ["background.js"]}
-    manifest.pop("version_name", None)
     manifest["browser_specific_settings"] = FIREFOX_SETTINGS
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()
