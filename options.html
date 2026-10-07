@@ -122,7 +122,7 @@
 <p class="hint">Detected automatically from the SpicyChat UI available to this browser profile. QoL does not grant beta access and does not probe private APIs just to test entitlement.</p>
 <p id="spicyChatBetaStatus"><strong>Status:</strong> Not detected yet.</p>
 <p class="hint" id="spicyChatBetaCapabilities">Public Lorebooks: unknown · Story Mode: unknown</p>
-<p class="hint">Detection updates when QoL sees beta-only controls such as Lorebook Explore/Public visibility, Switch to Story Mode, or a Story Mode route. Normal accounts are left on production behavior.</p>
+<p class="hint">Detection updates only from beta-only controls/routes SpicyChat actually exposes to this browser profile. Normal accounts are left on production behavior, and Rulebook-specific QoL stays dormant unless Rulebooks are present.</p>
 </section>
 <section class="card" id="settingsLayoutCard">
 <h2>Settings layout</h2>
@@ -2175,8 +2175,8 @@ cash =&gt; Bingo Coins
 <label class="row"><input id="lorebookAutoStartNew" type="checkbox"/><span>Automatically click Start New when opening Create Lorebook</span></label>
 <label class="row"><input id="lorebookBulkKeywordPaste" type="checkbox"/><span>Add an Insert copied button for Lorebook keywords</span></label>
 <label class="row"><input id="lorebookExpandEntryEditor" type="checkbox"/><span>Make the Lorebook entry editor/content field taller</span></label>
-<label class="row"><input id="lorebookExpandTags" type="checkbox"/><span>Expand collapsed Lorebook tag lists</span></label>
-<p class="hint">Uses SpicyChat's current Lorebook search index to restore the complete public tag list when a card shows +N. QoL only expands a row when the returned tag count is complete.</p>
+<label class="row"><input id="lorebookExpandTags" type="checkbox"/><span>Expand collapsed Lorebook tag / keyword lists</span></label>
+<p class="hint">Expands public Lorebook card tags and collapsed entry-keyword rows. Public data uses SpicyChat's current Lorebook search indexes; owned/private editor rows fall back to the current authenticated Lorebook data. QoL only replaces +N when it has the complete list.</p>
 <label class="row"><input id="botTagBulkPaste" type="checkbox"/><span>Add an Insert copied button for chatbot tags</span></label>
 <label class="row"><input id="botEditorSaveActions" type="checkbox"/><span>Add Save &amp; Stay and Save &amp; Chat buttons to the chatbot editor</span></label>
 <label class="row"><input id="botEditorSaveChatNewTab" type="checkbox"/><span>Make Save &amp; Chat open the chat in a new tab and keep the editor available</span></label>

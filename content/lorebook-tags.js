@@ -627,15 +627,188 @@
     return true;
   });
 
+
+  const editorEntryCache = new Map();
+  const editorEntryInFlight = new Map();
+  const EDITOR_ENTRY_CACHE_MAX_AGE = 30 * 1000;
+  const LOREBOOK_EXPORT_WORKER_PARAM = "dsQolLorebookBackupWorker";
+
+  function isLorebookBackupWorkerPage() {
+    try {
+      return new URLSearchParams(location.search || "").get(LOREBOOK_EXPORT_WORKER_PARAM) === "1" ||
+        document.documentElement?.getAttribute("data-ds-qol-lorebook-backup-worker") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function editorLorebookIdFromPath(path = location.pathname) {
+    const match = String(path || "").match(/^\/lorebook\/edit\/([0-9a-f-]{20,})\/entries(?:\/|$)/i);
+    return clean(match?.[1] || "").toLowerCase();
+  }
+
+  function editorEntryTitle(rowInfo) {
+    const button = rowInfo?.counter?.closest?.("button");
+    if (!button) return "";
+    const tooltip = [...button.querySelectorAll("[data-tooltip-content]")]
+      .map(el => clean(el.getAttribute("data-tooltip-content")))
+      .find(Boolean);
+    if (tooltip) return tooltip;
+
+    const candidates = [...button.querySelectorAll("p, span")]
+      .filter(el => el !== rowInfo.textNode && el !== rowInfo.counter)
+      .map(el => clean(el.textContent))
+      .filter(text => text && !/^\+\d+$/.test(text));
+    return candidates[0] || "";
+  }
+
+  function findEditorCollapsedKeywordRows() {
+    const rows = [];
+    const seen = new Set();
+    const counters = [...document.querySelectorAll("p, span")]
+      .filter(el => /^\+\d+$/.test(clean(el.textContent)));
+
+    for (const counter of counters) {
+      const row = counter.parentElement;
+      const button = counter.closest?.("button");
+      if (!row || !button || !button.contains(row)) continue;
+      const textNode = [...row.children].find(el => el !== counter && clean(el.textContent) && !/^\+\d+$/.test(clean(el.textContent)));
+      if (!textNode) continue;
+      const key = `${editorEntryTitle({ row, textNode, counter })}|${clean(textNode.textContent)}|${clean(counter.textContent)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ row, textNode, counter, button });
+    }
+    return rows;
+  }
+
+  function entryKeywordScore(entry, rowInfo) {
+    const keywords = [...new Set((Array.isArray(entry?.keywords) ? entry.keywords : []).map(clean).filter(Boolean))];
+    const visible = visibleCollapsedTags(rowInfo);
+    const hidden = collapsedTagCount(rowInfo);
+    if (!keywords.length || keywords.length < visible.length + hidden) return -1;
+
+    let score = 0;
+    const title = clean(editorEntryTitle(rowInfo)).toLowerCase();
+    const entryName = clean(entry?.name).toLowerCase();
+    if (title && entryName === title) score += 100;
+    else if (title && entryName && (entryName.includes(title) || title.includes(entryName))) score += 20;
+
+    const lowerKeywords = keywords.map(value => value.toLowerCase());
+    const lowerVisible = visible.map(value => value.toLowerCase());
+    const prefix = lowerVisible.every((value, index) => lowerKeywords[index] === value);
+    if (prefix) score += 80 + lowerVisible.length * 4;
+    else {
+      const allPresent = lowerVisible.every(value => lowerKeywords.includes(value));
+      if (!allPresent) return -1;
+      score += 35 + lowerVisible.length * 2;
+    }
+
+    if (keywords.length === visible.length + hidden) score += 25;
+    return score;
+  }
+
+  function matchEditorEntry(entries, rowInfo, usedIds) {
+    let best = null;
+    let bestScore = -1;
+    for (const entry of entries || []) {
+      const key = clean(entry?.id || `${entry?.name || ""}|${(entry?.keywords || []).join("|")}`);
+      if (key && usedIds.has(key)) continue;
+      const score = entryKeywordScore(entry, rowInfo);
+      if (score > bestScore) {
+        best = entry;
+        bestScore = score;
+      }
+    }
+    if (!best || bestScore < 35) return null;
+    const key = clean(best?.id || `${best?.name || ""}|${(best?.keywords || []).join("|")}`);
+    if (key) usedIds.add(key);
+    return best;
+  }
+
+  async function fetchEditorLorebookEntries(lorebookId) {
+    const id = clean(lorebookId).toLowerCase();
+    const cached = editorEntryCache.get(id);
+    if (cached && Date.now() - Number(cached.checkedAt || 0) < EDITOR_ENTRY_CACHE_MAX_AGE) return cached.entries || [];
+    if (editorEntryInFlight.has(id)) return editorEntryInFlight.get(id);
+
+    const task = (async () => {
+      let entries = [];
+      let source = "";
+
+      // Public Lorebooks can use SpicyChat's dedicated Lorebook-entry Typesense
+      // collection. This is the same scoped key already used by Lorebook Status,
+      // and avoids opening/fetching every entry individually.
+      try {
+        const indexed = await runtimeMessage({ type: "DS_LOREBOOK_PUBLIC_RECOVERY_FETCH", lorebookId: id, expectedCount: 0 });
+        if (indexed?.ok && indexed?.complete && Array.isArray(indexed.entries) && indexed.entries.length) {
+          entries = indexed.entries.map((entry, index) => normalizeLorebookEntry(entry, index));
+          source = clean(indexed.source || "typesense:lorebook_entries_public");
+        }
+      } catch {}
+
+      // Private/unindexed owned Lorebooks are not present in the public entry
+      // collection. Use the current authenticated API path once for the whole
+      // Lorebook. Do NOT call the full backup reader here: that reader is allowed
+      // to open an editor fallback, which previously let an automatic keyword
+      // expansion recursively spawn another helper while already inside one.
+      if (!entries.length) {
+        try {
+          const copy = await getCurrentOwnLorebookBackupDataApi(id);
+          if (Array.isArray(copy?.entries) && copy.entries.length) {
+            entries = copy.entries.map((entry, index) => normalizeLorebookEntry(entry, index));
+            source = clean(copy.source || "current-live-api");
+          }
+        } catch {}
+      }
+
+      editorEntryCache.set(id, { entries, source, checkedAt: Date.now() });
+      return entries;
+    })().finally(() => editorEntryInFlight.delete(id));
+
+    editorEntryInFlight.set(id, task);
+    return task;
+  }
+
+  async function expandEditorKeywordRows(lorebookId) {
+    const rows = findEditorCollapsedKeywordRows().filter(rowInfo => !rowInfo.row.classList.contains("ds-lorebook-tags-expanded"));
+    if (!rows.length) return;
+
+    const entries = await fetchEditorLorebookEntries(lorebookId);
+    if (!entries.length) return;
+
+    const usedIds = new Set();
+    for (const rowInfo of rows) {
+      const entry = matchEditorEntry(entries, rowInfo, usedIds);
+      if (!entry) continue;
+      showExpanded(rowInfo, entry.keywords || []);
+    }
+  }
+
   DS.applyLorebookTagExpansion = async function applyLorebookTagExpansion() {
     const settings = DS.state?.settings || {};
     const path = String(location.pathname || "");
     const supportedSurface = /^\/lorebooks(?:\/|$)/i.test(path) || /^\/lorebook(?:\/|$)/i.test(path);
 
+    // The persistent bulk-backup helper exists only to collect the requested
+    // Details/Entries snapshot. Never let automatic keyword expansion run in
+    // that worker: doing so can trigger another live-reader fallback while the
+    // helper is already collecting the same Lorebook.
+    if (isLorebookBackupWorkerPage()) {
+      restoreExpandedRows();
+      return;
+    }
+
     // My Lorebooks is deliberately a quiet management surface. Do not turn the
     // expansion option into another automatic scanner there.
     if (!settings.enabled || !settings.lorebookExpandTags || !supportedSurface || /^\/my-creations\/lorebooks(?:\/|$)/i.test(path)) {
       restoreExpandedRows();
+      return;
+    }
+
+    const editorLorebookId = editorLorebookIdFromPath(path);
+    if (editorLorebookId) {
+      await expandEditorKeywordRows(editorLorebookId);
       return;
     }
 
@@ -682,4 +855,87 @@
       showExpanded(item.rowInfo, tags);
     }));
   };
+
+  let editorExpansionObserver = null;
+  let editorExpansionTimer = null;
+
+  function editorExpansionEnabled() {
+    const settings = DS.state?.settings || {};
+    return !!settings.enabled && !!settings.lorebookExpandTags && !!editorLorebookIdFromPath();
+  }
+
+  function stopEditorExpansionObserver() {
+    editorExpansionObserver?.disconnect();
+    editorExpansionObserver = null;
+  }
+
+  function scheduleEditorExpansion(delay = 120) {
+    clearTimeout(editorExpansionTimer);
+    editorExpansionTimer = null;
+    if (!editorExpansionEnabled()) {
+      stopEditorExpansionObserver();
+      restoreExpandedRows();
+      return;
+    }
+    editorExpansionTimer = setTimeout(() => {
+      editorExpansionTimer = null;
+      DS.applyLorebookTagExpansion?.().catch?.(() => {});
+    }, Math.max(0, delay));
+  }
+
+  function ensureEditorExpansionObserver() {
+    if (!editorExpansionEnabled() || editorExpansionObserver || !document.body) return;
+    editorExpansionObserver = new MutationObserver(mutations => {
+      let relevant = false;
+      for (const mutation of mutations) {
+        if (DS.mutationIsQolOnly?.(mutation)) continue;
+        for (const node of mutation.addedNodes || []) {
+          if (!(node instanceof Element)) continue;
+          const hasCounter = /^\+\d+$/.test(clean(node.textContent)) ||
+            [...(node.querySelectorAll?.("p, span") || [])].some(el => /^\+\d+$/.test(clean(el.textContent)));
+          if (hasCounter) {
+            relevant = true;
+            break;
+          }
+        }
+        if (relevant) break;
+      }
+      if (relevant) scheduleEditorExpansion(140);
+    });
+    editorExpansionObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function refreshEditorExpansion() {
+    if (!editorExpansionEnabled()) {
+      stopEditorExpansionObserver();
+      restoreExpandedRows();
+      return;
+    }
+    ensureEditorExpansionObserver();
+    scheduleEditorExpansion(80);
+  }
+
+  window.addEventListener("popstate", () => setTimeout(refreshEditorExpansion, 80), true);
+  document.addEventListener("click", event => {
+    if (event.target instanceof Element && event.target.closest("a[href], button[data-testid^='tab-']")) {
+      setTimeout(refreshEditorExpansion, 120);
+    }
+  }, true);
+
+  try {
+    chrome.storage?.onChanged?.addListener?.((changes, area) => {
+      if (area !== "local" || !DS.hasSettingStorageChanges?.(changes)) return;
+      setTimeout(refreshEditorExpansion, 0);
+    });
+  } catch {}
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", refreshEditorExpansion, { once: true });
+  } else {
+    setTimeout(refreshEditorExpansion, 0);
+  }
+  setTimeout(refreshEditorExpansion, 400);
+  setTimeout(refreshEditorExpansion, 1400);
+  setTimeout(refreshEditorExpansion, 3200);
+
 })();

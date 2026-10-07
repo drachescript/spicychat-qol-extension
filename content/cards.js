@@ -503,8 +503,8 @@
     // My Creations is a management surface, not discovery. Keep explicit
     // user blocks authoritative, but do not run automatic discovery filters,
     // language scans, recommendation filters or blocked-word auto-actions
-    // against the user's own chatbot cards.
-    if (!discoveryContext && DS.isMyCreationsChatbotsPage?.()) return null;
+    // against the user's own My Creations cards.
+    if (!discoveryContext && DS.isMyCreationsPage?.()) return null;
 
     const favoriteCreator = DS.favoriteCreatorContextForCard?.(card) || null;
     const favoritePrefs = favoriteCreator?.preferences || {};
@@ -563,7 +563,7 @@
       !context.ignoreOpened &&
       favoritePrefs.showOpenedBots !== true &&
       (!DS.isChatListPage() || discoveryContext) &&
-      !DS.isMyCreationsChatbotsPage?.() &&
+      !DS.isMyCreationsPage?.() &&
       id &&
       openedChats.has(id)
     ) {

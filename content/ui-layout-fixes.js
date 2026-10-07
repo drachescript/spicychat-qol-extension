@@ -49,6 +49,15 @@ html[data-ds-chat-message-layout="stacked"] [data-ds-stacked-composer-bubble="1"
   box-sizing: border-box !important;
 }
 
+/* SpicyChat's Lorebook keyword field is a wrapping flex row. With many
+   keywords, the native Clear-all X can wrap onto its own line and sit at the
+   left edge. Keep that native button pinned to the right of whichever flex
+   line it lands on without changing the keyword/chip DOM or click behavior. */
+[data-field-name="keywords"] button[aria-label="Clear all tags"] {
+  margin-inline-start: auto !important;
+  flex: 0 0 auto !important;
+}
+
 @media (max-width: 760px) {
   html[data-ds-chat-message-layout="stacked"]
     div[id^="message-"] > div > div > div.w-full.flex.mb-lg.bg-transparent.items-center {

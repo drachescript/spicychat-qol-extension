@@ -146,7 +146,7 @@
           if (DS.state?.blockedBotIdSet?.has?.(id)) continue;
           if (currentBlockedWordRulesKey() !== job.rulesKey) continue;
           if (autoBlockFavoriteProtected(job.card, id)) continue;
-          if (DS.isMyCreationsChatbotsPage?.()) continue;
+          if (DS.isMyCreationsPage?.()) continue;
 
           const exceptions = await loadAutoBlockWordExceptions();
           if (exceptions.has(id)) continue;
@@ -181,7 +181,7 @@
     if (!id || DS.state?.blockedBotIdSet?.has?.(id) || autoBlockWordQueuedIds.has(id)) return false;
     if (Number(autoBlockWordFailureCooldown.get(id) || 0) > Date.now()) return false;
     if (autoBlockFavoriteProtected(card, id)) return false;
-    if (DS.isMyCreationsChatbotsPage?.()) return false;
+    if (DS.isMyCreationsPage?.()) return false;
 
     const rulesKey = currentBlockedWordRulesKey();
     if (!rulesKey || rulesKey.startsWith("0:")) return false;

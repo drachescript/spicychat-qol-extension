@@ -65,6 +65,9 @@
     const singleChatMatch = path.match(/^\/chat\/([^/?#]+)(?:\/([^/?#]+))?/i);
     const storyModeMatch = path.match(/^\/story\/([^/?#]+)(?:\/([^/?#]+))?/i);
     const lorebookExplore = path === "/lorebooks/explore" || path.startsWith("/lorebooks/explore/");
+    const rulebookExplore = path === "/rulebooks/explore" || path.startsWith("/rulebooks/explore/");
+    const rulebookEditor = path === "/rulebooks/editor" || path.startsWith("/rulebooks/editor/");
+    const rulebookMatch = path.match(/^\/rulebook\/([^/?#]+)/i);
     const botEditor = /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path);
     const botProfileMatch = !botEditor ? path.match(/^\/chatbot\/([^/?#]+)/i) : null;
     const lorebookEditor = /^\/lorebook\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path);
@@ -75,12 +78,14 @@
     const publicCreator = /^\/creator\/[^/]+(?:\/|$)/i.test(path);
     const myCreationsChatbots = path === "/my-creations/chatbots" || path.startsWith("/my-creations/chatbots/");
     const myCreationsLorebooks = path === "/my-creations/lorebooks" || path.startsWith("/my-creations/lorebooks/");
+    const myCreationsRulebooks = path === "/my-creations/rulebooks" || path.startsWith("/my-creations/rulebooks/");
     const personaPage = /^\/(?:persona|personas)(?:\/|$)/i.test(path);
     const home = path === "/";
     const singleChat = !!singleChatMatch;
     const chatList = chatsPage || chatRoot;
     const botProfile = !!botProfileMatch;
     const lorebookPage = path === "/lorebook" || path.startsWith("/lorebook/") || lorebookExplore || myCreationsLorebooks;
+    const rulebookPage = path === "/rulebook" || path.startsWith("/rulebook/") || path === "/rulebooks" || path.startsWith("/rulebooks/") || myCreationsRulebooks;
 
     let routeType = "other";
     if (singleChat) routeType = "chat";
@@ -88,11 +93,15 @@
     else if (chatList) routeType = "chat-list";
     else if (botEditor) routeType = "bot-editor";
     else if (lorebookEditor) routeType = "lorebook-editor";
+    else if (rulebookEditor) routeType = "rulebook-editor";
     else if (lorebookExplore) routeType = "lorebook-explore";
+    else if (rulebookExplore) routeType = "rulebook-explore";
     else if (lorebookMatch) routeType = "lorebook-public";
+    else if (rulebookMatch) routeType = "rulebook-public";
     else if (botProfile) routeType = "bot-profile";
     else if (myCreationsChatbots) routeType = "creator-listing";
     else if (myCreationsLorebooks || path === "/lorebook") routeType = "lorebook-listing";
+    else if (myCreationsRulebooks || path === "/rulebook" || path === "/rulebooks") routeType = "rulebook-listing";
     else if (personaPage) routeType = "persona";
     else if (home || favoriteBots || publicCreator || /^\/(?:search|discover|recommended(?:-bots)?|trending)(?:\/|$)/i.test(path)) routeType = "listing";
 
@@ -118,12 +127,20 @@
       isLorebookPage: lorebookPage,
       isLorebookExplorePage: lorebookExplore,
       lorebookId: lorebookMatch?.[1] && !["create", "edit"].includes(String(lorebookMatch[1]).toLowerCase()) ? lorebookMatch[1] : "",
+      isRulebookEditor: rulebookEditor,
+      isRulebookPage: rulebookPage,
+      isRulebookExplorePage: rulebookExplore,
+      rulebookId: rulebookMatch?.[1] || "",
       isFavoriteBotsPage: favoriteBots,
       isPublicCreatorPage: publicCreator,
       isSubscribePage: path === "/subscribe" || path.startsWith("/subscribe/"),
       isMyCreationsChatbotsPage: myCreationsChatbots,
       isMyCreationsLorebooksPage: myCreationsLorebooks,
+      isMyCreationsRulebooksPage: myCreationsRulebooks,
       isPersonaPage: personaPage,
+      // Rulebooks are still early beta. Keep them out of the generic creator
+      // runtime until dedicated Rulebook tooling exists, while still exposing
+      // route flags so unrelated scanners can explicitly stay quiet there.
       isCreatorPage: botEditor || lorebookEditor || myCreationsChatbots || myCreationsLorebooks
     };
     return pageStateCache;
@@ -152,12 +169,16 @@
   DS.isSubscribePage = () => !!DS.getPageState().isSubscribePage;
   DS.isMyCreationsChatbotsPage = () => !!DS.getPageState().isMyCreationsChatbotsPage;
   DS.isMyCreationsLorebooksPage = () => !!DS.getPageState().isMyCreationsLorebooksPage;
+  DS.isMyCreationsRulebooksPage = () => !!DS.getPageState().isMyCreationsRulebooksPage;
   DS.isMyCreationsPage = () => {
     const page = DS.getPageState();
-    return !!(page.isMyCreationsChatbotsPage || page.isMyCreationsLorebooksPage);
+    return !!(page.isMyCreationsChatbotsPage || page.isMyCreationsLorebooksPage || page.isMyCreationsRulebooksPage);
   };
   DS.isLorebookPage = () => !!DS.getPageState().isLorebookPage;
   DS.isLorebookExplorePage = () => !!DS.getPageState().isLorebookExplorePage;
+  DS.isRulebookPage = () => !!DS.getPageState().isRulebookPage;
+  DS.isRulebookExplorePage = () => !!DS.getPageState().isRulebookExplorePage;
+  DS.isRulebookEditor = () => !!DS.getPageState().isRulebookEditor;
 
   DS.chatIdFromHref = function chatIdFromHref(href) {
     try {

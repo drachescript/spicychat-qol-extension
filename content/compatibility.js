@@ -129,9 +129,20 @@
     const publicLabel = document.querySelector('[data-translate-key="lorebook:form.field.visibility.public"]');
     const publicButton = publicLabel?.closest?.("button") || buttonByExactText("Public");
     const storySwitch = buttonByExactText("Switch to Story Mode");
+    const rulebookLink = document.querySelector([
+      'a[href="/rulebooks/explore"]',
+      'a[href^="/rulebooks/explore?"]',
+      'a[href="/rulebooks/editor"]',
+      'a[href^="/rulebooks/editor?"]',
+      'a[href="/my-creations/rulebooks"]',
+      'a[href^="/my-creations/rulebooks?"]',
+      'a[href^="/rulebook/"]',
+      '[data-testid^="Rulebook"]'
+    ].join(", "));
 
     let publicLorebooks = "unknown";
     let storyMode = "unknown";
+    let rulebooks = "unknown";
     const evidence = [];
 
     if (exploreLink || path === "/lorebooks/explore" || path.startsWith("/lorebooks/explore/")) {
@@ -150,7 +161,20 @@
       evidence.push("story-menu");
     }
 
-    return { publicLorebooks, storyMode, evidence, path };
+    if (
+      rulebookLink ||
+      path === "/rulebooks" ||
+      path.startsWith("/rulebooks/") ||
+      path === "/rulebook" ||
+      path.startsWith("/rulebook/") ||
+      path === "/my-creations/rulebooks" ||
+      path.startsWith("/my-creations/rulebooks/")
+    ) {
+      rulebooks = "available";
+      evidence.push("rulebooks-ui");
+    }
+
+    return { publicLorebooks, storyMode, rulebooks, evidence, path };
   }
 
   async function loadBetaCapabilityCache() {
@@ -175,7 +199,8 @@
     const previousCaps = previous.capabilities || {};
     const capabilities = {
       publicLorebooks: mergeCapability(previousCaps.publicLorebooks, observed.publicLorebooks),
-      storyMode: mergeCapability(previousCaps.storyMode, observed.storyMode)
+      storyMode: mergeCapability(previousCaps.storyMode, observed.storyMode),
+      rulebooks: mergeCapability(previousCaps.rulebooks, observed.rulebooks)
     };
     const detected = Object.values(capabilities).includes("available");
     const evidence = [...new Set([...(Array.isArray(previous.evidence) ? previous.evidence : []), ...(observed.evidence || [])])].slice(-12);
@@ -184,6 +209,7 @@
       previous.detected !== detected ||
       previousCaps.publicLorebooks !== capabilities.publicLorebooks ||
       previousCaps.storyMode !== capabilities.storyMode ||
+      previousCaps.rulebooks !== capabilities.rulebooks ||
       evidence.join("|") !== (Array.isArray(previous.evidence) ? previous.evidence : []).join("|");
     const stale = now - Number(previous.lastCheckedAt || 0) > 6 * 60 * 60 * 1000;
     const next = {
@@ -203,6 +229,7 @@
     document.documentElement.dataset.dsSpicychatBeta = detected ? "1" : "0";
     document.documentElement.dataset.dsSpicychatPublicLorebooks = capabilities.publicLorebooks;
     document.documentElement.dataset.dsSpicychatStoryMode = capabilities.storyMode;
+    document.documentElement.dataset.dsSpicychatRulebooks = capabilities.rulebooks;
 
     if ((changed || stale) && DS.isExtensionContextValid?.()) {
       await DS.storageSet?.({ [SPICYCHAT_BETA_CAPABILITIES_KEY]: next });
@@ -231,7 +258,8 @@
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes || []) {
             if (!(node instanceof Element)) continue;
-            if (node.matches?.('a[href*="/lorebooks/explore"],button') || node.querySelector?.('a[href*="/lorebooks/explore"],button')) { relevant = true; break; }
+            const selector = 'a[href*="/lorebooks/explore"],a[href*="/rulebooks/"],a[href*="/rulebook/"],a[href*="/my-creations/rulebooks"],[data-testid^="Rulebook"],button';
+            if (node.matches?.(selector) || node.querySelector?.(selector)) { relevant = true; break; }
           }
           if (relevant) break;
         }
@@ -250,7 +278,13 @@
     if (!target) return;
     const text = String(target.textContent || "").trim().toLowerCase();
     const href = String(target.getAttribute?.("href") || "");
-    if (text === "switch to story mode" || href.includes("/lorebooks/explore")) {
+    if (
+      text === "switch to story mode" ||
+      href.includes("/lorebooks/explore") ||
+      href.includes("/rulebooks/") ||
+      href.includes("/rulebook/") ||
+      href.includes("/my-creations/rulebooks")
+    ) {
       clearTimeout(betaDetectionTimer);
       betaDetectionTimer = setTimeout(() => DS.detectSpicyChatBetaCapabilities?.().catch(() => {}), 0);
     }

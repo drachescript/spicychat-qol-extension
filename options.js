@@ -17151,6 +17151,7 @@ async function load() {
     const caps = beta.capabilities || {};
     const pub = caps.publicLorebooks || "unknown";
     const story = caps.storyMode || "unknown";
+    const rulebooks = caps.rulebooks || "unknown";
     const statusText = beta.detected ? "Detected on this browser profile" : (pub === "unavailable" ? "Not detected on this browser profile" : "Not detected yet");
     if (betaStatus) {
       const label = document.createElement("strong");
@@ -17160,7 +17161,14 @@ async function load() {
         : "";
       betaStatus.replaceChildren(label, document.createTextNode(` ${statusText}${checkedText}`));
     }
-    if (betaDetails) betaDetails.textContent = `Public Lorebooks: ${pub} · Story Mode: ${story}`;
+    if (betaDetails) {
+      const parts = [`Public Lorebooks: ${pub}`, `Story Mode: ${story}`];
+      // Rulebooks are an early SpicyChat beta. Do not advertise a dead option
+      // to normal accounts; show the capability only after this browser profile
+      // has actually exposed Rulebook UI/routes.
+      if (rulebooks !== "unknown") parts.push(`Rulebooks: ${rulebooks}`);
+      betaDetails.textContent = parts.join(" · ");
+    }
   }
   setChecked("saiToolkitCompatibility", !!settings.saiToolkitCompatibility);
   setValue("globalNsfwMode", settings.globalNsfwMode || "ignore");
@@ -22476,7 +22484,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
-    (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}`; })(),
+    (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; const rulebooks = caps.rulebooks && caps.rulebooks !== "unknown" ? `; Rulebooks ${caps.rulebooks}` : ""; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}${rulebooks}`; })(),
     `S.AI compatibility enabled: ${settings.saiToolkitCompatibility ? "yes" : "no"}`,
     Number.isFinite(bytes) ? `chrome.storage.local: ${(bytes / 1024).toFixed(1)} KB` : "chrome.storage.local: unavailable",
     `Backup schema supported: v${BACKUP_FORMAT_VERSION}`,

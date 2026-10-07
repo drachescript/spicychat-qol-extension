@@ -2,10 +2,11 @@
   "use strict";
 
   // Keep the MAIN-world auth bridge limited to features that need authenticated
-  // SpicyChat API access. Chat routes get a very early one-shot start so the
-  // bridge cannot miss SpicyChat's first authenticated message-history XHR.
+  // SpicyChat API access. Chat/Lorebook editor routes get a very early one-shot
+  // start so the bridge cannot miss SpicyChat's first authenticated API request.
   const LOADER_ID = "ds-card-token-main-bridge-loader";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
+  const LOREBOOK_EXPORT_WORKER_PARAM = "dsQolLorebookBackupWorker";
   let requested = false;
   let bridgeWanted = false;
 
@@ -70,6 +71,20 @@
     return isMyChatbotsRoute() || isMyLorebooksRoute();
   }
 
+  function isLorebookEditorRoute() {
+    const path = String(location.pathname || "");
+    return /^\/(?:[a-z]{2}\/)?lorebook\/edit\/[0-9a-f-]{20,}(?:\/entries)?\/?$/i.test(path) ||
+      /^\/(?:[a-z]{2}\/)?lorebook\/[0-9a-f-]{20,}\/edit(?:\/entries)?\/?$/i.test(path);
+  }
+
+  function isLorebookBackupWorkerRoute() {
+    try {
+      return new URLSearchParams(location.search || "").get(LOREBOOK_EXPORT_WORKER_PARAM) === "1";
+    } catch {
+      return false;
+    }
+  }
+
   function isRecommendationWorkerRoute() {
     try { return new URLSearchParams(location.search || "").get("dsQolRecommendationWorker") === "1"; }
     catch { return false; }
@@ -94,6 +109,12 @@
   if (isBotStatusWorkerRoute()) {
     try { document.documentElement?.setAttribute("data-ds-qol-bot-status-worker", "1"); } catch {}
   }
+  if (isLorebookBackupWorkerRoute()) {
+    try {
+      document.documentElement?.setAttribute("data-ds-qol-lorebook-backup-worker", "1");
+      sessionStorage.setItem("dsQolBackgroundWorkerKind", "lorebook-backup");
+    } catch {}
+  }
 
   function syncFromSettings(settings) {
     const publicArchiveNeedsProfileBridge = !!settings?.botArchiveRememberSeenPublic && isBotProfileRoute();
@@ -102,6 +123,11 @@
     const chatExportNeedsAuthBridge = isChatRoute();
     const chatListImportNeedsAuthBridge = isChatListRoute();
     const myCreationsBackupNeedsAuthBridge = !!settings?.enableMyCreationsBulkBackup && isMyCreationsBackupRoute();
+    // Lorebook editor pages can make the current authenticated /lorebooks/<id>
+    // request during React startup. Keep the document-start bridge alive there
+    // so private/current Lorebook helpers reuse the exact bearer token SpicyChat
+    // itself just used instead of falling back to a cookie-only request.
+    const lorebookEditorNeedsAuthBridge = isLorebookEditorRoute();
     const enabled = !!(settings && settings.enabled !== false && (
       settings.showCardGreetingTokenInfo ||
       settings.deepSleepDisabledFeatures === false ||
@@ -109,19 +135,20 @@
       chatExportNeedsAuthBridge ||
       chatListImportNeedsAuthBridge ||
       myCreationsBackupNeedsAuthBridge ||
+      lorebookEditorNeedsAuthBridge ||
       isRecommendationWorkerRoute() ||
-      isBotStatusWorkerRoute()
+      isBotStatusWorkerRoute() ||
+      isLorebookBackupWorkerRoute()
     ));
     bridgeWanted = enabled;
     if (enabled) inject();
     else sendControl(false);
   }
 
-  // Chat history is usually fetched very early during page boot. Start the
-  // lightweight MAIN-world bridge immediately on chat routes so it can observe
-  // SpicyChat's own authenticated /messages XHR before an export is requested.
-  // Settings still decide whether the hooks remain active after startup.
-  if (isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
+  // SpicyChat performs the useful authenticated requests very early during page
+  // boot. Start the lightweight MAIN-world bridge immediately on routes that can
+  // later need that auth, before waiting for extension settings to hydrate.
+  if (isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isLorebookEditorRoute() || isLorebookBackupWorkerRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }
@@ -162,7 +189,8 @@
       syncFromSettings(watchedSettings);
     });
   } catch {
-    // If storage is unavailable, the early chat-route bridge may remain active;
-    // this preserves API export rather than losing auth capture entirely.
+    // If storage is unavailable, the early route bridge may remain active;
+    // preserving auth capture is safer than letting helpers send anonymous API
+    // requests and fall into editor fallback loops.
   }
 })();

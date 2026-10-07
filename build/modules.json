@@ -74,6 +74,7 @@
         "interface"
       ],
       "files": [
+        "content/chat-format-compatibility.js",
         "content/alternate-dialogue.js",
         "content/android-app.js",
         "content/auto-voice.js",

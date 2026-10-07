@@ -453,7 +453,7 @@
       const manifest = {
         format: "spicychat-qol-my-creations-backup",
         version: 1,
-        qolVersion: chrome.runtime?.getManifest?.().version || "0.2.36",
+        qolVersion: chrome.runtime?.getManifest?.().version || "0.2.37",
         exportedAt,
         source: "fresh-live-spicychat",
         historyIncluded: false,
