@@ -431,6 +431,16 @@
     };
   }
 
+  // Used only by a user-initiated full backup; never exported from old cached
+  // local copies in place of the current editor.
+  DS.readCurrentPersonaForBackup = async function readCurrentPersonaForBackup(persona) {
+    const refreshed = await enrichPersonaFromEditPage(persona || {});
+    if (refreshed?.source !== "/personas/edit" || !refreshed.name || !refreshed.id) {
+      throw new Error("Current Persona editor could not be read");
+    }
+    return refreshed;
+  };
+
   async function refreshIncompletePersonaCopies(button = null) {
     const current = DS.cleanPersonas?.(DS.state.savedPersonas || []) || [];
     const incomplete = current.filter(persona => {

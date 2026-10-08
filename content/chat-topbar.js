@@ -31,6 +31,68 @@
     return document.querySelector("button[aria-label='chat-dropdown']");
   }
 
+  // SpicyChat renders the owner-only "Edit Chatbot" menu entry as a button.
+  // Preserve that React-owned button and expose a normal link in its place so
+  // Ctrl/Cmd-click, middle-click and the native browser context menu all work.
+  // Do NOT add an edit action if SpicyChat did not actually render one.
+  function linkNativeEditChatbotAction() {
+    if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.()) return false;
+
+    const native = document.querySelector('button[data-testid="chat-edit-character-menu-item"]');
+    const profile = getBotProfileAnchor();
+    if (!native || !profile || native.disabled || native.getAttribute("aria-disabled") === "true" || !isVisible(native)) return false;
+
+    let profileUrl;
+    try { profileUrl = new URL(profile.href, location.href); }
+    catch { return false; }
+    if (profileUrl.origin !== location.origin) return false;
+    const match = profileUrl.pathname.match(/^\/chatbot\/([a-z0-9-]{8,})\/?$/i);
+    if (!match) return false;
+
+    const editUrl = `${location.origin}/chatbot/edit/${encodeURIComponent(match[1])}`;
+    let link = native.nextElementSibling;
+    if (link?.matches?.('a[data-ds-chat-edit-native-link="1"]')) {
+      if (link.href !== editUrl) link.href = editUrl;
+      return true;
+    }
+
+    link = document.createElement('a');
+    link.href = editUrl;
+    link.className = native.className;
+    // Preserve the native icon and label without parsing an HTML string.
+    // Firefox Add-on validation disallows copying dynamic innerHTML.
+    for (const child of native.childNodes) {
+      link.appendChild(child.cloneNode(true));
+    }
+    link.setAttribute('aria-label', 'Edit Chatbot');
+    link.setAttribute('title', 'Edit Chatbot');
+    link.dataset.dsChatEditNativeLink = '1';
+    link.style.textDecoration = 'none';
+    // Keep the normal browser anchor default action; just prevent menu-level
+    // synthetic click/auxclick listeners from also firing.
+    link.addEventListener('click', event => event.stopPropagation());
+    link.addEventListener('auxclick', event => event.stopPropagation());
+
+    native.insertAdjacentElement('afterend', link);
+    native.style.display = 'none';
+    native.setAttribute('aria-hidden', 'true');
+    native.tabIndex = -1;
+    return true;
+  }
+
+  // Short-lived checks are cheaper than watching all message DOM mutations.
+  // The menu item can mount a frame or two after the native dropdown click.
+  document.addEventListener('click', event => {
+    if (!event.target?.closest?.('button[aria-label="chat-dropdown"]')) return;
+    const delays = [0, 30, 100, 250, 600, 1200];
+    let index = 0;
+    const check = () => {
+      if (linkNativeEditChatbotAction() || ++index >= delays.length) return;
+      setTimeout(check, delays[index] - delays[index - 1]);
+    };
+    setTimeout(check, delays[0]);
+  }, true);
+
   function isVisible(el) {
     if (!el) return false;
     const rect = el.getBoundingClientRect?.();

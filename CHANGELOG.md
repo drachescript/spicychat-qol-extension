@@ -1,8 +1,21 @@
+## 0.2.39
+- Edit Chatbot in chat menus now supports normal Ctrl/Cmd-click, middle-click, and browser right-click link options.
+- Fixed repetitive Lorebook editor errors when automatic keyword expansion is blocked.
+- Compressed large bot-status and saved-bot records inside QoL storage, with a safe option to optimize older saved data. Full backups still include everything.
+- Fixed a chat-formatting loop that could cause constant DOM changes and lag.
+- Restored Copy / Export chat in Mini Panel independently of chat top-bar buttons.
+- Added compressed .json.gz backups and large-backup auto-compression.
+- Added selected-item and status-based backups for My Chatbots and Lorebooks, including bots Under Review.
+- Added optional full Persona backups with current text and avatar data.
+- Added personal tag rules based on bot title, greeting and other available fields.
+- Reorganized Settings so related options are easier to find.
+- Added optional Chatbot Edit buttons and a separate My Chatbots favorite-star setting.
+- Added an option to move My Personas back under Chats in the sidebar.
+- Fixed disappearing Keep and message quick-action buttons after chat toolbar updates.
+
 ## 0.2.38
 - Kept Private chatbot and Lorebook editors out of automatic QoL content scans; Public/Unlisted editors and manual creator actions still work normally.
 - Added optional Edit buttons to My Chatbot cards and made favorite-creator stars there a separate opt-in.
-- Added optional automatic chat refresh for very long chats, with a 250-message default limit and draft-safe reloads.
-- Fixed Lorebook API reads so QoL waits for authenticated access instead of sending anonymous requests.
 
 ## 0.2.37
 - Added beta Rulebook support for Rulebook Explore, editor, public Rulebook, and My Rulebooks pages; normal accounts stay unaffected and My Rulebooks stays quiet until more Rulebook tools are ready.

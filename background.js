@@ -1732,6 +1732,141 @@ const LARGE_STORAGE_DB_NAME = "dragon-spicychat-qol-large-v1";
 const LARGE_STORAGE_DB_VERSION = 2;
 const LARGE_STORAGE_META_STORE = "__meta";
 const LARGE_STORAGE_KEYS = new Set(["botAvailability", "botArchive", "lorebookStatus"]);
+// Cold, per-record compression. Ordinary callers always receive the original
+// JSON shape; only the background's IndexedDB representation changes.
+const LARGE_STORAGE_CODEC = "gzip-json-v1";
+const LARGE_STORAGE_MIN_BYTES = 1800;
+const LARGE_STORAGE_MIN_SAVINGS = 0.22;
+const LARGE_STORAGE_MAX_UNPACKED_BYTES = 8 * 1024 * 1024;
+const LARGE_STORAGE_OPTIMIZE_BATCH_LIMIT = 50;
+const LARGE_STORAGE_SUMMARY_FIELDS = {
+  botAvailability: ["id", "name", "image", "creator", "profileUrl", "chatUrl", "status", "reason", "checkedAt", "updateStatus", "unavailableConfirmedAt", "recoveredAt"],
+  botArchive: ["id", "name", "creator", "image", "profileUrl", "lastSavedAt", "ownBot", "source", "coverage"],
+  lorebookStatus: ["id", "name", "creator", "image", "profileUrl", "visibility", "status", "entryCount", "checkedAt", "updatedAt"]
+};
+
+function largeStorageCompressionAvailable() {
+  return typeof CompressionStream === "function" && typeof DecompressionStream === "function" && typeof TextEncoder === "function" && typeof TextDecoder === "function";
+}
+
+function largeStorageSummary(key, value) {
+  const summary = {};
+  for (const field of LARGE_STORAGE_SUMMARY_FIELDS[key] || []) {
+    if (!Object.prototype.hasOwnProperty.call(value || {}, field)) continue;
+    const item = value[field];
+    if (item == null || ["string", "number", "boolean"].includes(typeof item)) summary[field] = item;
+  }
+  return summary;
+}
+
+async function largeStorageStreamBytes(bytes, kind) {
+  const stream = kind === "compress" ? new CompressionStream("gzip") : new DecompressionStream("gzip");
+  const source = new Blob([bytes]).stream();
+  return new Uint8Array(await new Response(source.pipeThrough(stream)).arrayBuffer());
+}
+
+async function packLargeStorageRecord(key, record) {
+  let json;
+  try { json = JSON.stringify(record.value); }
+  catch { return record; }
+  if (typeof json !== "string") return record;
+  const bytes = new TextEncoder().encode(json);
+  if (!largeStorageCompressionAvailable() || bytes.byteLength < LARGE_STORAGE_MIN_BYTES || bytes.byteLength > LARGE_STORAGE_MAX_UNPACKED_BYTES) return record;
+  try {
+    const packed = await largeStorageStreamBytes(bytes, "compress");
+    if (packed.byteLength > bytes.byteLength * (1 - LARGE_STORAGE_MIN_SAVINGS)) return record;
+    // Verify that compression is reversible before replacing the original.
+    const restored = await largeStorageStreamBytes(packed, "decompress");
+    if (restored.byteLength !== bytes.byteLength || new TextDecoder().decode(restored) !== json) return record;
+    return {
+      id: record.id, codec: LARGE_STORAGE_CODEC, payload: packed,
+      bytesBefore: bytes.byteLength, summary: largeStorageSummary(key, record.value)
+    };
+  } catch {
+    return record; // Unsupported/failed compression must never block storage.
+  }
+}
+
+async function unpackLargeStorageRecord(row) {
+  if (!row || !row.codec) return row?.value && typeof row.value === "object" ? row.value : null;
+  if (row.codec !== LARGE_STORAGE_CODEC) throw new Error("Unknown QoL stored-record codec; refusing to discard the saved record.");
+  if (!largeStorageCompressionAvailable()) throw new Error("This browser cannot decompress existing QoL stored records.");
+  const data = row.payload instanceof Uint8Array ? row.payload : new Uint8Array(row.payload || []);
+  if (!data.byteLength || Number(row.bytesBefore || 0) > LARGE_STORAGE_MAX_UNPACKED_BYTES) throw new Error("Invalid compressed QoL stored record.");
+  const restored = await largeStorageStreamBytes(data, "decompress");
+  if (restored.byteLength > LARGE_STORAGE_MAX_UNPACKED_BYTES || (row.bytesBefore && restored.byteLength !== row.bytesBefore)) throw new Error("Damaged QoL compressed stored record.");
+  const value = JSON.parse(new TextDecoder().decode(restored));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid decoded QoL stored record.");
+  return value;
+}
+
+async function unpackLargeStorageRows(rows) {
+  // Bound the number of simultaneous gzip streams on large reads.
+  const result = new Array(rows.length);
+  for (let i = 0; i < rows.length; i += 6) {
+    await Promise.all(rows.slice(i, i + 6).map(async (row, j) => {
+      result[i + j] = { id: row.id, value: await unpackLargeStorageRecord(row) };
+    }));
+  }
+  return result;
+}
+
+async function packLargeStorageRecords(key, records) {
+  const packed = [];
+  for (let i = 0; i < records.length; i += 6) {
+    packed.push(...await Promise.all(records.slice(i, i + 6).map(row => packLargeStorageRecord(key, row))));
+  }
+  return packed;
+}
+
+// Explicit, small-batch upgrade for older IndexedDB rows. Runs only when the
+// user chooses Optimize stored data. Every write checks the source still matches,
+// so a Bot Status scan cannot be overwritten by stale optimization results.
+async function optimizeLargeStoragePage(key, { afterId = "", limit = 30 } = {}) {
+  if (!LARGE_STORAGE_KEYS.has(key)) throw new Error("Unknown QoL storage category.");
+  if (!largeStorageCompressionAvailable()) throw new Error("Gzip compression is unavailable in this browser.");
+  await ensureLargeStorageMigrated(key);
+  const db = await openLargeStorageDb();
+  const safeLimit = Math.max(1, Math.min(LARGE_STORAGE_OPTIMIZE_BATCH_LIMIT, Number(limit) || 30));
+  const startId = String(afterId || "");
+  const source = db.transaction(key, "readonly").objectStore(key);
+  const range = startId ? IDBKeyRange.lowerBound(startId, true) : null;
+  const rows = await idbRequest(source.getAll(range, safeLimit));
+  const candidates = [];
+  let alreadyCompressed = 0;
+  let tooSmall = 0;
+  for (const row of rows || []) {
+    if (row?.codec === LARGE_STORAGE_CODEC) { alreadyCompressed++; continue; }
+    if (!row?.value || typeof row.value !== "object") continue;
+    const packed = await packLargeStorageRecord(key, { id: row.id, value: row.value });
+    if (packed.codec === LARGE_STORAGE_CODEC) {
+      candidates.push({ id: row.id, previous: JSON.stringify(row.value), packed });
+    } else tooSmall++;
+  }
+  let converted = 0;
+  let concurrentChanges = 0;
+  if (candidates.length) {
+    const tx = db.transaction(key, "readwrite");
+    const store = tx.objectStore(key);
+    const done = idbTransactionDone(tx);
+    for (const entry of candidates) {
+      const req = store.get(entry.id);
+      req.onsuccess = () => {
+        const latest = req.result;
+        if (!latest || latest.codec || JSON.stringify(latest.value) !== entry.previous) { concurrentChanges++; return; }
+        store.put(entry.packed);
+        converted++;
+      };
+    }
+    await done;
+  }
+  const nextAfterId = rows?.length ? String(rows[rows.length - 1].id) : startId;
+  return {
+    ok: true, key, scanned: rows.length, converted, alreadyCompressed, tooSmall,
+    concurrentChanges, nextAfterId, done: rows.length < safeLimit
+  };
+}
+
 let largeStorageDbPromise = null;
 const largeStorageMigrationPromises = new Map();
 
@@ -1821,7 +1956,7 @@ async function writeLargeStorageMeta(key, extra = {}) {
 
 async function replaceLargeStorage(key, value, { markMigrated = true } = {}) {
   if (!LARGE_STORAGE_KEYS.has(key)) return false;
-  const records = normalizeLargeStorageRecords(value);
+  const records = await packLargeStorageRecords(key, normalizeLargeStorageRecords(value));
   const db = await openLargeStorageDb();
   const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
   const store = tx.objectStore(key);
@@ -1845,10 +1980,11 @@ async function mergeLargeStorageEntries(key, entries) {
   await ensureLargeStorageMigrated(key);
   const records = normalizeLargeStorageRecords({ meta: entries });
   if (!records.length) return true;
+  const packedRecords = await packLargeStorageRecords(key, records);
   const db = await openLargeStorageDb();
   const tx = db.transaction([key, LARGE_STORAGE_META_STORE], "readwrite");
   const store = tx.objectStore(key);
-  for (const record of records) store.put(record);
+  for (const record of packedRecords) store.put(record);
   tx.objectStore(LARGE_STORAGE_META_STORE).put({ key, migrated: true, updatedAt: Date.now() });
   await idbTransactionDone(tx);
   qolBackgroundTrace("storage", "indexeddb", { action: "merge", key, records: records.length, durationMs: Date.now() - startedAt });
@@ -1861,7 +1997,7 @@ async function readLargeStorage(key) {
   await ensureLargeStorageMigrated(key);
   const db = await openLargeStorageDb();
   const tx = db.transaction(key, "readonly");
-  const rows = await idbRequest(tx.objectStore(key).getAll());
+  const rows = await unpackLargeStorageRows(await idbRequest(tx.objectStore(key).getAll()));
   const meta = {};
   for (const row of rows || []) {
     const id = String(row?.id || "").trim();
@@ -1881,9 +2017,11 @@ async function readLargeStorageRecords(key, ids = []) {
   const tx = db.transaction(key, "readonly");
   const store = tx.objectStore(key);
   const rows = await Promise.all(cleanIds.map(id => idbRequest(store.get(id)).catch(() => null)));
+  const decoded = await unpackLargeStorageRows(rows.filter(Boolean));
+  const byId = new Map(decoded.map(row => [row.id, row.value]));
   const out = {};
   for (let i = 0; i < cleanIds.length; i += 1) {
-    const value = rows[i]?.value;
+    const value = byId.get(cleanIds[i]);
     if (value && typeof value === "object") out[cleanIds[i]] = value;
   }
   qolBackgroundTrace("storage", "indexeddb", { action: "read-records", key, requested: cleanIds.length, records: Object.keys(out).length, durationMs: Date.now() - startedAt }, { level: "deep" });
@@ -1925,13 +2063,14 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
   const cursorAfter = String(afterId || "").trim();
   const range = cursorAfter ? IDBKeyRange.lowerBound(cursorAfter, true) : null;
   const rows = await idbRequest(store.getAll(range, safeLimit));
+  const decodedRows = await unpackLargeStorageRows(rows);
   const cleanRows = [];
-  for (const row of rows || []) {
+  for (const row of decodedRows) {
     const id = String(row?.id || "").trim();
     if (!id || !row?.value || typeof row.value !== "object") continue;
     cleanRows.push({ id, value: row.value });
   }
-  const nextAfterId = cleanRows.length ? cleanRows[cleanRows.length - 1].id : cursorAfter;
+  const nextAfterId = rows.length ? String(rows[rows.length - 1].id) : cursorAfter;
   const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit };
   qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt }, { level: "deep" });
   return result;
@@ -6582,6 +6721,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     readLargeStoragePage(key, { afterId: message?.afterId || "", limit: message?.limit })
       .then(page => sendResponse({ ok: true, ...page }))
       .catch(error => sendResponse({ ok: false, key, rows: [], done: true, error: String(error?.message || error || "") }));
+    return true;
+  }
+
+  if (message?.type === "DS_LARGE_STORAGE_OPTIMIZE_PAGE") {
+    const key = String(message?.key || "");
+    optimizeLargeStoragePage(key, { afterId: message?.afterId || "", limit: message?.limit })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, key, error: String(error?.message || error || "") }));
     return true;
   }
 

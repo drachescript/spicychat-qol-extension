@@ -7,6 +7,48 @@
   let observedSidebarNav = null;
   let sidebarDirty = true;
   let lastSidebarSettingsSignature = "";
+  let personasOriginalSlot = null;
+
+  function nativeSidebarRow(anchor, nav) {
+    if (!(anchor instanceof Element) || !nav?.contains(anchor)) return null;
+    let node = anchor;
+    for (let depth = 0; node && node.parentElement && node !== nav && depth < 7; depth++, node = node.parentElement) {
+      // The native sidebar uses full-width row containers around each link.
+      if (node !== anchor && node.classList?.contains("w-full") &&
+          node.querySelectorAll?.("a[href]").length === 1) return node;
+    }
+    return anchor.closest("[data-tooltip-content]") || anchor;
+  }
+
+  function applyPersonasPlacement(settings) {
+    const enabled = !!(settings.enabled && settings.restorePersonasSidebarPosition);
+    if (!enabled) {
+      const old = personasOriginalSlot;
+      if (old?.row?.isConnected && old?.parent?.isConnected) {
+        if (old.next?.parentElement === old.parent) old.parent.insertBefore(old.row, old.next);
+        else old.parent.appendChild(old.row);
+        old.row.removeAttribute("data-ds-personas-moved");
+      }
+      personasOriginalSlot = null;
+      return;
+    }
+    const nav = getNav();
+    const chats = nav?.querySelector?.("a[href$='/chats'],a[href*='/chats?']");
+    const personas = nav?.querySelector?.("a[href$='/personas'],a[href*='/personas?']");
+    if (!chats || !personas) return;
+    const chatsRow = nativeSidebarRow(chats,nav);
+    const personasRow = nativeSidebarRow(personas,nav);
+    if (!chatsRow || !personasRow || chatsRow === personasRow || !chatsRow.parentElement || !personasRow.parentElement) return;
+    if (chatsRow.nextElementSibling === personasRow && chatsRow.parentElement === personasRow.parentElement) return;
+    if (!personasOriginalSlot || personasOriginalSlot.row !== personasRow) {
+      personasOriginalSlot = { row:personasRow, parent:personasRow.parentElement, next:personasRow.nextSibling };
+    }
+    chatsRow.parentElement.insertBefore(personasRow, chatsRow.nextSibling);
+    personasRow.setAttribute("data-ds-personas-moved", "1");
+  }
+
+  DS.sidebarPersonasMoved = () => !!personasOriginalSlot?.row?.isConnected;
+
 
   function sidebarSettingsSignature(settings = {}) {
     const cleanup = Object.keys(settings)
@@ -14,7 +56,7 @@
       .sort()
       .map(key => `${key}:${settings[key] ? 1 : 0}`)
       .join("|");
-    return `${cleanup}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
+    return `${cleanup}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
   }
 
   function ensureSidebarObserver() {
@@ -638,6 +680,7 @@
     keepSignInVisible();
     keepNativeNavigationToggleVisible();
     placeQolSidebarButton(settings);
+    applyPersonasPlacement(settings);
 
     if (!settings.enabled) return;
 

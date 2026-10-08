@@ -502,6 +502,11 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <p class="hint">Folders are local QoL organization and reuse the existing multi-collection data, so a bot can belong to more than one folder. On My Creations you can create, rename, delete and filter folders directly; deleting a folder never deletes a chatbot. Bulk actions support folders, personal tags, Later, copy links, and creator status.</p>
 </section>
 <section class="card">
+<h2>Favorite protection</h2>
+<label class="row"><input id="neverHideFavorites" type="checkbox"/><span>Never hide anything on the Favorites page</span></label>
+<label class="row"><input id="protectFavoritesFromBlocking" type="checkbox"/><span>Do not block favorites from card buttons</span></label>
+</section>
+<section class="card">
 <h2>Favorite bots</h2>
 <p class="hint">QoL remembers favorite bots it sees when you visit SpicyChat's Favorites page.</p>
 <label class="row"><input id="enableSavedListsOverlay" type="checkbox"/><span>Add an on-site Saved lists organizer for Favorite history + Later</span></label>
@@ -569,6 +574,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <h2>Favorite creators</h2>
 <p class="hint">Adds a small star next to creator links. Each favorite creator can have its own discovery overrides below; explicitly blocked bots always stay hidden.</p>
 <label class="row"><input id="showCreatorFavoriteButtons" type="checkbox"/><span>Show favorite creator star buttons</span></label>
+<div class="sub-card"><label class="row"><input id="showCreatorFavoriteButtonsOnMyChatbots" type="checkbox"/><span>Also show favorite creator stars on My Chatbots</span></label></div>
 <label class="row"><input id="protectFavoriteCreatorsFromFiltering" type="checkbox"/><span>Keep all favorite creators visible (global master override)</span></label>
 <div class="manager-add-row">
 <input id="favoriteCreatorAddHandle" placeholder="Creator handle or /creator/link" type="text"/>
@@ -1070,7 +1076,33 @@ CharacterName" spellcheck="false"></textarea>
 <div class="button-row"><button id="contextWarningRequestNotifications" type="button">Enable browser notifications</button><span class="count" id="contextWarningNotificationPermissionStatus"></span></div>
 <p class="hint">QoL first uses token/context usage exposed by SpicyChat's generation traffic. If SpicyChat does not expose the model context limit, set it manually here. When exact prompt usage is unavailable, QoL uses a conservative local estimate from captured chat messages and warns early. The feature never stores chat text for this calculation; only token estimates/metadata are retained.</p>
 </div>
-</section><section class="card">
+</section><section class="card" id="rpFormatRepairCard">
+<h2>RP Format Repair</h2>
+<p class="hint">Tired of people not using your preferred formatting for their bots? RP Format Repair cleans up messy bot responses and reformats them into the style you prefer.</p>
+<label class="row"><input id="enableRpFormatRepair" type="checkbox"/><span>Enable RP Format Repair for AI messages</span></label>
+<label class="row"><input id="rpFormatRepairAuto" type="checkbox"/><span>Automatically show repaired formatting when a response appears</span></label>
+<label>Formatting style
+          <select id="rpFormatStyle">
+<option value="clean">Clean RP — actions in *asterisks*, dialogue plain</option>
+<option value="quoted">Quoted dialogue — actions in *asterisks*, dialogue in quotes</option>
+</select>
+</label>
+<label>Detection strength
+          <select id="rpFormatDetection">
+<option value="conservative">Conservative — obvious formatting problems only</option>
+<option value="balanced">Balanced — use formatting plus narration/dialogue clues</option>
+<option value="aggressive">Aggressive — also guess unformatted narration</option>
+</select>
+</label>
+<label class="row"><input id="rpFormatConvertBoldActions" type="checkbox"/><span>Treat bold narration like <code>**action**</code> as an action</span></label>
+<label class="row"><input id="rpFormatRemoveActionParens" type="checkbox"/><span>Remove unnecessary parentheses around action blocks</span></label>
+<label class="row"><input id="rpFormatPreserveInlineEmphasis" type="checkbox"/><span>Preserve inline emphasis inside dialogue</span></label>
+<label class="row"><input id="rpFormatPreserveSemanticQuotes" type="checkbox"/><span>Keep meaningful quotes inside speech, such as repeating someone else's words</span></label>
+<label class="row"><input id="rpFormatPreserveBackticks" type="checkbox"/><span>Preserve backtick / alternate dialogue instead of treating it like narration</span></label>
+<label class="row"><input id="rpFormatShowMessageButtons" type="checkbox"/><span>Show an RP toggle on AI messages so you can compare repaired/original formatting</span></label>
+<p class="hint">Visual/local only: this does not silently edit or save the AI response. Toggle a message back to Original at any time. Repaired generations are cached in the page so swiping between responses does not need a full chat rescan.</p>
+</section>
+<section class="card">
 <h2>Composer and draft helpers</h2>
 <label class="row"><input id="hideChatPlusButton" type="checkbox"/><span>Hide plus button in chat input</span></label>
 <label class="row"><input id="hideChatImageButton" type="checkbox"/><span>Hide image generation button</span></label>
@@ -1266,6 +1298,8 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 </section><section class="card">
 <h2>Persona helpers</h2>
 <label class="row"><input id="savePersonasFromPages" type="checkbox"/><span>Save personas when the extension sees the persona list</span></label>
+<label class="row"><input id="personaFullBackupEnabled" type="checkbox"/><span>Show full Persona backup on My Personas</span></label>
+<p class="hint">Adds a manual Download all Personas button. It reads current editor data when clicked, includes avatar image data when available, and reports incomplete items instead of silently treating them as complete. No background backup runs automatically.</p>
 <label class="row"><input id="keepLocalPersonaCopies" type="checkbox"/><span>Keep local persona copies even after they disappear from My Personas</span></label>
 <label class="row"><input id="expandPersonaDescriptions" type="checkbox"/><span>Show expand buttons for persona descriptions on My Personas</span></label>
 <label class="row"><input id="enablePersonaOrganizer" type="checkbox"/><span>Enable Persona Manager</span></label>
@@ -1289,6 +1323,10 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="enableCharacterQolProfiles" type="checkbox"/><span>Enable per-character QoL profiles</span></label>
 <p class="hint">Adds a Character profile button to the QoL panel on individual chats. A character can override RP Format Repair, RP formatting style/detection, and Auto voice on chat open while every unchanged option continues using your normal global settings.</p>
 </section><section class="card">
+<h2>Debug</h2>
+<label class="row"><input id="debug" type="checkbox"/><span>Debug badges for dimmed cards</span></label>
+</section>
+<section class="card">
 <h2>Performance</h2>
 <label>QoL runtime performance mode
           <select id="runtimePerformanceMode">
@@ -1305,11 +1343,6 @@ Testing" spellcheck="false"></textarea></label>
 <label>Large-chat threshold
 <input id="largeChatPerformanceThreshold" max="5000" min="100" step="50" type="number"/>
 </label>
-<label class="row"><input id="autoReloadLargeChats" type="checkbox"/><span>Automatically refresh very long chats</span></label>
-<label>Auto-refresh threshold
-<input id="autoReloadLargeChatsThreshold" max="2000" min="150" step="50" type="number" value="250"/>
-</label>
-<p class="hint">Default: 250 mounted messages. QoL waits for the current reply or message edit to finish, preserves the composer draft, reloads the same chat, and avoids reload loops if SpicyChat comes back above the limit.</p>
 <label class="row"><input id="deferQolWhileTyping" type="checkbox"/><span>Delay non-essential chat QoL while I am actively typing</span></label>
 <label class="row"><input id="pauseQolWhileMessageEditing" type="checkbox"/><span>Keep non-essential QoL quiet while a message is being edited</span></label>
 <label class="row"><input id="reduceQolAnimations" type="checkbox"/><span>Reduce QoL-added animations and transitions</span></label>
@@ -1348,32 +1381,7 @@ Testing" spellcheck="false"></textarea></label>
 </label>
 <p class="hint">The Settings-size preview applies immediately here. Chat text and line spacing apply to SpicyChat after you save.</p>
 </section>
-<section class="card" id="rpFormatRepairCard">
-<h2>RP Format Repair</h2>
-<p class="hint">Tired of people not using your preferred formatting for their bots? RP Format Repair cleans up messy bot responses and reformats them into the style you prefer.</p>
-<label class="row"><input id="enableRpFormatRepair" type="checkbox"/><span>Enable RP Format Repair for AI messages</span></label>
-<label class="row"><input id="rpFormatRepairAuto" type="checkbox"/><span>Automatically show repaired formatting when a response appears</span></label>
-<label>Formatting style
-          <select id="rpFormatStyle">
-<option value="clean">Clean RP — actions in *asterisks*, dialogue plain</option>
-<option value="quoted">Quoted dialogue — actions in *asterisks*, dialogue in quotes</option>
-</select>
-</label>
-<label>Detection strength
-          <select id="rpFormatDetection">
-<option value="conservative">Conservative — obvious formatting problems only</option>
-<option value="balanced">Balanced — use formatting plus narration/dialogue clues</option>
-<option value="aggressive">Aggressive — also guess unformatted narration</option>
-</select>
-</label>
-<label class="row"><input id="rpFormatConvertBoldActions" type="checkbox"/><span>Treat bold narration like <code>**action**</code> as an action</span></label>
-<label class="row"><input id="rpFormatRemoveActionParens" type="checkbox"/><span>Remove unnecessary parentheses around action blocks</span></label>
-<label class="row"><input id="rpFormatPreserveInlineEmphasis" type="checkbox"/><span>Preserve inline emphasis inside dialogue</span></label>
-<label class="row"><input id="rpFormatPreserveSemanticQuotes" type="checkbox"/><span>Keep meaningful quotes inside speech, such as repeating someone else's words</span></label>
-<label class="row"><input id="rpFormatPreserveBackticks" type="checkbox"/><span>Preserve backtick / alternate dialogue instead of treating it like narration</span></label>
-<label class="row"><input id="rpFormatShowMessageButtons" type="checkbox"/><span>Show an RP toggle on AI messages so you can compare repaired/original formatting</span></label>
-<p class="hint">Visual/local only: this does not silently edit or save the AI response. Toggle a message back to Original at any time. Repaired generations are cached in the page so swiping between responses does not need a full chat rescan.</p>
-</section>
+
 <section class="card" id="chatBackgroundsCard">
 <h2>Custom chat backgrounds</h2>
 <label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
@@ -1465,7 +1473,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickPanelShowAutoAsterisk" type="checkbox"/><span>Show Auto * control in chats</span></label>
 <label class="row"><input id="quickPanelShowTranslation" type="checkbox"/><span>Show translation controls in chats</span></label>
 <label class="row"><input id="quickPanelShowPersona" type="checkbox"/><span>Show persona switch in chats</span></label>
-<label class="row"><input id="quickPanelShowExport" type="checkbox"/><span>Show Copy / Export chat in chats</span></label>
+<label class="row"><input id="quickPanelShowExport" type="checkbox"/><span>Show Copy / Export chat in Mini Panel (independent of chat top-bar buttons)</span></label>
 <label class="row"><input id="quickPanelShowSoundscapes" type="checkbox"/><span>Show Soundscape controls when Soundscapes are enabled</span></label>
 </section><section class="card">
 <h2>Layout preview</h2>
@@ -1591,6 +1599,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="hideSidebarHome" type="checkbox"/><span>Hide Home</span></label>
 <label class="row"><input id="hideSidebarChats" type="checkbox"/><span>Hide Chats</span></label>
 <label class="row"><input id="hideSidebarPersonas" type="checkbox"/><span>Hide My Personas</span></label>
+<label class="row"><input id="restorePersonasSidebarPosition" type="checkbox"/><span>Move My Personas back under Chats in the sidebar</span></label>
 <h3>Create</h3>
 <label class="row"><input id="hideSidebarCreateMenu" type="checkbox"/><span>Hide Create dropdown button</span></label>
 <label class="row"><input id="hideSidebarCreateChatbot" type="checkbox"/><span>Hide Create - Chatbot</span></label>
@@ -2244,6 +2253,7 @@ cash =&gt; Bingo Coins
 </section>
 <section class="card">
 <h2>My Creations filters</h2>
+<label class="row"><input id="showBlockButtonOnMyCreations" type="checkbox"/><span>Also show the block X on My Creations</span></label>
 <label class="row"><input id="enableMyCreationsFilters" type="checkbox"/><span>Enable My Creations filters</span></label>
 <label class="row"><input id="rememberMyCreationsView" type="checkbox"/><span>Remember My Creations sort/filter choices after reloads and returning to the page</span></label>
 <label class="row"><input id="autoLoadMyCreations" type="checkbox"/><span>Automatically load more bots on My Creations</span></label>
@@ -2257,7 +2267,8 @@ cash =&gt; Bingo Coins
 <label class="row"><input id="enableMyCreationsBulkBackup" type="checkbox"/><span>Show bulk backup controls on My Creations</span></label>
 <p class="hint">Adds Backup all chatbots / Backup all Lorebooks on your My Creations pages. Bulk backup always fetches the current live version from SpicyChat when you start it; local QoL revision/history copies are not used as the source.</p>
 <label class="row"><input id="showMyLorebookEditButtons" type="checkbox"/><span>Show an Edit button on my Lorebook cards</span></label>
-<p class="hint">Adds a normal Edit link to owned Lorebook cards, so click, Ctrl/Cmd+click, middle-click, and the browser context menu work normally. Ctrl/Cmd+clicking the native three-dot button also opens Edit in a new tab.</p>
+<label class="row"><input id="showMyChatbotEditButtons" type="checkbox"/><span>Show a small Edit button on my Chatbot cards</span></label>
+<p class="hint">Edit links use normal clicks, Ctrl/Cmd-click, middle-click and browser context menus. Ctrl/Cmd-clicking the native three-dot button opens the editor in a new tab when the corresponding option is on.</p>
 </section>
 <section class="card">
 <h2>Creation audit</h2>
@@ -2342,7 +2353,7 @@ cash =&gt; Bingo Coins
 </div>
 <label class="row"><input id="showQuickUnblockButtons" type="checkbox"/><span>Add quick Unblock on blocked cards when blocked cards are dimmed</span></label>
 <label class="row"><input id="replaceCardProfileWithBlockButton" type="checkbox"/><span>Replace card profile/info button with a block X</span></label>
-<label class="row"><input id="showBlockButtonOnMyCreations" type="checkbox"/><span>Also show the block X on My Creations</span></label>
+
 <p class="hint">Off by default: your own bots on /my-creations/chatbots do not need a block shortcut. Enable this only if you intentionally want the block control there too.</p>
 <div class="sub-card" id="selectBotsSettings">
 <h3>Select bots / bulk blocking</h3>
@@ -2603,11 +2614,7 @@ NTR"></textarea></label>
 <button id="notInterestedBotCollapse" type="button">Show 100</button>
 </div>
 </section>
-<section class="card">
-<h2>Favorite protection</h2>
-<label class="row"><input id="neverHideFavorites" type="checkbox"/><span>Never hide anything on the Favorites page</span></label>
-<label class="row"><input id="protectFavoritesFromBlocking" type="checkbox"/><span>Do not block favorites from card buttons</span></label>
-</section>
+
 <section class="card" id="tagAliasesCard">
 <h2>Local tag aliases / emoji</h2>
 <label class="row"><input id="enableTagAliases" type="checkbox"/><span>Enable local tag aliases and emoji display helpers</span></label>
@@ -2616,6 +2623,15 @@ NTR"></textarea></label>
 poly => Multiple Characters | 👥
 myth => Fantasy | ✨"></textarea></label>
 <p class="hint">Aliases are personal and never replace SpicyChat's real tags. Because shorthand such as “wlw” is used inconsistently by different creators, QoL does not hardcode meanings. Format: alias =&gt; exact SpicyChat tag | optional emoji.</p>
+<div class="sub-card">
+<h3>Personal tags from bot text</h3>
+<label class="row"><input id="localTagMatchEnabled" type="checkbox"/><span>Automatically add personal tags when matching bot text is found</span></label>
+<label>Local match rules, one per line<textarea id="localTagMatchRules" rows="6" spellcheck="false" placeholder="Scat => title,greeting,description: scat, defecat*, feces, poop
+Werewolf => title,description,greeting: werewolf, lycanthrope
+Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
+<label class="row"><input id="localTagMatchFetchPublic" type="checkbox"/><span>Check public bot profiles for greeting/details not already saved (slower)</span></label>
+<p class="hint">Format: personal tag =&gt; fields: matching words/phrases. Fields: title, description, greeting, personality, scenario, examples. A comma means any matching word/phrase; * at the end matches word endings. QoL only adds local personal tags; it never changes real SpicyChat tags. Scans loaded public bot cards only, avoids My Creations, and leaves previously assigned personal tags intact if you change the rules. Private bot editors are never scanned. Without the public-profile option, greeting/details only match when QoL already has a saved bot copy.</p>
+</div>
 </section>
 <section class="card" id="randomChatSettingsCard">
 <h2>Random Chat</h2>
@@ -2743,15 +2759,15 @@ myth => Fantasy | ✨"></textarea></label>
 </fieldset>
 <div class="button-row">
 <button id="exportSettings" type="button">Export to box</button>
-<button id="downloadBackupJson" type="button">Download .json</button>
+<button id="downloadBackupJson" type="button">Download .json (auto-compress large)</button><button id="downloadBackupGzip" type="button">Download .json.gz</button>
 <button id="downloadBackupTxt" type="button">Download .txt</button>
 <button id="loadBackupFile" type="button">Load backup file</button>
 <button id="validateImport" type="button">Validate backup</button>
 <button id="previewImport" type="button">Preview import</button>
 </div>
-<input accept=".json,.txt,.qol,.backup,application/json,text/plain" hidden="" id="settingsBackupFile" type="file"/>
+<input accept=".json,.json.gz,.gz,.txt,.qol,.backup,application/json,application/gzip,text/plain" hidden="" id="settingsBackupFile" type="file"/>
 <textarea id="settingsJson" placeholder="Exported/imported JSON appears here. You can also drop a .json/.txt backup file here." spellcheck="false"></textarea>
-<p class="hint">Backup files are plain UTF-8 JSON text. The same backup can be saved as .json or .txt and imported from either format. On extension-capable mobile browsers, use the Download and Load backup file controls here; QoL can use the browser download manager when a normal extension-page download link is unreliable. Native Android WebView file handling is maintained separately.</p>
+<p class="hint">Backups can be plain .json/.txt or compressed .json.gz. Download .json automatically uses gzip above 50 MB (uncompressed). Everything remains a complete backup. The separate storage optimization below reduces QoL’s internal IndexedDB footprint without removing or excluding saved records. Use Everything for a complete backup. Large compressed imports are decompressed locally before preview. Android WebView gzip support depends on the wrapper.</p>
 <div class="import-preview" hidden="" id="importPreview">
 <div>
 <strong>Import preview</strong>
@@ -2778,11 +2794,7 @@ myth => Fantasy | ✨"></textarea></label>
 </div>
 </div>
 </section>
-<section class="card" id="updateNotificationsCard">
-<h2>What's New notification</h2>
-<label class="row"><input id="showUpdateNotifications" type="checkbox"/><span>Show a small What's New toast after QoL updates</span></label>
-<p class="hint">The toast appears once after an extension version changes and links directly to the Changelog tab. It does not appear on first install.</p>
-</section>
+
 <section class="card" id="recentChangesCard">
 <h2>Recently changed / Undo</h2>
 <label class="row"><input id="enableLocalChangeHistory" type="checkbox"/><span>Keep a short local history for supported QoL changes</span></label>
@@ -2805,9 +2817,12 @@ myth => Fantasy | ✨"></textarea></label>
 <div class="storage-usage" id="storageUsage">Loading storage details...</div>
 <div class="button-row">
 <button id="refreshStorageUsage" type="button">Refresh</button>
+<button id="optimizeStoredData" type="button">Optimize stored data</button>
+<button id="stopOptimizeStoredData" type="button" disabled>Stop optimizing</button>
 <button id="checkOrphanedLocalData" type="button">Check for orphaned data</button>
 <button id="cleanLocalData" type="button">Clean local data</button>
 </div>
+<p class="hint" id="optimizeStoredDataStatus">Keeps all saved data and complete backups. Compresses older bot records in small batches; new large records are compressed automatically. Download a full backup first if you may downgrade QoL: older extension versions cannot read compressed storage. The first optimization may take a while.</p>
 <p class="hint" id="cleanupStatus"></p>
 </section><section class="card" id="settingsHealthCard">
 <h2>Settings check</h2>
@@ -2815,12 +2830,14 @@ myth => Fantasy | ✨"></textarea></label>
 <div class="button-row"><button id="runSettingsHealthCheck" type="button">Check configuration</button></div>
 <div class="settings-health-results" id="settingsHealthResults"><span class="hint">No check run yet.</span></div>
 </section>
-<section class="card">
-<h2>Debug</h2>
-<label class="row"><input id="debug" type="checkbox"/><span>Debug badges for dimmed cards</span></label>
-</section>
+
 </div>
 <div class="tab-page" data-page="changelog">
+<section class="card" id="updateNotificationsCard">
+<h2>What's New notification</h2>
+<label class="row"><input id="showUpdateNotifications" type="checkbox"/><span>Show a small What's New toast after QoL updates</span></label>
+<p class="hint">The toast appears once after an extension version changes and links directly to the Changelog tab. It does not appear on first install.</p>
+</section>
 <section class="card">
 <h2>Changelog</h2>
 <p class="hint" hidden="" id="settingsUpdateSummary"></p>

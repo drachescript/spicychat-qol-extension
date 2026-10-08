@@ -861,7 +861,10 @@
 
   function editorExpansionEnabled() {
     const settings = DS.state?.settings || {};
-    return !!settings.enabled && !!settings.lorebookExpandTags && !!editorLorebookIdFromPath();
+    // Private/unknown Lorebook editors are intentionally blocked by the
+    // Creator Editor privacy guard. Do not keep scheduling a guarded read.
+    return !!settings.enabled && !!settings.lorebookExpandTags && !!editorLorebookIdFromPath() &&
+      DS.creatorEditorAutoReadAllowed?.() !== false;
   }
 
   function stopEditorExpansionObserver() {
@@ -879,7 +882,9 @@
     }
     editorExpansionTimer = setTimeout(() => {
       editorExpansionTimer = null;
-      DS.applyLorebookTagExpansion?.().catch?.(() => {});
+      // The privacy guard can return undefined instead of a Promise. Catch
+      // both synchronous errors and rejected async reads without dereferencing it.
+      Promise.resolve().then(() => DS.applyLorebookTagExpansion?.()).catch(() => {});
     }, Math.max(0, delay));
   }
 

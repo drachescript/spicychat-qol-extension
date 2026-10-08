@@ -855,7 +855,12 @@
     const dropdown = root.querySelector("button[aria-label='message-dropdown']");
     const holder = dropdown?.closest?.(".relative") || dropdown?.parentElement || null;
     if (!holder) {
-      if (button.parentElement !== root) root.append(button);
+      // Native toolbar may temporarily mount without the three-dot control.
+      // Keep the action beside the header rather than putting it into message text.
+      const header = root.querySelector("a[aria-label='chatbot-profile']")?.closest?.(".flex") ||
+        root.querySelector("button[aria-label='message-dropdown']")?.parentElement || null;
+      if (header && button.parentElement !== header) header.append(button);
+      else if (!header && button.parentElement !== root) root.append(button);
       return;
     }
 
@@ -930,7 +935,10 @@
     const repair = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 12, margin: 1000, respectLane: false })
       || Array.from(document.querySelectorAll(MESSAGE_SELECTOR)).slice(-12);
     const roots = Array.from(new Set([...(pending || []), ...(repair || [])]));
-    roots.forEach(ensureMessageButtonForRoot);
+    roots.forEach(root => {
+      DS.repairMessageToolbarForRoot?.(root);
+      ensureMessageButtonForRoot(root);
+    });
   }
 
   // Small repair watchdog for toolbar-only React rerenders. It checks only the

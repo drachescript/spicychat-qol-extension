@@ -10,6 +10,17 @@
   const BOT_LINK_RE = /\/(?:chat|chatbot)\/([0-9a-f-]{20,})(?:[/?#]|$)/i;
   const LOREBOOK_LINK_RE = /\/lorebook\/(?!edit(?:\/|$))([0-9a-f-]{20,})(?:[/?#]|$)/i;
   const CONCURRENCY = 3;
+  const OWNED_LIST_REQUEST_EVENT = "ds-qol-owned-chatbots-list-request-v1";
+  const OWNED_LIST_RESPONSE_EVENT = "ds-qol-owned-chatbots-list-response-v1";
+  const SELECT_ID = "ds-my-creations-backup-selection";
+  const SELECT_CLASS = "ds-my-creations-backup-select-card";
+  let selectionKind = "";
+  let selectionItems = [];
+  const selectedIds = new Set();
+  let selectionLoading = false;
+  let selectionObserver = null;
+  let selectionTimer = null;
+
   let activeJob = null;
   let lastFailures = [];
   let lastFailureKind = "";
@@ -69,6 +80,186 @@
       if (!existing || (!existing.name && name)) map.set(id, { id, name });
     }
     return [...map.values()];
+  }
+
+  function normalizeName(value) {
+    return clean(value, 250).toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
+  }
+
+  function itemCategory(value) {
+    const text = clean(value, 100).toLowerCase().replace(/[\s_-]+/g, "");
+    if (/review|pending|moderation|approval|inqueue/.test(text)) return "review";
+    if (/^(public|published|live|approved|accepted|visible)$/.test(text)) return "public";
+    if (/^(private|onlyme|onlyyou|personal)$/.test(text)) return "private";
+    if (/^(hidden|unlisted|linkonly|link|notlisted)$/.test(text)) return "unlisted";
+    return "unknown";
+  }
+
+  function classifyOwnedBot(raw) {
+    const record = raw?.character && typeof raw.character === "object" ? { ...raw.character, ...raw } : raw;
+    const flag = record?.under_review === true || record?.underReview === true ||
+      record?.is_under_review === true || record?.isUnderReview === true ||
+      record?.in_review === true || record?.inReview === true;
+    if (flag) return "review";
+    const moderationFields = [
+      record?.review_status, record?.reviewStatus, record?.moderation_status,
+      record?.moderationStatus, record?.approval_status, record?.approvalStatus,
+      record?.publication_status, record?.publicationStatus,
+      record?.moderationReport?.moderation_status,
+      record?.moderationReport?.moderationStatus,
+      record?.moderation_report?.moderation_status,
+      record?.moderation_report?.moderationStatus,
+      record?.review?.status
+    ];
+    if (moderationFields.some(value => itemCategory(value) === "review")) return "review";
+    const visibilityFields = [
+      record?.visibility, record?.privacy, record?.visibility_status,
+      record?.visibilityStatus, record?.access, record?.listing,
+      record?.status
+    ];
+    for (const value of visibilityFields) {
+      const category = itemCategory(value);
+      if (category !== "unknown") return category;
+    }
+    if (record?.is_private === true || record?.isPrivate === true) return "private";
+    if (record?.is_unlisted === true || record?.isUnlisted === true) return "unlisted";
+    return "unknown";
+  }
+
+  function extractOwnedRows(payload) {
+    if (Array.isArray(payload)) return payload;
+    const seen = new Set();
+    const visit = (node, depth = 0) => {
+      if (!node || typeof node !== "object" || depth > 5 || seen.has(node)) return null;
+      seen.add(node);
+      for (const key of ["characters", "chatbots", "items", "results", "records", "list", "docs", "bots", "data"]) {
+        const child = node[key];
+        if (Array.isArray(child) && (child.length === 0 || child.some(row => row && typeof row === "object"))) return child;
+      }
+      for (const key of ["data", "result", "payload", "page", "response"]) {
+        const found = visit(node[key], depth + 1);
+        if (found) return found;
+      }
+      return null;
+    };
+    return visit(payload);
+  }
+
+  function canonicalOwnedRow(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const c = raw.character && typeof raw.character === "object" ? raw.character : raw;
+    const id = clean(c.id || c.uuid || c.character_id || c.characterId || raw.id, 100).toLowerCase();
+    if (!UUID_RE.test(id)) return null;
+    const name = clean(c.name || c.character_name || c.characterName || c.title || raw.name || id, 250);
+    const visibility = clean(c.visibility || raw.visibility || "", 100).toLowerCase();
+    const report = raw.moderationReport || raw.moderation_report || c.moderationReport || c.moderation_report;
+    const reviewStatus = clean(report?.moderation_status || report?.moderationStatus || "", 100).toLowerCase();
+    return { id, name, category: classifyOwnedBot(raw), visibility, reviewStatus, source: "owned-list" };
+  }
+
+  function requestOwnedListPage(lastKey = "", limit = 50) {
+    return new Promise((resolve, reject) => {
+      const requestId = `owned-backup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      let done = false;
+      const finish = (value, error) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        window.removeEventListener(OWNED_LIST_RESPONSE_EVENT, onResponse);
+        if (error) reject(error); else resolve(value);
+      };
+      const onResponse = event => {
+        const detail = event?.detail || {};
+        if (detail.requestId !== requestId) return;
+        if (!detail.ok) return finish(null, new Error(`Owned chatbot list ${clean(detail.status || "request failed", 120)}${detail.httpStatus ? ` (HTTP ${detail.httpStatus})` : ""}`));
+        finish(detail.data);
+      };
+      const timer = setTimeout(() => finish(null, new Error("Owned chatbot list request timed out.")), 17000);
+      window.addEventListener(OWNED_LIST_RESPONSE_EVENT, onResponse);
+      try {
+        window.DSCardTokenBridgeLoader?.ensure?.();
+        window.dispatchEvent(new CustomEvent(OWNED_LIST_REQUEST_EVENT, { detail: { requestId, lastKey, limit } }));
+      } catch (error) { finish(null, error); }
+    });
+  }
+
+  async function fetchAllOwnedChatbots() {
+    const map = new Map();
+    const visited = new Set();
+    const limit = 50;
+    let lastKey = "";
+    for (let page = 0; page < 60; page += 1) {
+      const payload = await requestOwnedListPage(lastKey, limit);
+      const rows = extractOwnedRows(payload);
+      if (!Array.isArray(rows)) throw new Error("Owned chatbot API changed its list format; no incomplete all-bot backup was downloaded.");
+      let newRows = 0;
+      for (const raw of rows) {
+        const row = canonicalOwnedRow(raw);
+        if (!row) continue;
+        const old = map.get(row.id);
+        if (!old) { map.set(row.id, row); newRows += 1; }
+        else if (old.category === "unknown" && row.category !== "unknown") map.set(row.id, row);
+      }
+      if (rows.length < limit) return [...map.values()];
+      const last = canonicalOwnedRow(rows[rows.length - 1]);
+      const provided = payload?.lastKey ?? payload?.nextLastKey ?? payload?.next_key ?? payload?.pagination?.lastKey;
+      const cursor = provided && typeof provided === "object"
+        ? JSON.stringify(provided)
+        : (typeof provided === "string" && provided ? provided : last?.id ? JSON.stringify({ id: last.id }) : "");
+      if (!cursor || visited.has(cursor) || !newRows) {
+        throw new Error("Owned chatbot list pagination stopped early; no incomplete all-bot backup was downloaded.");
+      }
+      visited.add(cursor);
+      lastKey = cursor;
+    }
+    throw new Error("Owned chatbot list exceeded its safety page limit; no incomplete all-bot backup was downloaded.");
+  }
+
+  function ownedCardName(card) {
+    const btn = card.querySelector('button[aria-label^="chat-with-"]');
+    const label = btn?.getAttribute("title") || btn?.getAttribute("aria-label")?.replace(/^chat-with-/i, "");
+    return clean(label || card.querySelector('button[title]')?.title || "", 250);
+  }
+
+  function ownedCards() {
+    return [...document.querySelectorAll("div.relative.group.rounded-xl")]
+      .filter(card => card.querySelector("svg.lucide-ellipsis-vertical") && ownedCardName(card));
+  }
+
+  function reconcileOwnedStatuses(items) {
+    const byName = new Map();
+    for (const item of items) {
+      const name = normalizeName(item.name);
+      byName.set(name, (byName.get(name) || 0) + 1);
+    }
+    const reviewedNames = new Set();
+    for (const card of ownedCards()) {
+      const name = normalizeName(ownedCardName(card));
+      if (!name || byName.get(name) !== 1) continue;
+      const review = /\bunder review\b/i.test(card.textContent || "") ||
+        !!card.querySelector('button[aria-label="Review"]');
+      if (review) reviewedNames.add(name);
+    }
+    return items.map(item => reviewedNames.has(normalizeName(item.name))
+      ? { ...item, category: "review", reviewStatus: item.reviewStatus || "pending" }
+      : item);
+  }
+
+  async function collectFullItems(kind) {
+    if (kind !== "chatbots") {
+      await loadRemainingNativeBatches(kind);
+      return collectItems(kind).map(item => ({ ...item, category: "unknown" }));
+    }
+    const apiItems = reconcileOwnedStatuses(await fetchAllOwnedChatbots());
+    if (!apiItems.length) throw new Error("The owned chatbot API returned no items; backup was not started.");
+    // SpicyChat does not expose a chat link for Under Review cards. Verify
+    // against the mounted list so an API or parsing regression cannot silently
+    // turn 'Backup all' into only Public/Unlisted bots again.
+    const cards = ownedCards();
+    if (cards.length > apiItems.length) throw new Error(
+      `Owned chatbot listing returned ${apiItems.length} bots but ${cards.length} cards are visible. Backup all was stopped to avoid missing bots.`
+    );
+    return apiItems;
   }
 
   function visible(element) {
@@ -223,6 +414,9 @@
             spicychat_id: snapshot.id,
             avatar_url: snapshot.image || "",
             visibility: snapshot.visibility || "",
+            owned_listing_visibility: snapshot.ownedVisibility || "",
+            review_status: snapshot.reviewStatus || "",
+            pending_revision_verified: snapshot.reviewStatus === "pending" ? false : null,
             created_at: snapshot.createdAt || null,
             updated_at: snapshot.updatedAt || null,
             lorebook_ids: Array.isArray(snapshot.lorebookIds) ? snapshot.lorebookIds : [],
@@ -370,15 +564,19 @@
     await Promise.all(runners);
   }
 
-  async function runBackup(kind, requestedItems = null) {
+  async function runBackup(kind, requestedItems = null, scope = "") {
     if (activeJob) return;
     const button = document.querySelector(`#${BAR_ID} [data-role='backup']`);
+    const select = document.querySelector(`#${BAR_ID} [data-role='select']`);
+    const filter = document.querySelector(`#${BAR_ID} [data-role='filter']`);
     const cancel = document.querySelector(`#${BAR_ID} [data-role='cancel']`);
     const retry = document.querySelector(`#${BAR_ID} [data-role='retry']`);
-    const job = { kind, cancelled: false, completed: 0, failures: [], success: [] };
+    const job = { kind, scope, cancelled: false, completed: 0, failures: [], success: [] };
     activeJob = job;
     DS.state.myCreationsBulkBackupRunning = true;
     if (button) button.disabled = true;
+    if (select) select.disabled = true;
+    if (filter) filter.hidden = true;
     if (cancel) cancel.hidden = false;
     if (retry) retry.hidden = true;
 
@@ -386,8 +584,8 @@
       try { await DS.requestDownloadPermission?.(); } catch {}
       let items = requestedItems;
       if (!items) {
-        await loadRemainingNativeBatches(kind);
-        items = collectItems(kind);
+        setStatus(`Finding all owned ${kind === "chatbots" ? "chatbots" : "Lorebooks"}…`);
+        items = await collectFullItems(kind);
       }
       if (!items?.length) throw new Error(`No owned ${kind === "chatbots" ? "chatbots" : "Lorebooks"} were found on this page.`);
 
@@ -398,7 +596,7 @@
         setStatus(`Reading chatbot dates from SpicyChat's index…`);
         indexedBotMetadata = await fetchIndexedBotMetadata(items, job);
       }
-      setStatus(`Fetching newest live ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… 0 / ${items.length}`);
+      setStatus(`Fetching current owner ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… 0 / ${items.length}`);
 
       await runPool(items, async item => {
         if (job.cancelled) return;
@@ -407,6 +605,8 @@
           if (job.cancelled) return;
           if (kind === "chatbots") {
             const indexed = indexedBotMetadata.get(String(item.id || "").toLowerCase()) || null;
+            snapshot.ownedVisibility = item.visibility || "";
+            snapshot.reviewStatus = item.reviewStatus || (item.category === "review" ? "pending" : "");
             let usedIndexedMetadata = false;
             if (!snapshot.createdAt && indexed?.createdAt) {
               snapshot.createdAt = indexed.createdAt;
@@ -441,7 +641,7 @@
           if (!job.cancelled) job.failures.push({ id: item.id, name: item.name || "", error: clean(error?.message || error, 500) });
         } finally {
           job.completed += 1;
-          setStatus(`Fetching newest live ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… ${job.completed} / ${items.length}${job.failures.length ? ` · ${job.failures.length} failed` : ""}`);
+          setStatus(`Fetching current owner ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… ${job.completed} / ${items.length}${job.failures.length ? ` · ${job.failures.length} failed` : ""}`);
         }
       }, job);
 
@@ -458,6 +658,15 @@
         source: "fresh-live-spicychat",
         historyIncluded: false,
         kind,
+        selection: job.scope || (requestedItems ? "selected-or-retry" : "all"),
+        reviewDataNote: kind === "chatbots" && items.some(item => item.category === "review")
+          ? "Under Review bots were fetched from the current owner API. Whether a pending edit or the last approved revision is returned is not independently verified."
+          : null,
+        categories: kind === "chatbots" ? items.reduce((counts, item) => {
+          const key = item.category || "unknown";
+          counts[key] = (counts[key] || 0) + 1;
+          return counts;
+        }, {}) : {},
         requested: items.length,
         succeeded: job.success.length,
         failed: job.failures.length,
@@ -490,7 +699,10 @@
     } finally {
       activeJob = null;
       DS.state.myCreationsBulkBackupRunning = false;
+      updateSelectionCounts();
       if (button) button.disabled = false;
+      if (select) select.disabled = false;
+      if (filter) filter.hidden = false;
       if (cancel) cancel.hidden = true;
     }
   }
@@ -498,6 +710,243 @@
   function setStatus(message) {
     const node = document.querySelector(`#${BAR_ID} [data-role='status']`);
     if (node) node.textContent = String(message || "");
+  }
+
+  function selectionStatus(message) {
+    const node = document.querySelector(`#${SELECT_ID} [data-role="selection-status"]`);
+    if (node) node.textContent = message;
+  }
+
+  function selectionLabel(category) {
+    return ({ public: "Public", private: "Private", unlisted: "Unlisted", review: "Under Review" })[category] || "Unknown";
+  }
+
+  function updateSelectionCounts() {
+    const panel = document.getElementById(SELECT_ID);
+    if (!panel) return;
+    const count = panel.querySelector('[data-role="selected-count"]');
+    if (count) count.textContent = `${selectedIds.size} selected / ${selectionItems.length} found`;
+    const run = panel.querySelector('[data-role="backup-selected"]');
+    if (run) { run.disabled = !selectedIds.size || !!activeJob; run.textContent = `Backup selected (${selectedIds.size})`; }
+    for (const button of document.querySelectorAll(`.${SELECT_CLASS}`)) {
+      const selected = selectedIds.has(button.dataset.id);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+      button.textContent = selected ? "✓" : "+";
+    }
+    for (const checkbox of panel.querySelectorAll('input[data-ds-backup-select-id]')) {
+      checkbox.checked = selectedIds.has(checkbox.dataset.dsBackupSelectId);
+    }
+  }
+
+  function toggleSelected(id) {
+    if (!selectionItems.some(row => row.id === id)) return;
+    if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+    updateSelectionCounts();
+  }
+
+  function cardsWithIds() {
+    const byName = new Map();
+    for (const item of selectionItems) {
+      const name = normalizeName(item.name);
+      if (!byName.has(name)) byName.set(name, []);
+      byName.get(name).push(item);
+    }
+    const used = new Set();
+    const cards = selectionKind === "chatbots" ? ownedCards() :
+      [...document.querySelectorAll("a[href*='/lorebook/']")].map(node => lorebookCardForAnchor(node)).filter(Boolean);
+    for (const card of new Set(cards)) {
+      if (!(card instanceof Element)) continue;
+      let id = "";
+      const anchor = card.querySelector(selectionKind === "chatbots" ? "a[href*='/chat/'],a[href*='/chatbot/']" : "a[href*='/lorebook/']");
+      if (anchor) id = itemIdFromHref(anchor.getAttribute("href") || anchor.href, selectionKind);
+      if (!id && selectionKind === "chatbots") {
+        const name = normalizeName(ownedCardName(card));
+        const candidates = byName.get(name) || [];
+        const review = /\bunder review\b/i.test(card.textContent || "");
+        id = (candidates.find(row => !used.has(row.id) && (review ? row.category === "review" : row.category !== "review")) ||
+          candidates.find(row => !used.has(row.id)))?.id || "";
+      }
+      if (id && !used.has(id)) { used.add(id); yieldCard(card, id); }
+    }
+  }
+
+  function yieldCard(card, id) {
+    let button = card.querySelector(`.${SELECT_CLASS}`);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = SELECT_CLASS;
+      button.dataset.dsOwned = "1";
+      button.dataset.dsOwner = "qol";
+      button.title = "Toggle this item for backup";
+      button.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        toggleSelected(button.dataset.id);
+      });
+      card.appendChild(button);
+    }
+    button.dataset.id = id;
+    const active = selectedIds.has(id);
+    button.textContent = active ? "✓" : "+";
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  function refreshSelectionCards() {
+    if (!selectionKind || !document.getElementById(SELECT_ID)) return;
+    cardsWithIds();
+    updateSelectionCounts();
+  }
+
+  function watchSelectionCards() {
+    selectionObserver?.disconnect();
+    if (!document.body) return;
+    selectionObserver = new MutationObserver(mutations => {
+      if (!mutations.some(m => [...m.addedNodes].some(node => node instanceof Element && !node.closest?.('[data-ds-owned="1"]')))) return;
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(refreshSelectionCards, 120);
+    });
+    selectionObserver.observe(document.body, { subtree: true, childList: true });
+  }
+
+  function closeSelection() {
+    selectionKind = "";
+    selectionItems = [];
+    selectedIds.clear();
+    selectionObserver?.disconnect();
+    selectionObserver = null;
+    clearTimeout(selectionTimer);
+    document.querySelectorAll(`.${SELECT_CLASS}`).forEach(node => node.remove());
+    document.getElementById(SELECT_ID)?.remove();
+  }
+
+  function renderSelectionList() {
+    const panel = document.getElementById(SELECT_ID);
+    if (!panel) return;
+    const list = panel.querySelector('[data-role="selection-list"]');
+    const search = normalizeName(panel.querySelector('[data-role="selection-search"]')?.value || "");
+    const fragment = document.createDocumentFragment();
+    let visibleCount = 0;
+    for (const item of selectionItems) {
+      if (search && !normalizeName(item.name).includes(search) && !selectionLabel(item.category).toLowerCase().includes(search)) continue;
+      visibleCount += 1;
+      const label = document.createElement("label");
+      label.className = "ds-backup-choice";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.dsBackupSelectId = item.id;
+      checkbox.checked = selectedIds.has(item.id);
+      checkbox.addEventListener("change", () => toggleSelected(item.id));
+      const name = document.createElement("span");
+      name.textContent = item.name || item.id;
+      const category = document.createElement("small");
+      category.textContent = selectionKind === "chatbots" ? selectionLabel(item.category) : "Lorebook";
+      label.append(checkbox, name, category);
+      fragment.append(label);
+    }
+    list.replaceChildren(fragment);
+    if (!visibleCount) list.textContent = "No matching items.";
+    updateSelectionCounts();
+  }
+
+  function buildSelectionPanel(kind) {
+    const panel = document.createElement("div");
+    panel.id = SELECT_ID;
+    panel.dataset.dsOwned = "1";
+    panel.dataset.dsOwner = "qol";
+    panel.dataset.dsFeature = "my-creations-backup-select";
+    const header = document.createElement("div");
+    header.className = "ds-backup-select-header";
+    const title = document.createElement("strong");
+    title.textContent = kind === "chatbots" ? "Select chatbots to backup" : "Select Lorebooks to backup";
+    const count = document.createElement("span");
+    count.dataset.role = "selected-count";
+    const close = document.createElement("button");
+    close.type = "button"; close.textContent = "Done"; close.addEventListener("click", closeSelection);
+    header.append(title, count, close);
+    const controls = document.createElement("div"); controls.className = "ds-backup-select-controls";
+    const search = document.createElement("input");
+    search.dataset.role = "selection-search";
+    search.placeholder = "Search your creations…";
+    search.setAttribute("aria-label", "Search backup selection");
+    search.addEventListener("input", renderSelectionList);
+    controls.appendChild(search);
+    const choose = (label, category, fromFiltered = false) => {
+      const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+      button.addEventListener("click", () => {
+        if (category === "clear") selectedIds.clear();
+        else {
+          const query = normalizeName(search.value);
+          for (const item of selectionItems) {
+            if (category !== "all" && category !== item.category) continue;
+            if (fromFiltered && query && !normalizeName(item.name).includes(query) && !selectionLabel(item.category).toLowerCase().includes(query)) continue;
+            selectedIds.add(item.id);
+          }
+        }
+        updateSelectionCounts();
+      });
+      controls.appendChild(button);
+    };
+    choose("Select all", "all");
+    choose("Select shown", "all", true);
+    choose("Clear", "clear");
+    if (kind === "chatbots") {
+      for (const category of ["public", "private", "unlisted", "review"]) choose(selectionLabel(category), category);
+    }
+    const list = document.createElement("div"); list.className = "ds-backup-choice-list"; list.dataset.role = "selection-list";
+    const footer = document.createElement("div"); footer.className = "ds-backup-select-footer";
+    const status = document.createElement("span"); status.dataset.role = "selection-status";
+    const run = document.createElement("button"); run.type = "button"; run.dataset.role = "backup-selected";
+    run.addEventListener("click", () => {
+      if (!selectedIds.size || activeJob) return;
+      const items = selectionItems.filter(item => selectedIds.has(item.id));
+      runBackup(kind, items, "selected");
+    });
+    footer.append(status, run);
+    panel.append(header, controls, list, footer);
+    return panel;
+  }
+
+  async function openSelection(kind) {
+    if (selectionLoading || activeJob) return;
+    if (selectionKind === kind && document.getElementById(SELECT_ID)) { closeSelection(); return; }
+    selectionLoading = true;
+    const opener = document.querySelector(`#${BAR_ID} [data-role="select"]`);
+    if (opener) opener.disabled = true;
+    closeSelection();
+    setStatus(`Loading ${kind === "chatbots" ? "chatbot" : "Lorebook"} selection…`);
+    try {
+      const items = await collectFullItems(kind);
+      if (!items.length) throw new Error("No creations were found for selection.");
+      if (pageKind() !== kind) return;
+      selectionKind = kind;
+      selectionItems = items;
+      selectedIds.clear();
+      const panel = buildSelectionPanel(kind);
+      const bar = document.getElementById(BAR_ID);
+      if (!bar) return;
+      bar.insertAdjacentElement("afterend", panel);
+      renderSelectionList();
+      refreshSelectionCards();
+      watchSelectionCards();
+      setStatus(`${items.length} ${kind === "chatbots" ? "chatbots" : "Lorebooks"} available for selection.`);
+    } catch (error) {
+      setStatus(`Selection failed: ${clean(error?.message || error, 300)}`);
+      closeSelection();
+    } finally {
+      selectionLoading = false;
+      if (opener) opener.disabled = false;
+    }
+  }
+
+  async function backupByCategory(kind, category) {
+    if (activeJob) return;
+    setStatus(`Finding ${selectionLabel(category).toLowerCase()} chatbots…`);
+    try {
+      const all = await collectFullItems(kind);
+      const chosen = all.filter(item => item.category === category);
+      if (!chosen.length) { setStatus(`No ${selectionLabel(category).toLowerCase()} chatbots found.`); return; }
+      await runBackup(kind, chosen, category);
+    } catch (error) { setStatus(`Status backup failed: ${clean(error?.message || error, 300)}`); }
   }
 
   function ensureStyle() {
@@ -512,6 +961,24 @@
       #${BAR_ID} button{appearance:none;border:1px solid rgba(148,163,184,.34);border-radius:7px;background:rgba(55,65,81,.64);color:inherit;padding:5px 8px;cursor:pointer;font:600 11px/1.15 inherit;white-space:nowrap}
       #${BAR_ID} button:hover:not(:disabled){background:rgba(75,85,99,.88)}
       #${BAR_ID} button:disabled{opacity:.55;cursor:default}
+      #${BAR_ID} details{position:relative}
+      #${BAR_ID} summary{cursor:pointer;border:1px solid rgba(148,163,184,.34);border-radius:7px;padding:5px 8px;background:rgba(55,65,81,.64);font-size:11px;font-weight:600}
+      #${BAR_ID} details[open] .ds-backup-filter-menu{position:absolute;top:100%;left:0;z-index:500;min-width:155px;display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:rgba(17,24,39,.98)}
+      #${SELECT_ID}{position:relative;z-index:20;margin:8px 0 12px;padding:10px;border:1px solid rgba(168,85,247,.5);border-radius:10px;background:rgba(31,41,55,.52);font:12px/1.4 system-ui,sans-serif}
+      #${SELECT_ID} button{appearance:none;border:1px solid rgba(148,163,184,.4);border-radius:7px;padding:6px 9px;background:rgba(55,65,81,.78);color:inherit;cursor:pointer;font:600 11px/1.2 system-ui,sans-serif}
+      #${SELECT_ID} button:hover:not(:disabled){background:rgba(88,28,135,.83)}
+      #${SELECT_ID} button:disabled{opacity:.55;cursor:default}
+      #${SELECT_ID} .ds-backup-select-header,#${SELECT_ID} .ds-backup-select-controls,#${SELECT_ID} .ds-backup-select-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+      #${SELECT_ID} .ds-backup-select-header span{margin-right:auto;opacity:.75}
+      #${SELECT_ID} .ds-backup-select-controls input{min-width:175px;flex:1 1 220px;background:rgba(17,24,39,.6);color:inherit;border:1px solid rgba(148,163,184,.4);border-radius:7px;padding:6px}
+      #${SELECT_ID} .ds-backup-choice-list{max-height:330px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 12px;margin:8px 0}
+      #${SELECT_ID} .ds-backup-choice{display:flex;align-items:center;gap:7px;min-width:0;padding:5px;cursor:pointer;border-bottom:1px solid rgba(148,163,184,.11)}
+      #${SELECT_ID} .ds-backup-choice span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+      #${SELECT_ID} .ds-backup-choice small{opacity:.65;font-size:10px;white-space:nowrap}
+      #${SELECT_ID} .ds-backup-select-footer span{flex:1 1 220px;opacity:.8}
+      #${SELECT_ID} [data-role="backup-selected"]{background:rgba(126,34,206,.9);border-color:rgba(168,85,247,.65)}
+      .${SELECT_CLASS}{position:absolute!important;z-index:85!important;left:6px!important;top:6px!important;width:28px!important;height:28px!important;border:1px solid rgba(216,180,254,.9)!important;border-radius:8px!important;background:rgba(88,28,135,.92)!important;color:white!important;cursor:pointer!important;font:bold 17px/1 system-ui!important}
+      .${SELECT_CLASS}[aria-pressed="true"]{background:rgba(126,34,206,.98)!important}
       .ds-my-lorebook-edit-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 28px;border-radius:7px;color:inherit;text-decoration:none;background:transparent}
       .ds-my-lorebook-edit-button:hover{background:rgba(148,163,184,.16)}
       .ds-my-lorebook-edit-button svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -546,7 +1013,7 @@
     const status = document.createElement("span");
     status.dataset.role = "status";
     status.textContent = kind === "chatbots"
-      ? "Downloads the newest current version of every chatbot as one ZIP."
+      ? "Downloads every owned chatbot, including bots Under Review, as one ZIP."
       : "Downloads every current Lorebook and its current entries as one ZIP.";
 
     const backup = document.createElement("button");
@@ -555,6 +1022,30 @@
     backup.textContent = kind === "chatbots" ? "Backup all chatbots" : "Backup all Lorebooks";
     backup.title = "Loads the rest of this My Creations list, then fetches each current live item. Local version history is not exported.";
     backup.addEventListener("click", () => runBackup(kind));
+
+    const select = document.createElement("button");
+    select.type = "button";
+    select.dataset.role = "select";
+    select.textContent = kind === "chatbots" ? "Select bots to backup" : "Select Lorebooks to backup";
+    select.addEventListener("click", () => openSelection(kind));
+
+    let filter = null;
+    if (kind === "chatbots") {
+      filter = document.createElement("details");
+      filter.dataset.role = "filter";
+      const summary = document.createElement("summary");
+      summary.textContent = "Backup by status";
+      const menu = document.createElement("div");
+      menu.className = "ds-backup-filter-menu";
+      for (const category of ["public", "private", "unlisted", "review"]) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.textContent = selectionLabel(category);
+        option.addEventListener("click", () => { filter.open = false; backupByCategory(kind, category); });
+        menu.appendChild(option);
+      }
+      filter.append(summary, menu);
+    }
 
     const cancel = document.createElement("button");
     cancel.type = "button";
@@ -580,7 +1071,9 @@
       runBackup(kind, lastFailures.map(row => ({ ...row })));
     });
 
-    bar.append(title, status, backup, cancel, retry);
+    bar.append(title, status, backup, select);
+    if (filter) bar.appendChild(filter);
+    bar.append(cancel, retry);
 
     // Do not fall back to #root while React is still mounting. That placed the
     // bar above SpicyChat's entire shell/logo. If the tab row is not ready yet,
@@ -671,6 +1164,7 @@
     ensureStyle();
 
     const existing = document.getElementById(BAR_ID);
+    if (selectionKind && (!bulkEnabled || selectionKind !== kind)) closeSelection();
     if (bulkEnabled) {
       if (!existing || existing.dataset.kind !== kind) {
         existing?.remove();
@@ -695,6 +1189,7 @@
   };
 
   DS.removeMyCreationsBackupTools = function removeMyCreationsBackupTools() {
+    closeSelection();
     if (activeJob) activeJob.cancelled = true;
     document.getElementById(BAR_ID)?.remove();
     document.querySelectorAll(".ds-my-lorebook-edit-button").forEach(node => node.remove());

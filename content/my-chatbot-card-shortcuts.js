@@ -6,7 +6,6 @@
   window.__DS_QOL_MY_CHATBOT_CARD_SHORTCUTS__ = true;
 
   const STYLE_ID = "ds-my-chatbot-card-shortcuts-style";
-  const CONTROL_ID = "ds-my-chatbot-card-shortcuts-control";
   const EDIT_CLASS = "ds-my-chatbot-edit-button";
   const FAVORITE_SETTING = "showCreatorFavoriteButtonsOnMyChatbots";
   const EDIT_SETTING = "showMyChatbotEditButtons";
@@ -47,58 +46,6 @@
     style.id = STYLE_ID;
     style.dataset.dsOwned = "1";
     style.textContent = `
-      #${CONTROL_ID} {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-      }
-      #${CONTROL_ID} > summary {
-        list-style: none;
-        cursor: pointer;
-        user-select: none;
-        min-height: 28px;
-        display: inline-flex;
-        align-items: center;
-        padding: 0 8px;
-        border: 1px solid rgba(148,163,184,.30);
-        border-radius: 7px;
-        background: rgba(55,65,81,.38);
-        font: 600 11px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      }
-      #${CONTROL_ID} > summary::-webkit-details-marker { display: none; }
-      #${CONTROL_ID}[open] > summary,
-      #${CONTROL_ID} > summary:hover { background: rgba(75,85,99,.62); }
-      #${CONTROL_ID} .ds-my-chatbot-card-shortcuts-popover {
-        position: absolute;
-        z-index: 160;
-        right: 0;
-        top: calc(100% + 6px);
-        width: 245px;
-        padding: 9px 10px;
-        border: 1px solid rgba(148,163,184,.30);
-        border-radius: 9px;
-        background: rgba(17,24,39,.98);
-        box-shadow: 0 10px 28px rgba(0,0,0,.30);
-        color: inherit;
-        font: 12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      }
-      #${CONTROL_ID} .ds-my-chatbot-card-shortcuts-popover label {
-        display: flex;
-        align-items: flex-start;
-        gap: 7px;
-        cursor: pointer;
-        margin: 3px 0;
-      }
-      #${CONTROL_ID} .ds-my-chatbot-card-shortcuts-popover input {
-        margin-top: 2px;
-        flex: 0 0 auto;
-      }
-      #${CONTROL_ID} .ds-my-chatbot-card-shortcuts-hint {
-        display: block;
-        margin-top: 6px;
-        opacity: .68;
-        font-size: 10px;
-      }
       .${EDIT_CLASS} {
         display: inline-flex;
         align-items: center;
@@ -220,10 +167,9 @@
     for (const chatAnchor of document.querySelectorAll("a[href*='/chat/']")) {
       const id = botIdFromHref(chatAnchor.getAttribute("href") || chatAnchor.href);
       if (!id || seen.has(id)) continue;
-      seen.add(id);
-
       const card = cardFromNode(chatAnchor);
       if (!card) continue;
+      seen.add(id);
       if (card.querySelector(`.${EDIT_CLASS}[data-ds-chatbot-id="${CSS.escape(id)}"]`)) continue;
 
       const creator = card.querySelector("a[aria-label='creator'][href*='/creator/'], a[href*='/creator/']");
@@ -237,121 +183,20 @@
     }
   }
 
-  async function saveToggle(key, checked) {
-    const value = !!checked;
-    if (DS.state?.settings) DS.state.settings[key] = value;
-    try {
-      if (typeof DS.saveSettingsPatch === "function") {
-        await DS.saveSettingsPatch({ [key]: value }, { immediate: true });
-      } else if (typeof DS.storageSet === "function") {
-        await DS.storageSet({ settings: { ...(DS.state?.settings || {}), [key]: value } }, { immediate: true });
-      }
-    } catch {}
-
-    applyNow();
-
-    if (key === FAVORITE_SETTING && value && settings().showCreatorFavoriteButtons === true) {
-      DS.updateCreatorFavoriteButtons?.();
-      addEditButtons();
-    }
-  }
-
-  function makeToggle(labelText, key, title = "") {
-    const label = document.createElement("label");
-    if (title) label.title = title;
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = settings()[key] === true;
-    input.addEventListener("change", () => saveToggle(key, input.checked));
-    const span = document.createElement("span");
-    span.textContent = labelText;
-    label.append(input, span);
-    return label;
-  }
-
-  function controlsAnchor() {
-    const tab = document.querySelector('a[data-testid="creation-tab-chatbots"]');
-    const list = tab?.closest?.("menu")?.querySelector?.("ul");
-    if (!list) return null;
-    const analytics = [...list.children].find(child => /creator analytics/i.test(String(child.textContent || "")));
-    return { list, analytics: analytics || null };
-  }
-
-  function ensureControls() {
-    if (!isMyChatbotsPage()) {
-      document.getElementById(CONTROL_ID)?.closest("li")?.remove();
-      return;
-    }
-
-    ensureStyle();
-
-    const existing = document.getElementById(CONTROL_ID);
-    if (existing) {
-      const favorite = existing.querySelector(`[data-setting="${FAVORITE_SETTING}"]`);
-      const edit = existing.querySelector(`[data-setting="${EDIT_SETTING}"]`);
-      if (favorite) favorite.checked = settings()[FAVORITE_SETTING] === true;
-      if (edit) edit.checked = settings()[EDIT_SETTING] === true;
-      return;
-    }
-
-    const anchor = controlsAnchor();
-    if (!anchor) return;
-
-    const li = document.createElement("li");
-    li.dataset.dsOwned = "1";
-    li.dataset.dsOwner = "qol";
-    li.dataset.dsFeature = "my-chatbot-card-shortcuts";
-
-    const details = document.createElement("details");
-    details.id = CONTROL_ID;
-    details.dataset.dsOwned = "1";
-
-    const summary = document.createElement("summary");
-    summary.textContent = "QoL cards";
-
-    const popover = document.createElement("div");
-    popover.className = "ds-my-chatbot-card-shortcuts-popover";
-
-    const favoriteToggle = makeToggle(
-      "Favorite creator stars on My Chatbots",
-      FAVORITE_SETTING,
-      "Also requires the main Favorite creator star buttons setting."
-    );
-    favoriteToggle.querySelector("input").dataset.setting = FAVORITE_SETTING;
-
-    const editToggle = makeToggle(
-      "Edit buttons on My Chatbot cards",
-      EDIT_SETTING
-    );
-    editToggle.querySelector("input").dataset.setting = EDIT_SETTING;
-
-    const hint = document.createElement("small");
-    hint.className = "ds-my-chatbot-card-shortcuts-hint";
-    hint.textContent = "Both are off by default. Edit links keep normal browser Ctrl/Cmd-click, middle-click and context-menu behavior.";
-
-    popover.append(favoriteToggle, editToggle, hint);
-    details.append(summary, popover);
-    li.appendChild(details);
-
-    if (anchor.analytics) anchor.list.insertBefore(li, anchor.analytics);
-    else anchor.list.appendChild(li);
-  }
-
   function applyNow() {
     installFavoriteGuard();
 
     if (!isMyChatbotsPage()) {
-      document.getElementById(CONTROL_ID)?.closest("li")?.remove();
       removeEditButtons();
       return;
     }
 
-    ensureControls();
 
     if (!favoriteButtonsAllowedHere()) {
       creatorFavoriteCleanup();
     }
 
+    if (editButtonsEnabled()) ensureStyle();
     addEditButtons();
   }
 
@@ -381,7 +226,7 @@
   document.addEventListener("click", onNativeMenuCtrlClick, true);
 
   observer = new MutationObserver(mutations => {
-    if (!isMyChatbotsPage() && !document.getElementById(CONTROL_ID) && !document.querySelector(`.${EDIT_CLASS}`)) return;
+    if (!isMyChatbotsPage() && !document.querySelector(`.${EDIT_CLASS}`)) return;
     if (typeof DS.mutationsHaveNativeChanges === "function" && !DS.mutationsHaveNativeChanges(mutations)) return;
     scheduleApply(90);
   });

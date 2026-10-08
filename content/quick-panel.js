@@ -1647,10 +1647,12 @@
     }
     setShown(document.getElementById("ds-qol-soundscape-row"), showSoundscapes, "flex");
 
+    // Mini Panel export is its own option. The floating/top-bar export
+    // button is controlled separately by showChatExportButton.
     const showExport = !!(
       onSingleChatPage &&
-      settings.showChatExportButton &&
-      settings.quickPanelShowExport !== false
+      settings.quickPanelShowExport !== false &&
+      typeof DS.exportCurrentChat === "function"
     );
     setShown(document.getElementById("ds-qol-copy-chat"), showExport);
     setShown(document.getElementById("ds-qol-export-chat"), showExport);

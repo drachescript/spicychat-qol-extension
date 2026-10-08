@@ -349,7 +349,9 @@
       holder.insertBefore(bar, holder.firstChild);
     }
 
-    if (bar.dataset.dsActionSignature === signature) {
+    if (bar.dataset.dsActionSignature === signature &&
+        bar.querySelectorAll(":scope > .ds-message-quick-action").length === actions.length &&
+        actions.every(action => !!bar.querySelector(`:scope > .ds-message-quick-action[data-ds-message-action="${CSS.escape(action.label)}"]`))) {
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
       const root = getMessageRoot(dropdownButton);
       quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
@@ -423,7 +425,13 @@
     const revision = Number(DS.getMessageRootRevision?.(root) || 0);
     if (revision !== Number(state.revision || 0)) return false;
     if (!state.holder?.isConnected || state.holder !== getDropdownHolder(button)) return false;
-    if (state.hasActions) return !!(state.bar?.isConnected && state.bar.parentElement === state.holder);
+    if (state.hasActions) {
+      const actions = getEnabledActions(button);
+      const bar = state.bar;
+      return !!(bar?.isConnected && bar.parentElement === state.holder &&
+        bar.querySelectorAll(":scope > .ds-message-quick-action").length === actions.length &&
+        actions.every(action => !!bar.querySelector(`:scope > .ds-message-quick-action[data-ds-message-action="${CSS.escape(action.label)}"]`)));
+    }
     return true;
   }
 
@@ -431,8 +439,11 @@
     const holder = getDropdownHolder(button);
     const bar = holder?.querySelector?.(":scope > .ds-message-quick-actions");
     if (!bar) return false;
-    return bar.dataset.dsActionSignature === JSON.stringify(getEnabledActions(button).map(action => action.label)) &&
-      button.dataset.dsMessageQuickReady === signature;
+    const actions = getEnabledActions(button);
+    return bar.dataset.dsActionSignature === JSON.stringify(actions.map(action => action.label)) &&
+      button.dataset.dsMessageQuickReady === signature &&
+      bar.querySelectorAll(":scope > .ds-message-quick-action").length === actions.length &&
+      actions.every(action => !!bar.querySelector(`:scope > .ds-message-quick-action[data-ds-message-action="${CSS.escape(action.label)}"]`));
   }
 
   function hasAnyQuickActionEnabled(settings) {
@@ -503,7 +514,7 @@
   function repairNewestQuickActions() {
     quickActionRepairTimer = 0;
     const settings = DS.state?.settings || {};
-    if (document.hidden || !settings.enabled || !DS.isSingleChatPage?.() || !hasAnyQuickActionEnabled(settings)) return;
+    if (document.hidden || !settings.enabled || !DS.isSingleChatPage?.() || !(hasAnyQuickActionEnabled(settings) || (settings.enableContextKeeper && settings.contextKeeperMessageButtons))) return;
     if (DS.state?.chatExportLock?.active) return;
     const quietUntil = Math.max(
       Number(DS.state?.chatStartupQuietUntil || 0),
@@ -516,7 +527,7 @@
     }
 
     const signature = settingsSignature(settings);
-    const roots = DS.getMessageEnhancerRoots?.({ newest: 12, margin: 900 }) || [];
+    const roots = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 12, margin: 900, respectLane: false }) || [];
     const buttons = roots.length
       ? roots.flatMap(root => DS.qsa("button[aria-label='message-dropdown']", root))
       : DS.qsa("button[aria-label='message-dropdown']").slice(-12);
@@ -524,9 +535,13 @@
     let repaired = 0;
     for (const button of buttons) {
       if (button.closest("#ds-qol-panel") || DS.isMessageEditPending?.(button.closest("div[id^='message-']"))) continue;
-      if (quickActionRevisionStateHealthy(button, signature) || quickActionBarHealthy(button, signature)) continue;
-      ensureQuickActions(button, signature);
-      repaired += 1;
+      if (hasAnyQuickActionEnabled(settings) && !quickActionRevisionStateHealthy(button, signature) && !quickActionBarHealthy(button, signature)) {
+        ensureQuickActions(button, signature);
+        repaired += 1;
+      }
+      // Keep may have been removed by a toolbar-only React remount even if
+      // the quick-action bar is already healthy.
+      repairContextKeeperForDropdown(button);
     }
     if (repaired) {
       const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
@@ -538,6 +553,49 @@
     clearTimeout(quickActionRepairTimer);
     quickActionRepairTimer = window.setTimeout(repairNewestQuickActions, Math.max(250, Number(delay) || 6500));
   }
+
+  DS.repairMessageToolbarForRoot = function repairMessageToolbarForRoot(root) {
+    if (!(root instanceof Element) || !root.isConnected || !DS.isSingleChatPage?.()) return;
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || DS.isMessageEditPending?.(root)) return;
+    const signature = settingsSignature(settings);
+    root.querySelectorAll("button[aria-label='message-dropdown']").forEach(button => {
+      if (hasAnyQuickActionEnabled(settings) && !quickActionRevisionStateHealthy(button, signature) && !quickActionBarHealthy(button, signature)) {
+        ensureQuickActions(button, signature);
+      }
+      repairContextKeeperForDropdown(button);
+    });
+  };
+
+  // Target only newly mounted native toolbar controls. Avoid scanning message
+  // bodies on every token while the AI is streaming.
+  let remountTimer = 0;
+  const remountRoots = new Set();
+  const toolbarRemountObserver = new MutationObserver(mutations => {
+    const settings = DS.state?.settings || {};
+    if (document.hidden || !settings.enabled || !DS.isSingleChatPage?.()) return;
+    if (!(hasAnyQuickActionEnabled(settings) || (settings.enableContextKeeper && settings.contextKeeperMessageButtons))) return;
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes || []) {
+        if (!(node instanceof Element) || node.closest?.(".ds-message-quick-actions")) continue;
+        if (!node.matches?.("button[aria-label='message-dropdown']") && !node.querySelector?.("button[aria-label='message-dropdown']")) continue;
+        const root = node.closest?.("div[id^='message-']") || node.querySelector?.("button[aria-label='message-dropdown']")?.closest?.("div[id^='message-']");
+        if (root) remountRoots.add(root);
+      }
+    }
+    if (!remountRoots.size || remountTimer) return;
+    remountTimer = window.setTimeout(() => {
+      remountTimer = 0;
+      const roots = [...remountRoots];
+      remountRoots.clear();
+      for (const root of roots.slice(0, 32)) DS.repairMessageToolbarForRoot?.(root);
+    }, 180);
+  });
+  const beginToolbarObserver = () => {
+    if (document.body) toolbarRemountObserver.observe(document.body, { childList: true, subtree: true });
+  };
+  if (document.body) beginToolbarObserver();
+  else document.addEventListener("DOMContentLoaded", beginToolbarObserver, { once: true });
 
   window.setInterval(() => scheduleQuickActionRepair(0), 7000);
   window.addEventListener("pageshow", () => scheduleQuickActionRepair(450), true);

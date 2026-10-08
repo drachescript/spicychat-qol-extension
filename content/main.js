@@ -1783,7 +1783,7 @@
     if (slowDirtyHas(dirty, "interface")) {
       await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
-      const sidebarWanted = !!settings.showQolSidebarButton || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      const sidebarWanted = !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), () => DS.applySidebarCleanup?.());
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
       await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
@@ -1907,6 +1907,8 @@
       await runFeatureStep("scroll to top", !!settings.showScrollToTopButton || !!settings.showScrollToBottomButton || !!document.querySelector("#ds-scroll-to-top,#ds-scroll-to-bottom"), () => DS.applyScrollToTopButton?.());
       await runFeatureStep("soundscapes", !!settings.enableSoundscapes || !!document.querySelector("[data-ds-soundscape],#ds-soundscape-player,.ds-chat-soundscape-wrapper"), () => DS.applySoundscapes?.());
       await runFeatureStep("tag aliases", !!settings.enableTagAliases || !!document.querySelector("[data-ds-tag-alias-original]"), () => DS.applyTagAliases?.());
+      await runFeatureStep("local tag matching", !!settings.localTagMatchEnabled, () => DS.applyLocalTagMatching?.());
+      await runFeatureStep("persona full backup button", !!settings.personaFullBackupEnabled || !!document.getElementById("ds-full-persona-backup"), () => DS.applyPersonaFullBackup?.());
       await runFeatureStep("profile export", !!settings.enableProfileExport || !!document.getElementById("ds-profile-export-button"), () => DS.applyProfileExport?.());
       await runFeatureStep("creator writing assistant", !!settings.enableCreatorWritingAssistant || !!document.querySelector(".ds-creator-writing-button"), () => DS.applyCreatorWritingAssistant?.());
       await runFeatureStep("native rating helpers", !!settings.enableNativeRatingHelpers || !!document.getElementById("ds-native-rating-quick"), () => DS.applyNativeRatingHelpers?.());
@@ -1917,7 +1919,7 @@
       // listing/banner work so a busy chat cannot leave SpicyChat UI elements
       // visible just because the cosmetic lane was delayed.
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
-      const sidebarWanted = !!settings.showQolSidebarButton || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      const sidebarWanted = !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       if (listing) {
         await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);
       } else {

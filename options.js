@@ -308,6 +308,9 @@ const DEFAULT_SETTINGS = {
   enableTagAliases: false,
   tagAliasRules: "",
   tagAliasShowDisplay: true,
+  localTagMatchEnabled: false,
+  localTagMatchRules: "",
+  localTagMatchFetchPublic: false,
   includeTags: [],
   excludeTags: [],
   showTagTemplateButton: false,
@@ -495,6 +498,7 @@ const DEFAULT_SETTINGS = {
   protectFavoritesFromBlocking: false,
   showBlockButtonOnMyCreations: false,
   showCreatorFavoriteButtons: false,
+  showCreatorFavoriteButtonsOnMyChatbots: false,
   protectFavoriteCreatorsFromFiltering: false,
   showFollowCreatorButtons: false,
   enableCreatorBotNotifications: false,
@@ -561,6 +565,7 @@ const DEFAULT_SETTINGS = {
   enableMyCreationsFilters: false,
   enableMyCreationsBulkBackup: false,
   showMyLorebookEditButtons: false,
+  showMyChatbotEditButtons: false,
   rememberMyCreationsView: false,
   autoLoadMyCreations: false,
   myCreationsAutoLoadPages: 1,
@@ -722,6 +727,7 @@ const DEFAULT_SETTINGS = {
 
   autoAcceptPersonaChange: false,
   savePersonasFromPages: false,
+  personaFullBackupEnabled: false,
   keepLocalPersonaCopies: false,
   expandPersonaDescriptions: false,
   enablePersonaOrganizer: false,
@@ -855,8 +861,6 @@ const DEFAULT_SETTINGS = {
   pauseQolInHiddenTabs: false,
   autoPerformanceLargeChats: true,
   largeChatPerformanceThreshold: 300,
-  autoReloadLargeChats: false,
-  autoReloadLargeChatsThreshold: 250,
   deferQolWhileTyping: false,
   pauseQolWhileMessageEditing: true,
   reduceQolAnimations: false,
@@ -891,6 +895,7 @@ const DEFAULT_SETTINGS = {
   hideSidebarHome: false,
   hideSidebarChats: false,
   hideSidebarPersonas: false,
+  restorePersonasSidebarPosition: false,
   hideSidebarCreateMenu: false,
   hideSidebarCreateChatbot: false,
   hideSidebarCreateLorebook: false,
@@ -2677,6 +2682,9 @@ function displayReleaseVersion(value) {
   }
 
   const manifest = chrome.runtime.getManifest?.() || {};
+  if (raw === String(manifest.version || "") && manifest.version_name) {
+    return String(manifest.version_name);
+  }
   return raw;
 }
 
@@ -4883,7 +4891,7 @@ function setVersionText() {
   if (!versionEl) return;
 
   const manifest = chrome.runtime.getManifest();
-  versionEl.textContent = `v${displayReleaseVersion(manifest.version)}`;
+  versionEl.textContent = `v${manifest.version_name || displayReleaseVersion(manifest.version)}`;
 }
 
 function resetHeavySavedDataState() {
@@ -17187,6 +17195,9 @@ async function load() {
   setChecked("enableTagAliases", !!settings.enableTagAliases);
   setValue("tagAliasRules", settings.tagAliasRules || "");
   setChecked("tagAliasShowDisplay", settings.tagAliasShowDisplay !== false);
+  setChecked("localTagMatchEnabled", !!settings.localTagMatchEnabled);
+  setValue("localTagMatchRules", settings.localTagMatchRules || "");
+  setChecked("localTagMatchFetchPublic", !!settings.localTagMatchFetchPublic);
   setChecked("showTagTemplateButton", !!settings.showTagTemplateButton);
   setChecked("showChatTagLinks", !!settings.showChatTagLinks);
   setChecked("showChatTagAddButtons", !!settings.showChatTagAddButtons);
@@ -17410,6 +17421,7 @@ async function load() {
   setChecked("neverHideFavorites", !!settings.neverHideFavorites);
   setChecked("protectFavoritesFromBlocking", !!settings.protectFavoritesFromBlocking);
   setChecked("showCreatorFavoriteButtons", !!settings.showCreatorFavoriteButtons);
+  setChecked("showCreatorFavoriteButtonsOnMyChatbots", !!settings.showCreatorFavoriteButtonsOnMyChatbots);
   setChecked("protectFavoriteCreatorsFromFiltering", !!settings.protectFavoriteCreatorsFromFiltering);
   setChecked("showFollowCreatorButtons", !!settings.showFollowCreatorButtons);
   setChecked("enableCreatorBotNotifications", !!settings.enableCreatorBotNotifications);
@@ -17651,8 +17663,6 @@ async function load() {
   setChecked("pauseQolInHiddenTabs", !!settings.pauseQolInHiddenTabs);
   setChecked("autoPerformanceLargeChats", !!settings.autoPerformanceLargeChats);
   setValue("largeChatPerformanceThreshold", Math.max(100, Math.min(5000, Number(settings.largeChatPerformanceThreshold) || 300)));
-  setChecked("autoReloadLargeChats", !!settings.autoReloadLargeChats);
-  setValue("autoReloadLargeChatsThreshold", Math.max(150, Math.min(2000, Number(settings.autoReloadLargeChatsThreshold) || 250)));
   setChecked("deferQolWhileTyping", !!settings.deferQolWhileTyping);
   setChecked("pauseQolWhileMessageEditing", settings.pauseQolWhileMessageEditing !== false);
   setChecked("reduceQolAnimations", !!settings.reduceQolAnimations);
@@ -17696,6 +17706,7 @@ async function load() {
   renderOocTemplates(settings.oocTemplates);
 
   setChecked("savePersonasFromPages", settings.savePersonasFromPages);
+  setChecked("personaFullBackupEnabled", !!settings.personaFullBackupEnabled);
   setChecked("keepLocalPersonaCopies", !!settings.keepLocalPersonaCopies);
   setChecked("expandPersonaDescriptions", !!settings.expandPersonaDescriptions);
   setChecked("enablePersonaOrganizer", !!settings.enablePersonaOrganizer);
@@ -17705,6 +17716,7 @@ async function load() {
   setChecked("autoAcceptPersonaChange", settings.autoAcceptPersonaChange);
   setValue("personaQuickSwitchLimit", String(settings.personaQuickSwitchLimit || 6));
 
+  setChecked("restorePersonasSidebarPosition", !!settings.restorePersonasSidebarPosition);
   for (const key of Object.keys(DEFAULT_SETTINGS).filter(key => key.startsWith("hideSidebar"))) {
     setChecked(key, settings[key]);
   }
@@ -17762,6 +17774,7 @@ async function load() {
   setChecked("enableMyCreationsFilters", !!settings.enableMyCreationsFilters);
   setChecked("enableMyCreationsBulkBackup", !!settings.enableMyCreationsBulkBackup);
   setChecked("showMyLorebookEditButtons", !!settings.showMyLorebookEditButtons);
+  setChecked("showMyChatbotEditButtons", !!settings.showMyChatbotEditButtons);
   setChecked("rememberMyCreationsView", !!settings.rememberMyCreationsView);
   setChecked("autoLoadMyCreations", !!settings.autoLoadMyCreations);
   setValue("myCreationsAutoLoadPages", String(Math.max(1, Math.min(30, Number(settings.myCreationsAutoLoadPages) || 1))));
@@ -17900,6 +17913,9 @@ function readSettingsFromPage() {
     enableTagAliases: checked("enableTagAliases"),
     tagAliasRules: value("tagAliasRules"),
     tagAliasShowDisplay: checked("tagAliasShowDisplay"),
+    localTagMatchEnabled: checked("localTagMatchEnabled"),
+    localTagMatchRules: value("localTagMatchRules"),
+    localTagMatchFetchPublic: checked("localTagMatchFetchPublic"),
     showTagTemplateButton: checked("showTagTemplateButton"),
     showChatTagLinks: checked("showChatTagLinks"),
     showChatTagAddButtons: checked("showChatTagAddButtons"),
@@ -18088,6 +18104,7 @@ function readSettingsFromPage() {
     neverHideFavorites: checked("neverHideFavorites"),
     protectFavoritesFromBlocking: checked("protectFavoritesFromBlocking"),
     showCreatorFavoriteButtons: checked("showCreatorFavoriteButtons"),
+    showCreatorFavoriteButtonsOnMyChatbots: checked("showCreatorFavoriteButtonsOnMyChatbots"),
     protectFavoriteCreatorsFromFiltering: checked("protectFavoriteCreatorsFromFiltering"),
     showFollowCreatorButtons: checked("showFollowCreatorButtons"),
     enableCreatorBotNotifications: checked("enableCreatorBotNotifications"),
@@ -18306,8 +18323,6 @@ function readSettingsFromPage() {
     pauseQolInHiddenTabs: checked("pauseQolInHiddenTabs"),
     autoPerformanceLargeChats: checked("autoPerformanceLargeChats"),
     largeChatPerformanceThreshold: Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)),
-    autoReloadLargeChats: checked("autoReloadLargeChats"),
-    autoReloadLargeChatsThreshold: Math.max(150, Math.min(2000, Number(value("autoReloadLargeChatsThreshold", "250")) || 250)),
     deferQolWhileTyping: checked("deferQolWhileTyping"),
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
@@ -18350,6 +18365,7 @@ function readSettingsFromPage() {
     oocTemplates,
 
     savePersonasFromPages: checked("savePersonasFromPages"),
+    personaFullBackupEnabled: checked("personaFullBackupEnabled"),
     keepLocalPersonaCopies: checked("keepLocalPersonaCopies"),
     expandPersonaDescriptions: checked("expandPersonaDescriptions"),
     enablePersonaOrganizer: checked("enablePersonaOrganizer"),
@@ -18360,6 +18376,7 @@ function readSettingsFromPage() {
     personaQuickSwitchLimit: Math.max(1, Math.min(12, Number(value("personaQuickSwitchLimit", "6")) || 6)),
 
     showQolSidebarButton: checked("showQolSidebarButton"),
+    restorePersonasSidebarPosition: checked("restorePersonasSidebarPosition"),
     qolSidebarButtonPlacement: value("qolSidebarButtonPlacement", "after-sai"),
     hideSidebarLogo: checked("hideSidebarLogo"),
     hideSidebarHome: checked("hideSidebarHome"),
@@ -18438,6 +18455,7 @@ function readSettingsFromPage() {
     enableMyCreationsFilters: checked("enableMyCreationsFilters"),
     enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
     showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
+    showMyChatbotEditButtons: checked("showMyChatbotEditButtons"),
     rememberMyCreationsView: checked("rememberMyCreationsView"),
     autoLoadMyCreations: checked("autoLoadMyCreations"),
     myCreationsAutoLoadPages: Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)),
@@ -18540,6 +18558,9 @@ function readSingleSettingFromPage(settingKey) {
     case "enableTagAliases": return (checked("enableTagAliases"));
     case "tagAliasRules": return (value("tagAliasRules"));
     case "tagAliasShowDisplay": return (checked("tagAliasShowDisplay"));
+    case "localTagMatchEnabled": return (checked("localTagMatchEnabled"));
+    case "localTagMatchRules": return (value("localTagMatchRules"));
+    case "localTagMatchFetchPublic": return (checked("localTagMatchFetchPublic"));
     case "showTagTemplateButton": return (checked("showTagTemplateButton"));
     case "showChatTagLinks": return (checked("showChatTagLinks"));
     case "showChatTagAddButtons": return (checked("showChatTagAddButtons"));
@@ -18723,6 +18744,7 @@ function readSingleSettingFromPage(settingKey) {
     case "neverHideFavorites": return (checked("neverHideFavorites"));
     case "protectFavoritesFromBlocking": return (checked("protectFavoritesFromBlocking"));
     case "showCreatorFavoriteButtons": return (checked("showCreatorFavoriteButtons"));
+    case "showCreatorFavoriteButtonsOnMyChatbots": return (checked("showCreatorFavoriteButtonsOnMyChatbots"));
     case "protectFavoriteCreatorsFromFiltering": return (checked("protectFavoriteCreatorsFromFiltering"));
     case "showFollowCreatorButtons": return (checked("showFollowCreatorButtons"));
     case "enableCreatorBotNotifications": return (checked("enableCreatorBotNotifications"));
@@ -18937,8 +18959,6 @@ function readSingleSettingFromPage(settingKey) {
     case "pauseQolInHiddenTabs": return (checked("pauseQolInHiddenTabs"));
     case "autoPerformanceLargeChats": return (checked("autoPerformanceLargeChats"));
     case "largeChatPerformanceThreshold": return (Math.max(100, Math.min(5000, Number(value("largeChatPerformanceThreshold", "300")) || 300)));
-    case "autoReloadLargeChats": return (checked("autoReloadLargeChats"));
-    case "autoReloadLargeChatsThreshold": return (Math.max(150, Math.min(2000, Number(value("autoReloadLargeChatsThreshold", "250")) || 250)));
     case "deferQolWhileTyping": return (checked("deferQolWhileTyping"));
     case "pauseQolWhileMessageEditing": return (checked("pauseQolWhileMessageEditing", true));
     case "reduceQolAnimations": return (checked("reduceQolAnimations"));
@@ -18978,6 +18998,7 @@ function readSingleSettingFromPage(settingKey) {
     case "showOocTools": return (checked("showOocTools"));
     case "oocTemplates": return oocTemplatesFromPage();
     case "savePersonasFromPages": return (checked("savePersonasFromPages"));
+    case "personaFullBackupEnabled": return (checked("personaFullBackupEnabled"));
     case "keepLocalPersonaCopies": return (checked("keepLocalPersonaCopies"));
     case "expandPersonaDescriptions": return (checked("expandPersonaDescriptions"));
     case "enablePersonaOrganizer": return (checked("enablePersonaOrganizer"));
@@ -19061,6 +19082,8 @@ function readSingleSettingFromPage(settingKey) {
     case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
     case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
     case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
+    case "showMyChatbotEditButtons": return (checked("showMyChatbotEditButtons"));
+    case "restorePersonasSidebarPosition": return (checked("restorePersonasSidebarPosition"));
     case "rememberMyCreationsView": return (checked("rememberMyCreationsView"));
     case "autoLoadMyCreations": return (checked("autoLoadMyCreations"));
     case "myCreationsAutoLoadPages": return (Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)));
@@ -19838,7 +19861,13 @@ function decodeNativePickedFile(result) {
   if (Array.isArray(result)) {
     if (!result.length) return null;
     if (result.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) {
-      try { return { text: new TextDecoder().decode(new Uint8Array(result)), name: "Android backup file" }; } catch { return null; }
+      try {
+        const bytes = new Uint8Array(result);
+        if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+          return { blob: new Blob([bytes], { type: "application/gzip" }), name: "Android-backup.json.gz" };
+        }
+        return { text: new TextDecoder().decode(bytes), name: "Android backup file" };
+      } catch { return null; }
     }
     return decodeNativePickedFile(result[0]);
   }
@@ -19864,11 +19893,20 @@ function decodeNativePickedFile(result) {
     try {
       const binary = atob(result.base64.replace(/^data:[^,]*,/, ""));
       const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+      if (/\.gz$/i.test(name) || (bytes[0] === 0x1f && bytes[1] === 0x8b)) {
+        return { blob: new Blob([bytes], { type: "application/gzip" }), name: /\.gz$/i.test(name) ? name : `${name}.json.gz` };
+      }
       return { text: new TextDecoder().decode(bytes), name };
     } catch {}
   }
   if (Array.isArray(result.bytes)) {
-    try { return { text: new TextDecoder().decode(new Uint8Array(result.bytes)), name }; } catch {}
+    try {
+      const bytes = new Uint8Array(result.bytes);
+      if (/\.gz$/i.test(name) || (bytes[0] === 0x1f && bytes[1] === 0x8b)) {
+        return { blob: new Blob([bytes], { type: "application/gzip" }), name: /\.gz$/i.test(name) ? name : `${name}.json.gz` };
+      }
+      return { text: new TextDecoder().decode(bytes), name };
+    } catch {}
   }
   return null;
 }
@@ -19879,7 +19917,7 @@ async function tryNativeBackupPicker() {
   try {
     const result = await bridge.callHandler("pickFiles", JSON.stringify({
       allowMultiple: false,
-      allowedExtensions: ["json", "txt", "qol", "backup"]
+      allowedExtensions: ["json", "gz", "txt", "qol", "backup"]
     }));
     return decodeNativePickedFile(result);
   } catch {
@@ -19942,45 +19980,107 @@ async function browserManagerDownload(text, filename, mimeType, permissionAlread
   });
 }
 
-async function downloadBackupFile(ext = "json") {
-  // Mobile Firefox/extension browsers can ignore a normal <a download> from an
-  // extension page. Ask for the optional browser download-manager permission
-  // directly from the user's click before other async work can consume the
-  // user gesture. Desktop keeps the normal permission-free link path.
-  const browserManagerAllowed = chrome.permissions?.request
-    ? await requestBrowserDownloadsPermission()
-    : false;
-  const text = await ensureBackupTextInBox();
-  if (!text) {
-    showSettingsToast("Nothing to export yet.");
-    return;
-  }
-  try {
-    JSON.parse(text);
-  } catch {
-    showSettingsToast("The backup box does not currently contain valid JSON.");
-    return;
-  }
-  const normalizedExt = ext === "txt" ? "txt" : "json";
-  const filename = backupFilename(normalizedExt);
-  const mime = normalizedExt === "json" ? "application/json;charset=utf-8" : "text/plain;charset=utf-8";
-  if (await tryNativeBackupSave(text, filename, mime)) {
-    showSettingsToast(`Backup sent to the Android/system file saver as .${normalizedExt}.`);
-    return;
-  }
-  if (browserManagerAllowed && await browserManagerDownload(text, filename, mime, true)) {
-    showSettingsToast(`Backup sent to the browser download manager as .${normalizedExt}.`);
-    return;
-  }
-  const blob = new Blob([text], { type: mime });
+const GZIP_BACKUP_THRESHOLD = 50 * 1024 * 1024;
+const MAX_IMPORT_BACKUP_BYTES = 250 * 1024 * 1024;
+const MAX_GZIP_FILE_BYTES = 100 * 1024 * 1024;
+
+async function downloadBinaryBackup(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
   document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1200);
+  try { link.click(); }
+  finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+}
+
+async function gzipBackupText(text) {
+  if (typeof CompressionStream !== "function") {
+    throw new Error("This browser does not support gzip backups. Use Download .json instead.");
+  }
+  // Compression happens inside the browser. No file data leaves the device.
+  const input = new Blob([text], { type: "application/json;charset=utf-8" });
+  return new Response(input.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+}
+
+async function readGzipBackup(file) {
+  if (typeof DecompressionStream !== "function") {
+    throw new Error("This browser cannot open .json.gz backups. Decompress the file before importing.");
+  }
+  if (file.size > MAX_GZIP_FILE_BYTES) {
+    throw new Error("Compressed backup exceeds the 100 MB import limit.");
+  }
+  const reader = file.stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_IMPORT_BACKUP_BYTES) {
+        await reader.cancel();
+        throw new Error("Decompressed backup exceeds the 250 MB safety limit.");
+      }
+      chunks.push(value);
+    }
+    // Join once to avoid quadratic string concatenations on large exports.
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function downloadBackupFile(ext = "json") {
+  // Ask for download-manager permission on the click, before asynchronous work.
+  const managerAllowed = chrome.permissions?.request
+    ? await requestBrowserDownloadsPermission()
+    : false;
+  const scopes = selectedExportScopes();
+  if (!scopes.size) { showSettingsToast("Select at least one data set to export."); return; }
+  let text = "";
+  try {
+    const data = await readBackupSourceData();
+    // Download directly from the selected data. Avoid formatting a huge JSON
+    // string into the settings textarea and omit whitespace from the file.
+    text = JSON.stringify(buildExportPayload(scopes, data));
+  } catch (error) {
+    showSettingsToast(`Backup export failed: ${error?.message || "local data unavailable"}`);
+    return;
+  }
+  if (!text) { showSettingsToast("Nothing to export yet."); return; }
+
+  const bytes = new TextEncoder().encode(text).byteLength;
+  const wantGzip = ext === "json.gz" || (ext === "json" && bytes > GZIP_BACKUP_THRESHOLD);
+  if (wantGzip) {
+    try {
+      const blob = await gzipBackupText(text);
+      await downloadBinaryBackup(blob, backupFilename("json.gz"));
+      showSettingsToast(`Compressed backup downloaded (${(blob.size / 1048576).toFixed(1)} MB from ${(bytes / 1048576).toFixed(1)} MB).`);
+    } catch (error) {
+      showSettingsToast(`Compressed backup failed: ${error?.message || String(error)}`);
+    }
+    return;
+  }
+
+  const normalizedExt = ext === "txt" ? "txt" : "json";
+  const filename = backupFilename(normalizedExt);
+  const mime = normalizedExt === "json" ? "application/json;charset=utf-8" : "text/plain;charset=utf-8";
+  if (await tryNativeBackupSave(text, filename, mime)) {
+    showSettingsToast(`Backup sent to the file saver as .${normalizedExt}.`);
+    return;
+  }
+  if (managerAllowed && bytes <= 12_000_000 && await browserManagerDownload(text, filename, mime, true)) {
+    showSettingsToast(`Backup sent to the browser download manager as .${normalizedExt}.`);
+    return;
+  }
+  await downloadBinaryBackup(new Blob([text], { type: mime }), filename);
   showSettingsToast(`Backup downloaded as .${normalizedExt}.`);
 }
 
@@ -19988,11 +20088,17 @@ async function loadBackupFileObject(file) {
   if (!file) return;
   const status = $("status");
   try {
-    if (Number(file.size || 0) > 20 * 1024 * 1024) throw new Error("Backup file is larger than 20 MB.");
-    const text = await file.text();
+    const gz = /\.gz$/i.test(String(file.name || "")) || file.type === "application/gzip";
+    if (Number(file.size || 0) > (gz ? MAX_GZIP_FILE_BYTES : MAX_IMPORT_BACKUP_BYTES)) {
+      throw new Error("Backup file is larger than the allowed import size.");
+    }
+    const text = gz ? await readGzipBackup(file) : await file.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_IMPORT_BACKUP_BYTES) {
+      throw new Error("Backup exceeds the 250 MB import limit.");
+    }
     const parsed = JSON.parse(text);
     const validation = validateBackupObject(parsed);
-    if (!validation.ok) throw new Error(validation.warnings.join(" ") || "No importable QoL categories were found.");
+    if (!validation.ok) throw new Error(validation.warnings.join(" ") || "No importable QoL categories found.");
     const box = $("settingsJson");
     if (box) box.value = text;
     pendingImportPayload = null;
@@ -20002,7 +20108,7 @@ async function loadBackupFileObject(file) {
   } catch (error) {
     pendingImportPayload = null;
     cancelImportPreview();
-    if (status) status.textContent = `Could not load backup file: ${error?.message || "invalid JSON/text backup"}`;
+    if (status) status.textContent = `Could not load backup file: ${error?.message || "invalid backup"}`;
   }
 }
 
@@ -20011,6 +20117,11 @@ function setupBackupFileIo() {
   const box = $("settingsJson");
   $("loadBackupFile")?.addEventListener("click", async () => {
     const native = await tryNativeBackupPicker();
+    if (native?.blob) {
+      const file = new File([native.blob], native.name || "Android-backup.json.gz", { type: "application/gzip" });
+      await loadBackupFileObject(file);
+      return;
+    }
     if (native?.text) {
       const synthetic = { name: native.name || "Android backup file", size: new TextEncoder().encode(native.text).length, text: async () => native.text };
       await loadBackupFileObject(synthetic);
@@ -20022,6 +20133,7 @@ function setupBackupFileIo() {
   });
   input?.addEventListener("change", () => loadBackupFileObject(input.files?.[0]));
   $("downloadBackupJson")?.addEventListener("click", () => downloadBackupFile("json"));
+  $("downloadBackupGzip")?.addEventListener("click", () => downloadBackupFile("json.gz"));
   $("downloadBackupTxt")?.addEventListener("click", () => downloadBackupFile("txt"));
 
   if (box) {
@@ -22350,7 +22462,7 @@ let lastPerformanceSelfCheckText = "";
 
 function supportReportFilename(kind = "support-info") {
   const manifest = chrome.runtime.getManifest?.() || {};
-  const version = String(displayReleaseVersion(manifest.version || "unknown") || "unknown")
+  const version = String(manifest.version_name || displayReleaseVersion(manifest.version || "unknown") || "unknown")
     .replace(/[^0-9A-Za-z._-]+/g, "-");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "support-info").replace(/[^0-9A-Za-z._-]+/g, "-");
@@ -22481,7 +22593,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const diagnosticLines = [
     "SpicyChat QoL diagnostics",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
+    `Version: ${chrome.runtime.getManifest?.().version_name || displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -22662,7 +22774,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   let lines = [
     "SpicyChat QoL performance report",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -22674,7 +22786,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Bot archive preservation: ${Number(runtime.botArchiveSeenQueued || 0)} public observations queued; ${Number(runtime.botArchiveSeenMerged || 0)} merged in ${Number(runtime.botArchiveSeenBatches || 0)} batches; ${Number(runtime.botArchiveSeenUnchanged || 0)} unchanged snapshots skipped; ${Number(runtime.botArchiveWrites || 0)} archive writes; ${Number(runtime.ownBotBackupSaves || 0)} own-bot editor saves`,
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
     (() => { const c = context?.pageDiagnostics?.runtimeContext || {}; return `Runtime context: visibility ${c.visibilityState || "unknown"}; focus ${c.focused == null ? "unknown" : (c.focused ? "yes" : "no")}; mounted ${Number(c.mountedMessages || runtime.loadedChatMessages || 0)}; DOM ${Number(c.domNodes || 0)}; heap ${Number(c.heapBytes || 0) ? `${Math.round(Number(c.heapBytes) / 1048576)} MB` : "n/a"}; Long Task 10s ${Number(c.recentLongTaskMs10s || 0)} ms; 30s ${Number(c.recentLongTaskMs30s || 0)} ms`; })(),
-    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; auto refresh ${settings.autoReloadLargeChats ? `on @ ${Number(settings.autoReloadLargeChatsThreshold || 250)}` : "off"}; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
+    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
@@ -22751,7 +22863,7 @@ async function buildPerformanceSelfCheckText() {
   const lines = [
     "SpicyChat QoL performance self-check",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
@@ -22791,7 +22903,7 @@ async function buildFastSupportSnapshot() {
   return [
     "SpicyChat QoL fast support snapshot",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `Options DOM: ${document.getElementsByTagName("*").length} nodes`,
@@ -23850,6 +23962,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "autoAfkEnabled", name: "Inactive tab cleanup (Auto-AFK)", children: ["autoAfkMinutes", "autoAfkChats", "autoAfkHome", "autoAfkProfiles", "autoAfkProtectActive", "autoAfkResetOnActivate"] },
   { parent: "lowMemoryProtectionEnabled", name: "Low memory / PC protection", children: ["maxAwakeSpicyTabs"] },
   { parent: "duplicateTabGuardEnabled", name: "Duplicate SpicyChat Tab Guard", children: ["duplicateTabChats", "duplicateTabHome", "duplicateTabProfiles", "duplicateTabFocusExisting"] },
+  { parent: "showCreatorFavoriteButtons", name: "Favorite creator stars", children: ["showCreatorFavoriteButtonsOnMyChatbots"] },
   { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
   { parent: "showCardGreetingTokenInfo", name: "Bot card token info", children: ["cardTokenShowGreeting", "cardTokenShowPersonality", "cardTokenShowScenario", "cardTokenShowExamples"] },
   { parent: "replaceCardProfileWithBlockButton", name: "QoL card block button", children: ["quickDislikeOnBlock", "showBlockButtonOnMyCreations"] },
@@ -23877,6 +23990,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
   { parent: "enableCreatorWritingAssistant", name: "Creator Writing Assistant", children: ["creatorWritingUseBrowserAi", "creatorWritingTargetLanguage", "creatorWritingDictionary"] },
   { parent: "enableTagAliases", name: "Local tag aliases", children: ["tagAliasRules", "tagAliasShowDisplay"] },
+  { parent: "localTagMatchEnabled", name: "Personal tag matches", children: ["localTagMatchRules", "localTagMatchFetchPublic"] },
   { parent: "enableCreationAudit", name: "Creation Audit", children: ["creationAuditQuickStatus"] },
   { parent: "botBackupToolsEnabled", name: "Chatbot backup tools", children: ["botArchiveOwnEditorBackups", "botArchiveOwnRevisionLimit"] },
   { parent: "lorebookBackupToolsEnabled", name: "Lorebook backup tools", children: ["lorebookBackupsEnabled"] },
@@ -24888,6 +25002,52 @@ $("downloadImportSafetyCopy")?.addEventListener("click", () => {
   downloadJsonFile(pendingImportSafetyDownload, backupFilename("json").replace("spicychat-qol-backup", "spicychat-qol-pre-import-safety-copy"));
 });
 $("dismissImportRecoveryActions")?.addEventListener("click", hideImportRecoveryActions);
+let optimizeStoredDataStopRequested = false;
+let optimizeStoredDataRunning = false;
+
+async function optimizeStoredData() {
+  if (optimizeStoredDataRunning) return;
+  optimizeStoredDataRunning = true;
+  optimizeStoredDataStopRequested = false;
+  const run = $("optimizeStoredData");
+  const stop = $("stopOptimizeStoredData");
+  const status = $("optimizeStoredDataStatus");
+  if (run) run.disabled = true;
+  if (stop) stop.disabled = false;
+  let scanned = 0, converted = 0, already = 0, skipped = 0;
+  try {
+    for (const key of [BOT_AVAILABILITY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_STATUS_KEY]) {
+      let afterId = "";
+      while (!optimizeStoredDataStopRequested) {
+        if (status) status.textContent = `Optimizing ${key}… ${scanned.toLocaleString()} checked, ${converted.toLocaleString()} compressed. No records are deleted.`;
+        const response = await runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_OPTIMIZE_PAGE", key, afterId, limit: 30 }, 60000);
+        if (!response?.ok) throw new Error(response?.error || `Could not optimize ${key}.`);
+        scanned += Number(response.scanned || 0);
+        converted += Number(response.converted || 0);
+        already += Number(response.alreadyCompressed || 0);
+        skipped += Number(response.tooSmall || 0) + Number(response.concurrentChanges || 0);
+        if (response.done) break;
+        const next = String(response.nextAfterId || "");
+        if (!next || next === afterId) throw new Error("Storage scan did not advance.");
+        afterId = next;
+        // Yield between batches so Settings remains responsive and Stop works.
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      if (optimizeStoredDataStopRequested) break;
+    }
+    if (status) status.textContent = `${optimizeStoredDataStopRequested ? "Stopped" : "Finished"}: ${scanned.toLocaleString()} records checked, ${converted.toLocaleString()} compressed, ${already.toLocaleString()} already compressed, ${skipped.toLocaleString()} skipped (small or changed). All records preserved.`;
+    refreshStorageUsage().catch(() => {});
+  } catch (error) {
+    if (status) status.textContent = `Stopped after ${scanned.toLocaleString()} checked: ${error?.message || error}. Existing data remains readable and unchanged where not optimized.`;
+  } finally {
+    optimizeStoredDataRunning = false;
+    if (run) run.disabled = false;
+    if (stop) stop.disabled = true;
+  }
+}
+
+$("optimizeStoredData")?.addEventListener("click", optimizeStoredData);
+$("stopOptimizeStoredData")?.addEventListener("click", () => { optimizeStoredDataStopRequested = true; });
 $("refreshStorageUsage")?.addEventListener("click", refreshStorageUsage);
 $("checkOrphanedLocalData")?.addEventListener("click", () => checkOrphanedLocalData().catch(() => showSettingsToast("Local-data check failed.")));
 $("createRecoverySnapshot")?.addEventListener("click", createManualRecoverySnapshot);

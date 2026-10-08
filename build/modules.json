@@ -161,7 +161,8 @@
         "content/recommendation-helpers.js",
         "content/saved-lists-overlay.js",
         "content/smart-filter-presets.js",
-        "content/tags-nsfw.js"
+        "content/tags-nsfw.js",
+        "content/local-tag-matching.js"
       ]
     },
     "creator": {
@@ -236,6 +237,7 @@
       ],
       "files": [
         "content/persona-organizer.js",
+        "content/persona-full-backup.js",
         "content/personas.js"
       ]
     }
