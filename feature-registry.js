@@ -12,7 +12,7 @@
     F("diagnostics", "Safe diagnostics", "Setup & Compatibility", "Copy or download safe support/performance reports without chat text or private saved content. When Dragon\'s SpicyChat Diagnostic Extension is actively recording, Diagnostic Protocol v2 can also expose privacy-safe QoL operation, scheduler, storage, worker, network-attribution and performance timing summaries.", { builtIn: true, target: "diagnosticsCard", updated: "0.2.32" }),
     F("simple-feature-guide", "Simple feature guide", "Setup & Compatibility", "A plain-language ELI5 guide that explains what the main QoL features do and why you might want them, without requiring the internal setting names.", { builtIn: true, added: "0.1.9.105", target: "simpleFeatureGuideCard", aliases: ["eli5", "beginner guide", "what does this do", "help features", "simple help"] }),
     F("per-tab-qol", "Per-tab QoL switch", "Setup & Compatibility", "Pause all QoL page behavior only in the current SpicyChat tab from the extension popup. The pause survives reloads/navigation in that tab and clears when the tab is closed.", { builtIn: true, added: "0.1.9.64", aliases: ["this tab", "pause qol", "disable qol tab", "popup", "tab toggle"] }),
-    F("bot-status-center", "Bot Status Center", "Saved Lists & Bot Discovery", "Check tracked bots by exact character ID, preserve meaningful profile changes automatically as local history, distinguish deleted/private/unknown results safely, keep recovery copies, recheck archived/unavailable copies, restore bots that become public again without resurrecting Blocked membership, forget unwanted deleted bots from local QoL data, refresh stale records, and export or submit saved public snapshots to the Archive when configured.", { builtIn: true, target: "botAvailabilityCard", added: "0.1.8.98", updated: "0.2.30", aliases: ["opened chats", "opened history", "opened chat tracking", "deleted bot detector", "profile change history", "local bot archive", "deleted bot backup", "recheck archived bots", "forget deleted bot", "profile snapshots", "deleted saved bots", "recovery copies", "archive export", "archive upload", "archive contribution", "public archive submission", "json.gz", "stale refresh", "scan speed"] }),
+    F("bot-status-center", "Bot Status Center", "Saved Lists & Bot Discovery", "Check tracked bots by exact character ID, preserve meaningful profile changes automatically as local history, distinguish deleted/private/unknown results safely, keep recovery copies, recheck archived/unavailable copies, restore bots that become public again without resurrecting Blocked membership, forget unwanted deleted bots from local QoL data, refresh stale records, and export or submit saved public snapshots to the Archive when configured.", { builtIn: true, target: "botAvailabilityCard", added: "0.1.8.98", updated: "0.2.40", aliases: ["opened chats", "opened history", "opened chat tracking", "deleted bot detector", "profile change history", "local bot archive", "deleted bot backup", "recheck archived bots", "forget deleted bot", "profile snapshots", "deleted saved bots", "recovery copies", "archive export", "archive upload", "archive contribution", "public archive submission", "json.gz", "stale refresh", "scan speed", "scan limit", "scan duration", "ETA", "scan time estimate", "batch size"] }),
     F("favorite-history", "Favorite bot history", "Saved Lists & Bot Discovery", "Remember favorite bots seen on SpicyChat, then search/sort/filter them by creator, opened/blocked state, Later relationship and organizer folder.", { setting: "trackFavoriteBots", updated: "0.1.9.62" }),
     F("favorite-creators", "Favorite creators", "Saved Lists & Bot Discovery", "Save creators locally and optionally keep their bots visible when other filters would hide them.", { settings: ["showCreatorFavoriteButtons", "showCreatorFavoriteButtonsOnMyChatbots"], statusMode: "any", updated: "0.2.39" }),
     F("followed-creators", "Followed creators", "Saved Lists & Bot Discovery", "Maintain a separate local Follow / Following creator list without changing SpicyChat's account state. Any public creator can be followed locally; the follow itself is always user opt-in.", { setting: "showFollowCreatorButtons", added: "0.1.8.73", updated: "0.1.9.111" }),
@@ -464,7 +464,19 @@
 
     const currentCollect = collectTrackedAvailabilityBots;
     collectTrackedAvailabilityBots = function temporaryOnlyAvailability(scopeValue = "all") {
-      return currentCollect("all").filter(entry => ids.has(String(entry?.id || "").toLowerCase()));
+      // Retry explicit candidates even when normal scans exclude blocked/recovery bots.
+      // Never fall back to a broad scan if none of the requested IDs remain.
+      const byId = new Map();
+      for (const source of ["all", "blocked", "recovery", "archive", "recent", "opened", "favorite", "later", "organizer"]) {
+        for (const entry of currentCollect(source)) {
+          const id = String(entry?.id || "").toLowerCase();
+          if (ids.has(id) && !byId.has(id)) byId.set(id, entry);
+        }
+      }
+      for (const id of ids) {
+        if (!byId.has(id) && botAvailabilityState?.meta?.[id]) byId.set(id, { ...botAvailabilityState.meta[id], id });
+      }
+      return [...byId.values()];
     };
     temporaryRetryActive = true;
     try {

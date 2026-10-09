@@ -178,6 +178,14 @@ const BULK_LESS_LIKE_TRANSIENT_STATUSES = new Set([
 const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 const RECOVERY_SNAPSHOT_KEY = "dsRecoverySnapshotV1";
 const RECOVERY_SNAPSHOT_META_KEY = "dsRecoverySnapshotMetaV1";
+// Local safety copies are compressed and held outside chrome.storage.local.
+// Never silently write a full uncompressed backup (75+ MiB) into local storage.
+const RECOVERY_SNAPSHOT_DB_NAME = "dragon-spicychat-qol-recovery-v1";
+const RECOVERY_SNAPSHOT_DB_STORE = "snapshots";
+const RECOVERY_SNAPSHOT_DB_ID = "latest";
+const RECOVERY_SNAPSHOT_MAX_JSON_BYTES = 160 * 1024 * 1024;
+const RECOVERY_SNAPSHOT_MAX_GZIP_BYTES = 24 * 1024 * 1024;
+
 const BACKUP_FORMAT_VERSION = 13;
 
 const ARCHIVE_IMPORT_ENDPOINT_KEY = "dsArchiveImportEndpointV1";
@@ -543,6 +551,8 @@ const DEFAULT_SETTINGS = {
   botArchiveRefreshHours: 24,
   botStatusScanSpeed: "safe",
   botStatusStaleDays: 7,
+  botStatusMaxBots: 0,
+  botStatusMaxMinutes: 0,
   lorebookStatusScanSpeed: "safe",
   lorebookStatusStaleDays: 7,
   botArchiveRememberSeenPublic: false,
@@ -8072,6 +8082,7 @@ function botStatusCenterBaseEntries(scope = "all") {
   for (const item of tracked) {
     byId.set(item.id, {
       ...item,
+      _scanEligible: true,
       status: "unknown",
       reason: item.sources?.includes("archive") ? "Saved local copy; availability has not been checked yet." : "Not checked yet.",
       checkedAt: 0,
@@ -11020,21 +11031,29 @@ function renderBotAvailability(renderOptions = {}) {
   const confirmedUnavailableCount = base.filter(entry => entry.status === "unavailable").length;
   const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
   const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
-  const staleCount = base.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
+  // All-known is a history view, not the routine scan queue. In particular,
+  // archive/discovered/blocked-only records remain visible but cannot silently
+  // enroll themselves for monitoring. Button counts must match the real queue.
+  // The base builder already collected the real scan queue. Reuse its flags
+  // instead of normalizing thousands of saved bots a second time each paint.
+  const eligibleEntries = base.filter(entry => entry._scanEligible === true);
+  const uncheckedCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) <= 0).length;
+  const notMonitoredCount = base.length - eligibleEntries.length;
+  const uncheckedNotMonitoredCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0).length;
+  const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
   let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
   const shown = entries.slice(0, limit);
 
   const summary = $("botAvailabilitySummary");
-  const uncheckedCount = Math.max(0, base.length - checkedCount);
   if (summary) {
     const matches = entries.length !== base.length ? ` · ${entries.length} matching` : "";
     const duplicateText = duplicateBots == null ? "" : ` · ${duplicateBots} duplicate matches`;
-    summary.textContent = `${base.length} tracked · ${checkedCount} checked · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
+    summary.textContent = `${base.length} known · ${checkedCount} checked · ${eligibleEntries.length} in scan scope${notMonitoredCount ? ` · ${notMonitoredCount} not routinely monitored (${uncheckedNotMonitoredCount} unchecked)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
   }
   const uncheckedButton = $("scanUncheckedBotAvailability");
   if (uncheckedButton && !botAvailabilityScanRunning) {
     uncheckedButton.disabled = uncheckedCount === 0;
-    uncheckedButton.textContent = uncheckedCount ? `Check unchecked bots (${uncheckedCount})` : "No unchecked bots";
+    uncheckedButton.textContent = uncheckedCount ? `Check unchecked bots (${uncheckedCount})` : "No unchecked bots in scan scope";
   }
   const staleButton = $("scanStaleBotAvailability");
   if (staleButton && !botAvailabilityScanRunning) {
@@ -11238,6 +11257,32 @@ async function waitForRecommendationSteadyPace(delayMs) {
   return waitForRecommendationPace(waitMs);
 }
 
+const BOT_STATUS_LAST_RATE_KEY = "botStatusLastRateV1";
+let botStatusPreviousScanRateMs = 0;
+function botStatusPositiveLimit(id, max) {
+  const raw = String(value(id, "") || "").trim();
+  if (!raw) return 0;
+  return Math.min(max, Math.max(0, Math.floor(Number(raw) || 0)));
+}
+function botStatusDuration(ms) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const hours = Math.floor(mins / 60);
+  return hours ? `${hours}h ${mins % 60}m` : `${mins}m ${seconds % 60}s`;
+}
+function botStatusStartingRateMs() {
+  return botStatusPreviousScanRateMs > 0 ? botStatusPreviousScanRateMs : Math.max(900, botStatusScanDelayMs() + 650);
+}
+function updateBotStatusScanEstimate() {
+  const info = $("botStatusScanEstimate");
+  if (!info || botAvailabilityScanRunning) return;
+  const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
+  const minutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
+  const capText = `${maxBots ? `${maxBots.toLocaleString()} bots` : "all bots"} / ${minutes ? `${minutes} min` : "unlimited time"}`;
+  info.textContent = `Limits: ${capText}. Stops at whichever comes first; a check already in progress finishes safely. ETA uses actual scan speed once running.`;
+}
+
 function sortBotStatusRefreshQueue(entries, availability, archives) {
   return [...entries].sort((a, b) => {
     const av = availability[a.id] || {};
@@ -11290,6 +11335,11 @@ async function runBotAvailabilityScan(options = {}) {
       ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
       : allEntries;
   entries = sortBotStatusRefreshQueue(entries, existingAvailability, archives);
+  const totalCandidates = entries.length;
+  const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
+  const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
+  const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;
+  if (maxBots && entries.length > maxBots) entries = entries.slice(0, maxBots);
 
   const status = $("botAvailabilityScanStatus");
   const archivedStatus = mode === "archived" ? $("deletedSavedBotRecheckStatus") : null;
@@ -11322,6 +11372,9 @@ async function runBotAvailabilityScan(options = {}) {
   if (staleButton) staleButton.disabled = true;
   if (archivedButton) archivedButton.disabled = true;
   if (stopButton) stopButton.disabled = false;
+  for (const id of ["botStatusMaxBots", "botStatusMaxMinutes"]) { if ($(id)) $(id).disabled = true; }
+  const progressBar = $("botStatusScanProgress");
+  if (progressBar) { progressBar.hidden = false; progressBar.max = Math.max(1, entries.length); progressBar.value = 0; }
 
   let completed = 0;
   let changesPreserved = 0;
@@ -11338,11 +11391,15 @@ async function runBotAvailabilityScan(options = {}) {
   const archiveChangedIds = new Set();
   const metadataDirtyKeys = new Set();
   let terminalMessage = "";
+  let timeLimitReached = false;
+  let scanStartedAt = 0;
+  let scanLastCheckAt = 0;
   let lastProgressPaintAt = 0;
   let adaptiveDelay = botStatusScanDelayMs();
   const runStartedAt = Date.now();
+  const runDeadline = maximumRuntimeMs ? runStartedAt + maximumRuntimeMs : Infinity;
 
-  await noteBotStatusRunEvent("bot-status-run-start", { mode, scope, count: entries.length, speed: String(value("botStatusScanSpeed", "safe")), staleDays });
+  await noteBotStatusRunEvent("bot-status-run-start", { mode, scope, count: entries.length, totalCandidates, maxBots, maxMinutes, speed: String(value("botStatusScanSpeed", "safe")), staleDays });
   try {
     const preparingText = mode === "archived"
       ? `Preparing to recheck ${entries.length} archived bot${entries.length === 1 ? "" : "s"}${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked skipped` : ""}…`
@@ -11351,8 +11408,10 @@ async function runBotAvailabilityScan(options = {}) {
         : mode === "stale"
           ? `Preparing to refresh ${entries.length} stale bot${entries.length === 1 ? "" : "s"}…`
           : "Preparing one background Bot Status helper on SpicyChat Home…";
-    if (status) status.textContent = preparingText;
-    if (archivedStatus) archivedStatus.textContent = preparingText;
+    const initialEta = botStatusDuration(entries.length * botStatusStartingRateMs());
+    const queueText = `${preparingText} · initial estimate ~${initialEta}${maxMinutes ? ` · time cap ${maxMinutes}m` : ""}${totalCandidates > entries.length ? ` · ${totalCandidates - entries.length} deferred by bot limit` : ""}`;
+    if (status) status.textContent = queueText;
+    if (archivedStatus) archivedStatus.textContent = queueText;
     const prepared = await prepareBotStatusHelper({ forceOwnHelper: true, timeoutMs: 17000 });
     if (!prepared?.ok || prepared?.ready === false) {
       terminalMessage = "Could not initialize the Bot Status helper. No bots were changed; try the scan again after SpicyChat Home is signed in.";
@@ -11362,16 +11421,21 @@ async function runBotAvailabilityScan(options = {}) {
     botAvailabilityState = normalizeBotAvailability(botAvailabilityState);
     botArchiveState = normalizeBotArchive(botArchiveState);
     const metadataIndex = buildBotStatusMetadataScanIndex();
+    scanStartedAt = Date.now();
 
     for (const entry of entries) {
       if (botAvailabilityStopRequested) break;
+      if (Date.now() >= runDeadline) { timeLimitReached = true; break; }
       const now = Date.now();
       if ((status || archivedStatus) && (now - lastProgressPaintAt >= 400 || completed === 0)) {
+        const perBotMs = completed >= 3 ? Math.max(1, (now - scanStartedAt) / completed) : botStatusStartingRateMs();
+        const eta = botStatusDuration((entries.length - completed) * perBotMs);
         const progressText = mode === "archived"
           ? `Rechecking ${completed + 1} / ${entries.length} · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later`
           : `Checking ${completed + 1} / ${entries.length}: ${entry.name || entry.id}`;
-        if (status) status.textContent = progressText;
-        if (archivedStatus) archivedStatus.textContent = progressText;
+        const timing = ` · elapsed ${botStatusDuration(now - runStartedAt)} · ETA ~${eta}${maxMinutes ? ` · time left ${botStatusDuration(Math.max(0, runDeadline - now))}` : ""}`;
+        if (status) status.textContent = progressText + timing;
+        if (archivedStatus) archivedStatus.textContent = progressText + timing;
         lastProgressPaintAt = now;
       }
       const previous = botAvailabilityState?.meta?.[entry.id] || null;
@@ -11412,13 +11476,20 @@ async function runBotAvailabilityScan(options = {}) {
         }
       }
       completed++;
+      scanLastCheckAt = Date.now();
+      if (progressBar) progressBar.value = completed;
 
+      if (completed < entries.length && Date.now() >= runDeadline) { timeLimitReached = true; break; }
       if (!botAvailabilityStopRequested && completed < entries.length) {
         const http = Number(result.httpStatus || 0);
         const transientServerFailure = http === 429 || http >= 500;
         if (transientServerFailure) adaptiveDelay = Math.min(8000, Math.max(1500, adaptiveDelay * 2));
         else adaptiveDelay = Math.max(botStatusScanDelayMs(), Math.round(adaptiveDelay * 0.85));
-        await waitForBotStatusPace(adaptiveDelay);
+        // Time limits are soft for the in-flight check, but never start another
+        // check after the deadline or spend longer than necessary pacing.
+        const remainingTime = runDeadline - Date.now();
+        if (remainingTime <= 0) { timeLimitReached = true; break; }
+        await waitForBotStatusPace(Math.min(adaptiveDelay, remainingTime));
       }
     }
   } finally {
@@ -11488,15 +11559,32 @@ async function runBotAvailabilityScan(options = {}) {
     if (staleButton) staleButton.disabled = false;
     if (archivedButton) archivedButton.disabled = false;
     if (stopButton) stopButton.disabled = true;
+    for (const id of ["botStatusMaxBots", "botStatusMaxMinutes"]) { if ($(id)) $(id).disabled = false; }
+    if (progressBar) { progressBar.value = completed; progressBar.hidden = true; }
+    if (completed >= 3 && scanStartedAt) {
+      // Exclude bulk persistence and final render time from the saved rate.
+      const avg = Math.max(100, Math.round((scanLastCheckAt - scanStartedAt) / completed));
+      botStatusPreviousScanRateMs = avg;
+      rawStorageSet({ [BOT_STATUS_LAST_RATE_KEY]: avg }).catch(() => {});
+    }
+    const countLimitReached = maxBots > 0 && totalCandidates > entries.length && completed === entries.length;
+    const stopMessage = timeLimitReached
+      ? `Time limit reached after ${completed} / ${entries.length} selected checks (${totalCandidates} initially eligible). Completed checks saved.`
+      : countLimitReached
+        ? `Bot limit reached: checked ${completed} of ${totalCandidates} eligible bots. Completed checks saved.`
+        : "";
     const finalStatusText = terminalMessage || (botAvailabilityStopRequested
       ? `Stopped after ${completed} / ${entries.length}. Completed status/update checks were saved.`
+      : stopMessage ? stopMessage
       : mode === "archived"
         ? `${completed} checked · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked left alone` : ""}.`
         : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${changesPreserved ? `${changesPreserved} profile change${changesPreserved === 1 ? "" : "s"} preserved in history. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
     if (status) status.textContent = finalStatusText;
     if (archivedStatus) archivedStatus.textContent = finalStatusText;
     await noteBotStatusRunEvent("bot-status-run-complete", {
-      mode, scope, completed, requested: entries.length, stopped: !!botAvailabilityStopRequested,
+      mode, scope, completed, requested: entries.length, totalCandidates, maxBots, maxMinutes,
+      stopped: !!botAvailabilityStopRequested || timeLimitReached || countLimitReached,
+      stopReason: botAvailabilityStopRequested ? "manual" : timeLimitReached ? "time" : countLimitReached ? "count" : "complete",
       changesPreserved, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
       stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped,
       durationMs: Date.now() - runStartedAt
@@ -12726,7 +12814,17 @@ function setupBotAvailabilityControls() {
   const persistArchiveConfig = debounceCallback(() => saveArchiveUploadConfig({ quiet: true }).catch(() => {}), 350);
   $("botStatusArchiveEndpoint")?.addEventListener("change", persistArchiveConfig);
   $("botStatusArchiveToken")?.addEventListener("input", persistArchiveConfig);
-  $("botStatusScanSpeed")?.addEventListener("change", () => save().catch(() => {}));
+  $("botStatusScanSpeed")?.addEventListener("change", () => { save().catch(() => {}); updateBotStatusScanEstimate(); });
+  for (const id of ["botStatusMaxBots", "botStatusMaxMinutes"]) {
+    $(id)?.addEventListener("change", () => { save().catch(() => {}); updateBotStatusScanEstimate(); });
+    $(id)?.addEventListener("input", updateBotStatusScanEstimate);
+  }
+  storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
+    const rate = Number(result?.[BOT_STATUS_LAST_RATE_KEY] || 0);
+    if (rate >= 100 && rate <= 120000) botStatusPreviousScanRateMs = rate;
+    updateBotStatusScanEstimate();
+  }).catch(() => {});
+  updateBotStatusScanEstimate();
   $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability(); });
   $("botAvailabilityScope")?.addEventListener("change", () => {
     invalidateDuplicateCache();
@@ -17376,6 +17474,8 @@ async function load() {
   setChecked("trackOpenedChats", settings.trackOpenedChats);
   setValue("botStatusScanSpeed", Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, settings.botStatusScanSpeed) ? settings.botStatusScanSpeed : "safe");
   setValue("botStatusStaleDays", [1, 7, 14, 30].includes(Number(settings.botStatusStaleDays)) ? String(Number(settings.botStatusStaleDays)) : "7");
+  setValue("botStatusMaxBots", Number(settings.botStatusMaxBots) > 0 ? String(Math.min(100000, Math.floor(Number(settings.botStatusMaxBots)))) : "");
+  setValue("botStatusMaxMinutes", Number(settings.botStatusMaxMinutes) > 0 ? String(Math.min(1440, Math.floor(Number(settings.botStatusMaxMinutes)))) : "");
   setValue("lorebookStatusScanSpeed", Object.prototype.hasOwnProperty.call(LOREBOOK_STATUS_SCAN_SPEED_DELAYS, settings.lorebookStatusScanSpeed) ? settings.lorebookStatusScanSpeed : "safe");
   setValue("lorebookStatusStaleDays", [1, 7, 14, 30].includes(Number(settings.lorebookStatusStaleDays)) ? String(Number(settings.lorebookStatusStaleDays)) : "7");
   setChecked("importOpenedFromChatsPage", settings.importOpenedFromChatsPage);
@@ -18059,6 +18159,8 @@ function readSettingsFromPage() {
     trackOpenedChats: checked("trackOpenedChats"),
     botStatusScanSpeed: Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, value("botStatusScanSpeed", "safe")) ? value("botStatusScanSpeed", "safe") : "safe",
     botStatusStaleDays: [1, 7, 14, 30].includes(Number(value("botStatusStaleDays", "7"))) ? Number(value("botStatusStaleDays", "7")) : 7,
+    botStatusMaxBots: Math.min(100000, Math.max(0, Math.floor(Number(value("botStatusMaxBots", "0")) || 0))),
+    botStatusMaxMinutes: Math.min(1440, Math.max(0, Math.floor(Number(value("botStatusMaxMinutes", "0")) || 0))),
     lorebookStatusScanSpeed: Object.prototype.hasOwnProperty.call(LOREBOOK_STATUS_SCAN_SPEED_DELAYS, value("lorebookStatusScanSpeed", "safe")) ? value("lorebookStatusScanSpeed", "safe") : "safe",
     lorebookStatusStaleDays: [1, 7, 14, 30].includes(Number(value("lorebookStatusStaleDays", "7"))) ? Number(value("lorebookStatusStaleDays", "7")) : 7,
     importOpenedFromChatsPage: checked("importOpenedFromChatsPage"),
@@ -20590,6 +20692,103 @@ async function exportSettings() {
   $("settingsJson").value = JSON.stringify(buildExportPayload(scopes, result), null, 2);
 }
 
+// This is a separate, one-record IndexedDB database so it cannot collide with
+// the per-bot large-storage schema. Database writes replace the last snapshot
+// atomically; there is no background retention loop or unbounded copy history.
+function openRecoverySnapshotDb() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") return reject(new Error("IndexedDB is unavailable."));
+    const request = indexedDB.open(RECOVERY_SNAPSHOT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(RECOVERY_SNAPSHOT_DB_STORE)) {
+        db.createObjectStore(RECOVERY_SNAPSHOT_DB_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open recovery storage."));
+    request.onblocked = () => reject(new Error("Recovery storage is busy in another tab."));
+  });
+}
+
+async function recoverySnapshotDbOperation(mode, operation) {
+  const db = await openRecoverySnapshotDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      let transaction;
+      try { transaction = db.transaction(RECOVERY_SNAPSHOT_DB_STORE, mode); }
+      catch (error) { reject(error); return; }
+      const store = transaction.objectStore(RECOVERY_SNAPSHOT_DB_STORE);
+      let request;
+      try { request = operation(store); }
+      catch (error) { try { transaction.abort(); } catch {} reject(error); return; }
+      let value;
+      request.onsuccess = () => { value = request.result; };
+      request.onerror = () => { /* transaction abort handles the failure */ };
+      transaction.oncomplete = () => resolve(value);
+      transaction.onabort = () => reject(transaction.error || request.error || new Error("Recovery storage transaction was aborted."));
+      transaction.onerror = () => { /* transaction abort handles the failure */ };
+    });
+  } finally { db.close(); }
+}
+
+function getCompressedRecoverySnapshotRow() {
+  return recoverySnapshotDbOperation("readonly", store => store.get(RECOVERY_SNAPSHOT_DB_ID));
+}
+function putCompressedRecoverySnapshotRow(row) {
+  return recoverySnapshotDbOperation("readwrite", store => store.put(row));
+}
+function deleteCompressedRecoverySnapshotRow() {
+  return recoverySnapshotDbOperation("readwrite", store => store.delete(RECOVERY_SNAPSHOT_DB_ID));
+}
+async function recoverySnapshotChecksum(bytes) {
+  if (!crypto?.subtle) throw new Error("Secure recovery verification is unavailable.");
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), v => v.toString(16).padStart(2, "0")).join("");
+}
+function recoverySnapshotRowMeta(row) {
+  if (!row || row.codec !== "gzip-json-v1") return null;
+  return {
+    version: 2, createdAt: Number(row.createdAt) || 0,
+    reason: String(row.reason || "manual"),
+    extensionVersion: String(row.extensionVersion || ""),
+    scopes: Array.isArray(row.scopes) ? row.scopes.map(String) : [],
+    codec: "gzip-json-v1", storage: "indexeddb",
+    storedBytes: Number(row.storedBytes) || 0,
+    originalBytes: Number(row.originalBytes) || 0
+  };
+}
+
+async function readCompressedRecoverySnapshot(row) {
+  if (!row || row.codec !== "gzip-json-v1") throw new Error("Unsupported recovery snapshot format.");
+  const bytes = row.payload instanceof Uint8Array ? row.payload : new Uint8Array(row.payload || []);
+  if (!bytes.byteLength || bytes.byteLength > RECOVERY_SNAPSHOT_MAX_GZIP_BYTES ||
+      bytes.byteLength !== Number(row.storedBytes)) throw new Error("Recovery snapshot failed the size integrity check.");
+  if (await recoverySnapshotChecksum(bytes) !== row.sha256) throw new Error("Recovery snapshot failed the checksum verification.");
+  if (typeof DecompressionStream !== "function") throw new Error("This browser cannot decompress the saved recovery snapshot.");
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const chunks = [];
+  let decodedBytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      decodedBytes += value.byteLength;
+      if (decodedBytes > RECOVERY_SNAPSHOT_MAX_JSON_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new Error("Recovery snapshot exceeded the decoded-size safety limit.");
+      }
+      chunks.push(value);
+    }
+  } finally { try { reader.releaseLock(); } catch {} }
+  if (!decodedBytes || decodedBytes !== Number(row.originalBytes)) {
+    throw new Error("Recovery snapshot failed the decoded-size check.");
+  }
+  const snapshot = normalizeRecoverySnapshot(JSON.parse(await new Blob(chunks).text()));
+  if (!snapshot) throw new Error("Recovery snapshot does not contain a valid QoL backup.");
+  return snapshot;
+}
+
 function normalizeRecoverySnapshot(value) {
   const raw = value && typeof value === "object" ? value : {};
   if (!raw.backup || typeof raw.backup !== "object" || Array.isArray(raw.backup)) return null;
@@ -20619,13 +20818,17 @@ function normalizeRecoverySnapshotMeta(value) {
   const createdAt = Number(raw.createdAt) || 0;
   if (!createdAt && !raw.reason && !Array.isArray(raw.scopes)) return null;
   return {
-    version: 1,
+    version: Number(raw.version) || 1,
     createdAt,
     reason: String(raw.reason || "recovery snapshot"),
     extensionVersion: String(raw.extensionVersion || ""),
     scopes: Array.isArray(raw.scopes) ? raw.scopes.map(String) : [],
     legacy: !!raw.legacy,
-    bytes: Math.max(0, Number(raw.bytes) || 0)
+    bytes: Math.max(0, Number(raw.bytes) || 0),
+    codec: String(raw.codec || ""),
+    storage: String(raw.storage || ""),
+    storedBytes: Math.max(0, Number(raw.storedBytes) || 0),
+    originalBytes: Math.max(0, Number(raw.originalBytes) || 0)
   };
 }
 
@@ -20634,8 +20837,14 @@ async function readRecoverySnapshotMeta() {
   const meta = normalizeRecoverySnapshotMeta(result[RECOVERY_SNAPSHOT_META_KEY]);
   if (meta) return meta;
 
-  // Older snapshots can be tens of megabytes. Detect their presence from byte
-  // usage instead of deserializing the whole backup just to draw a status line.
+  // Quick metadata is absent on older installations; check the one-record
+  // compressed store before checking for a legacy chrome.storage.local copy.
+  try {
+    const row = await getCompressedRecoverySnapshotRow();
+    const summary = recoverySnapshotRowMeta(row);
+    if (summary) return summary;
+  } catch { /* legacy snapshot may still exist */ }
+  // Legacy snapshots may be enormous: check bytes without deserializing them.
   const bytes = Number(await storageBytesInUse(RECOVERY_SNAPSHOT_KEY));
   if (Number.isFinite(bytes) && bytes > 0) {
     return { version: 1, createdAt: 0, reason: "legacy recovery snapshot", extensionVersion: "", scopes: [], legacy: true, bytes };
@@ -20659,7 +20868,10 @@ async function refreshRecoverySnapshotStatus() {
   const mediaNote = meta.scopes.includes("localMedia")
     ? " Local media was included because that category was part of the protected action."
     : " Local media bytes are not included.";
-  host.textContent = `Last snapshot: ${when} · ${meta.reason}.${mediaNote} API keys/webhook URLs are never copied.`;
+  const sizeNote = meta.storage === "indexeddb"
+    ? ` Compressed IndexedDB copy: ${formatControlBytes(meta.storedBytes)} (from ${formatControlBytes(meta.originalBytes)} JSON; hard limit 24 MiB).`
+    : " Legacy local snapshot (not compressed).";
+  host.textContent = `Last snapshot: ${when} · ${meta.reason}.${sizeNote}${mediaNote} API keys/webhook URLs are never copied.`;
 }
 
 let pendingImportSafetyDownload = null;
@@ -20691,33 +20903,80 @@ async function createRecoverySnapshot(reason = "manual", sourceData = null, scop
     scopes: [...selectedScopes],
     backup: buildExportPayload(selectedScopes, result)
   };
-  const ok = await storageSetVerified({ [RECOVERY_SNAPSHOT_KEY]: snapshot });
-  if (!ok) {
-    const error = new Error("QoL couldn't create the safety copy for the selected data");
-    error.code = "RECOVERY_SNAPSHOT_FAILED";
+  try {
+    if (typeof CompressionStream !== "function") {
+      throw new Error("This browser cannot create compressed recovery snapshots. Download a full backup before changing local data.");
+    }
+    const json = JSON.stringify(snapshot);
+    // Do not save huge accidental imports into browser-local recovery storage.
+    // A hard limit also bounds the amount we later decompress into memory.
+    const rawBytes = new Blob([json]).size;
+    if (rawBytes > RECOVERY_SNAPSHOT_MAX_JSON_BYTES) {
+      throw new Error("Recovery data exceeds 160 MiB. No changes were made; export a full .json.gz backup instead.");
+    }
+    const gzip = await gzipBackupText(json);
+    if (!gzip.size || gzip.size > RECOVERY_SNAPSHOT_MAX_GZIP_BYTES) {
+      throw new Error(`Compressed recovery exceeds the 24 MiB safety limit (${(gzip.size / 1048576).toFixed(1)} MiB). No changes were made; download a backup before proceeding.`);
+    }
+    const bytes = new Uint8Array(await gzip.arrayBuffer());
+    const row = {
+      id: RECOVERY_SNAPSHOT_DB_ID, codec: "gzip-json-v1",
+      createdAt: snapshot.createdAt, reason: snapshot.reason,
+      extensionVersion: snapshot.extensionVersion, scopes: snapshot.scopes,
+      originalBytes: rawBytes, storedBytes: bytes.byteLength,
+      sha256: await recoverySnapshotChecksum(bytes), payload: bytes
+    };
+    await putCompressedRecoverySnapshotRow(row);
+    // Read-back verification before allowing any destructive action.
+    const stored = await getCompressedRecoverySnapshotRow();
+    if (!stored || stored.storedBytes !== row.storedBytes || stored.sha256 !== row.sha256 ||
+        await recoverySnapshotChecksum(stored.payload) !== row.sha256) {
+      throw new Error("Recovery snapshot could not be verified after saving.");
+    }
+    // Do not retain an old gigantic uncompressed snapshot alongside the verified copy.
+    // Failure to delete the legacy copy is non-destructive; it can still be cleared manually.
+    if (!await storageRemove([RECOVERY_SNAPSHOT_KEY])) {
+      throw new Error("Could not remove the old uncompressed safety copy. No protected changes were made.");
+    }
+    if (!await storageSetVerified({ [RECOVERY_SNAPSHOT_META_KEY]: recoverySnapshotRowMeta(row) })) {
+      throw new Error("Recovery snapshot metadata could not be verified.");
+    }
+    await refreshRecoverySnapshotStatus();
+    return recoverySnapshotRowMeta(row);
+  } catch (error) {
+    if (!error.code) error.code = "RECOVERY_SNAPSHOT_FAILED";
     throw error;
   }
-  const meta = recoverySnapshotMetaFromSnapshot(snapshot);
-  if (meta) await storageSet({ [RECOVERY_SNAPSHOT_META_KEY]: meta });
-  await refreshRecoverySnapshotStatus();
-  return snapshot;
 }
 
 async function createManualRecoverySnapshot() {
   try {
     await createRecoverySnapshot("manual snapshot");
     showSettingsToast("Local recovery snapshot saved.");
-  } catch {
-    showSettingsToast("Recovery snapshot could not be saved.");
+  } catch (error) {
+    showSettingsToast(`Recovery snapshot not saved: ${error?.message || "storage error"}`);
   }
 }
 
 async function loadRecoverySnapshotIntoImport() {
-  const result = await storageGet([RECOVERY_SNAPSHOT_KEY]);
-  const snapshot = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]);
+  let snapshot = null;
+  try {
+    const compressed = await getCompressedRecoverySnapshotRow();
+    if (compressed) snapshot = await readCompressedRecoverySnapshot(compressed);
+    else {
+      // Backward compatibility: older recovery snapshots remain readable.
+      const result = await storageGet([RECOVERY_SNAPSHOT_KEY]);
+      snapshot = normalizeRecoverySnapshot(result[RECOVERY_SNAPSHOT_KEY]);
+    }
+  } catch (error) {
+    showSettingsToast(`Recovery snapshot could not be opened: ${error?.message || error}`);
+    return;
+  }
   if (!snapshot) { showSettingsToast("No recovery snapshot is available."); return; }
   const meta = recoverySnapshotMetaFromSnapshot(snapshot);
-  if (meta) await storageSet({ [RECOVERY_SNAPSHOT_META_KEY]: meta });
+  if (meta) await storageSet({ [RECOVERY_SNAPSHOT_META_KEY]: {
+    ...meta, ...(await readRecoverySnapshotMeta())
+  } });
   const box = $("settingsJson");
   if (box) box.value = JSON.stringify(snapshot.backup, null, 2);
   pendingImportPayload = null;
@@ -20731,9 +20990,16 @@ async function loadRecoverySnapshotIntoImport() {
 
 async function clearRecoverySnapshot() {
   if (!confirm("Clear the saved local recovery snapshot? This does not change your current QoL data.")) return;
-  const removed = await storageRemoveVerified([RECOVERY_SNAPSHOT_KEY, RECOVERY_SNAPSHOT_META_KEY]);
+  let removed = false;
+  try {
+    await deleteCompressedRecoverySnapshotRow();
+    const legacyCleared = await storageRemoveVerified([RECOVERY_SNAPSHOT_KEY]);
+    const metadataCleared = legacyCleared && await storageRemoveVerified([RECOVERY_SNAPSHOT_META_KEY]);
+    const remaining = await getCompressedRecoverySnapshotRow();
+    removed = !!metadataCleared && !remaining;
+  } catch { removed = false; }
   await refreshRecoverySnapshotStatus();
-  showSettingsToast(removed ? "Recovery snapshot cleared." : "Recovery snapshot could not be cleared or verified.");
+  showSettingsToast(removed ? "Recovery snapshot cleared." : "Recovery snapshot could not be fully cleared or verified.");
 }
 
 function replaceSettingsForImport(importedSettings) {
@@ -21871,7 +22137,7 @@ async function refreshStorageUsage() {
   host.replaceChildren();
 
   if (Number.isFinite(bytes)) {
-    host.appendChild(makeElement("span", { className: "storage-chip", text: `Storage: ${Math.max(0, bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)} KB` }));
+    host.appendChild(makeElement("span", { className: "storage-chip", text: `chrome.storage.local: ${Math.max(0, bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)} KB` }));
   }
 
   await refreshRecoverySnapshotStatus();

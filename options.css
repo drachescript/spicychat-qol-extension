@@ -330,6 +330,21 @@ button:hover { background: #2e333a; }
   text-decoration: none;
 }
 .help-link:hover { background: #202226; border-color: #5c6169; }
+/* Piper's Help shortcut matches the bot linked from the extension popup. */
+.help-link.piper-help-link {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.piper-help-avatar {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 9px;
+}
+.piper-help-link span:first-of-type { min-width: 0; }
+
 .help-link span:first-child { display: flex; flex-direction: column; gap: 4px; }
 .help-link small { color: #aaa; line-height: 1.4; }
 .help-arrow { font-size: 20px; color: #aaa; }

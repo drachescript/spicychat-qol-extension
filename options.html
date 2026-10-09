@@ -748,7 +748,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </fieldset>
 <div class="bot-availability-controls">
 <select aria-label="Bots to scan" id="botAvailabilityScope">
-<option value="all">All tracked bots</option>
+<option value="all">All known bots (routine checks only)</option>
 <option value="favorite">Favorites only</option>
 <option value="later">Later only</option>
 <option value="blocked">Blocked bots only</option>
@@ -793,6 +793,15 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </label>
 <span class="manager-count" id="botAvailabilityUnavailableSummary"></span>
 </div>
+<div class="bot-availability-controls">
+<label>Max bots per run
+<input id="botStatusMaxBots" type="number" min="1" max="100000" step="1" placeholder="All" style="max-width:130px" aria-label="Maximum bots per run; blank for all" />
+</label>
+<label>Max runtime (minutes)
+<input id="botStatusMaxMinutes" type="number" min="1" max="1440" step="1" placeholder="Unlimited" style="max-width:130px" aria-label="Maximum scan runtime in minutes; blank for unlimited" />
+</label>
+<span class="hint" id="botStatusScanEstimate">Leave either field blank for no limit. The scan stops at whichever limit is reached first; any in-flight check finishes safely.</span>
+</div>
 <div class="button-row">
 <button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
@@ -800,6 +809,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
 </div>
+<progress id="botStatusScanProgress" max="1" value="0" hidden style="width:100%; max-width:680px; height:10px" aria-label="Bot Status scan progress"></progress>
 <p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
 <details class="sub-card bot-status-maintenance-card">
 <summary>Cleanup, export &amp; reset tools</summary>
@@ -2853,6 +2863,10 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 </div>
 <p>An independent quality-of-life project for SpicyChat focused on optional tools, local-first data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>
 <p class="hint">The extension uses normal SpicyChat pages/actions or information already available to the signed-in user. It does not unlock private character fields or publish creations automatically.</p>
+<a class="help-link piper-help-link" href="https://spicychat.ai/chatbot/98ebe0d7-625d-4196-a7a5-ebfd4f262367" rel="noopener noreferrer" target="_blank" title="Open Piper on SpicyChat">
+<img class="piper-help-avatar" src="icons/icon.jpg" alt="Piper"/>
+<span><strong>Ask Piper</strong><small>QoL mascot + resident UI critic. Chat with Piper on SpicyChat.</small></span><span class="help-arrow" aria-hidden="true">&gt;</span>
+</a>
 <a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension" rel="noopener noreferrer" target="_blank"><span><strong>Project &amp; source</strong><small>Source code, releases, issues and project updates.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://spicychatqol.drache.uk/" rel="noopener noreferrer" target="_blank"><span><strong>Project website</strong><small>Feature information, releases and install links.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://discord.gg/XTMdWvuVSU" rel="noopener noreferrer" target="_blank"><span><strong>SpicyChat QoL Discord server</strong><small>Join the project server for help, ideas, suggestions and feedback.</small></span><span class="help-arrow">&gt;</span></a>
@@ -3001,6 +3015,6 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="platform-capabilities.js"></script><script src="feature-registry.js"></script><script src="options.js"></script>
+<script src="platform-capabilities.js"></script><script src="feature-registry.js"></script><script src="options.js"></script><script src="bot-status-storage-cleanup.js"></script><script src="storage-metrics.js"></script>
 </body>
 </html>

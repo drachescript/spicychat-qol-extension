@@ -1,3 +1,22 @@
+## 0.2.40
+- Added the missing Ask Piper shortcut to Settings → Help, using the same bot link as the extension popup.
+- Added configurable Bot Status scan limits by number of bots and runtime, with progress, elapsed time, adaptive ETA and a saved pace estimate.
+- Fixed unchecked/stale Bot Status counts to reflect bots actually eligible in the selected scan scope; passive/blocked/archive-only records remain visible but no longer make routine scans appear incomplete.
+- Added a 24 MiB hard cap on compressed local safety snapshots and moved their single gzip copy to IndexedDB instead of storing giant uncompressed recovery objects in chrome.storage.local.
+- Recovery snapshots are SHA-256 verified after saving, remain restorable from the import preview, and abort protected imports/deletions safely if the guard cannot create a verified copy.
+- Clearing a recovery snapshot removes both the compressed copy and any legacy uncompressed local snapshot.
+- Storage measurements now include the compressed safety snapshot from its separate IndexedDB database.
+- Restored standard, readable manifest formatting without changing extension permissions, resources, or registered scripts.
+- Storage measurements now persist across Settings reloads, including the last measured totals, manual baseline and largest local keys, without automatically rescanning on startup.
+- Placed Storage measurements below the existing optimization note.
+- Added separate measurements for chrome.storage.local and raw IndexedDB Bot Status, Bot Archive and Lorebook Status storage, including stored gzip payload bytes and logical uncompressed sizes.
+- Added a local-key size breakdown and persistent before/after comparisons for cleanup and snapshot deduplication; browser disk usage is labeled as an estimate when available.
+- Reduced Bot Status routine scans to deliberately tracked, unblocked bots; passive discoveries and blocked bots stay available through explicit checks.
+- Fixed Retry temporary / unknown when the candidate is blocked or preserved for recovery.
+- Added protected, resumable Bot Status storage cleanup with an all-ages preview and in-page confirmation.
+- Added explicit snapshot deduplication for identical baselines and snapshots, retaining differing snapshots and revision history.
+- Kept manual backups, own creations, blocked lists, Bot Archive data and recovery copies protected from cleanup.
+
 ## 0.2.39
 - Edit Chatbot in chat menus now supports normal Ctrl/Cmd-click, middle-click, and browser right-click link options.
 - Fixed repetitive Lorebook editor errors when automatic keyword expansion is blocked.
