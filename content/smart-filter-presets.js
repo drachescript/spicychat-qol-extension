@@ -109,7 +109,7 @@
       : (source.later === true ? "later" : "any");
 
     return {
-      lorebook: ["any", "has", "none"].includes(source.lorebook) ? source.lorebook : "any",
+      lorebook: ["any", "has", "none", "unknown"].includes(source.lorebook) ? source.lorebook : "any",
       opened,
       followed,
       favorites,
@@ -314,8 +314,11 @@
     const favorite = entryMembership(entry, indexes.favorite);
     const savedLater = entryMembership(entry, indexes.later);
 
-    if (filters.lorebook === "has" && !hasLorebook) return false;
-    if (filters.lorebook === "none" && hasLorebook) return false;
+    const state = DS.cardLorebookState?.(entry.card) || (hasLorebook ? "has" : "unknown");
+    const strict = !!DS.state?.settings?.lorebookUnknownSafeFilter;
+    if (filters.lorebook === "has" && state !== "has") return false;
+    if (filters.lorebook === "none" && (strict ? state !== "none" : hasLorebook)) return false;
+    if (filters.lorebook === "unknown" && strict && state !== "unknown") return false;
 
     if (filters.opened === "opened" && !opened) return false;
     if (filters.opened === "unopened" && opened) return false;
@@ -390,8 +393,11 @@
     const favorite = entryMembership(entry, indexes.favorite);
     const savedLater = entryMembership(entry, indexes.later);
 
-    if (filters.lorebook === "has" && !hasLorebook) return "smart filter: requires Lorebook";
-    if (filters.lorebook === "none" && hasLorebook) return "smart filter: excludes Lorebook";
+    const state = DS.cardLorebookState?.(card) || (hasLorebook ? "has" : "unknown");
+    const strict = !!DS.state?.settings?.lorebookUnknownSafeFilter;
+    if (filters.lorebook === "has" && state !== "has") return "smart filter: requires Lorebook";
+    if (filters.lorebook === "none" && (strict ? state !== "none" : hasLorebook)) return "smart filter: No Lorebook not confirmed";
+    if (filters.lorebook === "unknown" && strict && state !== "unknown") return "smart filter: unknown status";
     if (filters.opened === "opened" && !opened) return "smart filter: opened only";
     if (filters.opened === "unopened" && opened) return "smart filter: unopened only";
     if (filters.favorites === "favorites" && !favorite) return "smart filter: favorites only";
@@ -562,7 +568,7 @@
     DS.setSafeMarkup(toolbar, `
       <strong>Smart filters</strong>
       <select id="ds-smart-preset-select" title="Built-in or saved preset"><option value="">Custom / no preset</option></select>
-      <label>Lorebook <select id="ds-smart-filter-lorebook"><option value="any">Any</option><option value="has">Has</option><option value="none">No Lorebook</option></select></label>
+      <label>Lorebook <select id="ds-smart-filter-lorebook"><option value="any">Any</option><option value="has">Has</option><option value="none">No Lorebook</option><option value="unknown">Unknown (unverified)</option></select></label>
       <label>Opened <select id="ds-smart-filter-opened"><option value="any">Any</option><option value="unopened">Unopened</option><option value="opened">Opened</option></select></label>
       <label>Creator <select id="ds-smart-filter-followed"><option value="any">Any</option><option value="followed">Followed</option><option value="not-followed">Not followed</option></select></label>
       <label>Favorites <select id="ds-smart-filter-favorites"><option value="any">Any</option><option value="favorites">Favorites</option><option value="not-favorites">Not favorites</option></select></label>
@@ -594,6 +600,8 @@
       toolbar.querySelector(`#ds-smart-filter-${key}`)?.addEventListener("change", applyFromControls);
     }
 
+    const unknownOption = toolbar.querySelector('#ds-smart-filter-lorebook option[value="unknown"]');
+    if (unknownOption) unknownOption.hidden = !DS.state?.settings?.lorebookUnknownSafeFilter;
     toolbar.querySelector("#ds-smart-preset-select")?.addEventListener("change", event => {
       const id = clean(event.target.value);
       if (!id) {

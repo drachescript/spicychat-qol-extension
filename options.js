@@ -529,6 +529,9 @@ const DEFAULT_SETTINGS = {
   laterBotCreatorFilter: "",
   laterBotStateFilter: "all",
   enableBotOrganizer: false,
+  favoritePageFoldersEnabled: false,
+  favoritePageSortEnabled: false,
+  lorebookUnknownSafeFilter: false,
   botCollections: "",
   botOrganizerShowCardMeta: true,
   botOrganizerBulkTools: true,
@@ -783,6 +786,9 @@ const DEFAULT_SETTINGS = {
   rpFormatPreserveBackticks: true,
   rpFormatShowMessageButtons: true,
   enableChatBackgrounds: false,
+  chatBackgroundUseAvatar: false,
+  chatBackgroundAnimateAvatar: false,
+  chatBackgroundBubbleOpacity: 100,
   chatBackgroundDim: 45,
   chatBackgroundBlur: 0,
   chatBackgroundFit: "cover",
@@ -2478,6 +2484,11 @@ const OPTIONAL_FEATURE_KEYS = [
   "formatToolbarBraces",
   "enableRpFormatRepair",
   "enableChatBackgrounds",
+  "chatBackgroundUseAvatar",
+  "chatBackgroundAnimateAvatar",
+  "favoritePageFoldersEnabled",
+  "favoritePageSortEnabled",
+  "lorebookUnknownSafeFilter",
   "enableCharacterQolProfiles",
   "enableChatBubbleCustomization",
   "persistSpicyChatUserAppearance",
@@ -11040,6 +11051,8 @@ function renderBotAvailability(renderOptions = {}) {
   const uncheckedCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) <= 0).length;
   const notMonitoredCount = base.length - eligibleEntries.length;
   const uncheckedNotMonitoredCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0).length;
+  const manualBlockedIds = new Set(normalizeBotStore(blockedState).ids);
+  const manualOutsideCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && !manualBlockedIds.has(entry.id) && !botStatusIdIgnored(entry.id)).length;
   const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
   let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
   const shown = entries.slice(0, limit);
@@ -11048,7 +11061,10 @@ function renderBotAvailability(renderOptions = {}) {
   if (summary) {
     const matches = entries.length !== base.length ? ` · ${entries.length} matching` : "";
     const duplicateText = duplicateBots == null ? "" : ` · ${duplicateBots} duplicate matches`;
-    summary.textContent = `${base.length} known · ${checkedCount} checked · ${eligibleEntries.length} in scan scope${notMonitoredCount ? ` · ${notMonitoredCount} not routinely monitored (${uncheckedNotMonitoredCount} unchecked)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
+    const monitoredChecked = eligibleEntries.length - uncheckedCount;
+    summary.textContent = `${base.length} known · ${eligibleEntries.length} routinely monitored (${monitoredChecked} checked, ${uncheckedCount} unchecked)${notMonitoredCount ? ` · ${notMonitoredCount} outside routine scans (${uncheckedNotMonitoredCount} unchecked)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
+    const manualButton = $("scanUnmonitoredBotAvailability");
+    if (manualButton && !botAvailabilityScanRunning) { manualButton.disabled = manualOutsideCount === 0; manualButton.textContent = manualOutsideCount ? `Check outside routine scope (${manualOutsideCount})` : "No unblocked outside-scope bots"; manualButton.title = "One-time manual scan only. Blocked bots remain excluded."; }
   }
   const uncheckedButton = $("scanUncheckedBotAvailability");
   if (uncheckedButton && !botAvailabilityScanRunning) {
@@ -11303,14 +11319,16 @@ async function runBotAvailabilityScan(options = {}) {
   if (botAvailabilityScanRunning) return;
   const requestedScope = String($("botAvailabilityScope")?.value || "all");
   const mode = options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all");
-  const scope = mode === "archived" ? "archived" : requestedScope;
+  const scope = mode === "archived" ? "archived" : mode === "outside" ? "all" : requestedScope;
   const existingAvailability = normalizeBotAvailability(botAvailabilityState).meta;
   const archives = normalizeBotArchive(botArchiveState).meta;
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
   const archivedBlockedSkipped = mode === "archived"
     ? Object.values(existingAvailability).filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && blockedIds.has(String(entry.id || "").toLowerCase())).length
     : 0;
-  const allEntries = mode === "archived"
+  const allEntries = mode === "outside"
+    ? botStatusCenterBaseEntries("all").filter(entry => !entry._scanEligible && !blockedIds.has(String(entry.id || "").toLowerCase()) && !botStatusIdIgnored(entry.id))
+    : mode === "archived"
     ? Object.values(existingAvailability)
         .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase()))
         .map(entry => {
@@ -11329,7 +11347,9 @@ async function runBotAvailabilityScan(options = {}) {
     : collectTrackedAvailabilityBots(scope);
   const staleDays = Math.max(1, Number(value("botStatusStaleDays", "7")) || 7);
   const staleCutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
-  let entries = mode === "unchecked"
+  let entries = mode === "outside"
+    ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) <= 0)
+    : mode === "unchecked"
     ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) <= 0)
     : mode === "stale"
       ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
@@ -11348,6 +11368,8 @@ async function runBotAvailabilityScan(options = {}) {
       ? (archivedBlockedSkipped
           ? `No unblocked archived bots need rechecking. ${archivedBlockedSkipped} blocked bot${archivedBlockedSkipped === 1 ? " was" : "s were"} left alone.`
           : "No archived/deleted recovery copies need rechecking.")
+      : mode === "outside"
+        ? "No unchecked, unblocked bots outside routine monitoring. Blocked bots are excluded from this one-time scan."
       : mode === "unchecked"
         ? "No unchecked tracked bots in this scope."
         : mode === "stale"
@@ -11366,11 +11388,13 @@ async function runBotAvailabilityScan(options = {}) {
   const uncheckedButton = $("scanUncheckedBotAvailability");
   const staleButton = $("scanStaleBotAvailability");
   const archivedButton = $("recheckDeletedSavedBots");
+  const outsideButton = $("scanUnmonitoredBotAvailability");
   const stopButton = $("stopBotAvailabilityScan");
   if (scanButton) scanButton.disabled = true;
   if (uncheckedButton) uncheckedButton.disabled = true;
   if (staleButton) staleButton.disabled = true;
   if (archivedButton) archivedButton.disabled = true;
+  if (outsideButton) outsideButton.disabled = true;
   if (stopButton) stopButton.disabled = false;
   for (const id of ["botStatusMaxBots", "botStatusMaxMinutes"]) { if ($(id)) $(id).disabled = true; }
   const progressBar = $("botStatusScanProgress");
@@ -11389,6 +11413,20 @@ async function runBotAvailabilityScan(options = {}) {
   const recoveredBlockedIds = new Set();
   const availabilityChangedIds = new Set();
   const archiveChangedIds = new Set();
+  const checkpointSavedIds = new Set();
+  let checkpointCount = 0;
+  const checkpointEvery = 50;
+  async function saveScanCheckpoint(force = false) {
+    const pending = [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id));
+    if (!pending.length || (!force && pending.length < checkpointEvery)) return true;
+    const availabilityUpdates = Object.fromEntries(pending.map(id => [id, botAvailabilityState.meta?.[id]]).filter(([, v]) => !!v));
+    const archiveUpdates = Object.fromEntries(pending.filter(id => archiveChangedIds.has(id)).map(id => [id, botArchiveState.meta?.[id]]).filter(([, v]) => !!v));
+    const saved = await runtimeMessage({ type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates });
+    if (!saved?.ok) return false;
+    pending.forEach(id => checkpointSavedIds.add(id));
+    checkpointCount += pending.length;
+    return true;
+  }
   const metadataDirtyKeys = new Set();
   let terminalMessage = "";
   let timeLimitReached = false;
@@ -11477,6 +11515,16 @@ async function runBotAvailabilityScan(options = {}) {
       }
       completed++;
       scanLastCheckAt = Date.now();
+      if (completed % checkpointEvery === 0) {
+        if (!await saveScanCheckpoint(true)) {
+          terminalMessage = `Paused after ${completed} checks: could not save the latest checkpoint. Retrying the final save...`;
+          break;
+        }
+        if (status) status.dataset.dsSavedCheckpoints = String(checkpointCount);
+        // Update this lightweight count without rebuilding thousands of cards.
+        const summary = $("botAvailabilitySummary");
+        if (summary) summary.textContent = `${completed} checked this run · ${checkpointCount} durably checkpointed · ${entries.length - completed} remaining (the full counts refresh when this run ends)`;
+      }
       if (progressBar) progressBar.value = completed;
 
       if (completed < entries.length && Date.now() >= runDeadline) { timeLimitReached = true; break; }
@@ -11509,21 +11557,20 @@ async function runBotAvailabilityScan(options = {}) {
       // does not structured-clone and serialize 6k+ status rows / 4k rich bot
       // copies on its UI thread. Fall back to the old full write if messaging
       // ever fails so scan results remain crash-safe.
+      // Only flush records not already safely checkpointed.
       const availabilityUpdates = Object.fromEntries(
-        [...availabilityChangedIds]
+        [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id))
           .map(id => [id, botAvailabilityState.meta?.[id]])
           .filter(([, entry]) => !!entry)
       );
       const archiveUpdates = Object.fromEntries(
-        [...archiveChangedIds]
+        [...archiveChangedIds].filter(id => !checkpointSavedIds.has(id))
           .map(id => [id, botArchiveState.meta?.[id]])
           .filter(([, entry]) => !!entry)
       );
-      const deltaSaved = await runtimeMessage({
-        type: "DS_BOT_STATUS_PERSIST_DELTA",
-        availabilityUpdates,
-        archiveUpdates
-      });
+      const deltaSaved = Object.keys(availabilityUpdates).length || Object.keys(archiveUpdates).length
+        ? await runtimeMessage({ type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates })
+        : { ok: true };
 
       if (!deltaSaved?.ok) {
         await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
@@ -11558,6 +11605,7 @@ async function runBotAvailabilityScan(options = {}) {
     if (uncheckedButton) uncheckedButton.disabled = false;
     if (staleButton) staleButton.disabled = false;
     if (archivedButton) archivedButton.disabled = false;
+    if (outsideButton) outsideButton.disabled = false;
     if (stopButton) stopButton.disabled = true;
     for (const id of ["botStatusMaxBots", "botStatusMaxMinutes"]) { if ($(id)) $(id).disabled = false; }
     if (progressBar) { progressBar.value = completed; progressBar.hidden = true; }
@@ -12740,6 +12788,7 @@ function setupBotAvailabilityControls() {
   });
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
+  $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
@@ -17546,6 +17595,9 @@ async function load() {
   setValue("laterBotCreatorFilter", settings.laterBotCreatorFilter || "");
   setValue("laterBotStateFilter", settings.laterBotStateFilter || "all");
   setChecked("enableBotOrganizer", !!settings.enableBotOrganizer);
+  setChecked("favoritePageFoldersEnabled", !!settings.favoritePageFoldersEnabled);
+  setChecked("favoritePageSortEnabled", !!settings.favoritePageSortEnabled);
+  setChecked("lorebookUnknownSafeFilter", !!settings.lorebookUnknownSafeFilter);
   setValue("botCollections", settings.botCollections || "");
   setChecked("botOrganizerShowCardMeta", settings.botOrganizerShowCardMeta !== false);
   setChecked("botOrganizerBulkTools", settings.botOrganizerBulkTools !== false);
@@ -17617,6 +17669,9 @@ async function load() {
   setChecked("rpFormatPreserveBackticks", settings.rpFormatPreserveBackticks !== false);
   setChecked("rpFormatShowMessageButtons", settings.rpFormatShowMessageButtons !== false);
   setChecked("enableChatBackgrounds", !!settings.enableChatBackgrounds);
+  setChecked("chatBackgroundUseAvatar", !!settings.chatBackgroundUseAvatar);
+  setChecked("chatBackgroundAnimateAvatar", !!settings.chatBackgroundAnimateAvatar);
+  setValue("chatBackgroundBubbleOpacity", String(settings.chatBackgroundBubbleOpacity ?? 100));
   setValue("chatBackgroundDim", String(settings.chatBackgroundDim ?? 45));
   setValue("chatBackgroundBlur", String(settings.chatBackgroundBlur ?? 0));
   setValue("chatBackgroundFit", settings.chatBackgroundFit || "cover");
@@ -18229,6 +18284,9 @@ function readSettingsFromPage() {
     laterBotCreatorFilter: value("laterBotCreatorFilter", ""),
     laterBotStateFilter: value("laterBotStateFilter", "all"),
     enableBotOrganizer: checked("enableBotOrganizer"),
+    favoritePageFoldersEnabled: checked("favoritePageFoldersEnabled"),
+    favoritePageSortEnabled: checked("favoritePageSortEnabled"),
+    lorebookUnknownSafeFilter: checked("lorebookUnknownSafeFilter"),
     botCollections: value("botCollections", ""),
     botOrganizerShowCardMeta: checked("botOrganizerShowCardMeta", true),
     botOrganizerBulkTools: checked("botOrganizerBulkTools", true),
@@ -18290,6 +18348,9 @@ function readSettingsFromPage() {
     rpFormatPreserveBackticks: checked("rpFormatPreserveBackticks", true),
     rpFormatShowMessageButtons: checked("rpFormatShowMessageButtons", true),
     enableChatBackgrounds: checked("enableChatBackgrounds"),
+    chatBackgroundUseAvatar: checked("chatBackgroundUseAvatar"),
+    chatBackgroundAnimateAvatar: checked("chatBackgroundAnimateAvatar"),
+    chatBackgroundBubbleOpacity: Math.max(25, Math.min(100, Number(value("chatBackgroundBubbleOpacity", "100")) || 100)),
     chatBackgroundDim: Math.min(90, Math.max(0, Number(value("chatBackgroundDim", "45")) || 0)),
     chatBackgroundBlur: Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)),
     chatBackgroundFit: ["cover", "contain", "tile"].includes(value("chatBackgroundFit", "cover")) ? value("chatBackgroundFit", "cover") : "cover",

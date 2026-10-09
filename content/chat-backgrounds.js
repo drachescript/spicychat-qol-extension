@@ -61,14 +61,32 @@
     return String(location.pathname || "").replace(/\/+$/, "");
   }
 
+  function avatarFromChatHeader() {
+    // Reuse the actual avatar in SpicyChat's chat header; no network request,
+    // full image download or permanent data-url copy is initiated by QoL.
+    const profile = document.querySelector("a[aria-label='chatbot-profile'][href*='/chatbot/']");
+    const image = profile?.querySelector("img") || profile?.parentElement?.querySelector("img") || null;
+    const source = image?.currentSrc || image?.src || "";
+    if (!source) return null;
+    try {
+      const url = new URL(source, location.href);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+      if (!DS.state?.settings?.chatBackgroundAnimateAvatar && /\.gif(?:$|[?#])/i.test(url.pathname)) return null;
+      return { url: url.href, name: "Character avatar", avatar: true };
+    } catch { return null; }
+  }
+
   function currentItem() {
     const key = chatKey();
-    return (key && mediaStore.chats?.[key]) || mediaStore.global || null;
+    const custom = (key && mediaStore.chats?.[key]) || mediaStore.global || null;
+    if (custom) return custom;
+    return DS.state?.settings?.chatBackgroundUseAvatar ? avatarFromChatHeader() : null;
   }
 
   function removeLayer() {
     document.getElementById("ds-chat-background-layer")?.remove();
-    document.documentElement.classList.remove("ds-chat-custom-background");
+    document.documentElement.classList.remove("ds-chat-custom-background", "ds-chat-bubble-alpha");
+    document.documentElement.style.removeProperty("--ds-chat-background-bubble-opacity");
   }
 
   function removeControl() {
@@ -82,7 +100,7 @@
   }
 
   function applyLayer(item) {
-    if (!item?.dataUrl) {
+    if (!item?.dataUrl && !item?.url) {
       removeLayer();
       return;
     }
@@ -96,7 +114,7 @@
     const settings = DS.state?.settings || {};
     const blur = Math.min(30, Math.max(0, Number(settings.chatBackgroundBlur) || 0));
     const dim = rgbaDim(settings.chatBackgroundDim ?? 45);
-    const safeUrl = String(item.dataUrl).replace(/"/g, "%22");
+    const safeUrl = String(item.dataUrl || item.url).replace(/"/g, "%22");
     layer.style.backgroundImage = `linear-gradient(${dim}, ${dim}), url("${safeUrl}")`;
     const fit = ["cover", "contain", "tile"].includes(settings.chatBackgroundFit) ? settings.chatBackgroundFit : "cover";
     const position = ["center", "top", "bottom", "left", "right"].includes(settings.chatBackgroundPosition) ? settings.chatBackgroundPosition : "center";
@@ -106,6 +124,9 @@
     layer.style.filter = blur ? `blur(${blur}px)` : "none";
     layer.style.transform = blur ? `scale(${1 + Math.min(0.08, blur / 250)})` : "none";
     document.documentElement.classList.add("ds-chat-custom-background");
+    const bubbleOpacity = Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
+    document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
+    document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
   }
 
   function findControlHost() {
@@ -203,7 +224,8 @@
     status.className = "ds-chat-background-status";
     status.textContent = override
       ? `This chat uses: ${override.name || "local image"}`
-      : (globalItem ? `Using global background: ${globalItem.name || "local image"}` : "No background image is set.");
+      : (globalItem ? `Using global background: ${globalItem.name || "local image"}` :
+        (DS.state?.settings?.chatBackgroundUseAvatar ? "Using chat character avatar where available." : "No background image is set."));
 
     const choose = document.createElement("button");
     choose.type = "button";

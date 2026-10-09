@@ -115,7 +115,11 @@
   function applyFilter(entries, mode) {
     restore(entries);
     for (const entry of entries) {
-      const hidden = mode === "has" ? !entry.lorebook : mode === "none" ? entry.lorebook : false;
+      const strict = !!DS.state?.settings?.lorebookUnknownSafeFilter;
+      const state = DS.cardLorebookState(entry.card);
+      const hidden = mode === "has" ? state !== "has" :
+        mode === "none" ? (strict ? state !== "none" : entry.lorebook) :
+        mode === "unknown" ? (!strict || state !== "unknown") : false;
       if (!hidden) continue;
       entry.target.classList.add("ds-lorebook-filter-hidden");
       entry.target.dataset.dsLorebookFilterHidden = "1";
@@ -164,6 +168,7 @@
             <option value="all">All</option>
             <option value="has">Has Lorebook</option>
             <option value="none">No Lorebook</option>
+            <option value="unknown">Unknown (unverified)</option>
           </select>
         </label>
         <label>Sort
@@ -200,7 +205,12 @@
 
     const filter = toolbar.querySelector("#ds-lorebook-filter-mode");
     const sort = toolbar.querySelector("#ds-lorebook-sort-mode");
-    if (filter) filter.value = DS.state.lorebookFilterMode || "all";
+    if (filter) {
+      const unknown = filter.querySelector('option[value="unknown"]');
+      if (unknown) unknown.hidden = !DS.state?.settings?.lorebookUnknownSafeFilter;
+      filter.value = DS.state.lorebookFilterMode === "unknown" && !DS.state?.settings?.lorebookUnknownSafeFilter
+        ? "all" : (DS.state.lorebookFilterMode || "all");
+    }
     if (sort) sort.value = DS.state.lorebookSortMode || "default";
 
     const total = entries.length;
@@ -232,6 +242,20 @@
 
     DS.state.lorebookFilterWasActive = false;
   }
+
+  // Three-way status: absence of an icon is not always proof of no Lorebook.
+  // Only explicit data/labels that state zero count as a confirmed "none".
+  DS.cardLorebookState = function cardLorebookState(card) {
+    if (hasLorebook(card)) return "has";
+    if (!card) return "unknown";
+    const explicit = card.querySelector?.('[data-lorebook-count], [data-lorebooks-count], [data-testid="no-lorebook"], [aria-label="No Lorebook"], [title="No Lorebook"]');
+    if (explicit) {
+      const count = explicit.getAttribute("data-lorebook-count") ?? explicit.getAttribute("data-lorebooks-count");
+      if (count !== null && Number.isFinite(Number(count))) return Number(count) > 0 ? "has" : "none";
+      if (/no lorebook/i.test(explicit.getAttribute("aria-label") || explicit.getAttribute("title") || explicit.getAttribute("data-testid") || "")) return "none";
+    }
+    return "unknown";
+  };
 
   DS.cardHasLorebook = hasLorebook;
 

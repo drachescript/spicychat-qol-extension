@@ -512,6 +512,9 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <label class="row"><input id="enableSavedListsOverlay" type="checkbox"/><span>Add an on-site Saved lists organizer for Favorite history + Later</span></label>
 <p class="hint">This is still QoL-local data. The organizer is an injected overlay on supported SpicyChat listing pages; it does not create a native SpicyChat Later list.</p>
 <label class="row"><input id="trackFavoriteBots" type="checkbox"/><span>Remember favorite bots seen on the Favorites page</span></label>
+<label class="row"><input id="favoritePageFoldersEnabled" type="checkbox"/><span>Show private QoL folder filter directly on Favorites</span></label>
+<label class="row"><input id="favoritePageSortEnabled" type="checkbox"/><span>Show oldest/newest Favorites sorting for loaded cards</span></label>
+<p class="hint">Local folders reuse Bot Organizer data. Sorting only affects cards currently loaded by the site; older favorite dates may reflect when QoL first saw them.</p>
 <label class="row"><input id="showFavoriteHistoryButton" type="checkbox"/><span>Show the Favorite history button on the Favorites page</span></label>
 <p class="hint">Favorite tracking can stay enabled without adding the extra page button. You can still manage remembered favorites here in Settings.</p>
 <div class="bot-manager-toolbar">
@@ -805,6 +808,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <div class="button-row">
 <button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
+<button id="scanUnmonitoredBotAvailability" type="button" title="Manual one-time check of previously seen bots outside routine monitoring; blocked bots are excluded">Check outside routine scope</button>
 <button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
@@ -1395,6 +1399,10 @@ Testing" spellcheck="false"></textarea></label>
 <section class="card" id="chatBackgroundsCard">
 <h2>Custom chat backgrounds</h2>
 <label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
+<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set (opt-in)</span></label>
+<label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
+<label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
+<p class="hint">Avatar mode uses the image already present in the chat header; it does not store or fetch an additional copy. Custom chat images always take priority.</p>
 <p class="hint">Uses local image data only. A global background applies to chats unless that chat has its own override from the in-chat BG control. Nothing is uploaded to SpicyChat.</p>
 <label>Background dimming (%)
 <input id="chatBackgroundDim" max="90" min="0" step="5" type="number" value="45"/>
@@ -2342,6 +2350,8 @@ cash =&gt; Bingo Coins
 </div>
 <label class="row"><input id="hideGroupChats" type="checkbox"/><span>Hide group chats / multiple participant bots</span></label>
 <label class="row"><input id="showLorebookFilters" type="checkbox"/><span>Add Lorebook filter/sort tools to bot listings (including Has Lorebook search)</span></label>
+<label class="row"><input id="lorebookUnknownSafeFilter" type="checkbox"/><span>Separate unknown Lorebook status from confirmed No Lorebook when filtering</span></label>
+<p class="hint">Unknown means the loaded card does not prove whether a Lorebook is attached. Private/public visibility is not inferred from missing icons or denied API requests.</p>
 <p class="hint">Exact message counts replace SpicyChat's rounded values (for example 1.2k) with the exact public count already returned by SpicyChat's Typesense listing search; QoL does not make a separate per-bot request for this. Token info loads bot profile data only as cards become visible, caches the result locally, and can show Greeting, Personality, Scenario and Example Dialogue counts. Greeting stays enabled by default; the other fields are optional. Counts use ~ because tokenization can differ by model. Lorebook tools add All / Has Lorebook / No Lorebook, Lorebook-first sorting, a count, a Has Lorebook toggle in SpicyChat's normal search/filter sidebar, and a Needs Lorebook shortcut on My Creations.</p>
 <label>
           Hidden card mode

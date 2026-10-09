@@ -227,7 +227,156 @@
     search?.focus();
   }
 
+  let favoritePageFolderFilter = "all";
+  let favoritePageSort = "native";
+
+  function favoriteFolderNames() {
+    const stored = DS.state?.botOrganization || {};
+    const configured = String(DS.state?.settings?.botCollections || "").split(/[\n,]+/);
+    return [...new Set([...(stored.collections || []), ...configured].map(cleanText).filter(Boolean))];
+  }
+
+  function resetFavoriteCards() {
+    for (const el of document.querySelectorAll("[data-ds-fav-page-managed='1']")) {
+      el.classList.remove("ds-favorite-qol-filter-hidden");
+      if (el.dataset.dsFavOldOrder !== undefined) {
+        el.style.order = el.dataset.dsFavOldOrder;
+        delete el.dataset.dsFavOldOrder;
+      }
+      delete el.dataset.dsFavPageManaged;
+    }
+  }
+
+  async function assignFavoriteFolder(id, name) {
+    const existing = DS.state.botOrganization || { meta: {}, collections: [] };
+    const next = { ...existing, meta: { ...(existing.meta || {}) } };
+    const current = next.meta[id] || {};
+    const membership = [...new Set([...(current.collections || []), name])];
+    next.meta[id] = { ...current, id, collections: membership, updatedAt: Date.now() };
+    DS.state.botOrganization = next;
+    await (DS.saveBotOrganization?.(next) || DS.storageSet?.({ [DS.BOT_ORGANIZER_KEY || "botOrganization"]: next }));
+    applyFavoritePageExtras();
+  }
+
+  function applyFavoritePageExtras() {
+    const settings = DS.state?.settings || {};
+    const enabled = !!settings.enabled && !!DS.isFavoriteBotsPage?.();
+    const folders = enabled && settings.favoritePageFoldersEnabled;
+    const sorting = enabled && settings.favoritePageSortEnabled;
+    const existing = document.getElementById("ds-favorite-qol-controls");
+    if (!folders && !sorting) {
+      existing?.remove();
+      document.querySelectorAll(".ds-favorite-qol-folder-action").forEach(el => el.remove());
+      resetFavoriteCards();
+      return;
+    }
+    const heading = (DS.qsa?.("h1, h2, h3") || []).find(el => /^(favorites|favorite bots)$/i.test(cleanText(el.textContent)));
+    if (!heading?.parentElement) return;
+    let controls = existing;
+    if (!controls || controls.previousElementSibling !== heading) {
+      existing?.remove();
+      controls = document.createElement("div");
+      controls.id = "ds-favorite-qol-controls";
+      controls.className = "ds-favorite-qol-controls";
+      heading.insertAdjacentElement("afterend", controls);
+    }
+    const names = favoriteFolderNames();
+    const signature = JSON.stringify([folders, sorting, names]);
+    if (controls.dataset.signature !== signature) {
+      controls.dataset.signature = signature;
+      controls.replaceChildren();
+      if (folders) {
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", "Filter Favorites by private folder");
+        for (const name of ["all", "__unfoldered__", ...names]) {
+          const opt = document.createElement("option"); opt.value = name;
+          opt.textContent = name === "all" ? "All favorite folders" : name === "__unfoldered__" ? "Unfoldered" : name;
+          select.appendChild(opt);
+        }
+        if (!["all", "__unfoldered__", ...names].includes(favoritePageFolderFilter)) favoritePageFolderFilter = "all";
+        select.value = favoritePageFolderFilter;
+        select.addEventListener("change", () => { favoritePageFolderFilter = select.value; applyFavoritePageExtras(); });
+        controls.appendChild(select);
+        const create = document.createElement("button"); create.type = "button"; create.textContent = "+ Folder";
+        create.addEventListener("click", async () => {
+          const name = cleanText(window.prompt("Name a private Favorites folder:"));
+          if (!name || names.some(n => n.toLowerCase() === name.toLowerCase())) return;
+          const combined = [...names, name];
+          const org = DS.state.botOrganization || { meta: {}, collections: [] };
+          DS.state.botOrganization = { ...org, collections: combined };
+          DS.state.settings.botCollections = combined.join("\n");
+          await Promise.all([
+            DS.saveBotOrganization?.(DS.state.botOrganization) || DS.storageSet?.({ [DS.BOT_ORGANIZER_KEY || "botOrganization"]: DS.state.botOrganization }),
+            DS.saveSettingsPatch?.({ botCollections: combined.join("\n") })
+          ]);
+          favoritePageFolderFilter = name;
+          controls.dataset.signature = "";
+          applyFavoritePageExtras();
+        });
+        controls.appendChild(create);
+      }
+      if (sorting) {
+        const sortSelect = document.createElement("select");
+        sortSelect.setAttribute("aria-label", "Sort loaded Favorites");
+        for (const [id,label] of [["native","SpicyChat order"],["newest","QoL newest first"],["oldest","QoL oldest first"]]) {
+          const opt = document.createElement("option");opt.value=id;opt.textContent=label;sortSelect.appendChild(opt);
+        }
+        sortSelect.value = favoritePageSort;
+        sortSelect.addEventListener("change", () => { favoritePageSort = sortSelect.value; applyFavoritePageExtras(); });
+        controls.appendChild(sortSelect);
+      }
+      const help = document.createElement("small");
+      help.textContent = "Only loaded cards · QoL saved dates may be first-seen dates";
+      controls.appendChild(help);
+    }
+    const orgMeta = DS.state?.botOrganization?.meta || {};
+    const favoriteMeta = DS.state?.favoriteBots?.meta || {};
+    const entries = (DS.collectCards?.() || []).map((item,i) => {
+      const id = DS.botIdFromHref?.(item.anchor?.href || "") || DS.chatIdFromHref?.(item.anchor?.href || "");
+      const target = DS.getBestHideTarget?.(item.card) || item.card;
+      return { ...item, id, target, index: i, savedAt: Number(favoriteMeta[id]?.savedAt || 0) || 0 };
+    }).filter(entry => !!entry.id && !!entry.target?.isConnected);
+    // CSS order only: never reparent React-owned cards or change SpicyChat favorites.
+    const groups = new Map();
+    for (const item of entries) {
+      if (!groups.has(item.target.parentElement)) groups.set(item.target.parentElement, []);
+      groups.get(item.target.parentElement).push(item);
+      if (item.target.dataset.dsFavOldOrder === undefined) item.target.dataset.dsFavOldOrder = item.target.style.order || "";
+      item.target.dataset.dsFavPageManaged = "1";
+      const memberships = orgMeta[item.id]?.collections || [];
+      const visible = !folders || favoritePageFolderFilter === "all" ||
+        (favoritePageFolderFilter === "__unfoldered__" ? !memberships.length : memberships.includes(favoritePageFolderFilter));
+      item.target.classList.toggle("ds-favorite-qol-filter-hidden", !visible);
+      const oldButton = item.card.querySelector(".ds-favorite-qol-folder-action");
+      if (folders && names.length && !oldButton) {
+        const btn = document.createElement("button");
+        btn.className = "ds-favorite-qol-folder-action";
+        btn.type = "button";
+        btn.textContent = "+ Folder";
+        btn.title = "Add to private QoL folder";
+        btn.addEventListener("click", event => {
+          event.preventDefault();event.stopPropagation();
+          const chosen = cleanText(window.prompt(`Add to which folder?\n${favoriteFolderNames().join(", ")}`, favoritePageFolderFilter !== "all" && favoritePageFolderFilter !== "__unfoldered__" ? favoritePageFolderFilter : ""));
+          if (!chosen || !favoriteFolderNames().includes(chosen)) return;
+          assignFavoriteFolder(item.id, chosen).catch(() => DS.setQuickStatus?.("Could not save folder"));
+        });
+        item.card.appendChild(btn);
+      } else if (!folders) oldButton?.remove();
+    }
+    for (const group of groups.values()) {
+      if (favoritePageSort === "native" || !sorting) {
+        for (const item of group) item.target.style.order = item.target.dataset.dsFavOldOrder || "";
+      } else {
+        group.sort((a,b) => favoritePageSort === "oldest"
+          ? (a.savedAt || Number.MAX_SAFE_INTEGER) - (b.savedAt || Number.MAX_SAFE_INTEGER) || a.index-b.index
+          : (b.savedAt || 0) - (a.savedAt || 0) || a.index-b.index);
+        group.forEach((item, i) => { item.target.style.order = String(i); });
+      }
+    }
+  }
+
   DS.applyFavoriteHistoryButton = function applyFavoriteHistoryButton() {
+    applyFavoritePageExtras();
     const settings = DS.state.settings || {};
     const existing = document.getElementById("ds-favorite-history-open");
     const existingWrap = document.getElementById("ds-favorite-history-button-wrap");
@@ -267,7 +416,7 @@
       existing?.isConnected &&
       existingWrap?.isConnected &&
       existing.parentElement === existingWrap &&
-      existingWrap.previousElementSibling === heading
+      existingWrap.previousElementSibling === (document.getElementById("ds-favorite-qol-controls") || heading)
     );
     if (correctlyPlaced) return;
 
@@ -286,13 +435,16 @@
     wrap.id = "ds-favorite-history-button-wrap";
     wrap.className = "ds-favorite-history-button-wrap";
     wrap.appendChild(button);
-    heading.insertAdjacentElement("afterend", wrap);
+    (document.getElementById("ds-favorite-qol-controls") || heading).insertAdjacentElement("afterend", wrap);
   };
 
   DS.removeFavoriteHistoryButton = function removeFavoriteHistoryButton() {
     document.getElementById("ds-favorite-history-open")?.remove();
     document.getElementById("ds-favorite-history-button-wrap")?.remove();
     document.getElementById("ds-favorite-history-modal")?.remove();
+    document.getElementById("ds-favorite-qol-controls")?.remove();
+    document.querySelectorAll(".ds-favorite-qol-folder-action").forEach(el => el.remove());
+    resetFavoriteCards();
   };
 
   DS.importVisibleFavoriteBots = async function importVisibleFavoriteBots() {

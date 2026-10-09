@@ -5695,3 +5695,16 @@ nav:not([style*="width: 54px"]) #ds-qol-sidebar-btn .ds-qol-sidebar-button-text 
   display: inline !important;
 }
 
+
+/* 0.2.40 — optional avatar background legibility. Only tint native message
+ * bubbles with an existing background; never fade the text or the composer. */
+html.ds-chat-bubble-alpha [id^="message-"] :is(.bg-gray-3,.bg-gray-4,.bg-gray-5) {
+  background-color: rgb(29 31 36 / var(--ds-chat-background-bubble-opacity, .95)) !important;
+}
+
+/* 0.2.40 private Favorites folders and loaded-card sorting (opt-in). */
+.ds-favorite-qol-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 4px; font-size:12px; }
+.ds-favorite-qol-controls select, .ds-favorite-qol-controls button, .ds-favorite-qol-folder-action { color:inherit; background:rgba(40,42,47,.95); border:1px solid rgba(180,180,190,.35); border-radius:7px; padding:5px 9px; cursor:pointer; }
+.ds-favorite-qol-controls small { opacity:.65; }
+.ds-favorite-qol-filter-hidden { display:none !important; }
+.ds-favorite-qol-folder-action { font-size:11px; margin:4px; }

@@ -1,3 +1,11 @@
+## 0.2.41
+- Clarified Bot Status counts: routine monitored checked/unchecked, outside-scope history, and manually checkable unblocked outside-scope bots.
+- Added a one-time outside-scope Bot Status check without enrolling those bots in routine monitoring; existing max bot/time limits and ETA apply.
+- Checkpoints long Bot Status runs every 50 completed bots, preserving batches through page reloads and updating live saved-progress text.
+- Added optional character-avatar chat backgrounds, animated-GIF permission, and a message-bubble opacity control; custom images take priority and no avatar copies are stored.
+- Added optional private folder filters/assignments and loaded-card oldest/newest sorting directly on Favorites, reusing Bot Organizer and saved favorite dates.
+- Added optional three-state Lorebook filtering (Has / confirmed None / Unknown) to prevent missing metadata being misreported as no Lorebook. Private/public visibility remains unverified unless explicitly provided.
+
 ## 0.2.40
 - Added the missing Ask Piper shortcut to Settings → Help, using the same bot link as the extension popup.
 - Added configurable Bot Status scan limits by number of bots and runtime, with progress, elapsed time, adaptive ETA and a saved pace estimate.
