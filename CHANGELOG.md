@@ -1,4 +1,4 @@
-## 0.2.43 (in progress)
+## 0.2.43
 - Fixed release preparation failing to include some required extension files.
 - Improved reliability when saving bot folders and covers, and stopped the mobile selection shortcut when Bot Organizer is disabled.
 - Memory Vault now clearly marks memories whose removal could not be confirmed, so users can check before restoring them.
