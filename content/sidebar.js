@@ -543,6 +543,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
+  function hideSidebarNewBadges() {
+    const nav = getNav();
+    if (!nav) return;
+    // Match the little direct-child label instead of hiding its parent link.
+    // Do not touch other badges such as premium, notifications, or unread counts.
+    // The native Lorebooks link currently contains a direct button child "New".
+    for (const button of nav.querySelectorAll("a > button, [data-testid='nav-lorebooks']")) {
+      for (const child of button.children) {
+        if (child.dataset?.dsReason === "sidebar:new-badge" ||
+            (child.children.length === 0 && String(child.textContent || "").trim().toLowerCase() === "new")) {
+          hideSidebarElement(child, "sidebar:new-badge");
+        }
+      }
+    }
+  }
+
   function keepSignInVisible() {
     const nav = getNav();
     if (!nav) return;
@@ -577,6 +593,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "sidebar:chats-text": !!settings.hideSidebarChats,
       "sidebar:personas": !!settings.hideSidebarPersonas,
       "sidebar:personas-text": !!settings.hideSidebarPersonas,
+      "sidebar:new-badge": !!settings.hideSidebarNewBadges,
       "sidebar:create-menu": !!settings.hideSidebarCreateMenu,
       "sidebar:create-chatbot": !!settings.hideSidebarCreateChatbot,
       "sidebar:create-chatbot-link": !!settings.hideSidebarCreateChatbot,
@@ -665,6 +682,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     ensureSidebarObserver();
     const settingsSignature = sidebarSettingsSignature(settings);
+    // A native React sidebar update can move Personas back to the lower group
+    // without replacing nav itself. Check only the two relevant links when
+    // this user explicitly enabled the move; avoid a broad sidebar scan.
+    if (!sidebarDirty && settings.enabled && settings.restorePersonasSidebarPosition) {
+      const nav = getNav();
+      const chats = nav?.querySelector("a[href$='/chats'],a[href*='/chats?']");
+      const personas = nav?.querySelector("a[href$='/personas'],a[href*='/personas?']");
+      const chatsRow = nativeSidebarRow(chats, nav);
+      const personaRow = nativeSidebarRow(personas, nav);
+      if (chatsRow && personaRow && (chatsRow.parentElement !== personaRow.parentElement || chatsRow.nextElementSibling !== personaRow)) sidebarDirty = true;
+    }
     if (!sidebarDirty && settingsSignature === lastSidebarSettingsSignature) {
       if (DS.state?.runtimeCounters) {
         DS.state.runtimeCounters.sidebarStablePassSkips = Number(DS.state.runtimeCounters.sidebarStablePassSkips || 0) + 1;
@@ -686,6 +714,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (!settings.enabled) return;
 
+    if (settings.hideSidebarNewBadges) hideSidebarNewBadges();
     if (settings.hideSidebarLogo) hideLogo();
 
     if (settings.hideSidebarHome) {

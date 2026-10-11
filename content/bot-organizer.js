@@ -9,6 +9,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let bulkMode = false;
   let selectedIds = new Set();
   let filterCollection = "all";
+  let explorerView = "root";
+  let latestFolderPage = "";
+  let newFolderScope = "";
   let filterStatus = "all";
   let filterQuery = "";
   let activePopoverId = "";
@@ -32,6 +35,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return [...new Set((values || []).map(clean).filter(Boolean))];
   }
 
+  // Folder locations affect only Favorites and My Creations. Home and
+  // Recommendations still support local notes/tags, but not folder controls.
+  function pageFolderScope() {
+    if (DS.isFavoriteBotsPage?.()) return "favorites";
+    if (DS.isMyCreationsChatbotsPage?.()) return "chatbots";
+    return "";
+  }
+
+  function normalizeFolderScope(scope) {
+    return ["favorites", "chatbots", "shared"].includes(scope) ? scope : "shared";
+  }
+
+  function visibleFolder(name) {
+    const page = pageFolderScope();
+    if (!page) return false;
+    const folderScope = normalizeFolderScope(DS.state.botOrganization?.folderScopes?.[name]);
+    return folderScope === "shared" || folderScope === page;
+  }
+
+  function visibleCollections() {
+    return parseConfiguredCollections().filter(visibleFolder);
+  }
+
+  function visibleMemberCollections(data) {
+    return unique(data?.collections).filter(visibleFolder);
+  }
+
   function parseConfiguredCollections() {
     const settingsCollections = String(DS.state.settings?.botCollections || "").split(/[\n,]+/g);
     const storedCollections = Array.isArray(DS.state.botOrganization?.collections)
@@ -40,11 +70,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return unique([...settingsCollections, ...storedCollections]);
   }
 
-  async function saveConfiguredCollections(collections) {
+  async function saveConfiguredCollections(collections, scopeUpdates = {}) {
     const next = unique(collections);
     const settings = { ...(DS.state.settings || {}), botCollections: next.join("\n") };
     const organizer = normalizeStore(DS.state.botOrganization);
     organizer.collections = next;
+    organizer.folderScopes = { ...(organizer.folderScopes || {}), ...scopeUpdates };
+    for (const name of Object.keys(organizer.folderScopes)) {
+      if (!next.includes(name)) delete organizer.folderScopes[name];
+    }
     DS.state.settings = settings;
     DS.state.botOrganization = organizer;
     await Promise.all([
@@ -64,9 +98,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
     const beforeSettings = { ...(DS.state.settings || {}) };
-    await saveConfiguredCollections([...current, name]);
+    await saveConfiguredCollections([...current, name], { [name]: normalizeFolderScope(newFolderScope || pageFolderScope()) });
     await DS.recordLocalChange?.(`Created chatbot folder: ${name}`, { settings: beforeSettings }, { settings: { ...(DS.state.settings || {}) } });
-    filterCollection = name;
+    const createdHere = visibleFolder(name);
+    filterCollection = createdHere ? name : "all";
+    explorerView = createdHere ? "folder" : "root";
+    if (!createdHere) DS.setQuickStatus?.(`Created ${name} for another page. Open that page to see it.`);
     DS.scheduleRun?.({ priority: "slow", source: "bot-folder-create" });
   }
 
@@ -90,6 +127,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       data.collections = unique((data.collections || []).map(item => item === oldName ? nextName : item));
       if ((data.collections || []).includes(nextName)) data.updatedAt = Date.now();
     }
+    if (nextStore.folderScopes?.[oldName]) {
+      nextStore.folderScopes[nextName] = nextStore.folderScopes[oldName];
+      delete nextStore.folderScopes[oldName];
+    }
+    if (nextStore.folderCovers?.[oldName]) {
+      nextStore.folderCovers[nextName] = nextStore.folderCovers[oldName];
+      delete nextStore.folderCovers[oldName];
+    }
     await saveStore(nextStore);
     await saveConfiguredCollections(current.map(item => item === oldName ? nextName : item));
     await DS.recordLocalChange?.(`Renamed chatbot folder: ${oldName} → ${nextName}`, { [DS.BOT_ORGANIZER_KEY]: beforeStore, settings: beforeSettings }, { [DS.BOT_ORGANIZER_KEY]: nextStore, settings: { ...(DS.state.settings || {}) } });
@@ -112,11 +157,46 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       data.updatedAt = Date.now();
       if (!hasLocalData(data)) delete nextStore.meta[id];
     }
+    delete nextStore.folderCovers?.[folder];
+    delete nextStore.folderScopes?.[folder];
     await saveStore(nextStore);
     await saveConfiguredCollections(current.filter(item => item !== folder));
     await DS.recordLocalChange?.(`Deleted chatbot folder: ${folder}`, { [DS.BOT_ORGANIZER_KEY]: beforeStore, settings: beforeSettings }, { [DS.BOT_ORGANIZER_KEY]: nextStore, settings: { ...(DS.state.settings || {}) } });
     filterCollection = "all";
     DS.scheduleRun?.({ priority: "slow", source: "bot-folder-delete" });
+  }
+
+  // Small folder-cover records live alongside folder names in the existing
+  // Bot Organizer storage/backup. Avatars are URLs; uploaded pictures are
+  // resized thumbnails, never original uploads or copies of bot avatars.
+  function normalizeFolderCover(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const mode = ["icon", "auto", "selected", "custom"].includes(raw.mode) ? raw.mode : "icon";
+    const ids = unique(Array.isArray(raw.ids) ? raw.ids : []).slice(0, 2);
+    const image = typeof raw.image === "string" && raw.image.length <= 55000 &&
+      /^data:image\/(?:webp|jpeg|png);base64,[a-zA-Z0-9+/=]+$/.test(raw.image) ? raw.image : "";
+    return { mode: mode === "custom" && !image ? "icon" : mode, ids, image, updatedAt: Number(raw.updatedAt) || 0 };
+  }
+
+  function normalizeFolderCovers(value) {
+    const output = {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return output;
+    for (const [name, cover] of Object.entries(value)) {
+      const key = clean(name);
+      const normalized = normalizeFolderCover(cover);
+      if (key && normalized) output[key] = normalized;
+    }
+    return output;
+  }
+
+  function normalizeFolderScopes(raw) {
+    const scopes = {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return scopes;
+    for (const [name, scope] of Object.entries(raw)) {
+      const key = clean(name);
+      if (key) scopes[key] = normalizeFolderScope(scope);
+    }
+    return scopes;
   }
 
   function normalizeStore(value) {
@@ -145,6 +225,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     return {
       collections: unique(source.collections),
+      folderCovers: normalizeFolderCovers(source.folderCovers),
+      folderScopes: normalizeFolderScopes(source.folderScopes),
       meta: output
     };
   }
@@ -155,11 +237,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function saveStore(next = store()) {
+    const previous = DS.state.botOrganization;
     DS.state.botOrganization = normalizeStore(next);
-    if (typeof DS.saveBotOrganization === "function") {
-      await DS.saveBotOrganization(DS.state.botOrganization);
-    } else {
-      await DS.storageSet?.({ [DS.BOT_ORGANIZER_KEY || "botOrganization"]: DS.state.botOrganization });
+    try {
+      if (typeof DS.saveBotOrganization === "function") {
+        const saved = await DS.saveBotOrganization(DS.state.botOrganization);
+        if (saved === false) throw new Error("QoL could not save the folder changes.");
+      } else {
+        const saved = await DS.storageSet?.({ [DS.BOT_ORGANIZER_KEY || "botOrganization"]: DS.state.botOrganization });
+        if (saved === false || saved === undefined) throw new Error("QoL could not save the folder changes.");
+      }
+    } catch (error) {
+      // A caller may have already edited the live object, so reload the last
+      // committed copy rather than reusing the possibly mutated reference.
+      try {
+        const key = DS.BOT_ORGANIZER_KEY || "botOrganization";
+        const persisted = await DS.storageGet?.([key]);
+        DS.state.botOrganization = normalizeStore(persisted?.[key]);
+      } catch {
+        DS.state.botOrganization = previous;
+      }
+      throw error;
     }
   }
 
@@ -347,7 +445,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const visible = {
       status: data.status || "",
-      collections: (data.collections || []).slice(0, 2),
+      collections: pageFolderScope() ? visibleMemberCollections(data).slice(0, 2) : [],
       tags: (data.tags || []).slice(0, 2),
       note: data.note || ""
     };
@@ -444,7 +542,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function openPopover(entry, anchorButton) {
     closePopover();
     const current = dataFor(entry.id);
-    const collections = parseConfiguredCollections();
+    const collections = visibleCollections();
     activePopoverId = entry.id;
 
     const panel = document.createElement("div");
@@ -486,7 +584,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     legend.textContent = "Folders";
     collectionBox.appendChild(legend);
 
-    if (collections.length) {
+    if (pageFolderScope() && collections.length) {
       for (const collection of collections) {
         const label = document.createElement("label");
         const checkbox = document.createElement("input");
@@ -498,10 +596,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     } else {
       const empty = document.createElement("small");
-      empty.textContent = "Create folders here or in Settings → Saved Lists → Bot Organizer.";
+      empty.textContent = pageFolderScope() ? "Create folders here or in Settings → Saved Lists → Bot Organizer." : "Folders are available on Favorites and My Creations.";
       collectionBox.appendChild(empty);
     }
-    body.appendChild(collectionBox);
+    if (pageFolderScope()) body.appendChild(collectionBox);
 
     let statusSelect = null;
     if (DS.isMyCreationsChatbotsPage?.()) {
@@ -543,8 +641,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     save.textContent = "Save";
     save.addEventListener("click", async () => {
       const beforeStore = JSON.parse(JSON.stringify(store()));
-      const chosenCollections = [...collectionBox.querySelectorAll("input[type='checkbox']:checked")]
-        .map(input => input.value);
+      const visible = visibleCollections();
+      const selectedVisible = [...collectionBox.querySelectorAll("input[type='checkbox']:checked")].map(input => input.value);
+      const chosenCollections = unique([
+        ...(current.collections || []).filter(name => !visible.includes(name)),
+        ...selectedVisible
+      ]);
       const tagValues = unique(tags.value.split(/[,\n]+/g)).slice(0, 40);
       const next = store();
       next.meta[entry.id] = {
@@ -590,9 +692,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function isFilteredOut(entry) {
     const data = dataFor(entry.id);
-    if (filterCollection === "__unfoldered__") {
-      if ((data.collections || []).length) return true;
-    } else if (filterCollection !== "all" && !(data.collections || []).includes(filterCollection)) return true;
+    const onFolderPage = !!pageFolderScope();
+    if (onFolderPage && DS.state.settings?.botOrganizerExplorerFolders && explorerView === "root") {
+      if (visibleMemberCollections(data).length) return true;
+    } else if (onFolderPage && filterCollection === "__unfoldered__") {
+      if (visibleMemberCollections(data).length) return true;
+    } else if (onFolderPage && filterCollection !== "all" && !(data.collections || []).includes(filterCollection)) return true;
     if (filterStatus !== "all") {
       if (filterStatus === "none") {
         if (data.status) return true;
@@ -613,8 +718,311 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function applyFilters(entries) {
     for (const entry of entries) {
-      entry.card.classList.toggle("ds-bot-org-filter-hidden", isFilteredOut(entry));
+      // The SpicyChat grid item wraps the card. Hiding only the inner card
+      // leaves an empty grid cell and makes a one-bot folder look stranded.
+      const target = DS.getBestHideTarget?.(entry.card) || entry.card;
+      if (target !== entry.card) entry.card.classList.remove("ds-bot-org-filter-hidden");
+      target.classList.toggle("ds-bot-org-filter-hidden", isFilteredOut(entry));
     }
+  }
+
+  function explorerPage() {
+    return !!(DS.isFavoriteBotsPage?.() || DS.isMyCreationsChatbotsPage?.());
+  }
+
+  function folderMembers(name, entries, meta) {
+    const known = new Map();
+    // Loaded avatar URLs take precedence. Saved URLs fill in when the bot is
+    // not among the current listing cards (without fetching hidden pages).
+    for (const [id, data] of Object.entries(meta || {})) {
+      if ((data?.collections || []).includes(name)) known.set(id, {
+        id, name: data.name || id, image: data.image || ""
+      });
+    }
+    for (const entry of entries || []) {
+      if (!known.has(entry.id)) continue;
+      const previous = known.get(entry.id);
+      known.set(entry.id, { id: entry.id, name: entry.name || previous.name, image: entry.image || previous.image });
+    }
+    return [...known.values()];
+  }
+
+  function createFolderCover(name, entries, meta, cover) {
+    const icon = document.createElement("span");
+    icon.className = "ds-bot-explorer-icon";
+    icon.textContent = "📁";
+    icon.setAttribute("aria-hidden", "true");
+    if (!cover || cover.mode === "icon") return icon;
+    const members = folderMembers(name, entries, meta);
+    const memberById = new Map(members.map(item => [item.id, item]));
+    const urls = cover.mode === "custom" ? [cover.image] :
+      cover.mode === "selected" ? (cover.ids || []).map(id => memberById.get(id)?.image) :
+      members.map(item => item.image);
+    const images = urls.filter(url => typeof url === "string" &&
+      (/^https:\/\//i.test(url) || /^data:image\/(?:webp|jpeg|png);base64,/i.test(url))).slice(0, 2);
+    if (!images.length) return icon;
+    const visuals = document.createElement("span");
+    visuals.className = `ds-bot-explorer-cover${images.length === 2 ? " ds-bot-explorer-cover-pair" : ""}`;
+    visuals.setAttribute("aria-hidden", "true");
+    for (const url of images) {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.src = url;
+      visuals.appendChild(img);
+    }
+    return visuals;
+  }
+
+  async function resizedCoverData(file) {
+    if (!file || !/^image\/(?:png|jpeg|webp|gif)$/i.test(file.type)) throw new Error("Choose a PNG, JPEG, WebP or GIF picture.");
+    if (file.size > 8 * 1024 * 1024) throw new Error("Picture exceeds the 8 MiB import limit.");
+    const objectUrl = URL.createObjectURL(file);
+    let bitmap;
+    try {
+      bitmap = new Image();
+      bitmap.decoding = "async";
+      bitmap.src = objectUrl;
+      await new Promise((resolve, reject) => { bitmap.onload = resolve; bitmap.onerror = () => reject(new Error("Couldn't read that picture.")); });
+      const canvas = document.createElement("canvas");
+      // Fixed 160 x 96 cover. Downscaling before storage keeps archive/backup
+      // payloads small and prevents large animated images running in tiles.
+      canvas.width = 160;
+      canvas.height = 96;
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error("Image resizing isn't available in this browser.");
+      const scale = Math.max(160 / bitmap.naturalWidth, 96 / bitmap.naturalHeight);
+      const w = bitmap.naturalWidth * scale, h = bitmap.naturalHeight * scale;
+      context.fillStyle = "#222";
+      context.fillRect(0, 0, 160, 96);
+      context.drawImage(bitmap, (160 - w) / 2, (96 - h) / 2, w, h);
+      let result = canvas.toDataURL("image/webp", 0.72);
+      if (!result.startsWith("data:image/webp;")) result = canvas.toDataURL("image/jpeg", 0.70);
+      if (result.length > 55000) result = canvas.toDataURL("image/jpeg", 0.48);
+      if (result.length > 55000) throw new Error("Picture cannot fit the folder cover storage limit.");
+      return result;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  function openFolderCoverEditor(name, entries) {
+    document.getElementById("ds-bot-explorer-cover-editor")?.remove();
+    const current = normalizeFolderCover(store().folderCovers?.[name]) || { mode: "icon", ids: [], image: "" };
+    const members = folderMembers(name, entries, store().meta);
+    const overlay = document.createElement("div");
+    overlay.id = "ds-bot-explorer-cover-editor";
+    overlay.className = "ds-bot-explorer-cover-overlay";
+    const dialog = document.createElement("section");
+    dialog.className = "ds-bot-explorer-cover-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", `Folder picture for ${name}`);
+    const heading = document.createElement("h3");
+    heading.textContent = `Folder picture: ${name}`;
+    const label = (caption, control) => {
+      const wrap = document.createElement("label");
+      wrap.className = "ds-bot-explorer-cover-field";
+      const title = document.createElement("span"); title.textContent = caption;
+      wrap.append(title, control); return wrap;
+    };
+    const scope = document.createElement("select");
+    scope.setAttribute("aria-label", "Folder location");
+    for (const [value, title] of [["favorites", "Favorites"], ["chatbots", "My Chatbots"], ["shared", "Shared (both pages)"]]) {
+      const option = document.createElement("option"); option.value = value; option.textContent = title; scope.append(option);
+    }
+    scope.value = normalizeFolderScope(store().folderScopes?.[name]);
+    const mode = document.createElement("select");
+    mode.setAttribute("aria-label", "Folder cover type");
+    for (const [value, title] of [
+      ["icon", "Normal folder icon"], ["auto", "First two bot pictures"],
+      ["selected", "Choose up to two bots"], ["custom", "Upload my own picture"]
+    ]) {
+      const option = document.createElement("option"); option.value = value; option.textContent = title; mode.append(option);
+    }
+    mode.value = current.mode;
+    const makeBotSelect = (index) => {
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", `Folder cover bot ${index + 1}`);
+      const empty = document.createElement("option"); empty.value = ""; empty.textContent = index ? "No second bot" : "Select a bot";
+      select.append(empty);
+      for (const item of members) {
+        const option = document.createElement("option"); option.value = item.id;
+        option.textContent = item.name; select.append(option);
+      }
+      select.value = current.ids?.[index] || "";
+      return select;
+    };
+    const first = makeBotSelect(0), second = makeBotSelect(1);
+    const file = document.createElement("input"); file.type = "file"; file.accept = "image/png,image/jpeg,image/webp,image/gif";
+    const note = document.createElement("small");
+    note.textContent = "Bot images use existing avatar links. Uploaded covers are saved as small, static thumbnails in local QoL backups.";
+    const status = document.createElement("small"); status.setAttribute("role", "status");
+    let chosenImage = current.image || "";
+    const existing = document.createElement("img");
+    existing.className = "ds-bot-explorer-cover-preview";
+    existing.alt = "Current custom folder cover";
+    if (chosenImage) existing.src = chosenImage;
+    const rows = [label("First bot", first), label("Second bot (optional)", second)];
+    const fileRow = label("Picture", file);
+    function updateFields() {
+      rows.forEach(row => row.hidden = mode.value !== "selected");
+      fileRow.hidden = mode.value !== "custom";
+      existing.hidden = mode.value !== "custom" || !chosenImage;
+    }
+    mode.addEventListener("change", updateFields); updateFields();
+    file.addEventListener("change", async () => {
+      status.textContent = "Preparing thumbnail…";
+      try {
+        chosenImage = await resizedCoverData(file.files?.[0]);
+        existing.src = chosenImage; updateFields();
+        status.textContent = "Picture ready — click Save to keep it.";
+      } catch (error) { status.textContent = error.message || "Unable to use picture."; }
+    });
+    const actions = document.createElement("div"); actions.className = "ds-bot-explorer-cover-actions";
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel";
+    const save = document.createElement("button"); save.type = "button"; save.textContent = "Save";
+    const close = () => overlay.remove();
+    cancel.addEventListener("click", close);
+    overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+    save.addEventListener("click", async () => {
+      const chosenMode = mode.value;
+      const ids = unique([first.value, second.value]).slice(0, 2);
+      if (chosenMode === "selected" && (!ids.length || ids.some(id => !members.some(item => item.id === id)))) {
+        status.textContent = "Choose at least one bot in this folder."; return;
+      }
+      if (chosenMode === "custom" && !chosenImage) { status.textContent = "Upload a picture first."; return; }
+      save.disabled = true;
+      try {
+        const previous = JSON.parse(JSON.stringify(store()));
+        const next = store();
+        const covers = { ...(next.folderCovers || {}) };
+        if (chosenMode === "icon") delete covers[name];
+        else covers[name] = normalizeFolderCover({
+          mode: chosenMode,
+          ids: chosenMode === "selected" ? ids : [],
+          image: chosenMode === "custom" ? chosenImage : "",
+          updatedAt: Date.now()
+        });
+        // Limit the total stored thumbnails. A large folder collection should
+        // never silently generate multi-megabyte backups.
+        const totalBytes = Object.values(covers).reduce((sum, item) => sum + (item?.image?.length || 0), 0);
+        if (totalBytes > 1024 * 1024) throw new Error("Folder pictures exceed the 1 MiB total limit. Remove an old cover first.");
+        next.folderCovers = covers;
+        next.folderScopes = { ...(next.folderScopes || {}), [name]: normalizeFolderScope(scope.value) };
+        await saveStore(next);
+        await DS.recordLocalChange?.(`Updated folder cover: ${name}`, { [DS.BOT_ORGANIZER_KEY]: previous }, { [DS.BOT_ORGANIZER_KEY]: next });
+        close();
+        document.getElementById("ds-bot-organizer-explorer")?.removeAttribute("data-signature");
+        const entries = collectEntries();
+        renderFolderExplorer(entries);
+        applyFilters(entries);
+        document.getElementById("ds-bot-organizer-toolbar")?.removeAttribute("data-ds-toolbar-signature");
+        DS.scheduleRun?.({ priority: "slow", source: "bot-folder-cover-or-location" });
+      } catch (error) { status.textContent = error.message || "Failed to save picture."; }
+      finally { save.disabled = false; }
+    });
+    actions.append(cancel, save);
+    dialog.append(heading, label("Location", scope), label("Display", mode), ...rows, fileRow, existing, note, status, actions);
+    overlay.append(dialog); document.body.append(overlay);
+    mode.focus();
+  }
+
+  function renderFolderExplorer(entries) {
+    const settings = DS.state.settings || {};
+    const enabled = !!(settings.enabled && settings.enableBotOrganizer && settings.botOrganizerExplorerFolders && explorerPage());
+    let panel = document.getElementById("ds-bot-organizer-explorer");
+    if (!enabled) { panel?.remove(); explorerView = "root"; return; }
+    const grid = entries[0]?.card?.parentElement?.parentElement;
+    // Insert only beside the live native grid, never into React-owned card trees.
+    if (!grid?.isConnected || !grid.classList?.contains("grid")) return;
+    if (!panel) {
+      panel = document.createElement("section");
+      panel.id = "ds-bot-organizer-explorer";
+      panel.className = "ds-bot-organizer-explorer";
+      panel.setAttribute("aria-label", "Private QoL bot folders");
+    }
+    if (panel.nextElementSibling !== grid) grid.parentElement.insertBefore(panel, grid);
+    grid.classList.add("ds-bot-organizer-explorer-grid");
+    const collections = visibleCollections();
+    if (explorerView === "folder" && filterCollection !== "__unfoldered__" && !collections.includes(filterCollection)) explorerView = "root";
+    const organizer = store();
+    const storeMeta = organizer.meta || {};
+    const covers = organizer.folderCovers || {};
+    const counts = new Map(collections.map(name => [name, entries.filter(item => (storeMeta[item.id]?.collections || []).includes(name)).length]));
+    const coverState = collections.map(name => {
+      const cover = covers[name];
+      const people = cover?.mode === "auto" ? folderMembers(name, entries, storeMeta).slice(0, 2).map(item => [item.id, item.image]) : [];
+      return [name, cover?.mode || "icon", cover?.updatedAt || 0, normalizeFolderScope(organizer.folderScopes?.[name]), people];
+    });
+    const signature = JSON.stringify([explorerView, filterCollection, collections, [...counts], entries.length, coverState]);
+    if (panel.dataset.signature === signature) return;
+    panel.dataset.signature = signature;
+    panel.replaceChildren();
+    const head = document.createElement("div");
+    head.className = "ds-bot-explorer-head";
+    const title = document.createElement("strong");
+    title.textContent = explorerView === "folder" ? `Folders / ${filterCollection}` : explorerView === "all" ? "All bots" : pageFolderScope() === "favorites" ? "Favorites folders" : "My Chatbots folders";
+    head.append(title);
+    const nav = document.createElement("div");
+    nav.className = "ds-bot-explorer-nav";
+    const navButton = (label, view, collection = "all") => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+      b.disabled = explorerView === view && (view !== "folder" || filterCollection === collection);
+      b.addEventListener("click", () => {
+        explorerView = view; filterCollection = collection;
+        document.getElementById("ds-bot-organizer-toolbar")?.removeAttribute("data-ds-toolbar-signature");
+        applyFilters(collectEntries());
+        renderFolderExplorer(collectEntries());
+        DS.scheduleRun?.({ priority: "slow", source: "bot-folder-explorer-navigation" });
+      });
+      return b;
+    };
+    nav.append(navButton("← Folders", "root"), navButton("All bots", "all"), navButton("Unfoldered", "folder", "__unfoldered__"));
+    head.append(nav);
+    if (explorerView === "folder" && collections.includes(filterCollection)) {
+      const configure = document.createElement("button"); configure.type = "button";
+      configure.className = "ds-bot-explorer-cover-settings";
+      configure.textContent = "Change folder picture";
+      configure.addEventListener("click", () => openFolderCoverEditor(filterCollection, collectEntries()));
+      head.append(configure);
+    }
+    panel.append(head);
+    if (explorerView === "root") {
+      const tiles = document.createElement("div"); tiles.className = "ds-bot-explorer-tiles";
+      for (const name of collections) {
+        const tile = document.createElement("div"); tile.className = "ds-bot-explorer-tile";
+        const btn = document.createElement("button"); btn.type = "button"; btn.className = "ds-bot-explorer-folder";
+        const folder = createFolderCover(name, entries, storeMeta, covers[name]);
+        const text = document.createElement("span"); text.textContent = name;
+        const count = document.createElement("small");
+        const location = normalizeFolderScope(organizer.folderScopes?.[name]);
+        count.textContent = `${counts.get(name) || 0} loaded · ${location === "shared" ? "Shared" : location === "favorites" ? "Favorites" : "My Chatbots"}`;
+        btn.append(folder, text, count); btn.title = `Open ${name}`;
+        btn.addEventListener("click", () => {
+          explorerView = "folder"; filterCollection = name;
+          applyFilters(collectEntries()); renderFolderExplorer(collectEntries());
+          DS.scheduleRun?.({ priority: "slow", source: "bot-folder-explorer-open" });
+        });
+        const configure = document.createElement("button"); configure.type = "button";
+        configure.className = "ds-bot-explorer-cover-settings";
+        configure.textContent = "✎";
+        configure.title = `Change folder picture for ${name}`;
+        configure.setAttribute("aria-label", `Change folder picture for ${name}`);
+        configure.addEventListener("click", () => openFolderCoverEditor(name, collectEntries()));
+        tile.append(btn, configure); tiles.append(tile);
+      }
+      if (!collections.length) {
+        const empty = document.createElement("small"); empty.textContent = "No private folders yet. Create one using the bottom organizer menu."; tiles.append(empty);
+      }
+      panel.append(tiles);
+    }
+    const help = document.createElement("small");
+    help.className = "ds-bot-explorer-help";
+    help.textContent = explorerView === "root" ? "Unfoldered bots below · folders are local to QoL" : "Showing loaded bots only · use the bottom toolbar to organize or move bots";
+    panel.append(help);
   }
 
   function makeSelect(options, currentValue, aria) {
@@ -635,7 +1043,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function chooseCollection() {
-    const collections = parseConfiguredCollections();
+    const collections = visibleCollections();
     if (!collections.length) {
       window.alert("Create at least one chatbot folder first.");
       return "";
@@ -785,8 +1193,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.body.appendChild(toolbar);
     }
 
-    const collections = parseConfiguredCollections();
-    const isMyCreations = !!DS.isMyCreationsChatbotsPage?.();
+    const scope = pageFolderScope();
+    const collections = visibleCollections();
+    const isMyCreations = scope === "chatbots";
+    const isFolderPage = !!scope;
+    if (latestFolderPage !== scope) {
+      latestFolderPage = scope;
+      explorerView = "root";
+      filterCollection = "all";
+      newFolderScope = scope;
+    }
     if (filterCollection !== "all" && filterCollection !== "__unfoldered__" && !collections.includes(filterCollection)) {
       filterCollection = "all";
     }
@@ -799,6 +1215,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const toolbarSignature = JSON.stringify({
       collections,
       isMyCreations,
+      isFolderPage,
+      scope,
       bulkTools: !!settings.botOrganizerBulkTools,
       bulkMode: !!bulkMode,
       filterCollection
@@ -817,6 +1235,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     filterCollection = collectionSelect.value;
     collectionSelect.addEventListener("change", () => {
       filterCollection = collectionSelect.value;
+      explorerView = filterCollection === "all" ? "all" : "folder";
+      renderFolderExplorer(collectEntries());
       applyFilters(collectEntries());
       DS.scheduleRun?.({ priority: "slow", source: "bot-folder-filter-change" });
     });
@@ -831,9 +1251,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       applyFilters(collectEntries());
     });
 
-    toolbar.append(collectionSelect);
+    if (isFolderPage) toolbar.append(collectionSelect);
 
-    if (isMyCreations) {
+    if (isFolderPage) {
+      const location = makeSelect([
+        [scope, scope === "favorites" ? "New: Favorites" : "New: My Chatbots"],
+        ["shared", "New: Shared"],
+        [scope === "favorites" ? "chatbots" : "favorites", scope === "favorites" ? "New: My Chatbots" : "New: Favorites"]
+      ], newFolderScope || scope, "New folder location");
+      location.addEventListener("change", () => { newFolderScope = location.value; });
+      toolbar.append(location);
       toolbar.appendChild(actionButton("+ Folder", createFolder));
       if (filterCollection !== "all" && filterCollection !== "__unfoldered__") {
         toolbar.append(
@@ -877,7 +1304,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         selected.textContent = `${selectedIds.size} selected`;
         toolbar.append(
           selected,
-          actionButton("Folder…", bulkAddCollection),
+          ...(isFolderPage ? [actionButton("Folder…", bulkAddCollection)] : []),
           actionButton("Tag…", bulkAddTag),
           actionButton("Later", bulkLater),
           actionButton("Copy links", bulkCopyLinks)
@@ -961,8 +1388,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // On coarse/mobile pointers, bulk mode becomes a deliberate selection mode.
   // Tapping anywhere on the card selects it and native card actions (especially
   // the very-near Favorite heart on Firefox Android) cannot fire accidentally.
-  document.addEventListener("click", event => {
-    if (!bulkMode || !mobileBulkMode()) return;
+  let mobileBulkListenerAttached = false;
+  function onMobileBulkSelectionClick(event) {
+    if (!DS.state?.settings?.enabled || !DS.state?.settings?.enableBotOrganizer || !bulkMode || !mobileBulkMode()) return;
     if (event.target?.closest?.(".ds-bot-bulk-select, #ds-bot-organizer-toolbar, .ds-bot-organizer-popover")) return;
     const card = event.target?.closest?.("[data-ds-bulk-bot-id]");
     const id = clean(card?.dataset?.dsBulkBotId || "");
@@ -980,17 +1408,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     event.stopPropagation();
     event.stopImmediatePropagation();
     toggleBulkEntry({ id, card });
-  }, true);
+  }
+  function setMobileBulkListener(active) {
+    if (active === mobileBulkListenerAttached) return;
+    if (active) document.addEventListener("click", onMobileBulkSelectionClick, true);
+    else document.removeEventListener("click", onMobileBulkSelectionClick, true);
+    mobileBulkListenerAttached = active;
+  }
 
   DS.removeBotOrganizer = function removeBotOrganizer() {
+    setMobileBulkListener(false);
     closePopover();
     document.getElementById("ds-bot-organizer-toolbar")?.remove();
+    document.getElementById("ds-bot-organizer-explorer")?.remove();
+    document.getElementById("ds-bot-explorer-cover-editor")?.remove();
+    document.querySelectorAll(".ds-bot-organizer-explorer-grid").forEach(grid => grid.classList.remove("ds-bot-organizer-explorer-grid"));
     document.getElementById("ds-bot-organizer-context-button")?.remove();
     for (const card of DS.qsa?.(".ds-bot-org-filter-hidden, .ds-bot-org-selected, [data-ds-bot-organizer-card]") || []) {
       card.classList.remove("ds-bot-org-filter-hidden", "ds-bot-org-selected", "ds-bot-org-mobile-bulk");
       delete card.dataset.dsBotOrganizerCard;
       delete card.dataset.dsBulkBotId;
     }
+    for (const el of DS.qsa?.(".ds-bot-org-filter-hidden") || []) el.classList.remove("ds-bot-org-filter-hidden");
     for (const el of DS.qsa?.(".ds-bot-organizer-button, .ds-bot-local-meta, .ds-bot-bulk-select") || []) el.remove();
     bulkMode = false;
     selectedIds.clear();
@@ -1007,11 +1446,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // menu/removed the launcher before recreating it a moment later.
     const listing = !contextPage && (stableOrganizerListingRoute() || hasCards);
     if (!settings.enabled || !settings.enableBotOrganizer || (!listing && !contextPage)) {
-      if (DS.state.botOrganizerWasActive || document.getElementById("ds-bot-organizer-toolbar") || document.getElementById("ds-bot-organizer-context-button")) DS.removeBotOrganizer?.();
+      if (DS.state.botOrganizerWasActive || mobileBulkListenerAttached || document.querySelector("#ds-bot-organizer-toolbar, #ds-bot-organizer-context-button, #ds-bot-organizer-explorer, .ds-bot-org-filter-hidden, [data-ds-bot-organizer-card]")) DS.removeBotOrganizer?.();
       return;
     }
 
     DS.state.botOrganizerWasActive = true;
+    // The capture listener is only needed while organizing listing cards.
+    setMobileBulkListener(!contextPage);
     if (contextPage) {
       document.getElementById("ds-bot-organizer-toolbar")?.remove();
       ensureContextOrganizerButton();
@@ -1021,6 +1462,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.getElementById("ds-bot-organizer-context-button")?.remove();
     const entries = collectEntries();
     ensureToolbar();
+    renderFolderExplorer(entries);
     // An empty card array can be a transient React remount. Do not clear the
     // active fixed popover or reset its state; just wait for the cards to return.
     if (!entries.length) return;

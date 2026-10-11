@@ -263,7 +263,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function applyFavoritePageExtras() {
     const settings = DS.state?.settings || {};
     const enabled = !!settings.enabled && !!DS.isFavoriteBotsPage?.();
-    const folders = enabled && settings.favoritePageFoldersEnabled;
+    const folders = enabled && settings.favoritePageFoldersEnabled && !settings.botOrganizerExplorerFolders;
     const sorting = enabled && settings.favoritePageSortEnabled;
     const existing = document.getElementById("ds-favorite-qol-controls");
     if (!folders && !sorting) {

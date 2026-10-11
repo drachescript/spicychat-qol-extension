@@ -71,7 +71,7 @@
     F("model-menu", "Model quick menu", "Chat Tools", "Favorite, order and optionally hide models in QoL's customized model menus. Compact mobile/WebView pickers stay native-safe so QoL cannot hide the whole model list during a re-render.", { setting: "customizeModelQuickMenu", updated: "0.2.1" }),
     F("chat-backgrounds", "Custom chat backgrounds", "Chat Tools", "Use a local global chat background with optional per-chat overrides, dimming, blur, Cover/Contain/Tile sizing and positioning without uploading the image to SpicyChat. The compact BG control sits before the native rating/Like action in the chat header.", { setting: "enableChatBackgrounds", added: "0.1.9.54", updated: "0.1.9.83" }),
     F("chat-bubbles", "Chat bubble customization", "Chat Tools", "Customize AI/user bubble colors, fonts, borders, opacity, shapes, shadows and normal/action/dialogue text styling locally. Chat text size/line spacing and custom chat backgrounds are available alongside it in Appearance.", { setting: "enableChatBubbleCustomization", updated: "0.2.22", aliases: ["chat colors", "message colors", "chat font", "font type", "chat appearance", "visual customization"] }),
-    F("accessibility-text-size", "Accessibility & text size", "Appearance & Interface", "Make QoL controls and chat messages easier to read with larger interface text and optional comfortable/spacious chat line spacing.", { builtIn: true, target: "accessibilityCard", added: "0.1.9.95", aliases: ["font size", "larger text", "eye strain", "line spacing", "readability"] }),
+    F("accessibility-text-size", "Accessibility & reading", "Appearance & Interface", "Customize fonts, spacing, contrast and control sizes in QoL Settings, alongside existing text-size options.", { builtIn: true, target: "accessibilityCard", added: "0.1.9.95", aliases: ["font size", "larger text", "eye strain", "line spacing", "readability"] }),
     F("rp-repair", "RP Format Repair", "Chat Tools", "Locally repair inconsistent speech/action Markdown into your preferred RP presentation without silently editing the saved reply.", { setting: "enableRpFormatRepair", updated: "0.1.8.92" }),
     F("context-window-warning", "RP context-full warning", "Chat Tools", "Warn before older roleplay messages are likely to fall out of the active model context. Uses SpicyChat-exposed context usage when available, otherwise a conservative local estimate with an optional manual context limit.", { setting: "enableContextWindowWarning", added: "0.1.9.109", aliases: ["max tokens", "context tokens", "context full", "forgotten messages", "rp memory warning"] }),
     F("chat-export", "Chat Export", "Chat Tools", "Copy or export chats as text, Markdown, HTML or JSON. Choose fast API history export or the native Load Previous Messages compatibility path; long exports report progress and completeness.", { setting: "showChatExportButton", updated: "0.2.18" }),
@@ -319,7 +319,7 @@
     if (!row) return;
     const label = document.createElement("label");
     label.className = "row";
-    label.innerHTML = '<input id="quickLessLikeOnBlock" type="checkbox"><span>Also use Less Like This after I block it (opt-in, desktop browser only)</span>';
+    label.innerHTML = '<input id="quickLessLikeOnBlock" type="checkbox"><span>Also use Less Like This after I block it (desktop browsers only)</span>';
     row.insertAdjacentElement("beforebegin", label);
     storageGet(["settings"]).then(data => {
       const input = document.getElementById("quickLessLikeOnBlock");

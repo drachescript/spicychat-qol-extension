@@ -523,6 +523,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function cleanup() {
+    if (replacementObserverActive) {
+      replacementObserver.disconnect();
+      replacementObserverActive = false;
+    }
+    clearTimeout(observerTimer);
+    observerTimer = null;
     restoreDisplayChanges();
     document.querySelectorAll(".ds-replacement-undo").forEach(button => button.remove());
     document.getElementById("ds-chat-replacement-preset")?.remove();
@@ -551,6 +557,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    if (!replacementObserverActive) {
+      replacementObserver.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+      replacementObserverActive = true;
+    }
     DS.state.chatTextReplacementsWasActive = true;
     const signature = replacementSignature(settings);
     const route = String(location.pathname || "");
@@ -597,6 +607,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.removeChatTextReplacements = cleanup;
 
   let observerTimer = null;
+  let replacementObserverActive = false;
   const replacementObserver = new MutationObserver(mutations => {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.enableChatTextReplacements || !DS.isSingleChatPage?.()) return;
@@ -626,11 +637,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     observerTimer = setTimeout(() => DS.applyChatTextReplacements?.(), 90);
   });
 
-  replacementObserver.observe(document.documentElement, {
-    childList: true,
-    characterData: true,
-    subtree: true
-  });
+  // No observer when muted words / replacement rules are disabled.
 })();
 
 }

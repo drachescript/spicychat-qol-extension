@@ -83,13 +83,10 @@ if (!(() => { try {
     setEnabled(!!(settings?.enabled && (settings?.showExactMessageCounts || settings?.showBotCreationDates)));
   }
 
-  // Install the MAIN-world bridge immediately at document_start. Waiting for
-  // chrome.storage.local.get() creates a race with SpicyChat's initial
-  // Typesense request, which can leave the exact-count cache empty until the
-  // page performs another search. The bridge only observes Typesense responses
-  // that SpicyChat already fetched; the settings still control whether exact
-  // counts and/or creation dates are displayed.
-  injectBridge();
+  // A disabled feature must not install a MAIN-world network bridge.
+  // Enabled users still get the bridge after settings hydrate; an initial
+  // Typesense request may precede that hydration and require a later listing
+  // request before the first count can be shown.
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
   const watchedSettingNames = ["enabled", "showExactMessageCounts", "showBotCreationDates"];

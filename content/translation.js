@@ -9,6 +9,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let cacheLoaded = false;
   let cacheSaveTimer = null;
   let observerTimer = null;
+  let translationObserverActive = false;
   const autoStability = new WeakMap();
   const sourceContainers = new WeakMap();
   let lastApplySignature = "";
@@ -468,6 +469,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function removeBlocks() {
+    if (translationObserverActive) {
+      observer.disconnect();
+      translationObserverActive = false;
+    }
+    clearTimeout(observerTimer);
+    observerTimer = null;
     DS.state.translationWasActive = false;
     lastApplySignature = "";
     lastApplyRoute = "";
@@ -558,6 +565,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    if (!translationObserverActive) {
+      observer.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+      translationObserverActive = true;
+    }
     DS.state.translationWasActive = true;
     loadChatLanguages().then(() => ensureChatLanguageControl());
     const route = String(location.pathname || "");
@@ -654,7 +665,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     observerTimer = setTimeout(() => DS.scheduleMessageLane?.("translation-mutation"), 100);
   });
 
-  observer.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+  // Observed only while translation is enabled; removeBlocks disconnects it.
 })();
 
 }

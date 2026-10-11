@@ -252,7 +252,46 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return select;
   }
 
-  function pageTokens(current, total) {
+  // A wide paginator fits on desktop but can overflow narrow listing columns.
+  // Budget against the actual listing container, not just the viewport width
+  // (the expanded desktop sidebar consumes horizontal space too).
+  function paginationLayout(parent, settings) {
+    const viewport = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 0);
+    const availableParent = parent.parentElement?.getBoundingClientRect().width || viewport;
+    const available = Math.max(1, Math.min(viewport - 24, availableParent - 8));
+    const usable = available - (settings.paginationQuickJumpMenu ? 110 : 0);
+    if (usable < 360) return "tiny";
+    if (usable < 600) return "compact";
+    if (usable < 940) return "medium";
+    return "wide";
+  }
+
+  function responsivePageTokens(current, total, layout) {
+    if (total <= 1) return [1];
+    if (layout === "tiny") {
+      // Keep direct first/last navigation and the active page on very narrow
+      // layouts, without adding gap inputs that would force horizontal overflow.
+      // Native Previous/Next remain alongside these three page buttons.
+      return [...new Set([1, current, total])];
+    }
+    const wanted = new Set([1, current, total]);
+    if (layout === "medium") {
+      // A short window around the current page, with an edge-friendly variant.
+      const begin = current <= 2 ? 1 : current >= total - 1 ? Math.max(1, total - 3) : current - 1;
+      const end = current <= 2 ? Math.min(total, 4) : current >= total - 1 ? total : current + 1;
+      for (let page = begin; page <= end; page += 1) wanted.add(page);
+    }
+    const pages = [...wanted].sort((a, b) => a - b);
+    const tokens = [];
+    for (let i = 0; i < pages.length; i += 1) {
+      if (i > 0 && pages[i] > pages[i - 1] + 1) tokens.push("gap");
+      tokens.push(pages[i]);
+    }
+    return tokens;
+  }
+
+  function pageTokens(current, total, layout = "wide") {
+    if (layout !== "wide") return responsivePageTokens(current, total, layout);
     if (total <= 1) return [1];
     if (total <= EDGE_WINDOW + 2) return Array.from({ length: total }, (_, index) => index + 1);
 
@@ -282,6 +321,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     parent.querySelectorAll("[data-ds-pagination-qol='1']").forEach(node => node.remove());
     nativePageButtons(parent).forEach(button => button.classList.remove("ds-pagination-native-hidden"));
     delete parent.dataset.dsPaginationSignature;
+    parent.classList.remove("ds-pagination-qol-layout");
   }
 
   function syncExpandedPagination(settings) {
@@ -295,7 +335,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ABSOLUTE_MAX_PAGE,
       Math.max(current, estimated || 0, nativeMax || 0, 1)
     );
-    const signature = `${current}|${total}|${settings.paginationQuickJumpMenu ? 1 : 0}`;
+    const layout = paginationLayout(parent, settings);
+    const signature = `${current}|${total}|${layout}|${settings.paginationQuickJumpMenu ? 1 : 0}`;
 
     // If SpicyChat has not remounted the paginator and nothing material changed,
     // keep the existing nodes instead of rebuilding on every QoL runtime pass.
@@ -316,7 +357,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     nativePageButtons(parent).forEach(button => button.classList.add("ds-pagination-native-hidden"));
 
-    const tokens = pageTokens(current, total);
+    const tokens = pageTokens(current, total, layout);
     for (const token of tokens) {
       let node;
       if (token === "gap") node = makeJumpInput(settings);
@@ -336,6 +377,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return false;
     }
 
+    parent.classList.add("ds-pagination-qol-layout");
     parent.dataset.dsPaginationSignature = signature;
     return true;
   }
@@ -445,7 +487,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     else restoreNextButton(next);
   }
 
+  let resizeScheduled = 0;
+  let listeningForResize = false;
+
+  function handleResize() {
+    if (resizeScheduled) return;
+    resizeScheduled = requestAnimationFrame(() => {
+      resizeScheduled = 0;
+      const settings = DS.state?.settings || {};
+      if (!settings.enabled || !paginatorParent()) {
+        stopResizeHandling();
+        return;
+      }
+      syncExpandedPagination(settings);
+    });
+  }
+
+  function startResizeHandling() {
+    if (listeningForResize) return;
+    window.addEventListener("resize", handleResize, { passive: true });
+    listeningForResize = true;
+  }
+
+  function stopResizeHandling() {
+    if (listeningForResize) window.removeEventListener("resize", handleResize);
+    listeningForResize = false;
+    if (resizeScheduled) cancelAnimationFrame(resizeScheduled);
+    resizeScheduled = 0;
+  }
+
   function cleanup() {
+    stopResizeHandling();
     restoreNativePagination();
     removeTopJumpBox();
     document.querySelectorAll("button[data-ds-pagination-capped='1']").forEach(restoreNextButton);
@@ -462,6 +534,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const paginationButtons = document.querySelectorAll("button[aria-label='previous-page'], button[aria-label='next-page'], button[aria-label^='page-']");
     if (!paginationButtons.length) {
+      stopResizeHandling();
       restoreNativePagination();
       document.querySelectorAll("button[data-ds-pagination-capped='1']").forEach(restoreNextButton);
       return;
@@ -469,7 +542,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (capCurrentUrlIfNeeded(settings)) return;
     applyHardCap(settings);
-    syncExpandedPagination(settings);
+    if (syncExpandedPagination(settings)) startResizeHandling();
+    else stopResizeHandling();
   };
 
   DS.removePaginationTools = cleanup;

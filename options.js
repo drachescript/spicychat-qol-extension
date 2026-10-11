@@ -272,11 +272,51 @@ function applyOptionsPerformancePreferences(settings = {}) {
   }
 }
 
+const SETTINGS_READING_FONTS = {
+  native: "",
+  arial: "Arial, Helvetica, sans-serif",
+  verdana: "Verdana, Geneva, sans-serif",
+  trebuchet: "'Trebuchet MS', Arial, sans-serif",
+  serif: "Georgia, 'Times New Roman', serif",
+  monospace: "Consolas, 'Courier New', monospace",
+  dyslexia: "OpenDyslexic, Verdana, Arial, sans-serif"
+};
+const SETTINGS_READING_LINE_SPACING = ["native", "comfortable", "spacious"];
+const SETTINGS_READING_LETTER_SPACING = ["native", "slight", "wide"];
+const SETTINGS_READING_SIZES = [100, 110, 125, 150];
+function settingsReadingValuesFromControls() {
+  return {
+    qolInterfaceScale: Number(value("qolInterfaceScale", "100")) || 100,
+    settingsReadingFont: value("settingsReadingFont", "native"),
+    settingsReadingSize: Number(value("settingsReadingSize", "100")) || 100,
+    settingsReadingLineSpacing: value("settingsReadingLineSpacing", "native"),
+    settingsReadingLetterSpacing: value("settingsReadingLetterSpacing", "native"),
+    settingsReadingContrast: checked("settingsReadingContrast"),
+    settingsReadingLargerControls: checked("settingsReadingLargerControls")
+  };
+}
 function applyOptionsAccessibilityPreview(settings = {}) {
-  const scale = [100, 110, 125, 150].includes(Number(settings.qolInterfaceScale))
-    ? Number(settings.qolInterfaceScale)
-    : 100;
-  document.documentElement.style.zoom = scale === 100 ? "" : String(scale / 100);
+  const baseScale = SETTINGS_READING_SIZES.includes(Number(settings.qolInterfaceScale))
+    ? Number(settings.qolInterfaceScale) : 100;
+  const settingsScale = SETTINGS_READING_SIZES.includes(Number(settings.settingsReadingSize))
+    ? Number(settings.settingsReadingSize) : 100;
+  // The original QoL interface-size setting still works. The new multiplier
+  // only applies here in Settings; no SpicyChat page gets this setting.
+  const scale = (baseScale * settingsScale) / 10000;
+  document.documentElement.style.zoom = scale === 1 ? "" : String(scale);
+  const font = SETTINGS_READING_FONTS[settings.settingsReadingFont] || "";
+  const root = document.documentElement;
+  root.classList.toggle("ds-options-reading-font", !!font);
+  if (font) root.style.setProperty("--ds-options-reading-font", font);
+  else root.style.removeProperty("--ds-options-reading-font");
+  for (const [className, enabled] of [
+    ["ds-options-reading-contrast", !!settings.settingsReadingContrast],
+    ["ds-options-reading-large-controls", !!settings.settingsReadingLargerControls],
+    ["ds-options-reading-line-comfortable", settings.settingsReadingLineSpacing === "comfortable"],
+    ["ds-options-reading-line-spacious", settings.settingsReadingLineSpacing === "spacious"],
+    ["ds-options-reading-letter-slight", settings.settingsReadingLetterSpacing === "slight"],
+    ["ds-options-reading-letter-wide", settings.settingsReadingLetterSpacing === "wide"]
+  ]) root.classList.toggle(className, enabled);
 }
 
 const OLD_DEFAULT_OOC_TEMPLATE = "[OOC: Never control Lukas or the user in any way. Do not speak for Lukas. Do not describe what Lukas thinks, feels, wants, notices, decides, does, or how he reacts. Do not move Lukas forward in the scene. Only the user may write Lukas's words, actions, thoughts, emotions, expressions, and decisions. You may control only your character, NPCs, side characters, enemies, and the environment. End every response in a way that leaves Lukas free to respond.]";
@@ -481,6 +521,7 @@ const DEFAULT_SETTINGS = {
   hideChatDropdownVoiceUpsell: false,
   hideChatDropdownMemoryItem: false,
   enableBulkMemoryManager: false,
+  enableMemoryVault: false,
   showCopyMemoryAction: false,
   memoryAutoLoadAll: false,
   enableChatTextReplacements: false,
@@ -541,6 +582,7 @@ const DEFAULT_SETTINGS = {
   laterBotCreatorFilter: "",
   laterBotStateFilter: "all",
   enableBotOrganizer: false,
+  botOrganizerExplorerFolders: false,
   favoritePageFoldersEnabled: false,
   favoritePageSortEnabled: false,
   lorebookUnknownSafeFilter: false,
@@ -643,6 +685,12 @@ const DEFAULT_SETTINGS = {
   qolInterfaceScale: 100,
   chatTextScale: 100,
   chatLineSpacing: "native",
+  settingsReadingFont: "native",
+  settingsReadingSize: 100,
+  settingsReadingLineSpacing: "native",
+  settingsReadingLetterSpacing: "native",
+  settingsReadingContrast: false,
+  settingsReadingLargerControls: false,
 
 
   autoFillListings: false,
@@ -924,6 +972,7 @@ const DEFAULT_SETTINGS = {
   hideSidebarHome: false,
   hideSidebarChats: false,
   hideSidebarPersonas: false,
+  hideSidebarNewBadges: false,
   restorePersonasSidebarPosition: false,
   hideSidebarCreateMenu: false,
   hideSidebarCreateChatbot: false,
@@ -2390,6 +2439,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "hideChatDropdownVoiceUpsell",
   "hideChatDropdownMemoryItem",
   "enableBulkMemoryManager",
+  "enableMemoryVault",
   "showCopyMemoryAction",
   "memoryAutoLoadAll",
   "enableSelectionRemember",
@@ -2410,6 +2460,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "trackFavoriteBots",
   "showFavoriteHistoryButton",
   "enableBotOrganizer",
+  "botOrganizerExplorerFolders",
   "showLaterBotButtons",
   "protectLaterBotsFromFiltering",
   "hideLaterBotsFromListings",
@@ -2551,6 +2602,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "hideSidebarHome",
   "hideSidebarChats",
   "hideSidebarPersonas",
+  "hideSidebarNewBadges",
   "hideSidebarCreateMenu",
   "hideSidebarCreateChatbot",
   "hideSidebarCreateLorebook",
@@ -5397,6 +5449,12 @@ function setActiveTab(tabName) {
   document.querySelectorAll(".tab-button").forEach(button => {
     button.classList.toggle("active", button.dataset.tab === tabName);
   });
+  const mobileSectionsCurrent = $("mobileSectionsCurrent");
+  if (mobileSectionsCurrent) {
+    const currentButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(tabName)}"]`);
+    mobileSectionsCurrent.textContent = String(currentButton?.firstChild?.textContent || currentButton?.textContent || tabName)
+      .trim().replace(/\s+/g, " ");
+  }
 
   document.querySelectorAll(".tab-page").forEach(page => {
     page.classList.toggle("active", page.dataset.page === tabName);
@@ -5430,8 +5488,33 @@ function setActiveTab(tabName) {
 }
 
 function setupTabs() {
+  const mobileToggle = $("mobileSectionsToggle");
+  const mobileNavigation = $("optionsTabsNav");
+  const closeMobileNavigation = () => {
+    mobileNavigation?.classList.remove("is-mobile-open");
+    mobileToggle?.setAttribute("aria-expanded", "false");
+  };
+  mobileToggle?.addEventListener("click", () => {
+    if (!mobileNavigation) return;
+    const open = mobileNavigation.classList.toggle("is-mobile-open");
+    mobileToggle.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !mobileNavigation?.classList.contains("is-mobile-open")) return;
+    closeMobileNavigation();
+    mobileToggle?.focus();
+  });
+  document.addEventListener("click", event => {
+    if (!mobileNavigation?.classList.contains("is-mobile-open")) return;
+    if (mobileToggle?.contains(event.target) || mobileNavigation.contains(event.target)) return;
+    closeMobileNavigation();
+  });
+  window.matchMedia("(min-width: 721px)").addEventListener?.("change", closeMobileNavigation);
   document.querySelectorAll(".tab-button").forEach(button => {
-    button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+    button.addEventListener("click", () => {
+      setActiveTab(button.dataset.tab);
+      closeMobileNavigation();
+    });
   });
 
   const savedTab = sessionStorage.getItem("spicychatQolOptionsTab");
@@ -5514,6 +5597,12 @@ function setupSettingsSearch() {
     qolInterfaceScale: "accessibility text size font size larger bigger settings interface ui eye strain readability",
     chatTextScale: "accessibility chat message text font size larger bigger eye strain readability",
     chatLineSpacing: "accessibility chat line spacing comfortable spacious readability eye strain",
+    settingsReadingFont: "settings accessibility dyslexia fonts open dyslexic verdana reading",
+    settingsReadingSize: "settings text size zoom readability",
+    settingsReadingLineSpacing: "settings accessibility line spacing readability",
+    settingsReadingLetterSpacing: "settings accessibility letter spacing dyslexia",
+    settingsReadingContrast: "settings accessibility stronger contrast",
+    settingsReadingLargerControls: "settings accessibility bigger buttons touch controls",
     chatListBlockedFilter: "chat list blocked bots filter blocked state"
   };
 
@@ -17516,6 +17605,7 @@ async function load() {
   setChecked("hideChatDropdownVoiceUpsell", !!settings.hideChatDropdownVoiceUpsell);
   setChecked("hideChatDropdownMemoryItem", !!settings.hideChatDropdownMemoryItem);
   setChecked("enableBulkMemoryManager", !!settings.enableBulkMemoryManager);
+  setChecked("enableMemoryVault", !!settings.enableMemoryVault);
   setChecked("showCopyMemoryAction", !!settings.showCopyMemoryAction);
   setChecked("memoryAutoLoadAll", !!settings.memoryAutoLoadAll);
   setChecked("enableChatTextReplacements", !!settings.enableChatTextReplacements);
@@ -17571,6 +17661,12 @@ async function load() {
   setValue("qolInterfaceScale", [100, 110, 125, 150].includes(Number(settings.qolInterfaceScale)) ? Number(settings.qolInterfaceScale) : 100);
   setValue("chatTextScale", [100, 110, 125, 150].includes(Number(settings.chatTextScale)) ? Number(settings.chatTextScale) : 100);
   setValue("chatLineSpacing", ["native", "comfortable", "spacious"].includes(settings.chatLineSpacing) ? settings.chatLineSpacing : "native");
+  setValue("settingsReadingFont", Object.hasOwn(SETTINGS_READING_FONTS, settings.settingsReadingFont) ? settings.settingsReadingFont : "native");
+  setValue("settingsReadingSize", SETTINGS_READING_SIZES.includes(Number(settings.settingsReadingSize)) ? Number(settings.settingsReadingSize) : 100);
+  setValue("settingsReadingLineSpacing", SETTINGS_READING_LINE_SPACING.includes(settings.settingsReadingLineSpacing) ? settings.settingsReadingLineSpacing : "native");
+  setValue("settingsReadingLetterSpacing", SETTINGS_READING_LETTER_SPACING.includes(settings.settingsReadingLetterSpacing) ? settings.settingsReadingLetterSpacing : "native");
+  setChecked("settingsReadingContrast", !!settings.settingsReadingContrast);
+  setChecked("settingsReadingLargerControls", !!settings.settingsReadingLargerControls);
   setChecked("showQuickPanel", settings.showQuickPanel);
   setValue("quickPanelPlacement", settings.quickPanelPlacement === "chat-header" ? "bottom-right" : (settings.quickPanelPlacement || "bottom-right"));
   setChecked("quickPanelDraggable", !!settings.quickPanelDraggable);
@@ -17633,6 +17729,7 @@ async function load() {
   setValue("laterBotCreatorFilter", settings.laterBotCreatorFilter || "");
   setValue("laterBotStateFilter", settings.laterBotStateFilter || "all");
   setChecked("enableBotOrganizer", !!settings.enableBotOrganizer);
+  setChecked("botOrganizerExplorerFolders", !!settings.botOrganizerExplorerFolders);
   setChecked("favoritePageFoldersEnabled", !!settings.favoritePageFoldersEnabled);
   setChecked("favoritePageSortEnabled", !!settings.favoritePageSortEnabled);
   setChecked("lorebookUnknownSafeFilter", !!settings.lorebookUnknownSafeFilter);
@@ -17869,7 +17966,7 @@ async function load() {
   setChecked("enableCommandPalette", !!settings.enableCommandPalette);
   setValue("commandPaletteShortcut", ["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(settings.commandPaletteShortcut) ? settings.commandPaletteShortcut : "ctrl-k");
   setChecked("commandPaletteShowSavedItems", settings.commandPaletteShowSavedItems !== false);
-  setChecked("deepSleepDisabledFeatures", settings.deepSleepDisabledFeatures !== false);
+  setChecked("deepSleepDisabledFeatures", true);
   setChecked("performanceDiagnostics", !!settings.performanceDiagnostics);
   setChecked("enableLocalChangeHistory", !!settings.enableLocalChangeHistory);
   setChecked("showUpdateNotifications", !!settings.showUpdateNotifications);
@@ -18220,6 +18317,7 @@ function readSettingsFromPage() {
     hideChatDropdownVoiceUpsell: checked("hideChatDropdownVoiceUpsell"),
     hideChatDropdownMemoryItem: checked("hideChatDropdownMemoryItem"),
     enableBulkMemoryManager: checked("enableBulkMemoryManager"),
+    enableMemoryVault: checked("enableMemoryVault"),
     showCopyMemoryAction: checked("showCopyMemoryAction"),
     memoryAutoLoadAll: checked("memoryAutoLoadAll"),
     enableChatTextReplacements: checked("enableChatTextReplacements"),
@@ -18272,6 +18370,12 @@ function readSettingsFromPage() {
     qolInterfaceScale: [100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100,
     chatTextScale: [100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100,
     chatLineSpacing: ["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native",
+    settingsReadingFont: Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native",
+    settingsReadingSize: SETTINGS_READING_SIZES.includes(Number(value("settingsReadingSize", "100"))) ? Number(value("settingsReadingSize", "100")) : 100,
+    settingsReadingLineSpacing: SETTINGS_READING_LINE_SPACING.includes(value("settingsReadingLineSpacing", "native")) ? value("settingsReadingLineSpacing", "native") : "native",
+    settingsReadingLetterSpacing: SETTINGS_READING_LETTER_SPACING.includes(value("settingsReadingLetterSpacing", "native")) ? value("settingsReadingLetterSpacing", "native") : "native",
+    settingsReadingContrast: checked("settingsReadingContrast"),
+    settingsReadingLargerControls: checked("settingsReadingLargerControls"),
     showQuickPanel: checked("showQuickPanel"),
     quickPanelPlacement: value("quickPanelPlacement", "bottom-right") || "bottom-right",
     quickPanelDraggable: checked("quickPanelDraggable"),
@@ -18332,6 +18436,7 @@ function readSettingsFromPage() {
     laterBotCreatorFilter: value("laterBotCreatorFilter", ""),
     laterBotStateFilter: value("laterBotStateFilter", "all"),
     enableBotOrganizer: checked("enableBotOrganizer"),
+    botOrganizerExplorerFolders: checked("botOrganizerExplorerFolders"),
     favoritePageFoldersEnabled: checked("favoritePageFoldersEnabled"),
     favoritePageSortEnabled: checked("favoritePageSortEnabled"),
     lorebookUnknownSafeFilter: checked("lorebookUnknownSafeFilter"),
@@ -18547,7 +18652,7 @@ function readSettingsFromPage() {
     enableCommandPalette: checked("enableCommandPalette", false),
     commandPaletteShortcut: ["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(value("commandPaletteShortcut")) ? value("commandPaletteShortcut") : "ctrl-k",
     commandPaletteShowSavedItems: checked("commandPaletteShowSavedItems", true),
-    deepSleepDisabledFeatures: checked("deepSleepDisabledFeatures", true),
+    deepSleepDisabledFeatures: true,
     performanceDiagnostics: checked("performanceDiagnostics"),
     enableLocalChangeHistory: checked("enableLocalChangeHistory"),
     showUpdateNotifications: checked("showUpdateNotifications", false),
@@ -18594,6 +18699,7 @@ function readSettingsFromPage() {
     hideSidebarHome: checked("hideSidebarHome"),
     hideSidebarChats: checked("hideSidebarChats"),
     hideSidebarPersonas: checked("hideSidebarPersonas"),
+    hideSidebarNewBadges: checked("hideSidebarNewBadges"),
     hideSidebarCreateMenu: checked("hideSidebarCreateMenu"),
     hideSidebarCreateChatbot: checked("hideSidebarCreateChatbot"),
     hideSidebarCreateLorebook: checked("hideSidebarCreateLorebook"),
@@ -18880,6 +18986,7 @@ function readSingleSettingFromPage(settingKey) {
     case "hideChatDropdownVoiceUpsell": return (checked("hideChatDropdownVoiceUpsell"));
     case "hideChatDropdownMemoryItem": return (checked("hideChatDropdownMemoryItem"));
     case "enableBulkMemoryManager": return (checked("enableBulkMemoryManager"));
+    case "enableMemoryVault": return (checked("enableMemoryVault"));
     case "showCopyMemoryAction": return (checked("showCopyMemoryAction"));
     case "memoryAutoLoadAll": return (checked("memoryAutoLoadAll"));
     case "enableChatTextReplacements": return (checked("enableChatTextReplacements"));
@@ -18928,6 +19035,12 @@ function readSingleSettingFromPage(settingKey) {
     case "qolInterfaceScale": return ([100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100);
     case "chatTextScale": return ([100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100);
     case "chatLineSpacing": return (["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native");
+    case "settingsReadingFont": return Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native";
+    case "settingsReadingSize": return SETTINGS_READING_SIZES.includes(Number(value("settingsReadingSize", "100"))) ? Number(value("settingsReadingSize", "100")) : 100;
+    case "settingsReadingLineSpacing": return SETTINGS_READING_LINE_SPACING.includes(value("settingsReadingLineSpacing", "native")) ? value("settingsReadingLineSpacing", "native") : "native";
+    case "settingsReadingLetterSpacing": return SETTINGS_READING_LETTER_SPACING.includes(value("settingsReadingLetterSpacing", "native")) ? value("settingsReadingLetterSpacing", "native") : "native";
+    case "settingsReadingContrast": return checked("settingsReadingContrast");
+    case "settingsReadingLargerControls": return checked("settingsReadingLargerControls");
     case "showQuickPanel": return (checked("showQuickPanel"));
     case "quickPanelPlacement": return (value("quickPanelPlacement", "bottom-right") || "bottom-right");
     case "quickPanelDraggable": return (checked("quickPanelDraggable"));
@@ -18988,6 +19101,7 @@ function readSingleSettingFromPage(settingKey) {
     case "laterBotCreatorFilter": return (value("laterBotCreatorFilter", ""));
     case "laterBotStateFilter": return (value("laterBotStateFilter", "all"));
     case "enableBotOrganizer": return (checked("enableBotOrganizer"));
+    case "botOrganizerExplorerFolders": return (checked("botOrganizerExplorerFolders"));
     case "botCollections": return (value("botCollections", ""));
     case "botOrganizerShowCardMeta": return (checked("botOrganizerShowCardMeta", true));
     case "botOrganizerBulkTools": return (checked("botOrganizerBulkTools", true));
@@ -19193,7 +19307,7 @@ function readSingleSettingFromPage(settingKey) {
     case "enableCommandPalette": return (checked("enableCommandPalette", false));
     case "commandPaletteShortcut": return (["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(value("commandPaletteShortcut")) ? value("commandPaletteShortcut") : "ctrl-k");
     case "commandPaletteShowSavedItems": return (checked("commandPaletteShowSavedItems", true));
-    case "deepSleepDisabledFeatures": return (checked("deepSleepDisabledFeatures", true));
+    case "deepSleepDisabledFeatures": return true;
     case "performanceDiagnostics": return (checked("performanceDiagnostics"));
     case "enableLocalChangeHistory": return (checked("enableLocalChangeHistory"));
     case "showUpdateNotifications": return (checked("showUpdateNotifications", false));
@@ -19235,6 +19349,7 @@ function readSingleSettingFromPage(settingKey) {
     case "hideSidebarHome": return (checked("hideSidebarHome"));
     case "hideSidebarChats": return (checked("hideSidebarChats"));
     case "hideSidebarPersonas": return (checked("hideSidebarPersonas"));
+    case "hideSidebarNewBadges": return (checked("hideSidebarNewBadges"));
     case "hideSidebarCreateMenu": return (checked("hideSidebarCreateMenu"));
     case "hideSidebarCreateChatbot": return (checked("hideSidebarCreateChatbot"));
     case "hideSidebarCreateLorebook": return (checked("hideSidebarCreateLorebook"));
@@ -19929,6 +20044,20 @@ function selectedExportScopes() {
     .filter(Boolean));
 }
 
+function normalizeMemoryVault(raw) {
+  const value = raw && typeof raw === "object" ? raw : {};
+  const entries = Array.isArray(value.entries) ? value.entries : [];
+  return { version: 1, entries: entries.filter(item => item && typeof item.id === "string" && typeof item.chatId === "string" && typeof item.text === "string" && ["stored", "saved-pending-delete", "restored"].includes(item.status)).map(item => ({ ...item })) };
+}
+function mergeMemoryVault(current, incoming) {
+  const entries = new Map(normalizeMemoryVault(current).entries.map(item => [item.id, item]));
+  for (const item of normalizeMemoryVault(incoming).entries) {
+    const existing = entries.get(item.id);
+    if (!existing || Number(item.updatedAt || 0) >= Number(existing.updatedAt || 0)) entries.set(item.id, item);
+  }
+  return { version: 1, entries: [...entries.values()] };
+}
+
 function buildExportPayload(scopes, result) {
   const selected = scopes instanceof Set ? scopes : new Set(scopes || []);
   const has = key => selected.has(key);
@@ -19967,6 +20096,7 @@ function buildExportPayload(scopes, result) {
   if (has("creatorBotWatch")) payload.creatorBotWatch = normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]);
   if (has("favoriteBots")) payload.favoriteBots = result[FAVORITE_BOTS_KEY] || { ids: [], meta: {} };
   if (has("laterBots")) payload.laterBots = result[LATER_BOTS_KEY] || { ids: [], meta: {} };
+  if (has("memoryVault")) payload.memoryVault = normalizeMemoryVault(result.dsMemoryVaultV1);
   if (has("botOrganization")) {
     const organizer = normalizeBotOrganization(result[BOT_ORGANIZER_KEY]);
     organizer.collections = uniqueClean([
@@ -20669,7 +20799,7 @@ function settingsScopeUsageCount(settingsValue, scope) {
 }
 
 const BACKUP_STORAGE_KEYS = [
-  "settings", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY,
+  "settings", "dsMemoryVaultV1", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY,
   NOT_INTERESTED_KEY, PERSONAS_KEY, LEGACY_PERSONAS_KEY, PERSONA_ORG_KEY, OOC_TEMPLATES_KEY, FAVORITE_CREATORS_KEY,
   FOLLOWED_CREATORS_KEY, CREATOR_BOT_WATCH_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY, BOT_ORGANIZER_KEY, CHAT_ORGANIZER_KEY, CHARACTER_QOL_PROFILES_KEY,
   BOT_AVAILABILITY_KEY, BOT_UNAVAILABLE_RECOVERY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_STATUS_KEY, LOREBOOK_BACKUPS_KEY, CHATBOT_LOREBOOK_LINKS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY,
@@ -20681,7 +20811,7 @@ const BACKUP_SCOPE_IDS = [
   ...SETTINGS_BACKUP_SCOPE_IDS,
   "settings",
   "opened", "blocked", "notInterested", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots",
-  "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks",
+  "memoryVault", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks",
   "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization",
   "ooc", "generationProfiles", "smartFilterPresets", "smartFilterPins", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots",
   "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"
@@ -20697,6 +20827,7 @@ const BACKUP_DATA_SCOPE_DEFS = {
   creatorBotWatch: { count: result => Object.keys(normalizeCreatorBotWatchState(result[CREATOR_BOT_WATCH_KEY]).creators || {}).length },
   favoriteBots: { count: result => uniqueClean(result[FAVORITE_BOTS_KEY]?.ids || []).length },
   laterBots: { count: result => uniqueClean(result[LATER_BOTS_KEY]?.ids || []).length },
+  memoryVault: { count: result => normalizeMemoryVault(result.dsMemoryVaultV1).entries.length },
   botOrganization: { count: result => {
     const organizer = normalizeBotOrganization(result[BOT_ORGANIZER_KEY]);
     const folders = uniqueClean([
@@ -21195,8 +21326,29 @@ function normalizeBotOrganization(value) {
     botOrganizerShowCardMeta: source.config.botOrganizerShowCardMeta !== false,
     botOrganizerBulkTools: source.config.botOrganizerBulkTools !== false
   } : null;
+  const folderCovers = {};
+  if (source.folderCovers && typeof source.folderCovers === "object") {
+    for (const [name, raw] of Object.entries(source.folderCovers)) {
+      if (!raw || typeof raw !== "object") continue;
+      const key = String(name || "").trim();
+      if (!key) continue;
+      const mode = ["icon", "auto", "selected", "custom"].includes(raw.mode) ? raw.mode : "icon";
+      const image = typeof raw.image === "string" && raw.image.length <= 55000 &&
+        /^data:image\/(?:webp|jpeg|png);base64,[a-zA-Z0-9+/=]+$/.test(raw.image) ? raw.image : "";
+      folderCovers[key] = {
+        mode: mode === "custom" && !image ? "icon" : mode,
+        ids: uniqueClean(Array.isArray(raw.ids) ? raw.ids : []).slice(0, 2),
+        image,
+        updatedAt: Number(raw.updatedAt) || 0
+      };
+    }
+  }
   return {
     collections: uniqueClean(source.collections || []),
+    folderCovers,
+    folderScopes: Object.fromEntries(Object.entries(source.folderScopes && typeof source.folderScopes === "object" && !Array.isArray(source.folderScopes) ? source.folderScopes : {})
+      .filter(([name]) => String(name || "").trim())
+      .map(([name, scope]) => [String(name).trim(), ["favorites", "chatbots", "shared"].includes(scope) ? scope : "shared"])),
     ...(config ? { config } : {}),
     meta: out
   };
@@ -21217,6 +21369,8 @@ function mergeBotOrganizations(current, incoming) {
   }
   return {
     collections: uniqueClean([...(left.collections || []), ...(right.collections || [])]),
+    folderCovers: { ...left.folderCovers, ...right.folderCovers },
+    folderScopes: { ...left.folderScopes, ...right.folderScopes },
     ...(right.config ? { config: right.config } : (left.config ? { config: left.config } : {})),
     meta
   };
@@ -21348,7 +21502,7 @@ function importCategoryEntries(parsed) {
   const settingsLike = !logExport && (source.settings || (
     !source.openedChats && !source.blockedBots && !source.quickDislikeHistory && !source.quickDislikeBulkState && !source.quickLessLikeHistory && !source.quickLessLikeBulkState && !source.notInterestedBots &&
     !source.favoriteCreators && !source.followedCreators && !source.favoriteBots &&
-    !source.laterBots && !source.botOrganization && !source.chatOrganization && !source.characterQolProfiles &&
+    !source.laterBots && !source.memoryVault && !source.botOrganization && !source.chatOrganization && !source.characterQolProfiles &&
     !source.botAvailability && !source.botArchive && !source.lorebookBackups && !source.savedTextSnippets &&
     !source.contextKeeperData && !source.storyDayTrackerData && !source.rpStateTrackerData && !source.chatNudges && !source.personas && !source.personaOrganization &&
     !source.oocTemplates && !source.generationProfiles && !source.smartFilterPresets && !source.smartFilterPinnedPresets &&
@@ -21380,6 +21534,7 @@ function importCategoryEntries(parsed) {
   if (source.creatorBotWatch && typeof source.creatorBotWatch === "object") add("creatorBotWatch", "Creator follow/watch history", Object.keys(normalizeCreatorBotWatchState(source.creatorBotWatch).creators || {}).length);
   if (source.favoriteBots && typeof source.favoriteBots === "object") add("favoriteBots", "Favorite bots", uniqueClean(source.favoriteBots.ids || []).length);
   if (source.laterBots && typeof source.laterBots === "object") add("laterBots", "Later bots", uniqueClean(source.laterBots.ids || []).length);
+  if (source.memoryVault && typeof source.memoryVault === "object") add("memoryVault", "Memory Vault", normalizeMemoryVault(source.memoryVault).entries.length);
   if (source.botOrganization && typeof source.botOrganization === "object") {
     const organizer = normalizeBotOrganization(source.botOrganization);
     add("botOrganization", "Bot organization", Object.keys(organizer.meta || {}).length + (organizer.collections || []).length);
@@ -21429,7 +21584,7 @@ function validateBackupObject(parsed) {
   const migration = migrateBackupPayload(parsed);
   const source = migration.payload;
   const entries = importCategoryEntries(source);
-  const known = new Set(["_qolBackup", "settings", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"]);
+  const known = new Set(["_qolBackup", "settings", "memoryVault", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"]);
   const warnings = Object.keys(source).filter(key => !known.has(key)).map(key => `Unknown top-level field: ${key}`);
   const meta = source._qolBackup && typeof source._qolBackup === "object" ? source._qolBackup : null;
   if (!meta) warnings.push("Legacy backup: no QoL backup metadata found (still importable after preview). ");
@@ -21743,6 +21898,12 @@ async function importSettings() {
       payload[LATER_BOTS_KEY] = mode === "replace"
         ? normalizeBotStore(parsed.laterBots)
         : mergeBotStores(current[LATER_BOTS_KEY], parsed.laterBots);
+    }
+
+    if (hasImportScope("memoryVault") && parsed.memoryVault && typeof parsed.memoryVault === "object") {
+      payload.dsMemoryVaultV1 = mode === "replace"
+        ? normalizeMemoryVault(parsed.memoryVault)
+        : mergeMemoryVault(current.dsMemoryVaultV1, parsed.memoryVault);
     }
 
     if (hasImportScope("botOrganization") && parsed.botOrganization && typeof parsed.botOrganization === "object") {
@@ -22175,6 +22336,7 @@ const STORAGE_DATASET_DEFS = [
   { id: "favoriteCreators", label: "Favorite creators", keys: [FAVORITE_CREATORS_KEY], count: result => countStoreItems(result[FAVORITE_CREATORS_KEY], "creator") },
   { id: "followedCreators", label: "Followed creators", keys: [FOLLOWED_CREATORS_KEY], count: result => countStoreItems(result[FOLLOWED_CREATORS_KEY], "creator") },
   { id: "laterBots", label: "Later", keys: [LATER_BOTS_KEY], count: result => countStoreItems(result[LATER_BOTS_KEY]) },
+  { id: "memoryVault", label: "Memory Vault", keys: ["dsMemoryVaultV1"], count: result => normalizeMemoryVault(result.dsMemoryVaultV1).entries.length },
   { id: "botOrganization", label: "Bot organization", keys: [BOT_ORGANIZER_KEY], count: result => Object.keys(result[BOT_ORGANIZER_KEY]?.meta || {}).length },
   { id: "chatOrganization", label: "Chat organization", keys: [CHAT_ORGANIZER_KEY], count: result => Object.keys(normalizeChatOrganization(result[CHAT_ORGANIZER_KEY]).meta).length },
   { id: "characterProfiles", label: "Character profiles", keys: [CHARACTER_QOL_PROFILES_KEY], count: result => Object.keys(normalizeCharacterQolProfiles(result[CHARACTER_QOL_PROFILES_KEY])).length },
@@ -23173,7 +23335,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Bot archive preservation: ${Number(runtime.botArchiveSeenQueued || 0)} public observations queued; ${Number(runtime.botArchiveSeenMerged || 0)} merged in ${Number(runtime.botArchiveSeenBatches || 0)} batches; ${Number(runtime.botArchiveSeenUnchanged || 0)} unchanged snapshots skipped; ${Number(runtime.botArchiveWrites || 0)} archive writes; ${Number(runtime.ownBotBackupSaves || 0)} own-bot editor saves`,
     `Performance mode: configured ${settings.runtimePerformanceMode || "adaptive"}; effective ${runtime.mode || settings.runtimePerformanceMode || "adaptive"}`,
     (() => { const c = context?.pageDiagnostics?.runtimeContext || {}; return `Runtime context: visibility ${c.visibilityState || "unknown"}; focus ${c.focused == null ? "unknown" : (c.focused ? "yes" : "no")}; mounted ${Number(c.mountedMessages || runtime.loadedChatMessages || 0)}; DOM ${Number(c.domNodes || 0)}; heap ${Number(c.heapBytes || 0) ? `${Math.round(Number(c.heapBytes) / 1048576)} MB` : "n/a"}; Long Task 10s ${Number(c.recentLongTaskMs10s || 0)} ms; 30s ${Number(c.recentLongTaskMs30s || 0)} ms`; })(),
-    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
+    `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep always on; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
@@ -23188,7 +23350,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     ] : []),
     `Opened-history persistence: queued ${Number(runtime.openedSaveQueued || 0)}; coalesced ${Number(runtime.openedSaveCoalesced || 0)}; flushes ${Number(runtime.openedSaveFlushes || 0)}; pending ${Number(runtime.openedSavePending || 0)}; last ${Number(runtime.openedSaveLastMs || 0)} ms`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"}; ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min; action ${settings.autoAfkAction === "close" ? "close" : "discard"}; scopes ${(() => { const scopes = [settings.autoAfkChats !== false ? "chats" : "", settings.autoAfkHome ? "home" : "", settings.autoAfkProfiles ? "profiles" : ""].filter(Boolean); return scopes.length ? scopes.join(", ") : (settings.autoAfkEnabled ? "chats (legacy fallback)" : "none"); })()}; low-memory ${settings.lowMemoryProtectionEnabled ? `on @ ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} awake tabs` : "off"}`,
-    `Disabled-feature deep sleep: ${settings.deepSleepDisabledFeatures !== false ? "on" : "off"}; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
+    `Disabled-feature deep sleep: always on; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
     `Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`,
     `Blocked-bot refresh batching: ${Number(runtime.blockedBotRefreshDeferrals || 0)} deferred single-block changes; ${Number(runtime.blockedBotRefreshFlushes || 0)} settled refreshes; ${Number(runtime.blockedBotMutationSkips || 0)} immediate listing mutations skipped; ${runtime.blockedBotRefreshPending ? `pending (${Math.max(0, Math.ceil((Number(runtime.blockedBotRefreshSettleAt || 0) - Date.now()) / 1000))}s remaining)` : "idle"}`,
     `Listing workload guard: ${Number(runtime.listingNonCardCriticalSkips || 0)} non-card critical passes skipped; ${Number(runtime.listingScheduleDeferrals || 0)} mutation bursts coalesced; ${Number(runtime.slowStepThrottleSkips || 0)} repeated slow scans throttled; ${Number(runtime.listingDuplicateRefillCardsRemoved || 0)} duplicate refill cards removed; ${Number(runtime.cardTokenHiddenQueuePauses || 0)} hidden-tab token queue pauses`,
@@ -24374,7 +24536,8 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableChatNudges", name: "Chat Nudges", children: ["chatNudgeDefaultHours", "chatNudgeBrowserNotifications"] },
   { parent: "enableTranslation", name: "Message translation", children: ["translationShowMessageButtons", "translationAutoAi", "translationAutoUser", "translationAllowRemoteFallback", "translationPerChatControls"] },
   { parent: "showFormattingToolbar", name: "Formatting toolbar", children: ["formatToolbarAsterisk", "formatToolbarBold", "formatToolbarBoldItalic", "formatToolbarStrike", "formatToolbarParens", "formatToolbarQuotes", "formatToolbarBackticks", "formatToolbarBrackets", "formatToolbarBraces"] },
-  { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
+  { parent: "enableBulkMemoryManager", name: "Memory Manager", children: ["enableMemoryVault"] },
+  { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerExplorerFolders", "botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
   { parent: "enableCreatorWritingAssistant", name: "Creator Writing Assistant", children: ["creatorWritingUseBrowserAi", "creatorWritingTargetLanguage", "creatorWritingDictionary"] },
   { parent: "enableTagAliases", name: "Local tag aliases", children: ["tagAliasRules", "tagAliasShowDisplay"] },
   { parent: "localTagMatchEnabled", name: "Personal tag matches", children: ["localTagMatchRules", "localTagMatchFetchPublic"] },
@@ -25544,7 +25707,25 @@ $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerfo
 ["settingsNavigationStyle", "settingsContentLayout", "settingsPageWidth"].forEach(id => {
   $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());
 });
-$("qolInterfaceScale")?.addEventListener("change", () => applyOptionsAccessibilityPreview({ qolInterfaceScale: Number(value("qolInterfaceScale", "100")) || 100 }));
+for (const id of ["qolInterfaceScale", "settingsReadingFont", "settingsReadingSize", "settingsReadingLineSpacing", "settingsReadingLetterSpacing", "settingsReadingContrast", "settingsReadingLargerControls"]) {
+  $(id)?.addEventListener("change", () => applyOptionsAccessibilityPreview(settingsReadingValuesFromControls()));
+}
+const SETTINGS_READING_PRESETS = {
+  default: { settingsReadingFont: "native", settingsReadingSize: 100, settingsReadingLineSpacing: "native", settingsReadingLetterSpacing: "native", settingsReadingContrast: false, settingsReadingLargerControls: false },
+  comfort: { settingsReadingFont: "verdana", settingsReadingSize: 110, settingsReadingLineSpacing: "comfortable", settingsReadingLetterSpacing: "slight", settingsReadingContrast: false, settingsReadingLargerControls: false },
+  vision: { settingsReadingFont: "arial", settingsReadingSize: 125, settingsReadingLineSpacing: "comfortable", settingsReadingLetterSpacing: "native", settingsReadingContrast: true, settingsReadingLargerControls: true }
+};
+document.querySelectorAll("[data-settings-reading-preset]").forEach(button => button.addEventListener("click", () => {
+  const preset = SETTINGS_READING_PRESETS[button.dataset.settingsReadingPreset];
+  if (!preset) return;
+  for (const [key, selected] of Object.entries(preset)) {
+    if (typeof selected === "boolean") setChecked(key, selected);
+    else setValue(key, selected);
+  }
+  applyOptionsAccessibilityPreview(settingsReadingValuesFromControls());
+  const card = $("accessibilityCard");
+  if (card) queueSettingsDiffForContainer(card, { delay: 70 });
+}));
 $("collapseAllSettingsSections")?.addEventListener("click", () => {
   setAllSettingsSectionsCollapsed(true);
   persistAllSettingsSectionStates();

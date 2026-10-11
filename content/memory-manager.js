@@ -13,6 +13,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let scanningPinnedOrder = false;
   let applyingPinnedOrder = false;
   let importingMemories = false;
+  let vaultBusy = false;
+  const MEMORY_VAULT_KEY = "dsMemoryVaultV1";
   let pinnedOrderDraft = [];
   const autoLoadedManagers = new WeakSet();
   let lastManager = null;
@@ -110,6 +112,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const count = selectedMemories.size;
     const countEl = toolbar.querySelector(".ds-memory-selected-count");
     const deleteButton = toolbar.querySelector(".ds-memory-delete-selected");
+    const archiveButton = toolbar.querySelector(".ds-memory-vault-archive");
+    if (archiveButton) archiveButton.disabled = vaultBusy || deleting || importingMemories || !selectedMemories.size;
     const pinButton = toolbar.querySelector(".ds-memory-pin-selected");
     const busy = deleting || checkingPins || pinningSelected || loadingMoreMemories || scanningPinnedOrder || applyingPinnedOrder || importingMemories;
 
@@ -591,6 +595,153 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     return { ok: true };
+  }
+
+  // Memory Vault is opt-in. Its local records are persisted and verified
+  // before invoking any native SpicyChat deletion action.
+  async function readMemoryVault() {
+    const value = (await DS.storageGet([MEMORY_VAULT_KEY]))?.[MEMORY_VAULT_KEY];
+    if (value == null) return { version: 1, entries: [] };
+    if (value.version !== 1 || !Array.isArray(value.entries)) throw new Error("Memory Vault data is not in a recognized format. Export a backup before proceeding.");
+    return value;
+  }
+
+  async function saveVerifiedMemoryVault(value, entryId) {
+    const ok = await DS.storageSet({ [MEMORY_VAULT_KEY]: value });
+    if (ok === false) throw new Error("Browser storage rejected the Memory Vault update.");
+    const verify = await readMemoryVault();
+    const wanted = value.entries.find(row => row.id === entryId);
+    const saved = verify.entries.find(row => row.id === entryId);
+    if (!wanted || !saved || JSON.stringify(saved) !== JSON.stringify(wanted)) throw new Error("The Memory Vault write did not pass read-back verification. Native memory was not deleted.");
+  }
+
+  function vaultChatId() {
+    const route = memoryRouteMeta();
+    // Current SpicyChat routes may use /chat/{conversationId} without the
+    // older /chat/{botId}/{conversationId} pair. The entire route is the
+    // persistent per-chat key; guard uncreated greeting-only chats below.
+    if (!route.botId || (looksLikeBrandNewChat() && !route.conversationId)) return "";
+    return route.conversationId ? `${route.botId}/${route.conversationId}` : route.botId;
+  }
+
+  async function archiveSelectedMemories() {
+    if (vaultBusy || deleting || importingMemories || !selectedMemories.size) return;
+    const chatId = vaultChatId();
+    if (!chatId) { setStatus("Open an established conversation before archiving memories; this chat has no stable conversation ID yet.", "error"); return; }
+    const manager = getManager();
+    if (findLoadMoreMemoriesButton(manager)) await loadAllMemories(manager);
+    const rows = getMemoryRows();
+    const targets = rows.filter(row => selectedMemories.has(row.text));
+    const duplicates = targets.some(row => rows.filter(other => other.text === row.text).length !== 1);
+    if (duplicates || targets.length !== selectedMemories.size) {
+      setStatus("Cannot archive ambiguously identified or unloaded memories. Exact duplicates must be handled manually.", "error"); return;
+    }
+    if (!window.confirm(`Archive ${targets.length} selected memor${targets.length === 1 ? "y" : "ies"} from SpicyChat?\n\nQoL saves and verifies local copies first, then uses SpicyChat's Delete action. Restore later from Memory Vault. This is a real native deletion, not just hiding the UI.`)) return;
+    vaultBusy = true;
+    updateToolbar();
+    let moved = 0;
+    try {
+      for (const target of targets) {
+        const current = findMemoryRowByText(target.text);
+        if (!current || getMemoryRows().filter(item => item.text === target.text).length !== 1) throw new Error("Memory changed or became ambiguous during archive.");
+        const pinned = await getMemoryPinnedState(current);
+        const state = await readMemoryVault();
+        const previous = state.entries.find(item => item.chatId === chatId && item.text === target.rawText && item.status !== "restored");
+        const id = previous?.id || (typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${state.entries.length}`);
+        const entry = {
+          id, chatId, botId: memoryRouteMeta().botId, text: target.rawText || target.text,
+          pinned: typeof pinned === "boolean" ? pinned : null,
+          status: "saved-pending-delete", storedAt: previous?.storedAt || Date.now(), updatedAt: Date.now()
+        };
+        const next = { version: 1, entries: [...state.entries.filter(item => item.id !== id), entry] };
+        await saveVerifiedMemoryVault(next, id);
+        setStatus(`Saved and verified ${moved + 1} of ${targets.length}; requesting SpicyChat removal...`);
+        const result = await deleteOneMemory(target.text);
+        if (!result.ok) throw new Error(`Copy is safely stored, but native removal was not confirmed: ${result.reason}`);
+        entry.status = "stored";
+        entry.updatedAt = Date.now();
+        await saveVerifiedMemoryVault(next, id);
+        selectedMemories.delete(target.text);
+        moved += 1;
+      }
+      setStatus(`Archived ${moved} memor${moved === 1 ? "y" : "ies"} to the local Vault.`, "ok");
+    } catch (error) {
+      setStatus(`Stopped after ${moved} archived: ${error?.message || error}. Check Vault before retrying.`, "error");
+    } finally {
+      vaultBusy = false; updateToolbar();
+      refreshMemoryVaultPanel().catch(() => {});
+    }
+  }
+
+  async function restoreVaultMemory(entryId) {
+    if (vaultBusy || importingMemories || deleting) return;
+    const chatId = vaultChatId();
+    if (!chatId) return;
+    vaultBusy = true;
+    try {
+      let state = await readMemoryVault();
+      const entry = state.entries.find(item => item.id === entryId && item.chatId === chatId);
+      if (!entry || entry.status === "restored") throw new Error("This record is not stored for this conversation.");
+      const pending = entry.status === "saved-pending-delete";
+      if (!window.confirm(pending
+        ? "SpicyChat did not confirm the earlier removal. QoL will check whether this memory is still active before attempting to restore it. The local copy will be kept. Continue?"
+        : "Restore this memory to SpicyChat? The local Vault copy will be retained.")) return;
+      const manager = getManager();
+      if (findLoadMoreMemoriesButton(manager)) await loadAllMemories(manager);
+      const existing = countMemoryRowsByText(entry.text);
+      if (existing > 1) throw new Error("More than one identical native memory already exists; cannot verify restoration.");
+      if (!existing) {
+        const result = await createNativeMemory(entry.text);
+        if (!result.ok) throw new Error(result.reason);
+      }
+      if (countMemoryRowsByText(entry.text) !== 1) throw new Error("SpicyChat did not confirm exactly one restored memory. Local copy was retained.");
+      if (entry.pinned === true) {
+        const pin = await setMemoryPinned(cleanText(entry.text), true);
+        if (!pin.ok) setStatus(`Memory restored, but pin status couldn't be confirmed: ${pin.reason}`, "error");
+      }
+      state = await readMemoryVault();
+      const current = state.entries.find(item => item.id === entryId);
+      if (!current) throw new Error("Vault entry changed during restoration; native memory exists but local status needs review.");
+      current.status = "restored"; current.restoredAt = Date.now(); current.updatedAt = Date.now();
+      await saveVerifiedMemoryVault(state, entryId);
+      setStatus("Memory restored to SpicyChat. The local recovery copy was retained.", "ok");
+    } catch (error) { setStatus(`Restore stopped: ${error?.message || error}`, "error"); }
+    finally { vaultBusy = false; refreshMemoryVaultPanel().catch(() => {}); updateToolbar(); }
+  }
+
+  async function refreshMemoryVaultPanel() {
+    const panel = getManager()?.querySelector("#ds-memory-vault-panel");
+    if (!panel || !DS.state.settings?.enableMemoryVault) return;
+    const chatId = vaultChatId();
+    panel.replaceChildren();
+    const heading = document.createElement("strong"); heading.textContent = "Stored memories (local Vault)";
+    panel.append(heading);
+    if (!chatId) { const note = document.createElement("small"); note.textContent = "Archive requires an established conversation ID."; panel.append(note); return; }
+    const state = await readMemoryVault();
+    const items = state.entries.filter(item => item.chatId === chatId && item.status !== "restored");
+    if (!items.length) { const note = document.createElement("small"); note.textContent = "No archived memories for this conversation."; panel.append(note); }
+    for (const item of items) {
+      const row = document.createElement("div"); row.className = "ds-memory-vault-row";
+      const label = document.createElement("span"); label.textContent = item.text;
+      if (item.status === "saved-pending-delete") {
+        label.title = "Native removal wasn't confirmed. QoL kept this copy for safety.";
+        const warning = document.createElement("small");
+        warning.textContent = "Removal not confirmed — check before restoring";
+        label.append(document.createElement("br"), warning);
+      } else label.title = item.text;
+      const button = document.createElement("button"); button.type = "button";
+      button.textContent = item.status === "saved-pending-delete" ? "Check / Restore" : "Restore";
+      button.disabled = vaultBusy;
+      button.addEventListener("click", () => restoreVaultMemory(item.id));
+      row.append(label, button); panel.append(row);
+    }
+    const exportButton = document.createElement("button"); exportButton.type = "button";
+    exportButton.textContent = "Export Vault JSON";
+    exportButton.addEventListener("click", async () => {
+      const records = (await readMemoryVault()).entries.filter(item => item.chatId === chatId);
+      saveJsonFile({ format: "spicychat-qol-memory-vault", version: 1, chatId, entries: records }, `spicychat-memory-vault-${Date.now()}.json`);
+    });
+    panel.append(exportButton);
   }
 
   async function deleteSelectedMemories() {
@@ -1563,12 +1714,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <button type="button" class="ds-memory-import-json">Import JSON</button>
         <button type="button" class="ds-memory-reorder-pinned">Reorder pinned</button>
         <button type="button" class="ds-memory-delete-selected" disabled>Delete selected</button>
+        ${DS.state.settings?.enableMemoryVault ? `<button type="button" class="ds-memory-vault-archive" disabled>Archive selected</button>` : ""}
       </div>
       <div class="ds-memory-bulk-meta">
         <span class="ds-memory-selected-count">0 selected</span>
         <span class="ds-memory-bulk-status" aria-live="polite"></span>
       </div>
       <div class="ds-memory-pinned-order" hidden></div>
+      ${DS.state.settings?.enableMemoryVault ? `<div id="ds-memory-vault-panel" class="ds-memory-vault-panel"></div>` : ""}
     `);
 
     toolbar.querySelector(".ds-memory-select-all")?.addEventListener("click", () => {
@@ -1640,6 +1793,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         updateToolbar(manager);
       });
     });
+
+    toolbar.querySelector(".ds-memory-vault-archive")?.addEventListener("click", () => archiveSelectedMemories().catch(error => { vaultBusy = false; setStatus(`Archive failed: ${error?.message || error}`, "error"); updateToolbar(manager); }));
+    refreshMemoryVaultPanel().catch(error => setStatus(`Vault read failed: ${error?.message || error}`, "error"));
 
     toolbar.querySelector(".ds-memory-delete-selected")?.addEventListener("click", () => {
       deleteSelectedMemories().catch(error => {
@@ -1826,6 +1982,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
     const manager = getManager();
     const bulkEnabled = !!(settings.enabled && settings.enableBulkMemoryManager && manager);
+    if (manager?.querySelector("#ds-memory-bulk-toolbar") && !!manager.querySelector("#ds-memory-vault-panel") !== !!settings.enableMemoryVault) manager.querySelector("#ds-memory-bulk-toolbar")?.remove();
     const copyEnabled = !!(settings.enabled && settings.showCopyMemoryAction && manager);
     const autoLoadEnabled = !!(settings.enabled && settings.memoryAutoLoadAll && manager);
 

@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>SpicyChat QoL</title>
 <link href="options.css" rel="stylesheet"/>
 <link href="options-overhaul.css" rel="stylesheet"/>
@@ -45,7 +46,12 @@
 <div class="settings-search-results" hidden="" id="settingsSearchResults"></div>
 </div>
 </section>
-<nav aria-label="Options tabs" class="tabs tabs-grouped">
+<button aria-controls="optionsTabsNav" aria-expanded="false" class="mobile-sections-toggle" id="mobileSectionsToggle" type="button">
+<span class="mobile-sections-label">Sections</span>
+<strong class="mobile-sections-current" id="mobileSectionsCurrent">General</strong>
+<span aria-hidden="true" class="mobile-sections-chevron">▾</span>
+</button>
+<nav aria-label="Options tabs" class="tabs tabs-grouped" id="optionsTabsNav">
 <div class="tab-group" data-tab-group="core"><span class="tab-group-label">Core</span><div class="tab-group-buttons">
 <button class="tab-button active" data-tab="general" type="button">General</button>
 <button class="tab-button" data-tab="control" type="button">Control Center</button>
@@ -494,6 +500,8 @@ Testing"></textarea></label>
 <h2>Bot Organizer</h2>
 <p class="hint">Adds local chatbot folders, private notes, personal tags, creator-only status labels, filtering, and safe bulk actions to bot listings. Nothing here changes the public bot itself.</p>
 <label class="row"><input id="enableBotOrganizer" type="checkbox"/><span>Enable Bot Organizer</span></label>
+<label class="row"><input id="botOrganizerExplorerFolders" type="checkbox"/><span>Show clickable Explorer-style folders on Favorites and My Creations</span></label>
+<p class="hint">Optional folder tiles above the existing bot grid. Open a folder to view its bots; use Back, All bots, or Unfoldered. Use the pencil on a folder tile (or Change folder picture inside it) to choose its location (Favorites, My Chatbots, or Shared), the standard icon, two bot avatars, selected bot avatars, or a custom uploaded cover. Existing folders remain Shared. Folder tiles only appear on Favorites and My Creations, never Home/Recommendations. Small custom thumbnails are stored in Bot Organizer backups. The existing bottom toolbar stays available.</p>
 <label class="row"><input id="botOrganizerShowCardMeta" type="checkbox"/><span>Show local folders, tags, notes, and creator status on cards</span></label>
 <label class="row"><input id="botOrganizerBulkTools" type="checkbox"/><span>Show listing filters and bulk selection tools</span></label>
 <label>Chatbot folders<textarea id="botCollections" placeholder="Testing
@@ -1225,6 +1233,8 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <div class="tab-page" data-page="personas-memory"><p class="page-intro">Persona backups and switching, SpicyChat Memory helpers, and Context Keeper.</p><section class="card">
 <h2>Memory manager</h2>
 <label class="row"><input id="enableBulkMemoryManager" type="checkbox"/><span>Enable Memory Manager</span></label>
+<label class="row"><input id="enableMemoryVault" type="checkbox"/><span>Enable reversible Memory Vault (archive native memories and restore later)</span></label>
+<p class="hint">Requires Memory Manager. Saves and verifies the exact memory locally before requesting native deletion. Archived memories stay in local QoL storage and backups until you restore or export them. Nothing is archived automatically. Deactivation does not erase earlier chat messages.</p>
 <p class="hint">Adds checkboxes plus Select all, Select unpinned, Invert, Clear, Pin selected, Keep selected for Context Keeper, Load all memories, JSON export/import, Reorder pinned, and Delete selected. Import previews the file first, skips exact duplicates by default, and creates memories in the current chat through SpicyChat's normal Memory controls.</p>
 <label class="row"><input id="memoryAutoLoadAll" type="checkbox"/><span>Automatically load all available memories when the Memories manager opens</span></label>
 <label class="row"><input id="showCopyMemoryAction" type="checkbox"/><span>Add Copy Memory to each memory's three-dot menu</span></label>
@@ -1380,8 +1390,8 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="pauseQolWhileMessageEditing" type="checkbox"/><span>Keep non-essential QoL quiet while a message is being edited</span></label>
 <label class="row"><input id="reduceQolAnimations" type="checkbox"/><span>Reduce QoL-added animations and transitions</span></label>
 <label class="row"><input id="reduceOptionsAnimations" type="checkbox"/><span>Reduce animations/transitions on the QoL Settings page</span></label>
-<label class="row"><input id="deepSleepDisabledFeatures" type="checkbox"/><span>Stop disabled features from running in the background (recommended)</span></label>
-<p class="hint">When this is on, features you turned off stop doing background checks. QoL can still do a one-time cleanup when something was previously enabled, and the few helper hooks used by token info/chat stability only start when needed.</p>
+<label class="row"><input id="deepSleepDisabledFeatures" type="checkbox" checked disabled/><span>Disabled features stay asleep (always enabled)</span></label>
+<p class="hint">Disabled features are no longer scheduled, even if an older backup had this switched off. A one-time cleanup may still run when an enabled feature is turned off. Packaged scripts can still be parsed at page load; this is runtime gating, not yet on-demand script injection.</p>
 <label class="row"><input id="performanceDiagnostics" type="checkbox"/><span>Collect local QoL performance timings for Diagnostics</span></label>
 <p class="hint">Adaptive is the normal recommended mode. Aggressive waits a little longer before non-essential QoL updates, while Maximum is meant for unusually large or slow chats. The large-chat option can switch to stronger handling automatically after your chosen message count. Performance reports stay local unless you copy one.</p>
 </section></div>
@@ -1413,6 +1423,45 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <p class="hint">The Settings-size preview applies immediately here. Chat text and line spacing apply to SpicyChat after you save.</p>
+<h3>Reading support for QoL Settings</h3>
+<p class="hint">These choices affect only this Settings page, not chat messages or the rest of SpicyChat.</p>
+<div class="button-row settings-reading-presets" aria-label="Settings reading presets">
+  <button type="button" data-settings-reading-preset="comfort">Reading comfort</button>
+  <button type="button" data-settings-reading-preset="vision">Larger and clearer</button>
+  <button type="button" data-settings-reading-preset="default">Reset reading options</button>
+</div>
+<label>Settings font
+<select id="settingsReadingFont">
+<option value="native">Normal font</option>
+<option value="arial">Arial</option>
+<option value="verdana">Verdana</option>
+<option value="trebuchet">Trebuchet MS</option>
+<option value="serif">Georgia</option>
+<option value="monospace">Monospace</option>
+<option value="dyslexia">OpenDyslexic (if installed)</option>
+</select></label>
+<label>Settings text and controls size
+<select id="settingsReadingSize">
+<option value="100">100% — default</option>
+<option value="110">110%</option>
+<option value="125">125%</option>
+<option value="150">150%</option>
+</select></label>
+<label>Settings line spacing
+<select id="settingsReadingLineSpacing">
+<option value="native">Normal</option>
+<option value="comfortable">Comfortable</option>
+<option value="spacious">Spacious</option>
+</select></label>
+<label>Settings letter spacing
+<select id="settingsReadingLetterSpacing">
+<option value="native">Normal</option>
+<option value="slight">A little more</option>
+<option value="wide">More spaced out</option>
+</select></label>
+<label class="row"><input id="settingsReadingContrast" type="checkbox"/><span>Stronger contrast in QoL Settings</span></label>
+<label class="row"><input id="settingsReadingLargerControls" type="checkbox"/><span>Larger buttons, checkboxes, and form controls</span></label>
+<p class="hint">Fonts use what's installed on your device; QoL doesn't download fonts. All changes preview immediately and can be reset. Chat reading options can be added later.</p>
 </section>
 
 <section class="card" id="chatBackgroundsCard">
@@ -1420,7 +1469,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
 <label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
 <p class="hint">Choose BG in a chat to save and switch scenes. Import images generated anywhere by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
-<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set (opt-in)</span></label>
+<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set</span></label>
 <label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
 <label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
 <p class="hint">Avatar mode uses the image already present in the chat header; it does not store or fetch an additional copy. Custom chat images always take priority.</p>
@@ -1639,6 +1688,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="hideSidebarChats" type="checkbox"/><span>Hide Chats</span></label>
 <label class="row"><input id="hideSidebarPersonas" type="checkbox"/><span>Hide My Personas</span></label>
 <label class="row"><input id="restorePersonasSidebarPosition" type="checkbox"/><span>Move My Personas back under Chats in the sidebar</span></label>
+<label class="row"><input id="hideSidebarNewBadges" type="checkbox"/><span>Hide sidebar “New” badges (e.g. Lorebooks), but keep the links visible</span></label>
 <h3>Create</h3>
 <label class="row"><input id="hideSidebarCreateMenu" type="checkbox"/><span>Hide Create dropdown button</span></label>
 <label class="row"><input id="hideSidebarCreateChatbot" type="checkbox"/><span>Hide Create - Chatbot</span></label>
@@ -2418,8 +2468,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="bulkCardBlockingSidebarLauncher" type="checkbox"/><span>Place Select bots below Narrow by Group Size instead of beside Search</span></label>
 <p class="hint">By default, Select bots sits in the main listing controls between the search area and SpicyChat's NSFW/sort controls. Enable the placement option above if you prefer the older location below Narrow by Group Size. The Mini Panel shortcut remains available either way. While Select mode is active, click bot cards to select/unselect them, then block the selection together.</p>
 </div>
-<label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (opt-in, desktop browser only)</span></label>
-<label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (opt-in, desktop browser only)</span></label>
+<label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
+<label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
 <p class="hint"><strong>Both are optional and independent.</strong> Enable either one or both. Less Like and Dislike both use the persistent signed recommendation-feedback helper; Dislike still waits for its idle cooldown and keeps separate handled history. If both point at the same negative recommendation event, QoL coordinates them so the same rating is not posted twice. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality

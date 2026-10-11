@@ -229,7 +229,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const resolvedWanted = typeof wanted === "function" ? !!wanted() : !!wanted;
-    if (deepSleep && !resolvedWanted) {
+    if (!resolvedWanted) {
       perf.disabledFeatureStepSkips = Number(perf.disabledFeatureStepSkips || 0) + 1;
       return null;
     }

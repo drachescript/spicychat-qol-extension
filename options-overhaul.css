@@ -252,3 +252,138 @@ body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .
   body.ds-options-nav-grouped .tab-group-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body.ds-options-nav-grouped .tabs.tabs-grouped .tab-button { width: 100%; }
 }
+
+/* Mobile Settings: keep sections available without covering the content. */
+.mobile-sections-toggle { display: none; }
+@media (max-width: 720px) {
+  .mobile-sections-toggle {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 42px;
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    border: 1px solid #444a53;
+    border-radius: 10px;
+    background: #1b1d21;
+    color: #f0f0f0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mobile-sections-label { color: #b4bbc5; font-size: 13px; }
+  .mobile-sections-current {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .mobile-sections-chevron { transition: transform .15s ease; }
+  .mobile-sections-toggle[aria-expanded="true"] .mobile-sections-chevron { transform: rotate(180deg); }
+  /* Always collapse on narrow layouts, including the Android WebView. */
+  .tabs.tabs-grouped:not(.is-mobile-open) { display: none !important; }
+  .mobile-sections-toggle:focus-visible { outline: 3px solid #a8ceff; outline-offset: 2px; }
+  .tabs.tabs-grouped.is-mobile-open,
+  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    width: 100%;
+    max-height: min(56dvh, 420px);
+    margin: 0 0 12px;
+    padding: 10px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid #434951;
+    border-radius: 10px;
+    background: #141619;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .45);
+  }
+  .tabs.tabs-grouped.is-mobile-open .tab-button {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 9px 7px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open {
+    grid-template-columns: 1fr;
+  }
+  /* Restore structure even when desktop classic navigation flattens groups. */
+  .tabs.tabs-grouped.is-mobile-open .tab-group {
+    display: block;
+    min-width: 0;
+  }
+  .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .tabs.tabs-grouped.is-mobile-open .tab-group-label {
+    display: block;
+    margin: 5px 4px;
+    color: #c1c6cf;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .tabs.tabs-grouped.is-mobile-open .tab-group .tab-button {
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    min-height: 44px;
+  }
+  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  @media (max-width: 370px) {
+    .tabs.tabs-grouped.is-mobile-open .tab-group-buttons,
+    body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+/* Optional reading aids are deliberately scoped to this Settings page. */
+html.ds-options-reading-font body,
+html.ds-options-reading-font body :is(button, input, select, textarea) {
+  font-family: var(--ds-options-reading-font, Arial, sans-serif) !important;
+}
+html.ds-options-reading-line-comfortable body { line-height: 1.55; }
+html.ds-options-reading-line-spacious body { line-height: 1.8; }
+html.ds-options-reading-letter-slight body { letter-spacing: .018em; }
+html.ds-options-reading-letter-wide body { letter-spacing: .045em; }
+html.ds-options-reading-contrast :is(.card, .settings-search-card, .tabs.tabs-grouped) {
+  border-color: #a5adba !important;
+}
+html.ds-options-reading-contrast :is(label, .hint, .page-intro, .tab-button, .settings-card-toggle, .tab-group-label) {
+  color: #f5f6fa !important;
+}
+html.ds-options-reading-contrast :is(input, select, textarea, button) {
+  border-color: #b0bccb !important;
+}
+html.ds-options-reading-large-controls :is(.tab-button, .settings-quick-nav button, .settings-card-body button, .settings-card-body select, .settings-card-body input:not([type="checkbox"]):not([type="radio"])) {
+  min-height: 44px;
+  box-sizing: border-box;
+}
+html.ds-options-reading-large-controls input:is([type="checkbox"], [type="radio"]) {
+  min-width: 22px;
+  min-height: 22px;
+}
+/* Keep keyboard focus visible even when none of the optional aids are active. */
+html :is(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 3px solid #a8ceff !important;
+  outline-offset: 3px !important;
+}
+.settings-reading-presets { flex-wrap: wrap; }
+.settings-reading-presets button { min-height: 40px; }

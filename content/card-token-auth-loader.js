@@ -135,7 +135,6 @@ if (!(() => { try {
     const lorebookEditorNeedsAuthBridge = isLorebookEditorRoute();
     const enabled = !!(settings && settings.enabled !== false && (
       settings.showCardGreetingTokenInfo ||
-      settings.deepSleepDisabledFeatures === false ||
       publicArchiveNeedsProfileBridge ||
       chatExportNeedsAuthBridge ||
       chatListImportNeedsAuthBridge ||
