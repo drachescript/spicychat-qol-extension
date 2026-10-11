@@ -1,3 +1,10 @@
+#ds-translation-chat-language { max-width: 132px; background: #25262b; color: #fff; border: 1px solid #777; border-radius: 6px; padding: 4px; font-size: 12px; }
+.ds-chat-scenes { margin: 12px 0; max-height: 45vh; overflow-y: auto; }
+.ds-chat-scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.ds-chat-scene-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ds-chat-scene-item img { max-width: 100%; height: 85px; object-fit: cover; border-radius: 6px; }
+.ds-chat-scene-item button { font-size: 11px; overflow-wrap: anywhere; }
+#ds-chat-replacement-preset { max-width: 148px; background: #25262b; color: #fff; border: 1px solid #777; border-radius: 6px; padding: 4px; font-size: 12px; }
 .ds-hidden {
   display: none !important;
 }
@@ -2961,15 +2968,17 @@ html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][cla
 
 /* v0.1.8.84: Android/WebView mobile top-bar menu */
 .ds-android-qol-menu-button {
-  min-width: 38px;
+  min-width: 34px;
   height: 34px;
-  padding: 0 8px;
+  flex: 0 0 34px;
+  padding: 0 5px;
   border: 1px solid rgba(128,128,128,.42);
   border-radius: 999px;
   background: rgba(20,20,20,.42);
   color: inherit;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1;
   cursor: pointer;
 }
 .ds-android-qol-menu {

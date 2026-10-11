@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -311,7 +313,7 @@
       cfg.lorebookEntryShowCharacterCount !== false;
     const actionsOn = cfg.lorebookEntryRenameButton !== false ||
       cfg.lorebookEntryCopyButton !== false ||
-      cfg.lorebookEntryDuplicateButton !== false;
+      cfg.lorebookEntryDuplicateButton !== false || !!cfg.lorebookEntryQuickToggle;
 
     let tools = row.nextElementSibling?.classList?.contains("ds-lb-row-tools") ? row.nextElementSibling : null;
     const toggleWrap = row.nextElementSibling?.classList?.contains("ds-lorebook-entry-toggle-wrap") ? row.nextElementSibling : null;
@@ -341,10 +343,13 @@
       const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "Rename"; rename.dataset.dsLbAction = "rename";
       const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy"; copy.dataset.dsLbAction = "copy";
       const duplicate = document.createElement("button"); duplicate.type = "button"; duplicate.textContent = "Duplicate"; duplicate.dataset.dsLbAction = "duplicate";
+      const quickToggle = document.createElement("button"); quickToggle.type = "button"; quickToggle.textContent = "Enable / Disable"; quickToggle.dataset.dsLbAction = "quick-toggle";
+      quickToggle.title = "Changes the shared Lorebook entry in SpicyChat — may affect multiple chats";
+      quickToggle.addEventListener("click", () => toggleOneEntry(row));
       rename.addEventListener("click", () => quickRename(row));
       copy.addEventListener("click", () => copyRows([row]));
       duplicate.addEventListener("click", () => duplicateRows([row]));
-      tools.append(check, label, rename, copy, duplicate);
+      tools.append(check, label, rename, copy, duplicate, quickToggle);
       row.insertAdjacentElement("afterend", tools);
     }
 
@@ -356,9 +361,11 @@
     const rename = tools.querySelector("[data-ds-lb-action='rename']");
     const copy = tools.querySelector("[data-ds-lb-action='copy']");
     const duplicate = tools.querySelector("[data-ds-lb-action='duplicate']");
+    const quickToggle = tools.querySelector("[data-ds-lb-action='quick-toggle']");
     if (rename) rename.hidden = cfg.lorebookEntryRenameButton === false;
     if (copy) copy.hidden = cfg.lorebookEntryCopyButton === false;
     if (duplicate) duplicate.hidden = cfg.lorebookEntryDuplicateButton === false;
+    if (quickToggle) quickToggle.hidden = !cfg.lorebookEntryQuickToggle;
 
     const info = analyzedEntries.get(rowInfo(row)?.name) || rowInfo(row);
     const label = tools.querySelector("[data-ds-lb-info]");
@@ -1161,6 +1168,25 @@
     } catch(error){setManagerStatus(error?.message||String(error));} finally{bulkBusy=false;}
   }
 
+  async function toggleOneEntry(row) {
+    if (bulkBusy || !row) return;
+    const answer = clean(prompt("Set this SHARED Lorebook entry to enable or disable? This may affect every chat using this Lorebook.", "enable"), 20).toLowerCase();
+    if (!answer) return;
+    if (!["enable", "disable"].includes(answer)) { setManagerStatus("Type enable or disable."); return; }
+    bulkBusy = true;
+    try {
+      const parts = await openRow(row);
+      const control = [...parts.root.querySelectorAll("label")].find(label => /enabled|active/i.test(textOf(label, 100)))
+        ?.querySelector("input[type='checkbox'],button[role='switch']");
+      if (!control) { await closeModal(parts); throw new Error("Native entry enable/disable control not found; no changes saved."); }
+      const checked = control.matches("input") ? control.checked : control.getAttribute("aria-checked") === "true";
+      if (checked !== (answer === "enable")) control.click();
+      await submitModal(parts);
+      setManagerStatus(`Entry ${answer === "enable" ? "enabled" : "disabled"} in SpicyChat's shared Lorebook.`);
+    } catch(error) { setManagerStatus(error?.message || String(error)); }
+    finally { bulkBusy = false; }
+  }
+
   async function bulkToggleEnabled() {
     const rows=selectedRows(); if(!rows.length)return setManagerStatus("Select at least one entry first.");
     const answer = clean(prompt("Type enable or disable for the selected entries", "enable"), 20).toLowerCase();
@@ -1333,3 +1359,5 @@
     await ensureChatMenuShortcut().catch(()=>{});
   };
 })();
+
+}

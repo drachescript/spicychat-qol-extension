@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -6,7 +8,10 @@
 
   const STORE_KEY = "chatBackgroundMediaV1";
   const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-  let mediaStore = { global: null, chats: {} };
+  const MAX_SCENE_BYTES = 1.5 * 1024 * 1024;
+  const MAX_SCENES_PER_CHAT = 6;
+  const MAX_GALLERY_DATA_CHARS = 24 * 1024 * 1024;
+  let mediaStore = { global: null, chats: {}, galleries: {} };
   let mediaLoaded = false;
   let mediaLoadPromise = null;
 
@@ -27,7 +32,14 @@
       const clean = cleanItem(item);
       if (clean && key) chats[String(key).slice(0, 260)] = clean;
     }
-    return { global: cleanItem(input.global), chats };
+    const galleries = {};
+    for (const [key, gallery] of Object.entries(input.galleries || {})) {
+      const items = (Array.isArray(gallery?.items) ? gallery.items : []).slice(0, MAX_SCENES_PER_CHAT)
+        .map(item => { const cleaned = cleanItem(item); return cleaned ? { ...cleaned, id: String(item.id || "").slice(0, 80) } : null; })
+        .filter(item => item?.id);
+      if (key && items.length) galleries[String(key).slice(0, 260)] = { activeId: String(gallery.activeId || "").slice(0, 80), items };
+    }
+    return { global: cleanItem(input.global), chats, galleries };
   }
 
   async function loadStore(force = false) {
@@ -38,7 +50,7 @@
         const result = await DS.storageGet?.([STORE_KEY]);
         mediaStore = cleanStore(result?.[STORE_KEY]);
       } catch {
-        mediaStore = { global: null, chats: {} };
+        mediaStore = { global: null, chats: {}, galleries: {} };
       }
       mediaLoaded = true;
       mediaLoadPromise = null;
@@ -78,7 +90,9 @@
 
   function currentItem() {
     const key = chatKey();
-    const custom = (key && mediaStore.chats?.[key]) || mediaStore.global || null;
+    const gallery = key && DS.state?.settings?.chatSceneGalleriesEnabled ? mediaStore.galleries?.[key] : null;
+    const activeScene = gallery?.items?.find(item => item.id === gallery.activeId) || null;
+    const custom = (key && mediaStore.chats?.[key]) || activeScene || mediaStore.global || null;
     if (custom) return custom;
     return DS.state?.settings?.chatBackgroundUseAvatar ? avatarFromChatHeader() : null;
   }
@@ -197,6 +211,58 @@
     await DS.applyChatBackgrounds?.();
   }
 
+
+  function sceneGalleryStatus() {
+    const gallery = mediaStore.galleries?.[chatKey()];
+    return gallery?.items?.length || 0;
+  }
+  async function uploadSceneFiles() {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*"; input.multiple = true;
+    const files = await new Promise(resolve => {
+      input.addEventListener("change", () => resolve([...input.files || []]), { once: true });
+      input.click();
+    });
+    if (!files.length) return;
+    const key = chatKey(); if (!key) return;
+    await loadStore();
+    const current = mediaStore.galleries?.[key] || { items: [], activeId: "" };
+    if (files.length + current.items.length > MAX_SCENES_PER_CHAT) {
+      DS.setQuickStatus?.(`Up to ${MAX_SCENES_PER_CHAT} scenes per chat. Delete an old scene first.`); return;
+    }
+    let activeId = current.activeId;
+    const items = [...current.items];
+    for (const file of files) {
+      if (!file.type.startsWith("image/") || file.size > MAX_SCENE_BYTES) {
+        DS.setQuickStatus?.(`Scene image must be under 1.5 MB: ${file.name}`); return;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+      items.push({ id, name: file.name.slice(0, 180), dataUrl, updatedAt: Date.now() });
+      activeId = id;
+    }
+    const galleries = { ...mediaStore.galleries, [key]: { items, activeId } };
+    const totalChars = Object.values(galleries).flatMap(g => g.items || []).reduce((sum, item) => sum + (item.dataUrl?.length || 0), 0);
+    if (totalChars > MAX_GALLERY_DATA_CHARS) { DS.setQuickStatus?.("Scene gallery storage budget reached (24 MB). Remove scenes before adding new ones."); return; }
+    try { await saveStore({ ...mediaStore, galleries }); await DS.applyChatBackgrounds?.(); openDialog(); }
+    catch { DS.setQuickStatus?.("Could not store scene gallery. Remove images or use smaller files."); }
+  }
+  async function changeScene(id, { remove = false } = {}) {
+    const key = chatKey(); if (!key) return;
+    await loadStore();
+    const galleries = { ...(mediaStore.galleries || {}) };
+    const existing = galleries[key]; if (!existing) return;
+    const items = remove ? existing.items.filter(item => item.id !== id) : existing.items;
+    galleries[key] = { items, activeId: remove ? (existing.activeId === id ? "" : existing.activeId) : id };
+    if (!items.length) delete galleries[key];
+    // Choosing a scene takes priority over any older single-image override.
+    const chats = { ...mediaStore.chats };
+    if (!remove) delete chats[key];
+    await saveStore({ ...mediaStore, galleries, chats });
+    await DS.applyChatBackgrounds?.();
+    openDialog();
+  }
+
   function closeDialog() {
     document.getElementById("ds-chat-background-dialog")?.remove();
   }
@@ -207,6 +273,7 @@
     const key = chatKey();
     const override = key ? mediaStore.chats?.[key] : null;
     const globalItem = mediaStore.global;
+    const sceneGallery = mediaStore.galleries?.[key];
 
     const modal = document.createElement("div");
     modal.id = "ds-chat-background-dialog";
@@ -222,10 +289,12 @@
     title.textContent = "Chat background";
     const status = document.createElement("p");
     status.className = "ds-chat-background-status";
+    const activeScene = sceneGallery?.items?.find(item => item.id === sceneGallery.activeId);
     status.textContent = override
       ? `This chat uses: ${override.name || "local image"}`
-      : (globalItem ? `Using global background: ${globalItem.name || "local image"}` :
-        (DS.state?.settings?.chatBackgroundUseAvatar ? "Using chat character avatar where available." : "No background image is set."));
+      : (DS.state?.settings?.chatSceneGalleriesEnabled && activeScene ? `Using scene: ${activeScene.name}` :
+        (globalItem ? `Using global background: ${globalItem.name || "local image"}` :
+        (DS.state?.settings?.chatBackgroundUseAvatar ? "Using chat character avatar where available." : "No background image is set.")));
 
     const choose = document.createElement("button");
     choose.type = "button";
@@ -262,7 +331,34 @@
     const actions = document.createElement("div");
     actions.className = "ds-chat-background-actions";
     actions.append(choose, clear, settingsButton, done);
-    panel.append(title, status, actions);
+    panel.append(title, status);
+    if (DS.state?.settings?.chatSceneGalleriesEnabled && key) {
+      const sceneSection = document.createElement("section"); sceneSection.className = "ds-chat-scenes";
+      const heading = document.createElement("h4"); heading.textContent = `Saved scenes (${sceneGalleryStatus()}/${MAX_SCENES_PER_CHAT})`;
+      const grid = document.createElement("div"); grid.className = "ds-chat-scene-grid";
+      for (const item of sceneGallery?.items || []) {
+        const row = document.createElement("div"); row.className = "ds-chat-scene-item";
+        const thumb = document.createElement("img"); thumb.src = item.dataUrl; thumb.alt = item.name; thumb.loading = "lazy";
+        const chooseScene = document.createElement("button"); chooseScene.type = "button";
+        chooseScene.textContent = item.id === sceneGallery.activeId ? `✓ ${item.name}` : item.name;
+        chooseScene.title = "Use this scene"; chooseScene.addEventListener("click", () => changeScene(item.id));
+        const removeScene = document.createElement("button"); removeScene.type = "button";
+        removeScene.textContent = "Delete"; removeScene.title = `Delete ${item.name}`;
+        removeScene.addEventListener("click", () => changeScene(item.id, { remove: true }));
+        row.append(thumb, chooseScene, removeScene); grid.appendChild(row);
+      }
+      const upload = document.createElement("button"); upload.type = "button";
+      upload.textContent = "Add scene images (including saved generated images)";
+      upload.disabled = sceneGalleryStatus() >= MAX_SCENES_PER_CHAT;
+      upload.addEventListener("click", uploadSceneFiles);
+      const unselect = document.createElement("button"); unselect.type = "button";
+      unselect.textContent = "Stop using scene";
+      unselect.disabled = !sceneGallery?.activeId;
+      unselect.addEventListener("click", () => changeScene(""));
+      sceneSection.append(heading, grid, upload, unselect);
+      panel.appendChild(sceneSection);
+    }
+    panel.append(actions);
     modal.append(backdrop, panel);
     document.documentElement.appendChild(modal);
     backdrop.addEventListener("click", closeDialog);
@@ -318,3 +414,5 @@
     });
   } catch {}
 })();
+
+}

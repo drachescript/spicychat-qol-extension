@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -894,6 +896,60 @@
       'button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]'
     ).filter(button => !button.classList.contains(OOC_SHORTCUT_CLASS));
 
+    // When the user starts typing, SpicyChat replaces its Image/voice controls
+    // with Send. OOC must not depend on Image continuing to exist. Keep the
+    // shortcut on the composer controls row (next to Plus) until Image returns.
+    if (!imageButtons.length) {
+      const field = composerFieldNear(document.body);
+      const controlRow = findComposerControlsRow(field);
+      if (!controlRow || controlRow.closest("#ds-qol-panel")) return;
+
+      const wrappers = DS.qsa(`.${OOC_WRAPPER_CLASS}`);
+      let holder = wrappers.find(wrapper => wrapper.parentElement === controlRow) || null;
+      wrappers.forEach(wrapper => { if (wrapper !== holder) wrapper.remove(); });
+
+      // A native Image wrapper may have been removed by React. Never keep a
+      // detached/stale shortcut or create more than one visible button.
+      DS.qsa(`.${OOC_SHORTCUT_CLASS}`).forEach(button => {
+        if (!holder?.contains(button)) button.remove();
+      });
+
+      if (!holder) {
+        const template = DS.qsa('button[aria-label="Plus-button"]', controlRow)[0]
+          || DS.qsa('button[aria-label="send-message"]', controlRow)[0];
+        if (!template) return;
+        holder = document.createElement("div");
+        holder.className = `inline-flex max-w-full ${OOC_WRAPPER_CLASS}`;
+        holder.setAttribute("data-tooltip-content", "OOC");
+        const shortcut = createOocShortcut(template);
+        // A fallback cloned from Plus/Send should look like the normal Image-
+        // based OOC shortcut, not inherit a filled Plus or Send background.
+        shortcut.className = `inline-flex items-center justify-center transition-all duration-200 rounded-full bg-transparent text-black dark:text-white w-9 h-9 cursor-pointer ${OOC_SHORTCUT_CLASS}`;
+        holder.appendChild(shortcut);
+      }
+
+      const plusContainer = DS.qsa('button[aria-label="Plus-button"]', controlRow)[0]
+        ?.closest(".relative") || null;
+      const anchor = plusContainer?.parentElement === controlRow
+        ? plusContainer
+        : Array.from(controlRow.children).find(child => child !== holder) || null;
+      if (anchor && anchor.nextElementSibling !== holder) {
+        anchor.insertAdjacentElement("afterend", holder);
+      } else if (!anchor && holder.parentElement !== controlRow) {
+        controlRow.appendChild(holder);
+      }
+      const shortcut = holder.querySelector(`.${OOC_SHORTCUT_CLASS}`);
+      bindOocShortcut(normalizeOocShortcut(shortcut));
+      scheduleOocShortcutHealthCheck();
+      return;
+    }
+
+    // In replace mode, the native Image wrapper hosts OOC. Drop only the
+    // temporary composer-row fallback before attaching there again.
+    if (replaceImage) {
+      DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
+    }
+
     imageButtons.forEach(original => {
       const wrapper = imageWrapperFor(original);
       if (!wrapper || wrapper.closest("#ds-qol-panel")) return;
@@ -1155,6 +1211,19 @@
     });
   }
 
+  // Early composer OOC mount, independent of the expensive chat-UI pass.
+  // Called while other enhancements are waiting for native React to settle.
+  DS.applyEssentialOocShortcut = function applyEssentialOocShortcut() {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !settings.replaceChatImageWithOocButton || !DS.isSingleChatPage?.()) return;
+    const mode = settings.hideChatImageButton ? "replace" : "alongside";
+    if (DS.state.oocShortcutMode !== mode) {
+      restoreOocShortcuts();
+      DS.state.oocShortcutMode = mode;
+    }
+    ensureOocShortcut(!!settings.hideChatImageButton);
+  };
+
   DS.applyChatUiCleanup =
     function applyChatUiCleanup() {
       const { settings } = DS.state;
@@ -1319,3 +1388,4 @@
       DS.restoreSendMessageControl();
     };
 })();
+}

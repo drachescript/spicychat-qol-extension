@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -201,32 +203,54 @@
     button.setAttribute("aria-expanded", "true");
   }
 
+  // The mobile compact control must live in the same chat-header action row
+  // as the native Like/Rating button, immediately to its left. We only move
+  // it during the normal chat UI pass (route/settings/React header remount),
+  // not in a repeating layout or geometry-measuring timer.
+  function compactMenuAnchor() {
+    const rating = document.querySelector('button[aria-label="ThumbsUp-button"]');
+    if (rating?.parentElement) {
+      return { host: rating.parentElement, before: rating, anchor: "rating" };
+    }
+
+    const dropdown = document.querySelector('button[aria-label="chat-dropdown"]');
+    const wrapper = dropdown?.closest?.("div.relative") || dropdown?.parentElement || null;
+    if (wrapper?.parentElement) {
+      return { host: wrapper.parentElement, before: wrapper, anchor: "dropdown" };
+    }
+    return null;
+  }
+
   function ensureButton() {
-    const nativeDropdown = document.querySelector('button[aria-label="chat-dropdown"]');
-    const wrapper = nativeDropdown?.closest?.("div.relative") || nativeDropdown?.parentElement || null;
-    const host = wrapper?.parentElement || null;
-    if (!host) return;
+    const placement = compactMenuAnchor();
+    if (!placement) return;
 
     let button = document.getElementById(BUTTON_ID);
-    if (button && button.parentElement !== host) button.remove();
-    button = document.getElementById(BUTTON_ID);
     if (!button) {
       button = document.createElement("button");
       button.id = BUTTON_ID;
       button.type = "button";
       button.className = "ds-android-qol-menu-button";
-      button.textContent = "QoL";
+      button.textContent = "⚙";
       button.title = "SpicyChat QoL compact controls";
+      button.setAttribute("aria-label", "SpicyChat QoL compact menu");
       button.setAttribute("aria-haspopup", "menu");
       button.setAttribute("aria-expanded", "false");
+      button.dataset.dsOwned = "1";
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
         if (document.getElementById(MENU_ID)) closeMenu();
         else buildMenu(button);
       });
-      host.insertBefore(button, wrapper);
     }
+
+    // Preserve the same button and its click handler on React remounts; do not
+    // leave an orphaned button in the old action row or create duplicates.
+    if (button.parentElement !== placement.host || button.nextElementSibling !== placement.before) {
+      placement.host.insertBefore(button, placement.before);
+    }
+    button.dataset.dsMenuAnchor = placement.anchor;
   }
 
   function cleanup() {
@@ -274,3 +298,5 @@
     if (event.key === "Escape") closeMenu();
   }, true);
 })();
+
+}

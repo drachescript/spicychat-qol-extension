@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
   const DS = window.DragonScriptQoL;
@@ -39,3 +41,5 @@
   DS.applyTagAliases=function(){const s=DS.state.settings||{};if(!s.enabled||!s.enableTagAliases)return cleanup();ensureStyle();const maps=parsedRules();visibleTagNodes().forEach(el=>applyNode(el,maps));};
   DS.removeTagAliases=cleanup;
 })();
+
+}

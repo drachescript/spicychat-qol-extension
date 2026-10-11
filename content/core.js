@@ -1,7 +1,153 @@
+// Keep a paused tab free of extension DOM work and runtime initialization.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
   const DS = window.DragonScriptQoL = window.DragonScriptQoL || {};
+
+  // Per-tab runtime gate: only affects QoL's ISOLATED content-script world.
+  // Native SpicyChat uses a separate JS world and keeps its own timers/observers.
+  // Pausing leaves already-added HTML/CSS untouched; resume uses a page reload.
+  const QOL_TAB_PAUSE_KEY = "ds-qol-tab-paused-v1";
+  DS.isQolWorkerTab = function () {
+    try {
+      if (/dsQol(?:BotStatusWorker|RecommendationWorker|LorebookBackupWorker|ListingRefillWorker|QuickDislikeWorker|QuickLessLikeWorker)=1/i.test(location.search)) return true;
+      return /^(?:bot-status|lorebook-backup|recommendation|listing-refill|quick-dislike|less-like)$/.test(String(sessionStorage.getItem("dsQolBackgroundWorkerKind") || ""));
+    } catch { return false; }
+  };
+  const nativeQolTimers = {
+    timeout: window.setTimeout.bind(window),
+    interval: window.setInterval.bind(window),
+    clearTimeout: window.clearTimeout.bind(window),
+    clearInterval: window.clearInterval.bind(window),
+    raf: window.requestAnimationFrame?.bind(window),
+    cancelRaf: window.cancelAnimationFrame?.bind(window),
+    idle: window.requestIdleCallback?.bind(window),
+    cancelIdle: window.cancelIdleCallback?.bind(window)
+  };
+  const qolTimeouts = new Set();
+  const qolIntervals = new Set();
+  const qolFrames = new Set();
+  const qolIdleCalls = new Set();
+  const qolObservers = new Set();
+  const qolDocumentListeners = [];
+  let qolRuntimeSuspended = false;
+  const tabPausedForRuntime = () => qolRuntimeSuspended || (!DS.isQolWorkerTab() && (() => {
+    try { return sessionStorage.getItem(QOL_TAB_PAUSE_KEY) === "1"; }
+    catch { return false; }
+  })());
+  // Preserve native functions for the state-control message listener's reload.
+  DS.reloadAfterTabResume = () => nativeQolTimers.timeout(() => { try { location.reload(); } catch {} }, 100);
+  if (!DS.isQolWorkerTab()) {
+    // Track document/window event handlers, too. These otherwise keep reacting
+    // to native scroll, keyboard and visibility events after a live tab pause.
+    for (const target of [window, document]) {
+      const nativeAdd = target.addEventListener.bind(target);
+      const nativeRemove = target.removeEventListener.bind(target);
+      target.addEventListener = function (type, callback, options) {
+        if (tabPausedForRuntime()) return;
+        const result = nativeAdd(type, callback, options);
+        qolDocumentListeners.push({ nativeRemove, type, callback, options });
+        return result;
+      };
+    }
+    window.setTimeout = function (callback, delay, ...args) {
+      if (tabPausedForRuntime()) return 0;
+      if (typeof callback !== "function") return nativeQolTimers.timeout(callback, delay, ...args);
+      let id = 0;
+      id = nativeQolTimers.timeout((...params) => {
+        qolTimeouts.delete(id);
+        if (!tabPausedForRuntime()) callback(...params);
+      }, delay, ...args);
+      qolTimeouts.add(id);
+      return id;
+    };
+    window.setInterval = function (callback, delay, ...args) {
+      if (tabPausedForRuntime()) return 0;
+      const id = nativeQolTimers.interval((...params) => {
+        if (!tabPausedForRuntime()) {
+          if (typeof callback === "function") callback(...params);
+        }
+      }, delay, ...args);
+      qolIntervals.add(id);
+      return id;
+    };
+    window.clearTimeout = function (id) { qolTimeouts.delete(id); return nativeQolTimers.clearTimeout(id); };
+    window.clearInterval = function (id) { qolIntervals.delete(id); return nativeQolTimers.clearInterval(id); };
+    if (nativeQolTimers.raf) {
+      window.requestAnimationFrame = function (callback) {
+        if (tabPausedForRuntime()) return 0;
+        let id = 0;
+        id = nativeQolTimers.raf(time => {
+          qolFrames.delete(id);
+          if (!tabPausedForRuntime()) callback(time);
+        });
+        qolFrames.add(id);
+        return id;
+      };
+      window.cancelAnimationFrame = function (id) { qolFrames.delete(id); return nativeQolTimers.cancelRaf(id); };
+    }
+    if (nativeQolTimers.idle) {
+      window.requestIdleCallback = function (callback, options) {
+        if (tabPausedForRuntime()) return 0;
+        let id = 0;
+        id = nativeQolTimers.idle(deadline => {
+          qolIdleCalls.delete(id);
+          if (!tabPausedForRuntime()) callback(deadline);
+        }, options);
+        qolIdleCalls.add(id);
+        return id;
+      };
+      window.cancelIdleCallback = function (id) { qolIdleCalls.delete(id); return nativeQolTimers.cancelIdle(id); };
+    }
+    if (typeof window.MutationObserver === "function") {
+      const NativeObserver = window.MutationObserver;
+      window.MutationObserver = class QoLTrackedMutationObserver extends NativeObserver {
+        constructor(callback) {
+          super((mutations, observer) => { if (!tabPausedForRuntime()) callback(mutations, observer); });
+        }
+        observe(...args) {
+          if (tabPausedForRuntime()) return;
+          const result = super.observe(...args);
+          qolObservers.add(this);
+          return result;
+        }
+        disconnect() { qolObservers.delete(this); return super.disconnect(); }
+      };
+    }
+    if (typeof window.PerformanceObserver === "function") {
+      const NativeObserver = window.PerformanceObserver;
+      window.PerformanceObserver = class QoLTrackedPerformanceObserver extends NativeObserver {
+        constructor(callback) {
+          super((entries, observer) => { if (!tabPausedForRuntime()) callback(entries, observer); });
+        }
+        observe(...args) {
+          if (tabPausedForRuntime()) return;
+          const result = super.observe(...args);
+          qolObservers.add(this);
+          return result;
+        }
+        disconnect() { qolObservers.delete(this); return super.disconnect(); }
+      };
+    }
+  }
+  DS.pauseQolTabRuntime = function () {
+    if (DS.isQolWorkerTab()) return;
+    qolRuntimeSuspended = true;
+    for (const id of qolTimeouts) nativeQolTimers.clearTimeout(id);
+    for (const id of qolIntervals) nativeQolTimers.clearInterval(id);
+    for (const id of qolFrames) nativeQolTimers.cancelRaf?.(id);
+    for (const id of qolIdleCalls) nativeQolTimers.cancelIdle?.(id);
+    for (const observer of qolObservers) { try { observer.disconnect(); } catch {} }
+    for (const { nativeRemove, type, callback, options } of qolDocumentListeners) {
+      try { nativeRemove(type, callback, options); } catch {}
+    }
+    qolTimeouts.clear(); qolIntervals.clear(); qolFrames.clear(); qolIdleCalls.clear(); qolObservers.clear();
+    qolDocumentListeners.length = 0;
+    try { window.DSCardTokenBridgeLoader?.disable?.(); } catch {}
+    try { window.dispatchEvent(new CustomEvent("ds-qol-card-token-bridge-control-v1", { detail: { enabled: false } })); } catch {}
+  };
+
 
   DS.EXT_NAME = "SpicyChat QoL";
   DS.OPENED_KEY = "openedChats";
@@ -203,6 +349,7 @@
     lorebookEntryShowHiddenKeywordCount: true,
     lorebookEntryShowNoKeywordsWarning: true,
     lorebookEntryShowCharacterCount: true,
+    lorebookEntryQuickToggle: false,
     lorebookEntryRenameButton: true,
     lorebookEntryCopyButton: true,
     lorebookEntryDuplicateButton: true,
@@ -336,6 +483,11 @@
     memoryAutoLoadAll: false,
     enableChatTextReplacements: false,
     chatTextReplacementRules: "",
+    enableChatMutedWords: false,
+    chatMutedWords: "",
+    chatTextReplacementPresets: "",
+    chatTextReplacementShowChatPresetControl: false,
+    chatTextReplacementChatAssignments: "",
     chatTextReplacementScope: "ai",
     chatTextReplacementMode: "display",
     chatTextReplacementPreview: false,
@@ -343,6 +495,11 @@
     translationShowMessageButtons: false,
     translationAutoAi: false,
     translationAutoUser: false,
+    translationProvider: "deepl",
+    libreTranslateUrl: "",
+    translationAllowRemoteFallback: false,
+    translationPerChatControls: false,
+    translationChatLanguageOverrides: "",
     translationTargetLanguage: "EN-US",
     translationUnderstoodLanguages: "EN",
     translationProtectedTerms: "",
@@ -628,6 +785,7 @@
     rpFormatPreserveBackticks: true,
     rpFormatShowMessageButtons: true,
     enableChatBackgrounds: false,
+    chatSceneGalleriesEnabled: false,
     chatBackgroundDim: 45,
     chatBackgroundBlur: 0,
     chatBackgroundFit: "cover",
@@ -789,10 +947,10 @@
     debug: false
   };
 
-  const TAB_QOL_PAUSED_KEY = "ds-qol-tab-paused-v1";
+  const TAB_QOL_PAUSED_KEY = QOL_TAB_PAUSE_KEY;
 
   function readTabQolPaused() {
-    try { return sessionStorage.getItem(TAB_QOL_PAUSED_KEY) === "1"; }
+    try { return !DS.isQolWorkerTab?.() && sessionStorage.getItem(TAB_QOL_PAUSED_KEY) === "1"; }
     catch { return false; }
   }
 
@@ -830,7 +988,10 @@
     if (DS.state?.settings) DS.state.settings.enabled = globalEnabled && !!enabled;
     DS.state.disabledCleanupDone = false;
     DS.runtimeLog?.("info", "tab-control", enabled ? "QoL enabled for this tab" : "QoL paused for this tab");
-    DS.scheduleRun?.({ immediate: true, source: "tab-qol-toggle" });
+    if (!enabled) DS.pauseQolTabRuntime?.();
+    // A suspended runtime is not restarted in-place. A fresh load is required
+    // to reinstall its detached observers and registered timeouts safely.
+    else DS.reloadAfterTabResume?.();
     return DS.getQolTabState?.() || { globalEnabled, paused: !enabled, enabled: globalEnabled && !!enabled };
   };
 
@@ -3487,3 +3648,5 @@ html[data-ds-qol-background-worker] *::after {
   DS.parkBackgroundWorkerRoot = parkNativeWorkerRoot;
 })();
 /* DS_QOL14_HOTFIX_END */
+
+}

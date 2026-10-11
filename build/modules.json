@@ -24,6 +24,7 @@
       "required": true,
       "dependsOn": [],
       "files": [
+        "content/tab-state-control.js",
         "content/auto-afk.js",
         "content/build-profile.js",
         "content/compatibility.js",

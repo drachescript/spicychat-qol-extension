@@ -1,3 +1,5 @@
+// Keep a paused tab free of extension DOM work and runtime initialization.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -22,3 +24,5 @@
     ])
   });
 })();
+
+}

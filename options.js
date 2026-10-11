@@ -12,6 +12,7 @@ const CREATOR_BOT_WATCH_KEY = "creatorBotWatchV1";
 const CREATOR_BOT_WEBHOOK_KEY = "creatorBotWebhookV1";
 const CREATOR_BOT_WATCH_INTERVALS = [15, 30, 60, 180, 360, 720, 1440, 2880, 4320, 10080, 20160];
 const DEEPL_API_KEY = "deeplApiKey";
+const LIBRE_TRANSLATE_KEY = "dsLibreTranslateKeyV1";
 const FAVORITE_BOTS_KEY = "favoriteBots";
 const LATER_BOTS_KEY = "laterBots";
 const BOT_ORGANIZER_KEY = "botOrganization";
@@ -352,6 +353,7 @@ const DEFAULT_SETTINGS = {
   lorebookEntryShowHiddenKeywordCount: true,
   lorebookEntryShowNoKeywordsWarning: true,
   lorebookEntryShowCharacterCount: true,
+  lorebookEntryQuickToggle: false,
   lorebookEntryRenameButton: true,
   lorebookEntryCopyButton: true,
   lorebookEntryDuplicateButton: true,
@@ -483,6 +485,11 @@ const DEFAULT_SETTINGS = {
   memoryAutoLoadAll: false,
   enableChatTextReplacements: false,
   chatTextReplacementRules: "",
+  enableChatMutedWords: false,
+  chatMutedWords: "",
+  chatTextReplacementPresets: "",
+  chatTextReplacementShowChatPresetControl: false,
+  chatTextReplacementChatAssignments: "",
   chatTextReplacementScope: "ai",
   chatTextReplacementMode: "display",
   chatTextReplacementPreview: false,
@@ -490,6 +497,11 @@ const DEFAULT_SETTINGS = {
   translationShowMessageButtons: false,
   translationAutoAi: false,
   translationAutoUser: false,
+  translationProvider: "deepl",
+  libreTranslateUrl: "",
+  translationAllowRemoteFallback: false,
+  translationPerChatControls: false,
+  translationChatLanguageOverrides: "",
   translationTargetLanguage: "EN-US",
   translationUnderstoodLanguages: "EN",
   translationProtectedTerms: "",
@@ -787,6 +799,7 @@ const DEFAULT_SETTINGS = {
   rpFormatShowMessageButtons: true,
   enableChatBackgrounds: false,
   chatBackgroundUseAvatar: false,
+  chatSceneGalleriesEnabled: false,
   chatBackgroundAnimateAvatar: false,
   chatBackgroundBubbleOpacity: 100,
   chatBackgroundDim: 45,
@@ -16716,7 +16729,19 @@ function normalizeChatBackgroundMediaStore(raw) {
     const clean = cleanItem(item);
     if (clean && key) chats[String(key).slice(0, 260)] = clean;
   }
-  return { global: cleanItem(input.global), chats };
+  const galleries = {};
+  for (const [route, gallery] of Object.entries(input.galleries || {})) {
+    if (!route || !gallery || typeof gallery !== "object") continue;
+    const items = (Array.isArray(gallery.items) ? gallery.items : []).slice(0, 6)
+      .map(item => {
+        const clean = cleanItem(item);
+        return clean ? { ...clean, id: String(item.id || "").slice(0, 80) } : null;
+      }).filter(item => item && item.id);
+    if (items.length) galleries[String(route).slice(0, 260)] = {
+      activeId: String(gallery.activeId || "").slice(0, 80), items
+    };
+  }
+  return { global: cleanItem(input.global), chats, galleries };
 }
 
 function chatBackgroundFileToDataUrl(file) {
@@ -16733,10 +16758,11 @@ function renderChatBackgroundOptions() {
   const preview = $("chatBackgroundGlobalPreview");
   const globalItem = chatBackgroundMediaState?.global || null;
   const perChatCount = Object.keys(chatBackgroundMediaState?.chats || {}).length;
+  const galleryCount = Object.values(chatBackgroundMediaState?.galleries || {}).reduce((n,g)=>n+(g.items?.length||0),0);
   if (status) {
     status.textContent = globalItem
-      ? `Global image: ${globalItem.name || "local image"} · ${perChatCount} chat override${perChatCount === 1 ? "" : "s"} saved.`
-      : `No global image saved · ${perChatCount} chat override${perChatCount === 1 ? "" : "s"} saved.`;
+      ? `Global image: ${globalItem.name || "local image"} · ${perChatCount} chat override${perChatCount === 1 ? "" : "s"} saved · ${galleryCount} scene images.`
+      : `No global image saved · ${perChatCount} chat override${perChatCount === 1 ? "" : "s"} saved · ${galleryCount} scene images.`;
   }
   if (preview) {
     preview.hidden = !globalItem;
@@ -16750,7 +16776,7 @@ function renderChatBackgroundOptions() {
   const clear = $("clearGlobalChatBackground");
   if (clear) clear.disabled = !globalItem;
   const clearChats = $("clearPerChatBackgrounds");
-  if (clearChats) clearChats.disabled = perChatCount === 0;
+  if (clearChats) clearChats.disabled = perChatCount === 0 && galleryCount === 0;
 }
 
 async function saveChatBackgroundMediaStore(next) {
@@ -16792,9 +16818,10 @@ async function clearGlobalChatBackground() {
 
 async function clearPerChatBackgrounds() {
   const count = Object.keys(chatBackgroundMediaState?.chats || {}).length;
-  if (!count) return;
-  if (!window.confirm(`Clear ${count} saved per-chat background override${count === 1 ? "" : "s"}? The global background will be kept.`)) return;
-  await saveChatBackgroundMediaStore({ ...chatBackgroundMediaState, chats: {} });
+  const sceneCount = Object.values(chatBackgroundMediaState?.galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0);
+  if (!count && !sceneCount) return;
+  if (!window.confirm(`Clear ${count} saved per-chat backgrounds and ${sceneCount} saved scene images? The global background will be kept.`)) return;
+  await saveChatBackgroundMediaStore({ ...chatBackgroundMediaState, chats: {}, galleries: {} });
 }
 
 function normalizeChatNudgeStore(value) {
@@ -17164,6 +17191,7 @@ async function load() {
     RELEASE_NOTICE_KEY,
     PENDING_OPTIONS_NAV_KEY,
     DEEPL_API_KEY,
+    LIBRE_TRANSLATE_KEY,
     CHAT_BACKGROUNDS_KEY,
     CREATOR_BOT_WEBHOOK_KEY,
     ARCHIVE_IMPORT_ENDPOINT_KEY,
@@ -17375,6 +17403,7 @@ async function load() {
   setChecked("lorebookEntryShowHiddenKeywordCount", settings.lorebookEntryShowHiddenKeywordCount !== false);
   setChecked("lorebookEntryShowNoKeywordsWarning", settings.lorebookEntryShowNoKeywordsWarning !== false);
   setChecked("lorebookEntryShowCharacterCount", settings.lorebookEntryShowCharacterCount !== false);
+  setChecked("lorebookEntryQuickToggle", !!settings.lorebookEntryQuickToggle);
   setChecked("lorebookEntryRenameButton", settings.lorebookEntryRenameButton !== false);
   setChecked("lorebookEntryCopyButton", settings.lorebookEntryCopyButton !== false);
   setChecked("lorebookEntryDuplicateButton", settings.lorebookEntryDuplicateButton !== false);
@@ -17491,6 +17520,10 @@ async function load() {
   setChecked("memoryAutoLoadAll", !!settings.memoryAutoLoadAll);
   setChecked("enableChatTextReplacements", !!settings.enableChatTextReplacements);
   setValue("chatTextReplacementRules", settings.chatTextReplacementRules || "");
+  setChecked("enableChatMutedWords", !!settings.enableChatMutedWords);
+  setValue("chatMutedWords", settings.chatMutedWords || "");
+  setValue("chatTextReplacementPresets", settings.chatTextReplacementPresets || "");
+  setChecked("chatTextReplacementShowChatPresetControl", !!settings.chatTextReplacementShowChatPresetControl);
   setValue("chatTextReplacementScope", ["ai", "user", "both"].includes(settings.chatTextReplacementScope) ? settings.chatTextReplacementScope : "ai");
   setValue("chatTextReplacementMode", settings.chatTextReplacementMode === "save" ? "save" : "display");
   setChecked("chatTextReplacementPreview", !!settings.chatTextReplacementPreview);
@@ -17498,10 +17531,15 @@ async function load() {
   setChecked("translationShowMessageButtons", !!settings.translationShowMessageButtons);
   setChecked("translationAutoAi", !!settings.translationAutoAi);
   setChecked("translationAutoUser", !!settings.translationAutoUser);
+  setValue("translationProvider", settings.translationProvider || "deepl");
+  setValue("libreTranslateUrl", settings.libreTranslateUrl || "");
+  setChecked("translationAllowRemoteFallback", !!settings.translationAllowRemoteFallback);
+  setChecked("translationPerChatControls", !!settings.translationPerChatControls);
   setValue("translationTargetLanguage", settings.translationTargetLanguage || "EN-US");
   setValue("translationUnderstoodLanguages", settings.translationUnderstoodLanguages || "EN");
   setValue("translationProtectedTerms", settings.translationProtectedTerms || "");
   setValue("deeplApiKey", String(result[DEEPL_API_KEY] || ""));
+  setValue("libreTranslateApiKey", String(result[LIBRE_TRANSLATE_KEY] || ""));
   const deeplStatus = $("deeplStatus");
   if (deeplStatus) deeplStatus.textContent = result[DEEPL_API_KEY] ? "DeepL API key saved. Test it before relying on auto translate." : "DeepL is not configured yet.";
 
@@ -17669,6 +17707,7 @@ async function load() {
   setChecked("rpFormatPreserveBackticks", settings.rpFormatPreserveBackticks !== false);
   setChecked("rpFormatShowMessageButtons", settings.rpFormatShowMessageButtons !== false);
   setChecked("enableChatBackgrounds", !!settings.enableChatBackgrounds);
+  setChecked("chatSceneGalleriesEnabled", !!settings.chatSceneGalleriesEnabled);
   setChecked("chatBackgroundUseAvatar", !!settings.chatBackgroundUseAvatar);
   setChecked("chatBackgroundAnimateAvatar", !!settings.chatBackgroundAnimateAvatar);
   setValue("chatBackgroundBubbleOpacity", String(settings.chatBackgroundBubbleOpacity ?? 100));
@@ -18101,6 +18140,7 @@ function readSettingsFromPage() {
     lorebookEntryShowHiddenKeywordCount: checked("lorebookEntryShowHiddenKeywordCount", true),
     lorebookEntryShowNoKeywordsWarning: checked("lorebookEntryShowNoKeywordsWarning", true),
     lorebookEntryShowCharacterCount: checked("lorebookEntryShowCharacterCount", true),
+    lorebookEntryQuickToggle: checked("lorebookEntryQuickToggle"),
     lorebookEntryRenameButton: checked("lorebookEntryRenameButton", true),
     lorebookEntryCopyButton: checked("lorebookEntryCopyButton", true),
     lorebookEntryDuplicateButton: checked("lorebookEntryDuplicateButton", true),
@@ -18184,6 +18224,10 @@ function readSettingsFromPage() {
     memoryAutoLoadAll: checked("memoryAutoLoadAll"),
     enableChatTextReplacements: checked("enableChatTextReplacements"),
     chatTextReplacementRules: value("chatTextReplacementRules", ""),
+    enableChatMutedWords: checked("enableChatMutedWords"),
+    chatMutedWords: value("chatMutedWords", ""),
+    chatTextReplacementPresets: value("chatTextReplacementPresets", ""),
+    chatTextReplacementShowChatPresetControl: checked("chatTextReplacementShowChatPresetControl"),
     chatTextReplacementScope: ["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai",
     chatTextReplacementMode: value("chatTextReplacementMode") === "save" ? "save" : "display",
     chatTextReplacementPreview: checked("chatTextReplacementPreview"),
@@ -18191,6 +18235,10 @@ function readSettingsFromPage() {
     translationShowMessageButtons: checked("translationShowMessageButtons"),
     translationAutoAi: checked("translationAutoAi"),
     translationAutoUser: checked("translationAutoUser"),
+    translationProvider: value("translationProvider", "deepl"),
+    libreTranslateUrl: value("libreTranslateUrl", "").trim(),
+    translationAllowRemoteFallback: checked("translationAllowRemoteFallback"),
+    translationPerChatControls: checked("translationPerChatControls"),
     translationTargetLanguage: value("translationTargetLanguage", "EN-US"),
     translationUnderstoodLanguages: value("translationUnderstoodLanguages", "EN"),
     translationProtectedTerms: value("translationProtectedTerms", ""),
@@ -18348,6 +18396,7 @@ function readSettingsFromPage() {
     rpFormatPreserveBackticks: checked("rpFormatPreserveBackticks", true),
     rpFormatShowMessageButtons: checked("rpFormatShowMessageButtons", true),
     enableChatBackgrounds: checked("enableChatBackgrounds"),
+    chatSceneGalleriesEnabled: checked("chatSceneGalleriesEnabled"),
     chatBackgroundUseAvatar: checked("chatBackgroundUseAvatar"),
     chatBackgroundAnimateAvatar: checked("chatBackgroundAnimateAvatar"),
     chatBackgroundBubbleOpacity: Math.max(25, Math.min(100, Number(value("chatBackgroundBubbleOpacity", "100")) || 100)),
@@ -18754,6 +18803,7 @@ function readSingleSettingFromPage(settingKey) {
     case "lorebookEntryShowHiddenKeywordCount": return (checked("lorebookEntryShowHiddenKeywordCount", true));
     case "lorebookEntryShowNoKeywordsWarning": return (checked("lorebookEntryShowNoKeywordsWarning", true));
     case "lorebookEntryShowCharacterCount": return (checked("lorebookEntryShowCharacterCount", true));
+    case "lorebookEntryQuickToggle": return (checked("lorebookEntryQuickToggle"));
     case "lorebookEntryRenameButton": return (checked("lorebookEntryRenameButton", true));
     case "lorebookEntryCopyButton": return (checked("lorebookEntryCopyButton", true));
     case "lorebookEntryDuplicateButton": return (checked("lorebookEntryDuplicateButton", true));
@@ -18834,6 +18884,10 @@ function readSingleSettingFromPage(settingKey) {
     case "memoryAutoLoadAll": return (checked("memoryAutoLoadAll"));
     case "enableChatTextReplacements": return (checked("enableChatTextReplacements"));
     case "chatTextReplacementRules": return (value("chatTextReplacementRules", ""));
+    case "enableChatMutedWords": return (checked("enableChatMutedWords"));
+    case "chatMutedWords": return (value("chatMutedWords", ""));
+    case "chatTextReplacementPresets": return (value("chatTextReplacementPresets", ""));
+    case "chatTextReplacementShowChatPresetControl": return (checked("chatTextReplacementShowChatPresetControl"));
     case "chatTextReplacementScope": return (["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai");
     case "chatTextReplacementMode": return (value("chatTextReplacementMode") === "save" ? "save" : "display");
     case "chatTextReplacementPreview": return (checked("chatTextReplacementPreview"));
@@ -18841,6 +18895,10 @@ function readSingleSettingFromPage(settingKey) {
     case "translationShowMessageButtons": return (checked("translationShowMessageButtons"));
     case "translationAutoAi": return (checked("translationAutoAi"));
     case "translationAutoUser": return (checked("translationAutoUser"));
+    case "translationProvider": return (value("translationProvider", "deepl"));
+    case "libreTranslateUrl": return (value("libreTranslateUrl", "").trim());
+    case "translationAllowRemoteFallback": return (checked("translationAllowRemoteFallback"));
+    case "translationPerChatControls": return (checked("translationPerChatControls"));
     case "translationTargetLanguage": return (value("translationTargetLanguage", "EN-US"));
     case "translationUnderstoodLanguages": return (value("translationUnderstoodLanguages", "EN"));
     case "translationProtectedTerms": return (value("translationProtectedTerms", ""));
@@ -18988,6 +19046,7 @@ function readSingleSettingFromPage(settingKey) {
     case "rpFormatPreserveBackticks": return (checked("rpFormatPreserveBackticks", true));
     case "rpFormatShowMessageButtons": return (checked("rpFormatShowMessageButtons", true));
     case "enableChatBackgrounds": return (checked("enableChatBackgrounds"));
+    case "chatSceneGalleriesEnabled": return (checked("chatSceneGalleriesEnabled"));
     case "chatBackgroundDim": return (Math.min(90, Math.max(0, Number(value("chatBackgroundDim", "45")) || 0)));
     case "chatBackgroundBlur": return (Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)));
     case "chatBackgroundFit": return (["cover", "contain", "tile"].includes(value("chatBackgroundFit", "cover")) ? value("chatBackgroundFit", "cover") : "cover");
@@ -20672,7 +20731,7 @@ const BACKUP_DATA_SCOPE_DEFS = {
   tabCleanupTopics: { count: result => normalizeTabCleanupTopics(result[TAB_CLEANUP_TOPICS_KEY]).topics.length },
   tabCleanupEnrichment: { count: result => Object.keys(result[TAB_CLEANUP_ENRICHMENT_KEY]?.meta || {}).length },
   localChangeHistory: { count: result => Array.isArray(result[LOCAL_CHANGE_HISTORY_KEY]) ? result[LOCAL_CHANGE_HISTORY_KEY].length : 0 },
-  localMedia: { count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).global ? 1 : 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).chats || {}).length, large: true }
+  localMedia: { count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).global ? 1 : 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).chats || {}).length + Object.values(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0), large: true }
 };
 
 async function readBackupSourceData() {
@@ -21957,7 +22016,8 @@ async function importSettings() {
         const existingBackgrounds = normalizeChatBackgroundMediaStore(current[CHAT_BACKGROUNDS_KEY]);
         payload[CHAT_BACKGROUNDS_KEY] = {
           global: incomingBackgrounds.global || existingBackgrounds.global || null,
-          chats: { ...(existingBackgrounds.chats || {}), ...(incomingBackgrounds.chats || {}) }
+          chats: { ...(existingBackgrounds.chats || {}), ...(incomingBackgrounds.chats || {}) },
+          galleries: { ...(existingBackgrounds.galleries || {}), ...(incomingBackgrounds.galleries || {}) }
         };
       }
     }
@@ -22140,7 +22200,7 @@ const STORAGE_DATASET_DEFS = [
   { id: "recentlySeenBots", label: "Recently seen bots", keys: [RECENTLY_SEEN_BOTS_KEY], count: result => Array.isArray(result[RECENTLY_SEEN_BOTS_KEY]?.entries) ? result[RECENTLY_SEEN_BOTS_KEY].entries.length : 0 },
   { id: "soundscapes", label: "Soundscape scenes", keys: [SOUNDSCAPES_KEY], count: result => normalizeSoundscapeScenes(result[SOUNDSCAPES_KEY]).scenes.length },
   { id: "soundscapeAudio", label: "Local soundscape audio files", keys: [SOUNDSCAPE_AUDIO_KEY], count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length },
-  { id: "chatBackgroundMedia", label: "Local chat background images", keys: [CHAT_BACKGROUNDS_KEY], count: result => { const store = normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]); return (store.global ? 1 : 0) + Object.keys(store.chats || {}).length; } },
+  { id: "chatBackgroundMedia", label: "Local chat background images", keys: [CHAT_BACKGROUNDS_KEY], count: result => { const store = normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]); return (store.global ? 1 : 0) + Object.keys(store.chats || {}).length + Object.values(store.galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0); } },
   { id: "tabCleanupEnrichment", label: "Tab cleanup profile metadata", keys: [TAB_CLEANUP_ENRICHMENT_KEY], count: result => Object.keys(result[TAB_CLEANUP_ENRICHMENT_KEY]?.meta || {}).length },
   { id: "tabCleanupSessions", label: "Saved tab sessions", keys: [TAB_CLEANUP_SESSIONS_KEY], count: result => normalizeTabCleanupSessions(result[TAB_CLEANUP_SESSIONS_KEY]).sessions.length },
   { id: "tabCleanupTopics", label: "Tab cleanup topics", keys: [TAB_CLEANUP_TOPICS_KEY], count: result => normalizeTabCleanupTopics(result[TAB_CLEANUP_TOPICS_KEY]).topics.length },
@@ -24303,7 +24363,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "blockCards", name: "Blocked tag / word / creator rules", children: ["autoBlockWordMatches"] },
   { parent: "showRandomChatButton", name: "Random Chat", children: ["randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites"] },
   { parent: "showChatTopBarTools", name: "Chat top-bar tools", children: ["chatTopBarInlineCreator", "hideChatTopBarRatingButton", "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell", "hideChatDropdownMemoryItem"] },
-  { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview"] },
+  { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview", "chatTextReplacementShowChatPresetControl"] },
   { parent: "showChatSearch", name: "Search Inside Current Chat", children: ["chatSearchShowPanel", "chatSearchShowFindButton", "chatSearchExactPhrase", "chatSearchCaseSensitive", "chatSearchWholeWord", "chatSearchRegex", "chatSearchLoadUntilMatch"] },
   { parent: "enableMessageBookmarks", name: "Message bookmarks", children: ["messageBookmarkButtons"] },
   { parent: "enableFocusMode", name: "Focus / Immersive Mode", children: ["focusHideSidebar", "focusHideTopBar", "focusHideChatHeader", "focusHideQolPanel"] },
@@ -24312,7 +24372,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableRpStateTracker", name: "RP State Tracker", children: ["rpStateTrackerMode", "rpStateInjectMode", "rpStateMaxContextChars", "rpStateShowQuickPanel"] },
   { parent: "enableGlobalMemory", name: "Global Memory", children: ["globalMemoryText", "globalMemorySendMode", "globalMemoryOocWrapper", "globalMemoryShowChatButton"] },
   { parent: "enableChatNudges", name: "Chat Nudges", children: ["chatNudgeDefaultHours", "chatNudgeBrowserNotifications"] },
-  { parent: "enableTranslation", name: "Message translation (DeepL)", children: ["translationShowMessageButtons", "translationAutoAi", "translationAutoUser"] },
+  { parent: "enableTranslation", name: "Message translation", children: ["translationShowMessageButtons", "translationAutoAi", "translationAutoUser", "translationAllowRemoteFallback", "translationPerChatControls"] },
   { parent: "showFormattingToolbar", name: "Formatting toolbar", children: ["formatToolbarAsterisk", "formatToolbarBold", "formatToolbarBoldItalic", "formatToolbarStrike", "formatToolbarParens", "formatToolbarQuotes", "formatToolbarBackticks", "formatToolbarBrackets", "formatToolbarBraces"] },
   { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
   { parent: "enableCreatorWritingAssistant", name: "Creator Writing Assistant", children: ["creatorWritingUseBrowserAi", "creatorWritingTargetLanguage", "creatorWritingDictionary"] },
@@ -24327,7 +24387,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableLorebookConsistency", name: "Lorebook response consistency", children: ["lorebookConsistencyShowMatches", "lorebookConsistencyAutoQueue", "lorebookConsistencyMaxEntries"] },
   { parent: "enableSoundscapes", name: "Soundscapes", children: ["soundscapeShowChatControl", "soundscapeMasterVolume", "soundscapeOnChat", "soundscapeOnHome", "soundscapeOnChats", "soundscapeOnProfiles", "soundscapeOnOther"] },
   { parent: "enableRpFormatRepair", name: "RP Format Repair", children: ["rpFormatRepairAuto", "rpFormatConvertBoldActions", "rpFormatRemoveActionParens", "rpFormatPreserveInlineEmphasis", "rpFormatPreserveSemanticQuotes", "rpFormatPreserveBackticks", "rpFormatShowMessageButtons"] },
-  { parent: "enableChatBackgrounds", name: "Custom chat backgrounds", children: ["chatBackgroundDim", "chatBackgroundBlur", "chatBackgroundFit", "chatBackgroundPosition"] },
+  { parent: "enableChatBackgrounds", name: "Custom chat backgrounds", children: ["chatSceneGalleriesEnabled", "chatBackgroundDim", "chatBackgroundBlur", "chatBackgroundFit", "chatBackgroundPosition"] },
   { parent: "androidTopBarMenu", name: "Compact chat top-bar controls", children: ["androidHideComposerShortcuts", "androidTopBarOoc", "androidTopBarAsterisk", "androidTopBarFormatting", "androidTopBarTranslation", "androidTopBarScroll", "androidTopBarPersona", "androidTopBarModel"] }
 ];
 
@@ -24420,7 +24480,8 @@ const SETTINGS_NO_DIRECT_CONTROL_KEYS = new Set([
   "chatBubblePreserveActionColors", "hideSidebarSocialLinks", "hideSidebarFooterLinks",
   "hideSidebarAppDownload", "enableMainFooterManagement", "hideMainFooterEntirely",
   "hideMainFooterCompany", "hideMainFooterResources", "hideMainFooterCommunity",
-  "hideMainFooterJoinUs", "hideMainFooterAppDownload", "hideMainFooter2257"
+  "hideMainFooterJoinUs", "hideMainFooterAppDownload", "hideMainFooter2257",
+  "translationChatLanguageOverrides", "chatTextReplacementChatAssignments"
 ]);
 
 const SETTINGS_RUNTIME_REQUIRED_KEYS = new Set(["stackChatMessages"]);
@@ -24445,7 +24506,7 @@ async function runSettingsHealthCheck() {
       detail: `Developer self-check: ${missing.slice(0, 18).join(", ")}${missing.length > 18 ? ` +${missing.length - 18} more` : ""}. This usually means a feature was wired in code but its Settings UI was not shipped.`
     });
   }
-  if (current.enableTranslation && !String(result[DEEPL_API_KEY] || "").trim()) {
+  if (current.enableTranslation && (current.translationProvider || "deepl") === "deepl" && !String(result[DEEPL_API_KEY] || "").trim()) {
     warnings.push({ title: "DeepL translation is enabled without an API key", detail: "Translation cannot run until a DeepL API key is saved and tested.", target: "deeplApiKey" });
   }
 
@@ -25290,6 +25351,54 @@ $("tabCleanupCloseSelected")?.addEventListener("click", closeSelectedTabCleanup)
     await renderTabCleanupSmartGroups();
     await renderTabCleanupSessionReview();
   });
+});
+async function saveLibreInstance({ testing = false } = {}) {
+  const status = $("libreTranslateStatus");
+  const raw = value("libreTranslateUrl", "").trim();
+  let origin = "";
+  try {
+    const url = new URL(raw);
+    if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use HTTPS (or HTTP on localhost) without credentials or query parameters.");
+    origin = url.origin;
+  } catch (error) {
+    if (status) status.textContent = `Invalid instance URL: ${error.message || "enter a server URL"}`;
+    return;
+  }
+  let granted = false;
+  try { granted = !!(await chrome.permissions.request({ origins: [origin + "/*"] })); } catch {}
+  if (!granted) { if (status) status.textContent = "Instance host permission not granted. No messages sent."; return; }
+  await storageSet({ [LIBRE_TRANSLATE_KEY]: value("libreTranslateApiKey", "").trim() });
+  // The site URL is a normal non-secret setting; use the settings Save pathway.
+  await save();
+  if (status) status.textContent = "Instance and key saved locally. Chat text is sent only when LibreTranslate is selected (or Test is clicked).";
+  if (testing) {
+    if (status) status.textContent = "Testing instance...";
+    const response = await runtimeMessage({ type: "DS_QOL_TRANSLATE", provider: "libre", text: "Hello", targetLang: "DE", settings: { libreTranslateUrl: raw } });
+    if (status) status.textContent = response?.ok ? `Instance connected: ${response.text}` : `Instance test failed: ${response?.error || "unknown error"}`;
+  }
+}
+$("saveLibreTranslate")?.addEventListener("click", () => saveLibreInstance());
+$("testLibreTranslate")?.addEventListener("click", () => saveLibreInstance({ testing: true }));
+$("copyEnglishFirstOoc")?.addEventListener("click", async () => {
+  const instruction = "(OOC: Please write your next replies in natural English, preserving character names, dialogue formatting and actions. My chat interface may translate your responses for display. Do not translate or control my character's own dialogue.)";
+  try {
+    await navigator.clipboard.writeText(instruction);
+    showSettingsToast("English-first OOC copied. Paste it into chat using your usual OOC workflow.");
+  } catch { showSettingsToast("Could not copy. Enable clipboard access or copy the instruction manually."); }
+});
+$("testLocalTranslator")?.addEventListener("click", async () => {
+  const host = $("localTranslatorStatus");
+  if (!host) return;
+  // Options pages and content scripts can expose the same Chrome Translator API.
+  const API = globalThis.Translator;
+  if (!API?.availability || !API?.create) { host.textContent = "This browser doesn't expose the on-device Translator API to QoL."; return; }
+  host.textContent = "Checking language model...";
+  try {
+    const targetLanguage = value("translationTargetLanguage", "DE").split("-")[0].toLowerCase();
+    const sourceLanguage = targetLanguage === "en" ? "de" : "en";
+    const state = await API.availability({ sourceLanguage, targetLanguage });
+    host.textContent = `On-device support (${sourceLanguage} → ${targetLanguage}): ${state}. A model download may be needed.`;
+  } catch (error) { host.textContent = error?.message || String(error); }
 });
 $("chatBackgroundGlobalUpload")?.addEventListener("change", async event => { await importGlobalChatBackground(event.target.files); event.target.value = ""; });
 $("clearGlobalChatBackground")?.addEventListener("click", clearGlobalChatBackground);

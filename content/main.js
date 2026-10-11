@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -1014,6 +1016,7 @@
   }
 
   async function runStep(name, fn) {
+    if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) return null;
     if (typeof fn !== "function") return null;
     const laneParentOperationId = String(
       DS.state?.diagMessageLaneOperationId ||
@@ -1256,7 +1259,7 @@
       if (settings.enableContextKeeper || DS.state.contextKeeperWasActive) await runStep("context keeper", () => DS.applyContextKeeper?.());
       if (settings.enableChatNudges || DS.state.chatNudgesWasActive) await runStep("chat nudges", () => DS.applyChatNudges?.());
       if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
-      if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
+      if (settings.enableChatTextReplacements || settings.enableChatMutedWords || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
       if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
       await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
       DS.markMessageEnhancerVisited?.(laneRoots);
@@ -1305,6 +1308,7 @@
   }
 
   DS.scheduleMessageLane = function scheduleMessageLane(source = "message-mutation") {
+    if (DS.isQolPausedForTab?.()) return;
     const profile = runtimeProfile();
     if (profile === "normal") return DS.scheduleRun?.({ priority: "critical", source });
     const counters = runtimeCounters();
@@ -1503,6 +1507,7 @@
   }
 
   DS.runCritical = async function runCritical() {
+    if (DS.isQolPausedForTab?.()) return;
     const passToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "critical-pass", {
       trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
       parentOperationId: ""
@@ -1659,7 +1664,7 @@
         await runFeatureStep("character QoL profile", !!settings.enableCharacterQolProfiles, () => DS.applyCharacterQolProfile?.());
         {
           const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
-          await runFeatureStep("Android app controls", !!env.android || String(settings.androidAppControlsMode || "auto") === "always" || !!DS.state.androidAppControlsWasActive, () => DS.applyAndroidAppControls?.());
+          await runFeatureStep("Android app controls", !!env.android || !!settings.androidTopBarMenu || String(settings.androidAppControlsMode || "auto") === "always" || !!DS.state.androidAppControlsWasActive, () => DS.applyAndroidAppControls?.());
         }
         await runFeatureStep("composer", composerWanted(settings) || !!DS.state.composerControlWasActive, () => DS.applyComposerControl?.());
         await runFeatureStep("mobile chat layout", true, () => DS.applyMobileChatLayoutFixes?.());
@@ -1820,6 +1825,7 @@
   }
 
   DS.runSlow = async function runSlow(options = {}) {
+    if (DS.isQolPausedForTab?.()) return;
     if (slowRunning) {
       slowPending = true;
       return;
@@ -2144,6 +2150,7 @@
   }
 
   DS.scheduleRun = function scheduleRun(options = {}) {
+    if (DS.isQolPausedForTab?.()) return;
     if (typeof options === "string") options = { source: options };
 
     if (DS.state.quickDislikeWorker) return;
@@ -2625,12 +2632,74 @@
     return true;
   }
 
+
+  // Essential chat controls must not wait for the ~20s message-decoration
+  // quiet window. This pass touches only the latest few native message roots.
+  let essentialChatControlsPending = false;
+  const essentialChatDirtyRoots = new Set();
+  function repairEssentialChatControls(source = "mount") {
+    if (DS.isQolPausedForTab?.() || !DS.state?.settings?.enabled || !DS.isSingleChatPage?.()) return;
+    const settings = DS.state.settings;
+    try {
+      if (settings.replaceChatImageWithOocButton) DS.applyEssentialOocShortcut?.();
+      if (settings.showOocTools || settings.quickPanelShowOoc) DS.applyOocTools?.();
+      const newRoots = [...essentialChatDirtyRoots].filter(root => root?.isConnected);
+      essentialChatDirtyRoots.clear();
+      // Only the native roots touched by this MutationObserver delivery.
+      // The cached newest roots are used only for the first startup pass.
+      const roots = newRoots.length ? newRoots.slice(-8) : (DS.getLoadedMessageRoots?.() || []).slice(-8);
+      for (const root of roots) DS.repairMessageToolbarForRoot?.(root);
+      DS.diagPerformance?.("essential-controls", { source, inspected: Math.min(8, roots.length) });
+    } catch (error) {
+      DS.runtimeLog?.("warn", "essential-controls", String(error?.message || error));
+    }
+  }
+  function scheduleEssentialChatControls(source = "mount", roots = []) {
+    for (const root of roots) if (root?.isConnected) essentialChatDirtyRoots.add(root);
+    if (essentialChatControlsPending || DS.isQolPausedForTab?.()) return;
+    essentialChatControlsPending = true;
+    // Targeted once per animation frame; never a full-message scan.
+    requestAnimationFrame(() => {
+      essentialChatControlsPending = false;
+      repairEssentialChatControls(source);
+    });
+  }
+
   DS.observePage = function observePage() {
+    if (DS.isQolPausedForTab?.()) return;
     const observer = new MutationObserver(mutations => {
+      if (DS.isQolPausedForTab?.()) return;
       const counters = runtimeCounters();
       counters.observerBatches = Number(counters.observerBatches || 0) + 1;
       counters.mutations += mutations.length;
       if (checkRouteChange()) return;
+
+      if (DS.isSingleChatPage?.()) {
+        const roots = new Set();
+        let composerMounted = false;
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes || []) {
+            if (!(node instanceof Element)) continue;
+            if (node.matches?.("textarea")) composerMounted = true;
+            const directRoot = node.matches?.("div[id^='message-']")
+              ? node : node.closest?.("div[id^='message-']");
+            if (directRoot && (node === directRoot || node.matches?.("button[aria-label='message-dropdown']"))) {
+              roots.add(directRoot);
+            }
+            if (!directRoot && node.childElementCount <= 12) {
+              const dropdown = node.querySelector?.("button[aria-label='message-dropdown']");
+              if (dropdown) {
+                const root = dropdown.closest("div[id^='message-']");
+                if (root) roots.add(root);
+              }
+              if (!composerMounted && node.querySelector?.("textarea")) composerMounted = true;
+            }
+            if (roots.size >= 16) break;
+          }
+          if (roots.size >= 16) break;
+        }
+        if (roots.size || composerMounted) scheduleEssentialChatControls("native-toolbar-mount", roots);
+      }
 
       if (DS.isSingleChatPage?.() && Number(DS.state?.chatStartupQuietUntil || 0) > Date.now()) {
         const changedMessages = messageRootMutationSets(mutations);
@@ -3134,6 +3203,7 @@
   }
 
   (async function main() {
+    if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) return;
     await DS.loadState();
     try { await DS.resolveBackgroundWorkerIdentity?.(); } catch {}
     DS.runtimeLog?.("info", "main", "State loaded", {
@@ -3164,6 +3234,12 @@
     applyRuntimePerformancePresentation();
     if (DS.isSingleChatPage?.()) startChatStartupQuietWindow("startup");
     DS.observePage();
+    if (DS.isSingleChatPage?.()) {
+      repairEssentialChatControls("startup");
+      // Tiny initial retries cover React's async first render without polling.
+      setTimeout(() => scheduleEssentialChatControls("startup-settle"), 260);
+      setTimeout(() => scheduleEssentialChatControls("startup-late"), 1050);
+    }
     if (!discardedWakeSessionActive()) DS.maybeAutoReadNotifications?.("startup");
 
     // A discarded tab that wakes in the background stays nearly passive until
@@ -3289,3 +3365,5 @@
   } catch {}
 
 })();
+
+}

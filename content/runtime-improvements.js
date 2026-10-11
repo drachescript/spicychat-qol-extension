@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
   const DS = window.DragonScriptQoL;
@@ -183,6 +185,9 @@
     await storageSetLocal({ [BROWSE_STATUS_KEY]: { meta } });
   }
   function discoverVisibleCards() {
+    if (DS.isQolPausedForTab?.() || DS.state?.settings?.enabled === false) return;
+    // Chat message headers are not listings. Never crawl their DOM every 5s.
+    if (DS.isSingleChatPage?.() || /^\/(?:[a-z]{2}\/)?chat\/[0-9a-f-]{20,}/i.test(location.pathname)) return;
     const params = new URLSearchParams(location.search || "");
     const isWorker = document.documentElement.hasAttribute("data-ds-qol-background-worker") ||
       [...params.keys()].some(key => /^ds(?:Qol)?(?:ListingRefill|Quick|BotStatus|Recommendation|LessLike)/i.test(key));
@@ -695,3 +700,5 @@
   }, true);
 })();
 /* END BOT METADATA RECOVERY CAPTURE */
+
+}

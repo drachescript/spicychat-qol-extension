@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -641,7 +643,7 @@
     textarea.dataset.dsMobileMessageEditLayoutReady = "1";
   }
   function resizeAndroidMessageEdit(textarea) {
-    if (!androidAppRuntime() || !mobileLayoutActive()) return false;
+    if (!mobileLayoutActive()) return false;
     if (!isMessageEditTextarea(textarea) || !textarea.isConnected) return false;
 
     const viewportHeight = Math.max(
@@ -704,7 +706,7 @@
     return true;
   }
   function normalizeAndroidMessageEditors() {
-    if (!androidAppRuntime() || !mobileLayoutActive()) return;
+    if (!mobileLayoutActive()) return;
 
     cleanupStaleMessageEditLayoutFixes();
 
@@ -716,7 +718,7 @@
   }
 
   function scheduleAndroidMessageEditResize(textarea = null) {
-    if (!androidAppRuntime() || !mobileLayoutActive()) return;
+    if (!mobileLayoutActive()) return;
 
     cancelAnimationFrame(state.editResizeRaf);
     clearTimeout(state.editResizeTimer);
@@ -756,6 +758,8 @@
 
     const mobileMutationTouchesComposer = records => records.some(record => {
       if (record.type !== "childList") return false;
+      // QoL's own edit-layout style changes are not child-list mutations; only
+      // native composer/editor mounts cause a repair. No periodic full-chat scan.
 
       const nodes = [
         ...Array.from(record.addedNodes || []),
@@ -853,3 +857,5 @@
     });
   };
 })();
+
+}

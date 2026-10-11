@@ -1,3 +1,26 @@
+## 0.2.42
+- Integrated the APK 3 compact chat menu placement correction into the browser extension: the optional QoL cog now sits directly left of the native Like/Rating control, falls back next to the chat dropdown if the rating button is absent, and reuses its existing button across header remounts without polling.
+- Fixed the compact menu's explicit opt-in on desktop Chrome/Firefox: normal chat passes now honor the enabled menu setting regardless of whether Android is detected. The compact menu remains off by default.
+- Extended the existing mobile message-edit height/Save/Cancel gap repair to small-screen browsers as well as Android WebView. The textarea grows only to 46% of the viewport (maximum 360px), then scrolls internally; actual Save/Cancel geometry triggers targeted compacting instead of continuous full-chat work.
+- Confirmed the earlier APK 3 OOC health behavior remains local repair plus manual-reload status, not an automatic forced reload. Android-native microphone permissions, fixed native overlay and release workflow remain in the Android project, not in this Chrome package.
+- Expanded optional chat translation beyond DeepL: on-device browser Translator API where supported, user-configured LibreTranslate (host permission and optional key), and manual open-in-Google-Translate. The existing DeepL path remains available.
+- Added an explicit opt-in for DeepL fallback from automatic on-device translation. No public or remote translator is called silently; translation itself remains disabled by default. Added a provider capability check, external provider labeling, and an English-first OOC instruction copy action.
+- Optional per-conversation target languages (stored with backed-up QoL settings), preserving originals, per-message actions, protected terms, cache, and existing automatic AI/user translation choices.
+- Added opt-in per-conversation scene galleries to Chat Backgrounds with local image imports, scene picking/removal, thumbnails, six-scene-per-chat limit, per-image size limit, and gallery size budget. Existing custom-background overrides and global images remain supported; gallery images are included in the separately selected local-media backup.
+- Added opt-in muted-word/phrase display filtering, named replacement rule presets, and per-chat preset selection. Per-chat selection is included in settings backups. Active muted words or named chat presets force display-only replacements, never silent edits to SpicyChat messages.
+- Added optional one-entry Enable / Disable shortcuts in the native shared Lorebook editor, using its own editor/Save control when available. This is NOT per-chat lore activation and does not erase previously shared context.
+- Fixed the incomplete source ZIP's service-worker entry importing a non-existent background-bot-status-guard.js file; the existing Bot Status helper timeouts and heartbeat logic in background.js remain untouched.
+- All new feature switches default off. Version stays 0.2.42; no new content-script modules or permissions added.
+
+- Per-tab pause suspends isolated-world timers and observers and unhooks the MAIN-world API bridge without rewriting existing chat UI.
+- Optional content scripts remain dormant after a paused-tab reload; only the minimal per-tab switch responds until re-enabled and reloaded. Dedicated background workers remain exempt.
+- Stop five-second bot discovery on chat routes and during pause.
+- Copy/Edit/OOC receive targeted early chat mounting and React toolbar remount handling while nonessential work stays deferred.
+- Added lightweight essential-control diagnostics for Inspector comparison.
+
+- Fixed the optional chat composer OOC button disappearing when typing a message. SpicyChat removes the native Image control while the composer contains text; OOC now uses an independent fallback next to the composer controls and returns to the Image slot when it becomes available again.
+- Preserved the existing opt-in setting, OOC templates, and Image/Plus visibility preferences.
+
 ## 0.2.41
 - Clarified Bot Status counts: routine monitored checked/unchecked, outside-scope history, and manually checkable unblocked outside-scope bots.
 - Added a one-time outside-scope Bot Status check without enrolling those bots in routine monitoring; existing max bot/time limits and ETA apply.

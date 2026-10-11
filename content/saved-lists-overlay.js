@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
   const DS=window.DragonScriptQoL;if(!DS)return;
@@ -43,3 +45,5 @@
   DS.applySavedListsOverlay=function(){const s=DS.state.settings||{};if(!s.enabled||!s.enableSavedListsOverlay)return cleanup();if(!DS.isFavoriteBotsPage?.()&&!/^\/recommended-bots\/?$/i.test(location.pathname))return cleanup();if(document.getElementById(BTN_ID))return;const h=[...document.querySelectorAll("h1,h2,h3")].find(el=>/favorites|recommend/i.test(clean(el.textContent)));if(!h?.parentElement)return;const b=document.createElement("button");b.id=BTN_ID;b.type="button";b.textContent="Saved lists";b.style.cssText="margin-left:8px;border:1px solid rgba(148,163,184,.35);border-radius:7px;background:transparent;color:inherit;padding:6px 9px;cursor:pointer;font:600 12px system-ui";b.onclick=e=>{e.preventDefault();e.stopPropagation();open();};h.insertAdjacentElement("afterend",b);};
   DS.removeSavedListsOverlay=cleanup;
 })();
+
+}

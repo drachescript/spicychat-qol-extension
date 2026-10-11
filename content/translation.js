@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -74,8 +76,93 @@
       .trim();
   }
 
+  const CHAT_LANG_KEY = "dsTranslationChatLanguagesV1";
+  let chatLangMap = null;
   function targetLang() {
-    return String(DS.state?.settings?.translationTargetLanguage || "EN-US").trim().toUpperCase() || "EN-US";
+    return String(chatLangMap?.[location.pathname] || DS.state?.settings?.translationTargetLanguage || "EN-US").trim().toUpperCase() || "EN-US";
+  }
+  async function loadChatLanguages() {
+    if (chatLangMap !== null) return;
+    try {
+      const stored = DS.state?.settings?.translationChatLanguageOverrides;
+      if (stored) chatLangMap = JSON.parse(stored);
+      else { const result = await DS.storageGet?.([CHAT_LANG_KEY]); chatLangMap = result?.[CHAT_LANG_KEY] || {}; }
+      if (!chatLangMap || typeof chatLangMap !== "object") chatLangMap = {};
+    } catch { chatLangMap = {}; }
+  }
+  async function saveChatLang(value) {
+    await loadChatLanguages();
+    if (value) chatLangMap[location.pathname] = value;
+    else delete chatLangMap[location.pathname];
+    // Bound map growth to avoid indefinite history.
+    const entries = Object.entries(chatLangMap).slice(-300);
+    chatLangMap = Object.fromEntries(entries);
+    if (DS.saveSettingsPatch) await DS.saveSettingsPatch({ translationChatLanguageOverrides: JSON.stringify(chatLangMap) });
+    else await DS.storageSet?.({ [CHAT_LANG_KEY]: chatLangMap });
+    document.querySelectorAll("[data-ds-translation-done], [data-ds-translation-skipped]").forEach(root => {
+      root.querySelector(":scope .ds-translation-block")?.remove();
+      delete root.dataset.dsTranslationDone; delete root.dataset.dsTranslationSkipped;
+      delete root.dataset.dsTranslationSourceHash; delete root.dataset.dsTranslationTarget;
+    });
+    lastApplySignature = "";
+    DS.applyTranslationTools?.();
+  }
+  async function localTranslate(text, target) {
+    const API = globalThis.Translator;
+    if (!API?.create || !API?.availability) throw new Error("On-device translation isn't supported by this browser. Choose DeepL, LibreTranslate, or manual external translation in Settings.");
+    const targetLanguage = normalizedBaseLanguage(target).toLowerCase();
+    let sourceLanguage = guessLanguage(text).toLowerCase();
+    if (!sourceLanguage && globalThis.LanguageDetector?.create) {
+      try {
+        const detector = await globalThis.LanguageDetector.create();
+        const candidates = await detector.detect(text);
+        sourceLanguage = String(candidates?.[0]?.detectedLanguage || "").toLowerCase();
+        detector.destroy?.();
+      } catch {}
+    }
+    if (!sourceLanguage) throw new Error("On-device source language couldn't be detected. Use DeepL or LibreTranslate for this message.");
+    if (sourceLanguage === targetLanguage) return { text, detectedSourceLanguage: sourceLanguage, provider: "On-device" };
+    const status = await API.availability({ sourceLanguage, targetLanguage });
+    if (["unavailable", "no"].includes(status)) throw new Error(`On-device ${sourceLanguage} → ${targetLanguage} is unavailable.`);
+    const translator = await API.create({ sourceLanguage, targetLanguage });
+    try { return { text: await translator.translate(text), detectedSourceLanguage: sourceLanguage, provider: "On-device" }; }
+    finally { translator.destroy?.(); }
+  }
+  function provider() { return String(DS.state?.settings?.translationProvider || "deepl"); }
+  async function translateWithProvider(text, target, context = "") {
+    const name = provider();
+    if (name === "external") throw new Error("External Google Translate is manual only.");
+    if (name === "local" || name === "auto") {
+      try { return await localTranslate(text, target); }
+      catch (error) {
+        if (name === "local" || !DS.state?.settings?.translationAllowRemoteFallback) throw error;
+      }
+    }
+    if (name === "libre") return await sendMessage({ type: "DS_QOL_TRANSLATE", provider: "libre", text, targetLang: target, settings: { libreTranslateUrl: DS.state?.settings?.libreTranslateUrl || "" } });
+    const deep = await sendMessage({ type: "DS_DEEPL_TRANSLATE", text, targetLang: target, context });
+    return { ...deep, provider: "DeepL" };
+  }
+  function openExternalTranslator(text, target) {
+    if (!text || text.length > 4500) throw new Error("External translator supports up to 4,500 characters at once.");
+    const dest = `https://translate.google.com/?sl=auto&tl=${encodeURIComponent(target.split("-")[0].toLowerCase())}&text=${encodeURIComponent(text)}&op=translate`;
+    window.open(dest, "_blank", "noopener,noreferrer");
+  }
+  function ensureChatLanguageControl() {
+    const enabled = !!DS.state?.settings?.translationPerChatControls;
+    let select = document.getElementById("ds-translation-chat-language");
+    if (!enabled) { select?.remove(); return; }
+    const header = document.querySelector("#ds-chat-background-control")?.parentElement || document.querySelector("button[aria-label='chat-dropdown']")?.parentElement;
+    if (!header) return;
+    if (!select) {
+      select = document.createElement("select"); select.id = "ds-translation-chat-language";
+      select.setAttribute("aria-label", "Target translation language for this chat"); select.title = "Translation language for this chat";
+      for (const [code, label] of Object.entries({ "": "Global language", "EN-US": "English", DE: "German", FR: "French", ES: "Spanish", IT: "Italian", JA: "Japanese", KO: "Korean", "ZH-HANS": "Chinese", PT: "Portuguese" })) {
+        const option = document.createElement("option"); option.value = code; option.textContent = label; select.appendChild(option);
+      }
+      select.addEventListener("change", () => saveChatLang(select.value));
+    }
+    select.value = chatLangMap?.[location.pathname] || "";
+    if (select.parentElement !== header) header.appendChild(select);
   }
 
   function normalizedBaseLanguage(code) {
@@ -142,7 +229,7 @@
   }
 
   function cacheKey(text, target) {
-    return `${target}:${simpleHash(text)}:${text.length}`;
+    return `${provider()}:${target}:${simpleHash(text)}:${text.length}`;
   }
 
 
@@ -248,7 +335,17 @@
     container.insertAdjacentElement("afterend", block);
     const translateButton = block.querySelector(".ds-translation-button");
     const toggle = block.querySelector(".ds-translation-toggle");
-    translateButton.addEventListener("click", () => translateRoot(root, { manual: true }));
+    translateButton.addEventListener("click", () => {
+      if (provider() === "external") {
+        // Open directly inside the user gesture; await/storage operations can
+        // cause browsers to block a newly opened translation tab.
+        try { openExternalTranslator(sourceText(root), targetLang()); }
+        catch (error) {
+          const note = block.querySelector(".ds-translation-note");
+          note.hidden = false; note.textContent = error?.message || String(error);
+        }
+      } else translateRoot(root, { manual: true });
+    });
     toggle.addEventListener("click", () => {
       const text = block.querySelector(".ds-translation-text");
       const hidden = !text.hidden;
@@ -270,8 +367,8 @@
     textHost.textContent = result.text || "";
     textHost.hidden = false;
     note.textContent = result.detectedSourceLanguage
-      ? `Translated from ${result.detectedSourceLanguage} with DeepL`
-      : "Translated with DeepL";
+      ? `Translated from ${result.detectedSourceLanguage} with ${result.provider || "DeepL"}`
+      : `Translated with ${result.provider || "DeepL"}`;
     note.hidden = false;
     button.textContent = "Translate again";
     button.disabled = false;
@@ -320,13 +417,18 @@
       button.textContent = "Translating...";
     }
 
+    if (provider() === "external") {
+      if (!manual) return;
+      try { openExternalTranslator(text, target); }
+      catch (error) { const note = block?.querySelector(".ds-translation-note"); if (note) { note.hidden = false; note.textContent = error.message; } }
+      if (button) { button.disabled = false; button.textContent = "Translate externally"; }
+      return;
+    }
     const protectedText = protectForTranslation(text);
-    const response = await sendMessage({
-      type: "DS_DEEPL_TRANSLATE",
-      text: protectedText.text,
-      targetLang: target,
-      context: previousMessageContext(root)
-    });
+    let response;
+    try { response = await translateWithProvider(protectedText.text, target, previousMessageContext(root)); }
+    catch (error) { response = { ok: false, error: error?.message || String(error) }; }
+    if (response && response.ok === undefined) response.ok = true;
 
     if (!response?.ok) {
       if (button) {
@@ -336,7 +438,11 @@
       const note = block?.querySelector(".ds-translation-note");
       if (note) {
         note.hidden = false;
-        note.textContent = response?.error || "Translation failed. Check your DeepL setup in Settings.";
+        note.textContent = response?.error || "Translation failed. Check the chosen provider in Settings.";
+      }
+      if (!manual) {
+        root.dataset.dsTranslationSkipped = "provider-error";
+        root.dataset.dsTranslationSourceHash = `${simpleHash(text)}:${text.length}`;
       }
       return;
     }
@@ -344,7 +450,8 @@
     const result = {
       text: protectedText.restore(response.text || ""),
       detectedSourceLanguage: response.detectedSourceLanguage || "",
-      savedAt: Date.now()
+      savedAt: Date.now(),
+      provider: response.provider || (provider() === "deepl" ? "DeepL" : provider())
     };
     memoryCache.set(key, result);
     scheduleCacheSave();
@@ -365,6 +472,7 @@
     lastApplySignature = "";
     lastApplyRoute = "";
     document.querySelectorAll(".ds-translation-block").forEach(el => el.remove());
+    document.getElementById("ds-translation-chat-language")?.remove();
     document.querySelectorAll("[data-ds-translation-done], [data-ds-translation-skipped]").forEach(el => {
       delete el.dataset.dsTranslationDone;
       delete el.dataset.dsTranslationSkipped;
@@ -400,14 +508,22 @@
       pending.push({ root, text, key, protectedText, block });
     }
 
-    for (let offset = 0; offset < pending.length; offset += 50) {
-      const chunk = pending.slice(offset, offset + 50);
-      const response = await sendMessage({
-        type: "DS_DEEPL_TRANSLATE_BATCH",
-        texts: chunk.map(item => item.protectedText.text),
-        targetLang: target,
-        context: previousMessageContext(chunk[0]?.root)
-      });
+    for (let offset = 0; offset < pending.length; offset += (provider() === "deepl" ? 50 : 10)) {
+      const chunk = pending.slice(offset, offset + (provider() === "deepl" ? 50 : 10));
+      let response;
+      if (provider() === "external") { response = { ok: false, error: "External translation works per message only." }; }
+      else if (provider() === "deepl") response = await sendMessage({ type: "DS_DEEPL_TRANSLATE_BATCH", texts: chunk.map(item => item.protectedText.text), targetLang: target, context: previousMessageContext(chunk[0]?.root) });
+      else {
+        const translations = [];
+        for (const item of chunk) {
+          try {
+            const result = await translateWithProvider(item.protectedText.text, target);
+            if (result?.ok === false) throw new Error(result.error || "Translation failed");
+            translations.push(result);
+          } catch (error) { response = { ok: false, error: error?.message || String(error) }; break; }
+        }
+        if (!response) response = { ok: true, translations };
+      }
 
       if (!response?.ok || !Array.isArray(response.translations)) {
         for (const item of chunk) {
@@ -425,7 +541,8 @@
         const result = {
           text: item.protectedText.restore(translated?.text || ""),
           detectedSourceLanguage: translated?.detectedSourceLanguage || "",
-          savedAt: Date.now()
+          savedAt: Date.now(),
+          provider: translated?.provider || (provider() === "deepl" ? "DeepL" : provider())
         };
         memoryCache.set(item.key, result);
         renderResult(item.root, result, item.text);
@@ -442,13 +559,15 @@
     }
 
     DS.state.translationWasActive = true;
+    loadChatLanguages().then(() => ensureChatLanguageControl());
     const route = String(location.pathname || "");
     const signature = JSON.stringify([
       targetLang(),
       !!settings.translationShowMessageButtons,
       !!settings.translationAutoAi,
       !!settings.translationAutoUser,
-      String(settings.translationUnderstoodLanguages || "")
+      String(settings.translationUnderstoodLanguages || ""),
+      provider(), !!settings.translationPerChatControls, !!settings.translationAllowRemoteFallback
     ]);
     const fullPass = signature !== lastApplySignature || route !== lastApplyRoute;
     lastApplySignature = signature;
@@ -481,8 +600,8 @@
       }
 
       const ai = isAiMessage(root);
-      const showButton = !!settings.translationShowMessageButtons;
-      const auto = ai ? !!settings.translationAutoAi : !!settings.translationAutoUser;
+      const showButton = !!settings.translationShowMessageButtons || provider() === "external";
+      const auto = provider() !== "external" && (ai ? !!settings.translationAutoAi : !!settings.translationAutoUser);
 
       if (showButton || auto) {
         const block = ensureBlock(root);
@@ -537,3 +656,5 @@
 
   observer.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
 })();
+
+}

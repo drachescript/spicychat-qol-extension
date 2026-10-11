@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -14,6 +16,81 @@
   let savedModeTimer = null;
   const dirtyRoots = new Set();
   const selfWrittenTextNodes = new WeakSet();
+  const PROFILE_SELECTION_KEY = "dsChatReplacementSelectedPresetsV1";
+  let profileSelection = null;
+  let profileLoading = null;
+  async function loadProfileSelections() {
+    if (profileSelection !== null) return;
+    if (profileLoading) return profileLoading;
+    profileLoading = (async () => {
+      try {
+        const stored = DS.state?.settings?.chatTextReplacementChatAssignments;
+        if (stored) profileSelection = JSON.parse(stored);
+        else { const result = await DS.storageGet?.([PROFILE_SELECTION_KEY]); profileSelection = result?.[PROFILE_SELECTION_KEY] || {}; }
+        if (!profileSelection || typeof profileSelection !== "object") profileSelection = {};
+      } catch { profileSelection = {}; }
+      finally { profileLoading = null; }
+    })();
+    return profileLoading;
+  }
+  function availablePresets(raw) {
+    const presets = new Map(); let current = "";
+    for (const rawLine of String(raw || "").split(/\r?\n/)) {
+      const line = rawLine.trim();
+      const header = /^\[([^\]\r\n]{1,60})\]$/.exec(line);
+      if (header) { current = header[1]; if (!presets.has(current)) presets.set(current, []); }
+      else if (current && line && !line.startsWith("#") && line.includes("=>")) presets.get(current).push(line);
+    }
+    return presets;
+  }
+  function selectedPresetRules(settings) {
+    const selected = String(profileSelection?.[location.pathname] || "");
+    const presets = availablePresets(settings.chatTextReplacementPresets);
+    return presets.get(selected)?.join("\n") || "";
+  }
+  function mutedRules(settings) {
+    if (!settings.enableChatMutedWords) return "";
+    return String(settings.chatMutedWords || "").split(/\r?\n/).map(line => line.trim())
+      .filter(line => line && !line.startsWith("#") && line.length <= 120)
+      .map(line => `${line} => `).join("\n");
+  }
+  function combinedDisplayRules(settings) {
+    return [settings.enableChatTextReplacements ? settings.chatTextReplacementRules : "", selectedPresetRules(settings), mutedRules(settings)]
+      .filter(Boolean).join("\n");
+  }
+  function ensurePresetSelector(settings) {
+    let select = document.getElementById("ds-chat-replacement-preset");
+    const enabled = !!settings.chatTextReplacementShowChatPresetControl && !!settings.enableChatTextReplacements;
+    if (!enabled) { select?.remove(); return; }
+    const host = document.querySelector("button[aria-label='chat-dropdown']")?.parentElement;
+    if (!host) return;
+    if (!select) {
+      select = document.createElement("select"); select.id = "ds-chat-replacement-preset";
+      select.setAttribute("aria-label", "Replacement preset for this chat"); select.title = "Local replacement rules for this chat";
+      select.addEventListener("change", async () => {
+        profileSelection = profileSelection || {};
+        if (select.value) profileSelection[location.pathname] = select.value;
+        else delete profileSelection[location.pathname];
+        profileSelection = Object.fromEntries(Object.entries(profileSelection).slice(-300));
+        if (DS.saveSettingsPatch) await DS.saveSettingsPatch({ chatTextReplacementChatAssignments: JSON.stringify(profileSelection) });
+        else await DS.storageSet?.({ [PROFILE_SELECTION_KEY]: profileSelection });
+        restoreDisplayChanges(); lastSignature = "";
+        DS.applyChatTextReplacements?.();
+      });
+    }
+    const presets = availablePresets(settings.chatTextReplacementPresets);
+    const old = [...select.options].map(item => item.value).join("|");
+    const wanted = ["", ...presets.keys()].join("|");
+    if (old !== wanted) {
+      select.replaceChildren();
+      for (const key of ["", ...presets.keys()]) {
+        const option = document.createElement("option"); option.value = key; option.textContent = key || "Global replacements";
+        select.appendChild(option);
+      }
+    }
+    select.value = profileSelection?.[location.pathname] || "";
+    if (select.parentElement !== host) host.appendChild(select);
+  }
 
   function writeTextNode(node, value) {
     if (!node || node.nodeValue === value) return false;
@@ -106,6 +183,8 @@
     return JSON.stringify([
       !!settings.enableChatTextReplacements,
       String(settings.chatTextReplacementRules || ""),
+      String(settings.chatMutedWords || ""), !!settings.enableChatMutedWords,
+      String(settings.chatTextReplacementPresets || ""), selectedPresetRules(settings),
       String(settings.chatTextReplacementScope || "ai"),
       String(settings.chatTextReplacementMode || "display"),
       !!settings.chatTextReplacementPreview
@@ -446,6 +525,7 @@
   function cleanup() {
     restoreDisplayChanges();
     document.querySelectorAll(".ds-replacement-undo").forEach(button => button.remove());
+    document.getElementById("ds-chat-replacement-preset")?.remove();
     clearTimeout(savedModeTimer);
     savedModeTimer = null;
     lastSignature = "";
@@ -456,14 +536,16 @@
     DS.state.chatTextReplacementsWasActive = false;
   }
 
-  DS.applyChatTextReplacements = function applyChatTextReplacements() {
+  DS.applyChatTextReplacements = async function applyChatTextReplacements() {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !DS.isSingleChatPage?.() || !settings.enableChatTextReplacements) {
+    if (!settings.enabled || !DS.isSingleChatPage?.() || (!settings.enableChatTextReplacements && !settings.enableChatMutedWords)) {
       if (DS.state.chatTextReplacementsWasActive) cleanup();
       return;
     }
 
-    const rules = parseRules(settings.chatTextReplacementRules);
+    await loadProfileSelections();
+    ensurePresetSelector(settings);
+    const rules = parseRules(combinedDisplayRules(settings));
     if (!rules.length) {
       if (DS.state.chatTextReplacementsWasActive) cleanup();
       return;
@@ -475,7 +557,8 @@
     const signatureChanged = signature !== lastSignature || initializedRoute !== route;
     lastSignature = signature;
     initializedRoute = route;
-    const mode = settings.chatTextReplacementMode === "save" ? "save" : "display";
+    const mode = settings.enableChatMutedWords || !!selectedPresetRules(settings)
+      ? "display" : (settings.chatTextReplacementMode === "save" ? "save" : "display");
 
     if (mode === "save" && signatureChanged) restoreDisplayChanges();
 
@@ -549,3 +632,5 @@
     subtree: true
   });
 })();
+
+}

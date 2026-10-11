@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -338,3 +340,5 @@
   DS.openChatSearch=function openChatSearch(){ if(!isEnabled()) return DS.setQuickStatus?.("Enable Search inside current chat in Settings first."); if(showFindButtonPlacement()){createFloatingPanel();return;} if(!showPanelPlacement()) return DS.setQuickStatus?.("Choose a Search Inside Current Chat placement in Settings first."); DS.createQuickPanel?.(); DS.updateQuickPanel?.(); bindQuickPanelControls(); const panel=document.getElementById("ds-qol-panel"); if(panel?.classList.contains("ds-closed")) panel.querySelector(".ds-qol-toggle")?.click(); const input=quickPanelInput(); if(input)setTimeout(()=>{try{input.focus({preventScroll:true})}catch{input.focus()}},0);};
   DS.removeChatSearch=removeAll;
 })();
+
+}

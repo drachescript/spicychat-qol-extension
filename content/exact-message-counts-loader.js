@@ -1,3 +1,8 @@
+// Avoid installing early API/network hooks on per-tab-disabled page loads.
+if (!(() => { try {
+    if (sessionStorage.getItem("ds-qol-tab-paused-v1") !== "1") return false;
+    return !(/dsQol(?:BotStatusWorker|RecommendationWorker|LorebookBackupWorker|ListingRefillWorker|QuickDislikeWorker|QuickLessLikeWorker)=1/i.test(location.search) || /^(?:bot-status|lorebook-backup|recommendation|listing-refill|quick-dislike|less-like)$/.test(String(sessionStorage.getItem("dsQolBackgroundWorkerKind") || "")));
+  } catch { return false; } })()) {
 (() => {
   "use strict";
 
@@ -123,3 +128,5 @@
     });
   } catch {}
 })();
+
+}

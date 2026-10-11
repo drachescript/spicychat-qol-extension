@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
   const DS = window.DragonScriptQoL;
@@ -97,3 +99,5 @@
   DS.applyProfileExport = function(){ const s=DS.state.settings||{}; if(!s.enabled||!s.enableProfileExport||!DS.isBotProfilePage?.()) return cleanup(); let b=document.getElementById(BTN_ID); if(b)return; const h=document.querySelector("h1"); if(!h)return; b=document.createElement("button");b.id=BTN_ID;b.type="button";b.textContent="Export";b.title="Export the visible public profile as JSON, Markdown, or HTML";b.style.cssText="align-self:flex-start;width:auto;max-width:max-content;margin:0;border:1px solid rgba(148,163,184,.35);border-radius:7px;background:transparent;color:inherit;padding:5px 9px;cursor:pointer;font:600 12px system-ui;display:inline-flex;align-items:center;justify-content:center;line-height:1.2";b.onclick=e=>{e.preventDefault();e.stopPropagation();open();};h.insertAdjacentElement("afterend",b);};
   DS.removeProfileExport=cleanup;
 })();
+
+}

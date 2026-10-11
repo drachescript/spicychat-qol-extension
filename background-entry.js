@@ -1,7 +1,5 @@
 "use strict";
-
-// Keep the large background worker intact and layer small, isolated worker
-// normalizers after it. Classic extension service workers share one global scope,
-// so the guard can wrap runBotStatusHelperCheck without duplicating background.js.
+// Existing background.js contains the Bot Status helper timeouts, heartbeat
+// checks, and backoff logic. The supplied 0.2.42 package referenced an
+// absent optional guard script; loading it would prevent this worker starting.
 importScripts("background.js");
-importScripts("background-bot-status-guard.js");

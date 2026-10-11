@@ -1008,8 +1008,22 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <label>Models to hide, one per line<textarea id="modelHiddenNames" placeholder="A model I never use" spellcheck="false"></textarea></label>
 <p class="hint">When enabled, model rows get a star. Favorites are moved to the top in this list order. Hidden/favorites-only only changes the quick menu; it does not remove model access from SpicyChat.</p>
 <label class="row"><input id="expandModelSelectorDescriptions" type="checkbox"/><span>Expand all model descriptions in Available models</span></label><label class="row"><input id="hideModelUpgradeButtons" type="checkbox"/><span>Hide locked-model Upgrade buttons and block locked-model upgrade prompts</span></label></section><section class="card" id="translationSettingsCard">
-<h2>Translation (DeepL)</h2>
-<p class="hint">Optional message translation. The original message stays unchanged and the translation is shown underneath it. When you use DeepL translation, the message text (and limited surrounding context when used) is sent directly to the DeepL API with your saved API key; it is not sent to a DragonScript/SpicyChat QoL server.</p>
+<h2>Chat translation</h2>
+<p class="hint">All translation is optional. Original messages remain unchanged. On-device translation keeps text on your device; choosing DeepL, LibreTranslate or an external translator sends selected text to that service. Automatic mode never silently falls back to a remote service.</p>
+<label>Translation provider
+<select id="translationProvider">
+<option value="auto">Automatic — try on-device first</option>
+<option value="local">Browser on-device (no account)</option>
+<option value="deepl">DeepL API</option>
+<option value="libre">LibreTranslate instance</option>
+<option value="external">Open Google Translate in a new tab (manual only)</option>
+</select></label>
+<label class="row"><input id="translationAllowRemoteFallback" type="checkbox"/><span>Allow Automatic provider to fall back to my configured DeepL API when on-device translation is unavailable</span></label>
+<p class="hint">On-device support varies by browser, language pair, and installed models. First use may download a language model. The external translator opens a browser tab only when clicked; it never auto-translates.</p>
+<div class="button-row"><button id="testLocalTranslator" type="button">Check on-device support</button><span class="hint" id="localTranslatorStatus"></span></div>
+<div class="button-row"><button id="copyEnglishFirstOoc" type="button">Copy English-first OOC instruction</button></div>
+<p class="hint">Optional: paste this through the existing OOC composer to ask the AI to generate in English first, then translate the displayed message with QoL. This is an instruction, not guaranteed model enforcement.</p>
+<label class="row"><input id="translationPerChatControls" type="checkbox"/><span>Show a per-chat target-language selector beside the chat translation controls</span></label>
 <label class="row"><input id="enableTranslation" type="checkbox"/><span>Enable translation tools</span></label>
 <label class="row"><input id="translationShowMessageButtons" type="checkbox"/><span>Show Translate on individual chat messages</span></label>
 <label class="row"><input id="translationAutoAi" type="checkbox"/><span>Automatically translate AI replies when needed</span></label>
@@ -1044,6 +1058,11 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 CharacterName" spellcheck="false"></textarea>
 </label>
 <p class="hint">One term per line. QoL also protects common placeholders, links, and inline/code-block text automatically.</p>
+<div class="sub-card"><h3>LibreTranslate (optional)</h3>
+<label>Instance URL<input id="libreTranslateUrl" type="url" placeholder="https://your-translator.example" autocomplete="off"/></label>
+<label>API key (only if your instance requires one)<input id="libreTranslateApiKey" type="password" autocomplete="off"/></label>
+<div class="button-row"><button id="saveLibreTranslate" type="button">Save instance / request access</button><button id="testLibreTranslate" type="button">Test instance</button></div>
+<p id="libreTranslateStatus" class="hint">No LibreTranslate instance configured. Use a server you trust: messages are sent to its operator.</p></div>
 <label>DeepL API key
           <input autocomplete="off" id="deeplApiKey" placeholder="Paste your DeepL API key" type="password"/>
 </label>
@@ -1399,6 +1418,8 @@ Testing" spellcheck="false"></textarea></label>
 <section class="card" id="chatBackgroundsCard">
 <h2>Custom chat backgrounds</h2>
 <label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
+<label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
+<p class="hint">Choose BG in a chat to save and switch scenes. Import images generated anywhere by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
 <label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set (opt-in)</span></label>
 <label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
 <label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
@@ -1950,7 +1971,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="androidTopBarOoc" type="checkbox"/><span>OOC</span></label>
 <label class="row"><input id="androidTopBarAsterisk" type="checkbox"/><span>* action wrapper</span></label>
 <label class="row"><input id="androidTopBarFormatting" type="checkbox"/><span>Formatting shortcuts</span></label>
-<label class="row"><input id="androidTopBarTranslation" type="checkbox"/><span>Translate visible messages (when DeepL translation is enabled)</span></label>
+<label class="row"><input id="androidTopBarTranslation" type="checkbox"/><span>Translate visible messages (when chat translation is enabled)</span></label>
 <label class="row"><input id="androidTopBarScroll" type="checkbox"/><span>Scroll top / bottom</span></label>
 <label class="row"><input id="androidTopBarPersona" type="checkbox"/><span>Change Persona</span></label>
 <label class="row"><input id="androidTopBarModel" type="checkbox"/><span>Model picker</span></label>
@@ -1995,6 +2016,21 @@ Testing" spellcheck="false"></textarea></label>
 cash =&gt; Bingo Coins
 /dollars?|bucks?/gi =&gt; Bingo Coins" spellcheck="false"></textarea></label>
 <p class="hint">Use one rule per line as <code>find =&gt; replacement</code>. Normal text is case-insensitive; Regex is supported too.</p>
+<div class="sub-card"><h3>Muted words (optional, local display only)</h3>
+<label class="row"><input id="enableChatMutedWords" type="checkbox"/><span>Hide muted words / phrases from displayed chat messages</span></label>
+<label>Muted words / phrases, one per line<textarea id="chatMutedWords" placeholder="mark you as mine
+predatory grin" spellcheck="false"></textarea></label>
+<p class="hint">This affects only what is shown locally, not the AI model or saved chat. While muted words or a named per-chat preset are active, all replacements switch to display-only; native Save mode is suspended for that chat.</p>
+</div>
+<div class="sub-card"><h3>Named replacement presets</h3>
+<label>Rule sets<textarea id="chatTextReplacementPresets" placeholder="[Fantasy]
+money =&gt; gold coins
+
+[Cyberpunk]
+money =&gt; credits" spellcheck="false"></textarea></label>
+<p class="hint">Create named groups with [Name] headings. Rules are local-display-only per-chat additions to global rules. Each chat can choose a set independently, and global rules remain unchanged.</p>
+<label class="row"><input id="chatTextReplacementShowChatPresetControl" type="checkbox"/><span>Show per-chat replacement preset selector</span></label>
+</div>
 </section>
 
 
@@ -2184,6 +2220,7 @@ cash =&gt; Bingo Coins
 <label class="row"><input id="lorebookEntryShowHiddenKeywordCount" type="checkbox"/><span>Show hidden keyword count (+N hidden keywords)</span></label>
 <label class="row"><input id="lorebookEntryShowNoKeywordsWarning" type="checkbox"/><span>Show no-keywords warning</span></label>
 <label class="row"><input id="lorebookEntryShowCharacterCount" type="checkbox"/><span>Show character-count warning near SpicyChat's 2,000-character entry limit</span></label>
+<label class="row"><input id="lorebookEntryQuickToggle" type="checkbox"/><span>Show optional individual entry Enable / Disable shortcut (edits the actual shared Lorebook, not per chat)</span></label>
 <label class="row"><input id="lorebookEntryRenameButton" type="checkbox"/><span>Show Rename</span></label>
 <label class="row"><input id="lorebookEntryCopyButton" type="checkbox"/><span>Show Copy</span></label>
 <label class="row"><input id="lorebookEntryDuplicateButton" type="checkbox"/><span>Show Duplicate</span></label>
@@ -2923,7 +2960,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div><strong>Scroll navigation</strong><span>Adds quick Top/Bottom controls and can help load older messages when you need them.</span></div>
 <div><strong>Model quick menu</strong><span>Favorite/order models and optionally hide models you never use from QoL's customized model menus.</span></div>
 <div><strong>Generation profiles</strong><span>Saves the current model and supported generation sliders so you can restore a setup later.</span></div>
-<div><strong>Translation</strong><span>Uses your own DeepL key to translate selected or automatic chat messages while leaving the original visible.</span></div>
+<div><strong>Translation</strong><span>Optional browser on-device translation, DeepL, LibreTranslate, or external manual translation; original messages stay visible.</span></div>
 <div><strong>Chat Export</strong><span>Copies or exports a conversation as text, Markdown, HTML, or JSON and can load older messages first.</span></div>
 <div><strong>Context Keeper</strong><span>Keeps durable continuity notes locally and can build a compact recap when needed. Saved notes use no chat tokens until you insert/send a recap.</span></div>
 <div><strong>RP State Tracker</strong><span>Keeps changing details such as inventory, location, injuries, currency, and objectives separate from long-term continuity notes.</span></div>

@@ -5443,6 +5443,32 @@ async function deeplTranslateBatch(message) {
   }));
 }
 
+
+async function libreTranslate(message) {
+  const urlText = String(message?.settings?.libreTranslateUrl || "").trim();
+  const url = new URL(urlText);
+  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("LibreTranslate must use a trusted HTTPS server (localhost HTTP is allowed).");
+  const settingsResult = await storageLocalGet([LIBRE_TRANSLATE_KEY_BACKGROUND]);
+  const key = String(settingsResult[LIBRE_TRANSLATE_KEY_BACKGROUND] || "");
+  const items = Array.isArray(message?.texts) ? message.texts.slice(0, 25) : [message?.text];
+  const translations = [];
+  for (const item of items) {
+    const text = String(item || "").trim();
+    if (!text || text.length > 12000) throw new Error("LibreTranslate message is empty or over 12,000 characters.");
+    const target = String(message?.targetLang || "EN-US").split("-")[0].toLowerCase();
+    const response = await fetch(new URL("translate", url.href.replace(/\/?$/, "/")).href, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: text, source: "auto", target, format: "text", ...(key ? { api_key: key } : {}) })
+    });
+    if (!response.ok) throw new Error(`LibreTranslate HTTP ${response.status}`);
+    const data = await response.json();
+    if (typeof data?.translatedText !== "string") throw new Error("LibreTranslate returned no translatedText.");
+    translations.push({ text: data.translatedText, detectedSourceLanguage: data.detectedLanguage?.language || "", provider: "LibreTranslate" });
+  }
+  return Array.isArray(message?.texts) ? { translations } : translations[0];
+}
+const LIBRE_TRANSLATE_KEY_BACKGROUND = "dsLibreTranslateKeyV1";
+
 async function reopenTabSessionItems(items, mode = "current") {
   const cleaned = (Array.isArray(items) ? items : []).map(item => ({
     url: String(item?.url || "").trim(),
@@ -7085,6 +7111,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+
+  if (message?.type === "DS_QOL_TRANSLATE" && message.provider === "libre") {
+    libreTranslate(message)
+      .then(result => sendResponse({ ok: true, ...result }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
 
   if (message?.type === "DS_DEEPL_TRANSLATE_BATCH") {
     deeplTranslateBatch(message)

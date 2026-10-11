@@ -1,3 +1,5 @@
+// No optional feature initialization on a tab whose QoL switch is paused.
+if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
 
@@ -1047,3 +1049,5 @@
   DS.saveLorebookBackupNow = (reason = "Manual Lorebook backup") => saveCapture(reason);
   DS.removeLorebookBackup = cleanup;
 })();
+
+}
