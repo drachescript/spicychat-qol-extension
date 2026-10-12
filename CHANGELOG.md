@@ -1,4 +1,5 @@
 ## 0.2.44
+- Fixed automated GitHub builds checking outdated release ZIPs instead of the newly built version.
 - Fixed automatic Chrome and Firefox development and release builds after the root folder cleanup.
 - Fixed the Mini Panel reappearing after typing or using chat controls when it is disabled in the current tab.
 - Fixed the Mini Panel appearing or returning after being disabled in a tab, including after settings changes or imports.

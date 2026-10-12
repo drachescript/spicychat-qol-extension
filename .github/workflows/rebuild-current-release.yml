@@ -197,7 +197,7 @@ jobs:
       - name: Verify modular runtime in Chrome and Firefox ZIPs
         if: steps.rebuild.outputs.rebuild == 'true'
         shell: bash
-        run: python3 scripts/verify_release_packages.py dist/*-chrome.zip dist/*-firefox.zip
+        run: python3 scripts/verify_release_packages.py "dist/spicychat-qol-v${{ steps.rebuild.outputs.version }}-chrome.zip" "dist/spicychat-qol-v${{ steps.rebuild.outputs.version }}-firefox.zip"
 
       - name: Validate release package structure
         if: steps.rebuild.outputs.rebuild == 'true'
