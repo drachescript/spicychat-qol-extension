@@ -1,0 +1,14 @@
+/* v0.2.43 opt-in Explorer-style folders. Cards remain in the native React grid. */
+.ds-bot-organizer-explorer { margin: 14px 0 10px; padding: 12px; border: 1px solid rgba(148,163,184,.3); border-radius: 12px; background: rgba(22,24,29,.75); color: inherit; }
+.ds-bot-explorer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ds-bot-explorer-head strong { font-size: 15px; }
+.ds-bot-explorer-nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.ds-bot-explorer-nav button { cursor: pointer; padding: 5px 9px; border: 1px solid rgba(148,163,184,.34); border-radius: 7px; background: rgba(45,47,53,.8); color: inherit; }
+.ds-bot-explorer-nav button:disabled { opacity: .5; cursor: default; }
+.ds-bot-explorer-tiles { display: grid; grid-template-columns: repeat(auto-fill,minmax(145px,1fr)); gap: 9px; margin-top: 12px; }
+.ds-bot-explorer-folder { min-height: 95px; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 11px; border: 1px solid rgba(148,163,184,.34); border-radius: 9px; background: rgba(45,47,53,.68); color: inherit; text-align: left; overflow-wrap: anywhere; }
+.ds-bot-explorer-folder:hover,.ds-bot-explorer-folder:focus-visible { border-color: rgba(96,165,250,.8); }
+.ds-bot-explorer-icon { font-size: 22px; }
+.ds-bot-explorer-folder small,.ds-bot-explorer-help { color: #aeb7c5; font-size: 11px; }
+.ds-bot-explorer-help { display: block; margin-top: 9px; }
+.ds-bot-organizer-explorer-grid { justify-content: start !important; align-content: start !important; }

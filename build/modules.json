@@ -15,7 +15,8 @@
   "notes": [
     "These boundaries formalize the runtime bundles already used by SpicyChat QoL.",
     "The Full profile must remain behaviorally identical to the normal extension.",
-    "Recommended Lite is a draft profile only and is intentionally not buildable yet."
+    "Shared Settings and background handlers are separate; remaining feature-specific code must still be isolated before arbitrary Custom builds are supported.",
+    "runtimeAssets is a declaration for future build tooling; Full manifest remains the loading-order reference."
   ],
   "bundles": {
     "core": {
@@ -28,10 +29,11 @@
         "content/auto-afk.js",
         "content/build-profile.js",
         "content/compatibility.js",
-        "platform-capabilities.js",
+        "shared/platform-capabilities.js",
         "content/runtime-improvements.js",
         "content/core-settings-defaults.js",
         "content/core.js",
+        "content/core-storage-writers.js",
         "content/background-worker-coordinator.js",
         "content/diagnostic-protocol.js",
         "content/dom.js",
@@ -44,7 +46,8 @@
         "content/tab-diagnostics.js",
         "content/tag-aliases.js",
         "content/update-toast.js",
-        "content/creator-editor-privacy-guard.js"
+        "content/creator-editor-privacy-guard.js",
+        "content/main-startup.js"
       ]
     },
     "interface": {
@@ -246,5 +249,67 @@
         "content/personas.js"
       ]
     }
+  },
+  "runtimeAssets": {
+    "background": {
+      "required": [
+        "background-entry.js",
+        "background.js",
+        "background/background-translation.js",
+        "background/background-events.js",
+        "background/bot-status-storage-cleanup.js"
+      ]
+    },
+    "options": {
+      "required": [
+        "options.html",
+        "options.css",
+        "options-overhaul.css",
+        "settings/options-settings-defaults.js",
+        "settings/options-reading-accessibility.js",
+        "settings/options-section-navigation.js",
+        "settings/options-tab-cleanup.js",
+        "settings/options-soundscapes.js",
+        "options.js",
+        "shared/feature-registry.js",
+        "shared/platform-capabilities.js",
+        "platform-capabilities.css",
+        "background/bot-status-storage-cleanup.js",
+        "shared/storage-metrics.js"
+      ]
+    },
+    "styles": {
+      "core": [
+        "content.css"
+      ],
+      "profiles": [
+        "content/styles/explorer-base.css",
+        "content/styles/explorer-covers.css"
+      ],
+      "chat": [
+        "content/styles/memory-vault.css"
+      ],
+      "listings": [
+        "content/styles/pagination.css"
+      ]
+    }
+  },
+  "sharedBundleFiles": {
+    "content/bot-organizer.js": [
+      "listings",
+      "profiles"
+    ],
+    "content/card-workflow.js": [
+      "listings",
+      "profiles"
+    ],
+    "content/creator-favorites.js": [
+      "listings",
+      "profiles"
+    ],
+    "content/later-bots.js": [
+      "listings",
+      "profiles"
+    ]
   }
 }

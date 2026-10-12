@@ -1,0 +1,6 @@
+/* v0.2.43 Memory Vault is visible only when user explicitly enables it. */
+.ds-memory-vault-panel { display: flex; flex-direction: column; gap: 7px; margin: 8px 0; padding: 10px; border: 1px solid rgba(148,163,184,.36); border-radius: 8px; }
+.ds-memory-vault-panel small { opacity: .7; }
+.ds-memory-vault-row { display: flex; gap: 10px; justify-content: space-between; align-items: center; border-top: 1px solid rgba(148,163,184,.2); padding: 7px 0; }
+.ds-memory-vault-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.ds-memory-vault-row button,.ds-memory-vault-panel>button { cursor: pointer; border: 1px solid rgba(148,163,184,.35); border-radius: 7px; padding: 5px 8px; background: rgba(85,91,103,.2); color: inherit; }

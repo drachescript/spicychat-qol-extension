@@ -1,0 +1,17 @@
+/* Responsive expanded pagination: limit to available listing width and wrap as
+   a fail-safe when SpicyChat uses unusually wide button styles. The JS chooses
+   fewer page numbers before this fallback is needed. */
+.ds-pagination-qol-layout {
+  display: flex;
+  flex-wrap: wrap !important;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  justify-content: center;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 8px;
+}
+.ds-pagination-qol-layout > [data-ds-pagination-qol="1"] {
+  flex-shrink: 0;
+}

@@ -1,3 +1,11 @@
+## 0.2.44
+- Fixed automatic Chrome and Firefox development and release builds after the root folder cleanup.
+- Fixed the Mini Panel reappearing after typing or using chat controls when it is disabled in the current tab.
+- Fixed the Mini Panel appearing or returning after being disabled in a tab, including after settings changes or imports.
+- Fixed Settings failing to load when files from earlier modular updates were missing. The page now identifies missing files instead of leaving the version stuck on loading.
+- Reduced repeated work when opening and filtering the persona picker, especially with larger persona lists.
+- Continued separating Settings, translation tools, and shared code to prepare for smaller Custom builds.
+
 ## 0.2.43
 - Fixed release preparation failing to include some required extension files.
 - Improved reliability when saving bot folders and covers, and stopped the mobile selection shortcut when Bot Organizer is disabled.

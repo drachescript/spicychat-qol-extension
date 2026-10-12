@@ -2965,7 +2965,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     console.warn(`[${DS.EXT_NAME}] storage listener skipped`, error);
   }
 
-  (async function main() {
+  DS.startMainRuntime = async function startMainRuntime() {
     if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) return;
     await DS.loadState();
     try { await DS.resolveBackgroundWorkerIdentity?.(); } catch {}
@@ -3022,7 +3022,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await DS.runCritical?.();
     DS.scheduleRun?.({ priority: "slow", immediate: true, source: "initial-idle-injection" });
     await DS.maybeShowUpdateToast?.();
-  })();
+  };
   DS.installMainDiagnostics?.({ runtimeProfile, loadedChatMessageCount, desktopAppPerformanceGuardActive });
 
 })();

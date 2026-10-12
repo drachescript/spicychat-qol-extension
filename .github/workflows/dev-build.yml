@@ -68,7 +68,10 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
-          files = {"background.js", "options.js", "popup.js"}
+          modules = json.loads(Path("build/modules.json").read_text(encoding="utf-8"))
+          files = {"background-entry.js", "background.js", "options.js", "popup.js", "shared/sync-service.js", "popup/popup-version.js"}
+          for section in ("background", "options"):
+              files.update(rel for rel in modules.get("runtimeAssets", {}).get(section, {}).get("required", []) if rel.endswith(".js"))
 
           for content_script in manifest.get("content_scripts", []):
               files.update(content_script.get("js", []))
@@ -90,6 +93,10 @@ jobs:
 
       - name: Build Chrome and Firefox development ZIPs
         run: python3 scripts/build_extension.py --profile full --dev
+
+      - name: Verify modular runtime in Chrome and Firefox ZIPs
+        shell: bash
+        run: python3 scripts/verify_release_packages.py dist/*-chrome.zip dist/*-firefox.zip
 
       - name: Validate development package structure
         shell: bash
@@ -134,8 +141,8 @@ jobs:
                               raise SystemExit(f"{path}: manifest references missing file {rel}")
 
                   if target == "chrome":
-                      if manifest.get("background", {}).get("service_worker") != "background.js":
-                          raise SystemExit(f"{path}: Chrome service worker is not background.js")
+                      if manifest.get("background", {}).get("service_worker") != "background-entry.js":
+                          raise SystemExit(f"{path}: Chrome service worker is not background-entry.js")
                       if manifest.get("browser_specific_settings"):
                           raise SystemExit(f"{path}: Chrome package unexpectedly contains browser_specific_settings")
                   else:

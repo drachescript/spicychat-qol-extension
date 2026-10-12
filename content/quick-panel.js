@@ -32,6 +32,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "sidebar-below-blocked-creators"
   ]);
 
+  // Panels have document/window listeners for dragging and composer layout.
+  // Removing their DOM without aborting those listeners leaves callbacks holding
+  // detached panels; a later focus/input/resize can otherwise reattach them.
+  const panelListeners = new WeakMap();
+
+  function disposePanel(panel) {
+    if (!panel) return;
+    const controller = panelListeners.get(panel);
+    if (controller) {
+      controller.abort();
+      panelListeners.delete(panel);
+    }
+  }
+
+  function panelMayMove(panel) {
+    return !!(
+      panel?.isConnected &&
+      DS.state?.settings?.enabled &&
+      DS.state?.settings?.showQuickPanel &&
+      DS.isQuickPanelEnabledForTab?.() &&
+      !window.__DSQ_TAB_GATE__?.paused
+    );
+  }
+
   function getSingleQuickPanel() {
     const panels = [...document.querySelectorAll("#ds-qol-panel")];
     if (!panels.length) return null;
@@ -41,14 +65,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       panels[0];
 
     panels.forEach(panel => {
-      if (panel !== primary) panel.remove();
+      if (panel !== primary) {
+        disposePanel(panel);
+        panel.remove();
+      }
     });
 
     return primary;
   }
 
   function removeAllQuickPanels() {
-    document.querySelectorAll("#ds-qol-panel").forEach(panel => panel.remove());
+    document.querySelectorAll("#ds-qol-panel").forEach(panel => {
+      disposePanel(panel);
+      panel.remove();
+    });
     removeEmptyDockHosts();
   }
 
@@ -92,7 +122,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function defaultTabPanelEnabled() {
-    return DS.state?.settings?.quickPanelEnabledByDefaultInTab !== false;
+    // False is the shipped default. An uninitialized setting must not briefly
+    // turn the panel on while settings are loading or being imported.
+    return DS.state?.settings?.quickPanelEnabledByDefaultInTab === true;
   }
 
   function readTabPanelEnabledOverride() {
@@ -113,27 +145,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function writeTabPanelEnabledOverride(enabled) {
     try {
-      const next = !!enabled;
-
-      // Matching the configured default does not need a permanent tab override.
-      // This lets later settings changes apply instead of the popup state winning forever.
-      if (next === defaultTabPanelEnabled()) {
-        sessionStorage.removeItem(TAB_ENABLED_KEY);
-        return;
-      }
-
-      sessionStorage.setItem(TAB_ENABLED_KEY, next ? "1" : "0");
-    } catch {}
+      // A deliberate per-tab choice must win over future global default
+      // changes (including settings imports/presets) for the life of this tab.
+      // This also prevents an explicit OFF from being silently forgotten just
+      // because the default happened to be OFF at the time of the click.
+      sessionStorage.setItem(TAB_ENABLED_KEY, enabled ? "1" : "0");
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   DS.isQuickPanelEnabledForTab = function isQuickPanelEnabledForTab() {
     const override = readTabPanelEnabledOverride();
     if (override !== null) return override;
-    return DS.state?.settings?.quickPanelEnabledByDefaultInTab !== false;
+    return defaultTabPanelEnabled();
   };
 
   DS.setQuickPanelEnabledForTab = function setQuickPanelEnabledForTab(enabled) {
-    writeTabPanelEnabledOverride(!!enabled);
+    if (!writeTabPanelEnabledOverride(!!enabled)) return false;
 
     if (!enabled) {
       removeAllQuickPanels();
@@ -141,6 +171,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.createQuickPanel?.();
       DS.updateQuickPanel?.();
     }
+    return true;
   };
 
   function readTabPanelPosition() {
@@ -302,7 +333,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function movePanelToDocument(panel) {
-    if (!panel || panel.parentElement === document.documentElement) return;
+    if (!panelMayMove(panel) || panel.parentElement === document.documentElement) return;
     document.documentElement.appendChild(panel);
   }
 
@@ -329,6 +360,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function dockPanel(panel, placement) {
+    if (!panelMayMove(panel)) return false;
     if (placement === "sidebar-below-blocked-creators") {
       const target = findSidebarBlockedCreatorsTarget();
       if (!target) return false;
@@ -344,6 +376,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function makePanelFixedAtCurrentSpot(panel) {
+    if (!panelMayMove(panel)) return;
     const rect = panel.getBoundingClientRect();
     movePanelToDocument(panel);
 
@@ -495,7 +528,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function applyQuickPanelPosition(panel) {
-    if (!panel || panel.classList.contains("ds-qol-dragging")) return;
+    if (!panelMayMove(panel) || panel.classList.contains("ds-qol-dragging")) return;
 
     const settings = DS.state?.settings || {};
     const placement = getPlacement();
@@ -641,10 +674,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const head = panel.querySelector(".ds-qol-head");
     if (!head) return;
 
+    // Abort all document/window listeners as soon as the panel is removed.
+    // This also prevents repeated panel rebuilds from accumulating handlers.
+    const listenerController = new AbortController();
+    panelListeners.set(panel, listenerController);
+    const listenerOptions = { capture: true, signal: listenerController.signal };
     let dragging = null;
 
     const stopDragging = event => {
       if (!dragging) return;
+      if (!panelMayMove(panel)) {
+        dragging = null;
+        return;
+      }
 
       try {
         event?.preventDefault?.();
@@ -658,7 +700,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
 
     const moveDragging = event => {
-      if (!dragging) return;
+      if (!dragging || !panelMayMove(panel)) return;
 
       const size = panelSize(panel);
       const maxX = Math.max(PANEL_MARGIN, window.innerWidth - size.width - PANEL_MARGIN);
@@ -679,6 +721,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
 
     head.addEventListener("pointerdown", event => {
+      if (!panelMayMove(panel)) return;
       const settings = DS.state?.settings || {};
       if (!settings.quickPanelDraggable) return;
       if (event.button !== 0) return;
@@ -697,28 +740,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       event.preventDefault();
     });
 
-    document.addEventListener("pointermove", moveDragging, true);
-    document.addEventListener("pointerup", stopDragging, true);
-    document.addEventListener("pointercancel", stopDragging, true);
+    document.addEventListener("pointermove", moveDragging, listenerOptions);
+    document.addEventListener("pointerup", stopDragging, listenerOptions);
+    document.addEventListener("pointercancel", stopDragging, listenerOptions);
 
     const refreshForComposer = event => {
+      if (!panelMayMove(panel)) return;
       const target = event?.target;
       if (!target || target.closest?.("#ds-qol-panel")) return;
       if (!target.matches?.("textarea, input[placeholder*='Message'], [contenteditable='true']")) return;
 
       requestAnimationFrame(() => {
+        if (!panelMayMove(panel)) return;
         applyQuickPanelPosition(panel);
         fitPanelToVisibleContent(panel);
       });
     };
 
-    document.addEventListener("input", refreshForComposer, true);
-    document.addEventListener("focusin", refreshForComposer, true);
+    document.addEventListener("input", refreshForComposer, listenerOptions);
+    document.addEventListener("focusin", refreshForComposer, listenerOptions);
 
     window.addEventListener("resize", () => {
+      if (!panelMayMove(panel)) return;
       applyQuickPanelPosition(panel);
       fitPanelToVisibleContent(panel);
-    });
+    }, { signal: listenerController.signal });
   }
 
   DS.setQuickStatus = function setQuickStatus(text, sticky = false) {
@@ -742,7 +788,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const { settings } = DS.state;
 
     if (
-      !settings.showQuickPanel ||
+      !settings?.enabled ||
+      !settings?.showQuickPanel ||
       !DS.isQuickPanelEnabledForTab?.()
     ) {
       removeAllQuickPanels();
@@ -756,6 +803,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      disposePanel(existing);
       existing.remove();
     }
 
@@ -927,6 +975,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       else delete panel.dataset.dsManualPanelOpen;
 
       requestAnimationFrame(() => {
+        if (!panelMayMove(panel)) return;
         applyQuickPanelPosition(panel);
         fitPanelToVisibleContent(panel);
       });
@@ -1380,6 +1429,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.updateQuickPanel = function updateQuickPanel({ forceLayout = false, bypassThrottle = false } = {}) {
+    // Pending/throttled updates must never resurrect or keep a panel whose
+    // master setting or per-tab switch has since been turned off.
+    if (!DS.state?.settings?.enabled || !DS.state?.settings?.showQuickPanel || !DS.isQuickPanelEnabledForTab?.()) {
+      removeAllQuickPanels();
+      return false;
+    }
     const panel = getSingleQuickPanel();
     if (!panel) return false;
     if (panelInteractionActive(panel)) return false;
@@ -1739,6 +1794,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       fitPanelToVisibleContent(panel);
 
       requestAnimationFrame(() => {
+        if (!panelMayMove(panel)) return;
         if (applyOverlapAutoCollapse(panel)) {
           panel.dataset.dsLayoutSignature = "";
           applyQuickPanelPosition(panel);
@@ -1768,16 +1824,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         globallyEnabled,
         tabEnabled,
         enabled: globallyEnabled && tabEnabled,
-        defaultEnabled: DS.state?.settings?.quickPanelEnabledByDefaultInTab !== false
+        defaultEnabled: defaultTabPanelEnabled()
       });
       return false;
     }
 
     if (message?.type === "DS_SET_QUICK_PANEL_TAB_STATE") {
-      DS.setQuickPanelEnabledForTab?.(!!message.enabled);
+      const saved = DS.setQuickPanelEnabledForTab?.(!!message.enabled) === true;
       sendResponse({
-        ok: true,
-        enabled: !!message.enabled
+        ok: saved,
+        enabled: !!DS.state?.settings?.enabled && !!DS.state?.settings?.showQuickPanel && !!DS.isQuickPanelEnabledForTab?.()
       });
       return false;
     }

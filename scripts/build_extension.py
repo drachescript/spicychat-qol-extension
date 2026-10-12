@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -298,13 +299,29 @@ def common_png_icons() -> dict:
     }
 
 
+def background_script_imports() -> list[str]:
+    """Return static worker imports for Firefox's classic background scripts.
+
+    Never load background-entry.js directly as a Firefox page script because it
+    calls importScripts, which is worker-only. Load its dependencies in order.
+    """
+    entry = (ROOT / "background-entry.js").read_text(encoding="utf-8-sig")
+    match = re.search(r"\bimportScripts\s*\(([^;]*)\)", entry, flags=re.S)
+    if match is None:
+        raise SystemExit("background-entry.js has no static importScripts list")
+    imports = re.findall(r"[\"']([^\"']+\.js)[\"']", match.group(1))
+    if not imports or imports[0] != "background.js":
+        raise SystemExit("background-entry.js must import background.js first")
+    return imports
+
+
 def chrome_manifest(source: dict, dev: bool, profile: dict) -> dict:
     manifest = json.loads(json.dumps(source))
     manifest["name"] = str(
         profile.get("devExtensionName" if dev else "extensionName")
         or ("SpicyChat QoL DEV" if dev else "SpicyChat QoL")
     )
-    manifest["background"] = {"service_worker": "background.js"}
+    manifest["background"] = {"service_worker": source["background"]["service_worker"]}
     manifest.pop("browser_specific_settings", None)
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()
@@ -317,7 +334,7 @@ def firefox_manifest(source: dict, dev: bool, profile: dict) -> dict:
         profile.get("devExtensionName" if dev else "extensionName")
         or ("SpicyChat QoL DEV" if dev else "SpicyChat QoL")
     )
-    manifest["background"] = {"scripts": ["background.js"]}
+    manifest["background"] = {"scripts": background_script_imports()}
     manifest["browser_specific_settings"] = FIREFOX_SETTINGS
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()
@@ -337,7 +354,12 @@ def verify_required_files() -> None:
         "icons/icon48.png",
         "icons/icon128.png",
     ]
-    missing = [rel for rel in required if not (ROOT / rel).exists()]
+    required.append("background-entry.js")
+    required.extend(background_script_imports())
+    runtime_assets = load_modules().get("runtimeAssets", {})
+    for section in ("background", "options"):
+        required.extend(runtime_assets.get(section, {}).get("required", []))
+    missing = [rel for rel in dict.fromkeys(required) if not (ROOT / rel).exists()]
     if missing:
         raise SystemExit("required package files are missing:\n  " + "\n  ".join(missing))
 

@@ -1,0 +1,19 @@
+/* Optional Bot Organizer Explorer folder covers — no added chat observers. */
+.ds-bot-explorer-tile { position: relative; min-width: 0; }
+.ds-bot-explorer-tile .ds-bot-explorer-folder { width: 100%; height: 100%; padding-right: 28px; }
+.ds-bot-explorer-cover { display: flex; width: min(100%, 142px); height: 66px; border-radius: 7px; overflow: hidden; background: rgba(0,0,0,.32); }
+.ds-bot-explorer-cover img { width: 100%; height: 100%; min-width: 0; flex: 1 1 auto; object-fit: cover; display: block; }
+.ds-bot-explorer-cover-pair img { width: 50%; flex-basis: 50%; }
+.ds-bot-explorer-cover-settings { background: rgba(40,43,50,.94); border: 1px solid rgba(148,163,184,.5); border-radius: 6px; color: inherit; padding: 5px 8px; font-size: 11px; cursor: pointer; }
+.ds-bot-explorer-tile > .ds-bot-explorer-cover-settings { position: absolute; top: 5px; right: 5px; z-index: 1; }
+.ds-bot-explorer-cover-settings:hover { border-color: rgba(96,165,250,.9); }
+.ds-bot-explorer-cover-overlay { position: fixed; z-index: 2147483001; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(0,0,0,.7); }
+.ds-bot-explorer-cover-dialog { display: flex; flex-direction: column; gap: 10px; max-width: 420px; width: 100%; max-height: min(85vh,650px); overflow-y: auto; background: #202126; color: #f4f4f5; border: 1px solid #626977; padding: 16px; border-radius: 12px; }
+.ds-bot-explorer-cover-dialog h3 { margin: 0; font-size: 16px; }
+.ds-bot-explorer-cover-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ds-bot-explorer-cover-field select, .ds-bot-explorer-cover-field input { width: 100%; max-width: 100%; padding: 6px; border-radius: 6px; color: inherit; background: #292b32; border: 1px solid #626977; }
+.ds-bot-explorer-cover-field[hidden], .ds-bot-explorer-cover-preview[hidden] { display: none !important; }
+.ds-bot-explorer-cover-preview { width: 160px; height: 96px; object-fit: cover; border-radius: 7px; }
+.ds-bot-explorer-cover-dialog small { color: #b6bdcc; }
+.ds-bot-explorer-cover-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ds-bot-explorer-cover-actions button { padding: 6px 13px; border-radius: 6px; cursor: pointer; background: #343744; border: 1px solid #81889b; color: inherit; }
