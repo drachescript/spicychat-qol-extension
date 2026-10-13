@@ -64,6 +64,7 @@ const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
 const GRANULAR_SETTINGS_REVISION_KEY = "dsSettingsRevisionV1";
 const GRANULAR_SETTINGS_LAST_BATCH_KEY = "dsSettingsLastBatchV1";
 const QOL_SYNC_STATE_KEY = "qolSyncStateV1";
+const QOL_SYNC_DEVICE_PREFS_KEY = "qolSyncDevicePrefsV1";
 const QOL_SYNC_DEVICE_SCHEMA_VERSION = 1;
 const PLATFORM_API = window.SpicyChatQoLPlatform || null;
 const BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD = 3;
@@ -185,7 +186,7 @@ const RECOVERY_SNAPSHOT_DB_ID = "latest";
 const RECOVERY_SNAPSHOT_MAX_JSON_BYTES = 160 * 1024 * 1024;
 const RECOVERY_SNAPSHOT_MAX_GZIP_BYTES = 24 * 1024 * 1024;
 
-const BACKUP_FORMAT_VERSION = 13;
+const BACKUP_FORMAT_VERSION = 14;
 
 const ARCHIVE_IMPORT_ENDPOINT_KEY = "dsArchiveImportEndpointV1";
 const ARCHIVE_IMPORT_TOKEN_KEY = "dsArchiveImportTokenV1";
@@ -8745,6 +8746,10 @@ function sortBotStatusRefreshQueue(entries, availability, archives) {
 
 const BOT_STATUS_PAUSED_QUEUE_KEY = "botStatusPausedQueueV1";
 const BOT_STATUS_ACCESS_FAILURE_PAUSE_AT = 3;
+// Persist both completed data AND unprocessed IDs. A tab/extension reload does
+// not run finally handlers, so crash recovery cannot rely on the Stop button.
+const BOT_STATUS_PROGRESS_EVERY = 50;
+const BOT_STATUS_PROGRESS_MS = 30_000;
 function isBotStatusAccessFailure(result) {
   if (!result || result.status !== "unknown") return false;
   const http = Number(result.httpStatus || 0);
@@ -8765,13 +8770,22 @@ async function refreshBotStatusPauseButton() {
   const count = (state?.ids || []).length;
   button.disabled = botAvailabilityScanRunning || !count;
   button.hidden = !count;
-  button.textContent = count ? `Resume paused scan (${count})` : "Resume paused scan";
+  button.textContent = count
+    ? `${state?.phase === "running" ? "Resume interrupted scan" : "Resume paused scan"} (${count})`
+    : "Resume paused scan";
 }
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
   if (botAvailabilityScanRunning) return;
   const pausedQueue = options?.resume ? await botStatusPausedQueue() : null;
+  if (!options?.resume) {
+    const unfinished = await botStatusPausedQueue();
+    if (unfinished?.ids?.length && !confirm(`A previous Bot Status scan has ${unfinished.ids.length} unchecked IDs saved. Start a new scan and replace that resume queue? Choose Cancel to resume the saved scan instead.`)) {
+      await refreshBotStatusPauseButton();
+      return;
+    }
+  }
   if (options?.resume && !(pausedQueue?.ids?.length)) {
     showSettingsToast("No paused Bot Status scan was saved.");
     await refreshBotStatusPauseButton();
@@ -8882,7 +8896,7 @@ async function runBotAvailabilityScan(options = {}) {
   const archiveChangedIds = new Set();
   const checkpointSavedIds = new Set();
   let checkpointCount = 0;
-  const checkpointEvery = 50;
+  const checkpointEvery = BOT_STATUS_PROGRESS_EVERY;
   async function saveScanCheckpoint(force = false) {
     const pending = [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id));
     if (!pending.length || (!force && pending.length < checkpointEvery)) return true;
@@ -8904,12 +8918,48 @@ async function runBotAvailabilityScan(options = {}) {
   let consecutiveAccessFailures = 0;
   const deferredAccessIds = [];
   let accessPauseTriggered = false;
-  let lastScanIndex = 0;
+  let nextScanIndex = 0;
+  let lastQueueCheckpointAt = 0;
+  let lastQueueCheckpointCompleted = 0;
   const runStartedAt = Date.now();
+  // The persisted queue is written only AFTER its completed records have been
+  // saved. If the tab disappears between those writes, a few bots might be
+  // checked again, but no completed result is skipped or lost from the queue.
+  async function saveScanProgress(nextIndex, { force = false } = {}) {
+    const now = Date.now();
+    if (!force && completed - lastQueueCheckpointCompleted < BOT_STATUS_PROGRESS_EVERY && now - lastQueueCheckpointAt < BOT_STATUS_PROGRESS_MS) return true;
+    if (!(await saveScanCheckpoint(true))) return false;
+    const pending = [...new Set([
+      ...deferredAccessIds,
+      ...entries.slice(nextIndex).map(entry => entry.id),
+      ...(options?.resume ? omittedByBotLimit : [])
+    ])];
+    // Keep the final ID recoverable until the end-of-run metadata/recovery
+    // writes finish. The finalizer clears the queue only after those writes.
+    if (!pending.length && entries.length) pending.push(entries[entries.length - 1].id);
+    try {
+      const queueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: {
+        version: 1, mode, scope, ids: pending, phase: "running",
+        updatedAt: now, startedAt: runStartedAt,
+        completed, total: entries.length, reason: "Saved progress"
+      } });
+      if (!queueSaved) return false;
+    } catch (error) {
+      console.warn("[SpicyChat QoL] Could not save Bot Status resume queue", error);
+      return false;
+    }
+    lastQueueCheckpointAt = now;
+    lastQueueCheckpointCompleted = completed;
+    return true;
+  }
   const runDeadline = maximumRuntimeMs ? runStartedAt + maximumRuntimeMs : Infinity;
 
   await noteBotStatusRunEvent("bot-status-run-start", { mode, scope, count: entries.length, totalCandidates, maxBots, maxMinutes, speed: String(value("botStatusScanSpeed", "safe")), staleDays });
   try {
+    if (!(await saveScanProgress(0, { force: true }))) {
+      terminalMessage = "Could not save a recoverable Bot Status scan queue. No checks were started; check extension storage and try again.";
+      return;
+    }
     const preparingText = mode === "archived"
       ? `Preparing to recheck ${entries.length} archived bot${entries.length === 1 ? "" : "s"}${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked skipped` : ""}…`
       : mode === "unchecked"
@@ -8933,7 +8983,7 @@ async function runBotAvailabilityScan(options = {}) {
     scanStartedAt = Date.now();
 
     for (let scanIndex = 0; scanIndex < entries.length; scanIndex += 1) {
-      lastScanIndex = scanIndex;
+      nextScanIndex = scanIndex;
       const entry = entries[scanIndex];
       if (botAvailabilityStopRequested) break;
       if (Date.now() >= runDeadline) { timeLimitReached = true; break; }
@@ -8958,14 +9008,27 @@ async function runBotAvailabilityScan(options = {}) {
         // A temporary auth/CORS outage must never replace an earlier
         // confirmed Available/Unavailable result with an Unknown check.
         deferredAccessIds.push(entry.id);
+        nextScanIndex = scanIndex + 1;
         consecutiveAccessFailures += 1;
+        if (consecutiveAccessFailures < BOT_STATUS_ACCESS_FAILURE_PAUSE_AT && !(await saveScanProgress(nextScanIndex))) {
+          terminalMessage = "Paused because Bot Status progress could not be saved. Previously saved results and the last checkpoint remain available.";
+          break;
+        }
         if (consecutiveAccessFailures >= BOT_STATUS_ACCESS_FAILURE_PAUSE_AT) {
-          const remaining = [...new Set([...deferredAccessIds, ...entries.slice(scanIndex + 1).map(item => item.id), ...omittedByBotLimit])];
-          const payload = { version: 1, mode, scope, ids: remaining, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
-          try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: payload }); }
-          catch (error) { console.warn("[SpicyChat QoL] Could not save paused Bot Status queue", error); }
-          accessPauseTriggered = true;
-          terminalMessage = `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`;
+          // Commit even a partial result batch BEFORE replacing the saved
+          // queue with just the failures and the unprocessed tail.
+          if (!(await saveScanCheckpoint(true))) {
+            terminalMessage = "Paused on an authentication/network failure, but the latest results could not be saved. The previous durable checkpoint remains recoverable.";
+            break;
+          }
+          const remaining = [...new Set([...deferredAccessIds, ...entries.slice(scanIndex + 1).map(item => item.id), ...(options?.resume ? omittedByBotLimit : [])])];
+          const payload = { version: 1, mode, scope, ids: remaining, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
+          const pausedSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: payload });
+          if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
+          accessPauseTriggered = !!pausedSaved;
+          terminalMessage = pausedSaved
+            ? `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`
+            : "Paused after authentication/network failures. Could not replace the saved resume queue; try resuming the earlier checkpoint.";
           if (status) status.textContent = terminalMessage;
           break;
         }
@@ -9007,9 +9070,10 @@ async function runBotAvailabilityScan(options = {}) {
         }
       }
       completed++;
+      nextScanIndex = scanIndex + 1;
       scanLastCheckAt = Date.now();
-      if (completed % checkpointEvery === 0) {
-        if (!await saveScanCheckpoint(true)) {
+      if (completed % checkpointEvery === 0 || scanLastCheckAt - lastQueueCheckpointAt >= BOT_STATUS_PROGRESS_MS) {
+        if (!await saveScanProgress(nextScanIndex, { force: true })) {
           terminalMessage = `Paused after ${completed} checks: could not save the latest checkpoint. Retrying the final save...`;
           break;
         }
@@ -9034,22 +9098,6 @@ async function runBotAvailabilityScan(options = {}) {
       }
     }
   } finally {
-    // Partial auth failures are resumable even if later requests recover.
-    // A complete successful resumed run clears the old checkpoint.
-    if (!accessPauseTriggered) {
-      const outstanding = new Set(deferredAccessIds);
-      if (options?.resume) omittedByBotLimit.forEach(id => outstanding.add(id));
-      if ((options?.resume && timeLimitReached) || botAvailabilityStopRequested) {
-        entries.slice(lastScanIndex).forEach(entry => outstanding.add(entry.id));
-      }
-      if (outstanding.size) {
-        try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: { version: 1, mode, scope, ids: [...outstanding], updatedAt: Date.now(), reason: "Retry skipped checks" } }); }
-        catch (error) { console.warn("[SpicyChat QoL] Could not checkpoint deferred Bot Status checks", error); }
-        if (!terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} deferred due to temporary failures or a stop; use Resume paused scan.`;
-      } else if (options?.resume) {
-        try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: null }); } catch {}
-      }
-    }
     await releaseBotStatusHelper();
     invalidateDuplicateCache();
     if (completed > 0) {
@@ -9107,6 +9155,24 @@ async function runBotAvailabilityScan(options = {}) {
         }
         await storageSet(payload);
       }
+    }
+    // Only advance/clear the resume queue after the final result and recovery
+    // writes above complete. On a page crash, the most recent saved queue is
+    // still available and may safely recheck the unfinished tail.
+    if (!accessPauseTriggered) {
+      const outstanding = new Set(deferredAccessIds);
+      if (options?.resume) omittedByBotLimit.forEach(id => outstanding.add(id));
+      entries.slice(nextScanIndex).forEach(entry => outstanding.add(entry.id));
+      try {
+        const finalQueueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: outstanding.size ? {
+          version: 1, mode, scope, ids: [...outstanding], phase: "paused",
+          updatedAt: Date.now(), startedAt: runStartedAt,
+          completed, total: entries.length,
+          reason: botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : "Retry skipped checks"
+        } : null });
+        if (!finalQueueSaved) throw new Error("Could not persist Bot Status resume queue");
+        if (outstanding.size && !terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} still pending; use Resume paused scan.`;
+      } catch (error) { console.warn("[SpicyChat QoL] Could not finalize Bot Status resume queue", error); }
     }
     botStatusMetadataDirty = false;
     botAvailabilityScanRunning = false;
@@ -9805,10 +9871,146 @@ async function cleanupArchivedBlockedBots({ automatic = false, maxItems = 25, ca
   return { cleaned: ids.length, waitingRemote: result.waitingRemote };
 }
 
+async function compactOlderBlockedBotData() {
+  const status = $("blockedCompactStatus");
+  const button = $("compactOldBlockedBotData");
+  const ageDays = Math.max(0, Number($("blockedCompactAge")?.value || 0));
+  const mode = String($("blockedCompactMode")?.value || "metadata");
+  if (!["metadata", "remote", "discard"].includes(mode)) return;
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+  try {
+    await Promise.all([ensureBlockingDataLoaded(), ensureSavedRecoveryDataLoaded()]);
+    const blocked = normalizeBotStore(blockedState);
+    const archives = normalizeBotArchive(botArchiveState).meta;
+    const availability = normalizeBotAvailability(botAvailabilityState).meta;
+    const minimumTime = ageDays ? Date.now() - ageDays * 86400000 : 0;
+    const storage = await storageGet([ARCHIVE_UPLOAD_STATE_KEY, ARCHIVE_CONTRIBUTION_STATE_KEY]);
+    const uploadState = normalizeArchiveUploadState(storage[ARCHIVE_UPLOAD_STATE_KEY]);
+    const contributionState = normalizeArchiveContributionState(storage[ARCHIVE_CONTRIBUTION_STATE_KEY]);
+    const candidates = [];
+    for (const id of blocked.ids) {
+      if (!validBotId(id)) continue;
+      const meta = blocked.meta?.[id] || {};
+      const archive = archives[id] || null;
+      // A zero timestamp means the age is unknown; never guess that it is old.
+      const recentAt = Math.max(0, ...[
+        meta.lastSeenAt, meta.savedAt, meta.autoBlockedAt, meta.compactedAt,
+        archive?.lastSavedAt, availability[id]?.checkedAt
+      ].map(value => Number(value) || 0));
+      if (minimumTime && (!recentAt || recentAt > minimumTime)) continue;
+      const hasDetails = Object.keys(meta).some(key => !["id", "compactedAt"].includes(key));
+      const preservation = archive ? blockedArchiveRemotePreservation(archive, availability[id], uploadState, contributionState) : null;
+      const removableCopy = !!archive && (mode === "discard" || (mode === "remote" && preservation?.safe));
+      if (!hasDetails && !removableCopy) continue;
+      candidates.push({ id, hasDetails, removableCopy, archive, remoteVerified: !!preservation?.safe });
+    }
+    const metadataCount = candidates.filter(item => item.hasDetails).length;
+    const copyCandidates = candidates.filter(item => item.removableCopy);
+    const unverifiedCount = copyCandidates.filter(item => !item.remoteVerified).length;
+    if (!candidates.length) {
+      if (status) status.textContent = "No eligible older blocked records need compacting. Select All ages to include records without dates.";
+      return;
+    }
+    const ageLabel = ageDays ? `not updated for ${ageDays}+ days` : "of any age";
+    const summary = `Compact ${metadataCount} blocked metadata record(s) ${ageLabel}` +
+      (mode === "metadata" ? ". Local saved copies will remain untouched." : ` and remove ${copyCandidates.length} saved local copy/copies.`) +
+      "\n\nEvery blocked bot ID stays blocked. Native SpicyChat chats and completed Less Like/Dislike history are not deleted.";
+    if (!confirm(summary)) return;
+    if (mode === "discard" && unverifiedCount && !confirm(
+      `DANGER: ${unverifiedCount} saved bot copy/copies have NO confirmed remote Archive preservation.\n\n` +
+      "Deleting these copies may permanently lose their descriptions, greetings, snapshots and recovery details. " +
+      "Export a QoL backup first. Proceed with permanent local deletion anyway?"
+    )) return;
+    if (status) status.textContent = `Compacting ${candidates.length} blocked record(s)…`;
+
+    // Remove large copies first; if interrupted, all ID blocks are still durable.
+    let copiesRemoved = 0;
+    for (let i = 0; i < copyCandidates.length; i += 100) {
+      const batch = copyCandidates.slice(i, i + 100).map(item => item.id);
+      const removed = await removeLargeStorageRecords(BOT_ARCHIVE_KEY, batch);
+      if (!removed?.ok) {
+        if (status) status.textContent = `Stopped after ${copiesRemoved} saved copies. Storage reported: ${String(removed?.error || "write failed").slice(0, 160)}. All blocked IDs remain intact.`;
+        return;
+      }
+      for (const id of batch) delete botArchiveState?.meta?.[id];
+      copiesRemoved += batch.length;
+      if (status) status.textContent = `${copiesRemoved} saved copies removed; saving the compact Blocked list…`;
+    }
+
+    // Re-read the live Blocked store to avoid re-adding an ID that another tab
+    // deliberately unblocked while we were checking archive fingerprints.
+    const fresh = await storageGet([BLOCKED_BOTS_KEY, "settings"]);
+    const latest = normalizeBotStore(fresh[BLOCKED_BOTS_KEY]);
+    const activeIds = new Set(latest.ids);
+    const now = Date.now();
+    let metaCompacted = 0;
+    for (const item of candidates) {
+      if (!activeIds.has(item.id)) continue;
+      const previous = latest.meta?.[item.id];
+      if (!previous || !Object.keys(previous).some(key => !["id", "compactedAt"].includes(key))) continue;
+      latest.meta[item.id] = { id: item.id, compactedAt: now };
+      metaCompacted += 1;
+    }
+    // Do not clear manually blocked name rules or reset the blocking settings.
+    const saved = await storageSetVerified({ [BLOCKED_BOTS_KEY]: latest });
+    if (!saved) {
+      if (status) status.textContent = "Could not verify the compact Blocked list. Original ID block membership remains saved; reload before retrying.";
+      return;
+    }
+    blockedState = latest;
+    invalidateDuplicateCache();
+    renderBotManager("blocked");
+    refreshStorageUsageIfVisible();
+    if (status) status.textContent = `Compacted ${metaCompacted} blocked record(s), removed ${copiesRemoved} saved copies. All ${latest.ids.length} blocked IDs were retained.`;
+    showSettingsToast(`Blocked cleanup complete: ${metaCompacted} metadata records compacted, ${copiesRemoved} local saved copies removed; blocked IDs kept.`);
+  } catch (error) {
+    if (status) status.textContent = `Blocked cleanup failed: ${String(error?.message || error).slice(0, 180)}. No blocked IDs were intentionally removed.`;
+    console.warn("[SpicyChat QoL] blocked metadata cleanup failed", error);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+let unavailableCleanupRunning = false;
 async function cleanConfirmedUnavailableBots() {
-  await ensureSavedListsDataLoaded();
-  const unavailable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && validBotId(entry.id));
+  if (unavailableCleanupRunning) return;
+  unavailableCleanupRunning = true;
+  const action = $("cleanUnavailableBots");
+  if (action) action.disabled = true;
+  try {
+    return await performConfirmedUnavailableCleanup();
+  } finally {
+    unavailableCleanupRunning = false;
+    if (action) action.disabled = false;
+  }
+}
+
+async function performConfirmedUnavailableCleanup() {
+  // Cleanup acts on both live list membership and the verified recovery data.
+  // Saved Lists loading alone does not guarantee the availability/archive
+  // data is ready, especially when the Saved tab was opened only moments ago.
+  await Promise.all([ensureSavedRecoveryDataLoaded(), ensureBlockingDataLoaded()]);
+  // A confirmed unavailable status is intentionally retained after cleanup.
+  // Do not offer the same already-quarantined ID again unless it was
+  // confirmed unavailable *after* the previous cleanup or an active membership
+  // has reappeared in the meantime.
+  const availabilityEntries = Object.values(normalizeBotAvailability(botAvailabilityState).meta);
+  const eligibleIds = new Set([
+    ...normalizeBotStore(notInterestedState).ids,
+    ...normalizeBotStore(favoriteBotState).ids,
+    ...normalizeBotStore(laterBotState).ids,
+    ...uniqueClean(currentOpened),
+    ...Object.keys(normalizeBotOrganization(botOrganizationState).meta),
+    ...normalizeRecentlySeenStore(recentlySeenBotState).entries.map(entry => entry.id),
+    ...normalizeCreatorBotWatchState(creatorBotWatchState).recent.map(entry => entry.id)
+  ]);
+  const unavailable = availabilityEntries.filter(entry =>
+    isConfirmedUnavailableBotStatus(entry) && validBotId(entry.id) &&
+    (!Number(entry.cleanupAppliedAt || 0) ||
+      Number(entry.unavailableConfirmedAt || 0) > Number(entry.cleanupAppliedAt || 0) ||
+      eligibleIds.has(entry.id))
+  );
   if (!unavailable.length) {
     showSettingsToast("No confirmed unavailable bots are waiting for cleanup.");
     return;
@@ -10303,8 +10505,13 @@ function setupBotAvailabilityControls() {
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
-  $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(() => showSettingsToast("Could not clean unavailable bots.")));
+  $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(error => {
+    const detail = String(error?.message || "Unexpected failure").slice(0, 180);
+    console.warn("[SpicyChat QoL] unavailable-bot cleanup failed", error);
+    showSettingsToast(`Could not clean unavailable bots: ${detail}. Check the recovery ledger before retrying.`);
+  }));
   $("cleanArchivedBlockedBotsNow")?.addEventListener("click", () => cleanupArchivedBlockedBots({ automatic: false, maxItems: 5000 }).catch(() => showSettingsToast("Could not clean archived blocked bots.")));
+  $("compactOldBlockedBotData")?.addEventListener("click", () => compactOlderBlockedBotData());
   $("savedBotInfoSearch")?.addEventListener("input", event => {
     savedBotInfoUiState.query = event?.target?.value || "";
     savedBotInfoUiState.visible = 10;
@@ -17558,6 +17765,9 @@ function buildExportPayload(scopes, result) {
     payload.settings = settingsSubsetForScopes(settings, selectedSettingScopes);
     payload._qolBackup.settingsScopes = [...selectedSettingScopes];
   }
+  if (has("accountSyncRules") && result[QOL_SYNC_DEVICE_PREFS_KEY]) {
+    payload.accountSyncRules = portableAccountSyncRules(result[QOL_SYNC_DEVICE_PREFS_KEY]);
+  }
   if (has("opened")) {
     payload.openedChats = Array.isArray(result[OPENED_KEY]) ? result[OPENED_KEY] : [];
     payload.openedChatMeta = result[OPENED_META_KEY] || {};
@@ -18278,7 +18488,7 @@ function settingsScopeUsageCount(settingsValue, scope) {
 }
 
 const BACKUP_STORAGE_KEYS = [
-  "settings", "dsMemoryVaultV1", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY,
+  "settings", QOL_SYNC_DEVICE_PREFS_KEY, "dsMemoryVaultV1", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY,
   NOT_INTERESTED_KEY, PERSONAS_KEY, LEGACY_PERSONAS_KEY, PERSONA_ORG_KEY, OOC_TEMPLATES_KEY, FAVORITE_CREATORS_KEY,
   FOLLOWED_CREATORS_KEY, CREATOR_BOT_WATCH_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY, BOT_ORGANIZER_KEY, CHAT_ORGANIZER_KEY, CHARACTER_QOL_PROFILES_KEY,
   BOT_AVAILABILITY_KEY, BOT_UNAVAILABLE_RECOVERY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_STATUS_KEY, LOREBOOK_BACKUPS_KEY, CHATBOT_LOREBOOK_LINKS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY,
@@ -18288,7 +18498,7 @@ const BACKUP_STORAGE_KEYS = [
 ];
 const BACKUP_SCOPE_IDS = [
   ...SETTINGS_BACKUP_SCOPE_IDS,
-  "settings",
+  "settings", "accountSyncRules",
   "opened", "blocked", "notInterested", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots",
   "memoryVault", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks",
   "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization",
@@ -18298,6 +18508,7 @@ const BACKUP_SCOPE_IDS = [
 const LIGHTWEIGHT_BACKUP_SCOPE_IDS = BACKUP_SCOPE_IDS.filter(scope => scope !== "localMedia");
 
 const BACKUP_DATA_SCOPE_DEFS = {
+  accountSyncRules: { count: result => result[QOL_SYNC_DEVICE_PREFS_KEY] && typeof result[QOL_SYNC_DEVICE_PREFS_KEY] === "object" ? 1 : 0 },
   opened: { count: result => Array.isArray(result[OPENED_KEY]) ? result[OPENED_KEY].length : 0 },
   blocked: { count: result => uniqueClean([...(result[BLOCKED_BOTS_KEY]?.ids || []), ...(result[BLOCKED_BOTS_KEY]?.names || [])]).length },
   notInterested: { count: result => uniqueClean(result[NOT_INTERESTED_KEY]?.ids || []).length },
@@ -18987,7 +19198,7 @@ function importCategoryEntries(parsed) {
     !source.oocTemplates && !source.generationProfiles && !source.smartFilterPresets && !source.smartFilterPinnedPresets &&
     !source.botEditorDraftHistory && !source.chatBookmarks && !source.recentlySeenBots && !source.creatorBotWatch &&
     !source.chatbotLorebookLinks && !source.soundscapes && !source.tabCleanupSessions && !source.tabCleanupTopics &&
-    !source.tabCleanupEnrichment && !source.localChangeHistory && !source.localMedia && !source._qolBackup
+    !source.tabCleanupEnrichment && !source.localChangeHistory && !source.localMedia && !source.accountSyncRules && !source._qolBackup
   ));
   const add = (scope, label, count) => entries.push({ scope, label, count: Number(count) || 0 });
   if (settingsLike) {
@@ -19005,6 +19216,7 @@ function importCategoryEntries(parsed) {
       add("settings", "Settings (legacy/all)", Object.keys(settingsSource).filter(k => k !== "_qolBackup").length);
     }
   }
+  if (source.accountSyncRules && typeof source.accountSyncRules === "object" && !Array.isArray(source.accountSyncRules)) add("accountSyncRules", "Account & Sync choices (no credentials)", 1);
   if (Array.isArray(source.openedChats)) add("opened", "Bot Status Center opened history", source.openedChats.length);
   if (source.blockedBots && typeof source.blockedBots === "object") add("blocked", "Blocked bots", uniqueClean([...(source.blockedBots.ids || []), ...(source.blockedBots.names || [])]).length);
   if (source.notInterestedBots && typeof source.notInterestedBots === "object") add("notInterested", "Not interested", uniqueClean(source.notInterestedBots.ids || []).length);
@@ -19063,7 +19275,7 @@ function validateBackupObject(parsed) {
   const migration = migrateBackupPayload(parsed);
   const source = migration.payload;
   const entries = importCategoryEntries(source);
-  const known = new Set(["_qolBackup", "settings", "memoryVault", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"]);
+  const known = new Set(["_qolBackup", "settings", "memoryVault", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia", "accountSyncRules"]);
   const warnings = Object.keys(source).filter(key => !known.has(key)).map(key => `Unknown top-level field: ${key}`);
   const meta = source._qolBackup && typeof source._qolBackup === "object" ? source._qolBackup : null;
   if (!meta) warnings.push("Legacy backup: no QoL backup metadata found (still importable after preview). ");
@@ -19205,6 +19417,7 @@ async function importSettings() {
     if (document.querySelector("[data-import-scope]") && !importScopes.size) throw new Error("No import categories selected");
     const currentRead = await storageGetChecked([
       "settings",
+      QOL_SYNC_DEVICE_PREFS_KEY,
       OPENED_KEY,
       OPENED_META_KEY,
       BLOCKED_BOTS_KEY,
@@ -19297,6 +19510,18 @@ async function importSettings() {
       payload.settings = mode === "replace"
         ? replaceSettingsGroupsForImport(current.settings, parsed.settings || parsed, selectedSettingsScopes)
         : mergeSettingsGroupsForImport(current.settings, parsed.settings || parsed, selectedSettingsScopes);
+    }
+
+    if (hasImportScope("accountSyncRules") && parsed.accountSyncRules && typeof parsed.accountSyncRules === "object" && !Array.isArray(parsed.accountSyncRules)) {
+      const rules = portableAccountSyncRules(parsed.accountSyncRules);
+      // Restore portable device choices only. The linked account/device identity
+      // and credentials in this browser remain untouched. Request a full sync
+      // when the restored mode permits it; never import old cloud cursors.
+      payload[QOL_SYNC_DEVICE_PREFS_KEY] = {
+        ...rules,
+        fullUploadNeeded: rules.mode === "two-way" || rules.mode === "upload-only",
+        fullDownloadNeeded: rules.mode === "two-way" || rules.mode === "download-only"
+      };
     }
 
     if (hasImportScope("opened") && Array.isArray(parsed.openedChats)) {
@@ -22363,643 +22588,6 @@ function updateAppearanceColorControlStates() {
     if (el) el.disabled = !altCustom;
   });
   updateBubbleContrastWarnings();
-}
-
-function detectSettingsEnvironment() {
-  const shared = PLATFORM_API?.detectEnvironment?.();
-  const ua = navigator.userAgent || "";
-  const android = shared ? !!shared.android : /Android/i.test(ua);
-  const webview = shared ? !!shared.webview : (android && (/;\s*wv\)/i.test(ua) || /Version\/4\.0.*Chrome\/\d+.*Mobile Safari/i.test(ua)));
-  let displayMode = "browser";
-  try {
-    if (window.matchMedia?.("(display-mode: window-controls-overlay)")?.matches) displayMode = "window-controls-overlay";
-    else if (window.matchMedia?.("(display-mode: standalone)")?.matches) displayMode = "standalone";
-    else if (window.matchMedia?.("(display-mode: minimal-ui)")?.matches) displayMode = "minimal-ui";
-    else if (window.matchMedia?.("(display-mode: fullscreen)")?.matches) displayMode = "fullscreen";
-  } catch {}
-  const installedApp = displayMode !== "browser" || navigator.standalone === true || !!window.__spicyChatQolAndroidApp;
-  const firefox = /Firefox\/|FxiOS\//i.test(ua);
-  const waterfox = /Waterfox/i.test(ua);
-  const opera = /\bOPR\//i.test(ua);
-  const chromium = /Chrome\//i.test(ua) && !firefox && !waterfox;
-  return {
-    android,
-    webview,
-    installedApp,
-    displayMode,
-    firefox,
-    waterfox,
-    opera,
-    chromium,
-    ua,
-    platform: shared?.platform || (android ? "android" : "desktop"),
-    capabilities: shared?.capabilities || {},
-    label: shared?.label || (android ? "Android" : "Desktop browser")
-  };
-}
-
-function refreshAndroidSettingsVisibility(forceShow = false) {
-  const env = detectSettingsEnvironment();
-  let manual = false;
-  try { manual = localStorage.getItem("dsShowAndroidSettings") === "1"; } catch {}
-  const show = forceShow || manual || env.android || env.webview || env.installedApp;
-  const tab = $("androidTabButton");
-  if (tab) tab.hidden = !show;
-
-  let text = env.webview
-    ? "Android WebView detected."
-    : env.android
-      ? "Android/mobile browser detected (including Firefox-family browsers)."
-      : env.installedApp
-        ? `Installed/standalone web-app mode detected (${env.displayMode}).`
-        : "Normal desktop browser tab detected.";
-  const compactForced = checked("androidTopBarMenu") && value("androidAppControlsMode", "auto") !== "off";
-  if (compactForced) text += " Compact QoL top-bar menu is manually enabled here, so detection will not block it.";
-  else if (value("androidAppControlsMode", "auto") === "off") text += " Compact/mobile controls are set to Never.";
-
-  if ($("androidEnvironmentStatus")) $("androidEnvironmentStatus").textContent = text;
-  if ($("androidSettingsEnvironmentStatus")) $("androidSettingsEnvironmentStatus").textContent = text;
-  return show;
-}
-
-function applyAndroidRecommendedUi() {
-  setControlValue("androidAppControlsMode", "android");
-  setControlValue("androidTopBarMenu", true);
-  setControlValue("androidHideComposerShortcuts", true);
-  setControlValue("androidTopBarOoc", true);
-  setControlValue("androidTopBarAsterisk", true);
-  setControlValue("androidTopBarFormatting", true);
-  setControlValue("androidTopBarTranslation", false);
-  setControlValue("androidTopBarScroll", true);
-  setControlValue("androidTopBarPersona", true);
-  setControlValue("androidTopBarModel", true);
-  setControlValue("chatPerformanceMode", true);
-  setControlValue("pauseQolInHiddenTabs", true);
-  refreshAndroidSettingsVisibility(true);
-  showSettingsToast("Mobile Recommended applied. Changes save automatically.");
-}
-
-function setupAndroidSettings() {
-  refreshAndroidSettingsVisibility(false);
-  $("showAndroidAppSettings")?.addEventListener("click", () => {
-    try { localStorage.setItem("dsShowAndroidSettings", "1"); } catch {}
-    refreshAndroidSettingsVisibility(true);
-    setActiveTab("android");
-  });
-  $("hideAndroidAppSettings")?.addEventListener("click", () => {
-    try { localStorage.removeItem("dsShowAndroidSettings"); } catch {}
-    const env = detectSettingsEnvironment();
-    if (!env.webview) {
-      $("androidTabButton")?.setAttribute("hidden", "");
-      setActiveTab("general");
-    }
-  });
-  $("applyAndroidRecommended")?.addEventListener("click", applyAndroidRecommendedUi);
-  $("androidTopBarMenu")?.addEventListener("change", () => refreshAndroidSettingsVisibility(true));
-  $("androidAppControlsMode")?.addEventListener("change", () => refreshAndroidSettingsVisibility(true));
-}
-
-
-function settingIsCustomizedForPlatform(name, settings = loadedSettingsSnapshot) {
-  if (!name || !settings || typeof settings !== "object") return false;
-  const desired = settings[name];
-  const fallback = DEFAULT_SETTINGS[name];
-  return !storageValueMatches(desired, fallback);
-}
-
-function platformCompatibilityForControl(control) {
-  if (!control?.id || !PLATFORM_API) return { supported: true, requires: [], reason: "" };
-  if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, control.id)) {
-    return PLATFORM_API.settingCompatibility?.(control.id, PLATFORM_API.detectEnvironment?.()) || { supported: true, requires: [], reason: "" };
-  }
-  return PLATFORM_API.actionCompatibility?.(control, PLATFORM_API.detectEnvironment?.()) || { supported: true, requires: [], reason: "" };
-}
-
-function platformBadgeHost(control) {
-  if (!control) return null;
-  const label = control.closest?.("label");
-  if (label) return label.querySelector("span") || label;
-  return null;
-}
-
-function markPlatformUnsupportedControl(control, compatibility, settings = loadedSettingsSnapshot) {
-  if (!control || compatibility?.supported !== false) return;
-  if (control.dataset.dsPlatformOriginalDisabled === undefined) {
-    control.dataset.dsPlatformOriginalDisabled = control.disabled ? "1" : "0";
-  }
-  control.dataset.dsPlatformUnsupported = "1";
-  control.disabled = true;
-  control.setAttribute("aria-disabled", "true");
-  if (compatibility.reason) control.title = compatibility.reason;
-
-  const row = control.closest?.("label, .button-row, .sub-card");
-  if (row) row.classList.add("ds-platform-unsupported-row");
-
-  const isSetting = Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, control.id);
-  if (!isSetting) return;
-  const host = platformBadgeHost(control);
-  if (!host) return;
-  let badge = [...(host.querySelectorAll?.(".ds-platform-badge") || [])].find(item => item.dataset.for === control.id) || null;
-  if (!badge) {
-    badge = document.createElement("span");
-    badge.className = "ds-platform-badge";
-    badge.dataset.for = control.id;
-    host.appendChild(badge);
-  }
-  const desired = settings?.[control.id];
-  const saved = typeof desired === "boolean" ? desired : settingIsCustomizedForPlatform(control.id, settings);
-  badge.classList.toggle("is-inactive", saved);
-  badge.textContent = saved ? "Desktop only · saved" : "Desktop only";
-  badge.title = compatibility.reason || "Saved here but inactive on Android.";
-}
-
-function clearPlatformCompatibilityMarks() {
-  document.querySelectorAll('[data-ds-platform-unsupported="1"]').forEach(control => {
-    const original = control.dataset.dsPlatformOriginalDisabled;
-    if (original !== undefined) control.disabled = original === "1";
-    control.removeAttribute("data-ds-platform-unsupported");
-    control.removeAttribute("aria-disabled");
-    delete control.dataset.dsPlatformOriginalDisabled;
-  });
-  document.querySelectorAll(".ds-platform-unsupported-row").forEach(row => row.classList.remove("ds-platform-unsupported-row"));
-  document.querySelectorAll(".ds-platform-badge").forEach(badge => badge.remove());
-}
-
-function refreshPlatformCompatibilityUi(settings = loadedSettingsSnapshot) {
-  if (!PLATFORM_API) return;
-  const env = PLATFORM_API.detectEnvironment?.() || detectSettingsEnvironment();
-  document.documentElement.dataset.dsPlatform = env.platform || (env.android ? "android" : "desktop");
-  const notice = $("platformCompatibilityNotice");
-  const noticeText = $("platformCompatibilityNoticeText");
-  if (notice) notice.hidden = !env.android;
-  if (noticeText && env.android) {
-    noticeText.textContent = "Desktop-only bulk, helper-tab and real-browser-tab controls are dimmed here. Their saved values are kept unchanged, so syncing from Android will not switch those desktop preferences off.";
-  }
-
-  clearPlatformCompatibilityMarks();
-  if (!env.android) return;
-
-  const controls = [...document.querySelectorAll("input[id], select[id], textarea[id], button[id]")];
-  for (const control of controls) {
-    const compatibility = platformCompatibilityForControl(control);
-    if (!compatibility.supported) markPlatformUnsupportedControl(control, compatibility, settings);
-  }
-
-  // Manager bulk bars are action UI rather than persisted settings, so not all
-  // of their controls have "bulk" in the individual id. Disable the whole
-  // action surface on Android while leaving the underlying saved lists usable.
-  const bulkReason = { supported: false, reason: "Bulk operations are desktop-only in QoL for now." };
-  document.querySelectorAll(".bot-manager-bulkbar button, .bot-manager-bulkbar select, .bot-manager-bulkbar input").forEach(control => {
-    markPlatformUnsupportedControl(control, bulkReason, settings);
-  });
-}
-
-function setupPlatformCompatibility() {
-  refreshPlatformCompatibilityUi();
-  document.addEventListener("change", event => {
-    if (!(event.target instanceof Element)) return;
-    window.setTimeout(() => refreshPlatformCompatibilityUi(), 0);
-  }, true);
-}
-
-function randomSyncDeviceId() {
-  try {
-    if (crypto?.randomUUID) return crypto.randomUUID();
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    const hex = [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-  } catch {
-    return `device-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-}
-
-function normalizeQolSyncState(value) {
-  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  return {
-    schemaVersion: QOL_SYNC_DEVICE_SCHEMA_VERSION,
-    deviceId: String(source.deviceId || "").trim(),
-    deviceCreatedAt: Number(source.deviceCreatedAt || 0),
-    accountId: String(source.accountId || "").trim(),
-    linkedAt: Number(source.linkedAt || 0),
-    automatic: source.automatic !== false,
-    paused: source.paused === true,
-    lastRevision: Math.max(0, Number(source.lastRevision || 0)),
-    lastSyncAt: Math.max(0, Number(source.lastSyncAt || 0)),
-    lastSyncAttemptAt: Math.max(0, Number(source.lastSyncAttemptAt || 0)),
-    lastLocalStorageRevision: Math.max(0, Number(source.lastLocalStorageRevision || 0)),
-    lastError: String(source.lastError || ""),
-    lastErrorAt: Math.max(0, Number(source.lastErrorAt || 0)),
-    lastStatus: String(source.lastStatus || "")
-  };
-}
-
-async function ensureQolSyncState({ resetDevice = false } = {}) {
-  const data = await storageGet([QOL_SYNC_STATE_KEY]);
-  const state = normalizeQolSyncState(data[QOL_SYNC_STATE_KEY]);
-  if (resetDevice || !state.deviceId) {
-    state.deviceId = randomSyncDeviceId();
-    state.deviceCreatedAt = Date.now();
-    state.accountId = resetDevice ? "" : state.accountId;
-    state.linkedAt = resetDevice ? 0 : state.linkedAt;
-    state.lastRevision = resetDevice ? 0 : state.lastRevision;
-    state.lastSyncAt = resetDevice ? 0 : state.lastSyncAt;
-    state.lastSyncAttemptAt = resetDevice ? 0 : state.lastSyncAttemptAt;
-    state.lastLocalStorageRevision = resetDevice ? 0 : state.lastLocalStorageRevision;
-    state.lastError = resetDevice ? "" : state.lastError;
-    state.lastErrorAt = resetDevice ? 0 : state.lastErrorAt;
-    state.lastStatus = resetDevice ? "Not linked" : state.lastStatus;
-    await storageSet({ [QOL_SYNC_STATE_KEY]: state });
-  }
-  return state;
-}
-
-function browserLabelForSync(env) {
-  const ua = String(navigator.userAgent || "");
-  let browser = "Browser";
-  if (/Firefox\//i.test(ua)) browser = "Firefox";
-  else if (/Edg\//i.test(ua)) browser = "Edge";
-  else if (/OPR\//i.test(ua)) browser = "Opera";
-  else if (/Chrome\//i.test(ua)) browser = "Chrome / Chromium";
-  return env.android ? env.label : `${browser} · Desktop`;
-}
-
-function syncDeviceMeta() {
-  const env = PLATFORM_API?.detectEnvironment?.() || detectSettingsEnvironment();
-  let clientVersion = "0.2.25";
-  try { clientVersion = chrome.runtime.getManifest?.().version || clientVersion; } catch {}
-  return {
-    deviceName: browserLabelForSync(env),
-    platform: env.android ? "android" : "desktop",
-    clientVersion
-  };
-}
-
-function formatSyncTime(value) {
-  const time = Number(value || 0);
-  if (!time) return "Never";
-  try { return new Date(time).toLocaleString(); }
-  catch { return "Unknown"; }
-}
-
-const ACCOUNT_SYNC_LIST_NAMES = ["blockedBots", "favoriteBots", "laterBots", "notInterestedBots", "openedChats"];
-let accountSyncSelectedPrefs = null;
-let accountSyncUserEditing = false;
-function readSyncDevicePrefsUi() {
-  const previous = accountSyncSelectedPrefs || {};
-  const mode = $("accountSyncSettingsMode")?.value || "off";
-  const limited = !!$("accountSyncLimitSettings")?.checked;
-  const allowedKeys = limited
-    ? [...document.querySelectorAll("#accountSyncSettingsChecklist input[data-setting-key]:checked")].map(el => el.dataset.settingKey).sort()
-    : null;
-  const listModes = {};
-  for (const name of ACCOUNT_SYNC_LIST_NAMES) {
-    listModes[name] = document.querySelector(`[data-sync-list="${name}"]`)?.value || "off";
-  }
-  return { ...previous, mode, allowedKeys, listModes };
-}
-function setupSyncSettingsChecklist(prefs) {
-  const root = $("accountSyncSettingsChecklist");
-  if (!root) return;
-  const index = Object.keys(DEFAULT_SETTINGS).sort();
-  const previous = new Set(Array.isArray(prefs?.allowedKeys) ? prefs.allowedKeys : index);
-  const fragment = document.createDocumentFragment();
-  for (const key of index) {
-    const label = document.createElement("label");
-    label.className = "row account-sync-setting-entry";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.dataset.settingKey = key;
-    input.checked = previous.has(key);
-    const text = document.createElement("span");
-    text.textContent = key;
-    label.append(input, text);
-    fragment.append(label);
-  }
-  root.replaceChildren(fragment);
-  root.onchange = () => { accountSyncUserEditing = true; };
-}
-function renderSyncDevicePrefs(prefs) {
-  if (!prefs || accountSyncUserEditing) return;
-  accountSyncSelectedPrefs = prefs;
-  const mode = $("accountSyncSettingsMode");
-  if (mode) mode.value = prefs.mode || "two-way";
-  const limited = $("accountSyncLimitSettings");
-  if (limited) limited.checked = Array.isArray(prefs.allowedKeys);
-  const selection = $("accountSyncSettingSelection");
-  if (selection) selection.hidden = !Array.isArray(prefs.allowedKeys);
-  if (Array.isArray(prefs.allowedKeys)) setupSyncSettingsChecklist(prefs);
-  else $("accountSyncSettingsChecklist")?.replaceChildren();
-  for (const name of ACCOUNT_SYNC_LIST_NAMES) {
-    const element = document.querySelector(`[data-sync-list="${name}"]`);
-    if (element) element.value = prefs.listModes?.[name] || "off";
-  }
-  const summary = $("accountSyncSelectionSummary");
-  if (summary) summary.textContent = `${Array.isArray(prefs.allowedKeys) ? prefs.allowedKeys.length + " selected settings" : "All syncable settings"}; saved lists use separate per-device directions.`;
-}
-let accountSyncDevicesCache = [];
-let accountSyncLastLinkCode = null;
-let accountSyncBusy = false;
-
-function setAccountSyncBusy(busy, status = "") {
-  accountSyncBusy = !!busy;
-  document.querySelectorAll("#accountSyncCard button, #accountSyncCard input").forEach(control => {
-    if (control.id === "accountSyncLinkCode") return;
-    control.disabled = accountSyncBusy;
-  });
-  const node = $("accountSyncActionStatus");
-  if (node && status) node.textContent = status;
-}
-
-function renderAccountSyncDevices(devices = [], currentDeviceId = "") {
-  const host = $("accountSyncDevices");
-  if (!host) return;
-  host.replaceChildren();
-  const list = Array.isArray(devices) ? devices : [];
-  if (!list.length) {
-    host.append(makeElement("p", { className: "hint", text: "No linked devices were returned yet." }));
-    return;
-  }
-  for (const device of list) {
-    const row = makeElement("div", { className: "account-sync-device-row" });
-    const text = makeElement("div", { className: "account-sync-device-copy" });
-    const title = `${device.name || device.platform || "QoL device"}${device.current || device.id === currentDeviceId ? " · This device" : ""}`;
-    text.append(
-      makeElement("strong", { text: title }),
-      makeElement("span", { className: "hint", text: `${device.platform || "unknown"}${device.clientVersion ? ` · v${device.clientVersion}` : ""} · last seen ${formatSyncTime(device.lastSeenAt)}` })
-    );
-    row.append(text);
-    if (!(device.current || device.id === currentDeviceId)) {
-      const remove = makeElement("button", { text: "Unlink", attrs: { type: "button" } });
-      remove.addEventListener("click", async () => {
-        if (!confirm(`Unlink ${device.name || "this device"} from the QoL account?`)) return;
-        setAccountSyncBusy(true, "Unlinking device…");
-        const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_REVOKE_DEVICE", deviceId: device.id }, 18000);
-        setAccountSyncBusy(false);
-        if (!result?.ok) {
-          $("accountSyncActionStatus").textContent = result?.message || "Could not unlink that device.";
-          return;
-        }
-        showSettingsToast("Device unlinked.");
-        await refreshAccountSyncUi({ refreshDevices: true });
-      });
-      row.append(remove);
-    }
-    host.append(row);
-  }
-}
-
-function renderAccountSyncLinkCode() {
-  const box = $("accountSyncGeneratedCodeBox");
-  const code = $("accountSyncGeneratedCode");
-  const expiry = $("accountSyncGeneratedCodeExpiry");
-  if (!box || !code || !expiry) return;
-  const value = accountSyncLastLinkCode;
-  const valid = !!(value?.code && Number(value.expiresAt || 0) > Date.now());
-  box.hidden = !valid;
-  if (!valid) return;
-  code.textContent = value.code;
-  expiry.textContent = `Expires ${formatSyncTime(value.expiresAt)} · one use only`;
-}
-
-async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
-  const card = $("accountSyncCard");
-  if (!card || !PLATFORM_API) return;
-  const env = PLATFORM_API.detectEnvironment?.() || detectSettingsEnvironment();
-  const localState = await ensureQolSyncState();
-  const response = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
-  const state = normalizeQolSyncState(response?.state || localState);
-  const linked = !!response?.linked;
-  const desired = { ...DEFAULT_SETTINGS, ...(loadedSettingsSnapshot || {}) };
-  const effective = PLATFORM_API.applyEffectiveSettings?.(desired, DEFAULT_SETTINGS, env) || { dormant: {} };
-  const dormantCount = Object.keys(effective.dormant || {}).length;
-  const syncDocument = PLATFORM_API.syncableSettingsDocument?.(desired, { revision: state.lastRevision }) || { settings: desired };
-  const settingCount = Object.keys(syncDocument.settings || {}).length;
-
-  if ($("accountSyncLinkState")) $("accountSyncLinkState").textContent = linked ? "Linked" : "Not linked";
-  if ($("accountSyncAutoState")) $("accountSyncAutoState").textContent = linked ? (state.paused ? "Paused" : "Automatic") : "Starts after linking";
-  if ($("accountSyncSettingCount")) $("accountSyncSettingCount").textContent = `${settingCount} setting${settingCount === 1 ? "" : "s"}`;
-  if ($("accountSyncDormantCount")) $("accountSyncDormantCount").textContent = `${dormantCount} inactive here`;
-  if ($("accountSyncDeviceLabel")) $("accountSyncDeviceLabel").textContent = browserLabelForSync(env);
-  if ($("accountSyncDeviceId")) $("accountSyncDeviceId").textContent = state.deviceId || "Preparing…";
-  if ($("accountSyncRevision")) $("accountSyncRevision").textContent = String(state.lastRevision || 0);
-  renderSyncDevicePrefs(response?.prefs);
-  if ($("accountSyncLastSync")) $("accountSyncLastSync").textContent = formatSyncTime(state.lastSyncAt);
-  if ($("accountSyncApiBase")) $("accountSyncApiBase").textContent = response?.apiBase || "https://syncqol.drache.uk";
-
-  const caps = env.capabilities || {};
-  const supported = [];
-  if (caps.styling) supported.push("styles");
-  if (caps.editing) supported.push("editing");
-  if (caps.helperTabs) supported.push("helper tabs");
-  if (caps.bulkOperations) supported.push("bulk");
-  if ($("accountSyncCapabilitySummary")) {
-    $("accountSyncCapabilitySummary").textContent = `Works here: ${supported.join(", ") || "current-page tools"}.`;
-  }
-
-  const setup = $("accountSyncSetup");
-  const linkedArea = $("accountSyncLinked");
-  const devicesCard = $("accountSyncDevicesCard");
-  if (setup) setup.hidden = linked;
-  if (linkedArea) linkedArea.hidden = !linked;
-  if (devicesCard) devicesCard.hidden = !linked;
-
-  const backendStatus = $("accountSyncBackendStatus");
-  if (backendStatus) {
-    backendStatus.textContent = linked
-      ? `Connected to ${response?.apiBase || "https://syncqol.drache.uk"}. ${state.lastStatus || "Automatic sync is active."}`
-      : `Cloudflare sync is ready at ${response?.apiBase || "https://syncqol.drache.uk"}. Create a QoL account here or enter a one-use code from another linked device.`;
-  }
-  const error = $("accountSyncError");
-  if (error) {
-    error.hidden = !state.lastError;
-    error.textContent = state.lastError ? `Last sync error: ${state.lastError}` : "";
-  }
-  const pause = $("accountSyncPause");
-  if (pause) pause.textContent = state.paused ? "Resume sync" : "Pause sync";
-
-  if (linked && (refreshDevices || !accountSyncDevicesCache.length)) {
-    const devices = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LIST_DEVICES" }, 12000);
-    if (devices?.ok) accountSyncDevicesCache = devices.devices || [];
-  }
-  if (linked) renderAccountSyncDevices(accountSyncDevicesCache, state.deviceId);
-  else {
-    accountSyncDevicesCache = [];
-    accountSyncLastLinkCode = null;
-    renderAccountSyncLinkCode();
-  }
-  renderAccountSyncLinkCode();
-  return { state, linked };
-}
-
-function setupAccountSyncFoundation() {
-  refreshAccountSyncUi({ refreshDevices: true }).catch(() => {});
-  $("accountSyncDevicePreferences")?.addEventListener("change", event => {
-    if (event.target?.id === "accountSyncLimitSettings") {
-      $("accountSyncSettingSelection").hidden = !event.target.checked;
-      if (event.target.checked && !$("accountSyncSettingsChecklist")?.children.length) {
-        setupSyncSettingsChecklist(accountSyncSelectedPrefs || {});
-      }
-    }
-    accountSyncUserEditing = true;
-  });
-  $("accountSyncSearchSetting")?.addEventListener("input", event => {
-    const term = String(event.target.value || "").toLowerCase();
-    document.querySelectorAll("#accountSyncSettingsChecklist .account-sync-setting-entry").forEach(row => {
-      row.hidden = !!term && !row.textContent.toLowerCase().includes(term);
-    });
-  });
-  $("accountSyncSavePreferences")?.addEventListener("click", async () => {
-    const prefs = readSyncDevicePrefsUi();
-    setAccountSyncBusy(true, "Saving device sync choices…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_DEVICE_PREFS", prefs }, 20000);
-    setAccountSyncBusy(false);
-    if (result?.ok) {
-      accountSyncUserEditing = false;
-      accountSyncSelectedPrefs = result.prefs;
-      $("accountSyncActionStatus").textContent = "Device sync choices saved. Use Sync now to apply changes.";
-      await refreshAccountSyncUi({ refreshDevices: false });
-    } else $("accountSyncActionStatus").textContent = result?.message || "Could not save sync choices.";
-  });
-
-  $("copyAccountSyncDeviceId")?.addEventListener("click", async () => {
-    const state = await ensureQolSyncState();
-    try {
-      await navigator.clipboard.writeText(state.deviceId);
-      showSettingsToast("Sync device ID copied.");
-    } catch {
-      showSettingsToast("Could not copy the device ID.");
-    }
-  });
-
-  $("accountSyncCreate")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Creating QoL account…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_ACCOUNT", meta: syncDeviceMeta() }, 120000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not create the QoL account.";
-      return;
-    }
-    if (result.initialSyncOk === false || result.sync?.ok === false) {
-      const detail = result.sync?.message ? ` ${result.sync.message}` : "";
-      $("accountSyncActionStatus").textContent = `Account created, but the first settings sync failed.${detail} Use Sync now to retry.`;
-      showSettingsToast("QoL account created; first sync needs a retry.");
-    } else {
-      $("accountSyncActionStatus").textContent = "Account created. Your current settings were uploaded and automatic sync is on.";
-      showSettingsToast("QoL sync account created.");
-    }
-    await refreshAccountSyncUi({ refreshDevices: true });
-  });
-
-  $("accountSyncLink")?.addEventListener("click", async () => {
-    const code = String($("accountSyncLinkCode")?.value || "").trim();
-    if (!code) {
-      $("accountSyncActionStatus").textContent = "Enter the one-use code from a linked device first.";
-      return;
-    }
-    const initialChoice = $("accountSyncLinkChoice")?.value || "choose";
-    const initialOptions = initialChoice === "blocked" ? { mode: "off", blockedOnly: true } :
-      initialChoice === "settings" ? { mode: "download-only" } : { mode: "off" };
-    setAccountSyncBusy(true, "Linking this device with the selected sync options…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LINK_ACCOUNT", code, meta: syncDeviceMeta(), initialOptions }, 120000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not link this device.";
-      return;
-    }
-    if ($("accountSyncLinkCode")) $("accountSyncLinkCode").value = "";
-    if (result.initialSyncOk === false || result.sync?.ok === false) {
-      const detail = result.sync?.message ? ` ${result.sync.message}` : "";
-      $("accountSyncActionStatus").textContent = `Device linked, but the first settings download failed.${detail} Use Sync now to retry.`;
-      showSettingsToast("Device linked; first sync needs a retry.");
-    } else {
-      $("accountSyncActionStatus").textContent = initialChoice === "choose"
-        ? "Linked. Local settings were not changed. Choose which settings and lists to sync below."
-        : initialChoice === "blocked" ? "Linked. Blocked bots were merged. Other settings were left alone."
-        : "Linked. Account settings downloaded; other saved lists remain local.";
-      showSettingsToast("Device linked to QoL sync.");
-    }
-    await refreshAccountSyncUi({ refreshDevices: true });
-  });
-
-  $("accountSyncNow")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Syncing now…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_NOW" }, 120000);
-    setAccountSyncBusy(false);
-    $("accountSyncActionStatus").textContent = result?.ok ? "Sync complete." : (result?.message || "Sync failed.");
-    if (result?.ok) showSettingsToast("QoL settings synced.");
-    await refreshAccountSyncUi({ refreshDevices: false });
-  });
-
-  $("accountSyncPause")?.addEventListener("click", async () => {
-    const current = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
-    const state = normalizeQolSyncState(current?.state);
-    setAccountSyncBusy(true, state.paused ? "Resuming sync…" : "Pausing sync…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_PAUSED", paused: !state.paused }, 30000);
-    setAccountSyncBusy(false);
-    $("accountSyncActionStatus").textContent = result?.ok ? (!state.paused ? "Automatic sync paused on this device." : "Automatic sync resumed.") : (result?.message || "Could not change sync state.");
-    await refreshAccountSyncUi({ refreshDevices: false });
-  });
-
-  $("accountSyncCreateLinkCode")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Creating one-use link code…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_LINK_CODE" }, 16000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not create a link code.";
-      return;
-    }
-    accountSyncLastLinkCode = result;
-    renderAccountSyncLinkCode();
-    $("accountSyncActionStatus").textContent = "Link code ready. Enter it on the other device before it expires.";
-  });
-
-  $("accountSyncCopyLinkCode")?.addEventListener("click", async () => {
-    if (!accountSyncLastLinkCode?.code) return;
-    try {
-      await navigator.clipboard.writeText(accountSyncLastLinkCode.code);
-      showSettingsToast("Link code copied.");
-    } catch {
-      showSettingsToast("Could not copy the link code.");
-    }
-  });
-
-  $("accountSyncRefreshDevices")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Refreshing linked devices…");
-    await refreshAccountSyncUi({ refreshDevices: true });
-    setAccountSyncBusy(false);
-    $("accountSyncActionStatus").textContent = "Device list refreshed.";
-  });
-
-  $("accountSyncDisconnectLocal")?.addEventListener("click", async () => {
-    if (!confirm("Disconnect this browser from the QoL account locally? This does not delete your QoL settings. If you want to revoke the device from the account, use another linked device's Unlink button first.")) return;
-    setAccountSyncBusy(true, "Disconnecting this browser…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_DISCONNECT_LOCAL" }, 12000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not disconnect this browser.";
-      return;
-    }
-    accountSyncDevicesCache = [];
-    accountSyncLastLinkCode = null;
-    $("accountSyncActionStatus").textContent = "This browser is no longer linked. Local settings were kept.";
-    showSettingsToast("QoL account disconnected on this browser.");
-    await refreshAccountSyncUi({ refreshDevices: false });
-  });
-
-  $("resetAccountSyncDeviceId")?.addEventListener("click", async () => {
-    const status = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
-    if (status?.linked) {
-      showSettingsToast("Disconnect this device from Account & Sync before resetting its local identity.");
-      return;
-    }
-    if (!confirm("Reset this device's local QoL sync identity? No settings are deleted.")) return;
-    await ensureQolSyncState({ resetDevice: true });
-    await refreshAccountSyncUi();
-    showSettingsToast("Local sync device identity reset. Your settings were not changed.");
-  });
 }
 
 ["chatBubbleAiBackground", "chatBubbleAiText", "chatBubbleUserBackground", "chatBubbleUserText"].forEach(id => {

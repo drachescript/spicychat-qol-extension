@@ -840,8 +840,26 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="clearBotArchive" type="button">Clear all saved bot copies</button>
 <span class="count" id="botStatusArchiveExportStatus"></span>
 </div>
-<p class="hint">Blocked + confirmed unavailable bots keep their block/tombstone forever. Heavy local saved copies are removed only when the exact current public/Bot Status snapshot is confirmed preserved in the Archive import queue or as an approved public Archive submission.</p>
+<p class="hint">The standard archived-blocked cleanup only removes local saved copies after exact Archive preservation is verified. Blocked IDs remain blocked. The optional manual compacting tool below can also remove unarchived copies, but only after an extra warning.</p>
 <span class="count" id="blockedArchiveCleanupStatus"></span>
+<div class="button-row" style="flex-wrap:wrap; align-items:center; margin-top:12px">
+<label for="blockedCompactAge">Compact blocked bots last updated</label>
+<select id="blockedCompactAge" aria-label="Blocked bot record age">
+<option value="90" selected>90+ days ago</option>
+<option value="30">30+ days ago</option>
+<option value="180">180+ days ago</option>
+<option value="0">Any age (including unknown)</option>
+</select>
+<label for="blockedCompactMode">Saved copies</label>
+<select id="blockedCompactMode" aria-label="Blocked bot saved copy deletion">
+<option value="metadata">Keep all saved copies</option>
+<option value="remote">Delete only remotely verified copies</option>
+<option value="discard">Delete local copies even without Archive backup</option>
+</select>
+<button id="compactOldBlockedBotData" type="button">Compact old blocked bot data</button>
+</div>
+<p class="hint">Manual only: keeps every blocked bot ID, removes old details from the Blocked list, and optionally deletes heavy local saved copies. Unverified Archive copies require an extra irreversible confirmation. SpicyChat chats and completed recommendation history are not deleted.</p>
+<span class="count" id="blockedCompactStatus" role="status"></span>
 </details>
 <div class="button-row" id="botStatusArchiveUploadActions" hidden>
 <button id="sendBotStatusArchiveChanged" type="button">Send saved copies to Archive</button>
@@ -2854,7 +2872,9 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="settingsAppearance" type="checkbox"/><span>Appearance &amp; Interface <span class="hint" data-export-count-for="settingsAppearance"></span></span></label>
 <label class="row"><input data-export-scope="settingsBrowser" type="checkbox"/><span>Browser, Tabs &amp; Mobile <span class="hint" data-export-count-for="settingsBrowser"></span></span></label>
 <label class="row"><input data-export-scope="settingsAdvanced" type="checkbox"/><span>Advanced &amp; Compatibility <span class="hint" data-export-count-for="settingsAdvanced"></span></span></label>
+<label class="row"><input data-export-scope="accountSyncRules" type="checkbox"/><span>Account &amp; Sync choices <span class="hint" data-export-count-for="accountSyncRules"></span></span></label>
 </div>
+<p class="hint">Account &amp; Sync backups include only sync directions and selected categories, not link codes, authentication tokens, account IDs or device identity. Restoring sync choices does not link a device. If restored on an already linked device, review its sync direction before the next automatic sync.</p>
 <p><strong>Saved data</strong></p>
 <div class="export-scope-grid">
 <label class="row"><input data-export-scope="opened" type="checkbox"/><span>Bot Status Center opened history <span class="hint" data-export-count-for="opened"></span></span></label>
@@ -3144,6 +3164,6 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
+<script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
 </body>
 </html>

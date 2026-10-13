@@ -9,6 +9,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   const DS = window.DragonScriptQoL;
   const CHAT_IMPORT_STATE_KEY = "dsQolChatImportState";
+  const CHAT_IMPORT_PROGRESS_KEY = "dsQolChatImportProgressV1";
+  const CHAT_IMPORT_CHECKPOINT_PAGES = 4; // 100 conversations at 25 per page
+  const CHAT_IMPORT_CHECKPOINT_MS = 30_000;
   const BOT_STATUS_IGNORED_KEY = "botStatusIgnoredIdsV1";
   let ignoredBotIds = new Set();
 
@@ -76,6 +79,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.chatImportBaselineReady = !!next.fullImportCompletedAt;
     await localStorageSet({ [CHAT_IMPORT_STATE_KEY]: next });
     return next;
+  }
+
+  async function readChatImportProgress() {
+    const saved = (await localStorageGet([CHAT_IMPORT_PROGRESS_KEY]))?.[CHAT_IMPORT_PROGRESS_KEY];
+    if (!saved || saved.version !== 1 || !["running", "paused"].includes(saved.phase)) return null;
+    if (typeof saved.cursor !== "string" || !/^([0-9a-f-]{36})?$/i.test(saved.cursor)) return null;
+    return saved;
+  }
+
+  async function saveChatImportProgress(state, phase = "running") {
+    // Save a small cursor only after metadata and the optional Chat Index have
+    // been committed. A crash between saves will replay a few rows, never skip
+    // unsaved rows. Existing per-bot/chat deduplication makes replays safe.
+    if (state.dirty) {
+      await DS.saveOpenedChats?.({ skipBlockedCleanup: true });
+      state.dirty = false;
+    }
+    await DS.chatIndexCheckpoint?.();
+    const payload = {
+      version: 1, phase, cursor: String(state.cursor || ""),
+      apiPages: Number(state.apiPages || 0),
+      conversationsImported: Number(state.conversationsImported || 0),
+      newConversationsSeen: Number(state.newConversationsSeen || 0),
+      refreshMode: !!state.refreshMode,
+      forceFullRescan: !!state.forceFullRescan,
+      updatedAt: Date.now()
+    };
+    if (!(await localStorageSet({ [CHAT_IMPORT_PROGRESS_KEY]: payload }))) throw new Error("Could not save the chat importer checkpoint");
+    state.lastCheckpointAt = Date.now();
+    state.lastCheckpointPage = state.apiPages;
   }
 
   function conversationIdFromUrl(value) {
@@ -165,6 +198,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         knownConversationIds: new Set(),
         refreshBoundaryReached: false,
         newConversationsSeen: 0,
+        lastCheckpointAt: 0,
+        lastCheckpointPage: 0,
         diagRunToken: null
       };
     }
@@ -546,11 +581,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const state = loadAllState();
+    if (state.running) return;
 
     await refreshIgnoredBotIds();
     const importState = await readChatImportState();
     const forceFullRescan = !!options?.forceFullRescan;
-    const refreshMode = !!importState.fullImportCompletedAt && !forceFullRescan;
+    const previousProgress = !forceFullRescan && !options?.startFresh ? await readChatImportProgress() : null;
+    const refreshMode = previousProgress ? !!previousProgress.refreshMode : !!importState.fullImportCompletedAt && !forceFullRescan;
 
     state.running = true;
     state.userStarted = true;
@@ -561,15 +598,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     state.noChange = 0;
     state.lastBeforeLinks = DS.qsa("a[href*='/chat/']").length;
     state.mode = "api";
-    state.apiPages = 0;
-    state.conversationsImported = 0;
-    state.cursor = "";
+    state.apiPages = previousProgress ? Math.max(0, Number(previousProgress.apiPages || 0)) : 0;
+    state.conversationsImported = previousProgress ? Math.max(0, Number(previousProgress.conversationsImported || 0)) : 0;
+    state.cursor = previousProgress ? String(previousProgress.cursor || "") : "";
     state.dirty = false;
     state.refreshMode = refreshMode;
     state.forceFullRescan = forceFullRescan;
     state.knownConversationIds = knownConversationIds();
     state.refreshBoundaryReached = false;
-    state.newConversationsSeen = 0;
+    state.newConversationsSeen = previousProgress ? Math.max(0, Number(previousProgress.newConversationsSeen || 0)) : 0;
+    state.lastCheckpointAt = 0;
+    state.lastCheckpointPage = state.apiPages;
     state.diagRunToken = DS.diagOperationStart?.("chat-import", refreshMode ? "incremental-refresh" : "full-import", {
       knownConversations: state.knownConversationIds.size,
       baselineAt: Number(importState.fullImportCompletedAt || 0)
@@ -585,9 +624,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try { await DS.chatIndexImportStart?.(); }
     catch (error) { console.warn(`[${DS.EXT_NAME}] chat index setup failed`, error); }
 
-    setLoadAllStatus(refreshMode
-      ? "Refreshing recent chats by API... QoL will stop when it reaches already-known history."
-      : "Importing all chats by API... You can switch tabs; extra chat cards will not be mounted.", true);
+    try { await saveChatImportProgress(state); }
+    catch (error) {
+      console.warn(`[${DS.EXT_NAME}] Could not start a resumable chat import`, error);
+      await DS.finishLoadAllChats("Could not save an initial chat-import checkpoint. No API scan started; check browser storage and retry.");
+      return;
+    }
+    setLoadAllStatus(previousProgress
+      ? `Resuming saved API import at page ${state.apiPages + 1} (${state.conversationsImported} conversations previously scanned)...`
+      : refreshMode
+        ? "Refreshing recent chats by API... QoL will stop when it reaches already-known history."
+        : "Importing all chats by API... You can switch tabs; extra chat cards will not be mounted.", true);
     Promise.resolve(DS.runLoadAllChatsApi?.()).catch(() => {});
   };
 
@@ -648,6 +695,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try { await DS.chatIndexImportFinish?.({ complete: completedNormally, full: !state.refreshMode }); }
     catch (error) { console.warn(`[${DS.EXT_NAME}] final chat index save failed`, error); }
+
+    // Only clear a completed scan after the final metadata/index save. A
+    // stopped or failed scan remains resumable after a browser restart.
+    if (completedNormally && !state.dirty) {
+      if (!(await localStorageSet({ [CHAT_IMPORT_PROGRESS_KEY]: null }))) {
+        console.warn(`[${DS.EXT_NAME}] Could not clear completed chat import checkpoint`);
+      }
+    } else {
+      try { await saveChatImportProgress(state, "paused"); }
+      catch (error) { console.warn(`[${DS.EXT_NAME}] Could not save final chat import cursor`, error); }
+    }
 
     if (state.diagRunToken) {
       DS.diagOperationEnd?.(state.diagRunToken, {
@@ -806,6 +864,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         const finished = rows.length < pageLimit;
         state.cursor = nextCursor;
+        if (state.apiPages - state.lastCheckpointPage >= CHAT_IMPORT_CHECKPOINT_PAGES ||
+            Date.now() - state.lastCheckpointAt >= CHAT_IMPORT_CHECKPOINT_MS) {
+          try { await saveChatImportProgress(state); }
+          catch (error) {
+            console.warn(`[${DS.EXT_NAME}] Chat import checkpoint failed`, error);
+            await DS.finishLoadAllChats(`Paused at page ${state.apiPages}: could not save the checkpoint. Previously saved progress is safe; press Load all to resume.`);
+            return;
+          }
+        }
 
         setLoadAllStatus(
           `${state.refreshMode ? "Refreshed" : "Imported"} ${state.conversationsImported} conversations · ${DS.state.openedChats.size} bots stored. ${finished ? "Finishing..." : "Continuing in background..."}`,
@@ -1236,8 +1303,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   });
 
-  Promise.all([readChatImportState(), refreshIgnoredBotIds()]).then(() => {
+  Promise.all([readChatImportState(), refreshIgnoredBotIds(), readChatImportProgress()]).then(([, , savedProgress]) => {
     updateLoadAllButton();
+    if (savedProgress && isChatListPage()) {
+      setLoadAllStatus(`Saved chat-import progress: ${savedProgress.conversationsImported || 0} conversations over ${savedProgress.apiPages || 0} pages. Press Load all to resume; Full rescan starts from the beginning.`, false);
+    }
     DS.updateQuickPanel?.();
   }).catch(() => {});
 

@@ -139,7 +139,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       'a[href="/my-creations/rulebooks"]',
       'a[href^="/my-creations/rulebooks?"]',
       'a[href^="/rulebook/"]',
-      '[data-testid^="Rulebook"]'
+      '[data-testid^="Rulebook"]',
+      'a[href^="/rulebooks/"]',
+      '[data-testid="chat-attach-rulebook-menu-item"]',
+      '[data-testid="ConversationRulebookPicker"]'
     ].join(", "));
 
     let publicLorebooks = "unknown";
@@ -260,8 +263,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes || []) {
             if (!(node instanceof Element)) continue;
-            const selector = 'a[href*="/lorebooks/explore"],a[href*="/rulebooks/"],a[href*="/rulebook/"],a[href*="/my-creations/rulebooks"],[data-testid^="Rulebook"],button';
+            const selector = 'a[href*="/lorebooks/explore"],a[href*="/rulebooks/"],a[href*="/rulebook/"],a[href*="/my-creations/rulebooks"],[data-testid^="Rulebook"],[data-testid="chat-attach-rulebook-menu-item"],[data-testid="ConversationRulebookPicker"]';
             if (node.matches?.(selector) || node.querySelector?.(selector)) { relevant = true; break; }
+            // Avoid rechecking beta capabilities whenever React adds unrelated
+            // buttons to chat, Rulebook editors, or the meter playtest.
+            const buttons = node.matches?.('button') ? [node] : (node.querySelectorAll?.('button') || []);
+            for (const button of buttons) {
+              const label = String(button.textContent || '').trim().toLowerCase();
+              if (label === 'switch to story mode' || label === 'public' ||
+                  button.querySelector?.('[data-translate-key="lorebook:form.field.visibility.public"]')) {
+                relevant = true;
+                break;
+              }
+            }
+            if (relevant) break;
           }
           if (relevant) break;
         }

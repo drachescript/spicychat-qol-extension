@@ -16,7 +16,10 @@
     "These boundaries formalize the runtime bundles already used by SpicyChat QoL.",
     "The Full profile must remain behaviorally identical to the normal extension.",
     "Shared Settings and background handlers are separate; remaining feature-specific code must still be isolated before arbitrary Custom builds are supported.",
-    "runtimeAssets is a declaration for future build tooling; Full manifest remains the loading-order reference."
+    "runtimeAssets is a declaration for future build tooling; Full manifest remains the loading-order reference.",
+    "CSS declarations contain ordered Full stylesheet slices. Some remaining legacy CSS is still shared and must not be omitted blindly.",
+    "Background services have started being extracted; shared listeners in background-events.js and options.js are not custom-build-safe yet.",
+    "Stage 2: chat message cache lives in the Chat bundle; Settings platform compatibility and Account & Sync controllers are separate files. Full still loads all; Custom capability contracts are not yet verified."
   ],
   "bundles": {
     "core": {
@@ -113,6 +116,7 @@
         "content/native-rating-helpers.js",
         "content/ooc.js",
         "content/performance-mode.js",
+        "content/core-message-cache.js",
         "content/chat-stability.js",
         "content/reply-instructions.js",
         "content/rp-format-repair.js",
@@ -257,10 +261,43 @@
         "background-entry.js",
         "background.js",
         "background/background-translation.js",
+        "background/background-auto-afk.js",
+        "background/background-wiki-fetch.js",
         "background/background-events.js",
         "background/bot-status-storage-cleanup.js",
         "shared/sync-service.js"
-      ]
+      ],
+      "services": {
+        "background/background-auto-afk.js": {
+          "bundles": [
+            "chat",
+            "interface"
+          ],
+          "provides": [
+            "Auto-AFK",
+            "Low-memory tab protection"
+          ],
+          "alwaysInFull": true
+        },
+        "background/background-wiki-fetch.js": {
+          "bundles": [
+            "lorebook"
+          ],
+          "provides": [
+            "Wiki/Web page fetch"
+          ],
+          "alwaysInFull": true
+        },
+        "background/background-translation.js": {
+          "bundles": [
+            "chat"
+          ],
+          "provides": [
+            "Background translation"
+          ],
+          "alwaysInFull": true
+        }
+      }
     },
     "options": {
       "required": [
@@ -272,6 +309,8 @@
         "settings/options-section-navigation.js",
         "settings/options-tab-cleanup.js",
         "settings/options-soundscapes.js",
+        "settings/options-platform-compatibility.js",
+        "settings/options-account-sync.js",
         "options.js",
         "shared/feature-registry.js",
         "shared/platform-capabilities.js",
@@ -282,20 +321,27 @@
     },
     "styles": {
       "core": [
-        "content.css"
+        "content.css",
+        "content/styles/remaining-styles.css"
       ],
       "profiles": [
+        "content/styles/bot-organizer.css",
         "content/styles/explorer-base.css",
         "content/styles/explorer-covers.css"
       ],
       "chat": [
+        "content/styles/chat-bubble-themes.css",
         "content/styles/memory-vault.css"
       ],
       "listings": [
+        "content/styles/bot-organizer.css",
         "content/styles/pagination.css"
       ],
       "chatList": [
         "content/styles/chat-index.css"
+      ],
+      "personas": [
+        "content/styles/persona-manager.css"
       ]
     }
   },

@@ -1,0 +1,388 @@
+/* v0.1.8.83 - local bot organizer */
+.ds-bot-organizer-inline-host {
+  position: relative;
+}
+
+.ds-bot-organizer-button,
+.ds-bot-bulk-select,
+.ds-bot-organizer-toolbar button,
+.ds-bot-organizer-popover button {
+  font: inherit;
+}
+
+.ds-bot-organizer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 7px;
+  background: rgba(30, 32, 36, 0.82);
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+.ds-bot-organizer-button:hover,
+.ds-bot-organizer-toolbar button:hover,
+.ds-bot-organizer-popover button:hover {
+  filter: brightness(1.12);
+}
+
+.ds-bot-organizer-button-floating {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 12;
+}
+
+.ds-bot-organizer-button-image {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 12;
+  width: 22px;
+  height: 22px;
+  background: rgba(20, 22, 26, 0.88);
+  backdrop-filter: blur(4px);
+}
+
+.ds-bot-organizer-meta-body {
+  height: auto !important;
+  min-height: 180px !important;
+  overflow: visible !important;
+}
+
+.ds-bot-local-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  padding-top: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.ds-bot-local-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 145px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(51, 54, 61, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-bot-status-needs-work { background: rgba(153, 73, 19, 0.34); }
+.ds-bot-status-testing { background: rgba(49, 83, 153, 0.35); }
+.ds-bot-status-finished { background: rgba(33, 113, 74, 0.36); }
+
+.ds-bot-local-note {
+  min-width: 0;
+  max-width: min(260px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.82;
+  font-style: italic;
+}
+
+.ds-bot-organizer-toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: min(860px, calc(100vw - 24px));
+  padding: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 10px;
+  background: rgba(18, 19, 22, 0.94);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.ds-bot-organizer-toolbar input,
+.ds-bot-organizer-toolbar select,
+.ds-bot-organizer-toolbar button {
+  min-height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 7px;
+  background: rgba(31, 33, 38, 0.96);
+  color: inherit;
+  padding: 4px 8px;
+}
+
+.ds-bot-organizer-toolbar input[type="search"] {
+  width: min(190px, 40vw);
+}
+
+.ds-bot-organizer-toolbar button {
+  cursor: pointer;
+}
+
+.ds-bot-org-primary {
+  border-color: rgba(59, 130, 246, 0.72) !important;
+  background: rgba(37, 99, 235, 0.78) !important;
+  color: #fff !important;
+}
+
+.ds-bot-bulk-count {
+  font-size: 12px;
+  opacity: 0.82;
+  padding: 0 3px;
+}
+
+.ds-bot-bulk-select {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  z-index: 20;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.82);
+  border-radius: 7px;
+  background: rgba(18, 19, 22, 0.9);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ds-bot-bulk-select[data-ds-selected="1"] {
+  background: rgba(37, 99, 235, 0.94);
+  border-color: rgba(147, 197, 253, 0.95);
+}
+
+@media (max-width: 760px), (pointer: coarse) {
+  .ds-bot-bulk-select {
+    left: auto;
+    right: 10px;
+    top: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    font-size: 18px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ds-bot-org-mobile-bulk {
+    cursor: pointer;
+  }
+
+  .ds-bot-org-mobile-bulk .ds-bot-bulk-select {
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.42);
+  }
+}
+
+.ds-bot-org-selected {
+  outline: 2px solid rgba(59, 130, 246, 0.82) !important;
+  outline-offset: 2px !important;
+}
+
+.ds-bot-org-filter-hidden {
+  display: none !important;
+}
+
+.ds-bot-organizer-popover {
+  position: fixed;
+  z-index: 2147483000;
+  width: min(330px, calc(100vw - 16px));
+  max-height: min(620px, calc(100dvh - 16px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 12px;
+  background: #1d1f23;
+  color: #f4f4f5;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+}
+
+.ds-bot-org-popover-head,
+.ds-bot-org-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ds-bot-org-popover-head {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.ds-bot-org-popover-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-bot-org-popover-head button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.ds-bot-org-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.ds-bot-org-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.ds-bot-org-field input,
+.ds-bot-org-field textarea,
+.ds-bot-org-field select,
+.ds-bot-organizer-popover button {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 7px;
+  background: #272a30;
+  color: inherit;
+  padding: 7px 8px;
+}
+
+.ds-bot-org-field textarea {
+  resize: vertical;
+  min-height: 74px;
+}
+
+.ds-bot-org-collections {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+}
+
+.ds-bot-org-collections legend {
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.ds-bot-org-collections label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(51, 54, 61, 0.75);
+  font-size: 12px;
+}
+
+.ds-bot-org-popover-actions {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 10px;
+  padding-top: 8px;
+  padding-bottom: max(2px, env(safe-area-inset-bottom));
+  background: #1d1f23;
+}
+
+.ds-bot-org-popover-actions button {
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .ds-bot-organizer-toolbar {
+    left: 8px;
+    right: 8px;
+    bottom: 70px;
+    transform: none;
+    max-width: none;
+    max-height: min(38dvh, 300px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .ds-bot-organizer-toolbar input,
+  .ds-bot-organizer-toolbar select,
+  .ds-bot-organizer-toolbar button {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .ds-bot-organizer-toolbar input[type="search"] {
+    width: 100%;
+  }
+
+  [data-ds-bot-organizer-card="1"].ds-bot-local-meta {
+    align-items: flex-start;
+    gap: 3px 4px;
+    max-height: 48px;
+    overflow: hidden;
+  }
+
+  [data-ds-bot-organizer-card="1"] .ds-bot-local-chip {
+    max-width: min(120px, 46%);
+  }
+
+  .ds-bot-local-note {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+
+  /* Make SpicyChat's native Favorite heart a usable touch target whenever the
+     Saved Bots organizer is active. QoL does not replace or click the control. */
+  [data-ds-bot-organizer-card="1"] button[aria-label*="favorite" i] {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    padding: 7px !important;
+    flex: 0 0 36px !important;
+  }
+
+  [data-ds-bot-organizer-card="1"] button[aria-label*="favorite" i] svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .ds-bot-organizer-popover {
+    left: 8px !important;
+    right: 8px !important;
+    width: auto;
+    max-height: calc(100dvh - 112px);
+  }
+}
+
+

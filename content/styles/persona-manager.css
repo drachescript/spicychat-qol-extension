@@ -1,0 +1,221 @@
+/* v0.1.8.79: expanded Persona Manager */
+.ds-persona-drag-handle {
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  min-width: 26px;
+  height: 26px;
+  line-height: 24px;
+  padding: 0 5px;
+  cursor: grab;
+  font-size: 15px;
+}
+
+.ds-persona-drag-handle:active,
+.ds-persona-drag-handle.is-active {
+  cursor: grabbing;
+  background: rgba(58, 119, 230, 0.78);
+}
+
+.ds-persona-dragging {
+  opacity: 0.58 !important;
+}
+
+.ds-persona-drop-target {
+  outline: 2px solid rgba(86, 145, 255, 0.9) !important;
+  outline-offset: 2px;
+}
+
+.ds-persona-local-note {
+  margin-top: 5px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(90, 111, 165, 0.16);
+  border: 1px solid rgba(118, 149, 229, 0.24);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.9;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+#ds-persona-org-local-search {
+  min-height: 28px;
+  width: min(220px, 100%);
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.82);
+  color: inherit;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.ds-persona-menu-group {
+  position: relative;
+  margin: 0;
+  padding: 3px 0;
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+  list-style: none;
+}
+
+.ds-persona-menu-group > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ds-persona-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  margin: 0 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1.2;
+  color: inherit;
+}
+
+.ds-persona-menu-item:hover,
+.ds-persona-menu-item:focus {
+  background: rgba(128, 128, 128, 0.18);
+  outline: none;
+}
+
+.ds-persona-menu-item[data-disabled="1"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ds-persona-menu-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+}
+
+.ds-persona-duplicate-notice {
+  margin-bottom: 14px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(90, 145, 255, 0.38);
+  background: rgba(55, 102, 190, 0.13);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ds-persona-duplicate-notice[data-state="success"] {
+  border-color: rgba(64, 179, 116, 0.42);
+  background: rgba(35, 135, 82, 0.13);
+}
+
+.ds-persona-duplicate-notice[data-state="warning"] {
+  border-color: rgba(226, 168, 62, 0.46);
+  background: rgba(172, 118, 28, 0.13);
+}
+
+.ds-persona-picker-org-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.24);
+  background: rgba(28, 28, 31, 0.88);
+  color: inherit;
+  font-size: 12px;
+}
+
+.ds-persona-picker-org-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ds-persona-picker-org-toolbar select {
+  min-height: 30px;
+  max-width: min(190px, 46vw);
+  border: 1px solid rgba(128, 128, 128, 0.38);
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.92);
+  color: inherit;
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+.ds-persona-picker-group-hidden {
+  display: none !important;
+}
+
+.ds-persona-picker-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 1px 0 4px;
+  font-size: 11px;
+}
+
+.ds-persona-picker-folder {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(74, 115, 196, 0.18);
+  border: 1px solid rgba(100, 145, 230, 0.28);
+  white-space: nowrap;
+}
+
+.ds-persona-picker-note {
+  opacity: 0.78;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .ds-persona-picker-org-toolbar {
+    gap: 7px;
+    padding: 7px 8px;
+  }
+
+  .ds-persona-picker-org-toolbar label {
+    flex: 1 1 140px;
+    justify-content: space-between;
+  }
+
+  .ds-persona-picker-org-toolbar select {
+    min-width: 0;
+    max-width: 60%;
+  }
+
+  .ds-persona-org-actions {
+    max-width: calc(100% - 34px);
+  }
+
+  .ds-persona-folder {
+    width: 78px;
+  }
+
+  #ds-persona-org-local-search {
+    flex: 1 1 160px;
+  }
+}
+

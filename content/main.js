@@ -81,16 +81,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function maybeYieldSlowSlice(stepName = "slow-step") {
-    if (!slowSliceState || typeof performance === "undefined") return;
-    // Critical/message lanes may interleave while an async slow feature is
-    // awaiting. Their runStep() calls must never be charged to or delayed by
-    // the slow-pass slice budget.
-    if (criticalRunning || messageLaneRunning) return;
+    // The saved/opened, message and critical lanes share runStep(), but they
+    // must not use the slow lane's slice budget or change its timing state.
+    if (!slowRunning || criticalRunning || messageLaneRunning || savedOpenedLaneRunning) return;
+    const slice = slowSliceState;
+    if (!slice || typeof performance === "undefined") return;
     const now = performance.now();
-    const elapsed = Math.max(0, now - Number(slowSliceState.sliceStarted || now));
+    const elapsed = Math.max(0, now - Number(slice.sliceStarted || now));
     if (elapsed < SLOW_SLICE_BUDGET_MS) return;
-    slowSliceState.activeMs += elapsed;
-    slowSliceState.slices += 1;
+    slice.activeMs += elapsed;
+    slice.slices += 1;
     DS.diagScheduler?.("deferred", {
       lane: "slow",
       reason: "slice-budget",
@@ -102,7 +102,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
       else setTimeout(resolve, 0);
     });
-    slowSliceState.sliceStarted = performance.now();
+    // Another lane can finish the slow pass while the frame is pending.
+    // Never write through the global after await: it may now be null or a
+    // state object belonging to a newer slow pass.
+    if (slowSliceState === slice) slice.sliceStarted = performance.now();
   }
 
   function creatorProfileStartupQuietActive() {

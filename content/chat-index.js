@@ -89,6 +89,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return flushChain;
   }
 
+  // The common chat importer checkpoints its cursor every 4 pages. Flush the
+  // optional index first so that resuming at the saved cursor cannot skip rows.
+  DS.chatIndexCheckpoint = async function chatIndexCheckpoint() {
+    if (indexActive && indexDirty) await flushIndex();
+  };
+
   async function notifyUpdate() {
     if (!viewOpen) return;
     scheduleRender(1500);

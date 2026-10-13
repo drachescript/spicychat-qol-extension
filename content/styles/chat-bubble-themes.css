@@ -1,0 +1,138 @@
+/* v0.1.8.84: CSS-driven chat bubble customization */
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] {
+  position: relative;
+  isolation: isolate;
+  overflow: visible !important;
+  background: var(--ds-chat-bubble-ai-bg) !important;
+  border: var(--ds-chat-bubble-ai-border-width) var(--ds-chat-bubble-ai-border-style, solid) var(--ds-chat-bubble-ai-border) !important;
+  box-shadow: var(--ds-chat-bubble-ai-shadow) !important;
+}
+
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"],
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] {
+  position: relative;
+  isolation: isolate;
+  overflow: visible !important;
+  background: var(--ds-chat-bubble-user-bg) !important;
+  border: var(--ds-chat-bubble-user-border-width) var(--ds-chat-bubble-user-border-style, solid) var(--ds-chat-bubble-user-border) !important;
+  box-shadow: var(--ds-chat-bubble-user-shadow) !important;
+}
+
+/* Only the message-body child inherits the chosen text color. Header names,
+   avatars, message menus and regenerate/rate/listen/swipe controls stay native. */
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-text-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-text-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) {
+  color: var(--ds-chat-bubble-ai-text) !important;
+}
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-text-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-text-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) {
+  color: var(--ds-chat-bubble-user-text) !important;
+}
+
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-text-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2) :is(span,p,strong,b):not(.ds-alt-dialogue),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-text-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(span,p,strong,b):not(.ds-alt-dialogue),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-text-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2) :is(span,p,strong,b):not(.ds-alt-dialogue),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-text-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(span,p,strong,b):not(.ds-alt-dialogue) {
+  color: inherit !important;
+}
+
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-action-colors="0"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"]) > :nth-child(2) :is(em,i):not(.ds-alt-dialogue) {
+  color: inherit !important;
+}
+
+
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2),
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) {
+  font-family: var(--ds-chat-bubble-ai-font, inherit) !important;
+}
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2),
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) {
+  font-family: var(--ds-chat-bubble-user-font, inherit) !important;
+}
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+  font-family: var(--ds-chat-bubble-ai-action-font, var(--ds-chat-bubble-ai-font, inherit)) !important;
+}
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+  font-family: var(--ds-chat-bubble-user-action-font, var(--ds-chat-bubble-user-font, inherit)) !important;
+}
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+  font-family: var(--ds-chat-bubble-ai-dialogue-font, var(--ds-chat-bubble-ai-font, inherit)) !important;
+}
+html[data-ds-chat-bubbles="1"] div[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+  font-family: var(--ds-chat-bubble-user-dialogue-font, var(--ds-chat-bubble-user-font, inherit)) !important;
+}
+
+/* Shape selectors are driven by attributes on <html>, so a newly swiped or
+   generated bubble receives its appearance during CSS matching with no JS scan. */
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])::before,
+html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])::after {
+  content: none;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+html[data-ds-chat-bubble-ai-shape="rounded"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubble-ai-shape="rounded"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] { border-radius: var(--ds-chat-bubble-ai-radius) !important; }
+html[data-ds-chat-bubble-user-shape="rounded"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"],
+html[data-ds-chat-bubble-user-shape="rounded"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] { border-radius: var(--ds-chat-bubble-user-radius) !important; }
+
+html[data-ds-chat-bubble-ai-shape="square"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubble-user-shape="square"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] { border-radius: 4px !important; }
+
+html[data-ds-chat-bubble-ai-shape="speech"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] { border-radius: var(--ds-chat-bubble-ai-radius) !important; }
+html[data-ds-chat-bubble-user-shape="speech"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] { border-radius: var(--ds-chat-bubble-user-radius) !important; }
+html[data-ds-chat-bubble-ai-shape="speech"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before {
+  content:""; left:-8px; bottom:14px; width:13px; height:15px; background:var(--ds-chat-bubble-ai-decoration); clip-path:polygon(100% 0,100% 100%,0 72%);
+}
+html[data-ds-chat-bubble-user-shape="speech"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after {
+  content:""; right:-8px; bottom:14px; width:13px; height:15px; background:var(--ds-chat-bubble-user-decoration); clip-path:polygon(0 0,100% 72%,0 100%);
+}
+
+html[data-ds-chat-bubble-ai-shape="cat"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubble-user-shape="cat"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] { border-radius:16px !important; }
+html[data-ds-chat-bubble-ai-shape="cat"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before,
+html[data-ds-chat-bubble-ai-shape="cat"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after,
+html[data-ds-chat-bubble-user-shape="cat"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before,
+html[data-ds-chat-bubble-user-shape="cat"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after {
+  content:""; top:-8px; width:18px; height:14px; clip-path:polygon(50% 0,100% 100%,0 100%);
+}
+/* Cat-ear placement keeps the original grouped layout by default, but can
+   place the pair on either side or split it across the bubble like a cat head. */
+html[data-ds-chat-bubble-ai-shape="cat"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before,
+html[data-ds-chat-bubble-ai-shape="cat"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after { background:var(--ds-chat-bubble-ai-decoration); }
+html[data-ds-chat-bubble-user-shape="cat"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before,
+html[data-ds-chat-bubble-user-shape="cat"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after { background:var(--ds-chat-bubble-user-decoration); }
+
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="auto"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before,
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="left"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before { left:18px; right:auto; }
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="auto"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after,
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="left"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after { left:43px; right:auto; }
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="right"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before { right:43px; left:auto; }
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="right"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after { right:18px; left:auto; }
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="split"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before { left:18px; right:auto; }
+html[data-ds-chat-bubble-ai-shape="cat"][data-ds-chat-bubble-ai-cat-layout="split"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after { right:18px; left:auto; }
+
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="auto"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before,
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="right"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before { right:43px; left:auto; }
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="auto"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after,
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="right"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after { right:18px; left:auto; }
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="left"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before { left:18px; right:auto; }
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="left"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after { left:43px; right:auto; }
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="split"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before { left:18px; right:auto; }
+html[data-ds-chat-bubble-user-shape="cat"][data-ds-chat-bubble-user-cat-layout="split"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after { right:18px; left:auto; }
+
+html[data-ds-chat-bubble-ai-shape="cloud"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] { border-radius:28px !important; }
+html[data-ds-chat-bubble-ai-shape="cloud"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before,
+html[data-ds-chat-bubble-ai-shape="cloud"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after,
+html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before,
+html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after {
+  content:""; width:30px; height:18px; border-radius:50%; top:-6px;
+}
+html[data-ds-chat-bubble-ai-shape="cloud"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::before { left:28px; background:var(--ds-chat-bubble-ai-decoration); box-shadow:28px 2px 0 -3px var(--ds-chat-bubble-ai-decoration); }
+html[data-ds-chat-bubble-ai-shape="cloud"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"]::after { right:35px; background:var(--ds-chat-bubble-ai-decoration); box-shadow:-26px 3px 0 -4px var(--ds-chat-bubble-ai-decoration); }
+html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::before { left:35px; background:var(--ds-chat-bubble-user-decoration); box-shadow:26px 3px 0 -4px var(--ds-chat-bubble-user-decoration); }
+html[data-ds-chat-bubble-user-shape="cloud"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"]::after { right:28px; background:var(--ds-chat-bubble-user-decoration); box-shadow:-28px 2px 0 -3px var(--ds-chat-bubble-user-decoration); }
+
