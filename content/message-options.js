@@ -338,7 +338,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       bar?.remove();
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
       const root = getMessageRoot(dropdownButton);
-      quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar: null, hasActions: false });
+      rememberQuickActionState(dropdownButton, settingsSignature, root, holder, null, false);
       repairContextKeeperForDropdown(dropdownButton);
       return;
     }
@@ -356,7 +356,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         actions.every(action => !!bar.querySelector(`:scope > .ds-message-quick-action[data-ds-message-action="${CSS.escape(action.label)}"]`))) {
       DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
       const root = getMessageRoot(dropdownButton);
-      quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
+      rememberQuickActionState(dropdownButton, settingsSignature, root, holder, bar, true);
       repairContextKeeperForDropdown(dropdownButton);
       return;
     }
@@ -390,8 +390,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     DS.setDatasetIfChanged?.(dropdownButton, "dsMessageQuickReady", settingsSignature);
     const root = getMessageRoot(dropdownButton);
-    quickActionState.set(dropdownButton, { signature: settingsSignature, root, revision: Number(DS.getMessageRootRevision?.(root) || 0), holder, bar, hasActions: true });
+    rememberQuickActionState(dropdownButton, settingsSignature, root, holder, bar, true);
     repairContextKeeperForDropdown(dropdownButton);
+  }
+
+  function rememberQuickActionState(button, signature, root, holder, bar, hasActions) {
+    quickActionState.set(button, {
+      signature,
+      root,
+      revision: Number(DS.getMessageRootRevision?.(root) || 0),
+      holder,
+      bar,
+      hasActions,
+      // Native message text can update without remounting the toolbar. Keep
+      // these references so an unchanged Copy/Edit bar needs no selector scans.
+      actionSignature: hasActions ? bar?.dataset.dsActionSignature : "",
+      actionButtons: hasActions ? Array.from(bar.children) : []
+    });
   }
 
   function cleanup() {
@@ -424,17 +439,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!state || state.signature !== signature) return false;
     const root = getMessageRoot(button);
     if (!root || state.root !== root || !root.isConnected) return false;
-    const revision = Number(DS.getMessageRootRevision?.(root) || 0);
-    if (revision !== Number(state.revision || 0)) return false;
+    // Revisions represent message-body changes too. Copy/Edit/Report labels do
+    // not depend on the text, so only dynamic user actions (Resend/Remove Image)
+    // need to be recomputed after a content revision.
+    const settings = DS.state?.settings || {};
+    const dynamicActions = settings.messageQuickActionResend === true ||
+      settings.messageQuickActionRemoveImage === true;
+    if (dynamicActions && Number(DS.getMessageRootRevision?.(root) || 0) !== Number(state.revision || 0)) return false;
     if (!state.holder?.isConnected || state.holder !== getDropdownHolder(button)) return false;
+    if (button.dataset.dsMessageQuickReady !== signature) return false;
     if (state.hasActions) {
-      const actions = getEnabledActions(button);
       const bar = state.bar;
-      return !!(bar?.isConnected && bar.parentElement === state.holder &&
-        bar.querySelectorAll(":scope > .ds-message-quick-action").length === actions.length &&
-        actions.every(action => !!bar.querySelector(`:scope > .ds-message-quick-action[data-ds-message-action="${CSS.escape(action.label)}"]`)));
+      if (!bar?.isConnected || bar.parentElement !== state.holder ||
+          bar.dataset.dsActionSignature !== state.actionSignature) return false;
+      const children = state.actionButtons || [];
+      return children.length > 0 && bar.childElementCount === children.length &&
+        children.every((child, index) => child.parentElement === bar && bar.children[index] === child);
     }
-    return true;
+    return !state.holder.querySelector(":scope > .ds-message-quick-actions");
   }
 
   function quickActionBarHealthy(button, signature) {
@@ -599,7 +621,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (document.body) beginToolbarObserver();
   else document.addEventListener("DOMContentLoaded", beginToolbarObserver, { once: true });
 
-  window.setInterval(() => scheduleQuickActionRepair(0), 7000);
+  window.setInterval(() => {
+    const settings = DS.state?.settings || {};
+    if (document.hidden || !settings.enabled || !DS.isSingleChatPage?.()) return;
+    if (!hasAnyQuickActionEnabled(settings) && !(settings.enableContextKeeper && settings.contextKeeperMessageButtons)) return;
+    scheduleQuickActionRepair(0);
+  }, 7000);
   window.addEventListener("pageshow", () => scheduleQuickActionRepair(450), true);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) scheduleQuickActionRepair(450);

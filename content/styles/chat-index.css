@@ -1,0 +1,54 @@
+/* Optional Chat Index. Default host is a compact subview inside the Mini Panel. */
+#ds-qol-panel[data-ds-chat-index-open="1"] .ds-qol-body > :not(.ds-qol-ci-panel) { display: none !important; }
+.ds-qol-ci { position: fixed; right: 12px; bottom: 12px; z-index: 2147482900; font: 12px/1.35 system-ui, sans-serif; color: #f5f5f5; }
+.ds-qol-ci *,.ds-qol-ci-panel * { box-sizing: border-box; }
+.ds-qol-ci-button { border: 1px solid #555; background: #29292f; border-radius: 7px; color: #f5f5f5; cursor: pointer; padding: 5px 7px; font: inherit; }
+.ds-qol-ci-button:hover { background: #41414b; }
+.ds-qol-ci-launch { background: #373744; box-shadow: 0 3px 9px #0007; font-weight: 650; }
+.ds-qol-ci-panel { position: relative; width: 100%; min-width: 0; min-height: 0; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; background: transparent; color: #f5f5f5; font: 11px/1.4 system-ui, sans-serif; }
+.ds-qol-ci > .ds-qol-ci-panel { position: absolute; right: 0; bottom: 38px; width: min(320px, calc(100vw - 24px)); max-height: min(480px, calc(100dvh - 90px)); overflow: hidden; background: #1c1b23; border: 1px solid #656575; border-radius: 10px; padding: 9px; box-shadow: 0 8px 24px #000a; }
+.ds-qol-ci-heading, .ds-qol-ci-actions, .ds-qol-ci-filters, .ds-qol-ci-footer, .ds-qol-ci-entry-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.ds-qol-ci-heading { justify-content: space-between; font-size: 12px; }
+.ds-qol-ci-heading .ds-qol-ci-button { padding: 3px 8px; }
+.ds-qol-ci-hint, .ds-qol-ci-count, .ds-qol-ci-status, .ds-qol-ci-meta { color: #c7c6d0; margin: 0; font-size: 10px; }
+.ds-qol-ci-status { color: #ece0aa; }
+.ds-qol-ci-actions .ds-qol-ci-button,.ds-qol-ci-footer .ds-qol-ci-button { flex: 1 1 auto; }
+.ds-qol-ci-filters > input, .ds-qol-ci-filters > select { background: #303039; border: 1px solid #686873; color: #fff; font: inherit; padding: 5px; border-radius: 6px; min-width: 0; flex: 1 1 115px; }
+.ds-qol-ci-results { overflow-y: auto; min-height: 0; max-height: min(250px, 36dvh); flex: 0 1 auto; scrollbar-width: thin; }
+.ds-qol-ci-entry { padding: 6px 2px; border-bottom: 1px solid #45434f; display: flex; align-items: flex-start; gap: 6px; }
+.ds-qol-ci-entry > img { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; flex-shrink: 0; }
+.ds-qol-ci-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.ds-qol-ci-title { font-weight: 620; color: #f5f5f5; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 2px; }
+.ds-qol-ci-entry-actions .ds-qol-ci-button { font-size: 10px; padding: 2px 6px; }
+.ds-qol-ci-more { width: 100%; margin-top: 6px; }
+.ds-qol-ci-empty { padding: 12px 4px; color: #dad5df; }
+.ds-qol-ci button:focus-visible,.ds-qol-ci a:focus-visible,.ds-qol-ci input:focus-visible,.ds-qol-ci select:focus-visible,.ds-qol-ci-panel button:focus-visible { outline: 2px solid #dbb7ff; outline-offset: 2px; }
+@media (max-width: 600px) { .ds-qol-ci { right: 8px; bottom: 8px; } .ds-qol-ci > .ds-qol-ci-panel { bottom: 38px; padding: 8px; } }
+
+/* Chat List tools launcher and full-size indexed conversation viewer. */
+.ds-qol-ci { position: static; flex: 0 0 auto; margin-inline-start: 10px; font: 13px/1.4 system-ui,sans-serif; }
+.ds-qol-ci .ds-qol-ci-launch { padding: 7px 12px; white-space: nowrap; }
+.ds-qol-ci .ds-qol-ci-backdrop { position: fixed; inset: 0; z-index: 2147482901; background: rgba(0,0,0,.65); }
+.ds-qol-ci > .ds-qol-ci-panel {
+  position: fixed; inset: 50% auto auto 50%; transform: translate(-50%,-50%);
+  z-index: 2147482902; width: min(920px, calc(100vw - 28px));
+  height: min(780px, calc(100dvh - 38px)); max-height: calc(100dvh - 38px);
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 18px; background: #1c1b23; border: 1px solid #656575;
+  border-radius: 13px; box-shadow: 0 20px 80px #000d;
+  color: #f5f5f5; font: 13px/1.5 system-ui,sans-serif; overflow: hidden;
+}
+.ds-qol-ci-heading { font-size: 17px; }
+.ds-qol-ci-hint,.ds-qol-ci-count,.ds-qol-ci-status,.ds-qol-ci-meta { font-size: 12px; }
+.ds-qol-ci .ds-qol-ci-results { max-height: none; overflow-y: auto; flex: 1 1 auto; }
+.ds-qol-ci-entry { padding: 11px 5px; gap: 13px; }
+.ds-qol-ci-entry > img { width: 54px; height: 54px; border-radius: 7px; }
+.ds-qol-ci-body { gap: 6px; }
+.ds-qol-ci-title { font-size: 14px; }
+.ds-qol-ci-entry-actions .ds-qol-ci-button { font-size: 12px; padding: 5px 9px; }
+.ds-qol-ci-filters > input,.ds-qol-ci-filters > select { padding: 9px; min-width: 150px; }
+@media (max-width: 700px) {
+ .ds-qol-ci > .ds-qol-ci-panel { padding: 11px; height: min(720px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); }
+ .ds-qol-ci-heading { font-size: 15px; }
+ .ds-qol-ci-entry > img { width: 45px; height: 45px; }
+}

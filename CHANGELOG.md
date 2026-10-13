@@ -1,3 +1,27 @@
+## 0.2.45
+- Fixed blocked-word auto-blocking for cards whose actual bot name is in SpicyChat's chat-link label, preventing matches such as Leon Kennedy and Simon Riley from being hidden without getting saved to Blocked bots.
+- Fixed Settings reopening on General instead of the last section after refresh; the current section now stays in the URL and is remembered locally for new Settings tabs.
+- Fixed blocked-word/tag auto-block rules being skipped when language or other discovery filters hid a card first. Actual tag badges are checked separately from names/descriptions.
+- Improved Portuguese detection for short descriptions, including sentences using “mãe”, “agora”, “quer”, and “você”.
+- Normalized mixed Greek/Cyrillic lookalike text in stylized Latin titles while leaving ordinary single-script Greek/Cyrillic descriptions unchanged.
+- Fixed Bot Status controls squeezing the known-bot summary into the scan filters. Counts now have a full-width row.
+- Moved the optional Chat Index into Chat List tools with a larger, scrollable index window. It remains disabled by default.
+- Improved per-device sync Settings layout by keeping the individual setting list collapsed until needed.
+- Bot Status scans now pause and preserve unfinished work after repeated authorization or connectivity failures instead of replacing confirmed results with Unknown.
+- Improved bulk Less Like and Dislike pause messages for repeated authentication or network failures.
+- Fixed mobile Settings getting stuck on General when the Sections menu did not initialize. Section navigation now starts independently and stays accessible if later Settings setup fails.
+- Reduced repeated OOC button class updates and unnecessary Copy/Edit toolbar checks while preserving early controls and repairs after chat rerenders.
+- Added an opt-in Chat Index for chat-list pages, with manual API refresh, full rescans, search and confirmed unavailable/restricted/unknown filters. It starts off and is opened from Chat List tools.
+- Added local favorites for individual conversations, alongside existing QoL bot favorites. Exact chat links and message counts are saved without loading extra chat cards.
+- Chat index imports use the existing API importer only when the feature is enabled, save progress in batches, and do not treat missing chats or temporary errors as deletions. Previously indexed data stays saved when disabled.
+- Added a separate option to automatically add bots with blocked tags to Blocked bots; matched tags must be recognized on the card.
+- Fixed overlapping blocked-tag and blocked-word rules so either enabled option can auto-block a bot without creating duplicate blocks.
+- Added persistent Words, Tags, and Both counts for successful automatic blocks in the current Blocked bots list. Manual unblocks remain exempt until matching rules change.
+- Added device-specific sync choices for settings and saved lists, with separate upload/download directions and optional individual settings selection.
+- New device links can now leave local settings untouched, sync only Blocked bots, or download account settings before choosing ongoing sync directions.
+- Added compact, ID-only sync for Blocked, Favorite, Later, Not Interested and Opened bot lists. Merges per bot across devices without uploading chat content, backup details or images.
+- Avoided repeat uploads of unchanged saved-list parts, with checkpointed updates and explicit device opt-in. Cloud history cleanup still requires backend support.
+
 ## 0.2.44
 - Fixed automated GitHub builds checking outdated release ZIPs instead of the newly built version.
 - Fixed automatic Chrome and Firefox development and release builds after the root folder cleanup.

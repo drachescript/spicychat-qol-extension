@@ -232,6 +232,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     blockCards: false,
     autoBlockWordMatches: false,
+    autoBlockTagMatches: false,
     blockedTags: [],
     blockedWords: [],
     blockedCreators: [],
@@ -398,6 +399,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     quickPanelShowChatSort: false,
     quickPanelShowScanVisible: false,
     quickPanelShowLoadAll: false,
+    enableChatIndex: false,
+    chatIndexStandaloneLauncher: false,
     quickPanelShowOoc: false,
     quickPanelShowAutoVoice: false,
     quickPanelShowAutoAsterisk: false,

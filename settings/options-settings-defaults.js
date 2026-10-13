@@ -229,6 +229,7 @@ const DEFAULT_SETTINGS = {
 
   blockCards: false,
   autoBlockWordMatches: false,
+  autoBlockTagMatches: false,
   blockedTags: [],
   blockedWords: [],
   blockedCreators: [],
@@ -412,6 +413,8 @@ const DEFAULT_SETTINGS = {
   quickPanelShowChatSort: false,
   quickPanelShowScanVisible: false,
   quickPanelShowLoadAll: false,
+  enableChatIndex: false,
+  chatIndexStandaloneLauncher: false,
   quickPanelShowOoc: false,
   quickPanelShowAutoVoice: false,
   quickPanelShowAutoAsterisk: false,

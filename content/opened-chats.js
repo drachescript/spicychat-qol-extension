@@ -580,6 +580,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    // The optional chat index consumes pages from this SAME importer. Failure
+    // to prepare the index must never prevent the normal opened-chat import.
+    try { await DS.chatIndexImportStart?.(); }
+    catch (error) { console.warn(`[${DS.EXT_NAME}] chat index setup failed`, error); }
+
     setLoadAllStatus(refreshMode
       ? "Refreshing recent chats by API... QoL will stop when it reaches already-known history."
       : "Importing all chats by API... You can switch tabs; extra chat cards will not be mounted.", true);
@@ -640,6 +645,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
       }
     }
+
+    try { await DS.chatIndexImportFinish?.({ complete: completedNormally, full: !state.refreshMode }); }
+    catch (error) { console.warn(`[${DS.EXT_NAME}] final chat index save failed`, error); }
 
     if (state.diagRunToken) {
       DS.diagOperationEnd?.(state.diagRunToken, {
@@ -754,6 +762,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
 
         const imported = importConversationApiRows(rows);
+        try { await DS.chatIndexCaptureRows?.(rows); }
+        catch (error) { console.warn(`[${DS.EXT_NAME}] chat index page save failed`, error); }
         state.importedTotal += imported.added;
         state.conversationsImported += imported.conversations;
         state.newConversationsSeen += newlySeenConversationIds;
@@ -786,7 +796,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
         const last = rows[rows.length - 1] || {};
         const nextCursor = String(last.character_id || last?.character?.id || "").trim().toLowerCase();
-        const finished = rows.length < pageLimit || !nextCursor || nextCursor === state.cursor;
+        // A repeated/missing cursor is NOT proof that we reached the end.
+        // Otherwise an incomplete index could be marked as a full import.
+        if (rows.length === pageLimit && (!nextCursor || nextCursor === state.cursor)) {
+          await DS.finishLoadAllChats(
+            `Paused at page ${state.apiPages}: the chat API did not advance its cursor. Stored ${DS.state.openedChats.size} bots; the index may be incomplete.`
+          );
+          return;
+        }
+        const finished = rows.length < pageLimit;
         state.cursor = nextCursor;
 
         setLoadAllStatus(

@@ -137,6 +137,7 @@
         "content/chat-organizer.js",
         "content/chat-tags.js",
         "content/opened-chats.js",
+        "content/chat-index.js",
         "content/saved-chat-actions.js"
       ]
     },
@@ -257,7 +258,8 @@
         "background.js",
         "background/background-translation.js",
         "background/background-events.js",
-        "background/bot-status-storage-cleanup.js"
+        "background/bot-status-storage-cleanup.js",
+        "shared/sync-service.js"
       ]
     },
     "options": {
@@ -291,6 +293,9 @@
       ],
       "listings": [
         "content/styles/pagination.css"
+      ],
+      "chatList": [
+        "content/styles/chat-index.css"
       ]
     }
   },

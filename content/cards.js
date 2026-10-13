@@ -391,6 +391,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     const creator = creatorCandidates[0] || "";
     const all = fallbackPreparedText || prepare(card?.textContent || "");
+    const settings = DS.state?.settings || {};
+    const inspectTags = settings.blockCards && (settings.autoBlockTagMatches || settings.autoBlockWordMatches);
+    const cardTagLabels = inspectTags
+      ? [
+          ...(DS.getCardTags?.(card) || []),
+          ...(DS.qsa?.("button[aria-label]", card) || [])
+            .filter(button => !button.closest?.("[data-ds-owned='1'], [data-ds-owner='qol']") &&
+              !String(button.className || "").includes("ds-") &&
+              !/^(favorite|unfavorite|block this bot|profile|edit|chat)$/i.test(String(button.getAttribute("aria-label") || "")))
+            .map(button => String(button.getAttribute("aria-label") || button.textContent || "").trim())
+        ]
+      : [];
+    const tagValues = new Set(cardTagLabels.map(prepare).filter(Boolean));
+    const verifiedNameCandidates = title && !tagValues.has(title) ? [title] : [];
+    if (settings.autoBlockWordMatches) {
+      const nativeNameLink = card?.querySelector?.(
+        "a[aria-label^='chat-with-'][href*='/chat/'], a[aria-label^='chat-with-'][href*='/chatbot/']"
+      );
+      if (nativeNameLink) {
+        for (const candidate of [
+          String(nativeNameLink.getAttribute('aria-label') || '').replace(/^chat-with-/i, ''),
+          nativeNameLink.querySelector('img[alt]')?.getAttribute('alt') || ''
+        ]) {
+          const verified = prepare(candidate);
+          if (verified && !tagValues.has(verified) && verified.length <= 180) {
+            verifiedNameCandidates.push(verified);
+          }
+        }
+      }
+    }
+    if (!verifiedNameCandidates.length && settings.autoBlockWordMatches) {
+      DS.qsa("h1, h2, h3, [data-testid*='name'], [data-testid*='title']", card)
+        .forEach(el => verifiedNameCandidates.push(prepare(el?.textContent || "")));
+    }
 
     // SpicyChat has used several different card title layouts. Keep a small set
     // of title-ish candidates instead of trusting one DOM selector. This avoids
@@ -403,7 +437,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!raw || raw.length > 180 || raw.startsWith("@")) return;
       const value = prepare(raw);
       if (!value || seenCandidates.has(value)) return;
-      if (["for you", "chat", "profile", "info", "new", "op"].includes(value)) return;
+      if (["for you", "chat", "profile", "info", "new", "op"].includes(value) || tagValues.has(value)) return;
       seenCandidates.add(value);
       nameCandidates.push(value);
     };
@@ -416,7 +450,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const descriptiveCandidates = [];
     const descriptiveSeen = new Set();
-    const tagValues = new Set((DS.getCardTags?.(card) || []).map(prepare));
     const addDescriptiveCandidate = (rawValue, el = null) => {
       if (el?.closest?.("a[href*='/creator/'], a[aria-label*='creator' i], nav, aside, header, footer")) return;
       const value = prepare(String(rawValue || "").replace(/\s+/g, " ").trim());
@@ -436,6 +469,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       creatorCandidates,
       all,
       nameCandidates,
+      verifiedNameCandidates: [...new Set(verifiedNameCandidates.filter(Boolean))],
+      tagCandidates: [...tagValues],
       descriptionCandidates: descriptiveCandidates,
       nameDescriptionCandidates: [...nameCandidates, description, ...descriptiveCandidates].filter(Boolean)
     };
@@ -519,6 +554,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const isSavedForLater = !!DS.cardIsSavedForLater?.(card, anchor);
 
+    // A matching blocked word/tag is a persistent user rule, not merely a
+    // visibility filter. Evaluate it once before any unrelated soft filter
+    // can return early (for example Language, Saved for Later, or Not Interested).
+    // Only a verified name/description or an actual tag badge may auto-block;
+    // broad card text still supplies the regular hide-only fallback below.
+    if (settings.blockCards && favoritePrefs.ignoreTagWordFilters !== true &&
+        !(isSavedForLater && (settings.protectLaterBotsFromFiltering || settings.hideLaterBotsFromListings)) &&
+        (settings.autoBlockWordMatches || settings.autoBlockTagMatches)) {
+      const fields = getPreparedFields();
+      const tagMatchers = DS.state.preparedMatchers?.blockedTags || [];
+      const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
+      const verifiedTagMatch = settings.autoBlockTagMatches
+        ? findPreparedMatchInFields(fields.tagCandidates, tagMatchers) : null;
+      const wordFields = [...fields.verifiedNameCandidates, fields.description].filter(Boolean);
+      const verifiedWordMatch = settings.autoBlockWordMatches
+        ? (findPreparedMatchInFields(wordFields, wordMatchers)
+          || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers))
+        : null;
+      if (verifiedWordMatch || verifiedTagMatch) {
+        DS.queueAutoBlockRuleMatch?.(card, anchor, {
+          word: verifiedWordMatch, tag: verifiedTagMatch
+        });
+      }
+    }
+
     if (
       settings.hideLaterBotsFromListings &&
       !context.ignoreLater &&
@@ -574,27 +634,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (settings.blockCards && favoritePrefs.ignoreTagWordFilters !== true) {
       const fields = getPreparedFields();
-      const tagMatch = findPreparedMatch(fields.all, DS.state.preparedMatchers?.blockedTags || []);
-      if (tagMatch) return `blocked tag: ${tagMatch.raw}`;
+      const tagMatchers = DS.state.preparedMatchers?.blockedTags || [];
+      // Tag auto-blocking requires a tag label on the card, not a text match
+      // in a bot name or description. Filtering retains its broad fallback.
+      const verifiedTagMatch = settings.autoBlockTagMatches
+        ? findPreparedMatchInFields(fields.tagCandidates, tagMatchers)
+        : null;
+      const tagMatch = findPreparedMatch(fields.all, tagMatchers) || verifiedTagMatch;
 
-      // Blocked words use the detected name/description plus several title-ish
-      // candidates because SpicyChat card markup changes frequently. Matching is
-      // punctuation/spacing tolerant, and multi-word name entries can also match
-      // the same name tokens in a different order (for example Ghost Simon ->
-      // Simon “Ghost” Riley).
-      const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
-      const strictWordFields = [...fields.nameCandidates, fields.description, ...fields.descriptionCandidates].filter(Boolean);
-      const strictWordMatch = findPreparedMatchInFields(strictWordFields, wordMatchers)
-        || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
-      const wordFields = fields.nameDescriptionCandidates.length
-        ? fields.nameDescriptionCandidates
-        : [fields.title, fields.description, fields.all].filter(Boolean);
-      const wordMatch = strictWordMatch || findPreparedMatchInFields(wordFields, wordMatchers)
-        || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
-      if (wordMatch) {
-        if (strictWordMatch) DS.queueAutoBlockWordMatch?.(card, anchor, strictWordMatch);
-        return `blocked word: ${wordMatch.raw}`;
+      // When tags already hide a card, skip expensive word matching unless
+      // word auto-blocking is enabled (overlapping rules must still work).
+      let strictWordMatch = null;
+      let wordMatch = null;
+      if (!tagMatch || settings.autoBlockWordMatches) {
+        const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
+        // Persistent word blocks must match a verified name or description,
+        // not a tag badge caught by a broad fallback selector.
+        const strictWordFields = [...fields.verifiedNameCandidates, fields.description].filter(Boolean);
+        strictWordMatch = findPreparedMatchInFields(strictWordFields, wordMatchers)
+          || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers);
+        const wordFields = fields.nameDescriptionCandidates.length
+          ? fields.nameDescriptionCandidates
+          : [fields.title, fields.description, fields.all].filter(Boolean);
+        wordMatch = strictWordMatch || findPreparedMatchInFields(wordFields, wordMatchers)
+          || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
       }
+      if (tagMatch) return `blocked tag: ${tagMatch.raw}`;
+      if (wordMatch) return `blocked word: ${wordMatch.raw}`;
 
       const creatorMatch = findPreparedMatchInFields(
         fields.creatorCandidates?.length ? fields.creatorCandidates : (fields.creator ? [fields.creator] : [fields.all]),

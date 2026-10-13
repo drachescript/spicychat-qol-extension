@@ -1549,6 +1549,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     setShown(document.getElementById("ds-qol-normal-row"), showOptions || showFill, "flex");
 
+    // Available independently of normal chat-list tools, but always opt-in.
     const showChatTools = !!(onChatListPage && settings.showChatListTools);
     const showSearch = showChatTools && settings.quickPanelShowChatSearch !== false;
     const showSort = showChatTools && settings.quickPanelShowChatSort !== false;

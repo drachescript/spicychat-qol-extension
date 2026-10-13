@@ -1531,6 +1531,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return output;
   }
 
+  const STYLED_LATIN_LOOKALIKES = Object.freeze({
+    // Cyrillic letters commonly used as Latin lookalikes in stylized titles.
+    "ѕ":"s", "т":"t", "у":"y", "н":"h", "я":"r", "є":"e", "м":"m",
+    "а":"a", "е":"e", "о":"o", "р":"p", "с":"c", "і":"i", "к":"k",
+    "х":"x", "в":"b", "ԁ":"d",
+    // Greek/math confusables used alongside Cyrillic in faux-English titles.
+    "ι":"i", "ω":"w", "α":"a", "η":"n", "σ":"o", "ο":"o", "ν":"v",
+    "є":"e", "ε":"e", "ρ":"p", "υ":"u", "τ":"t", "κ":"k",
+    "∂":"d", "ℓ":"l"
+  });
+
+  function normalizeMixedScriptLatin(value) {
+    const raw = String(value || "");
+    const greek = (raw.match(/[\u0370-\u03ff]/g) || []).length;
+    const cyrillic = (raw.match(/[\u0400-\u052f]/g) || []).length;
+    const latin = (raw.match(/[A-Za-z]/g) || []).length;
+    const mathStyled = /[∂ℓ]/u.test(raw);
+    // Resist changing actual non-English descriptions: require strong mixed-
+    // script decoration instead of transliterating single-script text.
+    if ((greek < 2 || cyrillic < 2) && !(mathStyled && (greek + cyrillic) >= 3 && latin >= 3)) return raw;
+    let out = "";
+    for (const char of raw) out += STYLED_LATIN_LOOKALIKES[char] || char;
+    return out;
+  }
+
   DS.normalizeTextForMatching = function normalizeTextForMatching(value, options = {}) {
     const settings = DS.state?.settings || DS.DEFAULT_SETTINGS || {};
     const enabled = settings.textNormalizationEnabled !== false;
@@ -1556,6 +1581,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       text = normalizeMathematicalLatinFallback(text);
       text = normalizeSmallCapLatin(text);
+      text = normalizeMixedScriptLatin(text);
     }
 
     if (settings.normalizePunctuation !== false) {

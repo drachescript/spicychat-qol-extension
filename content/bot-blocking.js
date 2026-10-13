@@ -30,14 +30,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   const AUTO_BLOCK_WORD_EXCEPTIONS_KEY = "autoBlockWordExceptionsV1";
-  const AUTO_BLOCK_WORD_EXCEPTION_LIMIT = 1000;
-  const autoBlockWordQueue = [];
-  const autoBlockWordQueuedIds = new Set();
-  const autoBlockWordFailureCooldown = new Map();
-  let autoBlockWordPumpRunning = false;
-  let autoBlockWordExceptionCache = { rulesKey: "", ids: new Map() };
+  const AUTO_BLOCK_TAG_EXCEPTIONS_KEY = "autoBlockTagExceptionsV1";
+  const AUTO_BLOCK_EXCEPTION_LIMIT = 1000;
+  const autoBlockQueue = [];
+  const autoBlockQueuedIds = new Set();
+  const autoBlockFailureCooldown = new Map();
+  let autoBlockPumpRunning = false;
+  const ruleExceptionCache = {
+    word: { rulesKey: "", ids: new Map() },
+    tag: { rulesKey: "", ids: new Map() }
+  };
 
-  function blockedWordRulesKeyFromValues(values) {
+  function blockedRulesKeyFromValues(values) {
     const normalized = [...new Set((values || []).map(value => {
       let text = String(value || "").trim();
       try { text = text.normalize("NFKC"); } catch {}
@@ -52,151 +56,162 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return `${normalized.length}:${(hash >>> 0).toString(16)}`;
   }
 
-  function currentBlockedWordRulesKey() {
-    return blockedWordRulesKeyFromValues(DS.state?.settings?.blockedWords || []);
+  const ruleSpecs = {
+    word: { key: AUTO_BLOCK_WORD_EXCEPTIONS_KEY, setting: "blockedWords", enabled: "autoBlockWordMatches" },
+    tag: { key: AUTO_BLOCK_TAG_EXCEPTIONS_KEY, setting: "blockedTags", enabled: "autoBlockTagMatches" }
+  };
+  function currentRulesKey(kind) {
+    return blockedRulesKeyFromValues(DS.state?.settings?.[ruleSpecs[kind].setting] || []);
   }
-
   function normalizeExceptionEntries(value) {
     if (!value || typeof value !== "object") return new Map();
-    const source = Array.isArray(value)
-      ? value.map(id => [id, Date.now()])
-      : Object.entries(value);
+    const source = Array.isArray(value) ? value.map(id => [id, Date.now()]) : Object.entries(value);
     const entries = new Map();
     for (const [idValue, atValue] of source) {
       const id = String(idValue || "").trim().toLowerCase();
-      if (!id) continue;
-      entries.set(id, Number(atValue || 0) || Date.now());
+      if (id) entries.set(id, Number(atValue || 0) || Date.now());
     }
     return entries;
   }
-
-  async function loadAutoBlockWordExceptions() {
-    const rulesKey = currentBlockedWordRulesKey();
-    if (autoBlockWordExceptionCache.rulesKey === rulesKey) return autoBlockWordExceptionCache.ids;
-
+  async function loadRuleExceptions(kind) {
+    const spec = ruleSpecs[kind];
+    const rulesKey = currentRulesKey(kind);
+    if (ruleExceptionCache[kind].rulesKey === rulesKey) return ruleExceptionCache[kind].ids;
     let stored = null;
-    try {
-      stored = (await DS.storageGet?.([AUTO_BLOCK_WORD_EXCEPTIONS_KEY]))?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY] || null;
-    } catch {}
-
+    try { stored = (await DS.storageGet?.([spec.key]))?.[spec.key] || null; } catch {}
     const ids = stored?.rulesKey === rulesKey ? normalizeExceptionEntries(stored.ids) : new Map();
-    autoBlockWordExceptionCache = { rulesKey, ids };
-
+    ruleExceptionCache[kind] = { rulesKey, ids };
     if (stored && stored.rulesKey !== rulesKey) {
-      DS.storageSet?.({
-        [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: {} }
-      }).catch?.(() => {});
+      DS.storageSet?.({ [spec.key]: { version: 1, rulesKey, ids: {} } }).catch?.(() => {});
     }
     return ids;
   }
-
-  async function persistAutoBlockWordExceptions(rulesKey, ids) {
+  async function persistRuleExceptions(kind, ids) {
+    const rulesKey = currentRulesKey(kind);
     const trimmed = [...ids.entries()]
       .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
-      .slice(0, AUTO_BLOCK_WORD_EXCEPTION_LIMIT);
-    const next = new Map(trimmed);
-    autoBlockWordExceptionCache = { rulesKey, ids: next };
+      .slice(0, AUTO_BLOCK_EXCEPTION_LIMIT);
+    ruleExceptionCache[kind] = { rulesKey, ids: new Map(trimmed) };
     await DS.storageSet?.({
-      [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: Object.fromEntries(trimmed) }
+      [ruleSpecs[kind].key]: { version: 1, rulesKey, ids: Object.fromEntries(trimmed) }
     });
   }
 
   try {
     chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
-      if (areaName !== "local" || !changes?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY]) return;
-      const stored = changes[AUTO_BLOCK_WORD_EXCEPTIONS_KEY]?.newValue || null;
-      const rulesKey = currentBlockedWordRulesKey();
-      autoBlockWordExceptionCache = {
-        rulesKey,
-        ids: stored?.rulesKey === rulesKey ? normalizeExceptionEntries(stored.ids) : new Map()
-      };
+      if (areaName !== "local") return;
+      for (const kind of Object.keys(ruleSpecs)) {
+        const key = ruleSpecs[kind].key;
+        if (!changes?.[key]) continue;
+        const stored = changes[key]?.newValue || null;
+        const rulesKey = currentRulesKey(kind);
+        ruleExceptionCache[kind] = {
+          rulesKey,
+          ids: stored?.rulesKey === rulesKey ? normalizeExceptionEntries(stored.ids) : new Map()
+        };
+      }
     });
   } catch {}
 
+  // Keep this established entry point: Unblock buttons call it already.
+  // A manual unblock protects matching word AND tag rules independently.
   DS.rememberAutoBlockWordException = async function rememberAutoBlockWordException(idValue) {
     const id = String(idValue || "").trim().toLowerCase();
-    const rulesKey = currentBlockedWordRulesKey();
-    if (!id || !rulesKey || rulesKey.startsWith("0:")) return false;
-    try {
-      const ids = await loadAutoBlockWordExceptions();
-      ids.set(id, Date.now());
-      await persistAutoBlockWordExceptions(rulesKey, ids);
-      return true;
-    } catch {
-      return false;
+    if (!id) return false;
+    let saved = false;
+    for (const kind of Object.keys(ruleSpecs)) {
+      if (currentRulesKey(kind).startsWith("0:")) continue;
+      try {
+        const ids = await loadRuleExceptions(kind);
+        ids.set(id, Date.now());
+        await persistRuleExceptions(kind, ids);
+        saved = true;
+      } catch {}
     }
+    return saved;
   };
 
   function autoBlockFavoriteProtected(card, id) {
     const settings = DS.state?.settings || {};
     if (!settings.protectFavoritesFromBlocking) return false;
+    if (DS.isFavoriteBotsPage?.()) return true;
     if (DS.state?.favoriteBotIdSet?.has?.(id)) return true;
     return !!card?.querySelector?.("button[aria-label='unfavorite'], button[aria-label*='unfavorite' i]");
   }
 
-  async function runAutoBlockWordQueue() {
-    if (autoBlockWordPumpRunning) return;
-    autoBlockWordPumpRunning = true;
+  function autoBlockingEnabled(settings) {
+    return !!settings.enabled && !!settings.blockCards &&
+      (!!settings.autoBlockWordMatches || !!settings.autoBlockTagMatches);
+  }
+
+  async function runAutoBlockQueue() {
+    if (autoBlockPumpRunning) return;
+    autoBlockPumpRunning = true;
     try {
-      while (autoBlockWordQueue.length) {
-        const job = autoBlockWordQueue.shift();
+      while (autoBlockQueue.length) {
+        const job = autoBlockQueue.shift();
         const id = String(job?.id || "").trim().toLowerCase();
         if (!id) continue;
         try {
           const settings = DS.state?.settings || {};
-          if (!settings.enabled || !settings.blockCards || !settings.autoBlockWordMatches) continue;
+          if (!autoBlockingEnabled(settings)) continue;
           if (DS.state?.blockedBotIdSet?.has?.(id)) continue;
-          if (currentBlockedWordRulesKey() !== job.rulesKey) continue;
-          if (autoBlockFavoriteProtected(job.card, id)) continue;
-          if (DS.isMyCreationsPage?.()) continue;
-
-          const exceptions = await loadAutoBlockWordExceptions();
-          if (exceptions.has(id)) continue;
+          if (autoBlockFavoriteProtected(job.card, id) || DS.isMyCreationsPage?.()) continue;
+          let word = !!job.word && !!settings.autoBlockWordMatches && currentRulesKey("word") === job.wordRulesKey;
+          let tag = !!job.tag && !!settings.autoBlockTagMatches && currentRulesKey("tag") === job.tagRulesKey;
+          // Treat each rule exemption separately: disabling an exempt word
+          // should not suppress an independently eligible tag rule.
+          if (word && (await loadRuleExceptions("word")).has(id)) word = false;
+          if (tag && (await loadRuleExceptions("tag")).has(id)) tag = false;
+          if (!word && !tag) continue;
 
           const result = await DS.blockBotFromCard?.(job.card, job.anchor, {
-            source: "blocked-word",
-            blockedWord: job.blockedWord || "",
-            blockedWordRulesKey: job.rulesKey
+            source: word ? "blocked-word" : "blocked-tag",
+            blockedWord: word ? job.word : "",
+            blockedTag: tag ? job.tag : "",
+            blockedWordRulesKey: word ? job.wordRulesKey : "",
+            blockedTagRulesKey: tag ? job.tagRulesKey : "",
+            autoBlockedByWord: word,
+            autoBlockedByTag: tag
           });
-          if (result?.ok || DS.state?.blockedBotIdSet?.has?.(id)) {
+          if (result?.ok) {
             const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
-            perf.autoBlockedWordBots = Number(perf.autoBlockedWordBots || 0) + 1;
+            if (word) perf.autoBlockedWordBots = Number(perf.autoBlockedWordBots || 0) + 1;
+            if (tag) perf.autoBlockedTagBots = Number(perf.autoBlockedTagBots || 0) + 1;
           } else {
-            autoBlockWordFailureCooldown.set(id, Date.now() + 30000);
+            autoBlockFailureCooldown.set(id, Date.now() + 30000);
           }
         } catch {
-          autoBlockWordFailureCooldown.set(id, Date.now() + 30000);
+          autoBlockFailureCooldown.set(id, Date.now() + 30000);
         } finally {
-          autoBlockWordQueuedIds.delete(id);
+          autoBlockQueuedIds.delete(id);
         }
-        if (autoBlockWordQueue.length) await new Promise(resolve => setTimeout(resolve, 120));
+        if (autoBlockQueue.length) await new Promise(resolve => setTimeout(resolve, 120));
       }
     } finally {
-      autoBlockWordPumpRunning = false;
+      autoBlockPumpRunning = false;
     }
   }
 
-  DS.queueAutoBlockWordMatch = function queueAutoBlockWordMatch(card, anchor, match = null) {
+  DS.queueAutoBlockRuleMatch = function queueAutoBlockRuleMatch(card, anchor, matches = {}) {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !settings.blockCards || !settings.autoBlockWordMatches) return false;
+    if (!autoBlockingEnabled(settings)) return false;
+    const word = settings.autoBlockWordMatches ? String(matches.word?.raw || "").trim().slice(0, 240) : "";
+    const tag = settings.autoBlockTagMatches ? String(matches.tag?.raw || "").trim().slice(0, 240) : "";
+    if (!word && !tag) return false;
     const id = String(DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref?.(anchor?.href || "") || "").trim().toLowerCase();
-    if (!id || DS.state?.blockedBotIdSet?.has?.(id) || autoBlockWordQueuedIds.has(id)) return false;
-    if (Number(autoBlockWordFailureCooldown.get(id) || 0) > Date.now()) return false;
-    if (autoBlockFavoriteProtected(card, id)) return false;
-    if (DS.isMyCreationsPage?.()) return false;
-
-    const rulesKey = currentBlockedWordRulesKey();
-    if (!rulesKey || rulesKey.startsWith("0:")) return false;
-    autoBlockWordQueuedIds.add(id);
-    autoBlockWordQueue.push({
-      id,
-      card,
-      anchor,
-      blockedWord: String(match?.raw || "").trim().slice(0, 240),
-      rulesKey
-    });
-    queueMicrotask(() => { runAutoBlockWordQueue().catch(() => {}); });
+    if (!id || DS.state?.blockedBotIdSet?.has?.(id) || autoBlockQueuedIds.has(id)) return false;
+    if (Number(autoBlockFailureCooldown.get(id) || 0) > Date.now()) return false;
+    if (autoBlockFavoriteProtected(card, id) || DS.isMyCreationsPage?.()) return false;
+    autoBlockQueuedIds.add(id);
+    autoBlockQueue.push({ id, card, anchor, word, tag, wordRulesKey: currentRulesKey("word"), tagRulesKey: currentRulesKey("tag") });
+    queueMicrotask(() => { runAutoBlockQueue().catch(() => {}); });
     return true;
+  };
+
+  // Compatibility for code that calls the old word-only queue.
+  DS.queueAutoBlockWordMatch = function queueAutoBlockWordMatch(card, anchor, match = null) {
+    return DS.queueAutoBlockRuleMatch(card, anchor, { word: match });
   };
 
   function visibleElement(el) {
@@ -489,6 +504,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return true;
     };
 
+    // Native SpicyChat listing cards put the chatbot name in a chat-with
+    // aria-label and image alt. Their first <p> is sometimes the description,
+    // which caused the display hide-rule to find a blocked name while the
+    // verified-name auto-block check received the description instead.
+    const nativeCardLink = card?.querySelector?.(
+      "a[aria-label^='chat-with-'][href*='/chat/'], a[aria-label^='chat-with-'][href*='/chatbot/']"
+    );
+    if (nativeCardLink) {
+      const names = [
+        String(nativeCardLink.getAttribute('aria-label') || '').replace(/^chat-with-/i, ''),
+        nativeCardLink.querySelector('img[alt]')?.getAttribute('alt') || ''
+      ];
+      for (const candidate of names) {
+        if (isUsableTitle(candidate)) return candidate.replace(/\s+/g, ' ').trim();
+      }
+    }
+
     // Prefer heading/title-ish text first, then fall back to the old broad scan.
     const prioritySelectors = [
       "h1, h2, h3",
@@ -630,10 +662,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     blockedBots.meta[id] = {
       ...(blockedBots.meta[id] || {}),
       ...DS.makeBotMeta({ id, card, anchor }),
-      ...(options?.source === "blocked-word" ? {
-        autoBlockedByWord: true,
+      ...(["blocked-word", "blocked-tag"].includes(options?.source) ? {
+        autoBlockedByWord: options.autoBlockedByWord === true || options.source === "blocked-word",
+        autoBlockedByTag: options.autoBlockedByTag === true,
         autoBlockedWord: String(options.blockedWord || "").slice(0, 240),
+        autoBlockedTag: String(options.blockedTag || "").slice(0, 240),
         autoBlockedWordRulesKey: String(options.blockedWordRulesKey || "").slice(0, 80),
+        autoBlockedTagRulesKey: String(options.blockedTagRulesKey || "").slice(0, 80),
         autoBlockedAt: Date.now()
       } : {})
     };

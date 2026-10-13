@@ -1963,3 +1963,46 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 .first-run-setup-grid button span{font-size:12px;opacity:.78;line-height:1.35}
 .first-run-setup-footer{margin-top:14px}
 @media (max-width:620px){.first-run-setup-grid{grid-template-columns:1fr}}
+
+/* Device-specific cloud sync scopes. */
+#accountSyncDevicePreferences { margin-top: 12px; }
+.account-sync-list-modes { display:grid;grid-template-columns: repeat(auto-fit,minmax(195px,1fr));gap:10px; }
+.account-sync-list-modes label { display:flex;flex-direction:column;gap:5px; }
+.account-sync-selectable-settings { max-height: 240px; overflow:auto; border:1px solid var(--ds-border,#555);padding:8px;border-radius:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:4px; }
+.account-sync-setting-entry {word-break:break-word;font-size:.85em;}
+.account-sync-setting-entry[hidden] {display:none!important;}
+
+/* QoL 45: Bot Status summary must not compete with long select/search controls. */
+#botAvailabilityCard .bot-availability-controls {
+  grid-template-columns: repeat(2,minmax(180px,1fr));
+  align-items: stretch;
+}
+#botAvailabilityCard .bot-availability-controls:first-of-type {
+  grid-template-columns: minmax(200px,1.1fr) minmax(180px,1fr) minmax(240px,1.5fr);
+}
+#botAvailabilityCard #botAvailabilitySummary {
+  grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere;
+  line-height: 1.55; justify-self: stretch; padding: 7px 10px;
+  border: 1px solid rgba(148,163,184,.26); border-radius: 8px;
+}
+#botAvailabilityCard #botAvailabilitySearch { width: 100%; min-width: 0; }
+#botAvailabilityCard #botAvailabilityUnavailableSummary,
+#botAvailabilityCard #botStatusScanEstimate { grid-column: 1 / -1; line-height: 1.6; }
+#botAvailabilityCard .bot-availability-controls label { min-width: 0; }
+#botAvailabilityCard .bot-availability-controls label select { width: 100%; }
+#accountSyncSettingChoices { margin: 8px 0 16px; padding: 11px; }
+#accountSyncSettingChoices > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+#accountSyncSettingSelection:not([hidden]) { margin-top: 12px; }
+#accountSyncSearchSetting { box-sizing: border-box; width: 100%; margin-bottom: 10px; }
+#accountSyncSettingsChecklist { display: grid; grid-template-columns: repeat(auto-fit,minmax(245px,1fr)); max-height: min(440px,55vh); gap: 9px 14px; padding: 12px; }
+#accountSyncSettingsChecklist .account-sync-setting-entry { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.5; min-width: 0; }
+#accountSyncSettingsChecklist .account-sync-setting-entry input { flex: 0 0 auto; }
+@media(max-width:800px) {
+ #botAvailabilityCard .bot-availability-controls, #botAvailabilityCard .bot-availability-controls:first-of-type { grid-template-columns: minmax(0,1fr); }
+ #accountSyncSettingsChecklist { grid-template-columns: minmax(0,1fr); }
+}
+
+#accountSyncDevicePreferences .account-sync-list-modes { grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 12px; }
+#accountSyncDevicePreferences .account-sync-list-modes label { font-size: 13px; min-width: 0; }
+#accountSyncDevicePreferences .account-sync-list-modes select { width: 100%; min-width: 0; }
+#accountSyncDevicePreferences .account-sync-selectable-settings .account-sync-setting-entry { font-size: 13px; }

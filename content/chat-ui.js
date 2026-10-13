@@ -25,6 +25,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let oocHealthConfirmTimer = 0;
 
   function restoreOocShortcuts() {
+    // Do not let a health check run after the user has turned OOC off.
+    clearTimeout(oocHealthTimer);
+    clearTimeout(oocHealthConfirmTimer);
+    oocHealthTimer = 0;
+    oocHealthConfirmTimer = 0;
     DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
     DS.qsa(`.${OOC_SHORTCUT_CLASS}`).forEach(button => button.remove());
 
@@ -754,17 +759,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // SpicyChat temporarily disables its native Image control while a reply is
     // being generated. OOC is cloned from that control for native sizing, but
     // transient disabled state must never become permanent on the QoL clone.
-    button.removeAttribute("disabled");
-    button.removeAttribute("aria-disabled");
-    button.removeAttribute("data-disabled");
-    button.removeAttribute("data-ds-hidden");
-    button.removeAttribute("data-ds-reason");
-    button.classList.remove("ds-hidden", "opacity-60", "cursor-not-allowed", "pointer-events-none");
-    button.classList.add("cursor-pointer");
-    button.style.removeProperty("display");
-    button.style.removeProperty("pointer-events");
-    button.style.removeProperty("opacity");
-    button.type = "button";
+    // Avoid writing unchanged attributes/classes. DOMTokenList.add/remove can
+    // emit a class mutation even when the requested token is already correct;
+    // the chat observer would then wake up to inspect our own OOC control.
+    for (const name of ["disabled", "aria-disabled", "data-disabled", "data-ds-hidden", "data-ds-reason"]) {
+      if (button.hasAttribute(name)) button.removeAttribute(name);
+    }
+    for (const name of ["ds-hidden", "opacity-60", "cursor-not-allowed", "pointer-events-none"]) {
+      if (button.classList.contains(name)) button.classList.remove(name);
+    }
+    if (!button.classList.contains("cursor-pointer")) button.classList.add("cursor-pointer");
+    for (const property of ["display", "pointer-events", "opacity"]) {
+      if (button.style.getPropertyValue(property)) button.style.removeProperty(property);
+    }
+    if (button.type !== "button") button.type = "button";
 
     if (button.getAttribute("tabindex") === "-1") button.removeAttribute("tabindex");
     return button;
@@ -955,15 +963,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!wrapper || wrapper.closest("#ds-qol-panel")) return;
 
       if (replaceImage) {
-        wrapper.dataset.dsOocImageWrapper = "1";
+        DS.setDatasetIfChanged?.(wrapper, "dsOocImageWrapper", "1");
 
         if (wrapper.dataset.dsOocOriginalTooltip === undefined) {
           wrapper.dataset.dsOocOriginalTooltip = wrapper.getAttribute("data-tooltip-content") || "";
         }
 
-        wrapper.setAttribute("data-tooltip-content", "OOC");
-        original.dataset.dsOocOriginalImage = "1";
-        original.style.setProperty("display", "none", "important");
+        DS.setAttributeIfChanged?.(wrapper, "data-tooltip-content", "OOC");
+        DS.setDatasetIfChanged?.(original, "dsOocOriginalImage", "1");
+        if (original.style.getPropertyValue("display") !== "none" ||
+            original.style.getPropertyPriority("display") !== "important") {
+          original.style.setProperty("display", "none", "important");
+        }
 
         const existingShortcut = wrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`);
         if (!existingShortcut) {
@@ -971,7 +982,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         } else {
           // Repair buttons created from a transiently-disabled native Image
           // control without requiring the user to reload the conversation.
-          existingShortcut.removeAttribute("data-ds-ooc-original-image");
+          if (existingShortcut.hasAttribute("data-ds-ooc-original-image")) {
+            existingShortcut.removeAttribute("data-ds-ooc-original-image");
+          }
           normalizeOocShortcut(existingShortcut);
           bindOocShortcut(existingShortcut);
         }
@@ -979,8 +992,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
-      original.style.removeProperty("display");
-      original.removeAttribute("data-ds-ooc-original-image");
+      if (original.style.getPropertyValue("display")) original.style.removeProperty("display");
+      if (original.hasAttribute("data-ds-ooc-original-image")) original.removeAttribute("data-ds-ooc-original-image");
 
       const controlRow = wrapper.parentElement;
       if (!controlRow) return;
@@ -1307,7 +1320,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.restoreChatUiReason("chat-ui:image-tooltip");
         ensureOocShortcut(settings.hideChatImageButton);
       } else {
-        restoreOocShortcuts();
+        // The mode-change branch above already restored removed OOC controls.
+        // Only inspect again if a stale shortcut is actually present.
+        if (DS.qs(`.${OOC_SHORTCUT_CLASS}, .${OOC_WRAPPER_CLASS}, [data-ds-ooc-image-wrapper='1']`)) {
+          restoreOocShortcuts();
+        }
         DS.state.oocShortcutMode = "off";
 
         if (settings.hideChatImageButton) {

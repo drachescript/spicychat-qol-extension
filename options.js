@@ -57,6 +57,7 @@ const QUICK_DISLIKE_BULK_STATE_KEY = "quickDislikeBulkStateV1";
 const QUICK_LESS_LIKE_HISTORY_KEY = "quickLessLikeHistoryV1";
 const QUICK_LESS_LIKE_BULK_STATE_KEY = "quickLessLikeBulkStateV1";
 const AUTO_BLOCK_WORD_EXCEPTIONS_KEY = "autoBlockWordExceptionsV1";
+const AUTO_BLOCK_TAG_EXCEPTIONS_KEY = "autoBlockTagExceptionsV1";
 const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
 const GRANULAR_SETTINGS_INDEX_KEY = "dsSettingsIndexV1";
 const GRANULAR_SETTINGS_MIGRATION_KEY = "dsGranularSettingsV1";
@@ -1297,6 +1298,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "hideOpenedChats",
   "compactAfterHiding",
   "showQuickPanel",
+  "enableChatIndex",
+  "chatIndexStandaloneLauncher",
   "popupShowOpenedCount",
   "popupShowBlockedCount",
   "popupShowStorageDetails",
@@ -1785,23 +1788,33 @@ function blockedWordRulesKeyFromValues(values) {
   return `${normalized.length}:${(hash >>> 0).toString(16)}`;
 }
 
+// An explicit unblock exempts the ID from both matching auto-block rule sets.
+// Keep the original name for existing removal actions in this Settings page.
 async function rememberAutoBlockWordExceptions(ids) {
   const cleanIds = [...new Set((ids || []).map(id => String(id || "").trim().toLowerCase()).filter(Boolean))];
   if (!cleanIds.length) return;
-  const rulesKey = blockedWordRulesKeyFromValues(linesToArray(value("blockedWords", "")));
-  if (!rulesKey || rulesKey.startsWith("0:")) return;
   try {
-    const result = await storageGet([AUTO_BLOCK_WORD_EXCEPTIONS_KEY]);
-    const stored = result?.[AUTO_BLOCK_WORD_EXCEPTIONS_KEY];
-    const entries = stored?.rulesKey === rulesKey && stored?.ids && typeof stored.ids === "object" && !Array.isArray(stored.ids)
-      ? { ...stored.ids }
-      : {};
-    const now = Date.now();
-    cleanIds.forEach(id => { entries[id] = now; });
-    const trimmed = Object.fromEntries(Object.entries(entries)
-      .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
-      .slice(0, 1000));
-    await storageSet({ [AUTO_BLOCK_WORD_EXCEPTIONS_KEY]: { version: 1, rulesKey, ids: trimmed } });
+    const specs = [
+      [AUTO_BLOCK_WORD_EXCEPTIONS_KEY, linesToArray(value("blockedWords", ""))],
+      [AUTO_BLOCK_TAG_EXCEPTIONS_KEY, linesToArray(value("blockedTags", ""))]
+    ];
+    const stored = await storageGet(specs.map(([key]) => key));
+    const payload = {};
+    for (const [key, rules] of specs) {
+      const rulesKey = blockedWordRulesKeyFromValues(rules);
+      if (rulesKey.startsWith("0:")) continue;
+      const previous = stored?.[key];
+      const entries = previous?.rulesKey === rulesKey && previous?.ids && typeof previous.ids === "object" && !Array.isArray(previous.ids)
+        ? { ...previous.ids }
+        : {};
+      const now = Date.now();
+      cleanIds.forEach(id => { entries[id] = now; });
+      const trimmed = Object.fromEntries(Object.entries(entries)
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+        .slice(0, 1000));
+      payload[key] = { version: 1, rulesKey, ids: trimmed };
+    }
+    if (Object.keys(payload).length) await storageSet(payload);
   } catch {}
 }
 
@@ -2462,6 +2475,7 @@ async function ensureBlockingDataLoaded() {
     const result = await storageGet(["settings", ...BLOCKING_DATA_KEYS]);
     const settings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
     blockedState = normalizeBotStore(result[BLOCKED_BOTS_KEY]);
+    renderAutoBlockMatchCounters();
     blockedState.ids = uniqueClean([...(settings.blockedBotIds || []), ...blockedState.ids]);
     blockedState.names = uniqueClean([...(settings.blockedBotNames || []), ...blockedState.names]);
     notInterestedState = normalizeBotStore(result[NOT_INTERESTED_KEY]);
@@ -2762,7 +2776,15 @@ function setActiveTab(tabName) {
   const footer = $("settingsFooter");
   if (footer) footer.classList.toggle("hidden", tabName === "help" || tabName === "changelog");
 
-  sessionStorage.setItem("spicychatQolOptionsTab", tabName);
+  try { sessionStorage.setItem("spicychatQolOptionsTab", tabName); } catch {}
+  try { localStorage.setItem("spicychatQolLastOptionsTabV1", tabName); } catch {}
+  // The Settings launcher opens options.html#general. Keep the hash in step
+  // with the selected section so refreshing does not force General again.
+  try {
+    if (location.hash !== `#${tabName}`) {
+      history.replaceState(history.state, "", `${location.pathname}${location.search}#${tabName}`);
+    }
+  } catch {}
 
   // Lightweight pages can become usable before the large saved-data load is
   // finished. Heavy managers render only after their tab is actually opened.
@@ -2816,10 +2838,17 @@ function setupTabs() {
     });
   });
 
-  const savedTab = sessionStorage.getItem("spicychatQolOptionsTab");
+  let savedTab = "";
+  let persistentTab = "";
+  try { savedTab = sessionStorage.getItem("spicychatQolOptionsTab") || ""; } catch {}
+  try { persistentTab = localStorage.getItem("spicychatQolLastOptionsTabV1") || ""; } catch {}
   const hashTab = String(location.hash || "").replace(/^#/, "");
   const validTabs = new Set([...document.querySelectorAll(".tab-button")].map(button => button.dataset.tab));
-  setActiveTab(validTabs.has(hashTab) ? hashTab : (validTabs.has(savedTab) ? savedTab : "general"));
+  const preferredTabs = hashTab && hashTab !== "general"
+    ? [hashTab, savedTab, persistentTab, "general"]
+    : [savedTab, persistentTab, hashTab, "general"];
+  const targetTab = preferredTabs.find(tab => validTabs.has(tab)) || "general";
+  setActiveTab(targetTab);
 }
 
 
@@ -8714,12 +8743,42 @@ function sortBotStatusRefreshQueue(entries, availability, archives) {
   });
 }
 
+const BOT_STATUS_PAUSED_QUEUE_KEY = "botStatusPausedQueueV1";
+const BOT_STATUS_ACCESS_FAILURE_PAUSE_AT = 3;
+function isBotStatusAccessFailure(result) {
+  if (!result || result.status !== "unknown") return false;
+  const http = Number(result.httpStatus || 0);
+  if (http === 401) return true;
+  const reason = String(result.reason || "");
+  return /\b(?:cors|unauthori[sz]ed|expired token|invalid token|401|login required|authentication was not ready|failed to fetch|networkerror|network error|network request failed|ERR_BLOCKED_BY_CLIENT)\b/i.test(reason);
+}
+async function botStatusPausedQueue() {
+  try {
+    const value = (await storageGet([BOT_STATUS_PAUSED_QUEUE_KEY]))?.[BOT_STATUS_PAUSED_QUEUE_KEY];
+    return value && Array.isArray(value.ids) ? value : null;
+  } catch { return null; }
+}
+async function refreshBotStatusPauseButton() {
+  const button = $("resumePausedBotAvailability");
+  if (!button) return;
+  const state = await botStatusPausedQueue();
+  const count = (state?.ids || []).length;
+  button.disabled = botAvailabilityScanRunning || !count;
+  button.hidden = !count;
+  button.textContent = count ? `Resume paused scan (${count})` : "Resume paused scan";
+}
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
   if (botAvailabilityScanRunning) return;
-  const requestedScope = String($("botAvailabilityScope")?.value || "all");
-  const mode = options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all");
+  const pausedQueue = options?.resume ? await botStatusPausedQueue() : null;
+  if (options?.resume && !(pausedQueue?.ids?.length)) {
+    showSettingsToast("No paused Bot Status scan was saved.");
+    await refreshBotStatusPauseButton();
+    return;
+  }
+  const requestedScope = options?.resume ? String(pausedQueue.scope || "all") : String($("botAvailabilityScope")?.value || "all");
+  const mode = options?.resume ? String(pausedQueue.mode || "all") : (options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all"));
   const scope = mode === "archived" ? "archived" : mode === "outside" ? "all" : requestedScope;
   const existingAvailability = normalizeBotAvailability(botAvailabilityState).meta;
   const archives = normalizeBotArchive(botArchiveState).meta;
@@ -8756,10 +8815,17 @@ async function runBotAvailabilityScan(options = {}) {
       ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
       : allEntries;
   entries = sortBotStatusRefreshQueue(entries, existingAvailability, archives);
+  if (options?.resume) {
+    const pending = new Set(pausedQueue.ids.filter(validBotId));
+    const order = new Map(pausedQueue.ids.map((id, position) => [id, position]));
+    entries = allEntries.filter(entry => pending.has(entry.id))
+      .sort((a,b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+  }
   const totalCandidates = entries.length;
   const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
   const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
   const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;
+  const omittedByBotLimit = maxBots && entries.length > maxBots ? entries.slice(maxBots).map(item => item.id) : [];
   if (maxBots && entries.length > maxBots) entries = entries.slice(0, maxBots);
 
   const status = $("botAvailabilityScanStatus");
@@ -8835,6 +8901,10 @@ async function runBotAvailabilityScan(options = {}) {
   let scanLastCheckAt = 0;
   let lastProgressPaintAt = 0;
   let adaptiveDelay = botStatusScanDelayMs();
+  let consecutiveAccessFailures = 0;
+  const deferredAccessIds = [];
+  let accessPauseTriggered = false;
+  let lastScanIndex = 0;
   const runStartedAt = Date.now();
   const runDeadline = maximumRuntimeMs ? runStartedAt + maximumRuntimeMs : Infinity;
 
@@ -8862,7 +8932,9 @@ async function runBotAvailabilityScan(options = {}) {
     const metadataIndex = buildBotStatusMetadataScanIndex();
     scanStartedAt = Date.now();
 
-    for (const entry of entries) {
+    for (let scanIndex = 0; scanIndex < entries.length; scanIndex += 1) {
+      lastScanIndex = scanIndex;
+      const entry = entries[scanIndex];
       if (botAvailabilityStopRequested) break;
       if (Date.now() >= runDeadline) { timeLimitReached = true; break; }
       const now = Date.now();
@@ -8882,6 +8954,26 @@ async function runBotAvailabilityScan(options = {}) {
         { ...entry, ...(previous || {}), sources: uniqueClean([...(previous?.sources || []), ...(entry.sources || [])]) },
         { keepHelper: true, forceOwnHelper: true, bulkScan: true, timeoutMs: 17000 }
       );
+      if (isBotStatusAccessFailure(rawResult)) {
+        // A temporary auth/CORS outage must never replace an earlier
+        // confirmed Available/Unavailable result with an Unknown check.
+        deferredAccessIds.push(entry.id);
+        consecutiveAccessFailures += 1;
+        if (consecutiveAccessFailures >= BOT_STATUS_ACCESS_FAILURE_PAUSE_AT) {
+          const remaining = [...new Set([...deferredAccessIds, ...entries.slice(scanIndex + 1).map(item => item.id), ...omittedByBotLimit])];
+          const payload = { version: 1, mode, scope, ids: remaining, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
+          try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: payload }); }
+          catch (error) { console.warn("[SpicyChat QoL] Could not save paused Bot Status queue", error); }
+          accessPauseTriggered = true;
+          terminalMessage = `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`;
+          if (status) status.textContent = terminalMessage;
+          break;
+        }
+        if (status) status.textContent = `Temporary auth/network failure ${consecutiveAccessFailures}/${BOT_STATUS_ACCESS_FAILURE_PAUSE_AT}. Skipping ${entry.id} without changing its previous Bot Status result.`;
+        await waitForBotStatusPace(Math.max(750,botStatusScanDelayMs()));
+        continue;
+      }
+      consecutiveAccessFailures = 0;
       const result = reconcileBotUpdate(previous, rawResult);
       if (result.updateStatus === "updated" && Number(result.updateDetectedAt || 0) > Number(previous?.updateDetectedAt || 0)) changesPreserved++;
       if (result.status === "unknown") unknownCount++;
@@ -8942,6 +9034,22 @@ async function runBotAvailabilityScan(options = {}) {
       }
     }
   } finally {
+    // Partial auth failures are resumable even if later requests recover.
+    // A complete successful resumed run clears the old checkpoint.
+    if (!accessPauseTriggered) {
+      const outstanding = new Set(deferredAccessIds);
+      if (options?.resume) omittedByBotLimit.forEach(id => outstanding.add(id));
+      if ((options?.resume && timeLimitReached) || botAvailabilityStopRequested) {
+        entries.slice(lastScanIndex).forEach(entry => outstanding.add(entry.id));
+      }
+      if (outstanding.size) {
+        try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: { version: 1, mode, scope, ids: [...outstanding], updatedAt: Date.now(), reason: "Retry skipped checks" } }); }
+        catch (error) { console.warn("[SpicyChat QoL] Could not checkpoint deferred Bot Status checks", error); }
+        if (!terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} deferred due to temporary failures or a stop; use Resume paused scan.`;
+      } else if (options?.resume) {
+        try { await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: null }); } catch {}
+      }
+    }
     await releaseBotStatusHelper();
     invalidateDuplicateCache();
     if (completed > 0) {
@@ -9039,6 +9147,7 @@ async function runBotAvailabilityScan(options = {}) {
       durationMs: Date.now() - runStartedAt
     });
     botAvailabilityStopRequested = false;
+    await refreshBotStatusPauseButton();
 
     // Auto-clean only the blocked IDs touched by this scan, and only after an
     // exact remotely-preserved archive fingerprint is confirmed. Keep this as
@@ -10189,6 +10298,8 @@ function setupBotAvailabilityControls() {
   });
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
+  $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true }));
+  void refreshBotStatusPauseButton();
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
@@ -12313,6 +12424,14 @@ function optionsLooksMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(String(navigator.userAgent || ""));
 }
 
+function isRepeatedAuthOrCorsError(response) {
+  if (!response || response.ok === true) return false;
+  const codes = [response.httpStatus, response.availabilityHttpStatus, response.ratingHttpStatus].map(Number);
+  if (codes.includes(401)) return true;
+  const reason = [response.status, response.error, response.reason, response.message].filter(Boolean).join(" ");
+  return /\b(cors|unauthori[sz]ed|401|invalid token|expired token|failed to fetch|networkerror|network error|network request failed)\b/i.test(reason);
+}
+
 function quickDislikeResponseIsTransient(response) {
   const status = String(response?.status || (response ? "failed" : "worker-error"));
   return !response?.ok && BULK_DISLIKE_TRANSIENT_STATUSES.has(status);
@@ -12427,6 +12546,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
   let failed = 0;
   let processed = 0;
   let consecutiveWorkerFailures = 0;
+  let consecutiveAccessFailures = 0;
   let autoPausedAfterFailures = false;
   const failedIds = [];
   let candidates = [];
@@ -12520,6 +12640,20 @@ async function runBlockedBulkDislike(mode = "remaining") {
         break;
       }
 
+      if (isRepeatedAuthOrCorsError(response)) {
+        consecutiveAccessFailures += 1;
+        if (consecutiveAccessFailures >= BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD) {
+          autoPausedAfterFailures = true;
+          blockedBulkDislikeStopRequested = true;
+          await persistQuickDislikeBulkState({
+            ...quickDislikeBulkState, status: "paused", currentId: "",
+            pendingIds: candidates.slice(index), runId, stopRequested: true
+          });
+          updateBlockedDislikeStatus("Bulk Dislike paused after 3 consecutive 401/CORS errors. The remaining queue is saved for Resume.");
+          break;
+        }
+      } else consecutiveAccessFailures = 0;
+
       const remembered = applyQuickDislikeResponseToLocalHistory(id, name, response);
       const status = response?.status === "already-handled" ? response?.rememberedStatus : response?.status;
       if (remembered && status === "disliked") disliked += 1;
@@ -12589,7 +12723,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
 
     if (candidates.length) {
       showSettingsToast(autoPausedAfterFailures
-        ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} helper failures in a row. The remaining bots were kept for Resume.`
+        ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive failures (including 401/CORS). Remaining bots were kept for Resume.`
         : stopped
           ? `Bulk Dislike stopped. ${disliked} disliked, ${alreadyDisliked} already disliked, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`
           : `Bulk Dislike finished. ${disliked} disliked, ${alreadyDisliked} already disliked, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
@@ -13038,6 +13172,7 @@ async function runBlockedBulkLessLike(mode = "remaining") {
   let failed = 0;
   let processed = 0;
   let consecutiveWorkerFailures = 0;
+  let consecutiveAccessFailures = 0;
   let autoPausedAfterFailures = false;
   const failedIds = [];
   const setFailure = (id, response) => {
@@ -13253,6 +13388,17 @@ async function runBlockedBulkLessLike(mode = "remaining") {
         bulkRunId: runId,
         jobId
       }, name || id, pacing, stats);
+
+      if (isRepeatedAuthOrCorsError(response)) {
+        consecutiveAccessFailures += 1;
+        if (consecutiveAccessFailures >= BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD) {
+          blockedBulkLessLikeStopRequested = true;
+          autoPausedAfterFailures = true;
+          await checkpoint({ force: true, status: "paused", currentId: "", nextIndex: index, stopRequested: true });
+          updateBlockedLessLikeStatus("Less Like paused after 3 consecutive 401/CORS errors. The current item and remaining queue were preserved for Resume.");
+          break;
+        }
+      } else consecutiveAccessFailures = 0;
 
       if (["recommendation-worker-closed", "recommendation-worker-not-ready", "recommendation-worker-wrong-page", "recommendation-worker-navigation-failed", "recommendation-worker-create-failed", "recommendation-worker-error"].includes(String(response?.status || ""))) {
         blockedBulkLessLikeStopRequested = true;
@@ -13474,7 +13620,7 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     else updateBlockedLessLikeStatus();
     if (candidates.length) {
       showSettingsToast(autoPausedAfterFailures
-        ? `Stop recommending paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} Less Like failures in a row. The remaining bots were kept for Resume.`
+        ? `Stop recommending paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive transient failures (including authentication/CORS). Remaining bots were kept for Resume.`
         : stopped
           ? `Stop recommending stopped. ${updated} sent, ${unavailable} unavailable, ${failed} failed.`
           : `Stop recommending finished. ${updated} sent, ${unavailable} unavailable, ${failed} failed.`);
@@ -13638,7 +13784,32 @@ function botManagerCardElement(entry, kind) {
   return card;
 }
 
+function renderAutoBlockMatchCounters() {
+  const label = $("autoBlockMatchCounters");
+  if (!label) return;
+  if (!blockingDataLoaded && !(blockedState?.ids || []).length) {
+    label.textContent = "Automatically blocked in the current Blocked bots list: open Discovery & Filters to load counts.";
+    return;
+  }
+  let words = 0;
+  let tags = 0;
+  let both = 0;
+  const meta = blockedState?.meta || {};
+  // Count only the IDs still blocked, not the entire history of ever-seen bots.
+  for (const id of new Set(blockedState?.ids || [])) {
+    const entry = meta[id];
+    if (!entry) continue;
+    const word = entry.autoBlockedByWord === true;
+    const tag = entry.autoBlockedByTag === true;
+    if (word) words++;
+    if (tag) tags++;
+    if (word && tag) both++;
+  }
+  label.textContent = `Automatically blocked in the current Blocked bots list: Words ${words} · Tags ${tags} · Both ${both}`;
+}
+
 function renderBotManager(kind) {
+  if (kind === "blocked") renderAutoBlockMatchCounters();
   refreshBotManagerFolderOptions(kind);
   const isBlocked = kind === "blocked";
   const host = $(managerElementId(kind, "Manager"));
@@ -14992,6 +15163,8 @@ async function load() {
   setChecked("quickPanelShowChatSort", settings.quickPanelShowChatSort !== false);
   setChecked("quickPanelShowScanVisible", settings.quickPanelShowScanVisible !== false);
   setChecked("quickPanelShowLoadAll", settings.quickPanelShowLoadAll !== false);
+  setChecked("enableChatIndex", settings.enableChatIndex === true);
+  setChecked("chatIndexStandaloneLauncher", settings.chatIndexStandaloneLauncher === true);
   setChecked("quickPanelShowOoc", settings.quickPanelShowOoc !== false);
   setChecked("quickPanelShowAutoVoice", settings.quickPanelShowAutoVoice !== false);
   setChecked("quickPanelShowAutoAsterisk", settings.quickPanelShowAutoAsterisk !== false);
@@ -15351,6 +15524,7 @@ async function load() {
 
   setChecked("blockCards", settings.blockCards);
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
+  setChecked("autoBlockTagMatches", !!settings.autoBlockTagMatches);
   setChecked("hideGroupChats", settings.hideGroupChats);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
   setChecked("enableSmartFilterPresets", !!settings.enableSmartFilterPresets);
@@ -15701,6 +15875,8 @@ function readSettingsFromPage() {
     quickPanelShowChatSort: checked("quickPanelShowChatSort", true),
     quickPanelShowScanVisible: checked("quickPanelShowScanVisible", true),
     quickPanelShowLoadAll: checked("quickPanelShowLoadAll", true),
+    enableChatIndex: checked("enableChatIndex"),
+    chatIndexStandaloneLauncher: checked("chatIndexStandaloneLauncher"),
     quickPanelShowOoc: checked("quickPanelShowOoc", true),
     quickPanelShowAutoVoice: checked("quickPanelShowAutoVoice", true),
     quickPanelShowAutoAsterisk: checked("quickPanelShowAutoAsterisk", true),
@@ -16047,6 +16223,7 @@ function readSettingsFromPage() {
 
     blockCards: checked("blockCards"),
     autoBlockWordMatches: checked("autoBlockWordMatches"),
+    autoBlockTagMatches: checked("autoBlockTagMatches"),
     hideHomeForYouCards: checked("hideHomeForYouCards"),
     expandLongCardDescriptions: checked("expandLongCardDescriptions"),
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
@@ -16366,6 +16543,8 @@ function readSingleSettingFromPage(settingKey) {
     case "quickPanelShowChatSort": return (checked("quickPanelShowChatSort", true));
     case "quickPanelShowScanVisible": return (checked("quickPanelShowScanVisible", true));
     case "quickPanelShowLoadAll": return (checked("quickPanelShowLoadAll", true));
+    case "enableChatIndex": return checked("enableChatIndex");
+    case "chatIndexStandaloneLauncher": return checked("chatIndexStandaloneLauncher");
     case "quickPanelShowOoc": return (checked("quickPanelShowOoc", true));
     case "quickPanelShowAutoVoice": return (checked("quickPanelShowAutoVoice", true));
     case "quickPanelShowAutoAsterisk": return (checked("quickPanelShowAutoAsterisk", true));
@@ -16693,6 +16872,7 @@ function readSingleSettingFromPage(settingKey) {
     case "hideMainFooter2257": return (checked("hideMainFooter2257"));
     case "blockCards": return (checked("blockCards"));
     case "autoBlockWordMatches": return (checked("autoBlockWordMatches"));
+    case "autoBlockTagMatches": return (checked("autoBlockTagMatches"));
     case "hideHomeForYouCards": return (checked("hideHomeForYouCards"));
     case "expandLongCardDescriptions": return (checked("expandLongCardDescriptions"));
     case "showCardGreetingTokenInfo": return (checked("showCardGreetingTokenInfo"));
@@ -21821,7 +22001,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols"] },
   { parent: "autoFillListings", name: "Listing refill", children: ["showListingRefillButton"] },
   { parent: "showListingFilterStats", name: "Listing filter stats", children: ["showListingFilterStatsDetails"] },
-  { parent: "blockCards", name: "Blocked tag / word / creator rules", children: ["autoBlockWordMatches"] },
+  { parent: "blockCards", name: "Blocked tag / word / creator rules", children: ["autoBlockWordMatches", "autoBlockTagMatches"] },
   { parent: "showRandomChatButton", name: "Random Chat", children: ["randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites"] },
   { parent: "showChatTopBarTools", name: "Chat top-bar tools", children: ["chatTopBarInlineCreator", "hideChatTopBarRatingButton", "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell", "hideChatDropdownMemoryItem"] },
   { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview", "chatTextReplacementShowChatPresetControl"] },
@@ -22464,6 +22644,61 @@ function formatSyncTime(value) {
   catch { return "Unknown"; }
 }
 
+const ACCOUNT_SYNC_LIST_NAMES = ["blockedBots", "favoriteBots", "laterBots", "notInterestedBots", "openedChats"];
+let accountSyncSelectedPrefs = null;
+let accountSyncUserEditing = false;
+function readSyncDevicePrefsUi() {
+  const previous = accountSyncSelectedPrefs || {};
+  const mode = $("accountSyncSettingsMode")?.value || "off";
+  const limited = !!$("accountSyncLimitSettings")?.checked;
+  const allowedKeys = limited
+    ? [...document.querySelectorAll("#accountSyncSettingsChecklist input[data-setting-key]:checked")].map(el => el.dataset.settingKey).sort()
+    : null;
+  const listModes = {};
+  for (const name of ACCOUNT_SYNC_LIST_NAMES) {
+    listModes[name] = document.querySelector(`[data-sync-list="${name}"]`)?.value || "off";
+  }
+  return { ...previous, mode, allowedKeys, listModes };
+}
+function setupSyncSettingsChecklist(prefs) {
+  const root = $("accountSyncSettingsChecklist");
+  if (!root) return;
+  const index = Object.keys(DEFAULT_SETTINGS).sort();
+  const previous = new Set(Array.isArray(prefs?.allowedKeys) ? prefs.allowedKeys : index);
+  const fragment = document.createDocumentFragment();
+  for (const key of index) {
+    const label = document.createElement("label");
+    label.className = "row account-sync-setting-entry";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.settingKey = key;
+    input.checked = previous.has(key);
+    const text = document.createElement("span");
+    text.textContent = key;
+    label.append(input, text);
+    fragment.append(label);
+  }
+  root.replaceChildren(fragment);
+  root.onchange = () => { accountSyncUserEditing = true; };
+}
+function renderSyncDevicePrefs(prefs) {
+  if (!prefs || accountSyncUserEditing) return;
+  accountSyncSelectedPrefs = prefs;
+  const mode = $("accountSyncSettingsMode");
+  if (mode) mode.value = prefs.mode || "two-way";
+  const limited = $("accountSyncLimitSettings");
+  if (limited) limited.checked = Array.isArray(prefs.allowedKeys);
+  const selection = $("accountSyncSettingSelection");
+  if (selection) selection.hidden = !Array.isArray(prefs.allowedKeys);
+  if (Array.isArray(prefs.allowedKeys)) setupSyncSettingsChecklist(prefs);
+  else $("accountSyncSettingsChecklist")?.replaceChildren();
+  for (const name of ACCOUNT_SYNC_LIST_NAMES) {
+    const element = document.querySelector(`[data-sync-list="${name}"]`);
+    if (element) element.value = prefs.listModes?.[name] || "off";
+  }
+  const summary = $("accountSyncSelectionSummary");
+  if (summary) summary.textContent = `${Array.isArray(prefs.allowedKeys) ? prefs.allowedKeys.length + " selected settings" : "All syncable settings"}; saved lists use separate per-device directions.`;
+}
 let accountSyncDevicesCache = [];
 let accountSyncLastLinkCode = null;
 let accountSyncBusy = false;
@@ -22550,6 +22785,7 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
   if ($("accountSyncDeviceLabel")) $("accountSyncDeviceLabel").textContent = browserLabelForSync(env);
   if ($("accountSyncDeviceId")) $("accountSyncDeviceId").textContent = state.deviceId || "Preparing…";
   if ($("accountSyncRevision")) $("accountSyncRevision").textContent = String(state.lastRevision || 0);
+  renderSyncDevicePrefs(response?.prefs);
   if ($("accountSyncLastSync")) $("accountSyncLastSync").textContent = formatSyncTime(state.lastSyncAt);
   if ($("accountSyncApiBase")) $("accountSyncApiBase").textContent = response?.apiBase || "https://syncqol.drache.uk";
 
@@ -22600,6 +22836,33 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
 
 function setupAccountSyncFoundation() {
   refreshAccountSyncUi({ refreshDevices: true }).catch(() => {});
+  $("accountSyncDevicePreferences")?.addEventListener("change", event => {
+    if (event.target?.id === "accountSyncLimitSettings") {
+      $("accountSyncSettingSelection").hidden = !event.target.checked;
+      if (event.target.checked && !$("accountSyncSettingsChecklist")?.children.length) {
+        setupSyncSettingsChecklist(accountSyncSelectedPrefs || {});
+      }
+    }
+    accountSyncUserEditing = true;
+  });
+  $("accountSyncSearchSetting")?.addEventListener("input", event => {
+    const term = String(event.target.value || "").toLowerCase();
+    document.querySelectorAll("#accountSyncSettingsChecklist .account-sync-setting-entry").forEach(row => {
+      row.hidden = !!term && !row.textContent.toLowerCase().includes(term);
+    });
+  });
+  $("accountSyncSavePreferences")?.addEventListener("click", async () => {
+    const prefs = readSyncDevicePrefsUi();
+    setAccountSyncBusy(true, "Saving device sync choices…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_DEVICE_PREFS", prefs }, 20000);
+    setAccountSyncBusy(false);
+    if (result?.ok) {
+      accountSyncUserEditing = false;
+      accountSyncSelectedPrefs = result.prefs;
+      $("accountSyncActionStatus").textContent = "Device sync choices saved. Use Sync now to apply changes.";
+      await refreshAccountSyncUi({ refreshDevices: false });
+    } else $("accountSyncActionStatus").textContent = result?.message || "Could not save sync choices.";
+  });
 
   $("copyAccountSyncDeviceId")?.addEventListener("click", async () => {
     const state = await ensureQolSyncState();
@@ -22636,8 +22899,11 @@ function setupAccountSyncFoundation() {
       $("accountSyncActionStatus").textContent = "Enter the one-use code from a linked device first.";
       return;
     }
-    setAccountSyncBusy(true, "Linking this device and downloading account settings…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LINK_ACCOUNT", code, meta: syncDeviceMeta() }, 120000);
+    const initialChoice = $("accountSyncLinkChoice")?.value || "choose";
+    const initialOptions = initialChoice === "blocked" ? { mode: "off", blockedOnly: true } :
+      initialChoice === "settings" ? { mode: "download-only" } : { mode: "off" };
+    setAccountSyncBusy(true, "Linking this device with the selected sync options…");
+    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LINK_ACCOUNT", code, meta: syncDeviceMeta(), initialOptions }, 120000);
     setAccountSyncBusy(false);
     if (!result?.ok) {
       $("accountSyncActionStatus").textContent = result?.message || "Could not link this device.";
@@ -22649,7 +22915,10 @@ function setupAccountSyncFoundation() {
       $("accountSyncActionStatus").textContent = `Device linked, but the first settings download failed.${detail} Use Sync now to retry.`;
       showSettingsToast("Device linked; first sync needs a retry.");
     } else {
-      $("accountSyncActionStatus").textContent = "Linked. Account settings were downloaded and automatic sync is on.";
+      $("accountSyncActionStatus").textContent = initialChoice === "choose"
+        ? "Linked. Local settings were not changed. Choose which settings and lists to sync below."
+        : initialChoice === "blocked" ? "Linked. Blocked bots were merged. Other settings were left alone."
+        : "Linked. Account settings downloaded; other saved lists remain local.";
       showSettingsToast("Device linked to QoL sync.");
     }
     await refreshAccountSyncUi({ refreshDevices: true });
@@ -23251,6 +23520,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[BLOCKED_BOTS_KEY] && blockingDataLoaded) {
     blockedState = normalizeBotStore(changes[BLOCKED_BOTS_KEY].newValue);
+    renderAutoBlockMatchCounters();
     refreshBlocked = true;
     if (savedListsDataLoaded) {
       savedRefreshKinds.add("hub");

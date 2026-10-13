@@ -449,3 +449,73 @@ function applySettingsSectionDefault(settings = {}) {
   writeSettingsSectionState(normalizedState);
 }
 
+// The mobile section picker must work independently from options.js. That large
+// controller runs substantial setup before setupTabs(); if any part of it stops
+// early, the HTML still shows General but the Sections button would be inert.
+// Attach only lightweight navigation here, before options.js is evaluated.
+(function bootstrapMobileSettingsNavigation() {
+  const init = () => {
+    const toggle = document.getElementById("mobileSectionsToggle");
+    const nav = document.getElementById("optionsTabsNav");
+    if (!toggle || !nav || toggle.dataset.dsMobileSectionsReady === "1") return;
+    toggle.dataset.dsMobileSectionsReady = "1";
+
+    const close = () => {
+      nav.classList.remove("is-mobile-open");
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    // Use capture so the legacy late setupTabs() handler cannot toggle the
+    // picker a second time and close it immediately after this one opens it.
+    toggle.addEventListener("click", event => {
+      event.stopImmediatePropagation();
+      const open = nav.classList.toggle("is-mobile-open");
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }, { capture: true });
+
+    // Normal navigation remains handled by options.js. If that controller
+    // failed to finish initialization, keep the user out of a General-only UI
+    // by switching the visible section without touching saved QoL settings.
+    nav.addEventListener("click", event => {
+      const button = event.target?.closest?.(".tab-button[data-tab]");
+      if (!button || !nav.contains(button) || button.disabled || button.hidden) return;
+      const tabName = button.dataset.tab;
+      const target = [...document.querySelectorAll(".tab-page")]
+        .find(page => page.dataset.page === tabName);
+      if (target && !target.classList.contains("active")) {
+        document.querySelectorAll(".tab-button").forEach(item => {
+          item.classList.toggle("active", item === button);
+        });
+        document.querySelectorAll(".tab-page").forEach(page => {
+          page.classList.toggle("active", page === target);
+        });
+        const footer = document.getElementById("settingsFooter");
+        if (footer) footer.classList.toggle("hidden", tabName === "help" || tabName === "changelog");
+        const label = document.getElementById("mobileSectionsCurrent");
+        if (label) label.textContent = String(button.textContent || tabName).trim().replace(/\s+/g, " ");
+        try { sessionStorage.setItem("spicychatQolOptionsTab", tabName); } catch {}
+        try { localStorage.setItem("spicychatQolLastOptionsTabV1", tabName); } catch {}
+        try { history.replaceState(history.state, "", `${location.pathname}${location.search}#${tabName}`); } catch {}
+      }
+      close();
+    });
+
+    document.addEventListener("click", event => {
+      if (!nav.classList.contains("is-mobile-open")) return;
+      if (toggle.contains(event.target) || nav.contains(event.target)) return;
+      close();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || !nav.classList.contains("is-mobile-open")) return;
+      close();
+      toggle.focus();
+    });
+    try { window.matchMedia("(min-width: 721px)").addEventListener?.("change", close); } catch {}
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+})();
