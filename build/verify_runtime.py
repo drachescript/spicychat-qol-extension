@@ -90,6 +90,8 @@ def main() -> int:
         ("content/core-storage-writers.js", "content/main.js"),
         ("content/main-page-observer.js", "content/main.js"),
         ("content/main-diagnostics.js", "content/main.js"),
+        ("content/main-scheduler-utils.js", "content/main.js"),
+        ("content/main-message-mutations.js", "content/main.js"),
         ("content/main.js", "content/main-startup.js"),
     ):
         check_order(before, after, late, "Content runtime")
@@ -166,16 +168,43 @@ def main() -> int:
         ("settings/options-tab-cleanup.js", "settings/options-soundscapes.js"),
         ("settings/options-soundscapes.js", "settings/options-platform-compatibility.js"),
         ("settings/options-platform-compatibility.js", "settings/options-account-sync.js"),
-        ("settings/options-account-sync.js", "options.js"),
+        ("settings/options-account-sync.js", "settings/options-ooc.js"),
+        ("settings/options-ooc.js", "options.js"),
     ):
         check_order(before, after, options_scripts, "Settings startup")
+
+
+    # Feature-level contracts are stricter than bundle ownership. A contract may
+    # describe blocked dependencies, but every claimed asset must be real.
+    contract_dir = ROOT / "build/features"
+    for contract_file in sorted(contract_dir.glob("*.json")) if contract_dir.is_dir() else []:
+        try:
+            contract = json.loads(contract_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            ERRORS.append(f"Invalid feature contract {contract_file.name}: {exc}")
+            continue
+        feature_id = contract.get("id")
+        if contract.get("schema") != "dsq-feature/v1" or not isinstance(feature_id, str) or contract_file.stem != feature_id:
+            ERRORS.append(f"Invalid identity for feature contract {contract_file.name}")
+        for field, source in (("runtimeScripts", all_js), ("settingsScripts", options_scripts), ("cssFiles", all_css), ("backgroundServices", imports)):
+            for path in contract.get(field, []):
+                check_file(path, f"{feature_id} {field}")
+                if path not in source:
+                    ERRORS.append(f"Feature {feature_id} references {path} in {field}, but Full does not load it")
+        for group, paths in contract.get("sharedDependencies", {}).items():
+            for path in paths:
+                check_file(path, f"{feature_id} shared {group}")
+        if contract.get("customBuildStatus") not in ("blocked", "validated"):
+            ERRORS.append(f"Feature {feature_id} must declare its build readiness")
+        if contract.get("customBuildStatus") == "blocked" and not contract.get("blockers"):
+            ERRORS.append(f"Feature {feature_id} blocked without reason")
 
     if ERRORS:
         print(f"Runtime verification failed ({len(ERRORS)} issue(s)):")
         for message in ERRORS: print(" -", message)
         return 1
     print(f"Full runtime wiring passed: {len(all_js)} JS, {len(all_css)} CSS, {len(imports)} background imports, {len(bundles)} bundles.")
-    print("Custom profiles remain blocked: feature-specific Settings and shared background handlers are not yet isolated.")
+    print("Custom profiles remain blocked: shared feature lifecycles and background events still need independent validation.")
     return 0
 
 if __name__ == "__main__":

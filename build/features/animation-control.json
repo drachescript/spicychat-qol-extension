@@ -1,0 +1,36 @@
+{
+  "schema": "dsq-feature/v1",
+  "id": "animation-control",
+  "label": "Animation Control",
+  "category": "interface",
+  "requiredFeatures": [],
+  "runtimeScripts": [
+    "content/animation-control.js"
+  ],
+  "settingsScripts": [],
+  "settingKeys": [],
+  "cssFiles": [],
+  "backgroundServices": [],
+  "permissions": [],
+  "sharedDependencies": {
+    "runtime": [
+      "content/core.js",
+      "content/main.js"
+    ],
+    "settings": [
+      "options.js",
+      "options.html"
+    ],
+    "background": [
+      "background/background-events.js"
+    ]
+  },
+  "customBuildStatus": "blocked",
+  "fullRuntimeStatus": "shared-lifecycle",
+  "blockers": [
+    "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+  ],
+  "notes": [
+    "Inventory generated from the Full module graph. This is not a verified standalone feature."
+  ]
+}

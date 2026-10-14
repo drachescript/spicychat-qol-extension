@@ -19,7 +19,8 @@
     "runtimeAssets is a declaration for future build tooling; Full manifest remains the loading-order reference.",
     "CSS declarations contain ordered Full stylesheet slices. Some remaining legacy CSS is still shared and must not be omitted blindly.",
     "Background services have started being extracted; shared listeners in background-events.js and options.js are not custom-build-safe yet.",
-    "Stage 2: chat message cache lives in the Chat bundle; Settings platform compatibility and Account & Sync controllers are separate files. Full still loads all; Custom capability contracts are not yet verified."
+    "Stage 2: chat message cache lives in the Chat bundle; Settings platform compatibility and Account & Sync controllers are separate files. Full still loads all; Custom capability contracts are not yet verified.",
+    "v0.2.47 consolidated migration: 703 Settings and 277 background top-level function declarations moved into domain scripts; shared state, event routing, and feature lifecycle still need separation before arbitrary omissions."
   ],
   "bundles": {
     "core": {
@@ -50,7 +51,9 @@
         "content/tag-aliases.js",
         "content/update-toast.js",
         "content/creator-editor-privacy-guard.js",
-        "content/main-startup.js"
+        "content/main-startup.js",
+        "content/main-scheduler-utils.js",
+        "content/main-message-mutations.js"
       ]
     },
     "interface": {
@@ -125,7 +128,8 @@
         "content/selection-memory.js",
         "content/story-day-tracker.js",
         "content/text-replacements.js",
-        "content/translation.js"
+        "content/translation.js",
+        "content/chat-rulebook-metadata.js"
       ]
     },
     "chatList": {
@@ -156,6 +160,8 @@
       "files": [
         "content/bot-blocking.js",
         "content/bot-organizer.js",
+        "content/mobile-bot-organizer.js",
+        "content/mobile-listing-overflow.js",
         "content/card-token-auth-loader.js",
         "content/card-token-info.js",
         "content/card-token-main.js",
@@ -175,7 +181,8 @@
         "content/saved-lists-overlay.js",
         "content/smart-filter-presets.js",
         "content/tags-nsfw.js",
-        "content/local-tag-matching.js"
+        "content/local-tag-matching.js",
+        "content/rulebook-filter.js"
       ]
     },
     "creator": {
@@ -233,6 +240,7 @@
       "files": [
         "content/bot-archive.js",
         "content/bot-organizer.js",
+        "content/mobile-bot-organizer.js",
         "content/card-workflow.js",
         "content/creator-favorites.js",
         "content/creator-following.js",
@@ -259,10 +267,36 @@
     "background": {
       "required": [
         "background-entry.js",
+        "background/features/background-diagnostics.js",
+        "background/features/background-worker-dislike.js",
+        "background/features/background-worker-less-like.js",
+        "background/features/background-worker-bot-status.js",
+        "background/features/background-storage.js",
+        "background/features/background-browser-tabs.js",
+        "background/features/background-feedback-history.js",
+        "background/features/background-notifications.js",
+        "background/features/background-creator-watch.js",
+        "background/features/background-work-queue.js",
+        "background/features/background-diagnostic-profile.js",
+        "background/features/background-update-recovery.js",
+        "background/features/background-discovery.js",
+        "background/features/background-lorebook-export.js",
         "background.js",
         "background/background-translation.js",
         "background/background-auto-afk.js",
         "background/background-wiki-fetch.js",
+        "background/events/runtime-messages.js",
+        "background/events/alarms.js",
+        "background/events/notification-click.js",
+        "background/events/tab-activated.js",
+        "background/events/tab-updated.js",
+        "background/events/tab-created.js",
+        "background/events/window-focus.js",
+        "background/events/tab-removed.js",
+        "background/events/storage-changed.js",
+        "background/events/installed.js",
+        "background/events/startup.js",
+        "background/events/sync-bootstrap.js",
         "background/background-events.js",
         "background/bot-status-storage-cleanup.js",
         "shared/sync-service.js"
@@ -297,7 +331,37 @@
           ],
           "alwaysInFull": true
         }
-      }
+      },
+      "helperModules": [
+        "background/features/background-diagnostics.js",
+        "background/features/background-worker-dislike.js",
+        "background/features/background-worker-less-like.js",
+        "background/features/background-worker-bot-status.js",
+        "background/features/background-storage.js",
+        "background/features/background-browser-tabs.js",
+        "background/features/background-feedback-history.js",
+        "background/features/background-notifications.js",
+        "background/features/background-creator-watch.js",
+        "background/features/background-work-queue.js",
+        "background/features/background-diagnostic-profile.js",
+        "background/features/background-update-recovery.js",
+        "background/features/background-discovery.js",
+        "background/features/background-lorebook-export.js"
+      ],
+      "eventModules": [
+        "background/events/runtime-messages.js",
+        "background/events/alarms.js",
+        "background/events/notification-click.js",
+        "background/events/tab-activated.js",
+        "background/events/tab-updated.js",
+        "background/events/tab-created.js",
+        "background/events/window-focus.js",
+        "background/events/tab-removed.js",
+        "background/events/storage-changed.js",
+        "background/events/installed.js",
+        "background/events/startup.js",
+        "background/events/sync-bootstrap.js"
+      ]
     },
     "options": {
       "required": [
@@ -311,12 +375,46 @@
         "settings/options-soundscapes.js",
         "settings/options-platform-compatibility.js",
         "settings/options-account-sync.js",
+        "settings/options-ooc.js",
+        "settings/features/options-foundation.js",
+        "settings/features/options-bot-editor-snippets.js",
+        "settings/features/options-bot-archive.js",
+        "settings/features/options-lorebook-status.js",
+        "settings/features/options-bot-export.js",
+        "settings/features/options-archive-sync.js",
+        "settings/features/options-creator-backups.js",
+        "settings/features/options-bot-status.js",
+        "settings/features/options-creator-follow.js",
+        "settings/features/options-saved-store-merging.js",
+        "settings/features/options-saved-bot-managers.js",
+        "settings/features/options-bulk-feedback.js",
+        "settings/features/options-saved-bot-cards.js",
+        "settings/features/options-mini-panel.js",
+        "settings/features/options-chat-appearance.js",
+        "settings/features/options-notifications.js",
+        "settings/features/options-navigation.js",
+        "settings/features/options-settings-load.js",
+        "settings/features/options-settings-autosave.js",
+        "settings/features/options-design.js",
+        "settings/features/options-backup-export.js",
+        "settings/features/options-moderation.js",
+        "settings/features/options-backup-scopes.js",
+        "settings/features/options-backup-recovery.js",
+        "settings/features/options-backup-import.js",
+        "settings/features/options-storage-maintenance.js",
+        "settings/features/options-control-center.js",
+        "settings/features/options-diagnostics.js",
+        "settings/features/options-translation.js",
+        "settings/features/options-release-notes.js",
+        "settings/features/options-settings-controls.js",
         "options.js",
         "shared/feature-registry.js",
         "shared/platform-capabilities.js",
         "platform-capabilities.css",
         "background/bot-status-storage-cleanup.js",
-        "shared/storage-metrics.js"
+        "shared/storage-metrics.js",
+        "content/build-profile.js",
+        "settings/options-feature-availability.js"
       ]
     },
     "styles": {
@@ -335,7 +433,8 @@
       ],
       "listings": [
         "content/styles/bot-organizer.css",
-        "content/styles/pagination.css"
+        "content/styles/pagination.css",
+        "content/styles/rulebook-filter.css"
       ],
       "chatList": [
         "content/styles/chat-index.css"
@@ -359,6 +458,10 @@
       "profiles"
     ],
     "content/later-bots.js": [
+      "listings",
+      "profiles"
+    ],
+    "content/mobile-bot-organizer.js": [
       "listings",
       "profiles"
     ]

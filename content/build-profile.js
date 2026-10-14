@@ -10,7 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     id: "full",
     label: "Full",
     generated: false,
-    revision: "0.2.17-20260925-b2",
+    revision: "0.2.47-stage3",
     bundles: Object.freeze([
       "core",
       "interface",

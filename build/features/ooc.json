@@ -1,0 +1,54 @@
+{
+  "schema": "dsq-feature/v1",
+  "id": "ooc",
+  "label": "OOC presets and insert buttons",
+  "category": "chat",
+  "requiredFeatures": [],
+  "runtimeScripts": [
+    "content/ooc.js"
+  ],
+  "settingsScripts": [
+    "settings/options-ooc.js"
+  ],
+  "settingKeys": [
+    "showOocTools",
+    "replaceChatImageWithOocButton",
+    "quickPanelShowOoc",
+    "androidTopBarOoc",
+    "oocTemplates"
+  ],
+  "cssFiles": [],
+  "backgroundServices": [],
+  "permissions": [],
+  "sharedDependencies": {
+    "runtime": [
+      "content/core.js",
+      "content/chat-ui.js",
+      "content/main.js",
+      "content/quick-panel.js"
+    ],
+    "settings": [
+      "options.js",
+      "options.html"
+    ],
+    "styles": [
+      "content.css"
+    ]
+  },
+  "customBuildStatus": "blocked",
+  "blockers": [
+    "OOC activation is still routed by the shared main.js scheduler",
+    "OOC Settings markup remains embedded in the shared options.html",
+    "OOC CSS is still mixed into shared content.css",
+    "OOC chat-input shortcut is currently implemented in content/chat-ui.js"
+  ],
+  "notes": [
+    "Full build remains unchanged except for extracted Settings helper functions",
+    "Shared dependencies must be extracted or guarded before Core + OOC becomes installable"
+  ],
+  "fullRuntimeStatus": "partially-separated",
+  "fullRuntimeNotes": [
+    "OOC runtime is in content/ooc.js, while main.js and chat-ui.js still own feature work.",
+    "Existing Full on/off guards remain; true feature start/stop lifecycle is not complete."
+  ]
+}

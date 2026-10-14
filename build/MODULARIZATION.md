@@ -1,4 +1,4 @@
-# QoL modular build progress — v0.2.46
+# QoL modular build progress — Full-first architecture
 
 This is source/build documentation. The public extension remains the **Full** build.
 
@@ -51,3 +51,60 @@ These are static/simulated checks, **not** Chrome/Firefox integration evidence. 
 - `content/core-message-cache.js`: moves chat root tracking, lazy message enhancer selection, and cached text/invalidation helpers out of `content/core.js` and assigns them to the `chat` bundle (still loaded early for Full).
 - `options.html`, Full `manifest.json`, `build/modules.json`, and the runtime verifier declare explicit load order. No optional assets are removed from Full.
 - Next: move more Settings controllers and Core routing/worker dependencies into bundle-owned files, then define feature-level package contracts. Custom builds remain blocked until verified in Chrome and Firefox.
+
+## v0.2.47 — Rulebooks, scheduler helpers and feature-aware Settings
+
+- `content/main-scheduler-utils.js` extracts pure dirty-group and blocked-ID delta helpers previously embedded in main.js.
+- `content/main-message-mutations.js` extracts chat message DOM mutation classification/cache-root targeting. Main continues to own scheduling, observer registration, state and pacing.
+- `content/chat-rulebook-metadata.js` passively reads only the visible Rulebook HUD at export time. Hidden creator influence rules are never fetched; the snapshot is not a per-message history.
+- `content/rulebook-filter.js` adds optional, conservative My Creations filtering. It never equates missing badges with confirmed absence (critical for unlisted and private Rulebooks).
+- `settings/options-feature-availability.js` consumes the generated build profile to hide explicitly owned, missing-module controls while keeping their storage values. This is a first step; it does not make options.js removable by feature yet.
+- `build/plan_custom.py` performs dependency closure and reports retained/omitted CSS and background-service candidates. It is preview-only and always marks the plan not installable.
+- Offline Chromium checks cover passive HUD snapshot, 3-state filter/cleanup, and omitted-feature Settings preservation. The Full runtime verifier checks 135 scripts, 11 stylesheets, and the original five background imports.
+
+Unresolved blockers: split the 1.2 MB Settings controller by module; isolate the callers and event registration in `background/background-events.js`; validate core/main execution under missing modules; validate early injection, permissions, and generated builds in Chrome and Firefox. Custom/Lite remains non-installable until these tests pass.
+
+## v0.2.47 — modularize Full, then generate Custom from the same modules
+
+**Full is the canonical modular runtime.** A feature should be implemented and verified in a
+self-contained Full module first. Full ships/loads all feature modules, and features that are
+disabled in Settings should not schedule work, install observers/listeners/timers, or retain
+background jobs. Custom selects a subset of those same modules at package time. It does
+not maintain a separate implementation of OOC, Creator Tools, etc.
+
+Feature ownership has four dimensions: (1) content runtime and lifecycle, (2) Settings
+UI/logic/defaults, (3) CSS, and (4) background handlers + permissions. A small feature can
+be a single JS file; separate Settings/CSS/background files exist only when needed. Shared
+Core is for platform plumbing, not a dumping ground for unrelated feature logic.
+
+Each feature should eventually have a lifecycle contract such as `start`, `update`, and
+`stop` so toggling it off is a hard stop, including cancellation of pending work. No
+permanently installed global observer should do feature-specific processing for a disabled
+feature. Dependencies are explicit, and teardown must not clear user data.
+
+This stage begins with **OOC**, extracting the preset editor/normalization functions from
+`options.js` into `settings/options-ooc.js`, keeping all eight functions byte-identical.
+`content/ooc.js` was already a separate file, but OOC still depends on shared chat UI,
+`main.js` scheduler calls, embedded `options.html` markup, and shared `content.css`.
+`build/features/ooc.json` records those exact blockers; it does **not** declare OOC
+independent or a Lite build installable.
+
+`build/plan_custom.py --features ooc` now produces a feature-level dependency preview
+with `installable: false`. `build/verify_runtime.py` checks feature file declarations and
+Full load order. An optional `profile.features` can hide OOC controls from a generated
+configuration page without clearing values; normal Full Settings remain unchanged.
+
+**Next Full-first changes:** move OOC activation and cleanup out of `main.js` into an
+explicit feature lifecycle; extract feature-specific Settings markup/CSS and OOC composer
+controls; then apply that pattern to Creator Tools and other features. Once a real Full
+feature can start, stop, and reload independently, allow the Custom builder to omit it.
+Custom recipes remain blocked until the exact recipe passes Chrome/Firefox integration tests.
+
+## Consolidated Full-first source migration (v0.2.47)
+
+One coordinated pass, not separate user-facing releases per feature. Migrated **703 top-level Settings function declarations** into 31 domain files and **277 background helper functions** into 14 files.
+The Full extension loads these files in the original relative declaration order, before the shared Settings/startup controller or event handler registration.
+
+This is **source separation**, not yet verified feature independence. `options.js` still holds shared state/event binding, background-events.js still invokes shared event registration in its original order (the 32 KB message router still multiplexes optional services), and `content/main.js` still coordinates feature passes. Recipes remain blocked until per-feature lifecycle and missing-dependency checks are complete.
+
+`build/features/` now includes conservative per-module contracts for all appropriate existing content modules. A contract marked blocked must never be packaged as independently installable.

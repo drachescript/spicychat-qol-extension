@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.46",
+  "version": "0.2.47",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -106,6 +106,7 @@
         "content/bot-backup.js",
         "content/creator-workspace.js",
         "content/lorebook-filter.js",
+        "content/rulebook-filter.js",
         "content/lorebook-search-filter.js",
         "content/lorebook-tags.js",
         "content/lorebook-public-qol.js",
@@ -124,6 +125,8 @@
         "content/bot-blocking.js",
         "content/runtime-improvements.js",
         "content/bot-organizer.js",
+        "content/mobile-bot-organizer.js",
+        "content/mobile-listing-overflow.js",
         "content/card-workflow.js",
         "content/chat-tags.js",
         "content/chat-ui.js",
@@ -176,12 +179,15 @@
         "content/lorebook-entries.js",
         "content/moderation-warnings.js",
         "content/creator-editor-privacy-guard.js",
+        "content/chat-rulebook-metadata.js",
         "content/chat-export.js",
         "content/ooc.js",
         "content/generation-metadata.js",
         "content/update-toast.js",
         "content/main-page-observer.js",
         "content/main-diagnostics.js",
+        "content/main-scheduler-utils.js",
+        "content/main-message-mutations.js",
         "content/main.js",
         "content/main-startup.js"
       ],
@@ -195,7 +201,8 @@
         "content/styles/memory-vault.css",
         "content/styles/explorer-covers.css",
         "content/styles/pagination.css",
-        "content/styles/chat-index.css"
+        "content/styles/chat-index.css",
+        "content/styles/rulebook-filter.css"
       ],
       "run_at": "document_idle"
     }

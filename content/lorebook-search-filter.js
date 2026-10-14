@@ -27,6 +27,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }) || null;
   }
 
+  // SpicyChat now supports server-side "Narrow by Features" filtering. Avoid
+  // placing a duplicate local-only Lorebook checkbox beside that native UI.
+  // Match the feature heading AND the native Lorebook label, excluding QoL UI.
+  function hasNativeLorebookFilter(root) {
+    if (!root) return false;
+    const nativeHeading = Array.from(root.querySelectorAll('h2, h3, h4, legend, summary, button, span, [role="heading"]'))
+      .some(node => /^narrow by features$/i.test((node.textContent || '').trim()));
+    if (!nativeHeading) return false;
+    return Array.from(root.querySelectorAll('label, span, [role="checkbox"], button'))
+      .some(node => !node.closest(`#${FILTER_ID}`) && /^lorebook(?:\b|$)/i.test((node.textContent || node.getAttribute('aria-label') || '').trim()));
+  }
+
   function filterEnabled() {
     return !!DS.state?.settings?.showLorebookFilters;
   }
@@ -142,7 +154,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function applyCardFilter() {
     const root = listingRoot();
-    if (!root || !filterEnabled()) {
+    if (!root || !filterEnabled() || hasNativeLorebookFilter(root)) {
       removeHiddenState();
       return;
     }
@@ -283,6 +295,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    if (hasNativeLorebookFilter(root)) {
+      document.getElementById(FILTER_ID)?.remove();
+      removeHiddenState();
+      observeListing(root);
+      return;
+    }
     ensureControl();
     observeListing(root);
     applyCardFilter();

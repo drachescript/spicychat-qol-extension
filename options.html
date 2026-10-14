@@ -2200,6 +2200,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="showChatExportButton" type="checkbox"/><span>Show Copy / Export chat buttons on chat pages</span></label>
 <p class="hint">Opening Copy / Export automatically fetches the full active chat through the fast API and keeps that history out of the live page. When the chat is ready, the export window uses the complete in-memory history; a retry button only appears if the automatic fetch did not complete.</p>
 <label class="row"><input id="chatExportIncludeBotInfo" type="checkbox"/><span>Include available bot info</span></label>
+<label class="row"><input id="chatExportIncludeRulebook" type="checkbox"/><span>Include current Rulebook meter snapshot (only visible information, not full history)</span></label>
 <label class="row"><input id="chatExportIncludeOocDirectives" type="checkbox"/><span>Include OOC and directive notes</span></label>
 <label class="row"><input id="chatExportIncludeGenerationDetails" type="checkbox"/><span>Include captured timestamps/model/generation details when available</span></label>
 <label class="row"><input id="chatExportNumberMessages" type="checkbox"/><span>Number exported messages</span></label>
@@ -2461,6 +2462,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 </div>
 <label class="row"><input id="hideGroupChats" type="checkbox"/><span>Hide group chats / multiple participant bots</span></label>
 <label class="row"><input id="showLorebookFilters" type="checkbox"/><span>Add Lorebook filter/sort tools to bot listings (including Has Lorebook search)</span></label>
+<label class="row"><input id="showRulebookFilters" type="checkbox"/><span>Add Rulebook Has / confirmed No / Unknown filter to My Creations (no profile requests)</span></label>
 <label class="row"><input id="lorebookUnknownSafeFilter" type="checkbox"/><span>Separate unknown Lorebook status from confirmed No Lorebook when filtering</span></label>
 <p class="hint">Unknown means the loaded card does not prove whether a Lorebook is attached. Private/public visibility is not inferred from missing icons or denied API requests.</p>
 <p class="hint">Exact message counts replace SpicyChat's rounded values (for example 1.2k) with the exact public count already returned by SpicyChat's Typesense listing search; QoL does not make a separate per-bot request for this. Token info loads bot profile data only as cards become visible, caches the result locally, and can show Greeting, Personality, Scenario and Example Dialogue counts. Greeting stays enabled by default; the other fields are optional. Counts use ~ because tokenization can differ by model. Lorebook tools add All / Has Lorebook / No Lorebook, Lorebook-first sorting, a count, a Has Lorebook toggle in SpicyChat's normal search/filter sidebar, and a Needs Lorebook shortcut on My Creations.</p>
@@ -3164,6 +3166,37 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
+<script src="content/build-profile.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="settings/features/options-bot-editor-snippets.js"></script>
+<script src="settings/features/options-bot-archive.js"></script>
+<script src="settings/features/options-lorebook-status.js"></script>
+<script src="settings/features/options-bot-export.js"></script>
+<script src="settings/features/options-archive-sync.js"></script>
+<script src="settings/features/options-creator-backups.js"></script>
+<script src="settings/features/options-bot-status.js"></script>
+<script src="settings/features/options-creator-follow.js"></script>
+<script src="settings/features/options-saved-store-merging.js"></script>
+<script src="settings/features/options-saved-bot-managers.js"></script>
+<script src="settings/features/options-bulk-feedback.js"></script>
+<script src="settings/features/options-saved-bot-cards.js"></script>
+<script src="settings/features/options-mini-panel.js"></script>
+<script src="settings/features/options-chat-appearance.js"></script>
+<script src="settings/features/options-notifications.js"></script>
+<script src="settings/features/options-navigation.js"></script>
+<script src="settings/features/options-settings-load.js"></script>
+<script src="settings/features/options-settings-autosave.js"></script>
+<script src="settings/features/options-design.js"></script>
+<script src="settings/features/options-backup-export.js"></script>
+<script src="settings/features/options-moderation.js"></script>
+<script src="settings/features/options-backup-scopes.js"></script>
+<script src="settings/features/options-backup-recovery.js"></script>
+<script src="settings/features/options-backup-import.js"></script>
+<script src="settings/features/options-storage-maintenance.js"></script>
+<script src="settings/features/options-control-center.js"></script>
+<script src="settings/features/options-diagnostics.js"></script>
+<script src="settings/features/options-translation.js"></script>
+<script src="settings/features/options-release-notes.js"></script>
+<script src="settings/features/options-settings-controls.js"></script>
+<script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
 </body>
 </html>

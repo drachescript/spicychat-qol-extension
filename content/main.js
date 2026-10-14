@@ -4,6 +4,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   "use strict";
 
   const DS = window.DragonScriptQoL;
+  const { normalizeSlowDirtyGroups, slowDirtyHas, blockedStoreChangeStats } = DS.mainSchedulerUtils;
+  const { nodeIsOrContainsChatMessage, mutationIsMessageScoped, mutationsAreComposerOnly, mutationsAreChatLocal, mutationsAddOrRemoveMessageRoots, addedMessageRootCount, messageRootForMutationNode, collectMessageCacheMutationTargets } = DS.mainMessageMutations;
 
   let lastChatDropdownClick = 0;
   let pauseRerunsUntil = 0;
@@ -41,12 +43,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const slowDirtyGroups = new Set(["all"]);
   let slowSliceState = null;
 
-  function normalizeSlowDirtyGroups(groups) {
-    if (groups == null) return [];
-    const list = Array.isArray(groups) ? groups : [groups];
-    return [...new Set(list.map(value => String(value || "").trim()).filter(Boolean))];
-  }
-
   function markSlowDirty(groups, source = "runtime") {
     const clean = normalizeSlowDirtyGroups(groups);
     if (!clean.length) return false;
@@ -72,12 +68,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const snapshot = new Set(slowDirtyGroups);
     slowDirtyGroups.clear();
     return snapshot;
-  }
-
-  function slowDirtyHas(dirty, ...groups) {
-    if (!dirty?.size) return false;
-    if (dirty.has("all")) return true;
-    return groups.some(group => dirty.has(group));
   }
 
   async function maybeYieldSlowSlice(stepName = "slow-step") {
@@ -189,30 +179,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       style.textContent = 'button[aria-label="scroll-back-to-top"]{display:none!important;}';
       (document.head || document.documentElement).appendChild(style);
     }
-  }
-
-  function blockedStoreIdentitySet(value) {
-    const raw = value && typeof value === "object" ? value : {};
-    const result = new Set();
-    for (const id of Array.isArray(raw.ids) ? raw.ids : []) {
-      const normalized = String(id || "").trim().toLowerCase();
-      if (normalized) result.add(`id:${normalized}`);
-    }
-    for (const name of Array.isArray(raw.names) ? raw.names : []) {
-      const normalized = String(name || "").trim().toLowerCase();
-      if (normalized) result.add(`name:${normalized}`);
-    }
-    return result;
-  }
-
-  function blockedStoreChangeStats(change) {
-    const before = blockedStoreIdentitySet(change?.oldValue);
-    const after = blockedStoreIdentitySet(change?.newValue);
-    let added = 0;
-    let removed = 0;
-    for (const value of after) if (!before.has(value)) added += 1;
-    for (const value of before) if (!after.has(value)) removed += 1;
-    return { added, removed };
   }
 
   function clearBlockedRefreshBatch() {
@@ -1491,6 +1457,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await runStep("persona page cleanup", () => DS.applyPersonaPageTools?.());
     await runStep("persona organizer cleanup", () => DS.removePersonaOrganizer?.());
     await runStep("lorebook listing cleanup", () => DS.removeLorebookListingTools?.());
+    await runStep("rulebook listing cleanup", () => DS.removeRulebookListingTools?.());
     await runStep("lorebook search filter cleanup", () => DS.removeLorebookSearchFilter?.());
     await runStep("smart filter cleanup", () => DS.removeSmartFilterPresets?.());
     await runStep("creation audit cleanup", () => DS.removeCreationAudit?.());
@@ -2011,6 +1978,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runThrottledFeatureStep("card hiding settled", cardFilteringWanted(settings) || !!document.querySelector("[data-ds-hidden-card],.ds-card-hidden,.ds-card-dimmed"), listingCardInterval, () => DS.applyCardHiding?.(), !!options.force);
         await runFeatureStep("listing refill dedupe", !!document.querySelector("[data-ds-autofill-extra='1']"), () => DS.removeDuplicateListingRefillCards?.());
         await runFeatureStep("lorebook listing tools", !!settings.showLorebookFilters || !!document.querySelector("[data-ds-lorebook-filter]"), () => DS.applyLorebookListingTools?.());
+        await runFeatureStep("rulebook listing tools", !!settings.showRulebookFilters || !!document.getElementById("ds-rulebook-filter-toolbar"), () => DS.applyRulebookListingTools?.());
         await runFeatureStep("lorebook search filter", !!settings.showLorebookFilters || !!document.getElementById("ds-lorebook-search-filter") || !!document.querySelector(".ds-lorebook-search-filter-hidden"), () => DS.applyLorebookSearchFilter?.());
         await runFeatureStep("lorebook tag expansion", !!settings.lorebookExpandTags || !!document.querySelector("[data-ds-lorebook-tags-expanded]"), () => DS.applyLorebookTagExpansion?.());
         await runFeatureStep("public lorebook blocking/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0) || !!document.querySelector("[data-ds-reason^='lorebook:block'], .ds-lorebook-block-button"), () => DS.applyPublicLorebookQoL?.());
@@ -2301,20 +2269,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])].some(nodeContainsNativeChatHeader);
   }
 
-  function nodeIsOrContainsChatMessage(node) {
-    const el = node instanceof Element ? node : node?.parentElement;
-    if (!el) return false;
-    return !!(el.matches?.("[id^='message-']") || el.closest?.("[id^='message-']") || el.querySelector?.("[id^='message-']"));
-  }
-
-  function mutationIsMessageScoped(mutation) {
-    const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
-    if (target?.closest?.("[id^='message-']")) return true;
-    const changed = [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])]
-      .filter(node => node?.nodeType === Node.ELEMENT_NODE || node?.parentElement);
-    return changed.length > 0 && changed.every(nodeIsOrContainsChatMessage);
-  }
-
   function mutationIsOnlyQolUi(mutation) {
     if (typeof DS.mutationIsQolOnly === "function") return DS.mutationIsQolOnly(mutation);
     const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
@@ -2345,6 +2299,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (!page.isMyCreationsChatbotsPage && document.getElementById("ds-lorebook-filter-toolbar")) {
       DS.removeLorebookListingTools?.();
+      changed = true;
+    }
+    if (!page.isMyCreationsChatbotsPage && document.getElementById("ds-rulebook-filter-toolbar")) {
+      DS.removeRulebookListingTools?.();
       changed = true;
     }
 
@@ -2522,98 +2480,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return !!node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
       });
     });
-  }
-
-  function mutationsAreComposerOnly(mutations) {
-    if (!DS.isSingleChatPage?.() || !mutations.length) return false;
-    return mutations.every(mutation => {
-      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-      return !!target?.closest?.("textarea, [contenteditable='true']");
-    });
-  }
-
-  function mutationsAreChatLocal(mutations) {
-    if (!DS.isSingleChatPage?.()) return false;
-    return mutations.every(mutation => {
-      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-      if (!target) return false;
-      if (target.closest?.("[id^='message-'], textarea, [contenteditable='true']")) return true;
-      return [...mutation.addedNodes, ...mutation.removedNodes].every(node => {
-        if (!(node instanceof Element)) return true;
-        return !!(node.matches?.("[id^='message-']") || node.closest?.("[id^='message-']") || node.querySelector?.("[id^='message-']"));
-      });
-    });
-  }
-
-  function mutationsAddOrRemoveMessageRoots(mutations) {
-    return mutations.some(mutation => [...mutation.addedNodes, ...mutation.removedNodes].some(node => {
-      if (!(node instanceof Element)) return false;
-      return !!(node.matches?.("[id^='message-']") || node.querySelector?.("[id^='message-']"));
-    }));
-  }
-
-  function addedMessageRootCount(mutations) {
-    const roots = new Set();
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes || []) {
-        if (!(node instanceof Element)) continue;
-        if (node.matches?.("[id^='message-']")) roots.add(node);
-        node.querySelectorAll?.("[id^='message-']").forEach(root => roots.add(root));
-      }
-    }
-    return roots.size;
-  }
-
-  function messageRootForMutationNode(node) {
-    const element = node instanceof Element ? node : node?.parentElement;
-    if (!element) return null;
-    if (element.matches?.("[id^='message-']")) return element;
-    return element.closest?.("[id^='message-']") || null;
-  }
-
-  function collectMessageCacheMutationTargets(mutations) {
-    const roots = new Set();
-    const textRoots = new Set();
-    let candidateNodes = 0;
-    const qolMessageDecorationSelector = "#ds-qol-panel, [data-ds-owned='1'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output";
-
-    const touchesMessageText = node => {
-      const element = node instanceof Element ? node : node?.parentElement;
-      if (!element) return false;
-      if (element.matches?.(qolMessageDecorationSelector) || element.closest?.(qolMessageDecorationSelector)) return false;
-      if (element.matches?.("div[class*='overflow-wrap']")) return true;
-      if (element.closest?.("div[class*='overflow-wrap']")) return true;
-      return !!element.querySelector?.("div[class*='overflow-wrap']");
-    };
-
-    const addNode = (node, scanDescendants = false) => {
-      candidateNodes += 1;
-      const root = messageRootForMutationNode(node);
-      if (root) {
-        roots.add(root);
-        if (touchesMessageText(node)) textRoots.add(root);
-        return;
-      }
-      // A MutationRecord target can be the entire chat/message-list container.
-      // Never scan all of its descendants or one appended message would turn
-      // into a full-chat invalidation. Descendant scanning is only appropriate
-      // for the actual added/removed subtree.
-      if (!scanDescendants) return;
-      const element = node instanceof Element ? node : node?.parentElement;
-      if (!element) return;
-      element.querySelectorAll?.("[id^='message-']").forEach(messageRoot => {
-        roots.add(messageRoot);
-        textRoots.add(messageRoot);
-      });
-    };
-
-    for (const mutation of mutations) {
-      addNode(mutation.target, false);
-      for (const node of mutation.addedNodes || []) addNode(node, true);
-      for (const node of mutation.removedNodes || []) addNode(node, true);
-    }
-
-    return { roots, textRoots, candidateNodes };
   }
 
   function mutationsAddBotCards(mutations) {

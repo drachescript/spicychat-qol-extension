@@ -2006,3 +2006,7 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 #accountSyncDevicePreferences .account-sync-list-modes label { font-size: 13px; min-width: 0; }
 #accountSyncDevicePreferences .account-sync-list-modes select { width: 100%; min-width: 0; }
 #accountSyncDevicePreferences .account-sync-selectable-settings .account-sync-setting-entry { font-size: 13px; }
+
+/* Generated Lite packages may omit selected feature bundles. Values remain stored. */
+.ds-lite-omitted-setting{display:none!important}
+#ds-lite-settings-notice{padding:10px 14px;border:1px solid #555;border-radius:9px;margin-bottom:14px}

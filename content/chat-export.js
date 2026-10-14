@@ -901,6 +901,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       exportedAt: new Date().toISOString(),
       chatUrl: location.href,
       botInfo: await collectAvailableBotInfo(),
+      rulebook: settings.chatExportIncludeRulebook === true ? (DS.snapshotVisibleRulebook?.() || null) : null,
       appearanceTemplate: captureAppearanceTemplate(),
       messages,
       olderMessagesAvailable: !!findLoadPreviousMessagesButton(),
@@ -923,9 +924,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return lines.join("\n").trim();
   }
 
+  function plainRulebook(rulebook) {
+    return [rulebook.name ? `Name: ${rulebook.name}` : "Name: not exposed by visible HUD",
+      ...(rulebook.id ? [`ID: ${rulebook.id}`] : []),
+      ...(rulebook.status ? [`Status: ${rulebook.status}`] : []),
+      `Captured: ${rulebook.capturedAt}`,
+      ...rulebook.meters.map(m => `${m.label}: ${m.value ?? "unknown"}`)].join("\n");
+  }
+
   function makePlainText(data, opts) {
     const parts = [`SpicyChat Export`, `Exported: ${new Date(data.exportedAt).toLocaleString()}`, `Chat: ${data.chatUrl}`];
     if (opts.includeBotInfo) parts.push(`BOT INFO\n${plainBotInfo(data.botInfo)}`);
+    if (opts.includeRulebook && data.rulebook) parts.push(`RULEBOOK SNAPSHOT (at export, not message history)\n${plainRulebook(data.rulebook)}`);
     const messages = data.messages.map((message, index) => {
       const number = opts.numberMessages ? `${index + 1}. ` : "";
       const meta = opts.includeGenerationDetails ? metadataLines(message.metadata) : [];
@@ -954,6 +964,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (value) parts.push(`### ${label}\n\n${value}`);
       }
     }
+    if (opts.includeRulebook && data.rulebook) parts.push(`## Rulebook snapshot (at export)\n\n${escapeMd(plainRulebook(data.rulebook))}`);
     parts.push("## Messages");
     data.messages.forEach((message, index) => {
       const prefix = opts.numberMessages ? `${index + 1}. ` : "";
@@ -973,6 +984,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       exportedAt: data.exportedAt,
       chatUrl: data.chatUrl,
       bot: opts.includeBotInfo ? data.botInfo : undefined,
+      rulebookSnapshot: opts.includeRulebook ? (data.rulebook || undefined) : undefined,
       history: data.captureStatus ? {
         source: data.captureStatus.source || undefined,
         requestedSource: data.captureStatus.requestedSource || undefined,
@@ -1079,6 +1091,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         ${bot.tags?.length ? `<div class="tags">${bot.tags.map(tag => `<span>${escapeHtmlText(tag)}</span>`).join("")}</div>` : ""}
         ${[["Description", bot.description], ["Personality", bot.personality], ["Scenario", bot.scenario], ["Lorebook", bot.lorebook], ["Definition", bot.definition]].filter(([,v]) => v).map(([label,v]) => `<details><summary>${label}</summary><div>${richTextHtml(v)}</div></details>`).join("")}
       </section>` : "";
+    const rulebookBlock = opts.includeRulebook && data.rulebook ? `<section class="bot-info"><h2>Rulebook snapshot (at export)</h2><pre>${escapeHtmlText(plainRulebook(data.rulebook))}</pre></section>` : "";
     const messages = data.messages.map((message, index) => {
       const meta = opts.includeGenerationDetails ? metadataLines(message.metadata) : [];
       const role = ["user", "human"].includes(String(message.role || "").toLowerCase()) ? "user" : "bot";
@@ -1093,7 +1106,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }).join("\n");
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtmlText(bot.name || "SpicyChat")} chat export</title><style>
       :root{color-scheme:dark;${vars}}*{box-sizing:border-box}body{margin:0;background:${matched ? "var(--ds-export-page-bg)" : "#0b0b0d"};color:${matched ? "var(--ds-export-page-text)" : "#eee"};font:${matched ? "var(--ds-export-font-size)/var(--ds-export-line-height) var(--ds-export-font)" : "15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif"}}main{max-width:900px;margin:auto;padding:28px 18px 60px}h1,h2{margin:.2em 0}.muted,small{color:#aaa}.export-meta{margin-bottom:18px;color:#999}.bot-info{padding:16px;border:1px solid #2b2b31;border-radius:14px;background:#141417;margin-bottom:22px}.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tags span{background:#24242b;padding:3px 8px;border-radius:999px;font-size:12px}details{margin-top:8px;border-top:1px solid #2b2b31;padding-top:8px}summary{cursor:pointer}.messages{display:flex;flex-direction:column;gap:14px}.message{break-inside:avoid}.message header{display:flex;gap:10px;align-items:center;margin-bottom:7px}.message header .avatar{width:38px;height:38px;flex:0 0 38px;background-size:cover;background-position:center;border-radius:9px}${avatarCss}.message header div{display:flex;flex-direction:column}.message.match{padding:14px 16px;max-width:min(100%,650px)}.message.match.role-bot{align-self:flex-start;background:var(--ds-export-bot-bg);color:var(--ds-export-bot-text);border:var(--ds-export-bot-border-width) var(--ds-export-bot-border-style) var(--ds-export-bot-border);border-radius:var(--ds-export-bot-radius)}.message.match.role-user{align-self:flex-end;background:var(--ds-export-user-bg);color:var(--ds-export-user-text);border:var(--ds-export-user-border-width) var(--ds-export-user-border-style) var(--ds-export-user-border);border-radius:var(--ds-export-user-radius)}.message.transcript{padding:10px 0;border-bottom:1px solid #24242a;border-radius:0;background:none}.body{white-space:normal;overflow-wrap:anywhere}.body code{padding:.08em .34em;background:var(--ds-export-code-bg,#24242b);color:var(--ds-export-code-text,inherit);border:1px solid var(--ds-export-code-border,transparent);border-radius:var(--ds-export-code-radius,5px);font:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone}.body pre code{display:block;padding:10px;white-space:pre-wrap}@media print{:root{color-scheme:light}body{background:#fff;color:#111}.bot-info,.message.match{background:#fff!important;color:#111!important;border-color:#ccc!important}.muted,small,.export-meta{color:#555}.tags span{background:#eee}.message.transcript{border-color:#ddd}main{max-width:none;padding:0}}
-    </style></head><body><main><h1>SpicyChat Export</h1><div class="export-meta">Exported ${escapeHtmlText(new Date(data.exportedAt).toLocaleString())} · ${escapeHtmlText(data.chatUrl)}</div>${infoBlocks}<section class="messages">${messages || "<p>No chat messages found.</p>"}</section></main></body></html>`;
+    </style></head><body><main><h1>SpicyChat Export</h1><div class="export-meta">Exported ${escapeHtmlText(new Date(data.exportedAt).toLocaleString())} · ${escapeHtmlText(data.chatUrl)}</div>${infoBlocks}${rulebookBlock}<section class="messages">${messages || "<p>No chat messages found.</p>"}</section></main></body></html>`;
   }
 
   function safeBaseName(value) {
@@ -2275,6 +2288,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ["transcript", "Clean transcript"],
     ]);
     const botInfoControl = makeExportCheckbox("ds-export-bot-info", "Bot info");
+    const rulebookControl = makeExportCheckbox("ds-export-rulebook", "Rulebook snapshot (at export)");
     const oocControl = makeExportCheckbox("ds-export-ooc", "OOC/directives");
     const generationControl = makeExportCheckbox("ds-export-generation", "Captured timestamps/model details");
     const numbersControl = makeExportCheckbox("ds-export-numbers", "Message numbers");
@@ -2283,6 +2297,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       formatControl.label,
       layoutControl.label,
       botInfoControl.label,
+      rulebookControl.label,
       oocControl.label,
       generationControl.label,
       numbersControl.label,
@@ -2327,6 +2342,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const format = formatControl.select;
     const layout = layoutControl.select;
     const botInfo = botInfoControl.input;
+    const rulebook = rulebookControl.input;
     const ooc = oocControl.input;
     const generation = generationControl.input;
     const numbers = numbersControl.input;
@@ -2335,6 +2351,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     format.value = settings.chatExportDefaultFormat || "text";
     layout.value = settings.chatExportHtmlLayout || "bubbles";
     botInfo.checked = !!settings.chatExportIncludeBotInfo;
+    rulebook.checked = !!settings.chatExportIncludeRulebook;
     ooc.checked = !!settings.chatExportIncludeOocDirectives;
     generation.checked = settings.chatExportIncludeGenerationDetails !== false;
     numbers.checked = settings.chatExportNumberMessages !== false;
@@ -2347,9 +2364,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let activeCapture = data.captureStatus?.source === "dom" ? nativeCapture : apiCapture;
     let largePreviewSkipped = false;
     const LARGE_PREVIEW_MESSAGE_THRESHOLD = 3000;
-    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked });
+    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeRulebook: rulebook.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked });
     const exportExt = () => format.value === "markdown" ? "md" : format.value === "json" ? "json" : format.value === "html" ? "html" : "txt";
     const refresh = () => {
+      // The user can enable the option inside Export even when the saved
+      // preference was off at the time the preview was first prepared.
+      if (rulebook.checked && !workingData.rulebook) workingData.rulebook = DS.snapshotVisibleRulebook?.() || null;
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       largePreviewSkipped = workingData.messages.length >= LARGE_PREVIEW_MESSAGE_THRESHOLD;
       if (largePreviewSkipped) {
@@ -2403,9 +2423,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (largePreviewSkipped) count.textContent += " Large-chat preview disabled; export is built once on action.";
     };
 
-    for (const control of [format, layout, botInfo, generation, numbers, avatars]) control.addEventListener("change", refresh);
+    for (const control of [format, layout, botInfo, rulebook, generation, numbers, avatars]) control.addEventListener("change", refresh);
     ooc.addEventListener("change", async () => {
-      const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked };
+      const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked, chatExportIncludeRulebook: rulebook.checked };
       activeCapture.settings = nextSettings;
       if (workingData.captureStatus?.source === "api") {
         // API history is intentionally kept in memory rather than replaced by
@@ -2459,7 +2479,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       try {
-        const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked, chatExportHistoryMode: method };
+        const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked, chatExportIncludeRulebook: rulebook.checked, chatExportHistoryMode: method };
 
         // Keep API and Native history fully separate, but keep ONE cumulative
         // Native capture session across retries/resumes. This prevents a 401 or
@@ -2598,6 +2618,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const data = await buildExportData(settings, result.messages, result);
       const value = makePlainText(data, {
         includeBotInfo: !!settings.chatExportIncludeBotInfo,
+        includeRulebook: !!settings.chatExportIncludeRulebook,
         includeGenerationDetails: settings.chatExportIncludeGenerationDetails !== false,
         numberMessages: settings.chatExportNumberMessages !== false,
         includeAvatars: false

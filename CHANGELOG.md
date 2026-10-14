@@ -1,3 +1,11 @@
+## 0.2.47
+- Fixed sideways mobile listing overflow on Home and Search: a compact Show filters toggle keeps native filters available when their fixed-width sidebar would push results off-screen; desktop and already-responsive layouts remain unchanged.
+- Made the mobile Bot Organizer start as a compact Organize bots launcher instead of covering listing controls. Its full toolbar remains available on demand.
+- Avoided duplicating SpicyChat's native Narrow by Features → Lorebook filter: QoL's local Has Lorebook checkbox is hidden when the native equivalent is present, without modifying saved preferences.
+- Added optional Rulebook-aware chat exports for TXT, Markdown, JSON and HTML. Exports can include a passive snapshot of visible Rulebook meters and any available Rulebook name; no hidden rules are fetched and historic meter states are not inferred. Off by default.
+- Added an optional Rulebook filter in My Creations with All / Has Rulebook / Confirmed No Rulebook / Unknown. Missing badges and unlisted Rulebooks are not assumed absent. No per-bot scan requests; off by default.
+- **Modularization — Stage 3:** Reorganized OOC Settings, other Settings tools, chat helpers, and background features into smaller modules, and improved the Custom Lite build planning. Full QoL keeps its existing functionality; customizable Lite builds are still in development.
+
 ## 0.2.46
 - Reduced unnecessary beta-capability rechecks during Rulebook editor rerenders: only relevant native Rulebook, Lorebook and Story controls wake the short-lived observer.
 - Improved passive Rulebook detection for the chat attachment menu and Rulebook picker. No new Rulebook features are enabled or changed by default.
@@ -6,12 +14,16 @@
 - Fixed confirmed-unavailable cleanup repeatedly offering already-cleaned bots. Existing unavailable statuses remain recorded, but repeat cleanup skips saved cleanup checkpoints unless bots become newly unavailable or re-enter active lists.
 - Prevented overlapping unavailable-cleanup actions while a save is running.
 - Added manual blocked-bot data compacting with an age filter. Blocked IDs always remain; users can retain saved copies, purge only verified Archive-preserved copies, or explicitly discard unarchived local copies after an additional warning.
+
 - Fixed a rare scheduler timing error when a saved/opened-chat step finished as the slow scheduler yielded, avoiding a null `sliceStarted` write.
 - Made unavailable-bot cleanup wait for recovery/availability data before evaluating the cleanup set, and show the underlying error if it fails.
+
 - Separated Account & Sync and device-compatibility Settings controllers and chat message-cache helpers into independently loaded modules without changing Full runtime behavior.
+
 - Made Bot Status scans recoverable after browser/extension restarts: save the remaining queue before the first check, checkpoint verified results and remaining IDs every 50 checks or 30 seconds, and offer Resume interrupted scan on the next Settings visit.
 - Made API-based Load all chats imports resume from a saved page cursor. Completed metadata and optional Chat Index pages are saved before the cursor advances, with checkpoints every 100 conversations or 30 seconds.
 - Normal Stop/Pause and scan completion still save results; successful full scans clear only their own resume checkpoint.
+
 - Started preparing QoL Lite Custom with separately loaded Auto-AFK/low-memory and Wiki-fetch background services.
 - Moved Persona Manager, chat-bubble styling and Bot Organizer CSS into individually owned stylesheets while preserving Full stylesheet order.
 - Added explicit background-service and stylesheet ownership to the build registry for future smaller custom packages.
