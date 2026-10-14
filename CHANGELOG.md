@@ -1,4 +1,4 @@
-## 0.2.48 (test build)
+## 0.2.48
 - **Modularization — Stage 4:** Added shared feature start/stop handling and cleanup, expanded feature-level Settings and background service isolation, and kept Full QoL and future Custom builds on the same module system. OOC now restores its native chat controls when disabled. Custom packages remain experimental until their remaining dependencies and browser startup are verified.
 - Made Settings search show named QoL features instead of internal sync keys, repeated controls and individual mini-options.
 - Fixed blocked bot cards reappearing after SpicyChat remounts/recycles them, while avoiding a full card scan after each block. Block buttons now use the current card link.
