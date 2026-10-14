@@ -108,6 +108,31 @@ def edit_recipe(recipe: dict, add: list[str], remove: list[str], contracts: dict
     return validate_recipe({**recipe, "selectedFeatures": selected}, contracts)
 
 
+def feature_readiness(closure: list[str], contracts: dict[str, dict]) -> dict[str, dict]:
+    """Report blockers without confusing lifecycle support with installability.
+
+    An independently gated Full runtime is NOT proof that a Custom package
+    contains the correct Settings, CSS, background services, and permissions.
+    """
+    readiness = {}
+    for feature in closure:
+        contract = contracts[feature]
+        status = str(contract.get("customBuildStatus") or "unverified")
+        lifecycle = str(contract.get("fullRuntimeStatus") or "unverified")
+        raw_blockers = contract.get("blockers", [])
+        if not isinstance(raw_blockers, list):
+            raise ValueError(f"Invalid blocker list in feature contract: {feature}")
+        blockers = [str(blocker) for blocker in raw_blockers]
+        if status != "validated" and not blockers:
+            blockers.append("Feature package closure has not been validated")
+        readiness[feature] = {
+            "fullRuntimeStatus": lifecycle,
+            "customBuildStatus": status,
+            "blockers": blockers,
+        }
+    return readiness
+
+
 def preview(recipe: dict, contracts: dict[str, dict]) -> dict:
     closure = dependency_closure(recipe["selectedFeatures"], contracts)
     result = plan_custom.plan_features(recipe["selectedFeatures"])
@@ -115,8 +140,11 @@ def preview(recipe: dict, contracts: dict[str, dict]) -> dict:
     # is installable merely because file declarations exist.
     result["installable"] = False
     return {"schema": "dsq-custom-recipe-preview/v1", "recipe": recipe,
+            "installable": False,
             "automaticallyRequiredFeatures": [f for f in closure if f not in recipe["selectedFeatures"]],
+            "featureReadiness": feature_readiness(closure, contracts),
             "plan": result,
+            "releaseGate": "Browser-tested resource closure and feature lifecycle required",
             "note": "Preview only. Update preferences are saved but not executed. Do not distribute as an extension."}
 
 
