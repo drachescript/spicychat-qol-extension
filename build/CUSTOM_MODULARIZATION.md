@@ -2,7 +2,16 @@
 
 **Experimental feature recipes only. The public Full QoL release is unchanged.**
 
-This branch starts from the v0.2.48 `main` source, rather than merging the prior v0.2.47 branch and potentially reverting newer runtime files.
+This branch currently tracks the v0.2.48 Full source and will be brought forward as Full QoL evolves. Feature changes should be implemented in Full and integrated here, without reversing newer runtime fixes.
+
+## Permanent branch policy
+
+- **`main`** stays the public Full QoL release and the canonical runtime.
+- **`qol-custom`** is the single permanent Custom development branch. Continue work here across v0.2.49, v0.2.50, etc. Update it from newer Full releases instead of creating version-numbered Custom branches.
+- Version-specific `qol-custom-*` and `qol-custom-modularization` branches are obsolete and may be deleted after verifying this branch. No extra archive branch is needed.
+- The old `scripts/custom_build.py` bundle-based prototype was intentionally replaced by v0.2.47+ feature-contract recipes; it did not produce runtime-verified installable builds. Do not reintroduce it solely to preserve an outdated implementation.
+- Preserve `build/custom_recipes.py`, `build/test_custom_recipes.py`, `build/custom-recipes/ooc-example.json`, and this document when updating `qol-custom` from `main`.
+- Keep Full QA and missing-module integration tests as release gates. The website-managed unpacked-folder updater comes after a verified minimal package.
 
 ## Changes on main that affect Custom
 
@@ -41,4 +50,4 @@ Saved `updates.default` and `updates.overrides` are configuration intent for a *
 
 **Do not use this branch's recipe preview as an installable ZIP.** Source separation, tests, feature-aware guards and a smaller manifest are useful foundations, not sufficient proof of a working Custom build.
 
-Historical branches `qol-custom-v0.2.47` and earlier remain intact.
+The earlier version-numbered Custom branches are superseded by `qol-custom` and can be deleted from GitHub once this branch is verified.
