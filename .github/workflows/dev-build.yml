@@ -50,8 +50,11 @@ jobs:
               )
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          if not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+          # Test builds may label the section without becoming stable releases.
+          if not re.search(rf"(?m)^##\s+{re.escape(version)}(?:\s+\(test build\))?\s*$", changelog):
+              raise SystemExit(
+                  f"CHANGELOG.md must have '## {version}' or '## {version} (test build)'."
+              )
 
           print(f"Version/changelog OK: {version}")
           PY

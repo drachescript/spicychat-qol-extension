@@ -166,6 +166,19 @@ jobs:
               raise SystemExit(f"Unknown release mode: {mode}")
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # A test-build heading permits development packages but never a stable release.
+          test_build = bool(re.search(
+              rf"(?m)^##\s+{re.escape(version)}\s+\(test build\)\s*$", changelog
+          ))
+          if test_build:
+              if mode == "auto":
+                  publish = False
+                  reason = f"{tag} is marked as a test build; stable release postponed."
+              else:
+                  raise SystemExit(
+                      f"{tag} is marked as a test build. Finalize the changelog heading "
+                      "before manually publishing a stable release."
+                  )
           if publish and not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
               raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
 
