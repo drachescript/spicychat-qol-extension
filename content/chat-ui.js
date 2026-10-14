@@ -1226,6 +1226,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   // Early composer OOC mount, independent of the expensive chat-UI pass.
   // Called while other enhancements are waiting for native React to settle.
+  // OOC's feature lifecycle can restore the native image control without
+  // keeping the rest of the Chat UI feature enabled.
+  DS.removeEssentialOocShortcut = restoreOocShortcuts;
+
   DS.applyEssentialOocShortcut = function applyEssentialOocShortcut() {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.replaceChatImageWithOocButton || !DS.isSingleChatPage?.()) return;

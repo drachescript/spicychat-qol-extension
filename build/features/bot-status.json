@@ -1,0 +1,34 @@
+{
+  "schema": "dsq-feature/v1",
+  "id": "bot-status",
+  "label": "Bot Status Center",
+  "category": "listings",
+  "requiredFeatures": [],
+  "runtimeScripts": [],
+  "settingsScripts": [
+    "settings/features/options-bot-status.js"
+  ],
+  "settingKeys": [],
+  "cssFiles": [],
+  "backgroundServices": [
+    "background/features/background-worker-bot-status.js"
+  ],
+  "permissions": [],
+  "sharedDependencies": {
+    "runtime": [
+      "content/core.js"
+    ],
+    "settings": [
+      "options.js",
+      "options.html"
+    ],
+    "background": [
+      "background/background-events.js"
+    ]
+  },
+  "customBuildStatus": "blocked",
+  "fullRuntimeStatus": "shared-lifecycle",
+  "blockers": [
+    "Bot Status worker startup, Settings and shared event routing must be tested without unrelated services."
+  ]
+}

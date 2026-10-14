@@ -20,7 +20,7 @@
     "CSS declarations contain ordered Full stylesheet slices. Some remaining legacy CSS is still shared and must not be omitted blindly.",
     "Background services have started being extracted; shared listeners in background-events.js and options.js are not custom-build-safe yet.",
     "Stage 2: chat message cache lives in the Chat bundle; Settings platform compatibility and Account & Sync controllers are separate files. Full still loads all; Custom capability contracts are not yet verified.",
-    "v0.2.47 consolidated migration: 703 Settings and 277 background top-level function declarations moved into domain scripts; shared state, event routing, and feature lifecycle still need separation before arbitrary omissions."
+    "v0.2.48 bulk: 703 Settings and 277 background top-level function declarations migrated into feature-oriented scripts; shared state/event handlers still need lifecycle separation before arbitrary omissions."
   ],
   "bundles": {
     "core": {
@@ -43,6 +43,8 @@
         "content/dom.js",
         "content/main-page-observer.js",
         "content/main-diagnostics.js",
+        "content/feature-build-map.js",
+        "content/feature-lifecycle.js",
         "content/main.js",
         "content/my-creations-auto-load.js",
         "content/runtime-kernel.js",
@@ -267,6 +269,8 @@
     "background": {
       "required": [
         "background-entry.js",
+        "background/feature-build-profile.js",
+        "background/feature-message-ownership.js",
         "background/features/background-diagnostics.js",
         "background/features/background-worker-dislike.js",
         "background/features/background-worker-less-like.js",

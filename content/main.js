@@ -791,6 +791,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function cardFilteringWanted(settings) {
+    // Saved explicit bot IDs must remain hidden even when optional word/tag
+    // filters are off. The dirty-card cache keeps repeated passes inexpensive.
+    if (DS.state?.blockedBotIdSet?.size) return true;
     return anySetting(settings, [
       "blockCards", "hideOpenedChats", "hideLaterBotsFromListings", "hideHomeForYouCards",
       "hideGroupChats", "enableLanguageFilter"
@@ -1005,6 +1008,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // callers are gated here as a final safety net so an omitted bundle does
     // not even pay for a no-op optional-chain call.
     const hintedBundle = DS.runtimeTaskGroupForName?.(name) || "core";
+    if (DS.featureBuildProfile?.isTaskInstalled?.(name) === false) {
+      const counters = runtimeCounters();
+      counters.uninstalledFeatureStepSkips = Number(counters.uninstalledFeatureStepSkips || 0) + 1;
+      if (diagToken) DS.diagOperationEnd?.(diagToken, { outcome: "skipped", meta: { reason: "feature-not-installed" } });
+      return null;
+    }
     if (hintedBundle !== "core" && !DS.isRuntimeBundleAvailable?.(hintedBundle)) {
       const counters = runtimeCounters();
       counters.buildBundleStepSkips = Number(counters.buildBundleStepSkips || 0) + 1;
@@ -1018,7 +1027,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const started = collectTiming && typeof performance !== "undefined" ? performance.now() : 0;
 
     try {
-      return await fn();
+      const result = await fn();
+      // Direct-run tasks participate in feature stop/start tracking too.
+      // Cleanup tasks must not re-arm a feature they just removed.
+      if (!/(?:cleanup|restore|remove|unhide|disabled)/i.test(String(name || "")) &&
+          DS.featureLifecycle?.hasCleanup?.(name)) {
+        DS.featureLifecycle.markActive(name, hintedBundle);
+      }
+      return result;
     } catch (error) {
       diagOutcome = "error";
       DS.diagError?.("runtime-step", String(name || "step"), error, { trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120) });
@@ -1399,82 +1415,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.scheduleSavedOpenedLane = scheduleSavedOpenedLane;
 
   async function runDisabledCleanup() {
-    if (DS.state.disabledCleanupDone) return;
-    DS.state.disabledCleanupDone = true;
-
-    await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
-    await runStep("accessibility cleanup", () => DS.applyAccessibilitySettings?.());
-    syncNativeScrollBackToTopVisibility();
-    await runStep("scroll to top cleanup", () => DS.removeScrollToTopButton?.());
-    await runStep("soundscape cleanup", () => DS.removeSoundscapes?.());
-    await runStep("chat background cleanup", () => DS.removeChatBackgrounds?.());
-    await runStep("unhide disabled cleanup", () => DS.unhideAllDragonScriptElements?.());
-    await runStep("card hide watchdog cleanup", () => DS.removeCardHideSafetyWatchdog?.());
-    await runStep("top bar native restore", () => DS.applyTopBarCleanup?.());
-    await runStep("sidebar native restore", () => DS.applySidebarCleanup?.());
-    await runStep("main footer native restore", () => DS.removeMainFooterManagement?.());
-    await runStep("listing refill button cleanup", () => DS.removeListingRefillButton?.());
-    await runStep("listing sort cleanup", () => DS.removeListingSortTools?.());
-    await runStep("card description native restore", () => DS.applyCardDescriptionExpansion?.());
-    await runStep("remove creator buttons", () => DS.removeCreatorFavoriteButtons?.());
-    await runStep("remove creator follow buttons", () => DS.removeCreatorFollowButtons?.());
-    await runStep("remove favorite history", () => DS.removeFavoriteHistoryButton?.());
-    await runStep("remove later buttons", () => DS.removeLaterBotButtons?.());
-    await runStep("remove tag template button", () => {
-      (DS.qsa?.(".ds-tag-template-button") || []).forEach(button => button.remove());
-    });
-    await runStep("remove bot editor snippets", () => DS.removeBotEditorSnippetTools?.());
-    await runStep("remove bot editor save actions", () => DS.removeBotEditorSaveActions?.());
-    await runStep("remove bot editor draft history", () => DS.removeBotEditorDraftHistory?.());
-    await runStep("remove bot editor local memory", () => DS.removeBotEditorLocalMemory?.());
-    await runStep("remove bot backup tools", () => DS.removeBotBackupTools?.());
-    await runStep("remove lorebook backup tools", () => DS.removeLorebookBackup?.());
-    await runStep("remove creation bulk input tools", () => DS.removeCreationBulkInputTools?.());
-    await runStep("remove card greeting token info", () => DS.removeCardGreetingTokenInfo?.());
-    await runStep("remove generation profiles", () => DS.removeGenerationProfileTools?.());
-    await runStep("remove generation metadata", () => DS.removeGenerationMetadata?.());
-    await runStep("remove model quick menu", () => DS.removeModelSelectorQuickMenu?.());
-    await runStep("chat top bar cleanup", () => DS.applyChatTopBarTools?.());
-    await runStep("chat UI cleanup", () => DS.applyChatUiCleanup?.());
-    await runStep("chat search cleanup", () => DS.removeChatSearch?.());
-    await runStep("chat bookmarks cleanup", () => DS.removeChatBookmarks?.());
-    await runStep("focus mode cleanup", () => DS.removeFocusMode?.());
-    await runStep("context keeper cleanup", () => DS.removeContextKeeper?.());
-    await runStep("lorebook consistency cleanup", () => DS.removeLorebookConsistency?.());
-    await runStep("reply instructions cleanup", () => DS.removeReplyInstructions?.());
-    await runStep("chat nudges cleanup", () => DS.removeChatNudges?.());
-    await runStep("selection remember cleanup", () => DS.removeSelectionRemember?.());
-    await runStep("composer cleanup", () => DS.applyComposerControl?.());
-    await runStep("message removal cleanup", () => DS.applyMessageRemovalGuard?.());
-    await runStep("failed helper cleanup", () => DS.applyFailedMessageHelper?.());
-    await runStep("message options cleanup", () => DS.applyMessageOptions?.());
-    await runStep("auto voice cleanup", () => DS.applyAutoVoice?.());
-    await runStep("saved chat actions cleanup", () => DS.applySavedChatQuickActions?.());
-    await runStep("memory manager cleanup", () => DS.applyMemoryManagerTools?.());
-    await runStep("chat text replacements cleanup", () => DS.removeChatTextReplacements?.());
-    await runStep("translation cleanup", () => DS.removeTranslationTools?.());
-    await runStep("moderation warning cleanup", () => DS.removeCreatorModerationWarnings?.());
-    await runStep("persona page cleanup", () => DS.applyPersonaPageTools?.());
-    await runStep("persona organizer cleanup", () => DS.removePersonaOrganizer?.());
-    await runStep("lorebook listing cleanup", () => DS.removeLorebookListingTools?.());
-    await runStep("rulebook listing cleanup", () => DS.removeRulebookListingTools?.());
-    await runStep("lorebook search filter cleanup", () => DS.removeLorebookSearchFilter?.());
-    await runStep("smart filter cleanup", () => DS.removeSmartFilterPresets?.());
-    await runStep("creation audit cleanup", () => DS.removeCreationAudit?.());
-    await runStep("my creations filter cleanup", () => DS.removeMyCreationsFilters?.());
-    await runStep("my creations backup cleanup", () => DS.removeMyCreationsBackupTools?.());
-    await runStep("recommendation helper cleanup", () => DS.removeRecommendationHelpers?.());
-    await runStep("bot organizer cleanup", () => DS.removeBotOrganizer?.());
-    await runStep("card workflow cleanup", () => DS.removeCardWorkflow?.());
-    await runStep("formatting toolbar cleanup", () => DS.removeFormattingToolbar?.());
-    await runStep("alternate dialogue cleanup", () => DS.removeAlternateDialogueStyling?.());
-    await runStep("RP format cleanup", () => DS.removeRpFormatRepair?.());
-    await runStep("chat bubble cleanup", () => DS.removeChatBubbleCustomization?.());
-    await runStep("Android app cleanup", () => DS.removeAndroidAppControls?.());
-    await runStep("animation cleanup", () => DS.removeAnimationControls?.());
-    await runStep("lorebook entry cleanup", () => DS.applyLorebookEntryExpanders?.());
-    await runStep("performance cleanup", () => DS.applyPerformanceMode?.());
-    await runStep("update panel", () => DS.updateQuickPanel?.());
+    return DS.featureLifecycle?.shutdownAll({ runStep, syncNativeScrollBackToTopVisibility });
   }
 
   DS.runCritical = async function runCritical() {
@@ -1530,6 +1471,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const listing = isCardListingContext();
       const plan = DS.getRuntimePlan?.(page, { listing }) || runtimePlan(listing);
       runtimeCounters().currentRuntimePlan = plan.key || page.routeType || "other";
+      await DS.featureLifecycle?.reconcileRoute?.(plan, DS.runtimeKernel?.canRunRouteGroup);
 
       // Large-list paint protection belongs to the listing lane. In .117 the
       // CSS/helper existed, but applyPerformanceMode was only invoked from chat
@@ -2179,6 +2121,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       criticalDelay = Math.max(criticalDelay, profile === "maximum" ? 650 : profile === "aggressive" ? 460 : 300);
       slowDelay = Math.max(slowDelay, profile === "maximum" ? 2400 : profile === "aggressive" ? 1750 : 1250);
       counters.listingScheduleDeferrals = Number(counters.listingScheduleDeferrals || 0) + 1;
+      const remainingScrollMs = Math.max(0, Number(DS.state.userScrollingUntil || 0) - Date.now());
+      if (remainingScrollMs > 0) {
+        // Direct card-mount safety checks still run immediately; defer the
+        // broader card/appearance pipelines until scrolling has settled.
+        criticalDelay = Math.max(criticalDelay, remainingScrollMs + 120);
+        slowDelay = Math.max(slowDelay, remainingScrollMs + 450);
+        counters.listingScrollDeferrals = Number(counters.listingScrollDeferrals || 0) + 1;
+      }
     }
 
     if (document.hidden) {
@@ -2457,15 +2407,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function elementMayBelongToCardArea(element) {
-    let node = element instanceof Element ? element : element?.parentElement;
-
-    for (let i = 0; node && i < 8; i++, node = node.parentElement) {
-      if (node === document.body || node.id === "root") break;
-      if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-      if (node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-    }
-
-    return false;
+    const node = element instanceof Element ? element : element?.parentElement;
+    if (!node) return false;
+    if (node.closest?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
+    // Only inspect ancestors that are themselves card shells. The old version
+    // queried every ancestor for descendant links and could mark a *whole grid*
+    // dirty when React changed an unrelated heading/sidebar sibling.
+    return !!node.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
   }
 
   function mutationsMayAffectCards(mutations) {
@@ -2763,6 +2711,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           }
           if (settingsChanged || changes[DS.OPENED_KEY] || changes[DS.OPENED_META_KEY]) {
             DS.state.openedImportRevision = -1;
+          }
+          // Reconcile active feature lifecycles against the newly loaded settings.
+          // Do not run unrelated feature scans or change saved settings.
+          if (settingsChanged) {
+            await DS.featureLifecycle?.reconcileSettings?.(changedSettingNames(changes), DS.state?.settings);
           }
           if (settingsChanged && document.hidden && DS.state?.settings?.autoReadNotifications) {
             setTimeout(() => DS.maybeAutoReadNotifications?.("settings-change"), 0);

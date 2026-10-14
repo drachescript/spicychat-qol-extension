@@ -33,11 +33,11 @@
 </section>
 <section aria-label="Search settings" class="settings-search-card is-collapsed" id="settingsSearchCard">
 <button class="settings-search-toggle" id="settingsSearchToggle" type="button" aria-expanded="false" aria-controls="settingsSearchBody">
-<span aria-hidden="true">⌕</span><strong>Find a setting</strong><span class="settings-search-chevron" aria-hidden="true">⌄</span>
+<span aria-hidden="true">⌕</span><strong>Find a feature</strong><span class="settings-search-chevron" aria-hidden="true">⌄</span>
 </button>
 <div class="settings-search-body" id="settingsSearchBody" hidden>
-<div class="settings-search-head"><span class="hint">Searches every Settings tab. Press Enter for the top result.</span></div>
-<input autocomplete="off" id="settingsSearch" placeholder="Try preference, refill, Later, voice, scroll, persona..." type="search"/>
+<div class="settings-search-head"><span class="hint">Search named QoL features. Press Enter to open the top result.</span></div>
+<input autocomplete="off" id="settingsSearch" placeholder="Find a feature: OOC, Bot Organizer, Card filters..." type="search"/>
 <div class="settings-quick-nav">
 <select id="settingsPinnedSections" aria-label="Pinned Settings sections"><option value="">Pinned sections…</option></select>
 <select id="settingsRecentSections" aria-label="Recently used Settings sections"><option value="">Recent sections…</option></select>
@@ -366,7 +366,7 @@
 <h2>Features</h2>
 <p class="hint">A grouped feature catalogue based on features.md. Status reflects the feature itself, not every child preference. Use Open settings to jump to its controls.</p>
 <div class="feature-index-toolbar">
-<input autocomplete="off" id="featureIndexSearch" placeholder="Search features, settings, or categories..." type="search"/>
+<input autocomplete="off" id="featureIndexSearch" placeholder="Search feature names..." type="search"/>
 <label>Category
             <select id="featureIndexCategory">
 <option value="all">All categories</option>
@@ -1490,14 +1490,15 @@ Testing" spellcheck="false"></textarea></label>
 
 <section class="card" id="chatBackgroundsCard">
 <h2>Custom chat backgrounds</h2>
+<p class="hint"><strong>Early version / experimental:</strong> Chat backgrounds are still being refined. Image placement, sizing and compatibility may change as we test them.</p>
 <label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
 <label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
-<p class="hint">Choose BG in a chat to save and switch scenes. Import images generated anywhere by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
+<p class="hint">Open the QoL extension popup on a chat and choose Chat background (BG) to set a picture or switch scenes. Import generated images by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
 <label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set</span></label>
 <label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
 <label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
-<p class="hint">Avatar mode uses the image already present in the chat header; it does not store or fetch an additional copy. Custom chat images always take priority.</p>
-<p class="hint">Uses local image data only. A global background applies to chats unless that chat has its own override from the in-chat BG control. Nothing is uploaded to SpicyChat.</p>
+<p class="hint">Avatar mode uses the original character image from SpicyChat's CDN when available (not the tiny chat-header thumbnail). This may download a larger image. Adjust its displayed size or optionally repeat the avatar into the left and right sides of the screen from each chat’s BG menu. Custom images take priority.</p>
+<p class="hint">Imported backgrounds and scenes are stored locally; avatar images are displayed from the CDN without saving a copy. Global backgrounds apply unless overridden for a chat. QoL does not upload background images to SpicyChat.</p>
 <label>Background dimming (%)
 <input id="chatBackgroundDim" max="90" min="0" step="5" type="number" value="45"/>
 </label>

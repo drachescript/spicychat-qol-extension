@@ -590,6 +590,89 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return writeChain;
   }
 
+  // Browsing a public listing is itself an opt-in discovery source. Earlier
+  // versions only called rememberSeenBotData from Card Token Info (or an opened
+  // profile), leaving new Home/creator listing bots unknown while token info was
+  // disabled. Enqueue identity-only snapshots here; Bot Status enriches them
+  // during its normal scan instead of fetching every profile from the listing.
+  const listingSeenIds = new Set();
+  const listingPendingCards = new Map();
+  let listingDiscoveryTimer = null;
+  const LISTING_DISCOVERY_BATCH = 12;
+
+  function flushListingDiscovery() {
+    listingDiscoveryTimer = null;
+    if (!DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveRememberSeenPublic) {
+      listingPendingCards.clear();
+      return;
+    }
+    let processed = 0;
+    let queuedForArchive = 0;
+    for (const [id, card] of listingPendingCards) {
+      listingPendingCards.delete(id);
+      processed++;
+      if (!card?.isConnected) {
+        // Native page navigation may replace the card before the idle slice.
+        // Allow rediscovery if it reappears later in this tab.
+        listingSeenIds.delete(id);
+      } else {
+        try {
+          const name = clean(DS.getCardTitle?.(card) || "", 500);
+          const image = DS.getCardImageUrl?.(card) || card.querySelector?.("img")?.getAttribute("src") || "";
+          const creatorLink = card.querySelector?.("a[href*='/creator/']");
+          const creator = creatorLink?.getAttribute("href")?.match(/\/creator\/([^/?#]+)/i)?.[1] || "";
+          if (name || image) {
+            if (DS.rememberSeenBotData?.(id, { name, image }, {
+              name, image, creator: creator ? decodeURIComponent(creator) : "",
+              profileUrl: `https://spicychat.ai/chatbot/${id}`,
+              source: "Listing discovery"
+            })) queuedForArchive++;
+          } else {
+            // The native card may still be a loading placeholder.
+            listingSeenIds.delete(id);
+          }
+        } catch {
+          listingSeenIds.delete(id);
+        }
+      }
+      if (processed >= LISTING_DISCOVERY_BATCH) break;
+    }
+    if (queuedForArchive) {
+      const stats = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      stats.listingDiscoveredBotSnapshots = Number(stats.listingDiscoveredBotSnapshots || 0) + queuedForArchive;
+      DS.diagPerformance?.("listing-discovery", { queued: queuedForArchive, pending: listingPendingCards.size });
+    }
+    if (listingPendingCards.size) {
+      listingDiscoveryTimer = setTimeout(flushListingDiscovery, 24);
+    }
+  }
+
+  DS.rememberListedBotCards = function rememberListedBotCards(cards = []) {
+    if (!DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveRememberSeenPublic ||
+        DS.state?.qolBackgroundWorker || !Array.isArray(cards)) return 0;
+    let queued = 0;
+    for (const pair of cards) {
+      const card = pair?.card;
+      const anchor = pair?.anchor;
+      if (!card || !anchor) continue;
+      const id = String(DS.botIdFromHref?.(anchor.href) || "").trim().toLowerCase();
+      if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/.test(id) || listingSeenIds.has(id)) continue;
+      listingSeenIds.add(id);
+      listingPendingCards.set(id, card);
+      queued++;
+    }
+    if (queued) {
+      const stats = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      stats.listingDiscoveredBotIds = Number(stats.listingDiscoveredBotIds || 0) + queued;
+    }
+    if (queued && !listingDiscoveryTimer) {
+      // One deferred slice per newly discovered card batch, not another
+      // synchronous DOM read during the listing's first render.
+      listingDiscoveryTimer = setTimeout(flushListingDiscovery, 900);
+    }
+    return queued;
+  };
+
   DS.rememberSeenBotData = function rememberSeenBotData(idValue, rawFields = {}, meta = {}) {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.botArchiveRememberSeenPublic) return false;

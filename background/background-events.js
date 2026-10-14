@@ -22,12 +22,12 @@ registerQolBackgroundInstalled();
 
 registerQolBackgroundStartup();
 
-configureAutoAfkAlarm(false);
+if (dsqBackgroundHasFeature("performance-mode")) configureAutoAfkAlarm(false);
 getDuplicateTabSettings().then(settings => {
   if (settings.enabled !== false && settings.duplicateTabGuardEnabled) queueDuplicateTabScan({ focusExisting: false });
 });
-configureChatNudgeAlarm(false);
-configureCreatorBotWatchAlarm(false);
+if (dsqBackgroundHasFeature("chat-nudges")) configureChatNudgeAlarm(false);
+if (dsqBackgroundHasFeature("creator-workspace")) configureCreatorBotWatchAlarm(false);
 initializeHelperLifecycleRecovery();
 
 // v0.2.25 account/device sync is intentionally isolated from the large

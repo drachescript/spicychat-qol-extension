@@ -37,18 +37,16 @@
   },
   "customBuildStatus": "blocked",
   "blockers": [
-    "OOC activation is still routed by the shared main.js scheduler",
-    "OOC Settings markup remains embedded in the shared options.html",
-    "OOC CSS is still mixed into shared content.css",
-    "OOC chat-input shortcut is currently implemented in content/chat-ui.js"
+    "OOC shortcut creation still shares content/chat-ui.js and chat composer controls.",
+    "The shared main scheduler, Options markup, CSS and background/core closure still need a runnable small-build test."
   ],
   "notes": [
     "Full build remains unchanged except for extracted Settings helper functions",
     "Shared dependencies must be extracted or guarded before Core + OOC becomes installable"
   ],
-  "fullRuntimeStatus": "partially-separated",
+  "fullRuntimeStatus": "lifecycle-gated",
   "fullRuntimeNotes": [
-    "OOC runtime is in content/ooc.js, while main.js and chat-ui.js still own feature work.",
-    "Existing Full on/off guards remain; true feature start/stop lifecycle is not complete."
+    "OOC panel and original image shortcut have independent teardown through the shared feature lifecycle.",
+    "The existing Chat UI shortcut creation code remains shared and Custom package dependencies are not fully isolated."
   ]
 }

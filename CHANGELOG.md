@@ -1,3 +1,11 @@
+## 0.2.48 (test build)
+- **Modularization — Stage 4:** Added shared feature start/stop handling and cleanup, expanded feature-level Settings and background service isolation, and kept Full QoL and future Custom builds on the same module system. OOC now restores its native chat controls when disabled. Custom packages remain experimental until their remaining dependencies and browser startup are verified.
+- Made Settings search show named QoL features instead of internal sync keys, repeated controls and individual mini-options.
+- Fixed blocked bot cards reappearing after SpicyChat remounts/recycles them, while avoiding a full card scan after each block. Block buttons now use the current card link.
+- Reduced unnecessary listing-card rescans, deferred nonessential work while scrolling and added optional card collection/filter timing diagnostics.
+- Smoothed large listing startup by splitting card hiding into shorter passes, and fixed new visible bot cards not being saved by the enabled public discovery archive. Discovery saves locally in small batches without fetching every bot profile; Bot Status can then include the saved IDs in its next scan.
+- Improved experimental chat backgrounds: added Clear/Restore per chat, adjustable larger avatar images, optional side-to-side avatar repeats, higher-quality original character images, and moved the BG shortcut into the extension popup below Block this bot.
+
 ## 0.2.47
 - Fixed sideways mobile listing overflow on Home and Search: a compact Show filters toggle keeps native filters available when their fixed-width sidebar would push results off-screen; desktop and already-responsive layouts remain unchanged.
 - Made the mobile Bot Organizer start as a compact Organize bots launcher instead of covering listing controls. Its full toolbar remains available on demand.

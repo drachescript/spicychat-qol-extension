@@ -801,11 +801,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           event.stopImmediatePropagation();
 
           blockButton.disabled = true;
-
-          await DS.blockBotFromCard(
-            card,
-            anchor
-          );
+          // React can recycle an existing bot card without removing QoL's X.
+          // Resolve the *current* anchor at click time, not the link captured
+          // when the button was first created.
+          const currentAnchor = card.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+          try {
+            const result = await DS.blockBotFromCard(card, currentAnchor);
+            if (!result?.ok) blockButton.disabled = false;
+          } catch (error) {
+            blockButton.disabled = false;
+            DS.runtimeLog?.("warn", "card-block", String(error?.message || error));
+          }
         },
         true
       );

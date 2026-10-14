@@ -2,6 +2,10 @@
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundRuntimeMessages() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!dsqBackgroundMessageAllowed(message?.type)) {
+    sendResponse({ ok: false, error: "This feature is not installed in this build." });
+    return false;
+  }
   if (message?.type === "DS_QOL_DIAGNOSTIC_SUBSCRIBE") {
     sendResponse(qolDiagnosticSubscribe(sender, message));
     return false;

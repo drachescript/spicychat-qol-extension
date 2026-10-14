@@ -694,7 +694,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   };
 
+  // Lightweight, opt-in per-phase metrics for Inspector/Performance reports.
+  // Aggregated values only: no bot IDs, names, descriptions or message text.
+  function recordCardPhase(name, started, count, excludedWaitMs = 0) {
+    if (!started || typeof performance === "undefined") return;
+    const ms = Math.max(0, performance.now() - started - Math.max(0, excludedWaitMs));
+    const stats = DS.state.performanceStats || (DS.state.performanceStats = {});
+    const key = `card ${name}`;
+    const item = stats[key] || (stats[key] = { calls: 0, totalMs: 0, maxMs: 0 });
+    item.calls++;
+    item.totalMs += ms;
+    item.maxMs = Math.max(item.maxMs, ms);
+    item.lastMs = ms;
+    item.lastAt = Date.now();
+    item.lastCount = Number(count) || 0;
+    DS.diagPerformance?.("card-phase", { phase: name, durationMs: Math.round(ms * 100) / 100, cards: item.lastCount });
+  }
+  function cardTimingStart() {
+    return (DS.state?.settings?.performanceDiagnostics || DS.isDiagnosticTraceActive?.("normal")) &&
+      typeof performance !== "undefined" ? performance.now() : 0;
+  }
+
   DS.collectCards = function collectCards() {
+    const started = cardTimingStart();
     const revision = Number(DS.state?.domRevision || 0);
     const url = location.href;
 
@@ -703,6 +725,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.state.cardCacheRevision === revision &&
       DS.state.cardCacheUrl === url
     ) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.cardCollectionCacheHits = (perf.cardCollectionCacheHits || 0) + 1;
       return DS.state.cardCache;
     }
 
@@ -723,6 +747,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.cardCache = cards;
     DS.state.cardCacheRevision = revision;
     DS.state.cardCacheUrl = url;
+    // Identity-only discovery is deferred by Bot Archive. It must not block
+    // card collection, hide/filter controls or the initial listing paint.
+    DS.rememberListedBotCards?.(cards);
+    recordCardPhase("collection", started, cards.length);
     return cards;
   };
 
@@ -1227,6 +1255,47 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     ].join("|");
   }
 
+  // A native React rerender can replace a card immediately after it was
+  // blocked. Re-hide only *newly mounted* blocked cards, without waiting for
+  // the deliberately deferred full-listing refresh or rescanning the grid.
+  DS.hideBlockedCardMounts = function hideBlockedCardMounts(mutations) {
+    const ids = DS.state?.blockedBotIdSet;
+    if (!DS.state?.settings?.enabled || !ids?.size ||
+        DS.isSingleChatPage?.() || DS.isBotProfilePage?.() || DS.isChatListPage?.() ||
+        (DS.isFavoriteBotsPage?.() && DS.state.settings.neverHideFavorites !== false)) return 0;
+
+    const seen = new Set();
+    let hidden = 0;
+    const checkLink = link => {
+      if (!link || !link.isConnected || seen.has(link)) return;
+      seen.add(link);
+      const id = DS.botIdFromHref?.(link.href || "") || DS.chatIdFromHref?.(link.href || "");
+      if (!id || !ids.has(id)) return;
+      const card = DS.getCardFromChatLink?.(link);
+      const target = DS.getBestHideTarget?.(card);
+      if (!target || DS.isUnsafeCardHideTarget?.(target)) return;
+      if (DS.hideCard?.(card, `card:blocked bot id: ${id}`)) hidden++;
+    };
+    for (const mutation of mutations || []) {
+      // Include the changed anchor when React reuses a card and replaces href.
+      if (mutation.type === "attributes" && mutation.attributeName === "href") {
+        if (mutation.target?.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) checkLink(mutation.target);
+        continue;
+      }
+      for (const node of mutation.addedNodes || []) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) checkLink(node);
+        node.querySelectorAll?.("a[href*='/chat/'], a[href*='/chatbot/']").forEach(checkLink);
+      }
+    }
+    if (hidden) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.blockedCardRemountHides = Number(perf.blockedCardRemountHides || 0) + hidden;
+      DS.diagPerformance?.("blocked-card-remount", { hidden });
+    }
+    return hidden;
+  };
+
   DS.markListingDirtyCards = function markListingDirtyCards(mutations) {
     const dirty = DS.state.listingDirtyCards instanceof Set
       ? DS.state.listingDirtyCards
@@ -1249,7 +1318,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
 
     for (const mutation of mutations || []) {
-      addNode(mutation.target);
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+      if (target) {
+        const nearestCard = target.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
+        if (nearestCard && DS.isRecommendationCardRoot?.(nearestCard)) dirty.add(nearestCard);
+        // Only scan the mutation target itself when it is an anchor. Scanning
+        // all descendant anchors of a grid/container dirtied every card after
+        // unrelated React list and sidebar changes.
+        if (target.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) addNode(target);
+      }
       for (const node of mutation.addedNodes || []) addNode(node);
     }
     return dirty.size;
@@ -1300,6 +1377,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       dirty.clear();
     }
 
+    const filterStarted = cardTimingStart();
+    let filterYieldMs = 0;
     DS.applyCardDisplayNormalization?.(cards);
 
     if (DS.isFavoriteBotsPage() && DS.state.settings.neverHideFavorites !== false) {
@@ -1310,14 +1389,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     let hidden = 0;
     let processed = 0;
-    const chunkLargeListing = cards.length >= 60;
+    const chunkLargeListing = cards.length >= 32;
 
     for (const { card, anchor } of cards) {
       processed += 1;
-      if (chunkLargeListing && processed > 1 && processed % 24 === 0) {
-        // A 100-200 card grid can otherwise become one long synchronous task.
-        // Yield between small chunks so Brave/Chrome can paint and process input.
+      if (chunkLargeListing && processed > 1 && processed % 16 === 0) {
+        // Typical 48-card creator pages also benefit from short paint/input
+        // breaks. Critical hide decisions still run before cosmetic passes.
+        const yieldStarted = filterStarted ? performance.now() : 0;
         await new Promise(resolve => setTimeout(resolve, 0));
+        if (yieldStarted) filterYieldMs += performance.now() - yieldStarted;
       }
       const target = DS.getBestHideTarget(card);
 
@@ -1390,6 +1471,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     DS.compactLayouts(cards);
+    recordCardPhase("filtering", filterStarted, processed, filterYieldMs);
 
     if (hidden > 0) {
       DS.updateQuickPanel?.();

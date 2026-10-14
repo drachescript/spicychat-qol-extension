@@ -218,25 +218,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const resolvedGroup = group || taskGroupForName(name);
     const perf = counters();
 
+    if (DS.featureBuildProfile?.isTaskInstalled?.(name) === false) {
+      await DS.featureLifecycle?.stop?.(name, "not-installed");
+      perf.uninstalledFeatureStepSkips = Number(perf.uninstalledFeatureStepSkips || 0) + 1;
+      return null;
+    }
+
     if (BUNDLE_BITS[resolvedGroup] && !isBundleAvailable(resolvedGroup)) {
+      await DS.featureLifecycle?.stop?.(name, "build-unavailable");
       perf.buildBundleStepSkips = Number(perf.buildBundleStepSkips || 0) + 1;
       return null;
     }
 
     if (plan && !canRunRouteGroup(plan, resolvedGroup)) {
+      await DS.featureLifecycle?.stop?.(name, "route-unavailable");
       perf.routeFeatureStepSkips = Number(perf.routeFeatureStepSkips || 0) + 1;
       return null;
     }
 
     const resolvedWanted = typeof wanted === "function" ? !!wanted() : !!wanted;
     if (!resolvedWanted) {
+      await DS.featureLifecycle?.stop?.(name, "disabled");
       perf.disabledFeatureStepSkips = Number(perf.disabledFeatureStepSkips || 0) + 1;
       return null;
     }
 
     perf.runtimeKernelRuns = Number(perf.runtimeKernelRuns || 0) + 1;
     const runner = typeof execute === "function" ? execute : (fn => fn());
-    return runner(run, name);
+    const result = await runner(run, name);
+    DS.featureLifecycle?.markActive?.(name, resolvedGroup);
+    return result;
   }
 
   DS.RUNTIME_BUNDLE_ORDER = BUNDLE_ORDER;
@@ -248,7 +259,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     id: String(rawProfile.id || "full"),
     label: String(rawProfile.label || rawProfile.id || "Full"),
     generated: !!rawProfile.generated,
-    bundles: BUNDLE_ORDER.filter(name => isBundleAvailable(name))
+    bundles: BUNDLE_ORDER.filter(name => isBundleAvailable(name)),
+    features: DS.featureBuildProfile?.features || undefined
   });
   DS.isRuntimeBundleAvailable = isBundleAvailable;
   DS.runtimeTaskGroupForName = taskGroupForName;

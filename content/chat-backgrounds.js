@@ -11,7 +11,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MAX_SCENE_BYTES = 1.5 * 1024 * 1024;
   const MAX_SCENES_PER_CHAT = 6;
   const MAX_GALLERY_DATA_CHARS = 24 * 1024 * 1024;
-  let mediaStore = { global: null, chats: {}, galleries: {} };
+  // Keep portraits clearly visible without forcing the viewport-wide crop of cover.
+  const DEFAULT_AVATAR_SIZE = 100;
+  // Only the original CDN URL is used by default. If it is unavailable,
+  // fall back once to a moderately sized CDN derivative (never a tiny avatar).
+  const avatarImageChecks = new Map();
+  let mediaStore = { global: null, chats: {}, galleries: {}, suppressedChats: {}, avatarSizes: {}, avatarSideCopies: {} };
   let mediaLoaded = false;
   let mediaLoadPromise = null;
 
@@ -39,7 +44,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         .filter(item => item?.id);
       if (key && items.length) galleries[String(key).slice(0, 260)] = { activeId: String(gallery.activeId || "").slice(0, 80), items };
     }
-    return { global: cleanItem(input.global), chats, galleries };
+    // A cleared chat must stay clear even when a global image or automatic
+    // avatar would otherwise take over. Never delete global/gallery images.
+    const suppressedChats = {};
+    for (const [key, value] of Object.entries(input.suppressedChats || {})) {
+      if (key && value === true) suppressedChats[String(key).slice(0, 260)] = true;
+    }
+    const avatarSizes = {};
+    for (const [key, value] of Object.entries(input.avatarSizes || {})) {
+      const percent = Number(value);
+      if (key && Number.isFinite(percent) && percent >= 30 && percent <= 150) {
+        avatarSizes[String(key).slice(0, 260)] = Math.round(percent);
+      }
+    }
+    const avatarSideCopies = {};
+    for (const [key, enabled] of Object.entries(input.avatarSideCopies || {})) {
+      if (key && enabled === true) avatarSideCopies[String(key).slice(0, 260)] = true;
+    }
+    return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies };
   }
 
   async function loadStore(force = false) {
@@ -50,7 +72,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const result = await DS.storageGet?.([STORE_KEY]);
         mediaStore = cleanStore(result?.[STORE_KEY]);
       } catch {
-        mediaStore = { global: null, chats: {}, galleries: {} };
+        mediaStore = cleanStore(null);
       }
       mediaLoaded = true;
       mediaLoadPromise = null;
@@ -74,22 +96,59 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function avatarFromChatHeader() {
-    // Reuse the actual avatar in SpicyChat's chat header; no network request,
-    // full image download or permanent data-url copy is initiated by QoL.
     const profile = document.querySelector("a[aria-label='chatbot-profile'][href*='/chatbot/']");
-    const image = profile?.querySelector("img") || profile?.parentElement?.querySelector("img") || null;
+    // SpicyChat 4.6 places the avatar beside the name-link column. Search
+    // only the header row so a message or the user's avatar cannot be chosen.
+    const headerRow = profile?.closest(".ds-chat-topbar-creator-line")?.parentElement
+      || profile?.parentElement?.parentElement;
+    const image = profile?.querySelector("img") || headerRow?.querySelector("img") || null;
     const source = image?.currentSrc || image?.src || "";
     if (!source) return null;
     try {
       const url = new URL(source, location.href);
       if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-      if (!DS.state?.settings?.chatBackgroundAnimateAvatar && /\.gif(?:$|[?#])/i.test(url.pathname)) return null;
-      return { url: url.href, name: "Character avatar", avatar: true };
+      if (!DS.state?.settings?.chatBackgroundAnimateAvatar && /\.gif$/i.test(url.pathname)) return null;
+
+      let fallbackUrl = "";
+      if (url.hostname === "cdn.nd-api.com" && url.pathname.startsWith("/avatars/")) {
+        // Chat header images use ?class=avatar48x48. Enlarging that thumbnail
+        // produces severe pixelation. Ask the CDN for the original instead.
+        url.searchParams.delete("class");
+        // This derivative is only used if the original really cannot load.
+        const fallback = new URL(url.href);
+        fallback.searchParams.set("class", "image500x650");
+        fallbackUrl = fallback.href;
+      }
+      return { url: url.href, fallbackUrl, name: "Character avatar", avatar: true };
     } catch { return null; }
+  }
+
+  function usableAvatarUrl(item) {
+    if (!item.avatar || !item.fallbackUrl) return item.dataUrl || item.url;
+    const status = avatarImageChecks.get(item.url);
+    if (status === "failed") return item.fallbackUrl;
+    if (!status) {
+      // Image requests share browser cache with the CSS background. Check
+      // once per URL so a broken original can fall back without looping.
+      avatarImageChecks.set(item.url, "loading");
+      const probe = new Image();
+      probe.onload = () => avatarImageChecks.set(item.url, "loaded");
+      probe.onerror = () => {
+        avatarImageChecks.set(item.url, "failed");
+        if (DS.isSingleChatPage?.() && DS.state?.settings?.enableChatBackgrounds) {
+          DS.applyChatBackgrounds?.();
+        }
+      };
+      probe.src = item.url;
+      // Bound the transient cache on long-lived tabs navigating many chats.
+      if (avatarImageChecks.size > 48) avatarImageChecks.delete(avatarImageChecks.keys().next().value);
+    }
+    return item.url;
   }
 
   function currentItem() {
     const key = chatKey();
+    if (key && mediaStore.suppressedChats?.[key]) return null;
     const gallery = key && DS.state?.settings?.chatSceneGalleriesEnabled ? mediaStore.galleries?.[key] : null;
     const activeScene = gallery?.items?.find(item => item.id === gallery.activeId) || null;
     const custom = (key && mediaStore.chats?.[key]) || activeScene || mediaStore.global || null;
@@ -128,31 +187,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
     const blur = Math.min(30, Math.max(0, Number(settings.chatBackgroundBlur) || 0));
     const dim = rgbaDim(settings.chatBackgroundDim ?? 45);
-    const safeUrl = String(item.dataUrl || item.url).replace(/"/g, "%22");
-    layer.style.backgroundImage = `linear-gradient(${dim}, ${dim}), url("${safeUrl}")`;
+    const safeUrl = String(usableAvatarUrl(item)).replace(/"/g, "%22");
     const fit = ["cover", "contain", "tile"].includes(settings.chatBackgroundFit) ? settings.chatBackgroundFit : "cover";
     const position = ["center", "top", "bottom", "left", "right"].includes(settings.chatBackgroundPosition) ? settings.chatBackgroundPosition : "center";
-    layer.style.backgroundPosition = position;
-    layer.style.backgroundRepeat = fit === "tile" ? "repeat" : "no-repeat";
-    layer.style.backgroundSize = fit === "tile" ? "auto" : fit;
+    if (item.avatar) {
+      // Portrait avatar + viewport-wide `cover` scales/crops the face heavily.
+      // Keep the dimming gradient full-screen, but size the image separately.
+      const key = chatKey();
+      const size = mediaStore.avatarSizes?.[key] ?? DEFAULT_AVATAR_SIZE;
+      if (mediaStore.avatarSideCopies?.[key]) {
+        // Paint the full-size portrait in the middle, then repeat the *same*
+        // image horizontally behind it. A gradient dims only the side copies;
+        // the full-screen top gradient preserves the user's normal dim value.
+        // CSS repeats the cached image without cloning DOM nodes or requests.
+        layer.style.backgroundImage = `linear-gradient(${dim}, ${dim}), url("${safeUrl}"), linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.26) 28%, rgba(0,0,0,.26) 72%, rgba(0,0,0,.55)), url("${safeUrl}")`;
+        layer.style.backgroundSize = `100% 100%, auto ${size}%, 100% 100%, auto ${size}%`;
+        layer.style.backgroundPosition = `center, ${position}, center, ${position}`;
+        layer.style.backgroundRepeat = "no-repeat, no-repeat, no-repeat, repeat-x";
+      } else {
+        layer.style.backgroundImage = `linear-gradient(${dim}, ${dim}), url("${safeUrl}")`;
+        layer.style.backgroundSize = `100% 100%, auto ${size}%`;
+        layer.style.backgroundPosition = `center, ${position}`;
+        layer.style.backgroundRepeat = "no-repeat, no-repeat";
+      }
+      layer.style.backgroundColor = "#111318";
+    } else {
+      layer.style.backgroundImage = `linear-gradient(${dim}, ${dim}), url("${safeUrl}")`;
+      // Two backgrounds: a full-size dimming gradient, then the chosen image.
+      // Retain the existing Fit setting for uploaded/global image backgrounds.
+      layer.style.backgroundSize = `100% 100%, ${fit === "tile" ? "auto" : fit}`;
+      layer.style.backgroundPosition = `center, ${position}`;
+      layer.style.backgroundRepeat = fit === "tile" ? "no-repeat, repeat" : "no-repeat, no-repeat";
+      layer.style.backgroundColor = "transparent";
+    }
     layer.style.filter = blur ? `blur(${blur}px)` : "none";
     layer.style.transform = blur ? `scale(${1 + Math.min(0.08, blur / 250)})` : "none";
     document.documentElement.classList.add("ds-chat-custom-background");
     const bubbleOpacity = Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
     document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
     document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
-  }
-
-  function findControlHost() {
-    const rating = document.querySelector("button[aria-label='ThumbsUp-button']");
-    if (rating?.parentElement) return rating.parentElement;
-    const dropdown = document.querySelector("button[aria-label='chat-dropdown']");
-    if (dropdown?.parentElement) return dropdown.parentElement;
-    const title = [...document.querySelectorAll("h1, h2, h3")].find(el => {
-      const rect = el.getBoundingClientRect?.();
-      return rect?.width > 0 && rect?.height > 0 && String(el.textContent || "").trim().length > 0;
-    });
-    return title?.parentElement || null;
   }
 
   function fileToDataUrl(file) {
@@ -191,7 +264,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         chats: {
           ...(mediaStore.chats || {}),
           [key]: { dataUrl, name: file.name || "Chat background", updatedAt: Date.now() }
-        }
+        },
+        suppressedChats: { ...(mediaStore.suppressedChats || {}), [key]: false }
       });
       await DS.applyChatBackgrounds?.();
       return true;
@@ -201,16 +275,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
-  async function clearChatOverride() {
+  async function resetChatBackground({ suppress = false } = {}) {
     const key = chatKey();
     if (!key) return;
     await loadStore();
     const chats = { ...(mediaStore.chats || {}) };
     delete chats[key];
-    await saveStore({ ...mediaStore, chats });
+    const galleries = { ...(mediaStore.galleries || {}) };
+    if (galleries[key]) {
+      // Keep saved scenes; only stop displaying the currently chosen scene.
+      galleries[key] = { ...galleries[key], activeId: "" };
+    }
+    const suppressedChats = { ...(mediaStore.suppressedChats || {}) };
+    if (suppress) suppressedChats[key] = true;
+    else delete suppressedChats[key];
+    await saveStore({ ...mediaStore, chats, galleries, suppressedChats });
     await DS.applyChatBackgrounds?.();
   }
 
+  async function saveAvatarSize(percent) {
+    const key = chatKey();
+    if (!key) return;
+    await loadStore();
+    const avatarSizes = { ...(mediaStore.avatarSizes || {}),
+      [key]: Math.max(30, Math.min(150, Math.round(Number(percent) || DEFAULT_AVATAR_SIZE))) };
+    await saveStore({ ...mediaStore, avatarSizes });
+    await DS.applyChatBackgrounds?.();
+  }
+
+  async function saveAvatarSideCopies(enabled) {
+    const key = chatKey();
+    if (!key) return;
+    await loadStore();
+    const avatarSideCopies = { ...(mediaStore.avatarSideCopies || {}) };
+    if (enabled) avatarSideCopies[key] = true;
+    else delete avatarSideCopies[key];
+    await saveStore({ ...mediaStore, avatarSideCopies });
+    await DS.applyChatBackgrounds?.();
+  }
 
   function sceneGalleryStatus() {
     const gallery = mediaStore.galleries?.[chatKey()];
@@ -244,7 +346,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const galleries = { ...mediaStore.galleries, [key]: { items, activeId } };
     const totalChars = Object.values(galleries).flatMap(g => g.items || []).reduce((sum, item) => sum + (item.dataUrl?.length || 0), 0);
     if (totalChars > MAX_GALLERY_DATA_CHARS) { DS.setQuickStatus?.("Scene gallery storage budget reached (24 MB). Remove scenes before adding new ones."); return; }
-    try { await saveStore({ ...mediaStore, galleries }); await DS.applyChatBackgrounds?.(); openDialog(); }
+    try {
+      const suppressedChats = { ...(mediaStore.suppressedChats || {}) };
+      delete suppressedChats[key];
+      const chats = { ...(mediaStore.chats || {}) };
+      delete chats[key];
+      await saveStore({ ...mediaStore, galleries, chats, suppressedChats });
+      await DS.applyChatBackgrounds?.();
+      openDialog();
+    }
     catch { DS.setQuickStatus?.("Could not store scene gallery. Remove images or use smaller files."); }
   }
   async function changeScene(id, { remove = false } = {}) {
@@ -257,8 +367,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!items.length) delete galleries[key];
     // Choosing a scene takes priority over any older single-image override.
     const chats = { ...mediaStore.chats };
-    if (!remove) delete chats[key];
-    await saveStore({ ...mediaStore, galleries, chats });
+    const suppressedChats = { ...(mediaStore.suppressedChats || {}) };
+    if (!remove) {
+      delete chats[key];
+      delete suppressedChats[key];
+    }
+    await saveStore({ ...mediaStore, galleries, chats, suppressedChats });
     await DS.applyChatBackgrounds?.();
     openDialog();
   }
@@ -290,11 +404,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const status = document.createElement("p");
     status.className = "ds-chat-background-status";
     const activeScene = sceneGallery?.items?.find(item => item.id === sceneGallery.activeId);
-    status.textContent = override
+    const suppressed = !!mediaStore.suppressedChats?.[key];
+    const displayedItem = currentItem();
+    status.textContent = suppressed ? "Background cleared for this chat." : override
       ? `This chat uses: ${override.name || "local image"}`
       : (DS.state?.settings?.chatSceneGalleriesEnabled && activeScene ? `Using scene: ${activeScene.name}` :
         (globalItem ? `Using global background: ${globalItem.name || "local image"}` :
-        (DS.state?.settings?.chatBackgroundUseAvatar ? "Using chat character avatar where available." : "No background image is set.")));
+        (displayedItem?.avatar ? "Using the chat character avatar." : "No background image is set.")));
 
     const choose = document.createElement("button");
     choose.type = "button";
@@ -309,11 +425,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const clear = document.createElement("button");
     clear.type = "button";
-    clear.textContent = override ? "Use global background" : "No chat override";
-    clear.disabled = !override;
+    clear.textContent = "Clear background for this chat";
+    clear.disabled = suppressed;
+    clear.title = "Hide the picture on this chat, including automatic avatar and global backgrounds. Saved gallery/global images are kept.";
     clear.addEventListener("click", async () => {
-      await clearChatOverride();
-      closeDialog();
+      clear.disabled = true;
+      try { await resetChatBackground({ suppress: true }); openDialog(); }
+      catch { DS.setQuickStatus?.("Could not clear the background. Try again."); clear.disabled = false; }
+    });
+
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.textContent = "Use default background";
+    restore.disabled = !suppressed && !override && !activeScene;
+    restore.title = "Remove this chat's background override and use the global image or automatic avatar if enabled.";
+    restore.addEventListener("click", async () => {
+      restore.disabled = true;
+      try { await resetChatBackground(); openDialog(); }
+      catch { DS.setQuickStatus?.("Could not reset the background. Try again."); restore.disabled = false; }
     });
 
     const settingsButton = document.createElement("button");
@@ -330,8 +459,61 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const actions = document.createElement("div");
     actions.className = "ds-chat-background-actions";
-    actions.append(choose, clear, settingsButton, done);
+    actions.append(choose, clear, restore, settingsButton, done);
     panel.append(title, status);
+    if (displayedItem?.avatar) {
+      const zoom = document.createElement("label");
+      zoom.textContent = "Avatar picture size";
+      zoom.style.display = "flex";
+      zoom.style.alignItems = "center";
+      zoom.style.gap = "10px";
+      zoom.style.margin = "10px 0";
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = "30";
+      slider.max = "150";
+      slider.step = "5";
+      slider.value = String(mediaStore.avatarSizes?.[key] ?? DEFAULT_AVATAR_SIZE);
+      slider.style.flex = "1";
+      const value = document.createElement("span");
+      value.textContent = `${slider.value}%`;
+      slider.addEventListener("input", () => {
+        value.textContent = `${slider.value}%`;
+        const layer = document.getElementById("ds-chat-background-layer");
+        if (layer) {
+          layer.style.backgroundSize = mediaStore.avatarSideCopies?.[key]
+            ? `100% 100%, auto ${slider.value}%, 100% 100%, auto ${slider.value}%`
+            : `100% 100%, auto ${slider.value}%`;
+        }
+      });
+      slider.addEventListener("change", async () => {
+        slider.disabled = true;
+        try { await saveAvatarSize(slider.value); }
+        catch { DS.setQuickStatus?.("Could not save avatar size. Try again."); }
+        finally { slider.disabled = false; }
+      });
+      zoom.append(slider, value);
+      panel.appendChild(zoom);
+
+      const sides = document.createElement("label");
+      sides.style.display = "flex";
+      sides.style.alignItems = "center";
+      sides.style.gap = "8px";
+      sides.style.margin = "8px 0 12px";
+      const sidesCheckbox = document.createElement("input");
+      sidesCheckbox.type = "checkbox";
+      sidesCheckbox.checked = !!mediaStore.avatarSideCopies?.[key];
+      sidesCheckbox.addEventListener("change", async () => {
+        sidesCheckbox.disabled = true;
+        try { await saveAvatarSideCopies(sidesCheckbox.checked); }
+        catch {
+          sidesCheckbox.checked = !sidesCheckbox.checked;
+          DS.setQuickStatus?.("Could not save avatar side copies. Try again.");
+        } finally { sidesCheckbox.disabled = false; }
+      });
+      sides.append(sidesCheckbox, document.createTextNode("Repeat avatar picture toward both screen edges (experimental)"));
+      panel.appendChild(sides);
+    }
     if (DS.state?.settings?.chatSceneGalleriesEnabled && key) {
       const sceneSection = document.createElement("section"); sceneSection.className = "ds-chat-scenes";
       const heading = document.createElement("h4"); heading.textContent = `Saved scenes (${sceneGalleryStatus()}/${MAX_SCENES_PER_CHAT})`;
@@ -364,27 +546,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     backdrop.addEventListener("click", closeDialog);
   }
 
-  function ensureControl() {
-    let button = document.getElementById("ds-chat-background-control");
-    const host = findControlHost();
-    if (!host) return;
-    if (!button) {
-      button = document.createElement("button");
-      button.id = "ds-chat-background-control";
-      button.type = "button";
-      button.className = "ds-chat-background-control";
-      button.textContent = "BG";
-      button.title = "Chat background";
-      button.setAttribute("aria-label", "Chat background");
-      button.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        openDialog();
-      });
-    }
-    if (!button.isConnected || button.parentElement !== host) host.appendChild(button);
-  }
-
   DS.applyChatBackgrounds = async function applyChatBackgrounds() {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.enableChatBackgrounds || !DS.isSingleChatPage?.()) {
@@ -396,7 +557,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.chatBackgroundsWasActive = true;
     await loadStore();
     applyLayer(currentItem());
-    ensureControl();
+    // Popup is the only BG launcher. Clear any header button from an older pass.
+    document.getElementById("ds-chat-background-control")?.remove();
   };
 
   DS.removeChatBackgrounds = function removeChatBackgrounds() {
@@ -404,6 +566,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     removeControl();
     DS.state.chatBackgroundsWasActive = false;
   };
+
+  try {
+    chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
+      if (message?.type !== "DS_GET_CHAT_BACKGROUND_MENU_STATE" &&
+          message?.type !== "DS_OPEN_CHAT_BACKGROUND_MENU") return false;
+      const settings = DS.state?.settings || {};
+      const available = !!(settings.enabled && settings.enableChatBackgrounds && DS.isSingleChatPage?.());
+      sendResponse({ ok: available });
+      if (message.type === "DS_OPEN_CHAT_BACKGROUND_MENU" && available)
+        openDialog().catch(() => DS.setQuickStatus?.("Could not open chat background menu."));
+      return false;
+    });
+  } catch {}
 
   try {
     chrome.storage?.onChanged?.addListener((changes, areaName) => {

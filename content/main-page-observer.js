@@ -10,6 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const {runtimeCounters, checkRouteChange, scheduleEssentialChatControls, messageRootMutationSets, scheduleChatStartupQuietResume, mutationsMayAffectChatListRows, scheduleSavedOpenedLane, shouldPauseHiddenTab, syncMessageEditGuards, mutationRemovedPersistentChatShortcut, mutationRemovedPersistentChatHeaderControl, mutationAddedNativeChatHeader, mutationIsOnlyQolUi, mutationsAddOrRemoveMessageRoots, mutationIsMessageScoped, mutationTouchesNativeChatHeader, mutationsAreComposerOnly, collectMessageCacheMutationTargets, nodeInsidePendingMessageEdit, updateLoadedChatMessageCountFromMutations, addedMessageRootCount, runtimeProfile, isLikelyHistoryInsertionBurst, scheduleChatHistoryBatchRefresh, loadedChatMessageCount, isCardListingContext, mutationsMayAffectCards, mutationsAreChatLocal, mutationsAddBotCards} = dependencies;
     DS.observePage = function observePage() {
     if (DS.isQolPausedForTab?.()) return;
+    let lastNonCardListingScheduleAt = 0;
     const observer = new MutationObserver(mutations => {
       if (DS.isQolPausedForTab?.()) return;
       const counters = runtimeCounters();
@@ -221,6 +222,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // A real message-root add/remove still bumps it so static long-chat classes
       // and other structure caches refresh, while text edits use messageTextRevision.
       const cardListing = !isChatPage && isCardListingContext();
+      // A blocked ID is authoritative even during the 2-minute refresh batch.
+      // This checks only added/updated links, not the other 48+ listing cards.
+      if (cardListing) DS.hideBlockedCardMounts?.(mutations);
       const affectsCards = cardListing ? mutationsMayAffectCards(mutations) : false;
       if (cardListing && affectsCards) DS.markListingDirtyCards?.(mutations);
       if (chatLocal) {
@@ -250,7 +254,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // not need the critical card-filter lane. Keep them in the throttled
         // cosmetic lane instead of rescanning every loaded bot card.
         counters.listingNonCardCriticalSkips = Number(counters.listingNonCardCriticalSkips || 0) + 1;
-        DS.scheduleRun?.({ priority: "slow", source: "listing-non-card-mutation" });
+        const now = Date.now();
+        if (now - lastNonCardListingScheduleAt >= 1800) {
+          lastNonCardListingScheduleAt = now;
+          DS.scheduleRun?.({ priority: "slow", source: "listing-non-card-mutation" });
+        } else {
+          counters.listingNonCardCoalesced = Number(counters.listingNonCardCoalesced || 0) + 1;
+        }
       } else if (isChatPage) {
         // Chat DOM changes still get the interactive/critical repair lane, but
         // the slow lane is invalidation-driven. A new message or unrelated
@@ -277,6 +287,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     observer.observe(document.documentElement, {
       childList: true,
       characterData: true,
+      // React may recycle the same anchor for another bot without adding a node.
+      // Track only href changes; other attributes (especially QoL classes) remain ignored.
+      attributes: true,
+      attributeFilter: ["href"],
       subtree: true
     });
 

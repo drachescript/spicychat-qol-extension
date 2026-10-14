@@ -740,6 +740,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.ensureOocPanel = ensureOocPanel;
 
+  DS.removeOocTools = function removeOocTools() {
+    document.getElementById("ds-qol-ooc-row")?.remove();
+    DS.removeEssentialOocShortcut?.();
+  };
+
   DS.applyOocTools = function applyOocTools() {
     if (!DS.state.settings.enabled) return;
 

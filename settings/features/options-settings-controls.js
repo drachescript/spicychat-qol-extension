@@ -504,7 +504,7 @@ function setupFeaturesIndex() {
 
   function featureSearchText(entry) {
     const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || {};
-    return clean(`${entry.name} ${entry.category} ${entry.description || ""} ${(entry.aliases || []).join(" ")} ${entry.platform || ""} ${entry.maturity || ""} ${compatibility.label || ""} ${compatibility.reason || ""}`).toLowerCase();
+    return clean(entry.name).toLowerCase();
   }
 
   function renderFeature(entry) {

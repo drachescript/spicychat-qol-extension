@@ -2033,103 +2033,41 @@ function setupSettingsSearch() {
     return /^(?:show\s+(?:\d+\s+more|first\s+\d+|\d+)|load\s+more|open\s+profile|open\s+chat|copy\s+link|select|remove|recheck)$/i.test(text);
   }
 
+  // Search *features*, not the thousands of nested Settings labels, synced
+  // storage keys, repeated creator-specific switches, or manager row controls.
+  // A feature gets one searchable result and still links to its real Settings.
   const items = [];
-  let itemIndex = 0;
-
-  document.querySelectorAll(".tab-page .card").forEach(card => {
-    const page = card.closest(".tab-page");
-    const tabName = page?.dataset.page || "general";
-    if (tabName === "features") return;
+  for (const entry of featureRegistry) {
+    if (!entry?.id || !entry?.name || entry.planned) continue;
+    const candidates = [entry.target, entry.setting, ...(Array.isArray(entry.settings) ? entry.settings : [])]
+      .filter(Boolean).map(id => document.getElementById(String(id))).filter(Boolean);
+    const target = candidates.find(node => node.closest(".tab-page")) || null;
+    const card = target?.closest(".card") || null;
+    const page = target?.closest(".tab-page") || null;
+    const tabName = page?.dataset.page || "features";
     const tabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(tabName)}"]`);
-    const tabLabel = cleanSearchText(tabButton?.textContent) || tabName;
-    const cardHeading = cleanSearchText(card.querySelector(":scope > h2 .settings-card-toggle")?.textContent || card.querySelector(":scope > h2")?.textContent || card.querySelector("h2")?.textContent) || "Settings";
-    const seenTargets = new Set();
-
-    const addItem = (target, kind = "setting") => {
-      if (!target || seenTargets.has(target)) return;
-      seenTargets.add(target);
-
-      const label = targetLabel(target);
-      if (!label) return;
-      const subheading = nearestSubheading(target, card);
-      const control = target.matches("input, select, textarea, button")
-        ? target
-        : target.querySelector("input, select, textarea, button");
-      const controlMeta = cleanSearchText([
-        control?.id,
-        control?.name,
-        control?.getAttribute?.("aria-label"),
-        control?.getAttribute?.("placeholder")
-      ].filter(Boolean).join(" "));
-      const nearbyHint = cleanSearchText(
-        target.nextElementSibling?.classList?.contains("hint")
-          ? target.nextElementSibling.textContent
-          : ""
-      );
-      const aliases = cleanSearchText(SEARCH_ALIASES[control?.id] || SEARCH_ALIASES[target?.id] || "");
-      const registryText = cleanSearchText(registrySearchTextFor(control?.id, target?.id, card.id));
-      const searchText = kind === "action"
-        ? cleanSearchText([subheading, label, GENERIC_SEARCH_TERMS].filter(Boolean).join(" ")).toLowerCase()
-        : cleanSearchText([
-            tabLabel,
-            cardHeading,
-            subheading,
-            label,
-            controlMeta,
-            nearbyHint,
-            aliases,
-            registryText,
-            kind !== "card" ? GENERIC_SEARCH_TERMS : ""
-          ].filter(Boolean).join(" ")).toLowerCase();
-
-      items.push({
-        index: itemIndex++,
-        target,
-        control,
-        card,
-        tabName,
-        tabLabel,
-        cardHeading,
-        subheading,
-        label,
-        kind,
-        searchText,
-        targetText: cleanSearchText([subheading, label, controlMeta].filter(Boolean).join(" ")).toLowerCase()
-      });
-    };
-
-    // Index the individual setting/control first. This is the important part:
-    // search results now point to the exact checkbox/select/button instead of
-    // only knowing which large card contains the words.
-    card.querySelectorAll("label").forEach(label => addItem(label, "setting"));
-    card.querySelectorAll("button").forEach(button => {
-      if (button.closest("label") || isSearchNoiseButton(button)) return;
-      const text = cleanSearchText(button.textContent || button.getAttribute("aria-label"));
-      if (!text) return;
-      addItem(button, "action");
-    });
-
-    // Keep a card-level fallback, but index only the static card heading/hints.
-    // Indexing card.textContent also pulled thousands of rendered bot rows and
-    // pager labels ("Show 20 more", etc.) into Settings search.
-    const staticHintText = cleanSearchText(
-      [...card.querySelectorAll(":scope > p.hint, :scope > .hint")].map(node => node.textContent).join(" ")
-    );
+    const tabLabel = cleanSearchText(tabButton?.textContent) || "Features";
+    const name = cleanSearchText(entry.name);
+    // Curated aliases are intentionally searchable; free-form descriptions,
+    // category names and setting IDs aren't (they caused unrelated matches).
+    // Search actual feature names only. Aliases/descriptions are kept in the
+    // registry for help text, not used to flood feature discovery results.
+    const aliases = [];
     items.push({
-      index: itemIndex++,
-      target: card,
-      control: null,
-      card,
+      index: items.length,
+      target: target || $("featureIndexSearch") || $("featureIndexList"),
+      control: target?.matches?.("input, select, textarea, button") ? target : null,
+      card: card || $("featureIndexList"),
       tabName,
       tabLabel,
-      cardHeading,
+      cardHeading: name,
       subheading: "",
-      label: cardHeading,
-      kind: "card",
-      searchText: cleanSearchText([cardHeading, staticHintText, registrySearchTextFor("", card.id, card.id), GENERIC_SEARCH_TERMS].join(" ")).toLowerCase(),
-      targetText: cardHeading.toLowerCase()
+      label: name,
+      kind: "feature",
+      searchText: cleanSearchText([name, ...aliases].join(" ")).toLowerCase(),
+      targetText: name.toLowerCase()
     });
-  });
+  }
 
   const clearResults = () => {
     host.hidden = true;
@@ -2138,7 +2076,7 @@ function setupSettingsSearch() {
 
   const scoreMatch = (item, query, terms) => {
     let score = 0;
-    if (item.kind !== "card") score += 120;
+    if (item.kind === "feature") score += 120;
     if (item.targetText === query) score += 1000;
     else if (item.targetText.startsWith(query)) score += 700;
     else if (item.targetText.includes(query)) score += 500;
@@ -2154,6 +2092,10 @@ function setupSettingsSearch() {
 
   const revealAndScrollTo = item => {
     setActiveTab(item.tabName);
+    if (item.tabName === "features" && item.kind === "feature") {
+      const featureSearch = $("featureIndexSearch");
+      if (featureSearch) { featureSearch.value = item.label; featureSearch.dispatchEvent(new Event("input", { bubbles: true })); }
+    }
     expandSettingsCardForTarget(item.target);
     recordRecentSettingsCard(item.card);
 
@@ -2200,15 +2142,23 @@ function setupSettingsSearch() {
     const needle = String(term || "").toLowerCase();
     if (!needle) return true;
     if (hay.includes(needle)) return true;
-    let pos = 0;
-    let gaps = 0;
-    for (const ch of needle) {
-      const found = hay.indexOf(ch, pos);
-      if (found < 0) return false;
-      gaps += found - pos;
-      pos = found + 1;
-    }
-    return gaps <= Math.max(6, needle.length * 3);
+    // Short queries such as "tag" must not match unrelated titles simply
+    // because t, a and g appear somewhere in a long feature name.
+    if (needle.length <= 4) return false;
+    // One typo in a *word* is enough; do not fuzzy-match across whole labels.
+    const withinOneEdit = word => {
+      if (Math.abs(word.length - needle.length) > 1) return false;
+      let i = 0, j = 0, edits = 0;
+      while (i < word.length && j < needle.length) {
+        if (word[i] === needle[j]) { i++; j++; continue; }
+        if (++edits > 1) return false;
+        if (word.length > needle.length) i++;
+        else if (word.length < needle.length) j++;
+        else { i++; j++; }
+      }
+      return edits + (word.length - i) + (needle.length - j) <= 1;
+    };
+    return hay.split(/[^\p{L}\p{N}]+/u).some(word => word && withinOneEdit(word));
   }
 
   let lastMatches = [];
@@ -2231,7 +2181,7 @@ function setupSettingsSearch() {
     const query = terms.join(" ");
 
     const directItems = genericOnly
-      ? items.filter(item => item.kind === "card")
+      ? items
       : items.filter(item => terms.every(term => item.searchText.includes(term)));
     const candidateItems = directItems.length || genericOnly
       ? directItems
@@ -2250,7 +2200,7 @@ function setupSettingsSearch() {
     if (!matches.length) {
       host.replaceChildren(makeElement("div", {
         className: "settings-search-empty",
-        text: `No settings matched “${rawQuery}”.`
+        text: `No features matched “${rawQuery}”.`
       }));
       return;
     }
@@ -2258,7 +2208,7 @@ function setupSettingsSearch() {
     const buttons = matches.map(({ item }) => {
       const path = [item.tabLabel, item.cardHeading];
       if (item.subheading && item.subheading !== item.cardHeading) path.push(item.subheading);
-      const exact = item.kind === "card" ? item.cardHeading : item.label;
+      const exact = item.kind === "feature" ? "Open feature settings" : item.label;
       const button = makeElement("button", {
         className: "settings-search-result",
         attrs: { type: "button" },

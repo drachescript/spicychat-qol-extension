@@ -449,6 +449,14 @@ async function load() {
     blockButton.style.display = "none";
   }
 
+  const backgroundButton = document.getElementById("openChatBackground");
+  if (backgroundButton) {
+    const backgroundState = pageInfo?.isSingleChatPage && tabQolState?.enabled
+      ? await sendToActiveTab({ type: "DS_GET_CHAT_BACKGROUND_MENU_STATE" })
+      : null;
+    backgroundButton.hidden = !backgroundState?.ok;
+  }
+
   renderContextActions(pageInfo);
 }
 
@@ -551,6 +559,12 @@ document
 document
   .getElementById("blockCurrentBot")
   .addEventListener("click", blockCurrentBot);
+
+document.getElementById("openChatBackground")?.addEventListener("click", async () => {
+  const response = await sendToActiveTab({ type: "DS_OPEN_CHAT_BACKGROUND_MENU" });
+  if (response?.ok) window.close();
+  else document.getElementById("status").textContent = "Open a chat with backgrounds enabled to use BG.";
+});
 
 document.getElementById("viewChanges")?.addEventListener("click", async () => {
   await storageRemove(RELEASE_NOTICE_KEY);
