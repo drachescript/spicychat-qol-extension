@@ -53,6 +53,29 @@ class CustomRecipeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid update preference"):
             recipes.validate_recipe({**self.recipe, "updates": {"default": "manual", "overrides": {"ooc": "magic"}}}, self.contracts)
 
+    def test_ooc_lifecycle_status_does_not_claim_custom_build_ready(self):
+        contracts = {"ooc": {"requiredFeatures": [],
+                             "fullRuntimeStatus": "lifecycle-gated",
+                             "customBuildStatus": "blocked",
+                             "blockers": ["Composer shortcut is still shared"]}}
+        readiness = recipes.feature_readiness(["ooc"], contracts)
+        self.assertEqual(readiness["ooc"]["fullRuntimeStatus"], "lifecycle-gated")
+        self.assertEqual(readiness["ooc"]["customBuildStatus"], "blocked")
+        self.assertIn("Composer shortcut", readiness["ooc"]["blockers"][0])
+
+    def test_missing_package_status_is_unverified_not_validated(self):
+        readiness = recipes.feature_readiness(["ui"], self.contracts)
+        self.assertEqual(readiness["ui"]["customBuildStatus"], "unverified")
+        self.assertTrue(readiness["ui"]["blockers"])
+
+    def test_preview_has_noninstallable_outer_gate(self):
+        recipe = recipes.validate_recipe(self.recipe, self.contracts)
+        with patch.object(recipes.plan_custom, "plan_features", return_value={"installable": True}):
+            response = recipes.preview(recipe, self.contracts)
+        self.assertFalse(response["installable"])
+        self.assertFalse(response["plan"]["installable"])
+        self.assertIn("creator", response["featureReadiness"])
+
     def test_preview_remains_noninstallable_even_if_planner_regresses(self):
         recipe = recipes.validate_recipe(self.recipe, self.contracts)
         with patch.object(recipes.plan_custom, "plan_features", return_value={"installable": True}) as planner:
