@@ -112,10 +112,23 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
             require(rel, 'manifest icon')
 
         import_order = extract_imports(archive.read('background-entry.js').decode('utf-8')) if 'background-entry.js' in available else []
-        if not import_order or import_order[0] != 'background.js':
-            problems.append('background-entry.js does not import background.js first')
+        if not import_order:
+            problems.append('background-entry.js has no background imports')
+        if len(import_order) != len(set(import_order)):
+            problems.append('duplicate background-entry.js imports')
+        if import_order.count('background.js') != 1:
+            problems.append('background.js must occur exactly once in background-entry.js')
+        if import_order.count('background/background-events.js') != 1 or (import_order and import_order[-1] != 'background/background-events.js'):
+            problems.append('background/background-events.js must load last')
+        if 'background.js' in import_order:
+            index = import_order.index('background.js')
+            if any(rel.startswith('background/events/') for rel in import_order[:index]):
+                problems.append('background event handlers load before background.js')
         for rel in import_order:
             require(rel, 'background entry import')
+        source_imports = extract_imports((ROOT / 'background-entry.js').read_text(encoding='utf-8-sig'))
+        if source_imports != import_order:
+            problems.append('packaged background imports differ from the source entry point')
 
         is_firefox = '-firefox.zip' in path.name.lower()
         if not is_firefox and '-chrome.zip' not in path.name.lower():

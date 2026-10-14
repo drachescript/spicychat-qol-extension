@@ -310,8 +310,20 @@ def background_script_imports() -> list[str]:
     if match is None:
         raise SystemExit("background-entry.js has no static importScripts list")
     imports = re.findall(r"[\"']([^\"']+\.js)[\"']", match.group(1))
-    if not imports or imports[0] != "background.js":
-        raise SystemExit("background-entry.js must import background.js first")
+    if not imports:
+        raise SystemExit("background-entry.js has no JavaScript imports")
+    if len(imports) != len(set(imports)):
+        raise SystemExit("background-entry.js contains duplicate imports")
+    if imports.count("background.js") != 1:
+        raise SystemExit("background-entry.js must import background.js exactly once")
+    if imports.count("background/background-events.js") != 1 or imports[-1] != "background/background-events.js":
+        raise SystemExit("background/background-events.js must be the last background import")
+    controller_index = imports.index("background.js")
+    if any(path.startswith("background/events/") for path in imports[:controller_index]):
+        raise SystemExit("Background event handlers must load after background.js")
+    for path in imports:
+        if not (ROOT / path).is_file():
+            raise SystemExit(f"Missing background import: {path}")
     return imports
 
 

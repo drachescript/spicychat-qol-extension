@@ -38,3 +38,6 @@ Thumbs.db
 # others
 PATCH_EXTENSION_NEXT_BATCH.bat
 patch_extension_next_batch.ps1
+
+# Generated browser release archives (rebuild from source)
+/dist/

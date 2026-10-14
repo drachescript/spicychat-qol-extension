@@ -4,7 +4,7 @@ SpicyChat QoL is a configurable quality-of-life extension for SpicyChat. It adds
 
 The project is developed and maintained by **DragonGRaf** under **DragonScript**. The public extension name is **SpicyChat QoL**.
 
-Current release: **0.2.0**
+Latest published build: [GitHub Releases](https://github.com/drachescript/spicychat-qol-extension/releases). The manifest can be ahead of the published stores during testing.
 
 ## Install
 
@@ -140,14 +140,12 @@ S.AI Toolkit: https://github.com/OnyxMizuna/SAI-Toolkit
 
 ## Project files
 
-- `feature-registry.js` — structured feature catalogue used by the Settings Features tab.
+- `shared/feature-registry.js` — structured feature catalogue used by the Settings Features tab.
 - `features.md` — detailed human-readable feature list and roadmap.
 - `CHANGELOG.md` — detailed extension version history.
-- `RELEASE_NOTES.md` — v0.2 release and migration notes.
-- `RELEASE_CHECKLIST.md` — final automated/manual release checks.
 - `PRIVACY.md` — current privacy policy.
 - `PERMISSIONS.md` — why each extension/host permission is used.
-- `BUILDING.md` — local validation and packaging notes.
+- `build/README.md` — local build profiles and validation instructions.
 - `android-CHANGELOG.md` — Android release notes.
 - `THIRD-PARTY-NOTICES.md` — adapted/third-party code notices.
 - `CONTRIBUTING.md` / `SECURITY.md` — contribution and private security-report guidance.
