@@ -1,0 +1,12 @@
+{
+  "schema": "dsq-custom-recipe/v1",
+  "id": "ooc-example",
+  "label": "OOC Tools Experiment",
+  "selectedFeatures": [
+    "ooc"
+  ],
+  "updates": {
+    "default": "manual",
+    "overrides": {}
+  }
+}
