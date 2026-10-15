@@ -194,10 +194,13 @@ def main() -> int:
         for group, paths in contract.get("sharedDependencies", {}).items():
             for path in paths:
                 check_file(path, f"{feature_id} shared {group}")
-        if contract.get("customBuildStatus") not in ("blocked", "validated"):
+        # The fixed Core+OOC browser experiment is real source, but NOT a
+        # general-purpose validated Custom build. Keep it explicitly test-only.
+        status = contract.get("customBuildStatus")
+        if status not in ("blocked", "experimental-test-only", "validated"):
             ERRORS.append(f"Feature {feature_id} must declare its build readiness")
-        if contract.get("customBuildStatus") == "blocked" and not contract.get("blockers"):
-            ERRORS.append(f"Feature {feature_id} blocked without reason")
+        if status != "validated" and not contract.get("blockers"):
+            ERRORS.append(f"Feature {feature_id} has no reason for its non-validated status")
 
     if ERRORS:
         print(f"Runtime verification failed ({len(ERRORS)} issue(s)):")
