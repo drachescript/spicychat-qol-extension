@@ -1,0 +1,16 @@
+/* Optional Story Mode readability: no DOM injection or dialogue rewriting. */
+html.ds-qol-story-reading-layout :is([data-testid*="StoryMessage"],[data-testid*="story-message"],div[id^="message-"]) {
+  border-inline-start: 2px solid rgba(130, 155, 190, .48);
+  margin-block: 8px;
+  padding-inline-start: 12px;
+}
+html.ds-qol-story-reading-layout :is([data-testid*="StoryMessage"],[data-testid*="story-message"],div[id^="message-"]) :is(p,blockquote) {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  html.ds-qol-story-reading-layout :is([data-testid*="StoryMessage"],[data-testid*="story-message"],div[id^="message-"]) {
+    min-width: 0;
+    max-width: 100%;
+    padding-inline-start: 8px;
+  }
+}

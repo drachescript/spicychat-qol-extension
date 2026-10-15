@@ -5,7 +5,8 @@
   "category": "chat",
   "requiredFeatures": [],
   "runtimeScripts": [
-    "content/ooc.js"
+    "content/ooc.js",
+    "content/ooc-composer.js"
   ],
   "settingsScripts": [
     "settings/options-ooc.js"
@@ -17,36 +18,35 @@
     "androidTopBarOoc",
     "oocTemplates"
   ],
-  "cssFiles": [],
+  "cssFiles": [
+    "content/styles/ooc.css"
+  ],
   "backgroundServices": [],
   "permissions": [],
   "sharedDependencies": {
     "runtime": [
-      "content/core.js",
-      "content/chat-ui.js",
-      "content/main.js",
-      "content/quick-panel.js"
+      "content/core-settings-defaults.js",
+      "custom/ooc-runtime-core.js (minimal recipe only)"
     ],
     "settings": [
-      "options.js",
-      "options.html"
+      "custom/ooc-options.html (minimal recipe only)",
+      "custom/ooc-options.js (minimal recipe only)"
     ],
     "styles": [
-      "content.css"
+      "content/styles/ooc.css"
     ]
   },
-  "customBuildStatus": "blocked",
+  "customBuildStatus": "experimental-test-only",
   "blockers": [
-    "OOC shortcut creation still shares content/chat-ui.js and chat composer controls.",
-    "The shared main scheduler, Options markup, CSS and background/core closure still need a runnable small-build test."
+    "Real Chrome/Brave unpacked startup and storage/route behavior still require user validation.",
+    "This fixed recipe is not arbitrary feature selection."
   ],
   "notes": [
-    "Full build remains unchanged except for extracted Settings helper functions",
-    "Shared dependencies must be extracted or guarded before Core + OOC becomes installable"
+    "OOC insertion/composer are the same files in Full and Core+OOC.",
+    "The minimal recipe uses a small Settings page with compatible OOC settings keys, but separately installed Chrome extensions have isolated local storage."
   ],
   "fullRuntimeStatus": "lifecycle-gated",
   "fullRuntimeNotes": [
-    "OOC panel and original image shortcut have independent teardown through the shared feature lifecycle.",
-    "The existing Chat UI shortcut creation code remains shared and Custom package dependencies are not fully isolated."
+    "The composer button implementation lives in content/ooc-composer.js and loads independently from chat-ui.js."
   ]
 }

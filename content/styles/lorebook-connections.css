@@ -1,0 +1,13 @@
+/* Optional read-only Lorebook discovery tools; scoped to native public pages. */
+#ds-lorebook-connections { margin: 10px 0 16px; padding: 10px 12px; border: 1px solid #7776; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere; }
+#ds-lorebook-connections .ds-lb-connections-intro { opacity: .75; margin: 4px 0 8px; }
+#ds-lorebook-connections .ds-lb-connections-creator { margin: 6px 0; }
+#ds-lorebook-connections a { text-decoration: underline; text-underline-offset: 2px; }
+#ds-lorebook-connections button { margin-top: 7px; border: 1px solid #8889; padding: 6px 10px; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+#ds-lorebook-connections .ds-lb-connections-details { margin-top: 8px; }
+#ds-lorebook-connections .ds-lb-connections-details ul { margin: 8px 0; padding-left: 22px; max-height: 210px; overflow-y: auto; }
+#ds-lorebook-author-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 10px; margin: 8px 0; border: 1px solid #7776; border-radius: 9px; font-size: 13px; }
+#ds-lorebook-author-filter label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#ds-lorebook-author-filter input { min-width: 0; width: min(240px, 100%); padding: 7px; color: inherit; background: transparent; border: 1px solid #8888; border-radius: 7px; }
+#ds-lorebook-author-filter .ds-lb-author-count { opacity: .7; }
+.ds-lorebook-author-filter-hidden { display: none !important; }

@@ -1,4 +1,19 @@
-## 0.2.48 (test build)
+## 0.2.49
+- Expanded the optional Rulebook troubleshooting log with manual Regenerate, Delete and Next Turn markers, plus a short recent-events view. These help with testing and do not claim to detect native Rulebook triggers or reconstruct hidden data.
+- Added an optional public Lorebook discovery panel linking to the creator profile when SpicyChat shows it, and listing exact bot/Lorebook links already saved locally by QoL creator tools. These are known local links only, not a complete list of every bot using the Lorebook.
+- Added a creator-name filter for currently loaded public Lorebook cards; it does not scan profiles or call more APIs.
+- Added an optional visual-only Story Mode reading layout with subtle message boundaries and small-screen text wrapping. It does not change generation or merge native chat/Story modes.
+- Added Rename to saved background scene images so uploaded scenes can serve as reusable named presets without reuploading files.
+- Kept the v0.2.49 Rulebook mobile wrapping and chat background fit/position updates from the prior QoL 22 batch.
+- Added an opt-in, read-only Rulebook troubleshooting log for chat pages. It records changes to visible meter values/status text in the current tab (up to 150 observations), keeps the last visible values when the native HUD is minimized, and exports a JSON bug report. No hidden instructions, engine changes, chat text, or inferred trigger history. The log clears when disabled or when switching chats.
+- Improved narrow-screen Rulebook status text wrapping, and made the optional troubleshooting drawer fit smaller screens without covering the main chat with a permanent toolbar.
+- Added per-chat image Fit and Position choices to the background popup, including corners, with an independent "Use global setting" choice for each. Existing global options, original source URLs, images and scene galleries remain intact.
+- Began Core + OOC minimal-installation testing: extracted the OOC composer controls, added a small dedicated OOC Settings editor and a fixed minimal Chrome/Brave build recipe. Full QoL continues using the same OOC modules; other Custom combinations are not yet supported.
+
+- Added optional HTTPS image URL backgrounds for global/chat views. Download a local copy by default or keep the URL only; both keep the original URL for refreshing the image later. Per-host permission and the 8 MB limit still apply.
+- Added an Active options panel showing enabled named features in their original Settings context, with per-feature navigation and a confirmed bulk switch-off that preserves saved data.
+
+## 0.2.48
 - **Modularization — Stage 4:** Added shared feature start/stop handling and cleanup, expanded feature-level Settings and background service isolation, and kept Full QoL and future Custom builds on the same module system. OOC now restores its native chat controls when disabled. Custom packages remain experimental until their remaining dependencies and browser startup are verified.
 - Made Settings search show named QoL features instead of internal sync keys, repeated controls and individual mini-options.
 - Fixed blocked bot cards reappearing after SpicyChat remounts/recycles them, while avoiding a full card scan after each block. Block buttons now use the current card link.

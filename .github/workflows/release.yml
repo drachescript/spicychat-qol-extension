@@ -166,8 +166,10 @@ jobs:
               raise SystemExit(f"Unknown release mode: {mode}")
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # The existing tag/current-main checks decide release eligibility.
+          # Changelog headings remain plain version numbers.
           if publish and not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+              raise SystemExit(f"CHANGELOG.md has no exact '## {version}' section.")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"version={version}\n")

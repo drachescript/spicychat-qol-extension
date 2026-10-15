@@ -387,3 +387,19 @@ html :is(button, input, select, textarea, a, [tabindex]):focus-visible {
 }
 .settings-reading-presets { flex-wrap: wrap; }
 .settings-reading-presets button { min-height: 40px; }
+
+/* Named enabled-feature review; not an alternate Settings editor. */
+.ds-active-options-panel { margin: 0 0 15px; border: 1px solid #34383f; border-radius: 10px; background: #17191c; padding: 10px 14px; }
+.ds-active-options-panel > summary { cursor: pointer; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.ds-active-options-body { padding-top: 14px; }
+.ds-active-options-group { padding: 6px 0 12px; border-top: 1px solid #2f343a; }
+.ds-active-options-group h4 { margin: 9px 0; font-size: 13px; }
+.ds-active-options-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid #282c31; }
+.ds-active-options-description { min-width: min(100%, 270px); flex: 1 1 300px; display: grid; gap: 3px; }
+.ds-active-options-description small { color: #999fa8; font-size: 11px; line-height: 1.4; }
+.ds-active-options-row button { white-space: nowrap; }
+.ds-bg-url-entry { margin: 10px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ds-bg-url-entry label, .ds-bg-url-entry > p { flex-basis: 100%; }
+.ds-bg-url-entry input[type="url"] { flex: 1 1 240px; min-width: min(100%, 240px); }
+.ds-bg-url-entry select { max-width: 100%; }
+@media (max-width: 650px) { .ds-active-options-row button { flex: 1 1 120px; } }

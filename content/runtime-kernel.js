@@ -65,6 +65,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "chat top bar": "chat",
     "chat top bar cleanup": "chat",
     "chat backgrounds": "chat",
+    "rulebook diagnostics": "chat",
+    "rulebook diagnostics cleanup": "chat",
     "chat background cleanup": "chat",
     "chat background button placement": "chat",
     "chat UI": "chat",

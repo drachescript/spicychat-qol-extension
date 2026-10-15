@@ -50,8 +50,9 @@ jobs:
               )
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Version headings are always plain: ## 0.2.48, no status suffixes.
           if not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no '## {version}' section.")
+              raise SystemExit(f"CHANGELOG.md has no exact '## {version}' section.")
 
           print(f"Version/changelog OK: {version}")
           PY

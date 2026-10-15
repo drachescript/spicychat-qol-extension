@@ -125,6 +125,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BG_REQUEST_IMAGE_PERMISSION") {
+    const url = dsqSafeBackgroundImageUrl(message.url);
+    if (!url) { sendResponse({ ok: false, error: "Only public HTTPS image URLs are supported." }); return false; }
+    dsqBgRequestOrigin(dsqBgOriginPattern(url)).then(sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_BG_FETCH_IMAGE_URL") {
+    dsqFetchBackgroundImage(message.url).then(sendResponse).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_WIKI_REQUEST_PERMISSION") {
     const origin = wikiOriginPattern(message.url);
     if (!origin) {
@@ -807,4 +819,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+}
+
+
+// Explicit-user-action image downloader. Never runs on chat startup.
+function dsqSafeBackgroundImageUrl(raw) {
+  try {
+    const u = new URL(String(raw || "").trim());
+    if (u.protocol !== "https:" || u.username || u.password || u.href.length > 2048) return "";
+    if (!u.hostname || /^(localhost|.*\.localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$)/i.test(u.hostname)) return "";
+    return u.href;
+  } catch { return ""; }
+}
+
+function dsqBgOriginPattern(url) {
+  const u = new URL(url);
+  return `${u.protocol}//${u.hostname}/*`;
+}
+
+function dsqBgHasOrigin(origin) {
+  return new Promise(resolve => {
+    try {
+      chrome.permissions.contains({ origins: [origin] }, ok => resolve(!chrome.runtime.lastError && !!ok));
+    } catch { resolve(false); }
+  });
+}
+
+function dsqBgRequestOrigin(origin) {
+  return new Promise(resolve => {
+    try {
+      chrome.permissions.request({ origins: [origin] }, ok => {
+        const error = chrome.runtime.lastError?.message || "";
+        resolve({ ok: !!ok && !error, error: error || (ok ? "" : "Image host permission wasn't granted.") });
+      });
+    } catch (error) { resolve({ ok: false, error: error?.message || String(error) }); }
+  });
+}
+
+async function dsqFetchBackgroundImage(raw) {
+  const url = dsqSafeBackgroundImageUrl(raw);
+  if (!url) return { ok: false, error: "Enter a public HTTPS image URL." };
+  const origin = dsqBgOriginPattern(url);
+  if (!await dsqBgHasOrigin(origin)) return { ok: false, requiresPermission: true, origin };
+  const cap = 8 * 1024 * 1024;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 18000);
+  try {
+    const response = await fetch(url, { credentials: "omit", referrerPolicy: "no-referrer", redirect: "follow", signal: controller.signal, cache: "no-store", headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/bmp" } });
+    if (!response.ok) return { ok: false, error: `Image URL returned HTTP ${response.status}.` };
+    if (!dsqSafeBackgroundImageUrl(response.url)) return { ok: false, error: "Image redirected to an unsupported URL." };
+    if (!await dsqBgHasOrigin(dsqBgOriginPattern(response.url))) return { ok: false, error: "The image redirected to a host that hasn't been permitted." };
+    const type = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const allowed = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/bmp"]);
+    if (!allowed.has(type)) return { ok: false, error: `The URL returned ${type || "unknown content"}, not a supported image.` };
+    if (Number(response.headers.get("content-length") || 0) > cap) return { ok: false, error: "Image exceeds the 8 MB limit." };
+    const reader = response.body?.getReader();
+    if (!reader) return { ok: false, error: "The server didn't provide a readable image." };
+    const chunks = []; let size = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > cap) { await reader.cancel().catch(() => {}); return { ok: false, error: "Image exceeds the 8 MB limit." }; }
+      chunks.push(value);
+    }
+    if (!size) return { ok: false, error: "The image was empty." };
+    const combined = new Uint8Array(size); let offset = 0;
+    for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
+    let binary = ""; for (let i = 0; i < combined.length; i += 0x8000) binary += String.fromCharCode(...combined.subarray(i, i + 0x8000));
+    const name = new URL(url).pathname.split("/").pop()?.slice(0, 120) || "Background from URL";
+    return { ok: true, dataUrl: `data:${type};base64,${btoa(binary)}`, name, sourceUrl: url };
+  } catch (error) {
+    return { ok: false, error: error?.name === "AbortError" ? "Image download timed out." : (error?.message || "Image download failed.") };
+  } finally { clearTimeout(timer); }
 }

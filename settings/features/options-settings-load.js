@@ -739,6 +739,8 @@ async function load() {
   setChecked("chatExportLoadPreviousMessages", !!settings.chatExportLoadPreviousMessages);
   setChecked("chatExportIncludeBotInfo", !!settings.chatExportIncludeBotInfo);
   setChecked("chatExportIncludeRulebook", !!settings.chatExportIncludeRulebook);
+  setChecked("enableRulebookDiagnostics", !!settings.enableRulebookDiagnostics);
+  setChecked("storyReadingLayout", !!settings.storyReadingLayout);
   setChecked("chatExportIncludeOocDirectives", !!settings.chatExportIncludeOocDirectives);
   setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false);
   setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false);
@@ -880,6 +882,7 @@ async function load() {
   setChecked("applyBotBlockingToLorebooks", settings.applyBotBlockingToLorebooks === true);
   setChecked("showLorebookBlockButtons", settings.showLorebookBlockButtons === true);
   setChecked("lorebookTrackHistory", settings.lorebookTrackHistory === true);
+  setChecked("showLorebookConnections", settings.showLorebookConnections === true);
   setValue("lorebookBlockedIds", arrayToLines(settings.lorebookBlockedIds));
   setValue("blockedBotSortMode", settings.blockedBotSortMode || "newest");
   setValue("hiddenCardMode", settings.hiddenCardMode || "hide");
