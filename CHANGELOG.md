@@ -1,12 +1,10 @@
-## 0.2.49 — QoL 22 follow-up
+## 0.2.49
 - Expanded the optional Rulebook troubleshooting log with manual Regenerate, Delete and Next Turn markers, plus a short recent-events view. These help with testing and do not claim to detect native Rulebook triggers or reconstruct hidden data.
 - Added an optional public Lorebook discovery panel linking to the creator profile when SpicyChat shows it, and listing exact bot/Lorebook links already saved locally by QoL creator tools. These are known local links only, not a complete list of every bot using the Lorebook.
 - Added a creator-name filter for currently loaded public Lorebook cards; it does not scan profiles or call more APIs.
 - Added an optional visual-only Story Mode reading layout with subtle message boundaries and small-screen text wrapping. It does not change generation or merge native chat/Story modes.
 - Added Rename to saved background scene images so uploaded scenes can serve as reusable named presets without reuploading files.
 - Kept the v0.2.49 Rulebook mobile wrapping and chat background fit/position updates from the prior QoL 22 batch.
-
-## 0.2.49
 - Added an opt-in, read-only Rulebook troubleshooting log for chat pages. It records changes to visible meter values/status text in the current tab (up to 150 observations), keeps the last visible values when the native HUD is minimized, and exports a JSON bug report. No hidden instructions, engine changes, chat text, or inferred trigger history. The log clears when disabled or when switching chats.
 - Improved narrow-screen Rulebook status text wrapping, and made the optional troubleshooting drawer fit smaller screens without covering the main chat with a permanent toolbar.
 - Added per-chat image Fit and Position choices to the background popup, including corners, with an independent "Use global setting" choice for each. Existing global options, original source URLs, images and scene galleries remain intact.
