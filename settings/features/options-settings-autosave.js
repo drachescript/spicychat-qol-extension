@@ -507,6 +507,8 @@ function readSettingsFromPage() {
     chatExportHistoryMode: value("chatExportHistoryMode", "api"),
     chatExportIncludeBotInfo: checked("chatExportIncludeBotInfo"),
     chatExportIncludeRulebook: checked("chatExportIncludeRulebook"),
+    enableRulebookDiagnostics: checked("enableRulebookDiagnostics"),
+    storyReadingLayout: checked("storyReadingLayout"),
     chatExportIncludeOocDirectives: checked("chatExportIncludeOocDirectives"),
     chatExportIncludeGenerationDetails: checked("chatExportIncludeGenerationDetails"),
     chatExportNumberMessages: checked("chatExportNumberMessages"),
@@ -666,6 +668,7 @@ function readSettingsFromPage() {
     applyBotBlockingToLorebooks: checked("applyBotBlockingToLorebooks", false),
     showLorebookBlockButtons: checked("showLorebookBlockButtons", false),
     lorebookTrackHistory: checked("lorebookTrackHistory", false),
+    showLorebookConnections: checked("showLorebookConnections", false),
     lorebookBlockedIds: linesToArray(value("lorebookBlockedIds")),
     blockedBotIds: uniqueClean(blockingDataLoaded ? blockedState.ids : (loadedSettingsSnapshot.blockedBotIds || [])),
     blockedBotNames: uniqueClean(blockingDataLoaded ? blockedState.names : (loadedSettingsSnapshot.blockedBotNames || [])),
@@ -1163,6 +1166,8 @@ function readSingleSettingFromPage(settingKey) {
     case "chatExportHistoryMode": return (value("chatExportHistoryMode", "api"));
     case "chatExportIncludeBotInfo": return (checked("chatExportIncludeBotInfo"));
     case "chatExportIncludeRulebook": return (checked("chatExportIncludeRulebook"));
+    case "enableRulebookDiagnostics": return checked("enableRulebookDiagnostics");
+    case "storyReadingLayout": return checked("storyReadingLayout");
     case "chatExportIncludeOocDirectives": return (checked("chatExportIncludeOocDirectives"));
     case "chatExportIncludeGenerationDetails": return (checked("chatExportIncludeGenerationDetails"));
     case "chatExportNumberMessages": return (checked("chatExportNumberMessages"));
@@ -1315,6 +1320,7 @@ function readSingleSettingFromPage(settingKey) {
     case "applyBotBlockingToLorebooks": return (checked("applyBotBlockingToLorebooks", false));
     case "showLorebookBlockButtons": return (checked("showLorebookBlockButtons", false));
     case "lorebookTrackHistory": return (checked("lorebookTrackHistory", false));
+    case "showLorebookConnections": return checked("showLorebookConnections", false);
     case "lorebookBlockedIds": return (linesToArray(value("lorebookBlockedIds")));
     case "blockedBotIds": return (uniqueClean(blockingDataLoaded ? blockedState.ids : (loadedSettingsSnapshot.blockedBotIds || [])));
     case "blockedBotNames": return (uniqueClean(blockingDataLoaded ? blockedState.names : (loadedSettingsSnapshot.blockedBotNames || [])));

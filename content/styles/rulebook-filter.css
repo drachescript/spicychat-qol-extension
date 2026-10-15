@@ -1,1 +1,66 @@
 .ds-rulebook-filter-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:8px 0;padding:8px 12px;border:1px solid var(--border,#45454d);border-radius:10px;font-size:13px}.ds-rulebook-filter-toolbar select{margin-left:6px;padding:6px;border:1px solid #555;border-radius:7px;background:var(--background,#24242a);color:inherit}.ds-rulebook-filter-hidden{display:none!important}
+
+/* Optional read-only Rulebook troubleshooting drawer. Compact on mobile and
+   intentionally separate from SpicyChat's native meter controls. */
+#ds-rulebook-diagnostics {
+  position: fixed;
+  z-index: 490;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+  width: auto;
+  max-width: calc(100vw - 16px);
+  color: #f5f5f7;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#ds-rulebook-diagnostics button {
+  border: 1px solid #666;
+  border-radius: 8px;
+  background: #292932;
+  padding: 7px 10px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 34px;
+}
+#ds-rulebook-diagnostics button:focus-visible { outline: 2px solid #aac8fa; outline-offset: 2px; }
+#ds-rulebook-diagnostics button:disabled { opacity: .55; cursor: default; }
+#ds-rulebook-diagnostics .ds-rb-diag-launcher { float: right; background: #30303a; box-shadow: 0 2px 10px #0008; }
+#ds-rulebook-diagnostics .ds-rb-diag-drawer {
+  box-sizing: border-box;
+  clear: both;
+  width: min(410px, calc(100vw - 24px));
+  max-height: min(620px, calc(100dvh - 165px));
+  margin-bottom: 9px;
+  padding: 12px;
+  border: 1px solid #61616a;
+  border-radius: 12px;
+  background: #202027;
+  box-shadow: 0 6px 25px #0009;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+#ds-rulebook-diagnostics .ds-rb-diag-drawer[hidden] { display: none !important; }
+#ds-rulebook-diagnostics .ds-rb-diag-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#ds-rulebook-diagnostics .ds-rb-diag-drawer p { margin: 8px 0; white-space: normal; }
+#ds-rulebook-diagnostics .ds-rb-diag-meters { display: grid; gap: 5px; margin-top: 6px; }
+#ds-rulebook-diagnostics .ds-rb-diag-meters > div { display: flex; justify-content: space-between; gap: 14px; padding: 4px 0; border-bottom: 1px solid #4e4e56; }
+#ds-rulebook-diagnostics .ds-rb-diag-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+#ds-rulebook-diagnostics .ds-rb-diag-recent { margin: 6px 0 0; padding-left: 22px; max-height: 130px; overflow-y: auto; font-size: 12px; }
+#ds-rulebook-diagnostics .ds-rb-diag-recent li { margin: 3px 0; overflow-wrap: anywhere; }
+
+/* Rulebook status text was reported clipped on narrow/mobile chat views.
+   These rules only relax text wrapping; they do not reveal minimized meters
+   or move SpicyChat's native Rulebook controls. */
+@media (max-width: 640px) {
+  :is([data-testid="RulebookStatusLine"], [data-testid="RulebookHud-StatusLine"], [data-rulebook-status-line], [data-testid="RulebookExplanationSheet-RulebookLine"]) {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+  #ds-rulebook-diagnostics { right: max(8px, env(safe-area-inset-right)); bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+  #ds-rulebook-diagnostics .ds-rb-diag-drawer { max-height: min(520px, calc(100dvh - 185px)); }
+}

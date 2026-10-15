@@ -17,14 +17,27 @@ function showFirstRunNoticeIfNeeded(releaseNotice) {
   notice.hidden = releaseNotice?.reason !== "install";
 }
 
+function safeSettingsBackgroundUrl(value) {
+  try {
+    const u = new URL(String(value || "").trim());
+    if (u.protocol !== "https:" || u.username || u.password || u.href.length > 2048) return "";
+    if (!u.hostname || /^(localhost|.*\.localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$)/i.test(u.hostname)) return "";
+    return u.href;
+  } catch { return ""; }
+}
+
 function normalizeChatBackgroundMediaStore(raw) {
   const input = raw && typeof raw === "object" ? raw : {};
   const cleanItem = item => {
     if (!item || typeof item !== "object") return null;
     const dataUrl = String(item.dataUrl || "");
-    if (!dataUrl.startsWith("data:image/")) return null;
+    const url = safeSettingsBackgroundUrl(item.url || "");
+    const sourceUrl = safeSettingsBackgroundUrl(item.sourceUrl || url);
+    const sourceMode = item.sourceMode === "link" ? "link" : "local";
+    if (sourceMode === "link" ? !url : !dataUrl.startsWith("data:image/")) return null;
     return {
-      dataUrl,
+      ...(sourceMode === "link" ? { url } : { dataUrl }),
+      ...(sourceUrl ? { sourceUrl } : {}), sourceMode,
       name: String(item.name || "Background image").slice(0, 180),
       updatedAt: Number(item.updatedAt) || Date.now()
     };
@@ -46,7 +59,20 @@ function normalizeChatBackgroundMediaStore(raw) {
       activeId: String(gallery.activeId || "").slice(0, 80), items
     };
   }
-  return { global: cleanItem(input.global), chats, galleries };
+  // Global background edits must not erase saved per-chat Clear state / avatar sizing.
+  const suppressedChats = {};
+  for (const [key, value] of Object.entries(input.suppressedChats || {})) {
+    if (key && value === true) suppressedChats[String(key).slice(0, 260)] = true;
+  }
+  const avatarSizes = {};
+  for (const [key, value] of Object.entries(input.avatarSizes || {})) {
+    if (key && Number(value) >= 30 && Number(value) <= 150) avatarSizes[String(key).slice(0, 260)] = Math.round(Number(value));
+  }
+  const avatarSideCopies = {};
+  for (const [key, value] of Object.entries(input.avatarSideCopies || {})) {
+    if (key && value === true) avatarSideCopies[String(key).slice(0, 260)] = true;
+  }
+  return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies };
 }
 
 function chatBackgroundFileToDataUrl(file) {
@@ -71,13 +97,19 @@ function renderChatBackgroundOptions() {
   }
   if (preview) {
     preview.hidden = !globalItem;
-    preview.style.backgroundImage = globalItem ? `url("${String(globalItem.dataUrl).replace(/"/g, "%22")}")` : "";
+    preview.style.backgroundImage = globalItem ? `url("${String(globalItem.dataUrl || globalItem.url).replace(/"/g, "%22")}")` : "";
     const fit = value("chatBackgroundFit", "cover");
     const position = value("chatBackgroundPosition", "center");
     preview.style.backgroundSize = fit === "tile" ? "auto" : fit;
     preview.style.backgroundRepeat = fit === "tile" ? "repeat" : "no-repeat";
     preview.style.backgroundPosition = position;
   }
+  const urlInput = $("chatBackgroundGlobalUrl");
+  const urlMode = $("chatBackgroundGlobalUrlMode");
+  if (urlInput && document.activeElement !== urlInput) urlInput.value = globalItem?.sourceUrl || globalItem?.url || "";
+  if (urlMode && document.activeElement !== urlMode) urlMode.value = globalItem?.sourceMode || "local";
+  const refresh = $("refreshGlobalChatBackgroundUrl");
+  if (refresh) refresh.disabled = !globalItem?.sourceUrl;
   const clear = $("clearGlobalChatBackground");
   if (clear) clear.disabled = !globalItem;
   const clearChats = $("clearPerChatBackgrounds");
@@ -113,6 +145,51 @@ async function importGlobalChatBackground(files) {
   } catch {
     showSettingsToast("Could not save that background image. Try a smaller file.");
   }
+}
+
+
+function requestBackgroundUrlMessage(type, url) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({ type, url }, response => {
+        const error = chrome.runtime.lastError?.message;
+        if (error) reject(new Error(error));
+        else resolve(response || { ok: false, error: "No response from background service." });
+      });
+    } catch (error) { reject(error); }
+  });
+}
+
+async function importGlobalChatBackgroundUrl({ refresh = false } = {}) {
+  const button = $(refresh ? "refreshGlobalChatBackgroundUrl" : "useGlobalChatBackgroundUrl");
+  const input = $("chatBackgroundGlobalUrl");
+  const modeInput = $("chatBackgroundGlobalUrlMode");
+  const message = $("chatBackgroundGlobalUrlStatus");
+  const url = safeSettingsBackgroundUrl(refresh ? chatBackgroundMediaState?.global?.sourceUrl : input?.value);
+  if (!url) { if (message) message.textContent = "Enter a valid public HTTPS image URL."; return; }
+  const mode = refresh ? "local" : (modeInput?.value === "link" ? "link" : "local");
+  if (button) button.disabled = true;
+  if (message) message.textContent = "Checking image…";
+  try {
+    let item;
+    if (mode === "link") {
+      item = { url, sourceUrl: url, sourceMode: "link", name: "Linked background", updatedAt: Date.now() };
+    } else {
+      let response = await requestBackgroundUrlMessage("DS_BG_FETCH_IMAGE_URL", url);
+      if (response.requiresPermission) {
+        const allowed = await requestBackgroundUrlMessage("DS_BG_REQUEST_IMAGE_PERMISSION", url);
+        if (!allowed.ok) throw new Error(allowed.error || "Site permission not granted.");
+        response = await requestBackgroundUrlMessage("DS_BG_FETCH_IMAGE_URL", url);
+      }
+      if (!response.ok || !String(response.dataUrl || "").startsWith("data:image/")) throw new Error(response.error || "The URL did not return an image.");
+      item = { dataUrl: response.dataUrl, sourceUrl: url, sourceMode: "local", name: response.name || "Image from URL", updatedAt: Date.now() };
+    }
+    await saveChatBackgroundMediaStore({ ...chatBackgroundMediaState, global: item });
+    if (message) message.textContent = mode === "local" ? "Saved local copy; original URL kept for refresh." : "URL saved. The image will load from its original host.";
+    showSettingsToast("Global background updated.");
+  } catch (error) {
+    if (message) message.textContent = error?.message || "Could not use that image.";
+  } finally { if (button) button.disabled = false; }
 }
 
 async function clearGlobalChatBackground() {

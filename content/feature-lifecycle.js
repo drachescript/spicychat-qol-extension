@@ -17,6 +17,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "chat search": () => DS.removeChatSearch?.(),
     "chat bookmarks": () => DS.removeChatBookmarks?.(),
     "chat backgrounds": () => DS.removeChatBackgrounds?.(),
+    "rulebook diagnostics": () => DS.removeRulebookDiagnostics?.(),
     "focus mode": () => DS.removeFocusMode?.(),
     "chat nudges": () => DS.removeChatNudges?.(),
     "context keeper": () => DS.removeContextKeeper?.(),
@@ -111,6 +112,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const keyed = {
       "OOC": ["showOocTools", "replaceChatImageWithOocButton", "quickPanelShowOoc"],
       "chat backgrounds": ["enableChatBackgrounds"],
+      "rulebook diagnostics": ["enableRulebookDiagnostics"],
       "focus mode": ["enableFocusMode"],
       "chat bookmarks": ["enableMessageBookmarks"],
       "chat search": ["showChatSearch"],
@@ -146,6 +148,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await runStep("scroll to top cleanup", () => DS.removeScrollToTopButton?.());
     await runStep("soundscape cleanup", () => DS.removeSoundscapes?.());
     await runStep("chat background cleanup", () => DS.removeChatBackgrounds?.());
+    await runStep("rulebook diagnostics cleanup", () => DS.removeRulebookDiagnostics?.());
     await runStep("unhide disabled cleanup", () => DS.unhideAllDragonScriptElements?.());
     await runStep("card hide watchdog cleanup", () => DS.removeCardHideSafetyWatchdog?.());
     await runStep("top bar native restore", () => DS.applyTopBarCleanup?.());

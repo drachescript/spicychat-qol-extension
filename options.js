@@ -877,6 +877,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "showRandomChatButton",
   "showChatExportButton",
   "chatExportIncludeRulebook",
+  "enableRulebookDiagnostics",
   "showOocTools",
   "enableReplyInstructions",
   "enableGlobalMemory",
@@ -2919,6 +2920,8 @@ $("testLocalTranslator")?.addEventListener("click", async () => {
   } catch (error) { host.textContent = error?.message || String(error); }
 });
 $("chatBackgroundGlobalUpload")?.addEventListener("change", async event => { await importGlobalChatBackground(event.target.files); event.target.value = ""; });
+$("useGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl());
+$("refreshGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl({ refresh: true }));
 $("clearGlobalChatBackground")?.addEventListener("click", clearGlobalChatBackground);
 $("clearPerChatBackgrounds")?.addEventListener("click", clearPerChatBackgrounds);
 $("chatBackgroundFit")?.addEventListener("change", renderChatBackgroundOptions);
@@ -3084,6 +3087,7 @@ if (missingSettingsModules.length) {
 reorderOptionsUi();
 setupCollapsibleSettingsCards();
 setupSettingsSectionNavigation();
+setupActiveOptionsPanel();
 
 setupBotManagerControls("blocked");
 setupBotManagerControls("notInterested");

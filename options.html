@@ -46,6 +46,15 @@
 <div class="settings-search-results" hidden="" id="settingsSearchResults"></div>
 </div>
 </section>
+<details id="dsActiveOptionsPanel" class="ds-active-options-panel">
+<summary><strong>Active options</strong> <span id="dsActiveOptionsCount" class="hint">Open to review enabled features</span></summary>
+<div class="ds-active-options-body">
+<p class="hint">Only named, optional QoL features are listed. Open shows their location in normal Settings. Turning off a feature doesn't delete its saved data or change Core/Account Sync.</p>
+<div class="button-row"><button id="dsActiveOptionsDisableAll" type="button">Turn off all active features…</button><button id="dsActiveOptionsRefresh" type="button">Refresh list</button></div>
+<p id="dsActiveOptionsStatus" class="hint" role="status"></p>
+<div id="dsActiveOptionsList" class="ds-active-options-list"></div>
+</div>
+</details>
 <button aria-controls="optionsTabsNav" aria-expanded="false" class="mobile-sections-toggle" id="mobileSectionsToggle" type="button">
 <span class="mobile-sections-label">Sections</span>
 <strong class="mobile-sections-current" id="mobileSectionsCurrent">General</strong>
@@ -964,6 +973,8 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <fieldset class="bot-status-opened-tracking">
 <legend>Lorebook history tracking</legend>
 <label class="row"><input id="lorebookTrackHistory" type="checkbox"/><span>Track and save Lorebooks I encounter</span></label>
+<label class="row"><input id="showLorebookConnections" type="checkbox"/><span>Show public Lorebook discovery and local bot links</span></label>
+<p class="hint">On public Lorebook pages, show the visible creator-profile link and bots already associated by your local creator tools. On public Lorebook listings, filter currently loaded cards by creator. No extra bot requests or private-page scans; connections are incomplete by design.</p>
 <p class="hint">Off by default. When enabled, QoL saves exposed Lorebook metadata and meaningful changes in IndexedDB. A missing listing result is not treated as proof that a Lorebook was deleted.</p>
 </fieldset>
 <div class="bot-availability-controls">
@@ -1527,6 +1538,17 @@ Testing" spellcheck="false"></textarea></label>
 <input accept="image/*" hidden="" id="chatBackgroundGlobalUpload" type="file"/>
 <button id="clearGlobalChatBackground" type="button">Clear global background</button>
 <button id="clearPerChatBackgrounds" type="button">Clear per-chat overrides</button>
+</div>
+<div class="ds-bg-url-entry">
+<label for="chatBackgroundGlobalUrl">Or paste an image URL (HTTPS)</label>
+<input id="chatBackgroundGlobalUrl" type="url" placeholder="https://example.com/background.png" autocomplete="url"/>
+<select id="chatBackgroundGlobalUrlMode" aria-label="Image URL storage mode">
+<option value="local">Download and save locally (default)</option>
+<option value="link">Keep URL only (no local copy)</option>
+</select>
+<button id="useGlobalChatBackgroundUrl" type="button">Use image URL</button>
+<button id="refreshGlobalChatBackgroundUrl" type="button">Refresh saved image from original URL</button>
+<p class="hint" id="chatBackgroundGlobalUrlStatus" role="status">Local copies preserve their original URL. Downloading from a new host may require permission; URL-only images depend on the host.</p>
 </div>
 <p class="hint" id="chatBackgroundGlobalStatus">No global image saved.</p>
 <div class="chat-background-preview" hidden="" id="chatBackgroundGlobalPreview"></div>
@@ -2211,6 +2233,14 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint">For Match current chat appearance, API history supplies the message data while the currently loaded chat supplies the appearance template (bubble colors, text, borders, radius, font, and backtick styling). Clean transcript uses a simple portable layout. The very slow page-loading fallback is kept under Advanced / Compatibility for troubleshooting only.</p>
 </section>
 
+
+<section class="card" id="rulebookDiagnosticsCard">
+<h2>Rulebook troubleshooting</h2>
+<label class="row"><input id="enableRulebookDiagnostics" type="checkbox"/><span>Show a read-only Rulebook log in chats</span></label>
+<label class="row"><input id="storyReadingLayout" type="checkbox"/><span>Improve Story Mode reading layout (visual only)</span></label>
+<p class="hint">Adds subtle message boundaries and readable wrapping on native Story Mode pages. Does not merge Story Mode with normal RP, edit text or alter generation.</p>
+<p class="hint">Off by default. Tracks changes to meters and status text SpicyChat actually shows while this tab is open. Keeps up to 150 observations in tab memory, with a JSON export for bug reports. Hidden/minimized meters are not treated as zero or deleted. It does not read hidden rules, explain trigger logic, or change Rulebook values. Turning this off clears the session log.</p>
+</section>
 
 <section class="card" id="nativeRatingHelpersCard">
 <h2>Native rating helpers</h2>

@@ -1569,6 +1569,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
         await runFeatureStep("chat backgrounds", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
+        await runFeatureStep("rulebook diagnostics", !!settings.enableRulebookDiagnostics || !!document.getElementById("ds-rulebook-diagnostics"), () => DS.applyRulebookDiagnostics?.());
         await runFeatureStep("chat background button placement", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
         await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());
         if (settings.enableMessageBookmarks || DS.state.chatBookmarksWasActive) await runStep("chat bookmarks", () => DS.applyChatBookmarks?.());
@@ -1616,6 +1617,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (DS.state.chatBackgroundsWasActive) {
           await runStep("chat background cleanup", () => DS.removeChatBackgrounds?.());
         }
+        if (document.getElementById("ds-rulebook-diagnostics")) await runStep("rulebook diagnostics cleanup", () => DS.removeRulebookDiagnostics?.());
         if (DS.state.chatUiCleanupWasActive) {
           await runStep("chat UI cleanup", () => DS.applyChatUiCleanup?.());
         }
@@ -1661,6 +1663,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
 
+      await runFeatureStep("story reading layout", !!settings.storyReadingLayout || document.documentElement.classList.contains("ds-qol-story-reading-layout"), () => DS.applyStoryReadingLayout?.());
       if (plan.botEditor || plan.lorebookEditor) {
         const snippetWanted = anySetting(settings, ["botEditorShowCharButton", "botEditorShowUserButton", "botEditorShowContinueButton", "botEditorShowNoControlButton", "botEditorShowCustomSnippets", "botEditorAutoOpenAdvanced"]);
         const bulkInputWanted = anySetting(settings, ["lorebookBulkKeywordPaste", "lorebookExpandEntryEditor", "botTagBulkPaste"]);
@@ -1670,6 +1673,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         runtimeCounters().routeFeatureGroupSkips = Number(runtimeCounters().routeFeatureGroupSkips || 0) + 1;
       }
       await runRoutedFeatureStep(plan, "lorebookEditor", "wiki lorebook importer", () => (!!settings.enableWikiLorebookImporter && lorebookEditorRoute()) || !!document.querySelector("[data-ds-wiki-lorebook-import]") || !!document.getElementById("ds-wiki-lorebook-modal"), () => DS.applyWikiLorebookImporter?.());
+      if (settings.showLorebookConnections || document.getElementById("ds-lorebook-connections") || document.getElementById("ds-lorebook-author-filter")) {
+        await runFeatureStep("lorebook connections", true, () => DS.applyLorebookConnections?.());
+      }
       if (/^\/lorebook\/[0-9a-f-]{20,}(?:\/|$)/i.test(String(location.pathname || ""))) {
         await runFeatureStep("public lorebook profile/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0), () => DS.applyPublicLorebookQoL?.());
       }

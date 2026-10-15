@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpicyChat QoL — Core + OOC</title>
+<link rel="stylesheet" href="ooc-options.css"></head>
+<body><main>
+<h1>Core + OOC <small>v0.2.49 test</small></h1>
+<p>Minimal OOC-only build. These settings use the same field names and preset format as Full QoL. Other features are not installed.</p>
+<section><h2>OOC controls</h2>
+<label><input type="checkbox" id="enabled"> Enable QoL OOC</label>
+<label><input type="checkbox" id="showOocTools"> Show floating OOC insert panel</label>
+<label><input type="checkbox" id="quickPanelShowOoc"> Enable OOC panel content</label>
+<label><input type="checkbox" id="replaceChatImageWithOocButton"> Show OOC button in chat composer</label>
+<label><input type="checkbox" id="hideChatImageButton"> Replace Image button with OOC (otherwise keep both)</label>
+</section>
+<section><h2>OOC presets</h2><p>Saved with the original <code>oocTemplates</code> key. Preset edits are local to this test installation.</p>
+<div id="templates"></div>
+<div class="actions"><button type="button" id="add">Add preset</button><button type="button" id="reset">Restore built-ins</button></div>
+</section>
+<section><h2>Import or export presets</h2><p>Export from this test build, or import a JSON array of OOC presets from Full QoL. This only reads/writes OOC presets.</p>
+<div class="actions"><button id="export" type="button">Export OOC JSON</button><label class="file">Import OOC JSON <input id="import" type="file" accept=".json,application/json"></label></div></section>
+<button id="save" type="button">Save OOC settings</button><output id="status" role="status"></output>
+</main><script src="../content/core-settings-defaults.js"></script><script src="ooc-options.js"></script></body></html>

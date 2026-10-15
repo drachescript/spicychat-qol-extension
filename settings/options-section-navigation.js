@@ -519,3 +519,123 @@ function applySettingsSectionDefault(settings = {}) {
     init();
   }
 })();
+
+
+// Active options uses the same named feature catalogue and real Settings
+// controls as Full QoL. It does not expose internal storage keys or wipe data.
+function setupActiveOptionsPanel() {
+  const panel = $("dsActiveOptionsPanel");
+  const host = $("dsActiveOptionsList");
+  const count = $("dsActiveOptionsCount");
+  const bulk = $("dsActiveOptionsDisableAll");
+  const status = $("dsActiveOptionsStatus");
+  if (!panel || !host) return;
+  const registry = Array.isArray(window.SpicyChatQoLFeatureRegistry) ? window.SpicyChatQoLFeatureRegistry : [];
+  let busy = false;
+  let renderQueued = false;
+
+  function featureControls(entry) {
+    const keys = Array.isArray(entry.settings) ? entry.settings : (entry.setting ? [entry.setting] : []);
+    return keys.map(key => $(key)).filter(control => control?.type === "checkbox" &&
+      control.id in DEFAULT_SETTINGS && typeof DEFAULT_SETTINGS[control.id] === "boolean" && control.id !== "enabled");
+  }
+
+  function activeEntries() {
+    return registry.filter(entry => !entry.planned && !entry.builtIn &&
+      featureRegistryState(entry).key === "on" && featureControls(entry).some(control => control.checked));
+  }
+
+  async function disableEntries(entries) {
+    if (busy) return;
+    if (!settingsAutosaveReady) { status.textContent = "Wait for Settings to finish loading before changing features."; return; }
+    busy = true;
+    bulk.disabled = true;
+    const unique = new Map();
+    for (const entry of entries) for (const control of featureControls(entry)) {
+      if (control.checked) unique.set(control.id, control);
+    }
+    try {
+      for (const control of unique.values()) {
+        control.checked = false;
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const saved = await flushSettingsAutosave({ force: true });
+      status.textContent = saved
+        ? `Turned off ${unique.size} feature switch${unique.size === 1 ? "" : "es"}. Saved data and other settings were kept.`
+        : "Some changes couldn't be saved. Use Save now before closing Settings.";
+      updateSettingDependencies?.();
+      DS_FEATURE_INDEX_REFRESH?.();
+      applySettingsEnabledOnlyFilter();
+    } catch (error) {
+      status.textContent = error?.message || "Couldn't turn off those features. Use Save now to retry.";
+    } finally { busy = false; bulk.disabled = false; render(); }
+  }
+
+  function render() {
+    if (busy) return;
+    if (!settingsAutosaveReady) {
+      count.textContent = "Open to review enabled features";
+      bulk.disabled = true;
+      return;
+    }
+    const entries = activeEntries();
+    count.textContent = `${entries.length} active named feature${entries.length === 1 ? "" : "s"}`;
+    if (!panel.open) return;
+    bulk.disabled = entries.length === 0;
+    const groups = new Map();
+    for (const entry of entries) {
+      const controls = featureControls(entry);
+      const target = $(entry.target || entry.setting || controls[0]?.id) || controls[0];
+      const info = settingsCardInfo(target?.closest?.("section.card"));
+      const context = info ? `${info.tabLabel} · ${info.heading}` : (entry.category || "Settings");
+      if (!groups.has(context)) groups.set(context, []);
+      groups.get(context).push({ entry, controls, target });
+    }
+    const fragment = document.createDocumentFragment();
+    for (const [context, items] of groups) {
+      const section = document.createElement("section"); section.className = "ds-active-options-group";
+      const heading = document.createElement("h4"); heading.textContent = context; section.appendChild(heading);
+      for (const { entry, controls, target } of items) {
+        const row = document.createElement("div"); row.className = "ds-active-options-row";
+        const description = document.createElement("div"); description.className = "ds-active-options-description";
+        const label = document.createElement("strong"); label.textContent = entry.name;
+        const detail = document.createElement("small");
+        detail.textContent = entry.description || "Enabled QoL feature";
+        description.append(label, detail);
+        const open = document.createElement("button"); open.type = "button"; open.textContent = "Open in Settings";
+        open.addEventListener("click", () => {
+          if (!revealSettingsTarget(entry.target || entry.setting || controls[0]?.id, { fromFeatures: true })) {
+            target?.scrollIntoView?.({ block: "center" });
+          }
+        });
+        const off = document.createElement("button"); off.type = "button"; off.textContent = "Turn off";
+        off.addEventListener("click", () => disableEntries([entry]));
+        row.append(description, open, off); section.appendChild(row);
+      }
+      fragment.appendChild(section);
+    }
+    if (!entries.length) {
+      const none = document.createElement("p"); none.className = "hint";
+      none.textContent = "No optional named features are enabled. Core and built-in Settings tools remain available.";
+      fragment.appendChild(none);
+    }
+    host.replaceChildren(fragment);
+  }
+
+  panel.addEventListener("toggle", render);
+  $("dsActiveOptionsRefresh")?.addEventListener("click", render);
+  bulk.addEventListener("click", () => {
+    const entries = activeEntries();
+    const count = entries.length;
+    if (!count) return;
+    if (!confirm(`Turn off ${count} active named QoL features? This only changes feature switches. Saved lists, backups, passwords, and the main QoL switch stay untouched.`)) return;
+    disableEntries(entries);
+  });
+  document.addEventListener("change", event => {
+    if (!panel.open || event.target?.closest?.("#dsActiveOptionsPanel")) return;
+    if (renderQueued) return;
+    renderQueued = true;
+    setTimeout(() => { renderQueued = false; render(); }, 80);
+  }, true);
+  render();
+}

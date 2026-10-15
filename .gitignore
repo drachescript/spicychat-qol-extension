@@ -41,3 +41,4 @@ patch_extension_next_batch.ps1
 
 # Generated browser release archives (rebuild from source)
 /dist/
+build/CORE_OOC_TESTING.md

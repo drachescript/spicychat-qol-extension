@@ -119,6 +119,7 @@
         "content/message-options.js",
         "content/model-selector.js",
         "content/native-rating-helpers.js",
+        "content/ooc-composer.js",
         "content/ooc.js",
         "content/performance-mode.js",
         "content/core-message-cache.js",
@@ -433,7 +434,8 @@
       ],
       "chat": [
         "content/styles/chat-bubble-themes.css",
-        "content/styles/memory-vault.css"
+        "content/styles/memory-vault.css",
+        "content/styles/ooc.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",

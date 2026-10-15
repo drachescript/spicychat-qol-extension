@@ -1,0 +1,9 @@
+/* Shared OOC feature CSS: loaded in Full and Core + OOC packages. */
+.ds-chat-ooc-shortcut { font-size: 10px !important; font-weight: 700 !important; letter-spacing: .02em !important; line-height: 1 !important; min-width: 36px !important; }
+#ds-qol-ooc-row { display: flex; flex-direction: column; gap: 6px; }
+#ds-qol-ooc-row .ds-qol-ooc-controls { display: flex; align-items: center; gap: 6px; }
+#ds-qol-ooc-row select { min-width: 0; flex: 1; margin: 0; }
+#ds-qol-ooc-row button { flex: 0 0 auto; }
+#ds-qol-panel { position: fixed; z-index: 2147483000; right: 14px; bottom: 65px; max-width: min(320px, 94vw); background: #191b20; border: 1px solid #41454b; border-radius: 10px; color: #f2f4f7; font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 6px 22px #0008; padding: 9px; }
+#ds-qol-panel select, #ds-qol-panel button { padding: 7px; border-radius: 6px; color: #fff; background: #252a31; border: 1px solid #535a64; }
+#ds-qol-ooc-status { position: fixed; z-index: 2147483100; bottom: 12px; right: 14px; background: #171a21; color: white; border-radius: 7px; padding: 5px 8px; font: 12px system-ui, sans-serif; max-width: 275px; }

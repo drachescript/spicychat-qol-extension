@@ -16,18 +16,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Only the original CDN URL is used by default. If it is unavailable,
   // fall back once to a moderately sized CDN derivative (never a tiny avatar).
   const avatarImageChecks = new Map();
-  let mediaStore = { global: null, chats: {}, galleries: {}, suppressedChats: {}, avatarSizes: {}, avatarSideCopies: {} };
+  let mediaStore = { global: null, chats: {}, galleries: {}, suppressedChats: {}, avatarSizes: {}, avatarSideCopies: {}, viewModes: {} };
   let mediaLoaded = false;
   let mediaLoadPromise = null;
+
+  function safeBackgroundUrl(value) {
+    try {
+      const u = new URL(String(value || "").trim());
+      if (u.protocol !== "https:" || u.username || u.password || u.href.length > 2048) return "";
+      if (!u.hostname || /^(localhost|.*\.localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$)/i.test(u.hostname)) return "";
+      return u.href;
+    } catch { return ""; }
+  }
 
   function cleanStore(raw) {
     const input = raw && typeof raw === "object" ? raw : {};
     const cleanItem = item => {
       if (!item || typeof item !== "object") return null;
       const dataUrl = String(item.dataUrl || "");
-      if (!dataUrl.startsWith("data:image/")) return null;
+      const url = safeBackgroundUrl(item.url || "");
+      const sourceUrl = safeBackgroundUrl(item.sourceUrl || url);
+      const sourceMode = item.sourceMode === "link" ? "link" : "local";
+      if (sourceMode === "link" ? !url : !dataUrl.startsWith("data:image/")) return null;
       return {
-        dataUrl,
+        ...(sourceMode === "local" ? { dataUrl } : { url }),
+        ...(sourceUrl ? { sourceUrl } : {}), sourceMode,
         name: String(item.name || "Background image").slice(0, 180),
         updatedAt: Number(item.updatedAt) || Date.now()
       };
@@ -61,7 +74,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const [key, enabled] of Object.entries(input.avatarSideCopies || {})) {
       if (key && enabled === true) avatarSideCopies[String(key).slice(0, 260)] = true;
     }
-    return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies };
+    // Per-chat display choices, independent of the saved image (local, URL,
+    // global or gallery). Never let imported values become arbitrary CSS.
+    const viewModes = {};
+    for (const [key, inputMode] of Object.entries(input.viewModes || {})) {
+      if (!key || !inputMode || typeof inputMode !== "object") continue;
+      const fit = ["cover", "contain", "tile"].includes(inputMode.fit) ? inputMode.fit : "";
+      const position = ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"].includes(inputMode.position) ? inputMode.position : "";
+      if (fit || position) viewModes[String(key).slice(0, 260)] = { ...(fit ? { fit } : {}), ...(position ? { position } : {}) };
+    }
+    return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies, viewModes };
   }
 
   async function loadStore(force = false) {
@@ -188,8 +210,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const blur = Math.min(30, Math.max(0, Number(settings.chatBackgroundBlur) || 0));
     const dim = rgbaDim(settings.chatBackgroundDim ?? 45);
     const safeUrl = String(usableAvatarUrl(item)).replace(/"/g, "%22");
-    const fit = ["cover", "contain", "tile"].includes(settings.chatBackgroundFit) ? settings.chatBackgroundFit : "cover";
-    const position = ["center", "top", "bottom", "left", "right"].includes(settings.chatBackgroundPosition) ? settings.chatBackgroundPosition : "center";
+    const view = mediaStore.viewModes?.[chatKey()] || {};
+    const fit = ["cover", "contain", "tile"].includes(view.fit) ? view.fit
+      : (["cover", "contain", "tile"].includes(settings.chatBackgroundFit) ? settings.chatBackgroundFit : "cover");
+    const position = ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"].includes(view.position) ? view.position
+      : (["center", "top", "bottom", "left", "right"].includes(settings.chatBackgroundPosition) ? settings.chatBackgroundPosition : "center");
     if (item.avatar) {
       // Portrait avatar + viewport-wide `cover` scales/crops the face heavily.
       // Keep the dimming gradient full-screen, but size the image separately.
@@ -235,6 +260,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       reader.onerror = () => reject(reader.error || new Error("Could not read image"));
       reader.readAsDataURL(file);
     });
+  }
+
+
+  function fetchBackgroundUrlImage(url) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({ type: "DS_BG_FETCH_IMAGE_URL", url }, response => {
+          const lastError = chrome.runtime.lastError?.message;
+          if (lastError || (!response?.ok && !response?.requiresPermission)) reject(new Error(lastError || response?.error || "Couldn't download this image."));
+          else resolve(response);
+        });
+      } catch (error) { reject(error); }
+    });
+  }
+
+  function requestBackgroundHost(url) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({ type: "DS_BG_REQUEST_IMAGE_PERMISSION", url }, response => {
+          const lastError = chrome.runtime.lastError?.message;
+          if (lastError || !response?.ok) reject(new Error(lastError || response?.error || "Site access wasn't granted."));
+          else resolve(true);
+        });
+      } catch (error) { reject(error); }
+    });
+  }
+
+  async function saveChatImageUrl(rawUrl, mode, { refresh = false } = {}) {
+    const url = safeBackgroundUrl(rawUrl);
+    if (!url) throw new Error("Enter an HTTPS image URL (public websites only).");
+    const key = chatKey();
+    if (!key) throw new Error("Open a chat first.");
+    const selectedMode = mode === "link" ? "link" : "local";
+    let savedItem;
+    if (selectedMode === "local") {
+      let result = await fetchBackgroundUrlImage(url);
+      if (result?.requiresPermission) {
+        await requestBackgroundHost(url);
+        result = await fetchBackgroundUrlImage(url);
+      }
+      if (!result?.dataUrl?.startsWith("data:image/")) throw new Error("The URL didn't return a usable image.");
+      savedItem = { dataUrl: result.dataUrl, sourceUrl: url, sourceMode: "local", name: result.name || "Image from URL", updatedAt: Date.now() };
+    } else {
+      savedItem = { url, sourceUrl: url, sourceMode: "link", name: "Linked image", updatedAt: Date.now() };
+    }
+    await loadStore();
+    const chats = { ...mediaStore.chats, [key]: savedItem };
+    const suppressedChats = { ...mediaStore.suppressedChats };
+    delete suppressedChats[key];
+    const galleries = { ...mediaStore.galleries };
+    if (galleries[key]) galleries[key] = { ...galleries[key], activeId: "" };
+    await saveStore({ ...mediaStore, chats, suppressedChats, galleries });
+    await DS.applyChatBackgrounds?.();
+    return savedItem;
   }
 
   async function chooseChatImage() {
@@ -290,6 +369,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (suppress) suppressedChats[key] = true;
     else delete suppressedChats[key];
     await saveStore({ ...mediaStore, chats, galleries, suppressedChats });
+    await DS.applyChatBackgrounds?.();
+  }
+
+  async function saveChatViewMode(part, choice) {
+    const key = chatKey();
+    if (!key || !["fit", "position"].includes(part)) return;
+    await loadStore();
+    const allowed = part === "fit" ? ["cover", "contain", "tile"]
+      : ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"];
+    const current = { ...(mediaStore.viewModes?.[key] || {}) };
+    if (allowed.includes(choice)) current[part] = choice;
+    else delete current[part]; // Use the global setting for this one control.
+    const viewModes = { ...(mediaStore.viewModes || {}) };
+    if (Object.keys(current).length) viewModes[key] = current;
+    else delete viewModes[key];
+    await saveStore({ ...mediaStore, viewModes });
     await DS.applyChatBackgrounds?.();
   }
 
@@ -423,6 +518,46 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } finally { choose.disabled = false; }
     });
 
+    const urlBox = document.createElement("div");
+    urlBox.className = "ds-chat-background-url-controls";
+    urlBox.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0";
+    const urlInput = document.createElement("input");
+    urlInput.type = "url"; urlInput.placeholder = "https://example.com/background.png";
+    urlInput.setAttribute("aria-label", "Background image URL");
+    urlInput.style.cssText = "flex:1 1 230px;min-width:160px";
+    urlInput.value = override?.sourceUrl || override?.url || "";
+    const modeSelect = document.createElement("select");
+    modeSelect.setAttribute("aria-label", "How to use the image URL");
+    for (const [value, label] of [["local", "Save local copy (default)"], ["link", "Use URL only"]]) {
+      const opt = document.createElement("option"); opt.value = value; opt.textContent = label; modeSelect.appendChild(opt);
+    }
+    modeSelect.value = override?.sourceMode || "local";
+    const useUrlButton = document.createElement("button");
+    useUrlButton.type = "button"; useUrlButton.textContent = "Use image URL";
+    const urlStatus = document.createElement("p");
+    urlStatus.style.cssText = "width:100%;margin:0;font-size:12px";
+    urlStatus.setAttribute("role", "status");
+    urlStatus.textContent = "Local copies keep the original URL for later refresh. URL-only images require the host to stay available.";
+    useUrlButton.addEventListener("click", async () => {
+      useUrlButton.disabled = true; urlStatus.textContent = "Checking image…";
+      try { await saveChatImageUrl(urlInput.value, modeSelect.value); openDialog(); }
+      catch (error) { urlStatus.textContent = error?.message || "Unable to use that image URL."; }
+      finally { useUrlButton.disabled = false; }
+    });
+    urlInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); useUrlButton.click(); } });
+    urlBox.append(urlInput, modeSelect, useUrlButton, urlStatus);
+    if (override?.sourceUrl) {
+      const refresh = document.createElement("button");
+      refresh.type = "button"; refresh.textContent = "Refresh from original URL";
+      refresh.title = "Re-download the linked source while keeping this chat's current settings.";
+      refresh.addEventListener("click", async () => {
+        refresh.disabled = true;
+        try { await saveChatImageUrl(override.sourceUrl, "local", { refresh: true }); openDialog(); }
+        catch (error) { urlStatus.textContent = error?.message || "Could not refresh the image."; refresh.disabled = false; }
+      });
+      urlBox.appendChild(refresh);
+    }
+
     const clear = document.createElement("button");
     clear.type = "button";
     clear.textContent = "Clear background for this chat";
@@ -460,7 +595,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const actions = document.createElement("div");
     actions.className = "ds-chat-background-actions";
     actions.append(choose, clear, restore, settingsButton, done);
-    panel.append(title, status);
+    panel.append(title, status, urlBox);
+    // Per-chat positioning is useful for scenes and linked backgrounds where
+    // the subject is not centered. Unset choices follow the existing global
+    // Settings, so older images keep their appearance unchanged.
+    const viewBox = document.createElement("div");
+    viewBox.className = "ds-chat-background-view-controls";
+    viewBox.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin:10px 0";
+    for (const [part, title, entries] of [
+      ["fit", "Image fit", [["cover", "Cover"], ["contain", "Contain"], ["tile", "Tile"]]],
+      ["position", "Image position", [["center", "Center"], ["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["top left", "Top left"], ["top right", "Top right"], ["bottom left", "Bottom left"], ["bottom right", "Bottom right"]]]
+    ]) {
+      const label = document.createElement("label");
+      label.textContent = `${title} (this chat)`;
+      label.style.cssText = "display:flex;flex:1 1 145px;flex-direction:column;gap:4px;min-width:0;font-size:12px";
+      const select = document.createElement("select");
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "Use global setting";
+      select.appendChild(defaultOption);
+      for (const [value, text] of entries) {
+        const opt = document.createElement("option"); opt.value = value; opt.textContent = text; select.append(opt);
+      }
+      select.value = mediaStore.viewModes?.[key]?.[part] || "";
+      select.addEventListener("change", async () => {
+        select.disabled = true;
+        try { await saveChatViewMode(part, select.value); }
+        catch { DS.setQuickStatus?.("Could not save chat background position. Try again."); }
+        finally { select.disabled = false; }
+      });
+      label.append(select); viewBox.append(label);
+    }
+    panel.append(viewBox);
     if (displayedItem?.avatar) {
       const zoom = document.createElement("label");
       zoom.textContent = "Avatar picture size";
