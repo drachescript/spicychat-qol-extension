@@ -1,0 +1,55 @@
+name: QoL Custom — Core + OOC smoke test
+
+on:
+  push:
+    branches:
+      - qol-custom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-ooc-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Custom branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Full source wiring
+        run: python build/verify_runtime.py
+
+      - name: Test feature recipes and minimal package
+        run: python -m unittest discover -s build -p 'test_custom_recipes.py' -v && python -m unittest discover -s build -p 'test_minimal_ooc.py' -v
+
+      - name: Test Full runtime feature gates
+        run: node build/test_feature_lifecycle.js && node build/test_bulk_build_gates.js
+
+      - name: Check minimal OOC JavaScript syntax
+        run: |
+          node --check custom/ooc-runtime-core.js
+          node --check custom/ooc-options.js
+          node --check content/core-settings-defaults.js
+          node --check content/ooc.js
+          node --check content/ooc-composer.js
+
+      - name: Build experimental Core + OOC package
+        run: python scripts/build_minimal_ooc.py --output dist/qol-custom-core-ooc-test.zip
+
+      - name: Upload isolated browser test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: qol-custom-core-ooc-test
+          path: dist/qol-custom-core-ooc-test.zip
+          if-no-files-found: error
+          retention-days: 14
