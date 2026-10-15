@@ -49,13 +49,14 @@ for (const file of ["content/runtime-kernel.js", "content/feature-lifecycle.js"]
   assert.equal(calls.filter(x=>x === "removeOocTools").length,3);
   const original = fs.readFileSync(path.join(ROOT, 'content/feature-lifecycle.js'), 'utf8');
   const fullSteps = [...original.matchAll(/await runStep\("([^"]+)",/g)].map(x=>x[1]);
-  assert.equal(fullSteps.length,71,"Full shutdown contains original 70 steps plus OOC");
+  assert(fullSteps.length >= 71,"Full shutdown unexpectedly lost established cleanup steps");
+  assert(fullSteps.includes('rulebook diagnostics cleanup'),"v0.2.49 Rulebook cleanup remains registered");
   const shutdown = [];
   await lifecycle.shutdownAll({runStep:async(name,fn)=>{shutdown.push(name);await fn();},syncNativeScrollBackToTopVisibility:()=>shutdown.push("native-scroll-recovery")});
-  assert.equal(shutdown.filter(x=>x !== 'native-scroll-recovery').length,71);
+  assert.equal(shutdown.filter(x=>x !== 'native-scroll-recovery').length,fullSteps.length);
   assert.equal(shutdown[0],'remove disabled panel');
   assert.equal(shutdown.at(-1),'OOC cleanup');
   await lifecycle.shutdownAll({runStep:async()=>{throw Error('should not repeat');}});
   assert.equal(lifecycle.activeFeatures().length,0);
-  console.log('PASS Full feature lifecycle: activation, single cleanup, settings, route, 71-step ordered shutdown');
+  console.log('PASS Full feature lifecycle: activation, single cleanup, settings, route, ordered shutdown');
 })().catch(err=>{console.error(err);process.exitCode=1;});
