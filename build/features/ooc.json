@@ -26,11 +26,11 @@
   "sharedDependencies": {
     "runtime": [
       "content/core-settings-defaults.js",
-      "custom/ooc-runtime-core.js (minimal recipe only)"
+      "custom/ooc-runtime-core.js"
     ],
     "settings": [
-      "custom/ooc-options.html (minimal recipe only)",
-      "custom/ooc-options.js (minimal recipe only)"
+      "custom/ooc-options.html",
+      "custom/ooc-options.js"
     ],
     "styles": [
       "content/styles/ooc.css"
