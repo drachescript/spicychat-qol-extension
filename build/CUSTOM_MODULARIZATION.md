@@ -1,53 +1,44 @@
-# QoL Custom — v0.2.48 development baseline
+# QoL Custom — permanent development branch
 
-**Experimental feature recipes only. The public Full QoL release is unchanged.**
+**Current Full baseline: v0.2.49.** Full QoL is the canonical runtime on `main`; all experimental Custom work stays on `qol-custom`. Do not create a new branch for each release.
 
-This branch currently tracks the v0.2.48 Full source and will be brought forward as Full QoL evolves. Feature changes should be implemented in Full and integrated here, without reversing newer runtime fixes.
+## v0.2.49 — first minimal Core + OOC package smoke test
 
-## Permanent branch policy
+The source already includes a fixed Core + OOC test recipe at `scripts/build_minimal_ooc.py`. It packages Full's OOC insertion/composer scripts, the small Core adapter, OOC styles, and the dedicated test Settings page. It intentionally excludes the normal Full main scheduler, broad Settings, background worker and unrelated features.
 
-- **`main`** stays the public Full QoL release and the canonical runtime.
-- **`qol-custom`** is the single permanent Custom development branch. Continue work here across v0.2.49, v0.2.50, etc. Update it from newer Full releases instead of creating version-numbered Custom branches.
-- Version-specific `qol-custom-*` and `qol-custom-modularization` branches are obsolete and may be deleted after verifying this branch. No extra archive branch is needed.
-- The old `scripts/custom_build.py` bundle-based prototype was intentionally replaced by v0.2.47+ feature-contract recipes; it did not produce runtime-verified installable builds. Do not reintroduce it solely to preserve an outdated implementation.
-- Preserve `build/custom_recipes.py`, `build/test_custom_recipes.py`, `build/custom-recipes/ooc-example.json`, and this document when updating `qol-custom` from `main`.
-- Keep Full QA and missing-module integration tests as release gates. The website-managed unpacked-folder updater comes after a verified minimal package.
+The Custom branch now:
+- Merges Full v0.2.49 with saved feature recipes preserved.
+- Registers three new scripts and two stylesheets introduced in Full v0.2.49 in `build/modules.json`.
+- Fixes OOC shared dependency references to real paths, and recognizes `experimental-test-only` as a blocked-for-release readiness level in `build/verify_runtime.py`.
+- Updates stale Full lifecycle/feature count expectations to cover new Rulebook diagnostics and three new feature IDs.
+- Adds `build/test_minimal_ooc.py` to check package contents, manifest privileges, Full-source equivalence of OOC code, and Settings file closure.
+- Runs `.github/workflows/qol-custom-ooc-smoke.yml` on pushes to this branch to build a test ZIP.
 
-## Changes on main that affect Custom
+**GitHub Actions proof:** [successful Core + OOC smoke run](https://github.com/drachescript/spicychat-qol-extension/actions/runs/38712490305), which publishes the `qol-custom-core-ooc-test` artifact. This is **static/offline validation**, not live browser validation.
 
-- `content/feature-lifecycle.js` owns feature activation/cleanup coordination. The new OOC cleanup is now lifecycle-gated inside Full.
-- `content/feature-build-map.js` matches runtime scheduler tasks to feature contract IDs and supports generated profiles.
-- `background/feature-build-profile.js` and `background/feature-message-ownership.js` support denying feature-owned messages in a **verified** generated profile, without changing Full behavior.
-- `settings/options-feature-availability.js` hides explicitly excluded feature settings without clearing their saved values.
-- `build/features/ooc.json` still declares `customBuildStatus: blocked`. Lifecycle cleanup does **not** establish that OOC can run without the shared Chat composer code, Settings markup, CSS, background plumbing or permissions.
+## Test the first build in Chrome/Brave
 
-## Feature recipes
+1. Open the successful Actions run above and download the `qol-custom-core-ooc-test` artifact (GitHub sign-in may be required).
+2. Unzip the artifact to get `qol-custom-core-ooc-test.zip`. Extract that package into a stable local directory.
+3. Use a **clean Chrome or Brave profile**. Open `chrome://extensions`, enable Developer Mode and choose **Load unpacked** on the extracted package directory.
+4. Open SpicyChat in that profile and check the OOC floating panel, presets, composer button, Image-button option, route changes, settings persistence, disable/enable, and page reload behavior.
+5. Inspect extension/page console errors, repeated observers or timers, and behavior when switching between chats.
+6. Do not run Full and Core+OOC against the same SpicyChat profile during this test. Their storage is isolated because they have different extension IDs.
+
+This fixed OOC recipe is not yet an arbitrary module builder, and it has not passed live Chrome/Brave validation. It is **not a public Custom release**.
+
+## Stored Custom feature recipes
 
 ```sh
 python build/custom_recipes.py --recipe build/custom-recipes/ooc-example.json
-
-# Keep current choices and add another declared feature
 python build/custom_recipes.py --recipe build/custom-recipes/ooc-example.json --add chat-search --save my-custom.json
-
-# Modify selections later without clearing per-feature update preferences
-python build/custom_recipes.py --recipe my-custom.json --remove chat-search --save my-custom.json
-
-# Test recipe behavior
 python -m unittest discover -s build -p 'test_custom_recipes.py' -v
 ```
 
-The recipe uses individual `build/features/*.json` contract IDs, not broad bundles.
-The preview includes `featureReadiness` with Full lifecycle and Custom packaging status, together with blockers from the contracts. Both the top-level preview and underlying plan remain `installable: false`, regardless of future planner behavior.
+Feature recipes preserve selected features and future update preferences, resolve dependency requirements, report readiness blockers, and always mark arbitrary Custom builds `installable: false`. They do not yet update installed extensions.
 
-Saved `updates.default` and `updates.overrides` are configuration intent for a **future** website updater. They do not currently update modules or install any executable code.
+## Next milestones
 
-## Next milestone before the first Chrome/Brave test build
+After the Core+OOC test passes live in a browser, prove adding/removing a second small feature while preserving Settings and data. Then implement the website's explicitly user-authorized write-to-unpacked-folder updater with build verification, backup, rollback and extension reload.
 
-1. In Full QoL, extract the remaining OOC Chat UI composer shortcut and associated CSS/Settings markup from shared assets. Ensure start/stop remains idempotent, even during SPA navigation and per-tab disable.
-2. Validate the smallest Core+OOC package closure, including dynamic scripts, DOM injection groups, Settings, background imports/listeners, CSS and permissions; fail closed on missing dependencies.
-3. Preserve Full parity and compare browser behavior and performance against a clean Full instance with Inspector.
-4. Once a verified minimal package works, begin the website's user-approved unpacked-folder updater, including backout/restore and an extension reload handshake.
-
-**Do not use this branch's recipe preview as an installable ZIP.** Source separation, tests, feature-aware guards and a smaller manifest are useful foundations, not sufficient proof of a working Custom build.
-
-The earlier version-numbered Custom branches are superseded by `qol-custom` and can be deleted from GitHub once this branch is verified.
+Keep `main` untouched by experimental changes, and keep using this one `qol-custom` branch for future releases.
