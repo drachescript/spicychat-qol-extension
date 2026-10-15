@@ -132,7 +132,9 @@
         "content/story-day-tracker.js",
         "content/text-replacements.js",
         "content/translation.js",
-        "content/chat-rulebook-metadata.js"
+        "content/chat-rulebook-metadata.js",
+        "content/story-reading-layout.js",
+        "content/rulebook-diagnostics.js"
       ]
     },
     "chatList": {
@@ -229,7 +231,8 @@
         "content/lorebook-tags.js",
         "content/lorebook-workflow.js",
         "content/wiki-lorebook-importer.js",
-        "content/lorebook-public-qol.js"
+        "content/lorebook-public-qol.js",
+        "content/lorebook-connections.js"
       ]
     },
     "profiles": {
