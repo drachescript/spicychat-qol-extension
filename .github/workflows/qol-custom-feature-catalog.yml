@@ -11,6 +11,10 @@ on:
       - ".github/workflows/qol-custom-feature-catalog.yml"
   workflow_dispatch:
 
+concurrency:
+  group: qol-custom-catalog-export
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
