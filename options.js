@@ -715,6 +715,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableBotEditorDraftHistory",
   "enableWikiLorebookImporter",
   "enableLorebookConsistency",
+  "enableCreatorTriggerPreview",
   "lorebookDefaultEntriesTab",
   "lorebookRememberEntrySort",
   "lorebookProtectEntryDrafts",
@@ -897,6 +898,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "formatToolbarBraces",
   "enableRpFormatRepair",
   "enableChatBackgrounds",
+  "enableCustomCharacterPictures",
+  "enableCustomPersonaPictures",
   "chatBackgroundUseAvatar",
   "chatBackgroundAnimateAvatar",
   "favoritePageFoldersEnabled",
@@ -2328,7 +2331,7 @@ const SETTINGS_BACKUP_GROUPS = {
   settingsWriting: { label: "Writing & Generation", pages: ["writing"] },
   settingsPersonas: { label: "Personas & Memory", pages: ["personas-memory"] },
   settingsCreator: { label: "Creator Tools", pages: ["bot-tools"] },
-  settingsAppearance: { label: "Appearance & Interface", pages: ["appearance"] },
+  settingsAppearance: { label: "Appearance & Interface", pages: ["appearance", "custom-pictures"] },
   settingsBrowser: { label: "Browser, Tabs & Mobile", pages: ["browser", "android"] },
   settingsAdvanced: { label: "Advanced & Compatibility", pages: ["advanced"] }
 };
@@ -2754,7 +2757,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "lowMemoryProtectionEnabled", name: "Low memory / PC protection", children: ["maxAwakeSpicyTabs"] },
   { parent: "duplicateTabGuardEnabled", name: "Duplicate SpicyChat Tab Guard", children: ["duplicateTabChats", "duplicateTabHome", "duplicateTabProfiles", "duplicateTabFocusExisting"] },
   { parent: "showCreatorFavoriteButtons", name: "Favorite creator stars", children: ["showCreatorFavoriteButtonsOnMyChatbots"] },
-  { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
+  { parent: "showQuickPanel", name: "Mini Panel", children: ["quickPanelShowCustomPictures", "quickPanelShowContextKeeper", "quickPanelShowFocusMode", "quickPanelShowCharacterProfile", "quickPanelShowSavedSnippets", "quickPanelShowCreatorPreview", "quickPanelShowImageGenerator", "quickPanelShowRulebookDiagnostics", "quickPanelDraggable", "quickPanelDefaultClosed", "quickPanelEnabledByDefaultInTab", "quickPanelAutoCollapseOverlap", "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked", "quickPanelShowFeatureSummary", "quickPanelShowOptions", "quickPanelShowFillNow", "quickPanelShowSmartFilterPins", "quickPanelShowChatSearch", "quickPanelShowChatSort", "quickPanelShowScanVisible", "quickPanelShowLoadAll", "quickPanelShowOoc", "quickPanelShowAutoVoice", "quickPanelShowAutoAsterisk", "quickPanelShowTranslation", "quickPanelShowPersona", "quickPanelShowExport", "quickPanelShowSoundscapes"] },
   { parent: "showCardGreetingTokenInfo", name: "Bot card token info", children: ["cardTokenShowGreeting", "cardTokenShowPersonality", "cardTokenShowScenario", "cardTokenShowExamples"] },
   { parent: "replaceCardProfileWithBlockButton", name: "QoL card block button", children: ["quickDislikeOnBlock", "showBlockButtonOnMyCreations"] },
   { parent: "enableBulkCardBlocking", name: "Bulk card selection", children: ["bulkCardBlockingSidebarLauncher"] },
@@ -2771,7 +2774,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "showChatSearch", name: "Search Inside Current Chat", children: ["chatSearchShowPanel", "chatSearchShowFindButton", "chatSearchExactPhrase", "chatSearchCaseSensitive", "chatSearchWholeWord", "chatSearchRegex", "chatSearchLoadUntilMatch"] },
   { parent: "enableMessageBookmarks", name: "Message bookmarks", children: ["messageBookmarkButtons"] },
   { parent: "enableFocusMode", name: "Focus / Immersive Mode", children: ["focusHideSidebar", "focusHideTopBar", "focusHideChatHeader", "focusHideQolPanel"] },
-  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember"] },
+  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember", "contextKeeperAutoRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
   { parent: "enableStoryDayTracker", name: "Internal Day Tracker", children: ["storyDayTrackerMode", "storyDayTrackerIncludeInContext", "storyDayTrackerShowQuickPanel"] },
   { parent: "enableRpStateTracker", name: "RP State Tracker", children: ["rpStateTrackerMode", "rpStateInjectMode", "rpStateMaxContextChars", "rpStateShowQuickPanel"] },
   { parent: "enableGlobalMemory", name: "Global Memory", children: ["globalMemoryText", "globalMemorySendMode", "globalMemoryOocWrapper", "globalMemoryShowChatButton"] },
@@ -2792,7 +2795,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableLorebookConsistency", name: "Lorebook response consistency", children: ["lorebookConsistencyShowMatches", "lorebookConsistencyAutoQueue", "lorebookConsistencyMaxEntries"] },
   { parent: "enableSoundscapes", name: "Soundscapes", children: ["soundscapeShowChatControl", "soundscapeMasterVolume", "soundscapeOnChat", "soundscapeOnHome", "soundscapeOnChats", "soundscapeOnProfiles", "soundscapeOnOther"] },
   { parent: "enableRpFormatRepair", name: "RP Format Repair", children: ["rpFormatRepairAuto", "rpFormatConvertBoldActions", "rpFormatRemoveActionParens", "rpFormatPreserveInlineEmphasis", "rpFormatPreserveSemanticQuotes", "rpFormatPreserveBackticks", "rpFormatShowMessageButtons"] },
-  { parent: "enableChatBackgrounds", name: "Custom chat backgrounds", children: ["chatSceneGalleriesEnabled", "chatBackgroundDim", "chatBackgroundBlur", "chatBackgroundFit", "chatBackgroundPosition"] },
+  { parent: "enableChatBackgrounds", name: "Custom Pictures · Backgrounds", children: ["chatSceneGalleriesEnabled", "chatBackgroundDim", "chatBackgroundBlur", "chatBackgroundFit", "chatBackgroundPosition"] },
   { parent: "androidTopBarMenu", name: "Compact chat top-bar controls", children: ["androidHideComposerShortcuts", "androidTopBarOoc", "androidTopBarAsterisk", "androidTopBarFormatting", "androidTopBarTranslation", "androidTopBarScroll", "androidTopBarPersona", "androidTopBarModel"] }
 ];
 

@@ -825,7 +825,7 @@ async function runSettingsHealthCheck() {
     });
   }
   if (current.enableChatBackgrounds && !backgroundStore.global && !Object.keys(backgroundStore.chats || {}).length) {
-    notices.push({ title: "Custom chat backgrounds are enabled without an image", detail: "Choose a global image in Appearance & Interface or set a per-chat override from the BG button in a chat.", target: "chatBackgroundsCard" });
+    notices.push({ title: "Custom chat backgrounds are enabled without an image", detail: "Choose a global image under Custom Pictures or set a per-chat override from the Custom Pictures popup shortcut.", target: "chatBackgroundsCard" });
   }
 
   const bulkState = normalizeQuickDislikeBulkState(result[QUICK_DISLIKE_BULK_STATE_KEY]);
@@ -1087,7 +1087,7 @@ function applyOptionsLayoutPreferences(settings = null) {
 function reorderOptionsUi() {
   const tabOrder = [
     "general", "control", "blocking", "chat-ui", "saved", "chat-list", "writing",
-    "personas-memory", "bot-tools", "appearance", "browser", "data", "account",
+    "personas-memory", "bot-tools", "appearance", "custom-pictures", "browser", "data", "account",
     "features", "advanced", "android", "changelog", "help"
   ];
   const tabs = document.querySelector("nav.tabs");
@@ -1107,7 +1107,8 @@ function reorderOptionsUi() {
     "personas-memory": ["Persona helpers", "Memory manager", "Context Keeper", "Global Memory / Baseline Notes", "Internal Day Tracker", "RP State Tracker", "Chat Nudges"],
     "chat-ui": ["Chat top bar", "Character shortcuts", "Message options", "Search inside current chat", "Message bookmarks / multiple local pins", "Scroll navigation", "Chat export", "Native rating helpers", "Chat text replacements", "Focus / Immersive Mode"],
     "bot-tools": ["Creation helpers", "Bot editor snippets", "My Creations filters", "My Creations backup & shortcuts", "Creator Writing Assistant", "Creation audit", "Bot & Lorebook backups", "Backup manager", "Bot / profile export", "Bot tags in chats"],
-    appearance: ["Accessibility & text size", "Mini panel", "Panel size", "Panel items", "Layout preview", "Top bar cleanup", "Avatar name", "Sidebar cleanup", "Premium & promo cleanup", "Chat bubble customization", "Custom chat backgrounds", "RP Format Repair", "Alternate dialogue styling", "Soundscapes / Ambience", "Animated bot images"],
+    "custom-pictures": ["Custom Pictures", "Custom Pictures → Backgrounds"],
+    appearance: ["Accessibility & text size", "Mini panel", "Panel size", "Panel items", "Layout preview", "Top bar cleanup", "Avatar name", "Sidebar cleanup", "Premium & promo cleanup", "Chat bubble customization", "RP Format Repair", "Alternate dialogue styling", "Soundscapes / Ambience", "Animated bot images"],
     browser: ["Extension popup", "Notifications", "Inactive tab cleanup (Auto-AFK)", "Duplicate SpicyChat tab guard", "Tab cleanup & session analysis"],
     data: ["Backup and restore", "Local storage & recovery", "Recently changed / Undo", "Personal usage & context", "What's New notification", "Settings check", "Debug"]
   };

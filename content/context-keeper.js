@@ -11,6 +11,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MESSAGE_SELECTOR = "div[id^='message-']";
   const BUTTON_CLASS = "ds-context-keep-button";
   const MAX_DETAIL = 1200;
+  let activeRecall = { chatId: "", details: [], ready: false };
+  let recallReadPending = false;
 
   const STOP_WORDS = new Set([
     "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "at", "for", "with", "from", "as", "is", "was",
@@ -77,6 +79,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           createdAt: Number(item?.createdAt) || Date.now(),
           score: Number(item?.score) || 0,
           enabled: item?.enabled !== false,
+          pinned: item?.pinned === true,
+          needsReview: item?.needsReview === true,
           messageId: clean(item?.messageId || item?.message_id || "").slice(0, 160),
           role: clean(item?.role || item?.speaker || "").slice(0, 40),
           storyDay: Number(item?.storyDay) > 0 ? Math.floor(Number(item.storyDay)) : 0,
@@ -91,7 +95,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         lastRecapAt: Number(entry.lastRecapAt) || 0,
         lastRecapMessageCount: Number(entry.lastRecapMessageCount) || 0,
         lastAutoScanMessageCount: Math.max(0, Number(entry.lastAutoScanMessageCount) || 0),
-        lastAutoScanAt: Number(entry.lastAutoScanAt) || 0
+        lastAutoScanAt: Number(entry.lastAutoScanAt) || 0,
+        revisions: Object.fromEntries(Object.entries(entry.revisions && typeof entry.revisions === "object" ? entry.revisions : {}).slice(-300).filter(([key, value]) => key && typeof value === "string"))
       };
     }
     return output;
@@ -102,14 +107,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return normalize(result?.[KEY]);
   }
 
-  async function writeStore(store, label = "Updated Context Keeper", { recordChange = true } = {}) {
-    const beforeResult = await DS.storageGet?.([KEY]);
-    const before = normalize(beforeResult?.[KEY]);
+  function rememberActive(store) {
+    const id = currentChatId();
+    activeRecall = { chatId: id, details: [...(store?.[id]?.details || [])], ready: true };
+  }
+
+  function prepareRecall() {
+    const id = currentChatId();
+    if (activeRecall.chatId === id && activeRecall.ready || recallReadPending) return;
+    activeRecall = { chatId: id, details: [], ready: false };
+    recallReadPending = true;
+    readStore().then(store => { if (currentChatId() === id) rememberActive(store); })
+      .catch(() => {})
+      .finally(() => { recallReadPending = false; });
+  }
+
+  // Serialize storage writes and avoid an extra write when the normalized data is unchanged.
+  // This also keeps the before/after audit snapshots in the same confirmed order.
+  let writeChain = Promise.resolve();
+  function writeStore(store, label = "Updated Context Keeper", { recordChange = true } = {}) {
     const after = normalize(store);
-    await DS.storageSet?.({ [KEY]: after });
-    if (recordChange && JSON.stringify(before) !== JSON.stringify(after)) {
-      await DS.recordLocalChange?.(label, { [KEY]: before }, { [KEY]: after });
-    }
+    const work = writeChain.catch(() => {}).then(async () => {
+      const beforeResult = await DS.storageGet?.([KEY]);
+      const before = normalize(beforeResult?.[KEY]);
+      if (JSON.stringify(before) === JSON.stringify(after)) return false;
+      const ok = await DS.storageSet?.({ [KEY]: after });
+      if (ok === false) throw new Error("Context Keeper storage write failed");
+      if (recordChange) await DS.recordLocalChange?.(label, { [KEY]: before }, { [KEY]: after });
+      rememberActive(after);
+      return true;
+    });
+    writeChain = work.catch(() => {});
+    return work;
+  }
+  function fingerprint(text) {
+    let hash = 2166136261;
+    for (const c of String(text || "")) { hash ^= c.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+    return (hash >>> 0).toString(36);
   }
 
   function roots() {
@@ -330,14 +364,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const every = autoCaptureEvery();
       const lastCount = Math.max(0, Number(entry.lastAutoScanMessageCount) || 0);
       const delta = Math.max(0, messageCount - lastCount);
-      if (lastCount > 0 && delta < every) return;
+      // A regeneration can replace content without adding a DOM message. Track a
+      // small newest-message window by stable ID + fingerprint instead of count alone.
+      const latestRoots = messageRoots.slice(-Math.max(12, every));
+      const revisions = entry.revisions || (entry.revisions = {});
+      const changed = latestRoots.filter(root => {
+        const id = messageIdForRoot(root);
+        return id && revisions[id] !== fingerprint(messageText(root));
+      });
+      if (lastCount > 0 && delta < every && !changed.length) return;
       if (lastCount === 0 && messageCount < every) return;
-
-      // Only inspect the newest small batch. This avoids rescanning a long loaded
-      // history and also avoids treating manually loaded old messages as a fresh
-      // automatic-capture pass.
       const batchSize = Math.min(messageCount, Math.max(every, Math.min(12, delta || every)));
-      const candidates = scanRoots(messageRoots.slice(-batchSize), autoSensitivityThreshold(), 24);
+      const changedRoots = changed.length ? changed : messageRoots.slice(-batchSize);
+      for (const root of changedRoots) {
+        const id = messageIdForRoot(root);
+        if (!id) continue;
+        const updated = fingerprint(messageText(root));
+        if (revisions[id] && revisions[id] !== updated) {
+          // Never discard a saved fact silently. Mark prior automatic facts from
+          // the regenerated/edited message for review until the user confirms.
+          for (const detail of entry.details) {
+            if (detail.source === "auto" && detail.messageId === id) {
+              detail.needsReview = true;
+              detail.enabled = false;
+            }
+          }
+        }
+        delete revisions[id];
+        revisions[id] = updated;
+      }
+      entry.revisions = Object.fromEntries(Object.entries(revisions).slice(-300));
+      const candidates = scanRoots(changedRoots, autoSensitivityThreshold(), 24);
       const story = DS.getStoryDaySnapshot?.() || null;
       let added = 0;
 
@@ -351,6 +408,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           source: "auto",
           score: Number(candidate.score) || scoreSentence(text),
           enabled: true,
+          pinned: false,
+          needsReview: false,
           messageId: clean(candidate.messageId || "").slice(0, 160),
           role: clean(candidate.role || "").slice(0, 40),
           storyDay: Number(story?.day || 0),
@@ -451,6 +510,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         source: itemSource,
         score: Number(item.score) || (itemSource === "memory" ? Math.max(8, scoreSentence(text)) : scoreSentence(text)),
         enabled: item.enabled !== false,
+        pinned: item.pinned === true,
+        needsReview: item.needsReview === true,
         messageId: clean(item.messageId || item.message_id || "").slice(0, 160),
         role: clean(item.role || item.speaker || "").slice(0, 40),
         storyDay: Number(item.storyDay) > 0 ? Math.floor(Number(item.storyDay)) : Number(story?.day || 0),
@@ -475,6 +536,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function detailPriority(detail) {
     const sourceBonus = { manual: 6, memory: 6, selection: 5, message: 4, auto: 3, scan: 2 }[detail.source] || 1;
+    if (detail.pinned) return 1000 + sourceBonus + Number(detail.score || 0);
     const categoryBonus = {
       identity: 6,
       relationship: 6,
@@ -494,7 +556,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function detailsForRecap(details) {
-    const enabled = (details || []).filter(detail => detail.enabled !== false);
+    const enabled = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview);
     const mode = recapMode();
     const limits = {
       compact: { count: 6, chars: 1700 },
@@ -539,8 +601,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
+  // Independent local recall: no native Memories API, no Memory Manager dependency.
+  // The composer integration requests this synchronously, after a cached storage read.
+  DS.getContextKeeperSendCandidate = function getContextKeeperSendCandidate(draft = "") {
+    const cfg = DS.state?.settings || {};
+    if (!cfg.enabled || !cfg.enableContextKeeper || !cfg.contextKeeperAutoRecall || !DS.isSingleChatPage?.()) return null;
+    const id = currentChatId();
+    if (activeRecall.chatId !== id || !activeRecall.ready) { prepareRecall(); return null; }
+    const enabled = activeRecall.details.filter(x => x.enabled !== false && !x.needsReview);
+    if (!enabled.length) return null;
+    const selected = [];
+    const words = new Set(clean(draft).toLowerCase().match(/[a-z]{4,}/g) || []);
+    const ranked = enabled.map(detail => {
+      const hits = [...new Set(clean(detail.text).toLowerCase().match(/[a-z]{4,}/g) || [])]
+        .filter(word => words.has(word) && !STOP_WORDS.has(word)).length;
+      return { detail, rank: detailPriority(detail) + Math.min(hits, 5) * 4 };
+    }).sort((a,b) => b.rank - a.rank || Number(b.detail.createdAt||0)-Number(a.detail.createdAt||0));
+    const budget = [450,900,1400].includes(Number(cfg.contextKeeperRecallMaxChars)) ? Number(cfg.contextKeeperRecallMaxChars) : 900;
+    const lead = "[OOC: Remember these established continuity details: ";
+    const tail = ". Keep the roleplay consistent.]";
+    let used = lead.length + tail.length;
+    for (const { detail } of ranked) {
+      const candidate = clean(detail.text).replace(/[.;]+$/g, "");
+      const cost = candidate.length + (selected.length ? 2 : 0);
+      if (used + cost > budget) continue;
+      selected.push(candidate); used += cost;
+      if (selected.length >= 12) break;
+    }
+    return selected.length ? { directive: lead + selected.join("; ") + tail, count: selected.length } : null;
+  };
+
   async function insertRecap(details) {
-    const active = (details || []).filter(detail => detail.enabled !== false);
+    const active = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview);
     const timelineOnly = DS.getStoryDayContextLine?.({ includeNotes: true }) || "";
     if (!active.length && !timelineOnly) {
       DS.setQuickStatus?.("Context Keeper has no recap-enabled details or Storydate timeline for this chat yet.");
@@ -578,13 +670,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const close = make("button", { type: "button", className: "ds-tool-modal-close" }, "×");
     head.append(close);
 
-    const note = make("p", { className: "ds-tool-note" }, "Local continuity helper. Automatic capture keeps strong long-term facts locally; manual scans remain review-only. Saved details do not use chat tokens until you insert/send an OOC recap.");
+    const note = make("p", { className: "ds-tool-note" }, "Standalone local memories, independent of native Memory Manager. Saved facts cost no tokens until a manual recap or optional automatic recall is included with a message.");
     const status = make("p", { className: "ds-tool-status" });
     const topActions = make("div", { className: "ds-tool-actions" });
     const scan = make("button", { type: "button" }, "Scan loaded chat");
+    const apiScan = make("button", { type: "button" }, "Scan up to 10k messages (API)");
+    const stopApiScan = make("button", { type: "button" }, "Stop scan");
+    stopApiScan.disabled = true;
     const addTop = make("button", { type: "button" }, "Add top 5");
     const insert = make("button", { type: "button" }, "Insert OOC recap");
-    topActions.append(scan, addTop, insert);
+    topActions.append(scan, apiScan, stopApiScan, addTop, insert);
 
     const manual = make("div", { className: "ds-tool-editor" });
     const manualText = make("textarea", { rows: "3", placeholder: "Add an important continuity detail manually..." });
@@ -611,7 +706,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const removeDisabled = make("button", { type: "button" }, "Remove excluded");
     const removeAll = make("button", { type: "button", className: "ds-danger" }, "Remove all");
     const copyRecap = make("button", { type: "button" }, "Copy OOC recap");
-    savedTools.append(enableAll, removeDisabled, removeAll, copyRecap);
+    const selectAll = make("button", { type: "button" }, "Select filtered");
+    const selectNone = make("button", { type: "button" }, "Clear selection");
+    const bulkPin = make("button", { type: "button" }, "Pin selected");
+    const bulkUnpin = make("button", { type: "button" }, "Unpin selected");
+    const bulkExclude = make("button", { type: "button" }, "Exclude selected");
+    const bulkInclude = make("button", { type: "button" }, "Include selected");
+    const bulkDelete = make("button", { type: "button", className: "ds-danger" }, "Delete selected");
+    const bulkCategory = make("select", { "aria-label": "Move selected continuity details to category" });
+    bulkCategory.append(make("option", { value: "" }, "Move selected to…"));
+    for (const [key, label] of Object.entries(CATEGORY_LABELS)) bulkCategory.append(make("option", { value: key }, label));
+    const exportJson = make("button", { type: "button" }, "Export JSON");
+    const importJson = make("button", { type: "button" }, "Import JSON…");
+    const selectedDetails = new Set();
+    savedTools.append(selectAll, selectNone, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
     savedFilters.append(savedSearch, categoryFilter, sourceFilter);
     const savedList = make("div", { className: "ds-tool-list" });
     const suggestionTitle = make("h3", {}, "Scan suggestions");
@@ -628,17 +736,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const nowCount = roots().length;
       const since = entry.lastRecapAt ? Math.max(0, nowCount - (entry.lastRecapMessageCount || 0)) : 0;
       const enabled = entry.details.filter(detail => detail.enabled !== false).length;
+      const review = entry.details.filter(detail => detail.needsReview).length;
       const automatic = entry.details.filter(detail => detail.source === "auto").length;
       const preview = recapText(entry.details).text;
       const approxTokens = preview ? Math.max(1, Math.round(preview.length / 4)) : 0;
       const recapInfo = `Recap: ${recapMode()} · about ${approxTokens.toLocaleString("en-US")} token${approxTokens === 1 ? "" : "s"} if inserted now.`;
       status.textContent = entry.lastRecapAt
-        ? `${entry.details.length} saved (${enabled} used, ${automatic} automatic). Last recap was inserted about ${since} loaded message${since === 1 ? "" : "s"} ago. ${recapInfo}`
-        : `${entry.details.length} saved (${enabled} used, ${automatic} automatic). No recap inserted yet. ${recapInfo}`;
+        ? `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}). Last recap was inserted about ${since} loaded message${since === 1 ? "" : "s"} ago. ${recapInfo}`
+        : `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}). No recap inserted yet. ${recapInfo}`;
     }
 
     function renderSaved() {
       savedList.replaceChildren();
+      const ids = new Set(entry.details.map(item => item.id));
+      for (const selected of selectedDetails) if (!ids.has(selected)) selectedDetails.delete(selected);
       if (!entry.details.length) {
         savedList.append(make("p", { className: "ds-tool-empty" }, "No continuity details saved for this chat yet."));
         return;
@@ -661,20 +772,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const meta = make("div", { className: "ds-context-item-meta" });
         const badge = make("span", { className: "ds-context-category" }, detail.category || "other");
         const sourceBadge = make("span", { className: "ds-context-source" }, `source: ${detail.source || "manual"}${detail.role ? ` · ${detail.role}` : ""}`);
+        const selectLabel = make("label", { className: "ds-context-include" });
+        const checked = make("input", { type: "checkbox", checked: selectedDetails.has(detail.id) });
+        selectLabel.append(checked, document.createTextNode("Select"));
+        checked.addEventListener("change", () => { if (checked.checked) selectedDetails.add(detail.id); else selectedDetails.delete(detail.id); });
         const includeLabel = make("label", { className: "ds-context-include" });
         const include = make("input", { type: "checkbox", checked: detail.enabled !== false });
         includeLabel.append(include, document.createTextNode("Use in recap"));
-        meta.append(badge, sourceBadge, includeLabel);
+        meta.append(selectLabel, badge, sourceBadge, includeLabel);
+        if (detail.pinned) meta.append(make("span", { className: "ds-context-category" }, "Pinned"));
+        if (detail.needsReview) meta.append(make("span", { className: "ds-context-category" }, "Review after regeneration"));
         const value = make("div", { className: "ds-tool-item-text" }, detail.text);
         const actions = make("div", { className: "ds-tool-actions" });
         const edit = make("button", { type: "button" }, "Edit");
+        const pin = make("button", { type: "button" }, detail.pinned ? "Unpin" : "Pin");
+        pin.addEventListener("click", async () => {
+          const latest = await readStore(); const found = latest[id]?.details?.find(item => item.id === detail.id);
+          if (!found) return;
+          found.pinned = !found.pinned;
+          await writeStore(latest); await refreshEntry();
+        });
         const jump = detail.messageId ? make("button", { type: "button" }, "Jump") : null;
-        const memory = make("button", { type: "button" }, "Memory");
         const remove = make("button", { type: "button", className: "ds-danger" }, "Remove");
         include.addEventListener("change", async () => {
           const latest = await readStore();
           const found = latest[id]?.details?.find(item => item.id === detail.id);
-          if (found) found.enabled = include.checked;
+          if (found) { found.enabled = include.checked; if (include.checked) found.needsReview = false; }
           await writeStore(latest);
           await refreshEntry();
         });
@@ -694,27 +817,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await refreshEntry();
         });
         jump?.addEventListener("click", () => jumpToSource(detail));
-        memory.addEventListener("click", async () => {
-          if (typeof DS.prepareSpicyChatMemory !== "function") {
-            DS.setQuickStatus?.("SpicyChat Memory preparation is not available on this page yet.");
-            return;
-          }
-          memory.disabled = true;
-          const result = await DS.prepareSpicyChatMemory(detail.text);
-          memory.disabled = false;
-          if (!result?.prepared && !result?.copied) {
-            DS.setQuickStatus?.("Could not prepare or copy this Context Keeper detail for SpicyChat Memory.");
-          }
-        });
         remove.addEventListener("click", async () => {
           const latest = await readStore();
           if (latest[id]) latest[id].details = latest[id].details.filter(item => item.id !== detail.id);
           await writeStore(latest);
           await refreshEntry();
         });
-        actions.append(edit);
+        actions.append(edit, pin);
         if (jump) actions.append(jump);
-        actions.append(memory, remove);
+        actions.append(remove);
         card.append(meta, value, actions);
         savedList.append(card);
       });
@@ -755,6 +866,61 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         suggestionList.append(card);
       });
     }
+
+    function selectedRows() { return entry.details.filter(detail => selectedDetails.has(detail.id)); }
+    async function bulkEdit(mode, argument = "") {
+      const chosen = selectedRows();
+      if (!chosen.length) { status.textContent = "Select continuity details first."; return; }
+      if (mode === "delete" && !window.confirm(`Delete ${chosen.length} selected continuity details?`)) return;
+      const latest = await readStore(); const target = latest[id]; if (!target) return;
+      const wanted = new Set(chosen.map(detail => detail.id));
+      if (mode === "delete") target.details = target.details.filter(detail => !wanted.has(detail.id));
+      else for (const detail of target.details) {
+        if (!wanted.has(detail.id)) continue;
+        if (mode === "pin") detail.pinned = true;
+        if (mode === "unpin") detail.pinned = false;
+        if (mode === "exclude") detail.enabled = false;
+        if (mode === "include") { detail.enabled = true; detail.needsReview = false; }
+        if (mode === "category") detail.category = normalizeCategory(argument);
+      }
+      if (mode === "delete") selectedDetails.clear();
+      await writeStore(latest, `Context Keeper bulk ${mode}`);
+      await refreshEntry();
+    }
+    selectAll.addEventListener("click", () => {
+      const query = clean(savedSearch.value).toLowerCase();
+      for (const detail of entry.details) if ((!query || detail.text.toLowerCase().includes(query))
+        && (categoryFilter.value === "all" || detail.category === categoryFilter.value)
+        && (sourceFilter.value === "all" || detail.source === sourceFilter.value)) selectedDetails.add(detail.id);
+      renderSaved();
+    });
+    selectNone.addEventListener("click", () => { selectedDetails.clear(); renderSaved(); });
+    bulkPin.addEventListener("click", () => bulkEdit("pin"));
+    bulkUnpin.addEventListener("click", () => bulkEdit("unpin"));
+    bulkExclude.addEventListener("click", () => bulkEdit("exclude"));
+    bulkInclude.addEventListener("click", () => bulkEdit("include"));
+    bulkDelete.addEventListener("click", () => bulkEdit("delete"));
+    bulkCategory.addEventListener("change", () => { if (bulkCategory.value) void bulkEdit("category", bulkCategory.value); bulkCategory.value = ""; });
+    exportJson.addEventListener("click", () => {
+      const chosen = selectedDetails.size ? selectedRows() : entry.details;
+      const payload = { format: "spicychat-qol-context-keeper", version: 1, exportedAt: new Date().toISOString(), details: chosen };
+      DS.downloadTextFile?.(JSON.stringify(payload, null, 2), `context-keeper-${Date.now()}.json`, "application/json;charset=utf-8", { requestPermission: true });
+    });
+    importJson.addEventListener("click", () => {
+      const input = make("input", { type: "file", accept: ".json,application/json" }); input.hidden = true;
+      input.addEventListener("change", async () => {
+        const file = input.files?.[0]; input.remove(); if (!file) return;
+        try {
+          const data = JSON.parse(await file.text());
+          if (data?.format !== "spicychat-qol-context-keeper" || !Array.isArray(data.details)) throw Error("Not a Context Keeper export");
+          const values = data.details.slice(0, 1000).map(row => ({ ...row, source: "manual", enabled: row.enabled !== false }));
+          if (!window.confirm(`Import up to ${values.length} continuity details into THIS chat? Similar entries will be skipped; the source file won't be changed.`)) return;
+          const result = await addManyDetails(values, { source: "manual" });
+          await refreshEntry(); status.textContent = `Imported ${result.added}; skipped ${result.skipped} duplicates.`;
+        } catch (error) { status.textContent = `Import failed: ${error?.message || error}`; }
+      }, { once: true });
+      document.body.append(input); input.click();
+    });
 
     savedSearch.addEventListener("input", renderSaved);
     categoryFilter.addEventListener("change", renderSaved);
@@ -805,6 +971,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.setQuickStatus?.(ok ? "Context Keeper OOC recap copied." : "Could not copy Context Keeper recap.");
     });
 
+    const apiScanState = { cancel: false, running: false };
+    apiScan.addEventListener("click", async () => {
+      if (apiScanState.running || typeof (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage) !== "function") {
+        status.textContent = "Authenticated chat-history API is unavailable."; return;
+      }
+      const route = location.pathname.match(/^\/chat\/([^/?#]+)\/([^/?#]+)/i);
+      if (!route) { status.textContent = "Save/open an established chat first."; return; }
+      apiScanState.running = true; apiScanState.cancel = false; apiScan.disabled = true; stopApiScan.disabled = false;
+      const op = DS.diagOperationStart?.("context-keeper", "manual-api-history-scan", { maxPages: 100 });
+      let pages = 0, scanned = 0, lastId = "", pageSize = 100; const seen = new Set(); const suggestions = new Map();
+      try {
+        for (; pages < 100 && !apiScanState.cancel; pages++) {
+          if (!DS.isSingleChatPage?.() || location.pathname !== `/chat/${route[1]}/${route[2]}`) break;
+          let response;
+          try { response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(route[1], route[2], { limit: pageSize, lastId }); }
+          catch (error) {
+            if (pages === 0 && [400, 404, 413, 422].includes(Number(error?.httpStatus || 0))) {
+              pageSize = 50;
+              response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(route[1], route[2], { limit: pageSize, lastId });
+            } else throw error;
+          }
+          const rows = response?.data?.messages;
+          if (!Array.isArray(rows)) throw Error("Chat history returned no message list");
+          if (!rows.length) break;
+          for (const row of rows) {
+            const messageId = String(row?.id || "");
+            if (!messageId || seen.has(messageId)) continue;
+            seen.add(messageId); scanned++;
+            const role = String(row?.role || "");
+            for (const sentence of splitSentences(row?.content || row?.text || row?.message || "")) {
+              const score = scoreSentence(sentence);
+              if (score < 5 || suggestions.size >= 250) continue;
+              const key = fingerprint(sentence.toLocaleLowerCase());
+              if (suggestions.has(key)) continue;
+              suggestions.set(key, { text: sentence.slice(0, MAX_DETAIL), category: categoryFor(sentence), score, messageId, role });
+            }
+          }
+          status.textContent = `Reading conversation… ${scanned} messages across ${pages + 1} API pages. Suggestions are review-only.`;
+          const oldest = rows[rows.length - 1]; const next = String(oldest?.id || "");
+          if (oldest?.prev_id == null && Object.hasOwn(oldest, "prev_id")) break;
+          if (rows.length < pageSize || !next || next === lastId) break;
+          lastId = next;
+          await new Promise(resolve => setTimeout(resolve, 60));
+        }
+        candidates = [...suggestions.values()].sort((a,b) => b.score-a.score).filter(c => !entry.details.some(d => isSimilarText(d.text,c.text))).slice(0, 250);
+        renderSuggestions();
+        status.textContent = `${apiScanState.cancel ? "Stopped" : "Read"} ${scanned} messages in ${pages + 1} pages; ${candidates.length} suggestions to review. No changes were auto-saved.`;
+        DS.diagOperationEnd?.(op, { scanned, changed: candidates.length, outcome: apiScanState.cancel ? "cancelled" : "done", meta: { pages: pages + 1 } });
+      } catch (error) {
+        status.textContent = `History scan stopped: ${error?.message || error}. Local details are safe.`;
+        DS.diagOperationEnd?.(op, { scanned, errors: 1, outcome: "failed" });
+      } finally { apiScanState.running = false; apiScan.disabled = false; stopApiScan.disabled = true; }
+    });
+    stopApiScan.addEventListener("click", () => { apiScanState.cancel = true; stopApiScan.disabled = true; });
     scan.addEventListener("click", () => {
       candidates = scanLoaded().filter(candidate => !entry.details.some(detail => isSimilarText(detail.text, candidate.text)));
       renderSuggestions();
@@ -839,8 +1059,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await refreshEntry();
       }
     });
-    close.addEventListener("click", () => modal.remove());
-    backdrop.addEventListener("click", () => modal.remove());
+    close.addEventListener("click", () => { apiScanState.cancel = true; modal.remove(); });
+    backdrop.addEventListener("click", () => { apiScanState.cancel = true; modal.remove(); });
     modal.addEventListener("keydown", event => { if (event.key === "Escape") modal.remove(); });
 
     dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, suggestionTitle, suggestionList);
@@ -961,10 +1181,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!document.hidden) scheduleMessageButtonRepair(450);
   }, true);
 
+  // Keep local recall fresh if another QoL tab edits Context Keeper data.
+  try {
+    chrome.storage?.onChanged?.addListener(changes => {
+      if (!changes?.[KEY] || !DS.state?.settings?.enableContextKeeper) return;
+      rememberActive(normalize(changes[KEY].newValue));
+    });
+  } catch {}
+
   DS.openContextKeeper = openManager;
   DS.addContextKeeperDetails = addManyDetails;
   DS.ensureContextKeeperMessageButtonForRoot = ensureMessageButtonForRoot;
   DS.applyContextKeeper = function applyContextKeeper() {
+    if (DS.state?.settings?.enableContextKeeper) prepareRecall();
     ensureMessageButtons();
     scheduleAutomaticCapture();
   };
@@ -975,6 +1204,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.getElementById(MODAL_ID)?.remove();
     clearTimeout(autoState.timer);
     autoState.timer = null;
+    activeRecall = { chatId: "", details: [], ready: false };
     DS.state.contextKeeperWasActive = false;
   };
   DS.normalizeContextKeeperData = normalize;

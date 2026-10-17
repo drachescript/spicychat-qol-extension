@@ -238,6 +238,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const character = currentCharacter();
     const candidates = [];
 
+    const countKey = `ds-qol-context-sends:${encodeURIComponent(location.pathname)}`;
+    let sentCount = 0;
+    try { sentCount = Math.max(0, Number(sessionStorage.getItem(countKey)) || 0); } catch {}
+    const interval = [1,3,5,10].includes(Number(s.contextKeeperRecallEverySends)) ? Number(s.contextKeeperRecallEverySends) : 5;
+    if (s.enableContextKeeper && s.contextKeeperAutoRecall && sentCount % interval === 0) {
+      const recall = DS.getContextKeeperSendCandidate?.(current);
+      if (recall?.directive) candidates.push({ kind: "context-recall", directive: recall.directive });
+    }
     const queue = s.enableLorebookConsistency ? DS.getLorebookConsistencyQueue?.() : null;
     if (queue?.text) candidates.push({ kind: "lorebook", directive: String(queue.text), queueId: queue.id || "" });
 
@@ -261,6 +269,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
+    // Count user-triggered sends without intercepting them if no directives apply.
+    // This does not send on its own, and it never changes the user's draft until preflight.
+    try { if (s.enableContextKeeper && s.contextKeeperAutoRecall) sessionStorage.setItem(countKey, String(sentCount + 1)); } catch {}
     if (!candidates.length) return false;
     const added = [];
     const alreadyPresent = [];

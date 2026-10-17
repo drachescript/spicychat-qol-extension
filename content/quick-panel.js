@@ -925,6 +925,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           <button id="ds-qol-saved-snippets" type="button">Saved snippets</button>
         </div>
 
+        <div class="ds-qol-row" id="ds-qol-custom-pictures-row">
+          <button id="ds-qol-custom-pictures" type="button">Custom Pictures</button>
+        </div>
+
+        <div class="ds-qol-row" id="ds-qol-creator-trigger-row">
+          <button id="ds-qol-creator-trigger" type="button">Creator trigger preview</button>
+        </div>
+
+        <div class="ds-qol-row" id="ds-qol-image-gen-row">
+          <button id="ds-qol-image-gen" type="button">Image generator</button>
+        </div>
+
+        <div class="ds-qol-row" id="ds-qol-rulebook-diag-row">
+          <button id="ds-qol-rulebook-diag" type="button">Rulebook diagnostics</button>
+        </div>
+
         <div class="ds-qol-row" id="ds-qol-context-keeper-row">
           <button id="ds-qol-context-keeper" type="button">Context keeper</button>
         </div>
@@ -1097,6 +1113,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.openSavedSnippets?.();
     });
 
+    panel.querySelector("#ds-qol-custom-pictures")?.addEventListener("click", () => DS.openCustomPicturesMenu?.());
+    panel.querySelector("#ds-qol-creator-trigger")?.addEventListener("click", () => DS.openCreatorTriggerPreview?.());
+    panel.querySelector("#ds-qol-image-gen")?.addEventListener("click", () => DS.openAutoImageSettings?.());
+    panel.querySelector("#ds-qol-rulebook-diag")?.addEventListener("click", () => {
+      const el = document.getElementById("ds-rulebook-diagnostics");
+      if (!el) return;
+      const trigger = el.querySelector("button[aria-expanded],button[aria-controls],button");
+      trigger?.click();
+    });
+
     panel.querySelector("#ds-qol-context-keeper")?.addEventListener("click", () => {
       DS.openContextKeeper?.();
     });
@@ -1158,7 +1184,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "quickPanelShowScanVisible", "quickPanelShowLoadAll", "showChatSearch", "chatSearchShowPanel", "enableFocusMode",
     "enableCharacterQolProfiles", "enableSavedTextSnippets", "enableContextKeeper", "enableStoryDayTracker", "storyDayTrackerShowQuickPanel", "enableRpStateTracker", "rpStateShowQuickPanel", "quickPanelShowAutoVoice", "autoPairAsterisks",
     "quickPanelShowAutoAsterisk", "enableTranslation", "quickPanelShowTranslation", "translationAutoAi", "enableSoundscapes",
-    "quickPanelShowSoundscapes", "showChatExportButton", "quickPanelShowExport", "chatListSortMode", "chatListOpenedFilter",
+    "quickPanelShowSoundscapes", "quickPanelShowContextKeeper", "quickPanelShowFocusMode", "quickPanelShowCharacterProfile", "quickPanelShowSavedSnippets", "quickPanelShowCustomPictures", "quickPanelShowCreatorPreview", "quickPanelShowImageGenerator", "quickPanelShowRulebookDiagnostics", "showChatExportButton", "quickPanelShowExport", "chatListSortMode", "chatListOpenedFilter",
     "chatListMessageFilter", "chatListSavedFilter", "chatListBlockedFilter", "chatPerformanceMode", "enableSmartFilterPresets",
     "quickPanelShowSmartFilterPins", "quickPanelWidth", "quickPanelUiScale", "qolInterfaceScale", "quickPanelMaxHeightPercent",
     "quickPanelPlacement", "quickPanelCustomXPercent", "quickPanelCustomYPercent", "quickPanelDraggable"
@@ -1172,10 +1198,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Some of those helpers inspect native chat UI or normalize larger stores;
     // they used to run even when their Mini Panel rows were hidden.
     const wantsSound = !!(settings?.enableSoundscapes && settings?.quickPanelShowSoundscapes);
-    const wantsStory = !!(onSingleChatPage && settings?.enableStoryDayTracker && settings?.storyDayTrackerShowQuickPanel !== false);
-    const wantsRpState = !!(onSingleChatPage && settings?.enableRpStateTracker && settings?.rpStateShowQuickPanel !== false);
-    const wantsCharacterProfile = !!(onSingleChatPage && settings?.enableCharacterQolProfiles);
-    const wantsAutoVoice = !!(onSingleChatPage && settings?.quickPanelShowAutoVoice !== false);
+    const wantsStory = !!(onSingleChatPage && settings?.enableStoryDayTracker && settings?.storyDayTrackerShowQuickPanel === true);
+    const wantsRpState = !!(onSingleChatPage && settings?.enableRpStateTracker && settings?.rpStateShowQuickPanel === true);
+    const wantsCharacterProfile = !!(onSingleChatPage && settings?.enableCharacterQolProfiles && settings?.quickPanelShowCharacterProfile === true);
+    const wantsAutoVoice = !!(onSingleChatPage && settings?.quickPanelShowAutoVoice === true);
 
     const sound = wantsSound ? (DS.getSoundscapePanelState?.() || {}) : {};
     const story = wantsStory ? (DS.getStoryDaySnapshot?.() || {}) : {};
@@ -1184,7 +1210,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nativeVoiceAvailable = wantsAutoVoice ? !!DS.isNativeVoiceAvailable?.() : false;
 
     const settingsPart = PANEL_SIGNATURE_SETTINGS.map(key => `${key}:${String(settings?.[key] ?? "")}`).join("|");
-    const visibleChats = onChatListPage && settings.quickPanelShowStatus !== false
+    const visibleChats = onChatListPage && settings.quickPanelShowStatus === true
       ? (document.querySelectorAll("a[href*='/chat/']")?.length || 0)
       : 0;
     const loadedMessages = onSingleChatPage && settings.quickPanelShowLoadedMessageCount
@@ -1202,6 +1228,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       wantsCharacterProfile ? (DS.hasCurrentCharacterQolProfile?.() ? 1 : 0) : 0,
       autoVoiceEnabled ? 1 : 0,
       nativeVoiceAvailable ? 1 : 0,
+      onSingleChatPage && settings.quickPanelShowImageGenerator ? (document.querySelector('[data-testid="ImageGenerationButton"]') ? 1 : 0) : 0,
       `${sound.playing ? 1 : 0}:${sound.activeId || ""}:${(sound.scenes || []).map(scene => `${scene.id}:${scene.name}`).join(",")}`,
       `${story.code || ""}:${story.pending || 0}`,
       `${rpState.count || 0}:${rpState.pending || 0}:${(rpState.items || []).map(item => `${item.id || item.key}:${item.updatedAt || 0}:${item.includeInContext === false ? 0 : 1}`).join(",")}`,
@@ -1225,6 +1252,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const characterProfileRow = document.getElementById("ds-qol-character-profile-row");
     const savedSnippetsRow = document.getElementById("ds-qol-saved-snippets-row");
     const contextKeeperRow = document.getElementById("ds-qol-context-keeper-row");
+    const customPicturesRow = document.getElementById("ds-qol-custom-pictures-row");
+    const creatorPreviewRow = document.getElementById("ds-qol-creator-trigger-row");
+    const imageGeneratorRow = document.getElementById("ds-qol-image-gen-row");
+    const rulebookDiagnosticsRow = document.getElementById("ds-qol-rulebook-diag-row");
     const storyDayRow = document.getElementById("ds-qol-story-day-row");
     const oocRow = document.getElementById("ds-qol-ooc-row");
     const personaRow = document.getElementById("ds-qol-persona-row");
@@ -1243,6 +1274,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         focusRow,
         characterProfileRow,
         savedSnippetsRow,
+        customPicturesRow,
+        creatorPreviewRow,
+        imageGeneratorRow,
+        rulebookDiagnosticsRow,
         contextKeeperRow,
         storyDayRow,
         oocRow,
@@ -1428,6 +1463,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     setShown(row, show && pinned.length > 0, "block");
   }
 
+  function shortcutAvailable(feature, enabled = true, launcher = true) {
+    return !!(enabled && launcher && DS.featureBuildProfile?.isInstalled?.(feature) !== false);
+  }
+
   DS.updateQuickPanel = function updateQuickPanel({ forceLayout = false, bypassThrottle = false } = {}) {
     // Pending/throttled updates must never resurrect or keep a panel whose
     // master setting or per-tab switch has since been turned off.
@@ -1516,7 +1555,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     renderQuickPanelSmartFilterPins(panel, settings, onChatListPage, onSingleChatPage);
 
     const status = document.getElementById("ds-qol-status");
-    setShown(status, settings.quickPanelShowStatus !== false || !!settings.quickPanelShowFeatureSummary);
+    setShown(status, settings.quickPanelShowStatus === true || !!settings.quickPanelShowFeatureSummary);
 
     const loadedMessageCount = document.getElementById("ds-qol-loaded-message-count");
     const showLoadedMessageCount = !!(onSingleChatPage && settings.quickPanelShowLoadedMessageCount);
@@ -1530,7 +1569,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const fillButton = document.getElementById("ds-qol-fill-listing");
     const showOptions = settings.quickPanelShowOptions !== false;
     const showFill = !!(
-      settings.quickPanelShowFillNow !== false &&
+      settings.quickPanelShowFillNow === true &&
       !onSingleChatPage &&
       !onChatListPage
     );
@@ -1550,11 +1589,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     setShown(document.getElementById("ds-qol-normal-row"), showOptions || showFill, "flex");
 
     // Available independently of normal chat-list tools, but always opt-in.
-    const showChatTools = !!(onChatListPage && settings.showChatListTools);
-    const showSearch = showChatTools && settings.quickPanelShowChatSearch !== false;
-    const showSort = showChatTools && settings.quickPanelShowChatSort !== false;
-    const showScan = showChatTools && settings.quickPanelShowScanVisible !== false;
-    const showLoadAll = showChatTools && settings.quickPanelShowLoadAll !== false;
+    const showChatTools = !!(onChatListPage && settings.showChatListTools && shortcutAvailable("chat-list"));
+    const showSearch = showChatTools && settings.quickPanelShowChatSearch === true;
+    const showSort = showChatTools && settings.quickPanelShowChatSort === true;
+    const showScan = showChatTools && settings.quickPanelShowScanVisible === true;
+    const showLoadAll = showChatTools && settings.quickPanelShowLoadAll === true;
 
     setShown(document.getElementById("ds-qol-chat-search-wrap"), showSearch);
     setShown(document.getElementById("ds-qol-chat-sort-wrap"), showSort);
@@ -1570,8 +1609,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const showCurrentChatSearch = !!(
       onSingleChatPage &&
-      settings.showChatSearch &&
-      settings.chatSearchShowPanel !== false
+      settings.showChatSearch && shortcutAvailable("chat-search") &&
+      settings.chatSearchShowPanel === true
     );
     setShown(
       document.getElementById("ds-qol-current-chat-search-tools"),
@@ -1582,14 +1621,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.bindChatSearchQuickPanel?.();
     }
 
-    const showFocusMode = !!(onSingleChatPage && settings.enableFocusMode);
+    const showFocusMode = !!(onSingleChatPage && shortcutAvailable("focus-mode", settings.enableFocusMode && settings.quickPanelShowFocusMode === true, typeof DS.toggleFocusMode === "function"));
     setShown(document.getElementById("ds-qol-focus-row"), showFocusMode, "flex");
     const focusButton = document.getElementById("ds-qol-focus-mode");
     if (focusButton) {
       setText(focusButton, DS.isFocusModeActive?.() ? "Exit focus" : "Focus mode");
     }
 
-    const showCharacterProfile = !!(onSingleChatPage && settings.enableCharacterQolProfiles);
+    const showCharacterProfile = !!(onSingleChatPage && shortcutAvailable("character-qol-profiles", settings.enableCharacterQolProfiles && settings.quickPanelShowCharacterProfile === true, typeof DS.openCharacterQolProfile === "function"));
     const characterProfileButton = document.getElementById("ds-qol-character-profile");
     if (characterProfileButton) {
       const custom = !!DS.hasCurrentCharacterQolProfile?.();
@@ -1601,13 +1640,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     setShown(characterProfileButton, showCharacterProfile);
     setShown(document.getElementById("ds-qol-character-profile-row"), showCharacterProfile, "flex");
 
-    const showSavedSnippets = !!(onSingleChatPage && settings.enableSavedTextSnippets);
+    const showSavedSnippets = !!(onSingleChatPage && shortcutAvailable("saved-snippets", settings.enableSavedTextSnippets && settings.quickPanelShowSavedSnippets === true, typeof DS.openSavedSnippets === "function"));
     setShown(document.getElementById("ds-qol-saved-snippets-row"), showSavedSnippets, "flex");
 
-    const showContextKeeper = !!(onSingleChatPage && settings.enableContextKeeper);
+    const showCustomPictures = onSingleChatPage && settings.quickPanelShowCustomPictures === true &&
+      shortcutAvailable("chat-backgrounds", !!DS.hasCustomPictures?.(), typeof DS.openCustomPicturesMenu === "function");
+    setShown(document.getElementById("ds-qol-custom-pictures-row"), showCustomPictures, "flex");
+    const showCreatorPreview = onSingleChatPage && settings.quickPanelShowCreatorPreview === true &&
+      shortcutAvailable("lorebook-consistency", !!settings.enableCreatorTriggerPreview, typeof DS.openCreatorTriggerPreview === "function");
+    setShown(document.getElementById("ds-qol-creator-trigger-row"), showCreatorPreview, "flex");
+    const showImageGen = onSingleChatPage && settings.quickPanelShowImageGenerator === true &&
+      shortcutAvailable("auto-voice", true, typeof DS.openAutoImageSettings === "function") &&
+      !!document.querySelector('[data-testid="ImageGenerationButton"]');
+    setShown(document.getElementById("ds-qol-image-gen-row"), showImageGen, "flex");
+    const showRulebook = onSingleChatPage && settings.quickPanelShowRulebookDiagnostics === true &&
+      shortcutAvailable("chat-rulebook-metadata", !!settings.enableRulebookDiagnostics, typeof DS.applyRulebookDiagnostics === "function") &&
+      !!document.getElementById("ds-rulebook-diagnostics");
+    setShown(document.getElementById("ds-qol-rulebook-diag-row"), showRulebook, "flex");
+
+    const showContextKeeper = !!(onSingleChatPage && settings.enableContextKeeper &&
+      shortcutAvailable("context-keeper", settings.quickPanelShowContextKeeper === true, typeof DS.openContextKeeper === "function"));
     setShown(document.getElementById("ds-qol-context-keeper-row"), showContextKeeper, "flex");
 
-    const showStoryDay = !!(onSingleChatPage && settings.enableStoryDayTracker && settings.storyDayTrackerShowQuickPanel !== false);
+    const showStoryDay = !!(onSingleChatPage && shortcutAvailable("story-day-tracker", settings.enableStoryDayTracker && settings.storyDayTrackerShowQuickPanel === true, typeof DS.openStoryDayTracker === "function"));
     const storyDayButton = document.getElementById("ds-qol-story-day");
     if (storyDayButton) {
       const snap = DS.getStoryDaySnapshot?.();
@@ -1616,7 +1671,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     setShown(document.getElementById("ds-qol-story-day-row"), showStoryDay, "flex");
 
-    const showRpState = !!(onSingleChatPage && settings.enableRpStateTracker && settings.rpStateShowQuickPanel !== false);
+    const showRpState = !!(onSingleChatPage && shortcutAvailable("rp-state-tracker", settings.enableRpStateTracker && settings.rpStateShowQuickPanel === true, typeof DS.openRpStateTracker === "function"));
     const rpStateButton = document.getElementById("ds-qol-rp-state");
     if (rpStateButton) {
       const snap = DS.getRpStateSnapshot?.();
@@ -1633,8 +1688,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nativeVoiceAvailable = !!DS.isNativeVoiceAvailable?.();
     const showAutoVoice = !!(
       onSingleChatPage &&
-      settings.quickPanelShowAutoVoice !== false &&
-      (nativeVoiceAvailable || autoVoiceEnabled)
+      settings.quickPanelShowAutoVoice === true &&
+      (nativeVoiceAvailable || autoVoiceEnabled) && shortcutAvailable("auto-voice", true, typeof DS.toggleAutoVoice === "function")
     );
     const autoVoiceButton = document.getElementById("ds-qol-auto-voice");
     if (autoVoiceButton) {
@@ -1652,7 +1707,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const autoAsteriskEnabled = !!settings.autoPairAsterisks;
     const showAutoAsterisk = !!(
       onSingleChatPage &&
-      settings.quickPanelShowAutoAsterisk !== false
+      settings.quickPanelShowAutoAsterisk === true && shortcutAvailable("composer-control", true, typeof DS.toggleAutoPairAsterisks === "function")
     );
     const autoAsteriskButton = document.getElementById("ds-qol-auto-asterisk");
     if (autoAsteriskButton) {
@@ -1666,7 +1721,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const showTranslation = !!(
       onSingleChatPage &&
       settings.enableTranslation &&
-      settings.quickPanelShowTranslation
+      settings.quickPanelShowTranslation && shortcutAvailable("translation", true, typeof DS.applyTranslation === "function" || typeof DS.translateVisible === "function")
     );
     const autoTranslateButton = document.getElementById("ds-qol-auto-translate");
     if (autoTranslateButton) {
@@ -1681,7 +1736,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const soundscapeState = DS.getSoundscapePanelState?.() || { scenes: [], playing: false, activeId: "", allowedHere: false };
     const showSoundscapes = !!(
       settings.enableSoundscapes &&
-      settings.quickPanelShowSoundscapes &&
+      settings.quickPanelShowSoundscapes && shortcutAvailable("soundscapes", true, typeof DS.getSoundscapePanelState === "function") &&
       soundscapeState.allowedHere &&
       soundscapeState.scenes?.length
     );
@@ -1709,7 +1764,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // button is controlled separately by showChatExportButton.
     const showExport = !!(
       onSingleChatPage &&
-      settings.quickPanelShowExport !== false &&
+      settings.quickPanelShowExport === true && shortcutAvailable("chat-export") &&
       typeof DS.exportCurrentChat === "function"
     );
     setShown(document.getElementById("ds-qol-copy-chat"), showExport);
@@ -1743,11 +1798,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const blockedCount = blockedBots.ids.length + blockedBots.names.length;
       const parts = [];
 
-      if (settings.quickPanelStatusShowOpened !== false) {
+      if (settings.quickPanelStatusShowOpened === true) {
         parts.push(`${openedChats.size} opened stored`);
       }
 
-      if (settings.quickPanelStatusShowBlocked !== false) {
+      if (settings.quickPanelStatusShowBlocked === true) {
         parts.push(`${blockedCount} blocked`);
       }
 

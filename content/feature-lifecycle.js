@@ -111,7 +111,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // from similarly named settings or clear the user's persistent values.
     const keyed = {
       "OOC": ["showOocTools", "replaceChatImageWithOocButton", "quickPanelShowOoc"],
-      "chat backgrounds": ["enableChatBackgrounds"],
+      "chat backgrounds": ["enableChatBackgrounds", "enableCustomCharacterPictures", "enableCustomPersonaPictures"],
       "rulebook diagnostics": ["enableRulebookDiagnostics"],
       "focus mode": ["enableFocusMode"],
       "chat bookmarks": ["enableMessageBookmarks"],

@@ -1070,6 +1070,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return mainWorldChatHistoryRequest(character, conversation, options);
   };
 
+  // Shared manual history reader: coalesce identical overlapping calls and
+  // briefly cache pages in memory. Nothing is persisted; never cache failures.
+  // Very short freshness for page one so regenerated replies aren't hidden.
+  const historyPageCache = new Map();
+  const historyPagePending = new Map();
+  DS.fetchChatHistoryPageShared = async function fetchChatHistoryPageShared(characterId, conversationId, options = {}) {
+    const character = String(characterId || "").trim().toLowerCase();
+    const conversation = String(conversationId || "").trim().toLowerCase();
+    const cursor = String(options?.lastId || "").trim();
+    const limit = Math.max(1, Math.min(200, Number(options?.limit) || 100));
+    const key = `${character}|${conversation}|${limit}|${cursor}`;
+    const cached = historyPageCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.response;
+    if (historyPagePending.has(key)) return historyPagePending.get(key);
+    const promise = DS.fetchChatHistoryPage(character, conversation, { ...options, limit, lastId: cursor })
+      .then(response => {
+        if (response?.ok === false) return response;
+        historyPageCache.delete(key);
+        historyPageCache.set(key, { response, expiresAt: Date.now() + (cursor ? 90_000 : 10_000) });
+        while (historyPageCache.size > 8) historyPageCache.delete(historyPageCache.keys().next().value);
+        return response;
+      }).finally(() => { historyPagePending.delete(key); });
+    historyPagePending.set(key, promise);
+    return promise;
+  };
+
   async function waitForMainBridgeCapturedAuth(timeoutMs = 5000) {
     if (mainBridgeHasCapturedAuth()) return true;
     return new Promise(resolve => {

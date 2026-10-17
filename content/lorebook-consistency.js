@@ -12,6 +12,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MODAL_ID = "ds-lorebook-consistency-modal";
   const QUEUE_PREFIX = "ds-qol-lorebook-next-turn-v1:";
   const processed = new Map();
+  const DEBUG_ID = "ds-qol-creator-debug-preview";
+  const DEBUG_LAUNCH_ID = "ds-qol-creator-debug-launch";
   let cache = { botId: "", at: 0, relation: null, book: null };
 
   const clean = (value, max = 12000) => String(value ?? "").replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trim().slice(0, max);
@@ -154,6 +156,88 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     bar.append(label, view, queue);
   }
 
+  async function showCreatorPreview() {
+    document.getElementById(DEBUG_ID)?.remove();
+    const book = await currentBook();
+    const overlay = document.createElement("div"); overlay.id = DEBUG_ID;
+    Object.assign(overlay.style, { position: "fixed", inset: 0, zIndex: 2147483599, background: "rgba(0,0,0,.70)", display: "grid", placeItems: "center", padding: "12px" });
+    const panel = document.createElement("section");
+    Object.assign(panel.style, { width: "min(740px,96vw)", maxHeight: "82vh", overflowY: "auto", background: "#17181c", color: "#fff", border: "1px solid #666", borderRadius: "12px", padding: "16px", fontSize: "14px" });
+    const heading = document.createElement("h3"); heading.textContent = "Creator trigger preview (local estimate)";
+    const note = document.createElement("p"); note.textContent = "This compares visible/local text to keywords. It CANNOT show internal prompt assembly, model reasoning, Rulebook decisions, actual Lorebook injections, or how much native context was used.";
+    const source = document.createElement("p"); source.textContent = book
+      ? `Locally linked Lorebook: ${book.name} · ${book.entries.length} keyworded entries. Other attached books or hidden versions may be missing.`
+      : "No locally backed-up linked Lorebook was found for this bot. Save a backup and visit the linked bot's editor first; unknown is not no Lorebook.";
+    const input = document.createElement("textarea"); input.rows = 4; input.placeholder = "Optional: paste test text here, or leave empty to inspect the newest visible chat messages";
+    input.setAttribute("aria-label", "Text for local Lorebook keyword test"); Object.assign(input.style, { width: "100%", boxSizing: "border-box", background: "#202125", color: "#fff", padding: "8px", borderRadius: "6px" });
+    const controls = document.createElement("div"); controls.style.cssText="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0";
+    const check = document.createElement("button"); check.type = "button"; check.textContent = "Check keyword matches";
+    const close = document.createElement("button"); close.type = "button"; close.textContent = "Close";
+    const out = document.createElement("div"); out.setAttribute("aria-live", "polite");
+    function render() {
+      out.replaceChildren();
+      if (!book?.entries?.length) { out.textContent = "No local Lorebook entries to check."; return; }
+      const chatRoots = messageRoots().slice(-12);
+      const text = clean(input.value || chatRoots.map(root => messageText(root)).join("\n"), 25000);
+      const total = chatRoots.length;
+      const matching = [];
+      let approxChars = 0;
+      for (const entry of book.entries) {
+        const hits = entry.keywords.filter(key => keywordMatches(text, key));
+        if (!hits.length) continue;
+        matching.push({ entry, hits }); approxChars += entry.content.length;
+      }
+      const summary = document.createElement("p");
+      summary.textContent = `${matching.length}/${book.entries.length} local entries have matching keywords in ${input.value ? "test text" : `${total} loaded messages`}. Their saved entry bodies total roughly ${Math.round(approxChars / 4)} estimated tokens BEFORE native priority, activation, and context limits.`;
+      out.append(summary);
+      for (const {entry,hits} of matching.slice(0,80)) {
+        const row = document.createElement("div"); row.style.cssText="padding:8px 0;border-top:1px solid #444";
+        const label = document.createElement("strong"); label.textContent = entry.name;
+        const keys = document.createElement("p"); keys.textContent = `Possible matches: ${hits.join(", ")} · entry body approx. ${Math.round(entry.content.length / 4)} tokens`;
+        keys.style.cssText="margin:3px 0;opacity:.8";
+        if (entry.content.length > 4000) keys.textContent += " · long entry — consider trimming";
+        row.append(label,keys); out.append(row);
+      }
+      if (matching.length > 80) out.append(document.createTextNode("Only first 80 matches are shown."));
+      const matchedNames = new Set(matching.map(match => match.entry));
+      const missing = book.entries.filter(entry => !matchedNames.has(entry));
+      if (missing.length) {
+        const note = document.createElement("details");
+        const title = document.createElement("summary"); title.textContent = `${missing.length} entries without local keyword hits (expand)`;
+        note.append(title);
+        for (const entry of missing.slice(0, 40)) {
+          const line = document.createElement("p"); line.style.cssText = "margin:5px 0;font-size:12px";
+          line.textContent = `${entry.name}: ${entry.keywords.join(", ")}`;
+          note.append(line);
+        }
+        if (missing.length > 40) note.append(document.createTextNode("Showing the first 40 unmatched entries."));
+        out.append(note);
+      }
+      if (!matching.length) out.append(document.createTextNode("No keyword hits in this sample; this does not prove the native engine didn't activate entries."));
+    }
+    check.addEventListener("click", render);
+    close.addEventListener("click", () => overlay.remove());
+    overlay.addEventListener("click", event => { if (event.target === overlay) overlay.remove(); });
+    controls.append(check, close);
+    panel.append(heading, note, source, input, controls, out); overlay.append(panel);
+    document.body.append(overlay);
+    render();
+  }
+  DS.openCreatorTriggerPreview = showCreatorPreview;
+  function updateCreatorDebugLaunch() {
+    const wanted = settings().enabled && settings().enableCreatorTriggerPreview && DS.isSingleChatPage?.() && !DS.isQolPausedForTab?.();
+    let launch = document.getElementById(DEBUG_LAUNCH_ID);
+    if (!wanted) { launch?.remove(); document.getElementById(DEBUG_ID)?.remove(); return; }
+    if (launch?.isConnected) return;
+    launch = document.createElement("button"); launch.id = DEBUG_LAUNCH_ID; launch.type = "button";
+    launch.textContent = "Trigger preview";
+    launch.title = "Local Lorebook keyword estimates — not the actual SpicyChat engine";
+    launch.setAttribute("aria-label", "Open local creator trigger preview");
+    Object.assign(launch.style, { position: "fixed", right: "10px", bottom: "82px", zIndex: "80000", padding: "6px 9px", border: "1px solid #666", borderRadius: "8px", background: "#24262e", color: "white", fontSize: "12px" });
+    launch.addEventListener("click", () => { void showCreatorPreview(); });
+    document.body.append(launch);
+  }
+
   DS.getLorebookConsistencyQueue = () => readQueue();
   DS.markLorebookConsistencyQueueSent = id => clearQueue(id);
   DS.clearLorebookConsistencyQueue = () => clearQueue();
@@ -161,6 +245,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyLorebookConsistency = async function applyLorebookConsistency() {
     const s = settings();
+    updateCreatorDebugLaunch();
     if (!s.enabled || !s.enableLorebookConsistency || !DS.isSingleChatPage?.()) {
       document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove());
       clearQueue();
@@ -186,6 +271,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.removeLorebookConsistency = function removeLorebookConsistency() {
     document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove()); closeModal(); clearQueue();
+    document.getElementById(DEBUG_LAUNCH_ID)?.remove(); document.getElementById(DEBUG_ID)?.remove();
   };
 })();
 

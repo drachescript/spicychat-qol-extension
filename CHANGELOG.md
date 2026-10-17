@@ -1,3 +1,21 @@
+## 0.2.51
+- Added Enter-to-search for the native chat History search field.
+- Added an optional native History search enhancement that shows additional matching conversations from the existing local Chat Index without loading more chat cards or making search API requests.
+- Added a dedicated Custom Pictures Settings category with Backgrounds as a subsection, preserving existing images and scene presets.
+- Added independent per-chat Character and Persona picture overrides for the visible chat UI, without changing the published avatars or native image-generation references.
+- Added a reusable local Picture Library for saved images, with rename, removal and quick assignment to a chat background or character/persona override.
+- Linked native conversation-image settings into Custom Pictures, retaining per-chat automatic image intervals and composer-safe triggering.
+- Added optional Mini Panel shortcuts for Custom Pictures, Context Keeper, creator keyword preview, native image controls, Rulebook troubleshooting, and additional chat tools.
+- Mini Panel shortcuts default off except Options, and hide when their underlying feature is disabled, omitted from a Custom Lite build, or unavailable on the current page.
+- Made Context Keeper a standalone local memory alternative that works without native Memory Manager, with optional visible OOC recall added to outgoing messages at a selected interval.
+- Added independent per-chat Auto Images controls that use SpicyChat's native conversation image button after a chosen number of new AI replies. No composer editing or automatic message sending; disabled by default.
+- Added bulk selection, pinning, category changes, recap inclusion, and JSON import/export to the Context Keeper manager.
+- Context Keeper now flags automatic continuity captured from changed or regenerated messages for review, instead of silently leaving outdated facts active.
+- Added a manual, cancellable chat-history scan in Context Keeper that finds reviewable suggestions through SpicyChat's authenticated history reader without loading older chat cards.
+- Expanded the opt-in Chat Index with manually indexed local message-text search, bounded samples, stop controls, and a clear-index action. Normal chat loading does not start message indexing.
+- Added an optional Creator trigger preview that checks locally backed-up Lorebook keywords against visible chat or pasted text and reports possible matches, unmatched entries, and approximate entry sizes.
+- Reused recent authenticated history pages between supported manual QoL readers to avoid duplicate requests, with short in-memory cache limits.
+
 ## 0.2.50
 - Clarified Bot Status scan counts to distinguish checked-but-Unknown results from unchecked blocked/excluded bots, with an optional targeted Unknown recheck.
 - Treat confirmed unavailable/deleted bots as handled in Dislike and Less Like without sending feedback or removing blocked IDs and recovery copies.

@@ -563,7 +563,7 @@ document
 document.getElementById("openChatBackground")?.addEventListener("click", async () => {
   const response = await sendToActiveTab({ type: "DS_OPEN_CHAT_BACKGROUND_MENU" });
   if (response?.ok) window.close();
-  else document.getElementById("status").textContent = "Open a chat with backgrounds enabled to use BG.";
+  else document.getElementById("status").textContent = "Open a chat and enable any Custom Pictures subsection to use it.";
 });
 
 document.getElementById("viewChanges")?.addEventListener("click", async () => {
