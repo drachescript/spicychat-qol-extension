@@ -1,3 +1,17 @@
+## 0.2.50
+- Clarified Bot Status scan counts to distinguish checked-but-Unknown results from unchecked blocked/excluded bots, with an optional targeted Unknown recheck.
+- Treat confirmed unavailable/deleted bots as handled in Dislike and Less Like without sending feedback or removing blocked IDs and recovery copies.
+- Count existing Less Like negative ratings directly in Bulk Dislike even after its separate history is cleared, with clearer warnings and counters.
+- Reduced redundant automatic Lorebook backup writes when editor content has not changed, and coordinated backup writes during entry saves and exports.
+- Improved Lorebook backup timing details for Inspector recordings without including Lorebook text.
+- Clarified Bulk Dislike history when Less Like already sent the same negative rating, with separate counts for confirmed Dislike requests and cross-handled results.
+- Preserved original rating-source information in saved Dislike history and clarified older entries where the source can only be inferred.
+- Fixed Lorebook JSON exports failing when the reusable background helper was still opening another Lorebook. Exports now wait for the correct editor and recheck the target before finishing.
+- Added bot import to both Create Bot and Edit Bot pages. Review imported fields before filling the SpicyChat editor; imports never save or publish the bot automatically.
+- Supports QoL and Character Card JSON, labeled bot replacement TXT files, and ZIP archives containing bot files. Select which bot to import when an archive contains more than one.
+- Imports can include name, title, description, greeting, personality, scenario, example dialogue and tags. Existing tags are kept; avatar and attached Lorebook data are left untouched.
+- Creates a local safety checkpoint before filling an existing bot. Read-only editors cannot be overwritten.
+
 ## 0.2.49
 - Expanded the optional Rulebook troubleshooting log with manual Regenerate, Delete and Next Turn markers, plus a short recent-events view. These help with testing and do not claim to detect native Rulebook triggers or reconstruct hidden data.
 - Added an optional public Lorebook discovery panel linking to the creator profile when SpicyChat shows it, and listing exact bot/Lorebook links already saved locally by QoL creator tools. These are known local links only, not a complete list of every bot using the Lorebook.

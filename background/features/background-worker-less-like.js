@@ -806,7 +806,8 @@ async function runQuickLessLikeBot(message) {
   if (message?.force !== true) {
     const history = await getQuickLessLikeHistory(message?.bulkRunId || "");
     const remembered = history.bots[botId];
-    if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
+    if (remembered && !(remembered.status === "unavailable" &&
+        await feedbackUnavailableSuperseded(botId, remembered.handledAt))) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
 
     const crossHandled = await completedRecommendationFeedbackForBot(botId, "less-like");
     if (crossHandled?.source === "dislike") {

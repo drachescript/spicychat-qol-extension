@@ -180,7 +180,7 @@ function managerExtraFilter(entry, kind) {
   if (kind === "blocked") {
     const dislikeFilter = value("blockedBotDislikeFilter", "all");
     const lessLikeFilter = value("blockedBotLessLikeFilter", "all");
-    const dislikeHandled = !!quickDislikeHistoryEntry(id);
+    const dislikeHandled = !!quickDislikeHistoryEntry(id) || !!blockedFeedbackRatedByLessLike(id);
     const lessLikeHandled = !!quickLessLikeHistoryEntry(id);
     if (dislikeFilter === "handled" && !dislikeHandled) return false;
     if (dislikeFilter === "remaining" && dislikeHandled) return false;
@@ -519,11 +519,20 @@ async function applyBotManagerBulkAction(kind) {
 
 function blockedQuickDislikeCounts() {
   const ids = uniqueClean(blockedState?.ids || []);
-  let handled = 0;
-  ids.forEach(id => { if (quickDislikeHistoryEntry(id)) handled += 1; });
+  let handled = 0, sent = 0, viaLessLike = 0, legacyUnknown = 0, unavailable = 0;
+  ids.forEach(id => {
+    const entry = quickDislikeHistoryEntry(id);
+    const cross = blockedFeedbackRatedByLessLike(id);
+    if (!entry && !cross) return;
+    handled++;
+    if (entry?.requestSent === true && entry?.ratingSource === "dislike") sent++;
+    else if (cross && cross.status === "less-liked" && cross.stage !== "cross-feedback-dedupe") viaLessLike++;
+    else if (entry?.fromBotStatus || entry?.status === "unavailable-private-or-deleted") unavailable++;
+    else if (entry?.crossHandledBy === "less-like" && entry?.ratingSource !== "dislike") viaLessLike++;
+    else legacyUnknown++;
+  });
   return {
-    total: ids.length,
-    handled,
+    total: ids.length, handled, sent, viaLessLike, legacyUnknown, unavailable,
     remaining: Math.max(0, ids.length - handled),
     nameOnly: uniqueClean(blockedState?.names || []).length
   };
@@ -533,7 +542,7 @@ function updateBlockedDislikeStatus(text = "") {
   const status = $("blockedBotDislikeStatus");
   if (!status) return;
   const counts = blockedQuickDislikeCounts();
-  const next = text || `${counts.handled} handled · ${counts.remaining} remaining`;
+  const next = text || `${counts.handled} handled · ${counts.sent} Dislike requests confirmed · ${counts.viaLessLike} covered by Less Like · ${counts.unavailable} unavailable/skipped · ${counts.legacyUnknown} other/legacy · ${counts.remaining} remaining`;
   if (status.textContent !== next) status.textContent = next;
   const shared = $("blockedBotNameOnlyStatus");
   if (shared) {
@@ -545,10 +554,16 @@ function updateBlockedDislikeStatus(text = "") {
 function blockedQuickLessLikeCounts() {
   const ids = uniqueClean(blockedState?.ids || []);
   let handled = 0;
-  ids.forEach(id => { if (quickLessLikeHistoryEntry(id)) handled += 1; });
+  let unavailable = 0;
+  ids.forEach(id => {
+    const entry = quickLessLikeHistoryEntry(id);
+    if (!entry) return;
+    handled++;
+    if (entry.status === "unavailable") unavailable++;
+  });
   return {
     total: ids.length,
-    handled,
+    handled, unavailable,
     remaining: Math.max(0, ids.length - handled),
     nameOnly: uniqueClean(blockedState?.names || []).length
   };
@@ -569,7 +584,7 @@ function updateBlockedLessLikeActionState() {
   if (!counts.remaining) {
     button.textContent = `All ${counts.total} blocked bots handled`;
     button.disabled = true;
-    button.title = "Every currently blocked bot ID already has Stop recommending history.";
+    button.title = "Every blocked ID is already negatively rated or is confirmed unavailable; history and availability are counted separately.";
     return;
   }
 
@@ -582,7 +597,7 @@ function updateBlockedLessLikeStatus(text = "") {
   const status = $("blockedBotLessLikeStatus");
   if (!status) return;
   const counts = blockedQuickLessLikeCounts();
-  const next = text || `${counts.handled}/${counts.total} total handled · ${counts.remaining} remaining`;
+  const next = text || `${counts.handled}/${counts.total} handled · ${counts.unavailable} unavailable/skipped · ${counts.remaining} remaining`;
   if (status.textContent !== next) status.textContent = next;
   const shared = $("blockedBotNameOnlyStatus");
   if (shared) {

@@ -22,23 +22,75 @@ function normalizeQuickDislikeHistory(raw) {
     normalized[botId] = {
       status,
       name: String(value?.name || "").slice(0, 160),
-      handledAt: Number(value?.handledAt || value?.at || 0) || 0
+      handledAt: Number(value?.handledAt || value?.at || 0) || 0,
+      crossHandledBy: value?.crossHandledBy === "less-like" ? "less-like" : "",
+      ratingSource: ["dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
+      ratingAt: Number(value?.ratingAt || 0) || 0,
+      requestSent: value?.requestSent === true
     };
   });
   return { version: 1, bots: normalized };
 }
 
+// A confirmed Bot Status result is enough to avoid a pointless feedback request.
+// This is a derived, non-persistent skip: blocked IDs and their archive remain intact,
+// and a later confirmed recovery automatically makes the ID eligible again.
+function blockedFeedbackConfirmedUnavailable(id) {
+  const botId = String(id || "").trim().toLowerCase();
+  const entry = botAvailabilityState?.meta?.[botId];
+  if (entry?.status === "unavailable") return entry;
+  // Less Like's own completed unavailable result is usable evidence too.
+  // Never preserve it as a permanent block after a newer confirmed recovery.
+  const recorded = quickLessLikeHistoryState?.bots?.[botId];
+  if (recorded?.status !== "unavailable") return null;
+  if (entry?.status === "available" && Number(entry.checkedAt || 0) > Number(recorded.handledAt || 0)) return null;
+  return { status: "unavailable", checkedAt: Number(recorded.handledAt || 0),
+    reason: "Earlier Less Like confirmed unavailable", fromLessLike: true };
+}
+
+function blockedFeedbackRatedByLessLike(id) {
+  const entry = quickLessLikeHistoryState?.bots?.[String(id || "").trim().toLowerCase()];
+  return entry?.status === "less-liked" ? entry : null;
+}
+
 function quickDislikeHistoryEntry(id) {
   const botId = String(id || "").trim();
-  return botId ? quickDislikeHistoryState?.bots?.[botId] || null : null;
+  if (!botId) return null;
+  const entry = quickDislikeHistoryState?.bots?.[botId] || null;
+  // A prior unavailable result must not block feedback after confirmed recovery.
+  if (entry?.status === "unavailable-private-or-deleted" &&
+      botAvailabilityState?.meta?.[botId]?.status === "available" &&
+      Number(botAvailabilityState.meta[botId].checkedAt || 0) > Number(entry.handledAt || 0)) return null;
+  if (!entry) {
+    const unavailable = blockedFeedbackConfirmedUnavailable(botId);
+    return unavailable ? { status: "unavailable-private-or-deleted", fromBotStatus: true,
+      handledAt: Number(unavailable.checkedAt || 0), name: String(unavailable.name || "") } : null;
+  }
+  if (entry.status !== "already-disliked" || entry.crossHandledBy) return entry;
+  // Legacy entries omitted provenance. Reconstruct a *display-only*, labeled
+  // inference from the earlier Less Like success rather than rewriting history.
+  const lessLike = quickLessLikeHistoryState?.bots?.[botId];
+  const lessAt = Number(lessLike?.handledAt || 0);
+  if (lessLike?.status === "less-liked" && lessLike?.stage !== "cross-feedback-dedupe" &&
+      lessAt > 0 && lessAt <= Number(entry.handledAt || 0)) {
+    return { ...entry, crossHandledBy: "less-like", ratingSource: "less-like", ratingAt: lessAt, sourceInferred: true };
+  }
+  return entry;
 }
 
 function quickDislikeHistoryLabel(entry) {
   if (!entry) return "";
-  if (entry.status === "disliked") return "Disliked";
-  if (entry.status === "already-disliked") return "Already disliked";
+  if (entry.status === "disliked") return entry.requestSent ? "Dislike request sent" : "Disliked (legacy history; request count unknown)";
+  if (entry.status === "already-disliked" && entry.crossHandledBy === "less-like") {
+    if (entry.ratingSource === "dislike") return "Previously rated via Dislike (Less Like history confirms it)";
+    return entry.sourceInferred ? "Already negatively rated via Less Like (inferred from saved history)" :
+      "Already negatively rated via Less Like (no new request)";
+  }
+  if (entry.status === "already-disliked") return "Already disliked (source not recorded)";
   if (entry.status === "already-rated-or-unavailable") return "Rating already set / unavailable";
-  if (entry.status === "unavailable-private-or-deleted") return "Private/deleted/404 · cannot rate";
+  if (entry.status === "unavailable-private-or-deleted") return entry.fromBotStatus
+    ? "Confirmed unavailable in Bot Status · no rating needed"
+    : "Private/deleted/404 · cannot rate";
   if (entry.status === "unavailable-creator-blocked") return "Creator blocked · cannot rate";
   return "Handled";
 }
@@ -75,14 +127,24 @@ function normalizeQuickLessLikeHistory(raw) {
 }
 
 function quickLessLikeHistoryEntry(id) {
-  const botId = String(id || "").trim();
-  return botId ? quickLessLikeHistoryState?.bots?.[botId] || null : null;
+  const botId = String(id || "").trim().toLowerCase();
+  if (!botId) return null;
+  const entry = quickLessLikeHistoryState?.bots?.[botId] || null;
+  if (entry?.status === "unavailable" && botAvailabilityState?.meta?.[botId]?.status === "available" &&
+      Number(botAvailabilityState.meta[botId].checkedAt || 0) > Number(entry.handledAt || 0)) return null;
+  if (entry) return entry;
+  const unavailable = blockedFeedbackConfirmedUnavailable(botId);
+  return unavailable ? { status: "unavailable", fromBotStatus: true,
+    handledAt: Number(unavailable.checkedAt || 0), name: String(unavailable.name || "") } : null;
 }
 
 function quickLessLikeHistoryLabel(entry) {
   if (!entry) return "";
-  if (entry.status === "less-liked") return "Stop recommending sent";
-  if (entry.status === "unavailable") return "Unavailable / deleted · skipped";
+  if (entry.status === "less-liked") return entry.stage === "cross-feedback-dedupe" ?
+    "Already negatively rated via Dislike (no new Less Like request)" : "Stop recommending sent";
+  if (entry.status === "unavailable") return entry.fromBotStatus
+    ? "Confirmed unavailable in Bot Status · no rating needed"
+    : "Unavailable / deleted · skipped";
   return "Handled";
 }
 
