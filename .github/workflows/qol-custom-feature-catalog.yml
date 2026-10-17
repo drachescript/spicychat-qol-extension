@@ -1,0 +1,52 @@
+name: Export QoL Custom feature catalog
+
+on:
+  push:
+    branches: [qol-custom]
+    paths:
+      - "build/features/**"
+      - "build/modules.json"
+      - "manifest.json"
+      - "scripts/export_custom_feature_catalog.py"
+      - ".github/workflows/qol-custom-feature-catalog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Export feature catalog from current contracts
+        run: python scripts/export_custom_feature_catalog.py
+      - name: Check catalog invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('build/feature-catalog.json').read_text())
+          assert d['schema']=='sqol-custom-feature-catalog/v1'
+          assert d['featureCount']==len(d['features'])
+          assert d['featureCount']>=100
+          ids={v['id'] for v in d['features']}
+          assert len(ids)==d['featureCount']
+          assert {'bot-blocking','language-filter','bulk-blocking','ooc','chat-search','chat-index'} <= ids
+          assert all(set(f['requiredFeatures']) <= ids for f in d['features'])
+          print('Validated',len(ids),'individual features')
+          PY
+      - name: Save catalog in the Custom branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f build/feature-catalog.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Refresh generated Custom feature catalog"
+            git push origin HEAD:qol-custom
+          fi
