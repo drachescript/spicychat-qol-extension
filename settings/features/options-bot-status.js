@@ -233,6 +233,8 @@ function renderBotAvailability(renderOptions = {}) {
   const uncheckedCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) <= 0).length;
   const notMonitoredCount = base.length - eligibleEntries.length;
   const uncheckedNotMonitoredCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0).length;
+  const checkedUnknownCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && String(entry.status || "") === "unknown").length;
+  const excludedBlockedUncheckedCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && (blockedState?.ids || []).includes(entry.id)).length;
   const manualBlockedIds = new Set(normalizeBotStore(blockedState).ids);
   const manualOutsideCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && !manualBlockedIds.has(entry.id) && !botStatusIdIgnored(entry.id)).length;
   const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
@@ -244,9 +246,15 @@ function renderBotAvailability(renderOptions = {}) {
     const matches = entries.length !== base.length ? ` · ${entries.length} matching` : "";
     const duplicateText = duplicateBots == null ? "" : ` · ${duplicateBots} duplicate matches`;
     const monitoredChecked = eligibleEntries.length - uncheckedCount;
-    summary.textContent = `${base.length} known · ${eligibleEntries.length} routinely monitored (${monitoredChecked} checked, ${uncheckedCount} unchecked)${notMonitoredCount ? ` · ${notMonitoredCount} outside routine scans (${uncheckedNotMonitoredCount} unchecked)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
+    summary.textContent = `${base.length} known · ${eligibleEntries.length} routinely monitored (${monitoredChecked} checked, ${uncheckedCount} unchecked, ${checkedUnknownCount} unresolved/Unknown)${notMonitoredCount ? ` · ${notMonitoredCount} outside routine scans (${uncheckedNotMonitoredCount} unchecked; ${excludedBlockedUncheckedCount} blocked/excluded)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
     const manualButton = $("scanUnmonitoredBotAvailability");
     if (manualButton && !botAvailabilityScanRunning) { manualButton.disabled = manualOutsideCount === 0; manualButton.textContent = manualOutsideCount ? `Check outside routine scope (${manualOutsideCount})` : "No unblocked outside-scope bots"; manualButton.title = "One-time manual scan only. Blocked bots remain excluded."; }
+  }
+  const unknownButton = $("scanUnknownBotAvailability");
+  if (unknownButton && !botAvailabilityScanRunning) {
+    unknownButton.disabled = checkedUnknownCount === 0;
+    unknownButton.textContent = checkedUnknownCount ? `Recheck unresolved results (${checkedUnknownCount})` : "No checked Unknown results";
+    unknownButton.title = "Manual recheck of checked but inconclusive results in the routine scope; respects scan limits and pause controls.";
   }
   const uncheckedButton = $("scanUncheckedBotAvailability");
   if (uncheckedButton && !botAvailabilityScanRunning) {
@@ -574,6 +582,8 @@ async function runBotAvailabilityScan(options = {}) {
     ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) <= 0)
     : mode === "unchecked"
     ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) <= 0)
+    : mode === "unknown"
+    ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && existingAvailability[entry.id]?.status === "unknown")
     : mode === "stale"
       ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
       : allEntries;
@@ -602,6 +612,8 @@ async function runBotAvailabilityScan(options = {}) {
         ? "No unchecked, unblocked bots outside routine monitoring. Blocked bots are excluded from this one-time scan."
       : mode === "unchecked"
         ? "No unchecked tracked bots in this scope."
+      : mode === "unknown"
+        ? "No checked Unknown results in this scope. Unchecked blocked bots stay outside routine scans."
         : mode === "stale"
           ? `No tracked bots in this scope are older than ${staleDays} day${staleDays === 1 ? "" : "s"}.`
           : "No locally tracked bots found in that scope.";
@@ -616,12 +628,14 @@ async function runBotAvailabilityScan(options = {}) {
   botAvailabilityStopRequested = false;
   const scanButton = $("scanBotAvailability");
   const uncheckedButton = $("scanUncheckedBotAvailability");
+  const unknownButton = $("scanUnknownBotAvailability");
   const staleButton = $("scanStaleBotAvailability");
   const archivedButton = $("recheckDeletedSavedBots");
   const outsideButton = $("scanUnmonitoredBotAvailability");
   const stopButton = $("stopBotAvailabilityScan");
   if (scanButton) scanButton.disabled = true;
   if (uncheckedButton) uncheckedButton.disabled = true;
+  if (unknownButton) unknownButton.disabled = true;
   if (staleButton) staleButton.disabled = true;
   if (archivedButton) archivedButton.disabled = true;
   if (outsideButton) outsideButton.disabled = true;
@@ -927,6 +941,7 @@ async function runBotAvailabilityScan(options = {}) {
     botAvailabilityScanRunning = false;
     if (scanButton) scanButton.disabled = false;
     if (uncheckedButton) uncheckedButton.disabled = false;
+    if (unknownButton) unknownButton.disabled = false;
     if (staleButton) staleButton.disabled = false;
     if (archivedButton) archivedButton.disabled = false;
     if (outsideButton) outsideButton.disabled = false;
@@ -2242,6 +2257,7 @@ function setupBotAvailabilityControls() {
   });
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
+  $("scanUnknownBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unknown" }));
   $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true }));
   void refreshBotStatusPauseButton();
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));

@@ -60,6 +60,9 @@ jobs:
       - name: Verify Full modular build metadata
         run: python3 scripts/build_extension.py --profile full --verify-only
 
+      - name: Check runtime helper behavior
+        run: node build/test_runtime_helpers.js
+
       - name: Check runtime JavaScript syntax
         shell: bash
         run: |

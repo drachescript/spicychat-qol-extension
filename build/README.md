@@ -1,38 +1,24 @@
-# QoL build profiles
+# QoL build and verification
 
-- `build/modules.json` declares the runtime bundle ownership map.
-- `build/verify_runtime.py` verifies Full static load order and file declarations. Run `python build/verify_runtime.py` after any module or manifest change.
-- `build/profiles/full.json` is the only buildable profile today.
-- `build/profiles/recommended-lite.json` remains a **draft**, not a safe, user-installable custom build.
-- `scripts/build_extension.py --profile full` builds Chrome and Firefox using the current Full source. `--list-profiles` lists draft recipes.
-- See `build/MODULARIZATION.md` for the extracted background services, ordered CSS ownership, static test results, and remaining Custom-build blockers.
+The source of truth for the Full extension is `manifest.json`. `build/modules.json` maps runtime content files to bundles, declares background/Settings assets, and preserves stylesheet ownership. `build/features/*.json` describes feature capabilities and dependencies. Keep all three aligned when adding, moving, or removing runtime code.
 
-For future Custom recipes, omit feature files **only after** background event handlers, Settings controllers, CSS, assets, and runtime scheduler dependencies are truly optional. Do not turn draft recipes into buildable profiles simply to produce smaller ZIPs.
+## Full builds
 
-## v0.2.47 preview planning (not installable)
+```sh
+python3 scripts/build_extension.py --profile full --verify-only
+python3 build/verify_runtime.py
+node build/test_runtime_helpers.js
+python3 scripts/build_extension.py --profile full
+```
 
-`python build/plan_custom.py --bundles chat` expands selected bundles to a closed dependency set and calculates script, stylesheet and background-service omissions. The result includes `installable: false` and an explicit blocker list. No extension ZIP is generated from arbitrary combinations yet. Do not distribute a plan as a working build.
+To validate generated browser archives, run `python3 scripts/verify_release_packages.py` with the Chrome and Firefox ZIP paths. The release workflows perform packaging and version/changelog checks. `CHANGELOG.md` is a required runtime asset because the Options page reads it.
 
-Generated profiles can use `settings/options-feature-availability.js` to hide known unavailable setting controls while preserving local values. Full loads every bundle and leaves the Settings page unchanged. Rulebook filters and export snapshots are optional and off by default.
+## Modular and Custom work
 
-## Full-first feature contracts and lifecycle migration
+The Full extension is the canonical implementation. Do not remove a runtime file, Settings controller, background service, permission, or stylesheet simply because a feature appears optional: its callers and cleanup dependencies must be checked first.
 
-The regular Full extension is the modular product. It loads the same feature modules that
-Custom will later select, and its per-feature disable controls must eventually terminate
-feature work rather than only hide its UI. Custom is a packaging and configuration layer,
-not a separate implementation.
+`build/profiles/full.json` is the packageable Full profile. `build/profiles/recommended-lite.json` is a conservative planning profile. `build/plan_custom.py` reports dependency closure but does not claim arbitrary combinations are installable. The independent Core + OOC test recipe is `scripts/build_minimal_ooc.py`; it should not be mistaken for proof that every Custom combination works.
 
-Feature contracts live in `build/features/*.json`. Preview one with
-`python build/plan_custom.py --features ooc`; the planner refuses to claim installability
-while the listed Full-runtime dependencies remain shared.
+Additional reusable regression checks are in `build/test_*.js`. Historical migration comparisons, old browser snapshots and dated development notes are preserved in the `archive/qol-legacy-reference` branch, rather than in the working `main` tree.
 
-Run `python build/test_v48_ooc_contract.py --base PATH_TO_V47_SOURCE` alongside the
-Full verifier when working on OOC modularization.
-
-## Next bulk migration (v0.2.48 experimental)
-
-- `content/feature-build-map.js` defines feature-level runtime gates for 109 feature contracts (including background-only Bot Status). `content/feature-lifecycle.js` preserves Full's ordered cleanup and tracks feature transitions; the 70 original cleanup actions remain in their previous order.
-- `settings/options-feature-availability.js` hides known omitted per-feature Settings controls without changing persisted preferences.
-- The static background recipe and ownership map in `background/feature-build-profile.js` and `background/feature-message-ownership.js` prevent messages and alarms invoking unavailable feature handlers in a generated recipe. Full has no exclusions.
-- Run `node build/test_feature_lifecycle.js`, `node build/test_bulk_build_gates.js`, `node build/test_bulk_settings_gates.js`, `node build/test_bulk_ooc_cleanup.js`, `node build/test_listing_discovery.js`, and `python build/verify_runtime.py` to validate these boundaries and the local-only listing discovery pipeline.
-- These are safe *gates*, not proof of fully independent initialization/shutdown inside every legacy feature. Core + OOC and other arbitrary Custom packages remain blocked until the shared `main.js` scheduler, Options event bindings, background helper dependencies, and generated package startup have passed real browser validation.
+Do not put generated ZIPs, extracted distribution folders, logs, or local diagnostic exports in source control.

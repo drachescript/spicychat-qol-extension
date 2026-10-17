@@ -117,6 +117,27 @@ async function ensureLorebookExportHelper(rawUrl) {
   return { ok: true, tabId, reused: true };
 }
 
+// chrome.tabs.update resolves before the old document is necessarily unloaded.
+// A message sent at that point can reach the previous Lorebook editor, which
+// must never be allowed to complete an export for the next requested ID.
+function lorebookExportHelperAtTarget(tab, targetUrl) {
+  if (!tab || tab.discarded || (tab.status && tab.status !== "complete")) return false;
+  try {
+    const expected = new URL(lorebookExportWorkerUrl(targetUrl));
+    const actual = new URL(String(tab.url || ""));
+    const pending = tab.pendingUrl ? new URL(String(tab.pendingUrl)) : null;
+    const host = url => url.hostname.replace(/^www\./i, "").toLowerCase();
+    const path = url => decodeURIComponent(url.pathname).replace(/^\/[a-z]{2}(?=\/)/i, "").replace(/\/+$/, "").toLowerCase();
+    if (expected.protocol !== "https:" || host(expected) !== "spicychat.ai") return false;
+    if (actual.protocol !== expected.protocol || host(actual) !== host(expected)) return false;
+    if (path(actual) !== path(expected)) return false;
+    if (actual.searchParams.get(LOREBOOK_EXPORT_WORKER_PARAM) !== "1") return false;
+    // A pending navigation must also agree with the requested target.
+    if (pending && (host(pending) !== host(expected) || path(pending) !== path(expected))) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function runLorebookExportHelperTab(tabId, message) {
   const token = String(message?.token || "").trim().slice(0, 140);
   const target = String(message?.target || "").trim().slice(0, 20);
@@ -125,23 +146,41 @@ async function runLorebookExportHelperTab(tabId, message) {
 
   const deadline = Date.now() + 90_000;
   let response = null;
+  let readySince = 0;
   try {
     while (Date.now() < deadline) {
       const tab = await tabsGet(Number(tabId));
       if (!tab) throw new Error("Lorebook export helper tab closed before collection finished.");
+      if (!lorebookExportHelperAtTarget(tab, message?.url)) {
+        readySince = 0;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
+      // Require a short stable interval before contacting the content script.
+      // This prevents a freshly updated tab from responding using the old DOM.
+      if (!readySince) readySince = Date.now();
+      if (Date.now() - readySince < 400) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        continue;
+      }
       response = await tabsSendMessage(Number(tabId), {
         type: "DS_LOREBOOK_EXPORT_RUN",
         token,
         target,
         id
       });
-      if (response) break;
+      if (response?.ok) return true;
+      if (response && !response.retryable) {
+        throw new Error(response.error || "Lorebook export helper failed.");
+      }
+      // The previous document may be unloading, or the new one may not have
+      // registered its listener. Retry only these temporary navigation states.
+      response = null;
+      readySince = 0;
       await new Promise(resolve => setTimeout(resolve, 350));
     }
 
-    if (!response) throw new Error("QoL could not start the Lorebook export helper in the other tab.");
-    if (!response.ok) throw new Error(response.error || "Lorebook export helper failed.");
-    return true;
+    throw new Error("The Lorebook export helper did not finish opening the requested Lorebook in time.");
   } catch (error) {
     await setLorebookExportJob(token, {
       status: "error",

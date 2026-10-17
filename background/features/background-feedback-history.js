@@ -14,7 +14,11 @@ function normalizeQuickDislikeHistory(raw) {
     normalized[id] = {
       status,
       name: String(value?.name || "").slice(0, 160),
-      handledAt: Number(value?.handledAt || value?.at || 0) || Date.now()
+      handledAt: Number(value?.handledAt || value?.at || 0) || Date.now(),
+      crossHandledBy: value?.crossHandledBy === "less-like" ? "less-like" : "",
+      ratingSource: ["dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
+      ratingAt: Number(value?.ratingAt || 0) || 0,
+      requestSent: value?.requestSent === true
     };
   }
   return { version: 1, bots: normalized };
@@ -27,13 +31,17 @@ async function getQuickDislikeHistory() {
   return recommendationFeedbackQuickDislikeCache;
 }
 
-async function rememberQuickDislike(botId, botName, status) {
+async function rememberQuickDislike(botId, botName, status, origin = {}) {
   if (!["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(status)) return null;
   const history = await getQuickDislikeHistory();
   history.bots[botId] = {
     status,
     name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
-    handledAt: Date.now()
+    handledAt: Date.now(),
+    crossHandledBy: origin.crossHandledBy === "less-like" ? "less-like" : "",
+    ratingSource: origin.ratingSource === "less-like" ? "less-like" : (status === "disliked" ? "dislike" : ""),
+    ratingAt: Number(origin.ratingAt || 0) || (status === "disliked" ? Date.now() : 0),
+    requestSent: status === "disliked" && origin.requestSent === true
   };
 
   // Keep this local ledger bounded even for very old installations.
@@ -195,6 +203,18 @@ async function rememberQuickLessLikeUnavailable(botId, botName, result = {}, opt
   }, options);
 }
 
+// A previously unavailable bot can recover. A later *confirmed available*
+// Bot Status result is the only reason to retry a previously skipped 404.
+async function feedbackUnavailableSuperseded(botId, handledAt) {
+  const previousAt = Number(handledAt || 0);
+  if (!previousAt) return false;
+  try {
+    const stored = await storageGet(["botAvailability"]);
+    const result = stored?.botAvailability?.meta?.[botId];
+    return result?.status === "available" && Number(result.checkedAt || 0) > previousAt;
+  } catch { return false; } // Preserve previous dedupe when storage is unavailable.
+}
+
 async function completedRecommendationFeedbackForBot(botId, targetMode = "") {
   const id = String(botId || "").trim().toLowerCase();
   if (!id) return null;
@@ -208,7 +228,8 @@ async function completedRecommendationFeedbackForBot(botId, targetMode = "") {
         source: "less-like",
         status: "less-liked",
         handledAt: Number(entry.handledAt || 0) || 0,
-        name: String(entry.name || "")
+        name: String(entry.name || ""),
+        stage: String(entry.stage || "")
       };
     }
   }
@@ -423,13 +444,26 @@ async function runQuickDislikeBot(message) {
   if (message?.force !== true) {
     const history = await getQuickDislikeHistory();
     const remembered = history.bots[botId];
-    if (remembered) return { ok: true, status: "already-handled", rememberedStatus: remembered.status, handledAt: remembered.handledAt || 0 };
+    if (remembered && !(remembered.status === "unavailable-private-or-deleted" &&
+        await feedbackUnavailableSuperseded(botId, remembered.handledAt))) return {
+      ok: true, status: "already-handled", rememberedStatus: remembered.status,
+      handledAt: remembered.handledAt || 0, ratingAt: remembered.ratingAt || 0,
+      crossHandledBy: remembered.crossHandledBy || "",
+      ratingSource: remembered.ratingSource || "", requestSent: false, networkAttempts: 0
+    };
 
     const crossHandled = await completedRecommendationFeedbackForBot(botId, "dislike");
     if (crossHandled?.source === "less-like") {
-      const rememberedCross = await rememberQuickDislike(botId, botName || crossHandled.name || "", "already-disliked");
+      const originalSource = crossHandled.stage === "cross-feedback-dedupe" ? "dislike" : "less-like";
+      const rememberedCross = await rememberQuickDislike(botId, botName || crossHandled.name || "", "already-disliked", {
+        crossHandledBy: "less-like", ratingSource: originalSource, ratingAt: crossHandled.handledAt || 0,
+        requestSent: false
+      });
       await recordHelperLifecycle("recommendationFeedbackCrossDedupe", { botId, skipped: "dislike", completedBy: "less-like" });
-      return { ok: true, status: "already-handled", rememberedStatus: "already-disliked", handledAt: rememberedCross?.handledAt || crossHandled.handledAt || Date.now(), crossHandledBy: "less-like", networkAttempts: 0, requestSent: false };
+      return { ok: true, status: "already-handled", rememberedStatus: "already-disliked",
+        handledAt: rememberedCross?.handledAt || Date.now(), ratingAt: rememberedCross?.ratingAt || crossHandled.handledAt || 0,
+        crossHandledBy: "less-like", ratingSource: originalSource,
+        networkAttempts: 0, requestSent: false };
     }
   }
 
@@ -444,8 +478,12 @@ async function runQuickDislikeBot(message) {
   }
 
   if (result?.ok && result.status === "disliked") {
-    const remembered = await rememberQuickDislike(botId, botName, "disliked");
-    if (remembered) result.handledAt = remembered.handledAt || Date.now();
+    const remembered = await rememberQuickDislike(botId, botName, "disliked", { requestSent: result.requestSent === true });
+    if (remembered) {
+      result.handledAt = remembered.handledAt || Date.now();
+      result.ratingAt = remembered.ratingAt || 0;
+      result.ratingSource = "dislike";
+    }
   } else if (result?.status === "bot-not-found") {
     const remembered = await rememberQuickDislike(botId, botName, "unavailable-private-or-deleted");
     result = { ...result, ok: true, status: "unavailable-private-or-deleted", rememberedStatus: "unavailable-private-or-deleted", handledAt: remembered?.handledAt || Date.now() };

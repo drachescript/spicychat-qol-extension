@@ -830,6 +830,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <div class="button-row">
 <button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
+<button id="scanUnknownBotAvailability" type="button">Recheck unresolved results</button>
 <button id="resumePausedBotAvailability" type="button" hidden>Resume paused Bot Status scan</button>
 <button id="scanUnmonitoredBotAvailability" type="button" title="Manual one-time check of previously seen bots outside routine monitoring; blocked bots are excluded">Check outside routine scope</button>
 <button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
@@ -2261,14 +2262,14 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <h2>Bot &amp; Lorebook backups</h2>
 <div class="sub-card">
 <strong>Chatbot backups &amp; version history</strong>
-<label class="row"><input id="botBackupToolsEnabled" type="checkbox"/><span>Enable compact Save / Export / Version history controls on my chatbot editor</span></label>
+<label class="row"><input id="botBackupToolsEnabled" type="checkbox"/><span>Show Import / Save / Export / Version history on my chatbot editor</span></label>
 <label class="row"><input id="botArchiveOwnEditorBackups" type="checkbox"/><span>Automatically save changed chatbot backups while I edit</span></label>
 <label>Bot history / safety revisions to keep per bot
 <input id="botArchiveOwnRevisionLimit" type="number" min="1" max="50" step="1" value="10"/>
 </label>
 <p class="hint">When chatbot backup tools are enabled for the first time, automatic backups default to On. The default retention is 10 per bot and can be changed from 1–50. Manual checkpoints are kept separately and are never removed by this retention limit.</p>
 <p class="hint"><strong>Bot Version History</strong> is separate from rotating safety revisions and manual checkpoints. A new version is recorded only when creator-controlled content actually changes: Name/Title, Greeting, Personality, Scenario, Example Dialogue, sorted Tags, Avatar, or a learned attached Lorebook association. Unchanged saves, message/like/rating changes, and visibility/review-state changes do not create a new version.</p>
-<p class="hint">Visibility/review state is recorded separately for context. Compare shows field-level differences; Restore fills selected normal editor fields for review and never presses Save or publishes anything. Lorebook association is version metadata only and Restore does not automatically attach or detach a Lorebook.</p>
+<p class="hint">Visibility/review state is recorded separately for context. Compare shows field-level differences; Restore and bot imports fill selected normal editor fields for review and never press Save or publish anything. Bot import supports JSON, labeled TXT replacements and ZIP files on Create/Edit pages. Lorebook association is version metadata only and Restore does not automatically attach or detach a Lorebook.</p>
 <p class="hint">With automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too.</p>
 </div>
 <div class="sub-card">
@@ -2528,7 +2529,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Both are optional and independent.</strong> Enable either one or both. Less Like and Dislike both use the persistent signed recommendation-feedback helper; Dislike still waits for its idle cooldown and keeps separate handled history. If both point at the same negative recommendation event, QoL coordinates them so the same rating is not posted twice. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
+<p class="hint"><strong>Both controls are optional.</strong> Enable either one or both; they share the same negative recommendation rating, so a successful rating is only sent once. Less Like and Dislike both use the persistent signed recommendation-feedback helper; Dislike still waits for its idle cooldown and keeps separate handled history. If both point at the same negative recommendation event, QoL coordinates them so the same rating is not posted twice. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
@@ -2594,11 +2595,12 @@ step sister" spellcheck="false"></textarea></label>
 </div>
 <div class="button-row">
 <strong>Dislike:</strong>
+<span class="hint">Dislike and Less Like use the same negative recommendation rating. Clearing Dislike history does not undo a Less Like rating or cause another rating request. Confirmed unavailable bots are counted as handled without rating; blocked IDs are preserved. Counts distinguish actual Dislike requests from shared ratings.</span>
 <button id="bulkDislikeBlockedBots" type="button">Dislike remaining blocked bots</button>
 <button hidden="" id="resumeBlockedDislikeRun" type="button">Resume unfinished</button>
 <button hidden="" id="retryFailedBlockedDislikes" type="button">Retry last failed</button>
 <button id="clearBlockedDislikeHistory" type="button">Clear Dislike history</button>
-<button id="resetAndRedoBlockedDislikes" type="button">Reset Dislike history + redo all</button>
+<button id="resetAndRedoBlockedDislikes" type="button">Clear Dislike history + check uncovered</button>
 <span class="manager-count" id="blockedBotDislikeStatus"></span>
 </div>
 <div class="button-row">
@@ -2630,7 +2632,7 @@ step sister" spellcheck="false"></textarea></label>
 <button id="blockedBotApplyBulk" type="button">Apply</button>
 </div>
 <p class="hint ds-bulk-selection-hint">Selections stay active after Apply so you can run another bulk action on the same bots. Use Clear selection when you are finished.</p>
-<p class="hint">Desktop browser only. Dislike and Stop recommending are separate workflows with separate handled history. Dislike and Stop recommending share one inactive SpicyChat Home recommendation helper so auth and SpicyChat's recommendation client stay initialized, then send feedback directly by bot ID without navigating between bots or searching/clicking cards. Their handled histories remain separate, while the shared coordinator prevents duplicate negative-rating POSTs. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
+<p class="hint">Desktop browser only. Dislike and Stop recommending have separate controls and history but submit the same underlying negative recommendation rating. Dislike and Stop recommending share one inactive SpicyChat Home recommendation helper so auth and SpicyChat's recommendation client stay initialized, then send feedback directly by bot ID without navigating between bots or searching/clicking cards. Their handled histories remain separate, while the shared coordinator prevents duplicate negative-rating POSTs. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
 <div class="bot-manager-list" id="blockedBotManager"></div>
 <div class="bot-manager-pager">
 <button id="blockedBotShowMore" type="button">Show 10 more</button>

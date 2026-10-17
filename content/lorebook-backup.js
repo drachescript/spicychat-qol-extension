@@ -13,6 +13,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let saveTimer = null;
   let initialTimer = null;
   let lastSignature = "";
+  let lorebookWriteQueue = Promise.resolve();
   let listenersInstalled = false;
   let lastPanelAutoState = null;
   let helperRunning = false;
@@ -231,10 +232,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
+  function entryData(entry) {
+    return {
+      key: String(entry?.key || ""),
+      name: String(entry?.name || ""),
+      keywords: Array.isArray(entry?.keywords) ? entry.keywords : [],
+      keywordsComplete: !!entry?.keywordsComplete,
+      hiddenKeywordCount: Number(entry?.hiddenKeywordCount) || 0,
+      content: String(entry?.content || "")
+    };
+  }
+
+  function entrySignature(entry) {
+    return JSON.stringify(entryData(entry));
+  }
+
   function mergeEntry(previous, incoming) {
     if (!previous) return incoming;
     const preferIncomingKeywords = incoming.keywordsComplete || !previous.keywordsComplete;
-    return {
+    const merged = {
       ...previous,
       ...incoming,
       keywords: preferIncomingKeywords && incoming.keywords.length ? incoming.keywords : previous.keywords,
@@ -242,6 +258,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       hiddenKeywordCount: incoming.keywordsComplete ? 0 : Math.max(Number(previous.hiddenKeywordCount) || 0, Number(incoming.hiddenKeywordCount) || 0),
       content: incoming.content || previous.content
     };
+    // A fresh DOM capture is not a new edit. Preserve the meaningful timestamp.
+    if (entrySignature(previous) === entrySignature(merged)) {
+      merged.capturedAt = Number(previous.capturedAt) || Number(incoming.capturedAt) || Date.now();
+    }
+    return merged;
+  }
+
+  function meaningfulLorebook(item) {
+    return JSON.stringify({
+      name: item?.name || "",
+      description: item?.description || "",
+      tags: item?.tags || [],
+      visibility: item?.visibility || "",
+      image: item?.image || "",
+      entries: Object.entries(item?.entries || {}).sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, entry]) => [key, entryData(entry)])
+    });
+  }
+
+  function queueLorebookWrite(work) {
+    const next = lorebookWriteQueue.catch(() => {}).then(work);
+    lorebookWriteQueue = next.catch(() => {});
+    return next;
   }
 
   function currentCapture() {
@@ -261,84 +300,127 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
-  async function saveCapture(reason = "Lorebook editor") {
+  function saveCapture(reason = "Lorebook editor") {
+    // Capture synchronously: the editor/modal can disappear before storage is ready.
     const capture = currentCapture();
-    if (!capture?.info?.id) return false;
-    const signature = JSON.stringify({ details: capture.details, entries: capture.entries });
-    if (signature && signature === lastSignature) return false;
-    const op = DS.diagOperationStart?.("lorebook-backup", "save", {
-      reason,
-      page: capture.info.page,
-      lorebookId: capture.info.id,
-      entryCount: capture.entries.length,
-      hasDetails: !!capture.details
+    if (!capture?.info?.id) return Promise.resolve(false);
+    const signature = JSON.stringify({
+      id: capture.info.id, page: capture.info.page, details: capture.details,
+      entries: capture.entries.map(entryData) // never include capture timestamps
     });
+    if (signature === lastSignature) return Promise.resolve(false);
+    return queueLorebookWrite(async () => {
+      if (signature === lastSignature) return false;
+      const op = DS.diagOperationStart?.("lorebook-backup", "save", {
+        reason, page: capture.info.page, entryCount: capture.entries.length,
+        hasDetails: !!capture.details
+      });
+      const startedAt = performance.now();
+      let readMs = 0;
+      let writeMs = 0;
+      let outcome = "failed";
+      try {
+        const result = await DS.storageGet?.([KEY]) || {};
+        readMs = performance.now() - startedAt;
+        const store = normalizeStore(result[KEY]);
+        const previous = store.meta[capture.info.id] || { id: capture.info.id, entries: {} };
+        const next = {
+          ...previous,
+          id: capture.info.id,
+          firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
+          lastSavedAt: Date.now(),
+          source: reason,
+          entries: { ...(previous.entries || {}) }
+        };
+        if (capture.details) {
+          if (capture.details.name) next.name = capture.details.name;
+          next.description = capture.details.description;
+          next.tags = capture.details.tags;
+          if (capture.details.visibility) next.visibility = capture.details.visibility;
+          if (capture.details.image) next.image = capture.details.image;
+        }
+        for (const entry of capture.entries) next.entries[entry.key] = mergeEntry(next.entries[entry.key], entry);
+        // Only read the active editor name if this queued capture is still on its page.
+        const stillHere = routeInfo()?.id === capture.info.id;
+        const currentName = stillHere ? currentLorebookDisplayName() : "";
+        if (currentName && (!next.name || next.name === capture.info.id)) next.name = currentName;
+        if (!next.name) next.name = capture.info.id;
 
-    const result = await DS.storageGet?.([KEY]) || {};
-    const store = normalizeStore(result[KEY]);
-    const previous = store.meta[capture.info.id] || { id: capture.info.id, entries: {} };
-    const next = {
-      ...previous,
-      id: capture.info.id,
-      firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
-      lastSavedAt: Date.now(),
-      source: reason,
-      entries: { ...(previous.entries || {}) }
-    };
-
-    if (capture.details) {
-      if (capture.details.name) next.name = capture.details.name;
-      next.description = capture.details.description;
-      next.tags = capture.details.tags;
-      if (capture.details.visibility) next.visibility = capture.details.visibility;
-      if (capture.details.image) next.image = capture.details.image;
-    }
-    for (const entry of capture.entries) next.entries[entry.key] = mergeEntry(next.entries[entry.key], entry);
-    const currentName = currentLorebookDisplayName();
-    if (currentName && (!next.name || next.name === capture.info.id)) next.name = currentName;
-    if (!next.name) next.name = clean(document.querySelector("h1")?.textContent || capture.info.id, 500) || capture.info.id;
-
-    const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [capture.info.id]: next } }) }));
-    if (ok) {
-      lastSignature = signature;
-      const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
-      counters.lorebookBackupSaves = Number(counters.lorebookBackupSaves || 0) + 1;
-    }
-    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: capture.entries.length });
-    return ok;
+        if (store.meta[capture.info.id] && meaningfulLorebook(previous) === meaningfulLorebook(next)) {
+          lastSignature = signature;
+          outcome = "unchanged";
+          return false;
+        }
+        const writeStartedAt = performance.now();
+        const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [capture.info.id]: next } }) }));
+        writeMs = performance.now() - writeStartedAt;
+        outcome = ok ? "ok" : "failed";
+        if (ok) {
+          lastSignature = signature;
+          const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+          counters.lorebookBackupSaves = Number(counters.lorebookBackupSaves || 0) + 1;
+        }
+        return ok;
+      } catch (error) {
+        outcome = "error";
+        throw error;
+      } finally {
+        DS.diagOperationEnd?.(op, {
+          outcome, entryCount: capture.entries.length,
+          meta: { readMs: Math.round(readMs), writeMs: Math.round(writeMs), totalMs: Math.round(performance.now() - startedAt) }
+        });
+      }
+    });
   }
 
-  async function updateStoredEntries(id, entries, reason = "Full Lorebook export", options = {}) {
-    if (!id || !Array.isArray(entries)) return false;
-    const op = DS.diagOperationStart?.("lorebook-backup", "update-entries", { lorebookId: id, entryCount: entries.length, reason });
-    const result = await DS.storageGet?.([KEY]) || {};
-    const store = normalizeStore(result[KEY]);
-    const previous = store.meta[id] || { id, name: currentLorebookDisplayName() || id, entries: {} };
-    const next = {
-      ...previous,
-      id,
-      firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
-      lastSavedAt: Date.now(),
-      source: reason,
-      entries: options.replace === true ? {} : { ...(previous.entries || {}) }
-    };
-    for (const entry of entries) {
-      if (!entry?.name) continue;
-      const incoming = {
-        key: clean(entry.key || entry.name, 600).toLowerCase(),
-        name: clean(entry.name, 500),
-        keywords: unique(entry.keywords || [], 12),
-        keywordsComplete: entry.keywordsComplete !== false,
-        hiddenKeywordCount: entry.keywordsComplete === false ? Math.max(0, Number(entry.hiddenKeywordCount) || 0) : 0,
-        content: clean(entry.content, 24000),
-        capturedAt: Number(entry.capturedAt) || Date.now()
-      };
-      next.entries[incoming.key] = mergeEntry(next.entries[incoming.key], incoming);
-    }
-    if (!next.name) next.name = currentLorebookDisplayName() || id;
-    const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
-    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: entries.length });
-    return ok;
+  function updateStoredEntries(id, entries, reason = "Full Lorebook export", options = {}) {
+    if (!id || !Array.isArray(entries)) return Promise.resolve(false);
+    return queueLorebookWrite(async () => {
+      const op = DS.diagOperationStart?.("lorebook-backup", "update-entries", { entryCount: entries.length, reason });
+      const startedAt = performance.now();
+      let writeMs = 0;
+      let outcome = "failed";
+      try {
+        const result = await DS.storageGet?.([KEY]) || {};
+        const store = normalizeStore(result[KEY]);
+        const previous = store.meta[id] || { id, name: currentLorebookDisplayName() || id, entries: {} };
+        const next = {
+          ...previous, id,
+          firstSavedAt: Number(previous.firstSavedAt) || Date.now(),
+          lastSavedAt: Date.now(), source: reason,
+          entries: options.replace === true ? {} : { ...(previous.entries || {}) }
+        };
+        for (const entry of entries) {
+          if (!entry?.name) continue;
+          const incoming = {
+            key: clean(entry.key || entry.name, 600).toLowerCase(),
+            name: clean(entry.name, 500),
+            keywords: unique(entry.keywords || [], 12),
+            keywordsComplete: entry.keywordsComplete !== false,
+            hiddenKeywordCount: entry.keywordsComplete === false ? Math.max(0, Number(entry.hiddenKeywordCount) || 0) : 0,
+            content: clean(entry.content, 24000),
+            capturedAt: Number(entry.capturedAt) || Date.now()
+          };
+          next.entries[incoming.key] = mergeEntry(next.entries[incoming.key], incoming);
+        }
+        if (!next.name) next.name = id;
+        if (store.meta[id] && meaningfulLorebook(previous) === meaningfulLorebook(next)) {
+          outcome = "unchanged";
+          return true;
+        }
+        const writeStartedAt = performance.now();
+        const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [id]: next } }) }));
+        writeMs = performance.now() - writeStartedAt;
+        outcome = ok ? "ok" : "failed";
+        return ok;
+      } catch (error) {
+        outcome = "error";
+        throw error;
+      } finally {
+        DS.diagOperationEnd?.(op, { outcome, entryCount: entries.length,
+          meta: { writeMs: Math.round(writeMs), totalMs: Math.round(performance.now() - startedAt) } });
+      }
+    });
   }
 
   async function captureFullEntriesHere(exportToken = "") {
@@ -395,6 +477,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } else {
         result = { id: info.id, entries: [], complete: true };
       }
+    }
+    // A reused helper can navigate while the async crawler is running.
+    // Never write rows collected for a route that has since changed.
+    const liveInfo = routeInfo();
+    if (!liveInfo || liveInfo.id.toLowerCase() !== info.id.toLowerCase() || liveInfo.page !== "entries") {
+      throw new Error("Lorebook page changed during entry collection. No entries were replaced.");
     }
     const ok = await updateStoredEntries(info.id, result?.entries || [], "Full Lorebook export", { replace: true });
     DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries?.length || 0 });
@@ -558,11 +646,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getCurrentOwnLorebookBackupDataFromEditor = captureCurrentLorebookThroughEditors;
 
-  async function waitForExportHelperReady(target, timeout = 30_000) {
+  async function waitForExportHelperReady(target, expectedId = "", timeout = 30_000) {
     const startedAt = Date.now();
+    const wantedId = clean(expectedId, 200).toLowerCase();
     while (Date.now() - startedAt < timeout) {
       const info = routeInfo();
-      if (info?.id && info.page === target) {
+      // During navigation, the old document may still receive a tab message.
+      // Do not treat its already-mounted form or entry list as the new book.
+      if (wantedId && info?.id && info.id.toLowerCase() !== wantedId) {
+        return { retryable: true };
+      }
+      if (info?.id && info.page === target && (!wantedId || info.id.toLowerCase() === wantedId)) {
         if (target === "details" && document.querySelector("form")) return info;
         if (target === "entries" && document.querySelector("[data-testid='EntriesListServer-Header']")) return info;
       }
@@ -581,9 +675,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     helperRunning = true;
     document.documentElement.dataset.dsLorebookExportHelper = "1";
     try {
-      const info = await waitForExportHelperReady(target);
-      if (expectedId && info.id !== expectedId) {
-        throw new Error("The helper opened a different Lorebook than the one being exported.");
+      const info = await waitForExportHelperReady(target, expectedId);
+      if (info.retryable) {
+        return { ok: false, retryable: true, error: "Lorebook helper is still navigating." };
       }
       await setExportJob(token, {
         status: "working",
@@ -594,6 +688,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       await saveCapture("Lorebook full export helper");
       if (target === "entries") await captureFullEntriesHere(token);
+      const finalInfo = routeInfo();
+      if (!finalInfo || finalInfo.page !== target || finalInfo.id.toLowerCase() !== info.id.toLowerCase()) {
+        throw new Error("Lorebook page changed during export; the result was not marked complete.");
+      }
       await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
       return { ok: true };
     } catch (error) {
@@ -961,6 +1059,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function onInput(event) {
     if (!document.getElementById(PANEL_ID)) return;
     if (event.target?.closest?.(`#${PANEL_ID},#ds-qol-panel`)) return;
+    if (!event.target?.closest?.("input,textarea,[contenteditable='true']")) return;
     scheduleSave();
   }
 
