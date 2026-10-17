@@ -3,7 +3,7 @@
   "version": "0.2.51",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 109,
+  "featureCount": 112,
   "sections": [
     "Blocking",
     "Chat List",
@@ -45,7 +45,6 @@
     "content/feature-build-map.js",
     "content/feature-lifecycle.js",
     "content/generation-metadata-loader.js",
-    "content/lorebook-connections.js",
     "content/main-diagnostics.js",
     "content/main-message-mutations.js",
     "content/main-page-observer.js",
@@ -53,11 +52,9 @@
     "content/main-startup.js",
     "content/main.js",
     "content/my-creations-auto-load.js",
-    "content/rulebook-diagnostics.js",
     "content/runtime-improvements.js",
     "content/runtime-kernel.js",
     "content/runtime-plan.js",
-    "content/story-reading-layout.js",
     "content/tab-diagnostics.js",
     "content/tab-state-control.js",
     "content/tag-aliases.js",
@@ -1448,6 +1445,28 @@
       ]
     },
     {
+      "id": "lorebook-connections",
+      "label": "Lorebook Connections",
+      "description": "Includes the Lorebook Connections tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-connections.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "showLorebookConnections"
+      ],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Custom package and Settings behavior need browser verification before treating this feature as independent."
+      ]
+    },
+    {
       "id": "lorebook-consistency",
       "label": "Lorebook Consistency",
       "description": "Includes the Lorebook Consistency tools and their available settings.",
@@ -2100,6 +2119,28 @@
       ]
     },
     {
+      "id": "rulebook-diagnostics",
+      "label": "Rulebook Diagnostics",
+      "description": "Includes the Rulebook Diagnostics tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/rulebook-diagnostics.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableRulebookDiagnostics"
+      ],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Custom package and Settings behavior need browser verification before treating this feature as independent."
+      ]
+    },
+    {
       "id": "rulebook-filter",
       "label": "Rulebook Filters",
       "description": "Includes the Rulebook Filter tools and their available settings.",
@@ -2297,6 +2338,28 @@
       "fullRuntimeStatus": "shared-lifecycle",
       "blockers": [
         "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "story-reading-layout",
+      "label": "Story Reading Layout",
+      "description": "Includes the Story Reading Layout tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/story-reading-layout.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "storyReadingLayout"
+      ],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Custom package and Settings behavior need browser verification before treating this feature as independent."
       ]
     },
     {
