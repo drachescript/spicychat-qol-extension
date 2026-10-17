@@ -55,6 +55,7 @@ function readSettingsFromPage() {
     botEditorDraftHistoryLimit: Math.max(3, Math.min(20, Number(value("botEditorDraftHistoryLimit", "8")) || 8)),
     enableWikiLorebookImporter: checked("enableWikiLorebookImporter"),
     enableLorebookConsistency: checked("enableLorebookConsistency"),
+    enableCreatorTriggerPreview: checked("enableCreatorTriggerPreview"),
     lorebookConsistencyShowMatches: checked("lorebookConsistencyShowMatches", true),
     lorebookConsistencyAutoQueue: checked("lorebookConsistencyAutoQueue", true),
     lorebookConsistencyMaxEntries: Math.max(1, Math.min(5, Number(value("lorebookConsistencyMaxEntries", "3")) || 3)),
@@ -235,6 +236,7 @@ function readSettingsFromPage() {
     quickPanelShowScanVisible: checked("quickPanelShowScanVisible", true),
     quickPanelShowLoadAll: checked("quickPanelShowLoadAll", true),
     enableChatIndex: checked("enableChatIndex"),
+    chatIndexEnhanceNativeSearch: checked("chatIndexEnhanceNativeSearch"),
     chatIndexStandaloneLauncher: checked("chatIndexStandaloneLauncher"),
     quickPanelShowOoc: checked("quickPanelShowOoc", true),
     quickPanelShowAutoVoice: checked("quickPanelShowAutoVoice", true),
@@ -243,6 +245,14 @@ function readSettingsFromPage() {
     quickPanelShowPersona: checked("quickPanelShowPersona", true),
     quickPanelShowExport: checked("quickPanelShowExport", true),
     quickPanelShowSoundscapes: checked("quickPanelShowSoundscapes"),
+    quickPanelShowCustomPictures: checked("quickPanelShowCustomPictures"),
+    quickPanelShowContextKeeper: checked("quickPanelShowContextKeeper"),
+    quickPanelShowFocusMode: checked("quickPanelShowFocusMode"),
+    quickPanelShowCharacterProfile: checked("quickPanelShowCharacterProfile"),
+    quickPanelShowSavedSnippets: checked("quickPanelShowSavedSnippets"),
+    quickPanelShowCreatorPreview: checked("quickPanelShowCreatorPreview"),
+    quickPanelShowImageGenerator: checked("quickPanelShowImageGenerator"),
+    quickPanelShowRulebookDiagnostics: checked("quickPanelShowRulebookDiagnostics"),
     compactAfterHiding: checked("compactAfterHiding"),
     neverHideFavorites: checked("neverHideFavorites"),
     protectFavoritesFromBlocking: checked("protectFavoritesFromBlocking"),
@@ -335,6 +345,8 @@ function readSettingsFromPage() {
     rpFormatPreserveBackticks: checked("rpFormatPreserveBackticks", true),
     rpFormatShowMessageButtons: checked("rpFormatShowMessageButtons", true),
     enableChatBackgrounds: checked("enableChatBackgrounds"),
+    enableCustomCharacterPictures: checked("enableCustomCharacterPictures"),
+    enableCustomPersonaPictures: checked("enableCustomPersonaPictures"),
     chatSceneGalleriesEnabled: checked("chatSceneGalleriesEnabled"),
     chatBackgroundUseAvatar: checked("chatBackgroundUseAvatar"),
     chatBackgroundAnimateAvatar: checked("chatBackgroundAnimateAvatar"),
@@ -417,6 +429,9 @@ function readSettingsFromPage() {
     contextKeeperMessageButtons: checked("contextKeeperMessageButtons"),
     enableSelectionRemember: checked("enableSelectionRemember"),
     contextKeeperRecapSize: ["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced",
+    contextKeeperAutoRecall: checked("contextKeeperAutoRecall"),
+    contextKeeperRecallEverySends: [1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5,
+    contextKeeperRecallMaxChars: [450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900,
     enableStoryDayTracker: checked("enableStoryDayTracker"),
     storyDayTrackerMode: ["manual", "conservative", "assisted"].includes(value("storyDayTrackerMode")) ? value("storyDayTrackerMode") : "conservative",
     storyDayTrackerIncludeInContext: checked("storyDayTrackerIncludeInContext", true),
@@ -733,6 +748,7 @@ function readSingleSettingFromPage(settingKey) {
     case "botEditorDraftHistoryLimit": return (Math.max(3, Math.min(20, Number(value("botEditorDraftHistoryLimit", "8")) || 8)));
     case "enableWikiLorebookImporter": return (checked("enableWikiLorebookImporter"));
     case "enableLorebookConsistency": return (checked("enableLorebookConsistency"));
+    case "enableCreatorTriggerPreview": return (checked("enableCreatorTriggerPreview"));
     case "lorebookConsistencyShowMatches": return (checked("lorebookConsistencyShowMatches", true));
     case "lorebookConsistencyAutoQueue": return (checked("lorebookConsistencyAutoQueue", true));
     case "lorebookConsistencyMaxEntries": return (Math.max(1, Math.min(5, Number(value("lorebookConsistencyMaxEntries", "3")) || 3)));
@@ -906,6 +922,7 @@ function readSingleSettingFromPage(settingKey) {
     case "quickPanelShowScanVisible": return (checked("quickPanelShowScanVisible", true));
     case "quickPanelShowLoadAll": return (checked("quickPanelShowLoadAll", true));
     case "enableChatIndex": return checked("enableChatIndex");
+    case "chatIndexEnhanceNativeSearch": return checked("chatIndexEnhanceNativeSearch");
     case "chatIndexStandaloneLauncher": return checked("chatIndexStandaloneLauncher");
     case "quickPanelShowOoc": return (checked("quickPanelShowOoc", true));
     case "quickPanelShowAutoVoice": return (checked("quickPanelShowAutoVoice", true));
@@ -914,6 +931,14 @@ function readSingleSettingFromPage(settingKey) {
     case "quickPanelShowPersona": return (checked("quickPanelShowPersona", true));
     case "quickPanelShowExport": return (checked("quickPanelShowExport", true));
     case "quickPanelShowSoundscapes": return (checked("quickPanelShowSoundscapes"));
+    case "quickPanelShowCustomPictures": return checked("quickPanelShowCustomPictures");
+    case "quickPanelShowContextKeeper": return checked("quickPanelShowContextKeeper");
+    case "quickPanelShowFocusMode": return checked("quickPanelShowFocusMode");
+    case "quickPanelShowCharacterProfile": return checked("quickPanelShowCharacterProfile");
+    case "quickPanelShowSavedSnippets": return checked("quickPanelShowSavedSnippets");
+    case "quickPanelShowCreatorPreview": return checked("quickPanelShowCreatorPreview");
+    case "quickPanelShowImageGenerator": return checked("quickPanelShowImageGenerator");
+    case "quickPanelShowRulebookDiagnostics": return checked("quickPanelShowRulebookDiagnostics");
     case "compactAfterHiding": return (checked("compactAfterHiding"));
     case "neverHideFavorites": return (checked("neverHideFavorites"));
     case "protectFavoritesFromBlocking": return (checked("protectFavoritesFromBlocking"));
@@ -1000,6 +1025,8 @@ function readSingleSettingFromPage(settingKey) {
     case "rpFormatPreserveBackticks": return (checked("rpFormatPreserveBackticks", true));
     case "rpFormatShowMessageButtons": return (checked("rpFormatShowMessageButtons", true));
     case "enableChatBackgrounds": return (checked("enableChatBackgrounds"));
+    case "enableCustomCharacterPictures": return checked("enableCustomCharacterPictures");
+    case "enableCustomPersonaPictures": return checked("enableCustomPersonaPictures");
     case "chatSceneGalleriesEnabled": return (checked("chatSceneGalleriesEnabled"));
     case "chatBackgroundDim": return (Math.min(90, Math.max(0, Number(value("chatBackgroundDim", "45")) || 0)));
     case "chatBackgroundBlur": return (Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)));
@@ -1078,6 +1105,9 @@ function readSingleSettingFromPage(settingKey) {
     case "contextKeeperMessageButtons": return (checked("contextKeeperMessageButtons"));
     case "enableSelectionRemember": return (checked("enableSelectionRemember"));
     case "contextKeeperRecapSize": return (["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced");
+    case "contextKeeperAutoRecall": return checked("contextKeeperAutoRecall");
+    case "contextKeeperRecallEverySends": return ([1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5);
+    case "contextKeeperRecallMaxChars": return ([450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900);
     case "enableStoryDayTracker": return (checked("enableStoryDayTracker"));
     case "storyDayTrackerMode": return (["manual", "conservative", "assisted"].includes(value("storyDayTrackerMode")) ? value("storyDayTrackerMode") : "conservative");
     case "storyDayTrackerIncludeInContext": return (checked("storyDayTrackerIncludeInContext", true));

@@ -119,25 +119,32 @@ function renderMiniPanelPreview() {
   setPreviewShown("miniPanelPreviewStatus", checked("quickPanelShowStatus", true));
   setPreviewShown("miniPanelPreviewMessageCount", mode === "chat" && checked("quickPanelShowLoadedMessageCount"));
   setPreviewShown("miniPanelPreviewOptions", checked("quickPanelShowOptions", true));
-  setPreviewShown("miniPanelPreviewFill", mode === "listing" && checked("quickPanelShowFillNow", true));
+  setPreviewShown("miniPanelPreviewFill", mode === "listing" && checked("quickPanelShowFillNow"));
   setPreviewShown("miniPanelPreviewSmartFilters", mode === "listing" && checked("quickPanelShowSmartFilterPins"));
-  setPreviewShown("miniPanelPreviewSearch", mode === "chats" && checked("quickPanelShowChatSearch", true));
-  setPreviewShown("miniPanelPreviewSort", mode === "chats" && checked("quickPanelShowChatSort", true));
-  setPreviewShown("miniPanelPreviewScan", mode === "chats" && checked("quickPanelShowScanVisible", true));
-  setPreviewShown("miniPanelPreviewLoad", mode === "chats" && checked("quickPanelShowLoadAll", true));
+  setPreviewShown("miniPanelPreviewSearch", mode === "chats" && checked("quickPanelShowChatSearch"));
+  setPreviewShown("miniPanelPreviewSort", mode === "chats" && checked("quickPanelShowChatSort"));
+  setPreviewShown("miniPanelPreviewScan", mode === "chats" && checked("quickPanelShowScanVisible"));
+  setPreviewShown("miniPanelPreviewLoad", mode === "chats" && checked("quickPanelShowLoadAll"));
   setPreviewShown(
     "miniPanelPreviewChatButtons",
-    mode === "chats" && (checked("quickPanelShowScanVisible", true) || checked("quickPanelShowLoadAll", true))
+    mode === "chats" && (checked("quickPanelShowScanVisible") || checked("quickPanelShowLoadAll"))
   );
-  setPreviewShown("miniPanelPreviewOoc", mode === "chat" && checked("quickPanelShowOoc", true));
-  setPreviewShown("miniPanelPreviewAutoVoice", mode === "chat" && checked("quickPanelShowAutoVoice", true));
-  setPreviewShown("miniPanelPreviewAutoAsterisk", mode === "chat" && checked("quickPanelShowAutoAsterisk", true));
+  setPreviewShown("miniPanelPreviewOoc", mode === "chat" && checked("quickPanelShowOoc"));
+  setPreviewShown("miniPanelPreviewAutoVoice", mode === "chat" && checked("quickPanelShowAutoVoice"));
+  setPreviewShown("miniPanelPreviewAutoAsterisk", mode === "chat" && checked("quickPanelShowAutoAsterisk"));
   const autoAsteriskPreview = $("miniPanelPreviewAutoAsterisk");
   if (autoAsteriskPreview) autoAsteriskPreview.textContent = checked("autoPairAsterisks") ? "Auto *: On" : "Auto *: Off";
   setPreviewShown("miniPanelPreviewTranslation", mode === "chat" && checked("enableTranslation") && checked("quickPanelShowTranslation"));
-  setPreviewShown("miniPanelPreviewPersona", mode === "chat" && checked("quickPanelShowPersona", true));
+  setPreviewShown("miniPanelPreviewPersona", mode === "chat" && checked("quickPanelShowPersona"));
   setPreviewShown("miniPanelPreviewSoundscapes", checked("enableSoundscapes") && checked("quickPanelShowSoundscapes"));
-  setPreviewShown("miniPanelPreviewExport", mode === "chat" && checked("quickPanelShowExport", true));
+  setPreviewShown("miniPanelPreviewExport", mode === "chat" && checked("quickPanelShowExport"));
+  for (const [id, key] of [
+    ["miniPanelPreviewCustomPictures", "quickPanelShowCustomPictures"],
+    ["miniPanelPreviewCreatorPreview", "quickPanelShowCreatorPreview"],
+    ["miniPanelPreviewImageGenerator", "quickPanelShowImageGenerator"],
+    ["miniPanelPreviewRulebookDiagnostics", "quickPanelShowRulebookDiagnostics"],
+    ["miniPanelPreviewContextKeeper", "quickPanelShowContextKeeper"]
+  ]) setPreviewShown(id, mode === "chat" && checked(key));
 
   if (!panel.dataset.previewManuallyToggled) {
     panel.classList.toggle("closed", checked("quickPanelDefaultClosed"));
@@ -167,6 +174,7 @@ function setupMiniPanelPreview() {
     "quickPanelStatusShowOpened",
     "quickPanelStatusShowBlocked",
     "quickPanelShowOptions",
+    "quickPanelShowCustomPictures", "quickPanelShowCreatorPreview", "quickPanelShowImageGenerator", "quickPanelShowRulebookDiagnostics", "quickPanelShowContextKeeper",
     "quickPanelShowFillNow",
     "quickPanelShowSmartFilterPins",
     "quickPanelShowChatSearch",

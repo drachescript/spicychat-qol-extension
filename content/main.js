@@ -1248,6 +1248,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (settings.enableChatTextReplacements || settings.enableChatMutedWords || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
       if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
       await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
+      await runStep("auto images", () => DS.applyAutoImage?.());
       DS.markMessageEnhancerVisited?.(laneRoots);
 
       const now = Date.now();
@@ -1568,9 +1569,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (singleChat) {
         DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
-        await runFeatureStep("chat backgrounds", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
+        await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
         await runFeatureStep("rulebook diagnostics", !!settings.enableRulebookDiagnostics || !!document.getElementById("ds-rulebook-diagnostics"), () => DS.applyRulebookDiagnostics?.());
-        await runFeatureStep("chat background button placement", !!settings.enableChatBackgrounds || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
+        await runFeatureStep("chat background button placement", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
         await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());
         if (settings.enableMessageBookmarks || DS.state.chatBookmarksWasActive) await runStep("chat bookmarks", () => DS.applyChatBookmarks?.());
         if (settings.showChatSearch || DS.state.chatSearchWasActive) await runStep("chat search", () => DS.applyChatSearch?.());
@@ -1600,6 +1601,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (settings.enableChatNudges || DS.state.chatNudgesWasActive) await runStep("chat nudges", () => DS.applyChatNudges?.());
           if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
           await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
+          await runStep("auto images", () => DS.applyAutoImage?.());
           if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
           if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
           DS.markMessageEnhancerVisited?.(DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || []);
@@ -1608,7 +1610,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           counters.criticalMessageEnhancerPassesDeferred = Number(counters.criticalMessageEnhancerPassesDeferred || 0) + 1;
           DS.scheduleMessageLane?.("critical-incremental-message-lane");
         }
-        if (settings.enableLorebookConsistency || document.querySelector(".ds-lorebook-consistency-bar")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
+        if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
         await runFeatureStep("memory manager", memoryManagerWanted(settings) || !!document.querySelector("[data-ds-memory-manager],#ds-memory-manager"), () => DS.applyMemoryManagerTools?.());
       } else {
         if (DS.state.chatTopBarWasActive) {
@@ -1654,6 +1656,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await runStep("selection remember cleanup", () => DS.removeSelectionRemember?.());
         }
         await runFeatureStep("auto voice cleanup", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
+        await runStep("auto images cleanup", () => DS.applyAutoImage?.());
         if (DS.state.chatTextReplacementsWasActive) {
           await runStep("chat text replacements cleanup", () => DS.removeChatTextReplacements?.());
         }
@@ -1733,7 +1736,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
       await runFeatureStep("OOC", !!settings.showOocTools || !!settings.replaceChatImageWithOocButton || !!settings.quickPanelShowOoc, () => DS.applyOocTools?.());
       if (settings.enableReplyInstructions || settings.enableGlobalMemory || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
-      if (settings.enableLorebookConsistency || document.querySelector(".ds-lorebook-consistency-bar")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
+      if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
     }
 
     if (slowDirtyHas(dirty, "message-ui")) {
@@ -1905,7 +1908,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
         await runFeatureStep("OOC", !!settings.showOocTools || !!settings.replaceChatImageWithOocButton || !!settings.quickPanelShowOoc, () => DS.applyOocTools?.());
         if (settings.enableReplyInstructions || settings.enableGlobalMemory || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
-        if (settings.enableLorebookConsistency || document.querySelector(".ds-lorebook-consistency-bar")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
+        if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
       }
 
       if (chatList) {

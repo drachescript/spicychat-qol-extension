@@ -5,6 +5,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   const DS = window.DragonScriptQoL;
 
+  // Native /chats search uses a separate Search button. Enter should perform
+  // the same native action, without poking React state or submitting a form.
+  // This is independent of the optional local Chat Index and chat list tools.
+  function nativeHistoryInput(input) {
+    return input instanceof HTMLInputElement
+      && input.matches('input[placeholder="Search conversations, names"]')
+      && !!input.closest('[data-testid="Input-Container"]');
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.repeat || event.isComposing || event.defaultPrevented
+        || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
+        || !/^\/(?:[a-z]{2}\/)?chats\/?$/i.test(location.pathname)
+        || DS.state?.settings?.enabled !== true || DS.isQolPausedForTab?.()
+        || !nativeHistoryInput(event.target)) return;
+    const searchRow = event.target.closest('[data-testid="Input-Container"]')?.parentElement?.parentElement;
+    const searchButton = searchRow?.querySelector('button[aria-label="Search-button"]');
+    if (!searchButton || searchButton.disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    searchButton.click();
+  });
+
   const classText = el => DS.classText?.(el) || String(el?.className || "");
   const normalizedRowTextCache = new WeakMap();
   const messageCountCache = new WeakMap();

@@ -52,3 +52,38 @@
  .ds-qol-ci-heading { font-size: 15px; }
  .ds-qol-ci-entry > img { width: 45px; height: 45px; }
 }
+
+/* Optional saved-index matches below the untouched native History search. */
+.ds-qol-native-index-results {
+  margin: 8px 0 16px;
+  padding: 12px;
+  border: 1px solid #5a5668;
+  border-radius: 10px;
+  background: #202027;
+  color: #f6f6fa;
+  font: 13px/1.5 system-ui, sans-serif;
+  min-width: 0;
+}
+.ds-qol-native-index-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ds-qol-native-index-heading strong { font-size: 14px; }
+.ds-qol-native-index-heading span, .ds-qol-native-index-hint { color: #c4c3ce; font-size: 12px; }
+.ds-qol-native-index-hint { margin: 6px 0 8px; }
+.ds-qol-native-index-list { display: flex; flex-direction: column; gap: 3px; }
+.ds-qol-native-index-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 10px; border-radius: 7px;
+  color: #f2ecff; text-decoration: none; background: #2d2c35;
+}
+.ds-qol-native-index-row:hover, .ds-qol-native-index-row:focus-visible { background: #41404b; }
+.ds-qol-native-index-name { overflow-wrap: anywhere; }
+.ds-qol-native-index-count { font-size: 11px; color: #c4c3ce; white-space: nowrap; }
+.ds-qol-native-index-more, .ds-qol-native-index-open {
+  background: #32303c; color: #f5f2ff; border: 1px solid #666172;
+  border-radius: 7px; padding: 6px 10px; cursor: pointer; font: inherit; margin-top: 6px;
+}
+.ds-qol-native-index-more:hover, .ds-qol-native-index-open:hover { background: #444151; }
+.ds-qol-native-index-more:focus-visible, .ds-qol-native-index-open:focus-visible { outline: 2px solid #ddb5ff; outline-offset: 2px; }
+@media (max-width: 480px) {
+  .ds-qol-native-index-results { padding: 9px; }
+  .ds-qol-native-index-row { align-items: flex-start; flex-direction: column; gap: 1px; }
+}

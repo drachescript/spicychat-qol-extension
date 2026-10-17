@@ -81,6 +81,7 @@
 </div></div>
 <div class="tab-group" data-tab-group="interface"><span class="tab-group-label">Interface &amp; browser</span><div class="tab-group-buttons">
 <button class="tab-button" data-tab="appearance" type="button">Appearance &amp; Interface</button>
+<button class="tab-button" data-tab="custom-pictures" type="button">Custom Pictures</button>
 <button class="tab-button" data-tab="browser" type="button">Browser &amp; Tabs</button>
 <button class="tab-button" data-tab="android" hidden="" id="androidTabButton" type="button">Mobile / Compact</button>
 </div></div>
@@ -449,6 +450,8 @@ Testing"></textarea></label>
 <section class="sub-card" id="chatIndexSettingsCard">
 <h3>Chat Index</h3>
 <label class="row"><input id="enableChatIndex" type="checkbox"/><span>Enable Chat Index on the chat list (off by default)</span></label>
+<label class="row"><input id="chatIndexEnhanceNativeSearch" type="checkbox"/><span>Show additional Chat Index matches under SpicyChat's native History search (off by default)</span></label>
+<p class="hint">Uses the existing locally imported conversation names/IDs; no chats are fetched or mounted when searching. The native Search button keeps working, and pressing Enter in its search field also searches. Requires Chat Index to be enabled. Message-text indexing remains a separate manual tool.</p>
 <p class="hint">When enabled, a Chat Index button appears with the chat list tools on /chats. It opens a larger searchable window with local chat favorites, status filters and manual API refresh controls. Existing indexed data stays saved when disabled. No automatic scan is started by this option.</p>
 </section>
 <p class="hint">Search uses the whole visible chat row, so it can match the bot name, persona name, description and visible message text. Opened/message/saved/blocked filters combine with search and sorting. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state. <strong>Load all / Refresh chats also imports every conversation bot into Bot Status Center's Opened history</strong> with the metadata SpicyChat's conversation API exposes; blocked bots remain tracked through the Blocked source instead.</p>
@@ -1267,7 +1270,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <p class="hint">You can use {user}, {persona}, {bot}, and {character}.</p>
 </section></div>
 <div class="tab-page" data-page="personas-memory"><p class="page-intro">Persona backups and switching, SpicyChat Memory helpers, and Context Keeper.</p><section class="card">
-<h2>Memory manager</h2>
+<h2>Native Memory Manager tools</h2>
 <label class="row"><input id="enableBulkMemoryManager" type="checkbox"/><span>Enable Memory Manager</span></label>
 <label class="row"><input id="enableMemoryVault" type="checkbox"/><span>Enable reversible Memory Vault (archive native memories and restore later)</span></label>
 <p class="hint">Requires Memory Manager. Saves and verifies the exact memory locally before requesting native deletion. Archived memories stay in local QoL storage and backups until you restore or export them. Nothing is archived automatically. Deactivation does not erase earlier chat messages.</p>
@@ -1288,8 +1291,8 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <label class="row"><input id="globalMemoryShowChatButton" type="checkbox"/><span>Show a GM button beside the chat composer</span></label>
 <p class="hint">This is local QoL data. SpicyChat does not expose a hidden account-wide memory/system slot, so when enabled QoL adds these notes visibly to your outgoing message according to the mode above.</p>
 </section><section class="card" id="contextKeeperCard">
-        <h2>Context Keeper</h2>
-        <label class="row"><input id="enableContextKeeper" type="checkbox"/><span>Enable Context Keeper in chats</span></label>
+        <h2>Context Keeper — local, standalone memories</h2>
+        <label class="row"><input id="enableContextKeeper" type="checkbox"/><span>Enable standalone Context Keeper (native Memory Manager not required)</span></label>
         <label class="row"><input id="contextKeeperAutoCapture" type="checkbox"/><span>Automatically keep durable continuity details from settled chat messages</span></label>
         <label>Automatic capture strictness
           <select id="contextKeeperAutoSensitivity">
@@ -1316,6 +1319,14 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
             <option value="full">Full - up to 30 details</option>
           </select>
         </label>
+        <label class="row"><input id="contextKeeperAutoRecall" type="checkbox"/><span>Include selected local continuity in outgoing messages automatically (opt-in)</span></label>
+        <label>Recall after this many messages you send
+          <select id="contextKeeperRecallEverySends"><option value="1">Every message</option><option value="3">Every 3 messages</option><option value="5">Every 5 messages</option><option value="10">Every 10 messages</option></select>
+        </label>
+        <label>Maximum automatic recall text
+          <select id="contextKeeperRecallMaxChars"><option value="450">Compact — 450 characters</option><option value="900">Balanced — 900 characters</option><option value="1400">Extended — 1,400 characters</option></select>
+        </label>
+        <p class="hint">Context Keeper stores notes locally and does not need native Memories or Memory Manager. Automatic recall is disabled by default, adds a visible OOC reminder only when you send a normal message, and uses ordinary chat context/tokens. It never sends a separate message. Pin important details to prioritize them; items awaiting regeneration review are excluded.</p>
         <p class="hint">Open Context Keeper from the chat three-dot menu or QoL panel. Automatic capture checks only small batches of new settled messages, favors durable facts over moment-to-moment narration, removes near-duplicates, and keeps manual/Memory details separate from the automatic cap.</p>
       </section>
       <section class="card" id="storyDayTrackerCard">
@@ -1431,6 +1442,70 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="performanceDiagnostics" type="checkbox"/><span>Collect local QoL performance timings for Diagnostics</span></label>
 <p class="hint">Adaptive is the normal recommended mode. Aggressive waits a little longer before non-essential QoL updates, while Maximum is meant for unusually large or slow chats. The large-chat option can switch to stronger handling automatically after your chosen message count. Performance reports stay local unless you copy one.</p>
 </section></div>
+<div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Everything is optional.</p>
+<section class="card" id="customPicturesCard">
+<h2>Custom Pictures</h2>
+<p class="hint">Manage pictures for individual conversations. Existing backgrounds and saved scenes are unchanged; Character and Persona pictures are local visual overrides only. They do not change the image-generation model's reference.</p>
+<label class="row"><input id="enableCustomCharacterPictures" type="checkbox"/><span>Enable per-chat Character Pictures</span></label>
+<label class="row"><input id="enableCustomPersonaPictures" type="checkbox"/><span>Enable per-chat Persona Pictures</span></label>
+<p class="hint">In a chat, use Custom Pictures to switch between Backgrounds, Character Pictures, Persona Pictures, Image Generation (if installed/enabled), and Picture Library. Only enabled and installed subsections appear.</p>
+</section>
+<section class="card" id="chatBackgroundsCard">
+<h2>Custom Pictures → Backgrounds</h2>
+<p class="hint"><strong>Early version / experimental:</strong> Chat backgrounds are still being refined. Image placement, sizing and compatibility may change as we test them.</p>
+<label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
+<label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
+<p class="hint">Open the QoL extension popup on a chat and choose Custom Pictures to set a picture or switch scenes. Import generated images by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
+<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set</span></label>
+<label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
+<label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
+<p class="hint">Avatar mode uses the original character image from SpicyChat's CDN when available (not the tiny chat-header thumbnail). This may download a larger image. Adjust its displayed size or optionally repeat the avatar into the left and right sides of the screen from each chat’s BG menu. Custom images take priority.</p>
+<p class="hint">Imported backgrounds and scenes are stored locally; avatar images are displayed from the CDN without saving a copy. Global backgrounds apply unless overridden for a chat. QoL does not upload background images to SpicyChat.</p>
+<label>Background dimming (%)
+<input id="chatBackgroundDim" max="90" min="0" step="5" type="number" value="45"/>
+</label>
+<label>Background blur (px)
+<input id="chatBackgroundBlur" max="30" min="0" step="1" type="number" value="0"/>
+</label>
+<label>Image fit
+<select id="chatBackgroundFit">
+<option value="cover">Cover</option>
+<option value="contain">Contain</option>
+<option value="tile">Tile / repeat</option>
+</select>
+</label>
+<label>Image position
+<select id="chatBackgroundPosition">
+<option value="center">Center</option>
+<option value="top">Top</option>
+<option value="bottom">Bottom</option>
+<option value="left">Left</option>
+<option value="right">Right</option>
+</select>
+</label>
+<h3>Global background</h3>
+<div class="button-row">
+<label class="button-link" for="chatBackgroundGlobalUpload">Choose image</label>
+<input accept="image/*" hidden="" id="chatBackgroundGlobalUpload" type="file"/>
+<button id="clearGlobalChatBackground" type="button">Clear global background</button>
+<button id="clearPerChatBackgrounds" type="button">Clear per-chat overrides</button>
+</div>
+<div class="ds-bg-url-entry">
+<label for="chatBackgroundGlobalUrl">Or paste an image URL (HTTPS)</label>
+<input id="chatBackgroundGlobalUrl" type="url" placeholder="https://example.com/background.png" autocomplete="url"/>
+<select id="chatBackgroundGlobalUrlMode" aria-label="Image URL storage mode">
+<option value="local">Download and save locally (default)</option>
+<option value="link">Keep URL only (no local copy)</option>
+</select>
+<button id="useGlobalChatBackgroundUrl" type="button">Use image URL</button>
+<button id="refreshGlobalChatBackgroundUrl" type="button">Refresh saved image from original URL</button>
+<p class="hint" id="chatBackgroundGlobalUrlStatus" role="status">Local copies preserve their original URL. Downloading from a new host may require permission; URL-only images depend on the host.</p>
+</div>
+<p class="hint" id="chatBackgroundGlobalStatus">No global image saved.</p>
+<div class="chat-background-preview" hidden="" id="chatBackgroundGlobalPreview"></div>
+<p class="hint">Images up to 8 MB can be stored locally. Per-chat overrides are managed from Custom Pictures inside an open conversation. Background image bytes are excluded from normal lightweight QoL backups and are listed separately in Storage Usage.</p>
+</section>
+</div>
 <div class="tab-page" data-page="appearance"><p class="page-intro">Appearance, navigation cleanup, Mini Panel, ambience, premium/promo cleanup, and other interface controls.</p>
 <section class="card" id="accessibilityCard">
 <h2>Accessibility &amp; text size</h2>
@@ -1500,61 +1575,6 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint">Fonts use what's installed on your device; QoL doesn't download fonts. All changes preview immediately and can be reset. Chat reading options can be added later.</p>
 </section>
 
-<section class="card" id="chatBackgroundsCard">
-<h2>Custom chat backgrounds</h2>
-<p class="hint"><strong>Early version / experimental:</strong> Chat backgrounds are still being refined. Image placement, sizing and compatibility may change as we test them.</p>
-<label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
-<label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
-<p class="hint">Open the QoL extension popup on a chat and choose Chat background (BG) to set a picture or switch scenes. Import generated images by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
-<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set</span></label>
-<label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
-<label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
-<p class="hint">Avatar mode uses the original character image from SpicyChat's CDN when available (not the tiny chat-header thumbnail). This may download a larger image. Adjust its displayed size or optionally repeat the avatar into the left and right sides of the screen from each chat’s BG menu. Custom images take priority.</p>
-<p class="hint">Imported backgrounds and scenes are stored locally; avatar images are displayed from the CDN without saving a copy. Global backgrounds apply unless overridden for a chat. QoL does not upload background images to SpicyChat.</p>
-<label>Background dimming (%)
-<input id="chatBackgroundDim" max="90" min="0" step="5" type="number" value="45"/>
-</label>
-<label>Background blur (px)
-<input id="chatBackgroundBlur" max="30" min="0" step="1" type="number" value="0"/>
-</label>
-<label>Image fit
-<select id="chatBackgroundFit">
-<option value="cover">Cover</option>
-<option value="contain">Contain</option>
-<option value="tile">Tile / repeat</option>
-</select>
-</label>
-<label>Image position
-<select id="chatBackgroundPosition">
-<option value="center">Center</option>
-<option value="top">Top</option>
-<option value="bottom">Bottom</option>
-<option value="left">Left</option>
-<option value="right">Right</option>
-</select>
-</label>
-<h3>Global background</h3>
-<div class="button-row">
-<label class="button-link" for="chatBackgroundGlobalUpload">Choose image</label>
-<input accept="image/*" hidden="" id="chatBackgroundGlobalUpload" type="file"/>
-<button id="clearGlobalChatBackground" type="button">Clear global background</button>
-<button id="clearPerChatBackgrounds" type="button">Clear per-chat overrides</button>
-</div>
-<div class="ds-bg-url-entry">
-<label for="chatBackgroundGlobalUrl">Or paste an image URL (HTTPS)</label>
-<input id="chatBackgroundGlobalUrl" type="url" placeholder="https://example.com/background.png" autocomplete="url"/>
-<select id="chatBackgroundGlobalUrlMode" aria-label="Image URL storage mode">
-<option value="local">Download and save locally (default)</option>
-<option value="link">Keep URL only (no local copy)</option>
-</select>
-<button id="useGlobalChatBackgroundUrl" type="button">Use image URL</button>
-<button id="refreshGlobalChatBackgroundUrl" type="button">Refresh saved image from original URL</button>
-<p class="hint" id="chatBackgroundGlobalUrlStatus" role="status">Local copies preserve their original URL. Downloading from a new host may require permission; URL-only images depend on the host.</p>
-</div>
-<p class="hint" id="chatBackgroundGlobalStatus">No global image saved.</p>
-<div class="chat-background-preview" hidden="" id="chatBackgroundGlobalPreview"></div>
-<p class="hint">Images up to 8 MB can be stored locally. Per-chat overrides are managed from the BG button inside an open conversation. Background image bytes are excluded from normal lightweight QoL backups and are listed separately in Storage Usage.</p>
-</section>
 <section class="card">
 <h2>Premium &amp; promo cleanup</h2>
 <label class="row"><input id="hidePremium" type="checkbox"/><span>Hide Get Premium / subscribe UI</span></label>
@@ -1591,7 +1611,15 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint">Maximum height is only a limit. The panel still shrinks to the controls currently shown.</p>
 </section><section class="card">
 <h2>Panel items</h2>
-<p class="hint">These control what appears inside the mini panel. Auto voice and Auto * can be toggled directly from the panel; other tools still use their normal feature settings.</p>
+<p class="hint">Only installed and enabled features can appear. Except for Options, every shortcut defaults OFF. Existing shortcut choices remain saved when a Lite build excludes a feature.</p>
+<label class="row"><input id="quickPanelShowCustomPictures" type="checkbox"/><span>Show Custom Pictures shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowContextKeeper" type="checkbox"/><span>Show Context Keeper shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowFocusMode" type="checkbox"/><span>Show Focus Mode shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowCharacterProfile" type="checkbox"/><span>Show Character Profile shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowSavedSnippets" type="checkbox"/><span>Show Saved Snippets shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowCreatorPreview" type="checkbox"/><span>Show Creator Trigger Preview in chats</span></label>
+<label class="row"><input id="quickPanelShowImageGenerator" type="checkbox"/><span>Show native Image Generator shortcut in chats</span></label>
+<label class="row"><input id="quickPanelShowRulebookDiagnostics" type="checkbox"/><span>Show Rulebook troubleshooting shortcut in chats</span></label>
 <label class="row"><input id="quickPanelShowStatus" type="checkbox"/><span>Show status line</span></label>
 <label class="row"><input id="quickPanelShowLoadedMessageCount" type="checkbox"/><span>Show messages currently loaded in chats</span></label>
 <label class="row"><input id="quickPanelStatusShowOpened" type="checkbox"/><span>Show opened chat count in the mini panel</span></label>
@@ -1668,6 +1696,11 @@ Testing" spellcheck="false"></textarea></label>
 <div class="mini-panel-preview-status" id="miniPanelPreviewStatus">350 opened stored. 3 personas saved.</div>
 <div class="mini-panel-preview-status" id="miniPanelPreviewMessageCount">Messages shown: 50</div>
 <button id="miniPanelPreviewOptions" type="button">Options</button>
+<button id="miniPanelPreviewCustomPictures" type="button" hidden>Custom Pictures</button>
+<button id="miniPanelPreviewContextKeeper" type="button" hidden>Context Keeper</button>
+<button id="miniPanelPreviewCreatorPreview" type="button" hidden>Creator trigger preview</button>
+<button id="miniPanelPreviewImageGenerator" type="button" hidden>Image generator</button>
+<button id="miniPanelPreviewRulebookDiagnostics" type="button" hidden>Rulebook troubleshooting</button>
 <button id="miniPanelPreviewFill" type="button">Fill now</button>
 <div class="mini-panel-preview-group" id="miniPanelPreviewSmartFilters"><span>Pinned filters</span><div class="mini-panel-preview-row"><button type="button">Fresh finds</button><button type="button">Later queue</button></div></div>
 <input id="miniPanelPreviewSearch" readonly="" type="text" value="Search chats..."/>
@@ -1807,7 +1840,7 @@ Testing" spellcheck="false"></textarea></label>
 </section><section class="card" id="chatBubbleCustomizationCard">
 <h2>Chat bubble customization</h2>
 <label class="row"><input id="enableChatBubbleCustomization" type="checkbox"/><span>Enable chat bubble customization</span></label>
-<p class="hint">Local appearance only. Customize AI and user bubbles separately without changing message text or anything saved by SpicyChat. Global chat font size and line spacing are under Accessibility &amp; text size; custom chat images are under Custom chat backgrounds.</p>
+<p class="hint">Local appearance only. Customize AI and user bubbles separately without changing message text or anything saved by SpicyChat. Global chat font size and line spacing are under Accessibility &amp; text size; custom chat pictures are under Custom Pictures.</p>
 <label class="row"><input id="persistSpicyChatUserAppearance" type="checkbox"/><span>Keep my SpicyChat “My messages” appearance locked across site updates</span></label>
 <p class="hint">When enabled, QoL automatically remembers the native My messages background/normal-text colors whenever that SpicyChat appearance panel is open and reapplies them locally if a site update resets the bubble. After enabling it, open that native appearance panel once so QoL can capture your current choices. Nothing is overridden before a native appearance has been captured, and message text is never changed.</p>
 <div class="button-row">
@@ -2304,6 +2337,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint">Stores the image prompt locally per chatbot and restores it when SpicyChat leaves the prompt blank after a refresh or later edit visit. It does not generate or upload an image by itself.</p>
 <label class="row"><input id="enableWikiLorebookImporter" type="checkbox"/><span>Add Wiki / Web import tools to Lorebook entries</span></label>
 <p class="hint">On a Lorebook's Entries page, import from Fandom, MediaWiki-style wikis, or other article pages. QoL asks for access only to the site you choose, removes common wiki clutter, previews editable entries/keywords first, and can selectively pull linked pages. If a site blocks fetching, you can paste article text or HTML instead.</p>
+<div class="sub-card" id="creatorTriggerPreviewCard"><h3>Creator trigger preview</h3><label class="row"><input id="enableCreatorTriggerPreview" type="checkbox"/><span>Show read-only Lorebook keyword preview in chats</span></label><p class="hint">Compares local Lorebook backups with visible chat/test text. Estimates possible keyword matches only; it cannot reveal the real engine block, hidden prompts, which entries actually fired, or native context usage. Off by default.</p></div>
 <div class="sub-card" id="lorebookConsistencyCard">
 <strong>Lorebook response consistency</strong>
 <label class="row"><input id="enableLorebookConsistency" type="checkbox"/><span>Check settled AI replies for new locally-backed-up Lorebook matches</span></label>
@@ -3103,7 +3137,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div><strong>RP State Tracker</strong><span>Keeps changing details such as inventory, location, injuries, currency, and objectives separate from long-term continuity notes.</span></div>
 <div><strong>Internal Day Tracker / Storydate</strong><span>Keeps a numbered in-story day so “yesterday”, “last night”, and older events have a stable reference point.</span></div>
 <div><strong>RP context-full warning</strong><span>Warns when a long roleplay is getting close to the model's context limit before older messages are likely to fall out.</span></div>
-<div><strong>Custom chat backgrounds</strong><span>Uses your own local image as a chat background without uploading it to SpicyChat.</span></div>
+<div><strong>Custom Pictures</strong><span>Backgrounds, character/persona overrides, saved images, and native image controls for individual chats.</span></div>
 <div><strong>Soundscapes</strong><span>Mixes local/direct ambience layers into reusable scenes you can control while chatting.</span></div>
 </div></details>
 <details><summary>Personas, memories &amp; conversation organization</summary>
