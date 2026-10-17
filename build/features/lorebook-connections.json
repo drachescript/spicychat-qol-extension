@@ -1,0 +1,39 @@
+{
+  "schema": "dsq-feature/v1",
+  "id": "lorebook-connections",
+  "label": "Lorebook Connections",
+  "category": "lorebook",
+  "requiredFeatures": [],
+  "runtimeScripts": [
+    "content/lorebook-connections.js"
+  ],
+  "settingsScripts": [],
+  "settingKeys": [
+    "showLorebookConnections"
+  ],
+  "cssFiles": [],
+  "backgroundServices": [],
+  "permissions": [],
+  "sharedDependencies": {
+    "runtime": [
+      "content/core.js",
+      "content/main.js"
+    ],
+    "settings": [
+      "options.js",
+      "options.html"
+    ],
+    "background": [
+      "background/background-events.js"
+    ]
+  },
+  "customBuildStatus": "blocked",
+  "fullRuntimeStatus": "lifecycle-gated",
+  "blockers": [
+    "Custom package and Settings behavior need browser verification before treating this feature as independent."
+  ],
+  "notes": [
+    "Tools that show lorebook connections.",
+    "Experimental selection, not yet standalone browser-validated."
+  ]
+}
