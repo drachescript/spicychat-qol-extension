@@ -1,0 +1,2424 @@
+{
+  "schema": "sqol-custom-feature-catalog/v1",
+  "version": "0.2.51",
+  "sourceBranch": "qol-custom",
+  "status": "experimental-unverified",
+  "featureCount": 109,
+  "sections": [
+    "Blocking",
+    "Chat List",
+    "Chat Tools",
+    "Creator Tools",
+    "Discovery",
+    "Filtering",
+    "Interface",
+    "Lorebooks",
+    "Organization",
+    "Personas",
+    "Profiles"
+  ],
+  "groups": [
+    "core",
+    "interface",
+    "chat",
+    "chatList",
+    "listings",
+    "creator",
+    "lorebook",
+    "profiles",
+    "personas"
+  ],
+  "sharedRuntimeScripts": [
+    "content/auto-afk.js",
+    "content/background-worker-coordinator.js",
+    "content/build-profile.js",
+    "content/card-token-auth-loader.js",
+    "content/card-token-main.js",
+    "content/compatibility.js",
+    "content/core-settings-defaults.js",
+    "content/core-storage-writers.js",
+    "content/core.js",
+    "content/creator-editor-privacy-guard.js",
+    "content/diagnostic-protocol.js",
+    "content/dom.js",
+    "content/exact-message-counts-loader.js",
+    "content/feature-build-map.js",
+    "content/feature-lifecycle.js",
+    "content/generation-metadata-loader.js",
+    "content/lorebook-connections.js",
+    "content/main-diagnostics.js",
+    "content/main-message-mutations.js",
+    "content/main-page-observer.js",
+    "content/main-scheduler-utils.js",
+    "content/main-startup.js",
+    "content/main.js",
+    "content/my-creations-auto-load.js",
+    "content/rulebook-diagnostics.js",
+    "content/runtime-improvements.js",
+    "content/runtime-kernel.js",
+    "content/runtime-plan.js",
+    "content/story-reading-layout.js",
+    "content/tab-diagnostics.js",
+    "content/tab-state-control.js",
+    "content/tag-aliases.js",
+    "content/update-toast.js",
+    "shared/platform-capabilities.js"
+  ],
+  "sharedStyles": [
+    "content.css",
+    "content/styles/bot-organizer.css",
+    "content/styles/chat-bubble-themes.css",
+    "content/styles/chat-index.css",
+    "content/styles/explorer-base.css",
+    "content/styles/explorer-covers.css",
+    "content/styles/lorebook-connections.css",
+    "content/styles/memory-vault.css",
+    "content/styles/pagination.css",
+    "content/styles/persona-manager.css",
+    "content/styles/remaining-styles.css",
+    "content/styles/rulebook-filter.css",
+    "content/styles/story-reading-layout.css"
+  ],
+  "allContentScriptPaths": [
+    "content/accessibility.js",
+    "content/ad-banners.js",
+    "content/alternate-dialogue.js",
+    "content/android-app.js",
+    "content/animation-control.js",
+    "content/auto-afk.js",
+    "content/auto-voice.js",
+    "content/background-worker-coordinator.js",
+    "content/bot-archive.js",
+    "content/bot-backup.js",
+    "content/bot-blocking.js",
+    "content/bot-editor-actions.js",
+    "content/bot-editor-history.js",
+    "content/bot-editor-memory.js",
+    "content/bot-editor-snippets.js",
+    "content/bot-organizer.js",
+    "content/build-profile.js",
+    "content/bulk-blocking.js",
+    "content/card-token-auth-loader.js",
+    "content/card-token-info.js",
+    "content/card-token-main.js",
+    "content/card-workflow.js",
+    "content/cards.js",
+    "content/character-qol-profiles.js",
+    "content/chat-backgrounds.js",
+    "content/chat-bookmarks.js",
+    "content/chat-bubbles.js",
+    "content/chat-export.js",
+    "content/chat-format-compatibility.js",
+    "content/chat-index.js",
+    "content/chat-list.js",
+    "content/chat-nudges.js",
+    "content/chat-organizer.js",
+    "content/chat-rulebook-metadata.js",
+    "content/chat-search.js",
+    "content/chat-stability.js",
+    "content/chat-tags.js",
+    "content/chat-topbar.js",
+    "content/chat-ui.js",
+    "content/command-palette.js",
+    "content/compatibility.js",
+    "content/composer-control.js",
+    "content/context-keeper.js",
+    "content/core-message-cache.js",
+    "content/core-settings-defaults.js",
+    "content/core-storage-writers.js",
+    "content/core.js",
+    "content/creation-audit.js",
+    "content/creation-bulk-input.js",
+    "content/creator-editor-privacy-guard.js",
+    "content/creator-favorites.js",
+    "content/creator-following.js",
+    "content/creator-workspace.js",
+    "content/creator-writing-assistant.js",
+    "content/delete-guard.js",
+    "content/diagnostic-protocol.js",
+    "content/dom.js",
+    "content/exact-message-counts-loader.js",
+    "content/exact-message-counts.js",
+    "content/failed-message-helper.js",
+    "content/favorite-bots.js",
+    "content/feature-build-map.js",
+    "content/feature-lifecycle.js",
+    "content/focus-mode.js",
+    "content/footer-manager.js",
+    "content/formatting-toolbar.js",
+    "content/generation-metadata-loader.js",
+    "content/generation-metadata.js",
+    "content/generation-profiles.js",
+    "content/interface-runtime-tools.js",
+    "content/language-filter.js",
+    "content/later-bots.js",
+    "content/list-fill.js",
+    "content/listing-panel-position.js",
+    "content/local-tag-matching.js",
+    "content/lorebook-backup.js",
+    "content/lorebook-connections.js",
+    "content/lorebook-consistency.js",
+    "content/lorebook-entries.js",
+    "content/lorebook-filter.js",
+    "content/lorebook-public-qol.js",
+    "content/lorebook-search-filter.js",
+    "content/lorebook-tags.js",
+    "content/lorebook-workflow.js",
+    "content/main-diagnostics.js",
+    "content/main-message-mutations.js",
+    "content/main-page-observer.js",
+    "content/main-scheduler-utils.js",
+    "content/main-startup.js",
+    "content/main.js",
+    "content/memory-manager.js",
+    "content/message-options.js",
+    "content/mobile-bot-organizer.js",
+    "content/mobile-listing-overflow.js",
+    "content/model-selector.js",
+    "content/moderation-warnings.js",
+    "content/my-chatbot-card-shortcuts.js",
+    "content/my-creations-auto-load.js",
+    "content/my-creations-backup.js",
+    "content/my-creations-filters.js",
+    "content/my-creations-view-memory.js",
+    "content/native-rating-helpers.js",
+    "content/ooc-composer.js",
+    "content/ooc.js",
+    "content/opened-chats.js",
+    "content/pagination-tools.js",
+    "content/performance-mode.js",
+    "content/persona-full-backup.js",
+    "content/persona-organizer.js",
+    "content/personas.js",
+    "content/premium-notifications.js",
+    "content/profile-export.js",
+    "content/quick-panel.js",
+    "content/recommendation-helpers.js",
+    "content/reply-instructions.js",
+    "content/rp-format-repair.js",
+    "content/rp-state-tracker.js",
+    "content/rulebook-diagnostics.js",
+    "content/rulebook-filter.js",
+    "content/runtime-improvements.js",
+    "content/runtime-kernel.js",
+    "content/runtime-plan.js",
+    "content/saved-chat-actions.js",
+    "content/saved-lists-overlay.js",
+    "content/saved-snippets.js",
+    "content/scroll-to-top.js",
+    "content/selection-memory.js",
+    "content/sidebar.js",
+    "content/smart-filter-presets.js",
+    "content/soundscapes.js",
+    "content/story-day-tracker.js",
+    "content/story-reading-layout.js",
+    "content/tab-diagnostics.js",
+    "content/tab-state-control.js",
+    "content/tag-aliases.js",
+    "content/tags-nsfw.js",
+    "content/text-replacements.js",
+    "content/top-bar.js",
+    "content/translation.js",
+    "content/ui-layout-fixes.js",
+    "content/update-toast.js",
+    "content/wiki-lorebook-importer.js",
+    "shared/platform-capabilities.js"
+  ],
+  "features": [
+    {
+      "id": "accessibility",
+      "label": "Accessibility",
+      "description": "Includes the Accessibility tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/accessibility.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "ad-banners",
+      "label": "Ad Banners",
+      "description": "Includes the Ad Banners tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/ad-banners.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "alternate-dialogue",
+      "label": "Alternate Dialogue",
+      "description": "Includes the Alternate Dialogue tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/alternate-dialogue.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "android-app",
+      "label": "Android App",
+      "description": "Includes the Android App tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/android-app.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "animation-control",
+      "label": "Animation Control",
+      "description": "Includes the Animation Control tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/animation-control.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "auto-voice",
+      "label": "Auto Voice",
+      "description": "Includes the Auto Voice tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/auto-voice.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-archive",
+      "label": "Bot Archive",
+      "description": "Includes the Bot Archive tools and their available settings.",
+      "section": "Profiles",
+      "group": "profiles",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-archive.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-backup",
+      "label": "Bot Backup",
+      "description": "Includes the Bot Backup tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-backup.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-blocking",
+      "label": "Bot Blocking & Quick Block",
+      "description": "Hide bots and use the blocking controls on listings and cards.",
+      "section": "Blocking",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-blocking.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-editor-actions",
+      "label": "Bot Editor Actions",
+      "description": "Includes the Bot Editor Actions tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-editor-actions.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-editor-history",
+      "label": "Bot Editor History",
+      "description": "Includes the Bot Editor History tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-editor-history.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-editor-memory",
+      "label": "Bot Editor Memory",
+      "description": "Includes the Bot Editor Memory tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-editor-memory.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-editor-snippets",
+      "label": "Bot Editor Snippets",
+      "description": "Includes the Bot Editor Snippets tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-editor-snippets.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-organizer",
+      "label": "Bot Organizer",
+      "description": "Includes the Bot Organizer tools and their available settings.",
+      "section": "Organization",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bot-organizer.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "bot-status",
+      "label": "Bot Status Center",
+      "description": "Check and manage your saved bot status records.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/features/options-bot-status.js"
+      ],
+      "backgroundServices": [
+        "background/features/background-worker-bot-status.js"
+      ],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Bot Status worker startup, Settings and shared event routing must be tested without unrelated services."
+      ]
+    },
+    {
+      "id": "bulk-blocking",
+      "label": "Bulk Blocking",
+      "description": "Blocking actions for multiple bots.",
+      "section": "Blocking",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bulk-blocking.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "card-token-info",
+      "label": "Card Token Info",
+      "description": "Includes the Card Token Info tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/card-token-info.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "card-workflow",
+      "label": "Card Workflow",
+      "description": "Includes the Card Workflow tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/card-workflow.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "cards",
+      "label": "Cards",
+      "description": "Includes the Cards tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/cards.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "character-qol-profiles",
+      "label": "Character Qol Profiles",
+      "description": "Includes the Character Qol Profiles tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/character-qol-profiles.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-backgrounds",
+      "label": "Chat Backgrounds",
+      "description": "Includes the Chat Backgrounds tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-backgrounds.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-bookmarks",
+      "label": "Chat Bookmarks",
+      "description": "Includes the Chat Bookmarks tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-bookmarks.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-bubbles",
+      "label": "Chat Bubbles",
+      "description": "Includes the Chat Bubbles tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-bubbles.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-export",
+      "label": "Chat Export",
+      "description": "Includes the Chat Export tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-export.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-format-compatibility",
+      "label": "Chat Format Compatibility",
+      "description": "Includes the Chat Format Compatibility tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-format-compatibility.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-index",
+      "label": "Chat Index",
+      "description": "Organize and search your imported conversation index.",
+      "section": "Organization",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-index.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-list",
+      "label": "Chat List",
+      "description": "Includes the Chat List tools and their available settings.",
+      "section": "Chat List",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-list.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-nudges",
+      "label": "Chat Nudges",
+      "description": "Includes the Chat Nudges tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-nudges.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-organizer",
+      "label": "Chat Folders & Organization",
+      "description": "Tools to organize your conversations.",
+      "section": "Organization",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-organizer.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-rulebook-metadata",
+      "label": "Chat Rulebook Metadata",
+      "description": "Includes the Chat Rulebook Metadata tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-rulebook-metadata.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-search",
+      "label": "Chat Search",
+      "description": "Find text and messages inside a conversation.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-search.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-stability",
+      "label": "Chat Stability",
+      "description": "Includes the Chat Stability tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-stability.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-tags",
+      "label": "Chat Tags",
+      "description": "Includes the Chat Tags tools and their available settings.",
+      "section": "Organization",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-tags.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-topbar",
+      "label": "Chat Topbar",
+      "description": "Includes the Chat Topbar tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-topbar.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "chat-ui",
+      "label": "Chat Ui",
+      "description": "Includes the Chat Ui tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-ui.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "command-palette",
+      "label": "Command Palette",
+      "description": "Includes the Command Palette tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/command-palette.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "composer-control",
+      "label": "Composer Control",
+      "description": "Includes the Composer Control tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/composer-control.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "context-keeper",
+      "label": "Context Keeper",
+      "description": "Includes the Context Keeper tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/context-keeper.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "core-message-cache",
+      "label": "Core Message Cache",
+      "description": "Includes the Core Message Cache tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/core-message-cache.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creation-audit",
+      "label": "Creation Audit",
+      "description": "Includes the Creation Audit tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creation-audit.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creation-bulk-input",
+      "label": "Creation Bulk Input",
+      "description": "Includes the Creation Bulk Input tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creation-bulk-input.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creator-favorites",
+      "label": "Creator Favorites",
+      "description": "Includes the Creator Favorites tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creator-favorites.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creator-following",
+      "label": "Creator Following",
+      "description": "Includes the Creator Following tools and their available settings.",
+      "section": "Discovery",
+      "group": "profiles",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creator-following.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creator-workspace",
+      "label": "Creator Workspace",
+      "description": "Includes the Creator Workspace tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creator-workspace.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "creator-writing-assistant",
+      "label": "Creator Writing Assistant",
+      "description": "Includes the Creator Writing Assistant tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/creator-writing-assistant.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "delete-guard",
+      "label": "Delete Guard",
+      "description": "Includes the Delete Guard tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/delete-guard.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "exact-message-counts",
+      "label": "Exact Message Counts",
+      "description": "Includes the Exact Message Counts tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/exact-message-counts.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "failed-message-helper",
+      "label": "Failed Message Helper",
+      "description": "Includes the Failed Message Helper tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/failed-message-helper.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "favorite-bots",
+      "label": "Favorite Bot Tools",
+      "description": "Includes the Favorite Bots tools and their available settings.",
+      "section": "Organization",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/favorite-bots.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "focus-mode",
+      "label": "Focus Mode",
+      "description": "Includes the Focus Mode tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/focus-mode.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "footer-manager",
+      "label": "Footer Manager",
+      "description": "Includes the Footer Manager tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/footer-manager.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "formatting-toolbar",
+      "label": "Formatting Toolbar",
+      "description": "Includes the Formatting Toolbar tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/formatting-toolbar.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "generation-metadata",
+      "label": "Generation Metadata",
+      "description": "Includes the Generation Metadata tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/generation-metadata.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "generation-profiles",
+      "label": "Generation Profiles",
+      "description": "Includes the Generation Profiles tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/generation-profiles.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "interface-runtime-tools",
+      "label": "Interface Runtime Tools",
+      "description": "Includes the Interface Runtime Tools tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/interface-runtime-tools.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "language-filter",
+      "label": "Language Filter",
+      "description": "Filter bot listings by language.",
+      "section": "Filtering",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/language-filter.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "later-bots",
+      "label": "Later Bot List",
+      "description": "Includes the Later Bots tools and their available settings.",
+      "section": "Organization",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/later-bots.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "list-fill",
+      "label": "List Fill",
+      "description": "Includes the List Fill tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/list-fill.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "listing-panel-position",
+      "label": "Listing Panel Position",
+      "description": "Includes the Listing Panel Position tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/listing-panel-position.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "local-tag-matching",
+      "label": "Tag Matching",
+      "description": "Match listing tags using local filtering rules.",
+      "section": "Filtering",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/local-tag-matching.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-backup",
+      "label": "Lorebook Backup",
+      "description": "Includes the Lorebook Backup tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-backup.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-consistency",
+      "label": "Lorebook Consistency",
+      "description": "Includes the Lorebook Consistency tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-consistency.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-entries",
+      "label": "Lorebook Entries",
+      "description": "Includes the Lorebook Entries tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-entries.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-filter",
+      "label": "Lorebook Filters",
+      "description": "Includes the Lorebook Filter tools and their available settings.",
+      "section": "Filtering",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-filter.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-public-qol",
+      "label": "Lorebook Public Qol",
+      "description": "Includes the Lorebook Public Qol tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-public-qol.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-search-filter",
+      "label": "Lorebook Search",
+      "description": "Includes the Lorebook Search Filter tools and their available settings.",
+      "section": "Filtering",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-search-filter.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-tags",
+      "label": "Lorebook Tags",
+      "description": "Includes the Lorebook Tags tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-tags.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "lorebook-workflow",
+      "label": "Lorebook Workflow",
+      "description": "Includes the Lorebook Workflow tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/lorebook-workflow.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "memory-manager",
+      "label": "Memory Manager",
+      "description": "Includes the Memory Manager tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/memory-manager.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "message-options",
+      "label": "Message Options",
+      "description": "Includes the Message Options tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/message-options.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "mobile-bot-organizer",
+      "label": "Mobile Bot Organizer",
+      "description": "Includes the Mobile Bot Organizer tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/mobile-bot-organizer.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "mobile-listing-overflow",
+      "label": "Mobile Listing Overflow",
+      "description": "Includes the Mobile Listing Overflow tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/mobile-listing-overflow.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "model-selector",
+      "label": "Model Selector",
+      "description": "Includes the Model Selector tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/model-selector.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "moderation-warnings",
+      "label": "Moderation Warnings",
+      "description": "Includes the Moderation Warnings tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/moderation-warnings.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "my-chatbot-card-shortcuts",
+      "label": "My Chatbot Card Shortcuts",
+      "description": "Includes the My Chatbot Card Shortcuts tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/my-chatbot-card-shortcuts.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "my-creations-backup",
+      "label": "My Creations Backup",
+      "description": "Includes the My Creations Backup tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/my-creations-backup.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "my-creations-filters",
+      "label": "My Creations Filters",
+      "description": "Includes the My Creations Filters tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/my-creations-filters.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "my-creations-view-memory",
+      "label": "My Creations View Memory",
+      "description": "Includes the My Creations View Memory tools and their available settings.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/my-creations-view-memory.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "native-rating-helpers",
+      "label": "Native Rating Helpers",
+      "description": "Includes the Native Rating Helpers tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/native-rating-helpers.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "ooc",
+      "label": "OOC Presets & Composer Button",
+      "description": "Manage OOC presets and insert them from the chat composer.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/ooc.js",
+        "content/ooc-composer.js"
+      ],
+      "cssFiles": [
+        "content/styles/ooc.css"
+      ],
+      "settingsScripts": [
+        "settings/options-ooc.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "showOocTools",
+        "replaceChatImageWithOocButton",
+        "quickPanelShowOoc",
+        "androidTopBarOoc",
+        "oocTemplates"
+      ],
+      "customBuildStatus": "experimental-test-only",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Real Chrome/Brave unpacked startup and storage/route behavior still require user validation.",
+        "This fixed recipe is not arbitrary feature selection."
+      ]
+    },
+    {
+      "id": "opened-chats",
+      "label": "Opened Chat Tracking",
+      "description": "Remember which chatbots or chats you already opened.",
+      "section": "Organization",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/opened-chats.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "pagination-tools",
+      "label": "Pagination Tools",
+      "description": "Includes the Pagination Tools tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/pagination-tools.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "performance-mode",
+      "label": "Performance Mode",
+      "description": "Includes the Performance Mode tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/performance-mode.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "persona-full-backup",
+      "label": "Persona Full Backup",
+      "description": "Includes the Persona Full Backup tools and their available settings.",
+      "section": "Organization",
+      "group": "personas",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/persona-full-backup.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "persona-organizer",
+      "label": "Persona Organizer",
+      "description": "Includes the Persona Organizer tools and their available settings.",
+      "section": "Organization",
+      "group": "personas",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/persona-organizer.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "personas",
+      "label": "Personas",
+      "description": "Includes the Personas tools and their available settings.",
+      "section": "Personas",
+      "group": "personas",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/personas.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "premium-notifications",
+      "label": "Premium Notifications",
+      "description": "Includes the Premium Notifications tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/premium-notifications.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "profile-export",
+      "label": "Profile Export",
+      "description": "Includes the Profile Export tools and their available settings.",
+      "section": "Profiles",
+      "group": "profiles",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/profile-export.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "quick-panel",
+      "label": "Quick Panel",
+      "description": "Includes the Quick Panel tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/quick-panel.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "recommendation-helpers",
+      "label": "Recommendation Helpers",
+      "description": "Includes the Recommendation Helpers tools and their available settings.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/recommendation-helpers.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "reply-instructions",
+      "label": "Reply Instructions",
+      "description": "Includes the Reply Instructions tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/reply-instructions.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "rp-format-repair",
+      "label": "Rp Format Repair",
+      "description": "Includes the Rp Format Repair tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/rp-format-repair.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "rp-state-tracker",
+      "label": "Rp State Tracker",
+      "description": "Includes the Rp State Tracker tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/rp-state-tracker.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "rulebook-filter",
+      "label": "Rulebook Filters",
+      "description": "Includes the Rulebook Filter tools and their available settings.",
+      "section": "Filtering",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/rulebook-filter.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "saved-chat-actions",
+      "label": "Saved Chat Actions",
+      "description": "Includes the Saved Chat Actions tools and their available settings.",
+      "section": "Organization",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/saved-chat-actions.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "saved-lists-overlay",
+      "label": "Saved Lists Overlay",
+      "description": "Includes the Saved Lists Overlay tools and their available settings.",
+      "section": "Organization",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/saved-lists-overlay.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "saved-snippets",
+      "label": "Saved Snippets",
+      "description": "Includes the Saved Snippets tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/saved-snippets.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "scroll-to-top",
+      "label": "Scroll To Top",
+      "description": "Includes the Scroll To Top tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/scroll-to-top.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "selection-memory",
+      "label": "Selection Memory",
+      "description": "Includes the Selection Memory tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/selection-memory.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "sidebar",
+      "label": "Sidebar",
+      "description": "Includes the Sidebar tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/sidebar.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "smart-filter-presets",
+      "label": "Saved Filter Presets",
+      "description": "Save and reuse filtering choices.",
+      "section": "Filtering",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/smart-filter-presets.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "soundscapes",
+      "label": "Soundscapes",
+      "description": "Includes the Soundscapes tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/soundscapes.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "story-day-tracker",
+      "label": "Story Day Tracker",
+      "description": "Includes the Story Day Tracker tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/story-day-tracker.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "tags-nsfw",
+      "label": "Tags Nsfw",
+      "description": "Includes the Tags Nsfw tools and their available settings.",
+      "section": "Filtering",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/tags-nsfw.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "text-replacements",
+      "label": "Text Replacements",
+      "description": "Includes the Text Replacements tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/text-replacements.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "top-bar",
+      "label": "Top Bar",
+      "description": "Includes the Top Bar tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/top-bar.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "translation",
+      "label": "Translation",
+      "description": "Includes the Translation tools and their available settings.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/translation.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "ui-layout-fixes",
+      "label": "Ui Layout Fixes",
+      "description": "Includes the Ui Layout Fixes tools and their available settings.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/ui-layout-fixes.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    },
+    {
+      "id": "wiki-lorebook-importer",
+      "label": "Wiki Lorebook Importer",
+      "description": "Includes the Wiki Lorebook Importer tools and their available settings.",
+      "section": "Lorebooks",
+      "group": "lorebook",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/wiki-lorebook-importer.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundServices": [],
+      "settingKeys": [],
+      "customBuildStatus": "blocked",
+      "fullRuntimeStatus": "shared-lifecycle",
+      "blockers": [
+        "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
+      ]
+    }
+  ],
+  "disclaimer": "Individual feature builds are experimental. Shared Settings and background code are not fully separated."
+}
