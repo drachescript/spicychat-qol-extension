@@ -26,8 +26,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify Full source wiring
-        run: python build/verify_runtime.py
+      - name: Verify v0.2.52 Custom feature ownership and catalog
+        run: python -m unittest discover -s build -p 'test_custom_52.py' -v
 
       - name: Test feature recipes and minimal package
         run: python -m unittest discover -s build -p 'test_custom_recipes.py' -v && python -m unittest discover -s build -p 'test_minimal_ooc.py' -v
