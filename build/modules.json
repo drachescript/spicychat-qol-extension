@@ -134,7 +134,16 @@
         "content/translation.js",
         "content/chat-rulebook-metadata.js",
         "content/story-reading-layout.js",
-        "content/rulebook-diagnostics.js"
+        "content/rulebook-diagnostics.js",
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js",
+        "content/chat-picture-editor-core.js",
+        "content/chat-picture-override-core.js",
+        "content/character-pictures.js",
+        "content/persona-pictures.js",
+        "content/picture-library.js",
+        "content/chat-scene-notes.js",
+        "content/auto-images.js"
       ]
     },
     "chatList": {
@@ -187,7 +196,8 @@
         "content/smart-filter-presets.js",
         "content/tags-nsfw.js",
         "content/local-tag-matching.js",
-        "content/rulebook-filter.js"
+        "content/rulebook-filter.js",
+        "content/auto-blocking.js"
       ]
     },
     "creator": {
