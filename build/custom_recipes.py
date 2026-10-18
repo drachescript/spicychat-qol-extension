@@ -51,7 +51,7 @@ def dependency_closure(selected: list[str], contracts: dict[str, dict]) -> list[
         if feature in visited:
             return
         visiting.add(feature)
-        dependencies = contracts[feature].get("requiredFeatures", [])
+        dependencies = contracts[feature].get("dependencies", contracts[feature].get("requiredFeatures", []))
         if not isinstance(dependencies, list) or any(not isinstance(dep, str) for dep in dependencies):
             raise ValueError(f"Invalid dependencies declared for {feature}")
         for dep in dependencies:
@@ -117,7 +117,8 @@ def feature_readiness(closure: list[str], contracts: dict[str, dict]) -> dict[st
     readiness = {}
     for feature in closure:
         contract = contracts[feature]
-        status = str(contract.get("customBuildStatus") or "unverified")
+        verified = all(contract.get(key) is True for key in ("settingsIsolated", "stylesIsolated", "backgroundIsolated", "browserVerified"))
+        status = str(contract.get("customBuildStatus") or ("validated" if verified else "unverified"))
         lifecycle = str(contract.get("fullRuntimeStatus") or "unverified")
         raw_blockers = contract.get("blockers", [])
         if not isinstance(raw_blockers, list):
