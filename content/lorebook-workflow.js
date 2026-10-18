@@ -15,6 +15,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DETAILS_SUPPRESS_PREFIX = "ds-qol-lorebook-details-manual:";
   const MAX_DRAFTS = 40;
   const analyzedEntries = new Map();
+  let analyzedLorebookId = "";
 
   let draftTimer = null;
   let lastDraftModal = null;
@@ -101,6 +102,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.documentElement.appendChild(style);
   }
 
+  function ensureAnalysisForCurrentLorebook() {
+    const id = lorebookRoute()?.id || "";
+    if (id !== analyzedLorebookId) {
+      analyzedEntries.clear();
+      analyzedLorebookId = id;
+    }
+  }
+
   function setManagerStatus(message) {
     const node = document.querySelector(`#${TOOLBAR_ID} .ds-lb-manager-status`);
     const next = message || "";
@@ -115,6 +124,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (listenersInstalled) return;
     listenersInstalled = true;
     document.addEventListener("click", event => {
+      // An editor save can change keywords/content without changing the row name.
+      // Invalidate the local analysis; don't perform a full refresh here.
+      const editor = event.target?.closest?.("button");
+      if (editor && lorebookRoute()?.page === "entries" &&
+          /^(update|save|create|add)$/i.test(clean(editor.getAttribute("aria-label") || editor.textContent, 32)) &&
+          entryModalParts()) analyzedEntries.clear();
       const details = event.target?.closest?.("[data-testid='tab-lorebook']");
       const route = lorebookRoute();
       if (details && route?.id) {
@@ -847,6 +862,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function captureRow(row) {
+    ensureAnalysisForCurrentLorebook();
     const quick = rowInfo(row);
     if (analyzedEntries.has(quick?.name)) return analyzedEntries.get(quick.name);
     const parts = await openRow(row);
@@ -858,6 +874,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function analyzeLoadedEntries() {
+    ensureAnalysisForCurrentLorebook();
     if (bulkBusy) return;
     const rows = findEntryRows();
     if (!rows.length) return setManagerStatus("No entries are loaded.");
@@ -1302,6 +1319,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.handleLorebookWorkflowRouteChange = function handleLorebookWorkflowRouteChange(){
+    ensureAnalysisForCurrentLorebook();
     const route = lorebookRoute();
     if (!route) {
       resetAutoEntriesVisit();
@@ -1347,6 +1365,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.applyLorebookWorkflowTools = async function applyLorebookWorkflowTools(){
+    ensureAnalysisForCurrentLorebook();
     if (document.documentElement.dataset.dsLorebookExportHelper === "1") {
       DS.removeLorebookWorkflowTools?.();
       return;

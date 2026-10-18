@@ -1,0 +1,18 @@
+{
+  "id": "auto-blocking",
+  "primary": "content/auto-blocking.js",
+  "type": "content",
+  "dependencies": [
+    "cards",
+    "bot-blocking"
+  ],
+  "settingsKeys": [
+    "autoBlockTagMatches",
+    "autoBlockWordMatches"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

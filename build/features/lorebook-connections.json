@@ -1,0 +1,14 @@
+{
+  "id": "lorebook-connections",
+  "primary": "content/lorebook-connections.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "showLorebookConnections"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

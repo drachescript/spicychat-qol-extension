@@ -351,15 +351,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function runAutomaticCapture() {
     if (autoState.running) return;
     const cfg = DS.state?.settings || {};
-    if (!cfg.enabled || !cfg.enableContextKeeper || cfg.contextKeeperAutoCapture === false || !DS.isSingleChatPage?.()) return;
+    if (!cfg.enabled || !cfg.enableContextKeeper || cfg.contextKeeperAutoCapture !== true || !DS.isSingleChatPage?.()) return;
     autoState.running = true;
+    const scanChatId = currentChatId();
     try {
       const messageRoots = roots();
       const messageCount = messageRoots.length;
       if (!messageCount) return;
 
       const store = await readStore();
-      const id = currentChatId();
+      // Never attribute messages from the previous chat to a new route after
+      // an asynchronous storage read or a React conversation switch.
+      if (!scanChatId || scanChatId !== currentChatId()) return;
+      const id = scanChatId;
       const entry = store[id] || { details: [], lastRecapAt: 0, lastRecapMessageCount: 0, lastAutoScanMessageCount: 0, lastAutoScanAt: 0 };
       const every = autoCaptureEvery();
       const lastCount = Math.max(0, Number(entry.lastAutoScanMessageCount) || 0);
@@ -423,6 +427,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       entry.details = trimAutomaticDetails(entry.details, autoCaptureCap());
       entry.lastAutoScanMessageCount = messageCount;
       entry.lastAutoScanAt = Date.now();
+      // A second route check protects the chat identity while candidate
+      // extraction runs. A later scan will pick up this chat on return.
+      if (id !== currentChatId() || !DS.state?.settings?.enableContextKeeper) return;
       store[id] = entry;
       await writeStore(store, "Context Keeper automatic capture", { recordChange: false });
       if (added) DS.setQuickStatus?.(`Context Keeper kept ${added} new continuity detail${added === 1 ? "" : "s"}.`);
@@ -439,7 +446,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       clearTimeout(autoState.timer);
       autoState.timer = null;
     }
-    if (!cfg.enabled || !cfg.enableContextKeeper || cfg.contextKeeperAutoCapture === false || !DS.isSingleChatPage?.()) {
+    if (!cfg.enabled || !cfg.enableContextKeeper || cfg.contextKeeperAutoCapture !== true || !DS.isSingleChatPage?.()) {
       clearTimeout(autoState.timer);
       autoState.timer = null;
       return;
@@ -615,7 +622,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const ranked = enabled.map(detail => {
       const hits = [...new Set(clean(detail.text).toLowerCase().match(/[a-z]{4,}/g) || [])]
         .filter(word => words.has(word) && !STOP_WORDS.has(word)).length;
-      return { detail, rank: detailPriority(detail) + Math.min(hits, 5) * 4 };
+      const dynamic = detail.category === "location" || detail.category === "state";
+      const penalty = dynamic && !detail.pinned && hits === 0 ? 12 : 0;
+      return { detail, rank: detailPriority(detail) + Math.min(hits, 5) * 4 - penalty };
     }).sort((a,b) => b.rank - a.rank || Number(b.detail.createdAt||0)-Number(a.detail.createdAt||0));
     const budget = [450,900,1400].includes(Number(cfg.contextKeeperRecallMaxChars)) ? Number(cfg.contextKeeperRecallMaxChars) : 900;
     const lead = "[OOC: Remember these established continuity details: ";
@@ -701,6 +710,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     [["all", "All sources"], ["manual", "Manual"], ["selection", "Selection"], ["message", "Message"], ["memory", "Memory"], ["auto", "Automatic"], ["scan", "Scan"]].forEach(([value, label]) => {
       sourceFilter.append(make("option", { value }, label));
     });
+    const reviewFilter = make("select", { "aria-label": "Filter Context Keeper by review status" });
+    [["all", "All review statuses"], ["review", "Needs review"], ["active", "Included in recap"], ["excluded", "Excluded from recap"]].forEach(([value, label]) => {
+      reviewFilter.append(make("option", { value }, label));
+    });
     const savedTools = make("div", { className: "ds-tool-actions" });
     const enableAll = make("button", { type: "button" }, "Use all in recap");
     const removeDisabled = make("button", { type: "button" }, "Remove excluded");
@@ -712,6 +725,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const bulkUnpin = make("button", { type: "button" }, "Unpin selected");
     const bulkExclude = make("button", { type: "button" }, "Exclude selected");
     const bulkInclude = make("button", { type: "button" }, "Include selected");
+    const bulkReview = make("button", { type: "button" }, "Mark selected reviewed");
     const bulkDelete = make("button", { type: "button", className: "ds-danger" }, "Delete selected");
     const bulkCategory = make("select", { "aria-label": "Move selected continuity details to category" });
     bulkCategory.append(make("option", { value: "" }, "Move selected to…"));
@@ -719,8 +733,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const exportJson = make("button", { type: "button" }, "Export JSON");
     const importJson = make("button", { type: "button" }, "Import JSON…");
     const selectedDetails = new Set();
-    savedTools.append(selectAll, selectNone, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
-    savedFilters.append(savedSearch, categoryFilter, sourceFilter);
+    savedTools.append(selectAll, selectNone, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkReview, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
+    savedFilters.append(savedSearch, categoryFilter, sourceFilter, reviewFilter);
     const savedList = make("div", { className: "ds-tool-list" });
     const suggestionTitle = make("h3", {}, "Scan suggestions");
     const suggestionList = make("div", { className: "ds-tool-list" });
@@ -735,7 +749,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     function renderStatus() {
       const nowCount = roots().length;
       const since = entry.lastRecapAt ? Math.max(0, nowCount - (entry.lastRecapMessageCount || 0)) : 0;
-      const enabled = entry.details.filter(detail => detail.enabled !== false).length;
+      const enabled = entry.details.filter(detail => detail.enabled !== false && !detail.needsReview).length;
       const review = entry.details.filter(detail => detail.needsReview).length;
       const automatic = entry.details.filter(detail => detail.source === "auto").length;
       const preview = recapText(entry.details).text;
@@ -757,10 +771,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const query = clean(savedSearch.value).toLowerCase();
       const categoryWanted = String(categoryFilter.value || "all");
       const sourceWanted = String(sourceFilter.value || "all");
+      const reviewWanted = String(reviewFilter.value || "all");
       const visibleDetails = entry.details.filter(detail => {
         if (query && !clean(detail.text).toLowerCase().includes(query)) return false;
         if (categoryWanted !== "all" && String(detail.category || "other") !== categoryWanted) return false;
         if (sourceWanted !== "all" && String(detail.source || "manual") !== sourceWanted) return false;
+        if (reviewWanted === "review" && !detail.needsReview) return false;
+        if (reviewWanted === "active" && (detail.enabled === false || detail.needsReview)) return false;
+        if (reviewWanted === "excluded" && detail.enabled !== false && !detail.needsReview) return false;
         return true;
       });
       if (!visibleDetails.length) {
@@ -777,11 +795,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         selectLabel.append(checked, document.createTextNode("Select"));
         checked.addEventListener("change", () => { if (checked.checked) selectedDetails.add(detail.id); else selectedDetails.delete(detail.id); });
         const includeLabel = make("label", { className: "ds-context-include" });
-        const include = make("input", { type: "checkbox", checked: detail.enabled !== false });
+        const include = make("input", { type: "checkbox", checked: detail.enabled !== false && !detail.needsReview });
         includeLabel.append(include, document.createTextNode("Use in recap"));
         meta.append(selectLabel, badge, sourceBadge, includeLabel);
         if (detail.pinned) meta.append(make("span", { className: "ds-context-category" }, "Pinned"));
-        if (detail.needsReview) meta.append(make("span", { className: "ds-context-category" }, "Review after regeneration"));
+        if (detail.needsReview) meta.append(make("span", { className: "ds-context-category" }, "Needs review — excluded from recall"));
         const value = make("div", { className: "ds-tool-item-text" }, detail.text);
         const actions = make("div", { className: "ds-tool-actions" });
         const edit = make("button", { type: "button" }, "Edit");
@@ -791,6 +809,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (!found) return;
           found.pinned = !found.pinned;
           await writeStore(latest); await refreshEntry();
+        });
+        const review = detail.needsReview ? make("button", { type: "button" }, "Confirm and include") : null;
+        review?.addEventListener("click", async () => {
+          const latest = await readStore(); const found = latest[id]?.details?.find(item => item.id === detail.id);
+          if (!found) return;
+          found.needsReview = false;
+          found.enabled = true;
+          await writeStore(latest, "Reviewed Context Keeper detail"); await refreshEntry();
         });
         const jump = detail.messageId ? make("button", { type: "button" }, "Jump") : null;
         const remove = make("button", { type: "button", className: "ds-danger" }, "Remove");
@@ -824,6 +850,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await refreshEntry();
         });
         actions.append(edit, pin);
+        if (review) actions.append(review);
         if (jump) actions.append(jump);
         actions.append(remove);
         card.append(meta, value, actions);
@@ -882,6 +909,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (mode === "exclude") detail.enabled = false;
         if (mode === "include") { detail.enabled = true; detail.needsReview = false; }
         if (mode === "category") detail.category = normalizeCategory(argument);
+        if (mode === "review" && detail.needsReview) { detail.needsReview = false; detail.enabled = true; }
       }
       if (mode === "delete") selectedDetails.clear();
       await writeStore(latest, `Context Keeper bulk ${mode}`);
@@ -891,7 +919,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const query = clean(savedSearch.value).toLowerCase();
       for (const detail of entry.details) if ((!query || detail.text.toLowerCase().includes(query))
         && (categoryFilter.value === "all" || detail.category === categoryFilter.value)
-        && (sourceFilter.value === "all" || detail.source === sourceFilter.value)) selectedDetails.add(detail.id);
+        && (sourceFilter.value === "all" || detail.source === sourceFilter.value)
+        && (reviewFilter.value === "all" || (reviewFilter.value === "review" && detail.needsReview)
+          || (reviewFilter.value === "active" && detail.enabled !== false && !detail.needsReview)
+          || (reviewFilter.value === "excluded" && (detail.enabled === false || detail.needsReview)))) selectedDetails.add(detail.id);
       renderSaved();
     });
     selectNone.addEventListener("click", () => { selectedDetails.clear(); renderSaved(); });
@@ -899,6 +930,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     bulkUnpin.addEventListener("click", () => bulkEdit("unpin"));
     bulkExclude.addEventListener("click", () => bulkEdit("exclude"));
     bulkInclude.addEventListener("click", () => bulkEdit("include"));
+    bulkReview.addEventListener("click", () => bulkEdit("review"));
     bulkDelete.addEventListener("click", () => bulkEdit("delete"));
     bulkCategory.addEventListener("change", () => { if (bulkCategory.value) void bulkEdit("category", bulkCategory.value); bulkCategory.value = ""; });
     exportJson.addEventListener("click", () => {
@@ -925,12 +957,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     savedSearch.addEventListener("input", renderSaved);
     categoryFilter.addEventListener("change", renderSaved);
     sourceFilter.addEventListener("change", renderSaved);
+    reviewFilter.addEventListener("change", renderSaved);
     enableAll.addEventListener("click", async () => {
       const latest = await readStore();
       const target = latest[id];
       if (!target?.details?.length) return;
-      target.details.forEach(detail => { detail.enabled = true; });
-      await writeStore(latest, "Enabled all Context Keeper recap details");
+      target.details.forEach(detail => { if (!detail.needsReview) detail.enabled = true; });
+      await writeStore(latest, "Enabled reviewed Context Keeper details");
       await refreshEntry();
     });
     removeDisabled.addEventListener("click", async () => {
@@ -1102,7 +1135,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function ensureMessageButtonForRoot(root) {
     if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
-    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) return false;
+    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons !== true || !DS.isSingleChatPage?.()) return false;
 
     // React can leave an obsolete Keep node behind while replacing the native
     // toolbar. Keep exactly one live button attached to the current dropdown
@@ -1138,7 +1171,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function ensureMessageButtons() {
-    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons === false || !DS.isSingleChatPage?.()) {
+    if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons !== true || !DS.isSingleChatPage?.()) {
       if (DS.state.contextKeeperWasActive) {
         document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => button.remove());
         document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-context-keeper-ready]`).forEach(root => delete root.dataset.dsContextKeeperReady);
@@ -1175,10 +1208,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, Math.max(150, Number(delay) || 450));
   }
 
-  window.setInterval(() => scheduleMessageButtonRepair(300), 7000);
-  window.addEventListener("pageshow", () => scheduleMessageButtonRepair(450), true);
+  // The optional message toolbar must not wake a repair timer when its toggle
+  // is off. This also keeps full builds quiet for Memory Manager users.
+  function messageButtonsWanted() {
+    const settings = DS.state?.settings || {};
+    return settings.enabled === true && settings.enableContextKeeper === true
+      && settings.contextKeeperMessageButtons === true && DS.isSingleChatPage?.();
+  }
+  window.setInterval(() => { if (messageButtonsWanted()) scheduleMessageButtonRepair(300); }, 7000);
+  window.addEventListener("pageshow", () => { if (messageButtonsWanted()) scheduleMessageButtonRepair(450); }, true);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) scheduleMessageButtonRepair(450);
+    if (!document.hidden && messageButtonsWanted()) scheduleMessageButtonRepair(450);
   }, true);
 
   // Keep local recall fresh if another QoL tab edits Context Keeper data.

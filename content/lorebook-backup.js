@@ -1048,12 +1048,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return panel;
   }
 
-  function scheduleSave() {
+  function scheduleSave(delayMs = 2000) {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
-      saveCapture("Lorebook editor idle backup").catch(() => {});
-    }, 1800);
+      // A native editor save may still be settling; perform the low-priority
+      // capture only when the browser is idle rather than during React remount.
+      const resume = () => {
+        if (!routeInfo() || !settings().enabled || !settings().lorebookBackupsEnabled) return;
+        saveCapture("Lorebook editor idle backup").catch(() => {});
+      };
+      if (typeof requestIdleCallback === "function") requestIdleCallback(resume, { timeout: 1600 });
+      else setTimeout(resume, 0);
+    }, Math.max(600, Number(delayMs) || 2000));
   }
 
   function onInput(event) {
@@ -1071,10 +1078,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // The entry modal disappears immediately after Update. Capture it during
     // the click's capture phase so complete keyword data is not lost before
     // SpicyChat rerenders the list back to its collapsed 3 +N view.
-    if (/^(update|create|save|add)$/i.test(clean(button.getAttribute("aria-label") || button.textContent, 40))) {
-      saveCapture("Lorebook entry saved").catch(() => {});
-    }
-    scheduleSave();
+    const action = clean(button.getAttribute("aria-label") || button.textContent, 40);
+    const isSave = /^(update|create|save|add)$/i.test(action);
+    // SpicyChat's entry Update button is in a portal at document.body, not
+    // always inside a form or [role=dialog]. Confirm the actual open entry.
+    const isEntrySave = isSave && !!captureOpenEntry();
+    const isDetailsSave = isSave && !!button.closest("form") && routeInfo()?.page === "details";
+    if (!isEntrySave && !isDetailsSave) return;
+    // Capture synchronously at click time: the open entry may unmount before
+    // the backup timer runs. The queued write remains serialized/deduplicated.
+    saveCapture("Lorebook entry saved").catch(() => {});
+    scheduleSave(2600);
   }
 
   function installListeners() {

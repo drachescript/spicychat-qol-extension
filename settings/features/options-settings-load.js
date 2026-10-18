@@ -230,7 +230,7 @@ async function load() {
   setChecked("enableLorebookConsistency", !!settings.enableLorebookConsistency);
   setChecked("enableCreatorTriggerPreview", !!settings.enableCreatorTriggerPreview);
   setChecked("lorebookConsistencyShowMatches", settings.lorebookConsistencyShowMatches !== false);
-  setChecked("lorebookConsistencyAutoQueue", settings.lorebookConsistencyAutoQueue !== false);
+  setChecked("lorebookConsistencyAutoQueue", settings.lorebookConsistencyAutoQueue === true);
   setValue("lorebookConsistencyMaxEntries", String(Math.max(1, Math.min(5, Number(settings.lorebookConsistencyMaxEntries || 3)))));
   setChecked("lorebookDefaultEntriesTab", !!settings.lorebookDefaultEntriesTab);
   setChecked("lorebookRememberEntrySort", !!settings.lorebookRememberEntrySort);
@@ -441,6 +441,7 @@ async function load() {
   setChecked("quickPanelShowFillNow", settings.quickPanelShowFillNow === true);
   setChecked("quickPanelShowSmartFilterPins", !!settings.quickPanelShowSmartFilterPins);
   setChecked("quickPanelShowChatSearch", settings.quickPanelShowChatSearch === true);
+  setChecked("quickPanelShowChatMessageSearch", settings.quickPanelShowChatMessageSearch === true);
   setChecked("quickPanelShowChatSort", settings.quickPanelShowChatSort === true);
   setChecked("quickPanelShowScanVisible", settings.quickPanelShowScanVisible === true);
   setChecked("quickPanelShowLoadAll", settings.quickPanelShowLoadAll === true);
@@ -457,6 +458,7 @@ async function load() {
   setChecked("quickPanelShowCustomPictures", settings.quickPanelShowCustomPictures === true);
   setChecked("quickPanelShowCreatorPreview", settings.quickPanelShowCreatorPreview === true);
   setChecked("quickPanelShowImageGenerator", settings.quickPanelShowImageGenerator === true);
+  setChecked("showAutoImageInlineButton", settings.showAutoImageInlineButton === true);
   setChecked("quickPanelShowRulebookDiagnostics", settings.quickPanelShowRulebookDiagnostics === true);
   setChecked("quickPanelShowContextKeeper", settings.quickPanelShowContextKeeper === true);
   setChecked("quickPanelShowFocusMode", settings.quickPanelShowFocusMode === true);
@@ -545,6 +547,10 @@ async function load() {
   setValue("alternateDialogueBackgroundColor", settings.alternateDialogueBackgroundColor || "#1f2430");
   setValue("alternateDialogueBorderColor", settings.alternateDialogueBorderColor || "#596273");
   setChecked("enableReplyInstructions", !!settings.enableReplyInstructions);
+  setChecked("enableChatSceneNotes", !!settings.enableChatSceneNotes);
+  setChecked("chatSceneNotesEnableBotApply", !!settings.chatSceneNotesEnableBotApply);
+  setChecked("chatSceneNotesAutoInclude", !!settings.chatSceneNotesAutoInclude);
+  setValue("chatSceneNotesAutoMode", settings.chatSceneNotesAutoMode === "every" ? "every" : "session");
   setValue("replyInstructionText", settings.replyInstructionText || "");
   setValue("replyInstructionSendMode", ["every", "session", "manual"].includes(settings.replyInstructionSendMode) ? settings.replyInstructionSendMode : "session");
   setChecked("replyInstructionOocWrapper", settings.replyInstructionOocWrapper !== false);
@@ -567,6 +573,7 @@ async function load() {
   setChecked("rpFormatShowMessageButtons", settings.rpFormatShowMessageButtons !== false);
   setChecked("enableCustomCharacterPictures", !!settings.enableCustomCharacterPictures);
   setChecked("enableCustomPersonaPictures", !!settings.enableCustomPersonaPictures);
+  setChecked("enableCustomPictureLibrary", !!settings.enableCustomPictureLibrary);
   setChecked("enableChatBackgrounds", !!settings.enableChatBackgrounds);
   setChecked("chatSceneGalleriesEnabled", !!settings.chatSceneGalleriesEnabled);
   setChecked("chatBackgroundUseAvatar", !!settings.chatBackgroundUseAvatar);

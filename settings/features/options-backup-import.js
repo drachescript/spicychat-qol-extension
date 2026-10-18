@@ -251,7 +251,7 @@ function importCategoryEntries(parsed) {
     !source.favoriteCreators && !source.followedCreators && !source.favoriteBots &&
     !source.laterBots && !source.memoryVault && !source.botOrganization && !source.chatOrganization && !source.characterQolProfiles &&
     !source.botAvailability && !source.botArchive && !source.lorebookBackups && !source.savedTextSnippets &&
-    !source.contextKeeperData && !source.storyDayTrackerData && !source.rpStateTrackerData && !source.chatNudges && !source.personas && !source.personaOrganization &&
+    !source.contextKeeperData && !source.chatSceneNotes && !source.storyDayTrackerData && !source.rpStateTrackerData && !source.chatNudges && !source.personas && !source.personaOrganization &&
     !source.oocTemplates && !source.generationProfiles && !source.smartFilterPresets && !source.smartFilterPinnedPresets &&
     !source.botEditorDraftHistory && !source.chatBookmarks && !source.recentlySeenBots && !source.creatorBotWatch &&
     !source.chatbotLorebookLinks && !source.soundscapes && !source.tabCleanupSessions && !source.tabCleanupTopics &&
@@ -297,6 +297,7 @@ function importCategoryEntries(parsed) {
   if (source.chatbotLorebookLinks && typeof source.chatbotLorebookLinks === "object") add("chatbotLorebookLinks", "Chatbot ↔ Lorebook links", Object.keys(source.chatbotLorebookLinks).length);
   if (Array.isArray(source.savedTextSnippets)) add("savedTextSnippets", "Saved snippets", source.savedTextSnippets.length);
   if (source.contextKeeperData && typeof source.contextKeeperData === "object") add("contextKeeperData", "Context Keeper chats", Object.keys(source.contextKeeperData).length);
+  if (source.chatSceneNotes && typeof source.chatSceneNotes === "object") add("chatSceneNotes", "Per-chat Scene Notes", Object.keys(source.chatSceneNotes).length);
   if (source.storyDayTrackerData && typeof source.storyDayTrackerData === "object") add("storyDayTrackerData", "Internal Day Tracker chats", Object.keys(source.storyDayTrackerData).length);
   if (source.rpStateTrackerData && typeof source.rpStateTrackerData === "object") add("rpStateTrackerData", "RP State Tracker chats", Object.keys(source.rpStateTrackerData).length);
   if (Array.isArray(source.chatNudges)) add("chatNudges", "Chat Nudges", normalizeChatNudgeStore(source.chatNudges).length);
@@ -316,7 +317,7 @@ function importCategoryEntries(parsed) {
   if (source.localMedia && typeof source.localMedia === "object") {
     const audioCount = normalizeSoundscapeAudio(source.localMedia.soundscapeAudio).items.length;
     const backgrounds = normalizeChatBackgroundMediaStore(source.localMedia.chatBackgroundMedia);
-    add("localMedia", "Local media", audioCount + (backgrounds.global ? 1 : 0) + Object.keys(backgrounds.chats || {}).length);
+    add("localMedia", "Local media", audioCount + (backgrounds.global ? 1 : 0) + Object.keys(backgrounds.chats || {}).length + Object.values(backgrounds.galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0) + Object.keys(backgrounds.portraits || {}).length + Object.keys(backgrounds.personaPictures || {}).length + (backgrounds.pictureLibrary || []).length);
   }
   return entries;
 }
@@ -332,7 +333,7 @@ function validateBackupObject(parsed) {
   const migration = migrateBackupPayload(parsed);
   const source = migration.payload;
   const entries = importCategoryEntries(source);
-  const known = new Set(["_qolBackup", "settings", "memoryVault", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia", "accountSyncRules"]);
+  const known = new Set(["_qolBackup", "settings", "memoryVault", "openedChats", "openedChatMeta", "blockedBots", "quickDislikeHistory", "quickDislikeBulkState", "quickLessLikeHistory", "quickLessLikeBulkState", "notInterestedBots", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks", "savedTextSnippets", "contextKeeperData", "chatSceneNotes", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization", "oocTemplates", "generationProfiles", "smartFilterPresets", "smartFilterPinnedPresets", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots", "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia", "accountSyncRules"]);
   const warnings = Object.keys(source).filter(key => !known.has(key)).map(key => `Unknown top-level field: ${key}`);
   const meta = source._qolBackup && typeof source._qolBackup === "object" ? source._qolBackup : null;
   if (!meta) warnings.push("Legacy backup: no QoL backup metadata found (still importable after preview). ");
@@ -379,6 +380,9 @@ function refreshImportPreviewImpact() {
   const mode = document.querySelector("input[name='importMode']:checked")?.value === "replace" ? "replace" : "merge";
   const chosen = validation.entries.filter(item => selected.has(item.scope));
   const total = chosen.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  const syncNote = selected.has("accountSyncRules") && !$("activateRestoredSync")?.checked
+    ? "Restored cloud sync directions will be paused on this device until you explicitly resume them."
+    : "";
   const modeText = mode === "replace"
     ? "Replace mode: only the selected categories will be replaced; categories not selected remain untouched."
     : "Merge mode: selected categories are combined with current local data and supported duplicates are removed.";
@@ -388,12 +392,13 @@ function refreshImportPreviewImpact() {
   if (unknownCount) details.unshift(`${unknownCount} unknown/newer top-level field${unknownCount === 1 ? "" : "s"} will be skipped`);
   impact.replaceChildren(
     makeElement("strong", { text: `${chosen.length} selected categor${chosen.length === 1 ? "y" : "ies"} · ${total.toLocaleString()} saved item${total === 1 ? "" : "s"}` }),
-    makeElement("p", { className: "hint", text: modeText }),
+    makeElement("p", { className: "hint", text: modeText + (syncNote ? " " + syncNote : "") }),
     makeElement("p", { className: "hint", text: details.join(" · ") })
   );
 }
 
 function previewImportSettings() {
+  if ($("activateRestoredSync")) $("activateRestoredSync").checked = false;
   hideImportRecoveryActions();
   const preview = $("importPreview");
   const summary = $("importPreviewSummary");
@@ -475,6 +480,7 @@ async function importSettings() {
     const currentRead = await storageGetChecked([
       "settings",
       QOL_SYNC_DEVICE_PREFS_KEY,
+      QOL_SYNC_STATE_KEY,
       OPENED_KEY,
       OPENED_META_KEY,
       BLOCKED_BOTS_KEY,
@@ -500,6 +506,7 @@ async function importSettings() {
       LOREBOOK_BACKUPS_KEY,
       SAVED_TEXT_SNIPPETS_KEY,
       CONTEXT_KEEPER_DATA_KEY,
+      CHAT_SCENE_NOTES_KEY,
       STORY_DAY_TRACKER_KEY,
       RP_STATE_TRACKER_KEY,
       CHAT_NUDGE_STORE_KEY,
@@ -540,7 +547,7 @@ async function importSettings() {
         !parsed.botArchive &&
         !parsed.lorebookBackups &&
         !parsed.savedTextSnippets &&
-        !parsed.contextKeeperData &&
+        !parsed.contextKeeperData && !parsed.chatSceneNotes &&
         !parsed.storyDayTrackerData &&
         !parsed.rpStateTrackerData &&
         !parsed.chatNudges &&
@@ -579,6 +586,9 @@ async function importSettings() {
         fullUploadNeeded: rules.mode === "two-way" || rules.mode === "upload-only",
         fullDownloadNeeded: rules.mode === "two-way" || rules.mode === "download-only"
       };
+      if (!$('activateRestoredSync')?.checked && current[QOL_SYNC_STATE_KEY] && typeof current[QOL_SYNC_STATE_KEY] === "object") {
+        payload[QOL_SYNC_STATE_KEY] = { ...current[QOL_SYNC_STATE_KEY], paused: true };
+      }
     }
 
     if (hasImportScope("opened") && Array.isArray(parsed.openedChats)) {
@@ -751,6 +761,13 @@ async function importSettings() {
     if (hasImportScope("contextKeeperData") && parsed.contextKeeperData && typeof parsed.contextKeeperData === "object") {
       const existing = current[CONTEXT_KEEPER_DATA_KEY] && typeof current[CONTEXT_KEEPER_DATA_KEY] === "object" ? current[CONTEXT_KEEPER_DATA_KEY] : {};
       payload[CONTEXT_KEEPER_DATA_KEY] = mode === "replace" ? parsed.contextKeeperData : { ...existing, ...parsed.contextKeeperData };
+    }
+    if (hasImportScope("chatSceneNotes") && parsed.chatSceneNotes && typeof parsed.chatSceneNotes === "object") {
+      const normalizeScenes = source => Object.fromEntries(Object.entries(source).filter(([id, raw]) =>
+        /^[a-z0-9-]{20,}\/[a-z0-9-]{20,}$/i.test(id) && raw && typeof raw === "object" && typeof raw.text === "string" && raw.text.trim()
+      ).map(([id, raw]) => [id, { text: raw.text.trim().slice(0, 4000), updatedAt: Math.max(0, Number(raw.updatedAt) || 0) }]));
+      const existing = current[CHAT_SCENE_NOTES_KEY] && typeof current[CHAT_SCENE_NOTES_KEY] === "object" ? current[CHAT_SCENE_NOTES_KEY] : {};
+      payload[CHAT_SCENE_NOTES_KEY] = mode === "replace" ? normalizeScenes(parsed.chatSceneNotes) : normalizeScenes({ ...existing, ...parsed.chatSceneNotes });
     }
 
     if (hasImportScope("storyDayTrackerData") && parsed.storyDayTrackerData && typeof parsed.storyDayTrackerData === "object") {
@@ -936,10 +953,19 @@ async function importSettings() {
         payload[SOUNDSCAPE_AUDIO_KEY] = { ...existingAudio, ...incomingAudio, items: [...audioById.values()] };
 
         const existingBackgrounds = normalizeChatBackgroundMediaStore(current[CHAT_BACKGROUNDS_KEY]);
+        const libraryById = new Map((existingBackgrounds.pictureLibrary || []).map(item => [String(item.id), item]));
+        for (const item of incomingBackgrounds.pictureLibrary || []) libraryById.set(String(item.id), item);
         payload[CHAT_BACKGROUNDS_KEY] = {
           global: incomingBackgrounds.global || existingBackgrounds.global || null,
           chats: { ...(existingBackgrounds.chats || {}), ...(incomingBackgrounds.chats || {}) },
-          galleries: { ...(existingBackgrounds.galleries || {}), ...(incomingBackgrounds.galleries || {}) }
+          galleries: { ...(existingBackgrounds.galleries || {}), ...(incomingBackgrounds.galleries || {}) },
+          suppressedChats: { ...(existingBackgrounds.suppressedChats || {}), ...(incomingBackgrounds.suppressedChats || {}) },
+          avatarSizes: { ...(existingBackgrounds.avatarSizes || {}), ...(incomingBackgrounds.avatarSizes || {}) },
+          avatarSideCopies: { ...(existingBackgrounds.avatarSideCopies || {}), ...(incomingBackgrounds.avatarSideCopies || {}) },
+          viewModes: { ...(existingBackgrounds.viewModes || {}), ...(incomingBackgrounds.viewModes || {}) },
+          portraits: { ...(existingBackgrounds.portraits || {}), ...(incomingBackgrounds.portraits || {}) },
+          personaPictures: { ...(existingBackgrounds.personaPictures || {}), ...(incomingBackgrounds.personaPictures || {}) },
+          pictureLibrary: [...libraryById.values()].slice(-30)
         };
       }
     }

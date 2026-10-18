@@ -1,3 +1,32 @@
+## 0.2.52
+- Firefox compatibility fix of warning "Unsafe call to target.insertAdjacentHTML for argument 1" in Custom Pictures settings.
+- Improved search on the Chats page so conversations imported through QoL can be found by name even when their cards are not loaded.
+- Restored separate manual controls for importing chats through the API and clicking SpicyChat's Load More button, with adjustable page limits.
+- Removed the misleading Unopened filter from existing chats and added better conversation sorting and filters.
+- Added a Messages view to Chat Index for searching and viewing locally saved message excerpts. Message indexing stays manual and optional.
+- Added manual refresh for older saved message samples and clearer warnings when only part of a conversation has been indexed.
+- Creator Trigger Preview now highlights duplicate Lorebook keywords, missing keywords and unusually long entries.
+- Improved non-English Lorebook keyword matching and cleared outdated match badges after edits, regeneration and conversation changes.
+- Reduced extra Lorebook backup work while entries are being saved. Automatic Lorebook continuity messages now start OFF.
+- Added backup presets for Settings, saved lists, creator content and pictures.
+- Fixed Backup/Restore for Character Pictures, Persona Pictures, Picture Library, background positioning and saved Scene Notes.
+- Added per-device cloud-sync presets and clearer upload/download choices. Restoring sync settings pauses existing sync until explicitly resumed.
+- Fixed Bot Status scans losing pending bots after reaching a scan limit, and improved the speed of large status lists.
+- Bot Status now remembers the last scan summary and distinguishes saved, pending, inconclusive and deferred checks, including storage problems.
+- Fixed blocked-tag rules mistakenly matching words in bot names or descriptions. Word and tag rules remain independent.
+- Made automatic blocking safer when cards change or actions are cancelled, while preserving manual-unblock exceptions.
+- Improved chat navigation by reducing unnecessary OOC and Mini Panel work, and restoring the Mini Panel after supported page changes.
+- Fixed Context Keeper carrying automatic findings into the wrong chat and added a review filter so uncertain memories stay out of recall until approved.
+- Added slow-feature timing summaries to local diagnostics for investigating lag.
+- The extra IMG button and new automatic capture options now start OFF. Existing saved user choices are preserved.
+- Mini Panel shortcuts remain optional and hide when their feature is disabled or absent from a Lite build.
+- Added independent per-chat Scene Notes with manual draft insertion and optional visible OOC inclusion, both off by default.
+- Added an optional Apply & Save action for owned Private or Unlisted bots. It backs up the old Scenario, uses SpicyChat's native Save button, and does not report success until the saved value can be verified.
+- Separated Auto Voice and automatic conversation images into independent features, keeping their existing settings.
+- Split Character Pictures, Persona Pictures, Backgrounds and Picture Library into separate feature modules; Picture Library now has its own OFF-by-default option.
+- Improved Custom Lite build checks and split more feature-specific Settings, styles and background components so unused code can be left out. Existing saved data is preserved.
+- Added independent Lite ownership for Auto-AFK, tag aliases, My Creations auto-load and automatic word/tag blocking.
+
 ## 0.2.51
 - Added Enter-to-search for the native chat History search field.
 - Added an optional native History search enhancement that shows additional matching conversations from the existing local Chat Index without loading more chat cards or making search API requests.

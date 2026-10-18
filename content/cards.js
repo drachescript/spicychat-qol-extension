@@ -393,17 +393,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const all = fallbackPreparedText || prepare(card?.textContent || "");
     const settings = DS.state?.settings || {};
     const inspectTags = settings.blockCards && (settings.autoBlockTagMatches || settings.autoBlockWordMatches);
-    const cardTagLabels = inspectTags
-      ? [
-          ...(DS.getCardTags?.(card) || []),
-          ...(DS.qsa?.("button[aria-label]", card) || [])
-            .filter(button => !button.closest?.("[data-ds-owned='1'], [data-ds-owner='qol']") &&
-              !String(button.className || "").includes("ds-") &&
-              !/^(favorite|unfavorite|block this bot|profile|edit|chat)$/i.test(String(button.getAttribute("aria-label") || "")))
-            .map(button => String(button.getAttribute("aria-label") || button.textContent || "").trim())
-        ]
-      : [];
-    const tagValues = new Set(cardTagLabels.map(prepare).filter(Boolean));
+    // Only trust tag-like UI elements. Native cards also use aria-labels on
+    // their Chat/Profile/Follow buttons; interpreting those as tags caused
+    // misleading "blocked tag" matches against character names.
+    const tagButtons = inspectTags ? (DS.qsa?.("button[aria-label]", card) || []) : [];
+    const cardTagLabels = inspectTags ? [
+      ...(DS.getCardTags?.(card) || []),
+      ...tagButtons.filter(button => {
+        if (button.closest?.("[data-ds-owned='1'], [data-ds-owner='qol']")) return false;
+        const label = String(button.getAttribute?.("aria-label") || "").trim();
+        if (/^(?:chat(?:[-_\s]+with)?|favorite|unfavorite|block|profile|edit|search|share|follow|unfollow|more|load|report|copy|menu)\b/i.test(label)) return false;
+        const cls = `${String(button.className || "")} ${String(button.parentElement?.className || "")}`;
+        return !!button.closest?.("[data-testid*='tag' i]") || /^tag[:\s]/i.test(label) || /(?:^|[\s_-])(?:tag|chip|pill)(?:$|[\s_-])/i.test(cls);
+      }).map(button => String(button.getAttribute("aria-label") || button.textContent || "").trim())
+    ] : [];
+    const nativeTagLabels = DS.qsa?.("[data-testid*='tag' i] button, [data-testid*='tag' i] span, a[href*='/tag/'], button[aria-label^='tag:' i]", card)
+      .map(element => element.getAttribute?.("aria-label") || element.textContent || "") || [];
+    const tagValues = new Set([...cardTagLabels, ...nativeTagLabels].map(prepare).filter(Boolean));
     const verifiedNameCandidates = title && !tagValues.has(title) ? [title] : [];
     if (settings.autoBlockWordMatches) {
       const nativeNameLink = card?.querySelector?.(
@@ -475,6 +481,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       nameDescriptionCandidates: [...nameCandidates, description, ...descriptiveCandidates].filter(Boolean)
     };
   }
+
+  // The automatic block queue waits for storage and can outlive a React card
+  // rerender. Re-check the live card against the *current* rules immediately
+  // before performing any persistent block action.
+  DS.getVerifiedCardAutoBlockMatches = function getVerifiedCardAutoBlockMatches(card) {
+    const settings = DS.state?.settings || {};
+    if (!card || !settings.enabled || !settings.blockCards) return { word: null, tag: null };
+    const fields = preparedCardFields(card);
+    const wordMatchers = DS.state?.preparedMatchers?.blockedWords || [];
+    return {
+      word: settings.autoBlockWordMatches
+        ? (findPreparedMatchInFields([...fields.verifiedNameCandidates, fields.description].filter(Boolean), wordMatchers)
+          || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers)) : null,
+      tag: settings.autoBlockTagMatches
+        ? findPreparedMatchInFields(fields.tagCandidates, DS.state?.preparedMatchers?.blockedTags || []) : null
+    };
+  };
 
   DS.shouldHideBlockedBot = function shouldHideBlockedBot(card, anchor, preparedText = "", preparedFields = null) {
     const id = DS.botIdFromHref?.(anchor.href || "") || DS.chatIdFromHref(anchor.href || "");
@@ -640,7 +663,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const verifiedTagMatch = settings.autoBlockTagMatches
         ? findPreparedMatchInFields(fields.tagCandidates, tagMatchers)
         : null;
-      const tagMatch = findPreparedMatch(fields.all, tagMatchers) || verifiedTagMatch;
+      const tagMatch = verifiedTagMatch || findPreparedMatchInFields(fields.tagCandidates, tagMatchers);
 
       // When tags already hide a card, skip expensive word matching unless
       // word auto-blocking is enabled (overlapping rules must still work).
@@ -683,7 +706,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : [fields.title, fields.description, fields.all].filter(Boolean);
     const word = findPreparedMatchInFields(wordFields, wordMatchers) || findUnorderedNameMatch(fields.nameCandidates, wordMatchers);
     const creator = findPreparedMatchInFields(fields.creatorCandidates?.length ? fields.creatorCandidates : [fields.creator, fields.all].filter(Boolean), DS.state.preparedMatchers?.blockedCreators || []);
-    const tag = findPreparedMatch(fields.all, DS.state.preparedMatchers?.blockedTags || []);
+    const tag = findPreparedMatchInFields(fields.tagCandidates, DS.state.preparedMatchers?.blockedTags || []);
     return {
       title: DS.getCardTitle?.(card) || "",
       description: DS.getCardDescriptionText?.(card) || "",

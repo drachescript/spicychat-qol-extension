@@ -1081,10 +1081,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const cursor = String(options?.lastId || "").trim();
     const limit = Math.max(1, Math.min(200, Number(options?.limit) || 100));
     const key = `${character}|${conversation}|${limit}|${cursor}`;
+    const fresh = options?.forceRefresh === true;
     const cached = historyPageCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) return cached.response;
+    if (!fresh && cached && cached.expiresAt > Date.now()) return cached.response;
     if (historyPagePending.has(key)) return historyPagePending.get(key);
-    const promise = DS.fetchChatHistoryPage(character, conversation, { ...options, limit, lastId: cursor })
+    const { forceRefresh: _fresh, ...requestOptions } = options || {};
+    const promise = DS.fetchChatHistoryPage(character, conversation, { ...requestOptions, limit, lastId: cursor })
       .then(response => {
         if (response?.ok === false) return response;
         historyPageCache.delete(key);

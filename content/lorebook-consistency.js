@@ -15,6 +15,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DEBUG_ID = "ds-qol-creator-debug-preview";
   const DEBUG_LAUNCH_ID = "ds-qol-creator-debug-launch";
   let cache = { botId: "", at: 0, relation: null, book: null };
+  let processedChatPath = "";
+  let lastShowMatches = null;
+  const REGEX_CACHE_LIMIT = 256;
+  const keywordRegexCache = new Map();
 
   const clean = (value, max = 12000) => String(value ?? "").replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trim().slice(0, max);
 
@@ -37,15 +41,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return clean(clone.innerText || clone.textContent || "", 24000);
   }
 
-  function keywordMatches(text, keyword) {
-    const hay = String(text || "").toLocaleLowerCase();
-    const needle = clean(keyword, 200).toLocaleLowerCase();
+  // Local estimates only. Cache compiled matchers so testing hundreds of entries
+  // doesn't build the same regular expression for every mounted message.
+  function normalizedMatchText(text) { return String(text || "").normalize("NFKC").toLocaleLowerCase(); }
+  function keywordMatches(hay, keyword) {
+    const needle = clean(keyword, 200).normalize("NFKC").toLocaleLowerCase();
     if (!needle || needle.length < 2) return false;
-    if (/^[\p{L}\p{N}_-]+$/u.test(needle)) {
-      try { return new RegExp(`(^|[^\\p{L}\\p{N}_])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}\\p{N}_]|$)`, "iu").test(hay); }
-      catch { return hay.includes(needle); }
+    if (!/^[\p{L}\p{N}_-]+$/u.test(needle)) return hay.includes(needle);
+    let regex = keywordRegexCache.get(needle);
+    if (!regex) {
+      try {
+        const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        regex = new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}([^\\p{L}\\p{N}_]|$)`, "u");
+      } catch { return hay.includes(needle); }
+      if (keywordRegexCache.size >= REGEX_CACHE_LIMIT) keywordRegexCache.delete(keywordRegexCache.keys().next().value);
+      keywordRegexCache.set(needle, regex);
     }
-    return hay.includes(needle);
+    return regex.test(hay);
   }
 
   function normalizeBook(raw, id = "") {
@@ -54,7 +66,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       name: clean(entry?.name, 500),
       content: clean(entry?.content, 12000),
       keywords: [...new Set((Array.isArray(entry?.keywords) ? entry.keywords : []).map(k => clean(k, 200)).filter(Boolean))].slice(0, 12)
-    })).filter(entry => entry.name && entry.keywords.length);
+    })).filter(entry => entry.name).slice(0, 1000);
     return { id: clean(raw.id || id, 200), name: clean(raw.name || id, 500), entries };
   }
 
@@ -63,6 +75,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!botId) return null;
     if (cache.botId === botId && Date.now() - cache.at < 30_000) return cache.book;
     const result = await DS.storageGet?.([LINK_KEY, BACKUP_KEY]) || {};
+    if (chatbotId() !== botId) return null;
     const relation = result[LINK_KEY]?.[botId] || null;
     const store = result[BACKUP_KEY]?.meta || result[BACKUP_KEY]?.lorebooks || {};
     let book = relation?.lorebookId ? normalizeBook(store[relation.lorebookId], relation.lorebookId) : null;
@@ -78,8 +91,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function differentialMatches(book, aiText, userText) {
     const max = Math.max(1, Math.min(5, Number(settings().lorebookConsistencyMaxEntries || 3)));
     const matched = [];
+    const aiNormalized = normalizedMatchText(aiText);
+    const userNormalized = normalizedMatchText(userText);
     for (const entry of book?.entries || []) {
-      const newKeywords = entry.keywords.filter(keyword => keywordMatches(aiText, keyword) && !keywordMatches(userText, keyword));
+      const newKeywords = entry.keywords.filter(keyword => keywordMatches(aiNormalized, keyword) && !keywordMatches(userNormalized, keyword));
       if (!newKeywords.length) continue;
       matched.push({ ...entry, matchedKeywords: newKeywords });
       if (matched.length >= max) break;
@@ -166,7 +181,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const heading = document.createElement("h3"); heading.textContent = "Creator trigger preview (local estimate)";
     const note = document.createElement("p"); note.textContent = "This compares visible/local text to keywords. It CANNOT show internal prompt assembly, model reasoning, Rulebook decisions, actual Lorebook injections, or how much native context was used.";
     const source = document.createElement("p"); source.textContent = book
-      ? `Locally linked Lorebook: ${book.name} · ${book.entries.length} keyworded entries. Other attached books or hidden versions may be missing.`
+      ? `Locally linked Lorebook: ${book.name} · ${book.entries.length} saved entries (${book.entries.filter(entry => entry.keywords.length).length} with keywords). Other attached books or hidden versions may be missing.`
       : "No locally backed-up linked Lorebook was found for this bot. Save a backup and visit the linked bot's editor first; unknown is not no Lorebook.";
     const input = document.createElement("textarea"); input.rows = 4; input.placeholder = "Optional: paste test text here, or leave empty to inspect the newest visible chat messages";
     input.setAttribute("aria-label", "Text for local Lorebook keyword test"); Object.assign(input.style, { width: "100%", boxSizing: "border-box", background: "#202125", color: "#fff", padding: "8px", borderRadius: "6px" });
@@ -178,7 +193,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       out.replaceChildren();
       if (!book?.entries?.length) { out.textContent = "No local Lorebook entries to check."; return; }
       const chatRoots = messageRoots().slice(-12);
-      const text = clean(input.value || chatRoots.map(root => messageText(root)).join("\n"), 25000);
+      const text = normalizedMatchText(clean(input.value || chatRoots.map(root => messageText(root)).join("\n"), 25000));
       const total = chatRoots.length;
       const matching = [];
       let approxChars = 0;
@@ -190,6 +205,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const summary = document.createElement("p");
       summary.textContent = `${matching.length}/${book.entries.length} local entries have matching keywords in ${input.value ? "test text" : `${total} loaded messages`}. Their saved entry bodies total roughly ${Math.round(approxChars / 4)} estimated tokens BEFORE native priority, activation, and context limits.`;
       out.append(summary);
+      // These are local-authoring warnings, NOT evidence of what the native
+      // Lorebook engine inserted into a generation.
+      const owners = new Map();
+      for (const entry of book.entries) for (const keyword of entry.keywords) {
+        const key = clean(keyword, 200).normalize("NFKC").toLocaleLowerCase();
+        if (!key) continue;
+        const list = owners.get(key) || new Set();
+        list.add(entry.name); owners.set(key, list);
+      }
+      const repeats = [...owners.entries()].filter(([, names]) => names.size > 1);
+      const longEntries = book.entries.filter(entry => entry.content.length > 2000);
+      const unkeyworded = book.entries.filter(entry => !entry.keywords.length);
+      if (repeats.length || longEntries.length || unkeyworded.length) {
+        const warning = document.createElement("details");
+        warning.style.cssText = "margin:8px 0;padding:7px 9px;border:1px solid rgba(245,158,11,.45);border-radius:7px";
+        const heading = document.createElement("summary");
+        heading.textContent = `Local authoring checks: ${repeats.length} reused keyword${repeats.length === 1 ? "" : "s"}, ${longEntries.length} long entr${longEntries.length === 1 ? "y" : "ies"}, ${unkeyworded.length} without keywords`;
+        warning.append(heading);
+        for (const [keyword, names] of repeats.slice(0, 20)) {
+          const line = document.createElement("p");
+          line.textContent = `Keyword “${keyword}” appears in: ${[...names].join(", ")}`;
+          warning.append(line);
+        }
+        if (repeats.length > 20) warning.append(document.createTextNode(`Showing 20 of ${repeats.length} reused keywords.`));
+        for (const entry of longEntries.slice(0, 12)) {
+          const line = document.createElement("p");
+          line.textContent = `${entry.name}: ${entry.content.length.toLocaleString()} characters in the saved backup`;
+          warning.append(line);
+        }
+        if (longEntries.length > 12) warning.append(document.createTextNode(`Showing 12 of ${longEntries.length} long entries.`));
+        for (const entry of unkeyworded.slice(0, 12)) {
+          const line = document.createElement("p");
+          line.textContent = `${entry.name}: no locally saved keywords`;
+          warning.append(line);
+        }
+        if (unkeyworded.length > 12) warning.append(document.createTextNode(`Showing 12 of ${unkeyworded.length} entries without keywords.`));
+        out.append(warning);
+      }
       for (const {entry,hits} of matching.slice(0,80)) {
         const row = document.createElement("div"); row.style.cssText="padding:8px 0;border-top:1px solid #444";
         const label = document.createElement("strong"); label.textContent = entry.name;
@@ -244,15 +297,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.queueLorebookConsistencyEntries = (entries, sourceMessageId) => setQueue(entries, sourceMessageId);
 
   DS.applyLorebookConsistency = async function applyLorebookConsistency() {
+    const path = chatPath();
+    if (processedChatPath !== path) {
+      processed.clear();
+      processedChatPath = path;
+      document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove());
+    }
     const s = settings();
     updateCreatorDebugLaunch();
+    if (lastShowMatches !== !!s.lorebookConsistencyShowMatches) {
+      // A visibility toggle must refresh previously skipped/hidden badges.
+      lastShowMatches = !!s.lorebookConsistencyShowMatches;
+      processed.clear();
+      if (!lastShowMatches) document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove());
+    }
     if (!s.enabled || !s.enableLorebookConsistency || !DS.isSingleChatPage?.()) {
       document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove());
+      processed.clear();
       clearQueue();
       return;
     }
     const book = await currentBook();
-    if (!book?.entries?.length) return;
+    if (chatPath() !== path || !settings().enabled || !settings().enableLorebookConsistency) return;
+    if (!book?.entries?.length) {
+      document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove());
+      processed.clear();
+      return;
+    }
     const roots = messageRoots();
     for (let i = 0; i < roots.length; i += 1) {
       const root = roots[i]; if (!isAi(root)) continue;
@@ -262,15 +333,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const signature = `${aiText.length}:${aiText.slice(-180)}`;
       if (processed.get(root.id) === signature) continue;
       processed.set(root.id, signature);
+      if (processed.size > 240) processed.delete(processed.keys().next().value);
       const matches = differentialMatches(book, aiText, userText);
-      if (!matches.length) continue;
-      if (s.lorebookConsistencyAutoQueue !== false) setQueue(matches, root.id);
+      if (!matches.length) {
+        // A regenerated answer can lose all its previous keyword hits.
+        root.nextElementSibling?.classList?.contains(BAR_CLASS) && root.nextElementSibling.remove();
+        continue;
+      }
+      if (s.lorebookConsistencyAutoQueue === true) setQueue(matches, root.id);
       renderBar(root, matches, book.name || "Lorebook");
     }
   };
 
   DS.removeLorebookConsistency = function removeLorebookConsistency() {
     document.querySelectorAll(`.${BAR_CLASS}`).forEach(node => node.remove()); closeModal(); clearQueue();
+    processed.clear(); processedChatPath = ""; keywordRegexCache.clear(); lastShowMatches = null;
     document.getElementById(DEBUG_LAUNCH_ID)?.remove(); document.getElementById(DEBUG_ID)?.remove();
   };
 })();

@@ -5,13 +5,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   "use strict";
   const DS = window.DragonScriptQoL;
   if (!DS) return;
-  const ids = new Set(["accessibility","ad-banners","alternate-dialogue","android-app","animation-control","auto-voice","bot-archive","bot-backup","bot-blocking","bot-editor-actions","bot-editor-history","bot-editor-memory","bot-editor-snippets","bot-organizer","bot-status","bulk-blocking","card-token-info","card-workflow","cards","character-qol-profiles","chat-backgrounds","chat-bookmarks","chat-bubbles","chat-export","chat-format-compatibility","chat-index","chat-list","chat-nudges","chat-organizer","chat-rulebook-metadata","chat-search","chat-stability","chat-tags","chat-topbar","chat-ui","command-palette","composer-control","context-keeper","core-message-cache","creation-audit","creation-bulk-input","creator-favorites","creator-following","creator-workspace","creator-writing-assistant","delete-guard","exact-message-counts","failed-message-helper","favorite-bots","focus-mode","footer-manager","formatting-toolbar","generation-metadata","generation-profiles","interface-runtime-tools","language-filter","later-bots","list-fill","listing-panel-position","local-tag-matching","lorebook-backup","lorebook-consistency","lorebook-connections","lorebook-entries","lorebook-filter","lorebook-public-qol","lorebook-search-filter","lorebook-tags","lorebook-workflow","memory-manager","message-options","mobile-bot-organizer","mobile-listing-overflow","model-selector","moderation-warnings","my-chatbot-card-shortcuts","my-creations-backup","my-creations-filters","my-creations-view-memory","native-rating-helpers","ooc","opened-chats","pagination-tools","performance-mode","persona-full-backup","persona-organizer","personas","premium-notifications","profile-export","quick-panel","recommendation-helpers","reply-instructions","rp-format-repair","rp-state-tracker","rulebook-filter","rulebook-diagnostics","saved-chat-actions","saved-lists-overlay","saved-snippets","scroll-to-top","selection-memory","sidebar","smart-filter-presets","soundscapes","story-day-tracker","story-reading-layout","tags-nsfw","text-replacements","top-bar","translation","ui-layout-fixes","wiki-lorebook-importer"]);
+  const ids = new Set(["accessibility","ad-banners","alternate-dialogue","android-app","animation-control","auto-voice","auto-images","auto-afk","auto-blocking","bot-archive","bot-backup","bot-blocking","bot-editor-actions","bot-editor-history","bot-editor-memory","bot-editor-snippets","bot-organizer","bot-status","bulk-blocking","card-token-info","card-workflow","cards","character-qol-profiles","chat-backgrounds","character-pictures","persona-pictures","picture-library","chat-bookmarks","chat-bubbles","chat-export","chat-format-compatibility","chat-index","chat-list","chat-nudges","chat-organizer","chat-rulebook-metadata","chat-search","chat-scene-notes","chat-stability","chat-tags","chat-topbar","chat-ui","command-palette","composer-control","context-keeper","core-message-cache","creation-audit","creation-bulk-input","creator-favorites","creator-following","creator-workspace","creator-writing-assistant","delete-guard","exact-message-counts","failed-message-helper","favorite-bots","focus-mode","footer-manager","formatting-toolbar","generation-metadata","generation-profiles","interface-runtime-tools","language-filter","later-bots","list-fill","listing-panel-position","local-tag-matching","lorebook-backup","lorebook-consistency","lorebook-connections","lorebook-entries","lorebook-filter","lorebook-public-qol","lorebook-search-filter","lorebook-tags","lorebook-workflow","memory-manager","message-options","mobile-bot-organizer","mobile-listing-overflow","model-selector","moderation-warnings","my-chatbot-card-shortcuts","my-creations-backup","my-creations-filters","my-creations-view-memory","my-creations-auto-load","native-rating-helpers","ooc","opened-chats","pagination-tools","performance-mode","persona-full-backup","persona-organizer","personas","premium-notifications","profile-export","quick-panel","recommendation-helpers","reply-instructions","rp-format-repair","rp-state-tracker","rulebook-filter","rulebook-diagnostics","saved-chat-actions","saved-lists-overlay","saved-snippets","scroll-to-top","selection-memory","sidebar","smart-filter-presets","soundscapes","story-day-tracker","story-reading-layout","tags-nsfw","tag-aliases","text-replacements","top-bar","translation","ui-layout-fixes","wiki-lorebook-importer"]);
   const aliases = Object.freeze({
     "OOC": "ooc",
     "chat top bar": "chat-topbar",
     "chat UI": "chat-ui",
-    "chat background button placement": "chat-backgrounds",
-    "chat background cleanup": "chat-backgrounds",
+    "chat background button placement": "custom-pictures",
+    "custom pictures": "custom-pictures",
+    "chat background cleanup": "custom-pictures",
+    "chat backgrounds": "custom-pictures",
+    "character pictures": "character-pictures",
+    "persona pictures": "persona-pictures",
+    "picture library": "picture-library",
     "composer": "composer-control",
     "scroll to top": "scroll-to-top",
     "card hiding": "bot-blocking",
@@ -103,6 +108,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "message removal draft guard": "delete-guard",
     "message options": "message-options",
     "auto voice": "auto-voice",
+    "auto images": "auto-images",
+    "auto image": "auto-images",
     "card greeting token cleanup": "card-token-info",
     "rulebook listing tools": "rulebook-filter",
     "rulebook diagnostics": "rulebook-diagnostics",
@@ -111,15 +118,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "rulebook diagnostics cleanup": "rulebook-diagnostics"
 });
   const raw = window.__DSQ_BUILD_PROFILE__ || {};
-  const selected = raw.generated && Array.isArray(raw.features)
+  const requested = raw.generated && Array.isArray(raw.features)
     ? new Set(raw.features.filter(id => ids.has(String(id))))
     : null;
+  const dependencies = Object.freeze({
+    "auto-blocking": ["cards", "bot-blocking"]
+  });
+  const selected = requested ? new Set([...requested].filter(id =>
+    (dependencies[id] || []).every(dep => requested.has(dep)))) : null;
   function featureForTask(task) {
     const name = String(task || "");
     if (Object.prototype.hasOwnProperty.call(aliases, name)) return aliases[name];
     const slug = name.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()
       .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return ids.has(slug) ? slug : null;
+    return slug === "custom-pictures" ? null : (ids.has(slug) ? slug : null);
   }
   DS.featureBuildProfile = Object.freeze({
     allFeatureIds: Object.freeze([...ids]),

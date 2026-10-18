@@ -1,0 +1,14 @@
+{
+  "id": "story-reading-layout",
+  "primary": "content/story-reading-layout.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "storyReadingLayout"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

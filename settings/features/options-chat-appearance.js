@@ -72,7 +72,28 @@ function normalizeChatBackgroundMediaStore(raw) {
   for (const [key, value] of Object.entries(input.avatarSideCopies || {})) {
     if (key && value === true) avatarSideCopies[String(key).slice(0, 260)] = true;
   }
-  return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies };
+  const viewModes = {};
+  for (const [key, raw] of Object.entries(input.viewModes || {})) {
+    if (!key || !raw || typeof raw !== "object") continue;
+    const fit = ["cover", "contain", "tile"].includes(raw.fit) ? raw.fit : "";
+    const position = ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"].includes(raw.position) ? raw.position : "";
+    if (fit || position) viewModes[String(key).slice(0,260)] = { ...(fit ? { fit } : {}), ...(position ? { position } : {}) };
+  }
+  const cleanChatPictures = value => {
+    const result = {};
+    for (const [key, raw] of Object.entries(value || {})) {
+      const item = cleanItem(raw);
+      if (item && key) result[String(key).slice(0,260)] = { ...item, note: String(raw.note || "").slice(0,1200) };
+    }
+    return result;
+  };
+  const pictureLibrary = (Array.isArray(input.pictureLibrary) ? input.pictureLibrary : [])
+    .slice(0,30).map(raw => {
+      const item = cleanItem(raw);
+      return item ? { ...item, id: String(raw.id || "").slice(0,90) } : null;
+    }).filter(item => item?.id);
+  return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies,
+    viewModes, portraits: cleanChatPictures(input.portraits), personaPictures: cleanChatPictures(input.personaPictures), pictureLibrary };
 }
 
 function chatBackgroundFileToDataUrl(file) {

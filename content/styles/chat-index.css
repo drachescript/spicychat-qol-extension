@@ -87,3 +87,10 @@
   .ds-qol-native-index-results { padding: 9px; }
   .ds-qol-native-index-row { align-items: flex-start; flex-direction: column; gap: 1px; }
 }
+
+/* Optional local message-text view. Nothing here loads remote history. */
+.ds-qol-ci-modes { display: flex; gap: 6px; }
+.ds-qol-ci-modes > button { flex: 1; }
+.ds-qol-ci-modes > button[aria-pressed="true"] { border-color: #9db6ff; background: #383d63; }
+.ds-qol-ci-excerpts { margin-top: 6px; padding: 8px; border: 1px solid #62616e; border-radius: 7px; background: #202027; max-height: 290px; overflow-y: auto; }
+.ds-qol-ci-excerpt { margin: 6px 0; padding: 7px; border-bottom: 1px solid #464650; color: #eee; white-space: pre-wrap; overflow-wrap: anywhere; }

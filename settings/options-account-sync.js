@@ -405,6 +405,36 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
 
 function setupAccountSyncFoundation() {
   setupAccountSyncCategorySelectionGuard();
+  const describeSyncPlan = () => {
+    const prefs = readSyncDevicePrefsUi();
+    const labels = { off: "off", "two-way": "upload + download", "upload-only": "upload only", "download-only": "download only", manual: "manual only" };
+    const settingsLabel = labels[prefs.mode] || "off";
+    const settingCount = prefs.mode === "off" ? 0 : Array.isArray(prefs.allowedKeys) ? prefs.allowedKeys.length : "all supported";
+    const listNames = { blockedBots: "Blocked", favoriteBots: "Favorites", laterBots: "Later", notInterestedBots: "Not Interested", openedChats: "Opened" };
+    const lists = ACCOUNT_SYNC_LIST_NAMES.filter(name => prefs.listModes?.[name] !== "off")
+      .map(name => `${listNames[name]}: ${labels[prefs.listModes[name]] || "off"}`);
+    const uploadCount = ACCOUNT_SYNC_LIST_NAMES.filter(name => ["two-way", "upload-only"].includes(prefs.listModes?.[name])).length + (["two-way", "upload-only"].includes(prefs.mode) ? 1 : 0);
+    const el = $("accountSyncDirectionPreview");
+    if (el) el.textContent = `Unsaved preview · Settings: ${settingsLabel} (${settingCount} keys). Lists: ${lists.join("; ") || "none"}. ${uploadCount ? "This selection allows uploading data from this device." : "No automatic upload directions selected."} Pictures, memories, drafts and chat text are not uploaded by this sync service.`;
+  };
+  $("accountSyncPreviewChoices")?.addEventListener("click", describeSyncPlan);
+  $("accountSyncQuickModes")?.addEventListener("click", event => {
+    const preset = event.target?.closest?.("[data-sync-preset]")?.dataset?.syncPreset;
+    if (!["all-off", "blocked-only", "desktop-upload"].includes(preset)) return;
+    const mode = $("accountSyncSettingsMode");
+    if (mode) mode.value = preset === "desktop-upload" ? "upload-only" : "off";
+    const limit = $("accountSyncLimitSettings");
+    if (limit) {
+      limit.checked = false;
+      if ($("accountSyncSettingSelection")) $("accountSyncSettingSelection").hidden = true;
+    }
+    for (const name of ACCOUNT_SYNC_LIST_NAMES) {
+      const select = document.querySelector(`[data-sync-list="${name}"]`);
+      if (select) select.value = preset === "blocked-only" && name === "blockedBots" ? "two-way" : "off";
+    }
+    accountSyncUserEditing = true;
+    describeSyncPlan();
+  });
   refreshAccountSyncUi({ refreshDevices: true }).catch(() => {});
   $("accountSyncDevicePreferences")?.addEventListener("change", event => {
     if (event.target?.id === "accountSyncLimitSettings") {

@@ -1,0 +1,173 @@
+/* v0.1.8.87 - current chat search inside QoL panel */
+#ds-qol-current-chat-search-tools {
+  display: none;
+  height: auto !important;
+  min-height: 0 !important;
+  margin-bottom: 6px;
+}
+
+#ds-qol-current-chat-search-tools .ds-qol-current-chat-search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 1px 5px;
+  color: rgba(255,255,255,.78);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+#ds-qol-current-chat-search-count {
+  color: rgba(255,255,255,.62);
+  white-space: nowrap;
+}
+
+#ds-qol-current-chat-search-tools input,
+#ds-qol-current-chat-search-tools select {
+  margin-bottom: 6px;
+}
+
+#ds-qol-current-chat-search-nav {
+  margin-bottom: 6px;
+}
+
+#ds-qol-current-chat-search-prev,
+#ds-qol-current-chat-search-next {
+  flex: 1 1 0;
+}
+
+#ds-qol-current-chat-search-load-older {
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+#ds-qol-current-chat-search-load-older[hidden] {
+  display: none !important;
+}
+
+[id^="message-"].ds-chat-search-match {
+  position: relative;
+  z-index: 1;
+  border-radius: 12px;
+  outline: 2px solid rgba(255, 255, 255, 0.22);
+  outline-offset: 3px;
+}
+
+[id^="message-"].ds-chat-search-current {
+  outline-width: 3px;
+  outline-color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+/* v0.1.8.87 - optional compact Find popup for current chat search */
+#ds-chat-search-panel {
+  position: fixed;
+  z-index: 2147483000;
+  top: 72px;
+  right: 18px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto auto auto auto auto auto;
+  align-items: center;
+  gap: 6px;
+  width: min(620px, calc(100vw - 36px));
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(25, 25, 29, 0.96);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.34);
+  color: #f4f4f5;
+  backdrop-filter: blur(12px);
+  box-sizing: border-box;
+}
+
+#ds-chat-search-panel input,
+#ds-chat-search-panel select,
+#ds-chat-search-panel button {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+#ds-chat-search-panel input {
+  min-width: 0;
+  padding: 6px 9px;
+  outline: none;
+}
+
+#ds-chat-search-panel input:focus {
+  border-color: rgba(255, 255, 255, 0.38);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+#ds-chat-search-panel select {
+  padding: 4px 7px;
+}
+
+#ds-chat-search-panel button {
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+#ds-chat-search-panel button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+#ds-chat-search-panel button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+#ds-chat-search-panel .ds-chat-search-prev,
+#ds-chat-search-panel .ds-chat-search-next,
+#ds-chat-search-panel .ds-chat-search-close {
+  width: 34px;
+  padding-inline: 0;
+  font-size: 19px;
+  line-height: 1;
+}
+
+#ds-chat-search-panel .ds-chat-search-count {
+  min-width: 54px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.86;
+  white-space: nowrap;
+}
+
+#ds-chat-search-panel .ds-chat-search-load-older[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  #ds-chat-search-panel {
+    top: 62px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    grid-template-columns: minmax(120px, 1fr) auto auto auto auto;
+  }
+
+  #ds-chat-search-panel .ds-chat-search-count {
+    grid-column: 1 / 2;
+    grid-row: 2;
+    text-align: left;
+    padding-left: 2px;
+  }
+
+  #ds-chat-search-panel .ds-chat-search-load-older {
+    grid-column: 2 / 5;
+    grid-row: 2;
+  }
+
+  #ds-chat-search-panel .ds-chat-search-close {
+    grid-column: 5;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    height: auto;
+  }
+}
+

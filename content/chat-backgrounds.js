@@ -1,142 +1,20 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
+// Custom chat backgrounds and scenes. No character/persona/library code.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
-
   const DS = window.DragonScriptQoL;
-  if (!DS) return;
-
-  const STORE_KEY = "chatBackgroundMediaV1";
+  const kit = DS?.customPictureKit;
+  if (!kit) return;
+  const { chatKey, safeBackgroundUrl, fileToDataUrl } = kit;
   const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
   const MAX_SCENE_BYTES = 1.5 * 1024 * 1024;
   const MAX_SCENES_PER_CHAT = 6;
   const MAX_GALLERY_DATA_CHARS = 24 * 1024 * 1024;
-  // Keep portraits clearly visible without forcing the viewport-wide crop of cover.
   const DEFAULT_AVATAR_SIZE = 100;
-  // Only the original CDN URL is used by default. If it is unavailable,
-  // fall back once to a moderately sized CDN derivative (never a tiny avatar).
   const avatarImageChecks = new Map();
-  let mediaStore = { global: null, chats: {}, galleries: {}, suppressedChats: {}, avatarSizes: {}, avatarSideCopies: {}, viewModes: {}, portraits: {}, personaPictures: {}, pictureLibrary: [] };
-  let activePictureTab = "backgrounds";
-  const originalPictureSources = new WeakMap();
-  const touchedPictureNodes = new Set();
-  let lastPictureRoute = "";
-  let lastPictureSource = "";
-  let lastPictureScanAt = 0;
-  let mediaLoaded = false;
-  let mediaLoadPromise = null;
-
-  function safeBackgroundUrl(value) {
-    try {
-      const u = new URL(String(value || "").trim());
-      if (u.protocol !== "https:" || u.username || u.password || u.href.length > 2048) return "";
-      if (!u.hostname || /^(localhost|.*\.localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|::1$)/i.test(u.hostname)) return "";
-      return u.href;
-    } catch { return ""; }
-  }
-
-  function cleanStore(raw) {
-    const input = raw && typeof raw === "object" ? raw : {};
-    const cleanItem = item => {
-      if (!item || typeof item !== "object") return null;
-      const dataUrl = String(item.dataUrl || "");
-      const url = safeBackgroundUrl(item.url || "");
-      const sourceUrl = safeBackgroundUrl(item.sourceUrl || url);
-      const sourceMode = item.sourceMode === "link" ? "link" : "local";
-      if (sourceMode === "link" ? !url : !dataUrl.startsWith("data:image/")) return null;
-      return {
-        ...(sourceMode === "local" ? { dataUrl } : { url }),
-        ...(sourceUrl ? { sourceUrl } : {}), sourceMode,
-        name: String(item.name || "Background image").slice(0, 180),
-        updatedAt: Number(item.updatedAt) || Date.now()
-      };
-    };
-    const chats = {};
-    for (const [key, item] of Object.entries(input.chats || {})) {
-      const clean = cleanItem(item);
-      if (clean && key) chats[String(key).slice(0, 260)] = clean;
-    }
-    const galleries = {};
-    for (const [key, gallery] of Object.entries(input.galleries || {})) {
-      const items = (Array.isArray(gallery?.items) ? gallery.items : []).slice(0, MAX_SCENES_PER_CHAT)
-        .map(item => { const cleaned = cleanItem(item); return cleaned ? { ...cleaned, id: String(item.id || "").slice(0, 80) } : null; })
-        .filter(item => item?.id);
-      if (key && items.length) galleries[String(key).slice(0, 260)] = { activeId: String(gallery.activeId || "").slice(0, 80), items };
-    }
-    // A cleared chat must stay clear even when a global image or automatic
-    // avatar would otherwise take over. Never delete global/gallery images.
-    const suppressedChats = {};
-    for (const [key, value] of Object.entries(input.suppressedChats || {})) {
-      if (key && value === true) suppressedChats[String(key).slice(0, 260)] = true;
-    }
-    const avatarSizes = {};
-    for (const [key, value] of Object.entries(input.avatarSizes || {})) {
-      const percent = Number(value);
-      if (key && Number.isFinite(percent) && percent >= 30 && percent <= 150) {
-        avatarSizes[String(key).slice(0, 260)] = Math.round(percent);
-      }
-    }
-    const avatarSideCopies = {};
-    for (const [key, enabled] of Object.entries(input.avatarSideCopies || {})) {
-      if (key && enabled === true) avatarSideCopies[String(key).slice(0, 260)] = true;
-    }
-    // Per-chat display choices, independent of the saved image (local, URL,
-    // global or gallery). Never let imported values become arbitrary CSS.
-    const viewModes = {};
-    for (const [key, inputMode] of Object.entries(input.viewModes || {})) {
-      if (!key || !inputMode || typeof inputMode !== "object") continue;
-      const fit = ["cover", "contain", "tile"].includes(inputMode.fit) ? inputMode.fit : "";
-      const position = ["center", "top", "bottom", "left", "right", "top left", "top right", "bottom left", "bottom right"].includes(inputMode.position) ? inputMode.position : "";
-      if (fit || position) viewModes[String(key).slice(0, 260)] = { ...(fit ? { fit } : {}), ...(position ? { position } : {}) };
-    }
-    const cleanChatPictures = source => {
-      const output = {};
-      for (const [key, value] of Object.entries(source || {})) {
-        const item = cleanItem(value);
-        if (key && item) output[String(key).slice(0, 260)] = { ...item, note: String(value.note || "").slice(0, 1200) };
-      }
-      return output;
-    };
-    const pictureLibrary = (Array.isArray(input.pictureLibrary) ? input.pictureLibrary : [])
-      .slice(0, 30).map(value => {
-        const item = cleanItem(value);
-        return item ? { ...item, id: String(value.id || "").slice(0, 90) } : null;
-      }).filter(item => item?.id);
-    return { global: cleanItem(input.global), chats, galleries, suppressedChats, avatarSizes, avatarSideCopies, viewModes,
-      portraits: cleanChatPictures(input.portraits), personaPictures: cleanChatPictures(input.personaPictures), pictureLibrary };
-  }
-
-  async function loadStore(force = false) {
-    if (mediaLoaded && !force) return mediaStore;
-    if (mediaLoadPromise && !force) return mediaLoadPromise;
-    mediaLoadPromise = (async () => {
-      try {
-        const result = await DS.storageGet?.([STORE_KEY]);
-        mediaStore = cleanStore(result?.[STORE_KEY]);
-      } catch {
-        mediaStore = cleanStore(null);
-      }
-      mediaLoaded = true;
-      mediaLoadPromise = null;
-      return mediaStore;
-    })();
-    return mediaLoadPromise;
-  }
-
-  async function saveStore(next) {
-    const normalized = cleanStore(next);
-    const ok = await DS.storageSet?.({ [STORE_KEY]: normalized });
-    if (!ok) throw new Error("Browser storage rejected the background image");
-    mediaStore = normalized;
-    mediaLoaded = true;
-    return mediaStore;
-  }
-
-  function chatKey() {
-    if (!DS.isSingleChatPage?.()) return "";
-    return String(location.pathname || "").replace(/\/+$/, "");
-  }
-
+  let mediaStore = kit.getStore();
+  async function loadStore(force = false) { mediaStore = await kit.loadStore(force); return mediaStore; }
+  async function saveStore(next) { mediaStore = await kit.saveStore(next); return mediaStore; }
   function avatarFromChatHeader() {
     const profile = document.querySelector("a[aria-label='chatbot-profile'][href*='/chatbot/']");
     // SpicyChat 4.6 places the avatar beside the name-link column. Search
@@ -272,16 +150,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
     document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
   }
-
-  function fileToDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(reader.error || new Error("Could not read image"));
-      reader.readAsDataURL(file);
-    });
-  }
-
 
   function fetchBackgroundUrlImage(url) {
     return new Promise((resolve, reject) => {
@@ -468,7 +336,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       delete chats[key];
       await saveStore({ ...mediaStore, galleries, chats, suppressedChats });
       await DS.applyChatBackgrounds?.();
-      openDialog();
+      DS.openCustomPicturesMenu?.("backgrounds");
     }
     catch { DS.setQuickStatus?.("Could not store scene gallery. Remove images or use smaller files."); }
   }
@@ -489,260 +357,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     await saveStore({ ...mediaStore, galleries, chats, suppressedChats });
     await DS.applyChatBackgrounds?.();
-    openDialog();
+    DS.openCustomPicturesMenu?.("backgrounds");
   }
 
-  function installed(feature) {
-    return DS.featureBuildProfile?.isInstalled?.(feature) !== false;
-  }
-
-  function activeCustomPictureFeatures(settings = DS.state?.settings || {}) {
-    return {
-      backgrounds: installed("chat-backgrounds") && !!settings.enableChatBackgrounds,
-      character: installed("chat-backgrounds") && !!settings.enableCustomCharacterPictures,
-      persona: installed("chat-backgrounds") && !!settings.enableCustomPersonaPictures,
-      generation: installed("auto-voice") && typeof DS.applyAutoImage === "function",
-      library: installed("chat-backgrounds") && !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures)
-    };
-  }
-
-  async function choosePictureFile() {
-    const input = document.createElement("input"); input.type = "file"; input.accept = "image/*";
-    input.style.display = "none"; document.body.appendChild(input);
-    const file = await new Promise(resolve => {
-      input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });
-      input.addEventListener("cancel", () => resolve(null), { once: true });
-      input.click();
-    });
-    input.remove();
-    if (!file) return null;
-    if (!file.type.startsWith("image/") || file.size > MAX_IMAGE_BYTES)
-      throw new Error("Select an image under 8 MB.");
-    const dataUrl = await fileToDataUrl(file);
-    if (!dataUrl.startsWith("data:image/")) throw new Error("Invalid image file.");
-    return { dataUrl, name: file.name.slice(0, 180), sourceMode: "local", updatedAt: Date.now() };
-  }
-
-  async function storePicture(kind, item) {
-    const key = chatKey();
-    if (!key) throw new Error("Open a conversation first.");
-    if (!activeCustomPictureFeatures()[kind]) throw new Error("Enable this Custom Pictures subsection in Settings.");
-    await loadStore();
-    const field = kind === "character" ? "portraits" : "personaPictures";
-    const records = { ...mediaStore[field] };
-    if (item) records[key] = item;
-    else delete records[key];
-    await saveStore({ ...mediaStore, [field]: records });
-    applyPictureOverrides(true);
-  }
-
-  function pictureUrl(item) { return item?.dataUrl || item?.url || ""; }
-  function clearPictureOverrides() {
-    for (const img of touchedPictureNodes) {
-      if (!img.isConnected) { touchedPictureNodes.delete(img); continue; }
-      const previous = originalPictureSources.get(img);
-      if (previous && img.getAttribute("src") !== previous) img.setAttribute("src", previous);
-      originalPictureSources.delete(img);
-      touchedPictureNodes.delete(img);
-    }
-    lastPictureSource = "";
-  }
-
-  function applyPictureOverrides(force = false) {
-    if (!DS.isSingleChatPage?.()) { clearPictureOverrides(); return; }
-    const settings = DS.state?.settings || {};
-    const features = activeCustomPictureFeatures(settings);
-    const key = chatKey();
-    const portrait = features.character ? pictureUrl(mediaStore.portraits?.[key]) : "";
-    const persona = features.persona ? pictureUrl(mediaStore.personaPictures?.[key]) : "";
-    const source = `${key}|${portrait.length}:${portrait.slice(0, 70)}|${persona.length}:${persona.slice(0, 70)}|${features.character}:${features.persona}`;
-    const now = Date.now();
-    if (!force && source === lastPictureSource && now - lastPictureScanAt < 3500) return;
-    lastPictureScanAt = now;
-    if (lastPictureRoute !== key) { clearPictureOverrides(); lastPictureRoute = key; }
-    lastPictureSource = source;
-    if (!portrait && !persona) { clearPictureOverrides(); return; }
-    // Only replace pictures displayed in the chat UI; never change bot settings,
-    // native uploads, the generation request or the actual conversation content.
-    const roots = Array.from(document.querySelectorAll("div[id^='message-']"))
-      .filter(root => !root.parentElement?.closest?.("div[id^='message-']"))
-      .slice(-80);
-    const targets = [];
-    for (const root of roots) {
-      const isBot = !!root.querySelector("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
-      const src = isBot ? portrait : persona;
-      if (!src) continue;
-      const img = root.querySelector("button img[alt], button img[src]");
-      if (img) targets.push([img, src]);
-    }
-    if (portrait) {
-      const header = document.querySelector("a[aria-label='chatbot-profile']");
-      const image = header?.parentElement?.parentElement?.querySelector("button img");
-      if (image) targets.push([image, portrait]);
-    }
-    const active = new Set(targets.map(([img]) => img));
-    for (const img of touchedPictureNodes) {
-      if (!img.isConnected || !active.has(img)) {
-        const original = originalPictureSources.get(img);
-        if (img.isConnected && original) img.setAttribute("src", original);
-        touchedPictureNodes.delete(img); originalPictureSources.delete(img);
-      }
-    }
-    for (const [img, src] of targets) {
-      if (!originalPictureSources.has(img)) originalPictureSources.set(img, img.getAttribute("src") || "");
-      if (img.getAttribute("src") !== src) img.setAttribute("src", src);
-      touchedPictureNodes.add(img);
-    }
-  }
-
-  function addPictureTab(panel, name, label, build, enabled) {
-    if (!enabled) return null;
-    const section = document.createElement("section");
-    section.dataset.dsPictureTab = name;
-    section.hidden = name !== activePictureTab;
-    section.style.display = name === activePictureTab ? "block" : "none";
-    build(section);
-    panel.appendChild(section);
-    return section;
-  }
-
-  function appendButton(parent, label, handler) {
-    const button = document.createElement("button"); button.type = "button"; button.textContent = label;
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try { await handler(); }
-      catch (error) { DS.setQuickStatus?.(error?.message || "Could not update picture."); }
-      finally { button.disabled = false; }
-    });
-    parent.appendChild(button);
-    return button;
-  }
-
-  function buildPictureEditor(section, kind, label) {
-    const key = chatKey();
-    const item = (kind === "character" ? mediaStore.portraits : mediaStore.personaPictures)?.[key];
-    const h = document.createElement("h3"); h.textContent = label;
-    const note = document.createElement("p"); note.textContent = "Per-chat visual override only. Does not change the bot/persona profile or what SpicyChat uses as its internal image-generation reference.";
-    section.append(h, note);
-    if (item) {
-      const img = document.createElement("img"); img.src = pictureUrl(item);
-      img.alt = item.name || label; img.style.cssText = "width:104px;max-height:140px;object-fit:contain;border-radius:8px;display:block;margin:10px 0";
-      section.appendChild(img);
-    }
-    const controls = document.createElement("div"); controls.className = "ds-chat-background-actions";
-    appendButton(controls, "Choose picture", async () => {
-      const picture = await choosePictureFile(); if (picture) { await storePicture(kind, picture); await openDialog(kind); }
-    });
-    appendButton(controls, "Use image URL", async () => {
-      const requested = window.prompt("Public HTTPS image URL");
-      if (requested === null) return;
-      const url = safeBackgroundUrl(requested);
-      if (!url) throw new Error("Enter a valid public HTTPS image URL.");
-      await storePicture(kind, { url, sourceUrl: url, sourceMode: "link", name: "Linked picture", updatedAt: Date.now() });
-      await openDialog(kind);
-    });
-    appendButton(controls, "Clear override", async () => { await storePicture(kind, null); await openDialog(kind); });
-    appendButton(controls, "Save to library", async () => {
-      if (!item) throw new Error("Choose a picture first.");
-      await saveToPictureLibrary(item); await openDialog("library");
-    });
-    section.appendChild(controls);
-    const appearance = document.createElement("label"); appearance.textContent = "Appearance / scene notes (local only)";
-    const area = document.createElement("textarea"); area.rows = 3; area.maxLength = 1200;
-    area.placeholder = "Current outfit, location, look...";
-    area.value = item?.note || "";
-    appearance.appendChild(area); section.appendChild(appearance);
-    appendButton(section, "Save appearance note", async () => {
-      if (!item) throw new Error("Choose a picture before saving notes.");
-      await storePicture(kind, { ...item, note: area.value.slice(0, 1200) });
-      await openDialog(kind);
-    });
-    if (kind === "character") appendButton(section, "Use latest chat image as current look", async () => {
-      const imgs = [...document.querySelectorAll("div[id^='message-'] img")].filter(img => {
-        const src = img.currentSrc || img.src || "";
-        return img.naturalWidth >= 200 && img.naturalHeight >= 150 && !img.closest("button");
-      });
-      const url = safeBackgroundUrl(imgs.at(-1)?.currentSrc || imgs.at(-1)?.src || "");
-      if (!url) throw new Error("No suitable generated image is currently loaded; save and upload it instead.");
-      await storePicture(kind, { url, sourceUrl:url, sourceMode:"link", name:"Latest chat image", updatedAt:Date.now() });
-      await openDialog(kind);
-    });
-  }
-
-  async function saveToPictureLibrary(item) {
-    await loadStore();
-    const current = mediaStore.pictureLibrary || [];
-    if (current.length >= 30) throw new Error("Picture Library is full (30 images). Remove one first.");
-    const chars = current.reduce((total, entry) => total + (entry.dataUrl?.length || 0), 0);
-    if (chars + (item.dataUrl?.length || 0) > MAX_GALLERY_DATA_CHARS)
-      throw new Error("Picture Library reached its 24 MB local budget.");
-    const entry = { ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
-    await saveStore({ ...mediaStore, pictureLibrary: [...current, entry] });
-  }
-
-  function buildPictureLibrary(section) {
-    const heading = document.createElement("h3"); heading.textContent = "Picture Library";
-    const note = document.createElement("p"); note.textContent = "Reusable local pictures (up to 30). Your existing scene galleries stay in Backgrounds.";
-    section.append(heading, note);
-    appendButton(section, "Add picture to library", async () => {
-      const item = await choosePictureFile(); if (item) { await saveToPictureLibrary(item); await openDialog("library"); }
-    });
-    const gallery = document.createElement("div"); gallery.className = "ds-chat-scene-grid";
-    for (const entry of mediaStore.pictureLibrary || []) {
-      const row = document.createElement("div"); row.className = "ds-chat-scene-item";
-      const img = document.createElement("img"); img.src = pictureUrl(entry); img.alt = entry.name; img.loading = "lazy";
-      row.appendChild(img);
-      for (const [role,label] of [["character","Use for character"],["persona","Use for persona"],["backgrounds","Use as background"]]) {
-        if (!activeCustomPictureFeatures()[role]) continue;
-        appendButton(row, label, async () => {
-          if (role === "backgrounds") {
-            const key = chatKey(); const chats = { ...mediaStore.chats, [key]: entry };
-            const suppressedChats = { ...mediaStore.suppressedChats }; delete suppressedChats[key];
-            await saveStore({ ...mediaStore, chats, suppressedChats });
-            await DS.applyChatBackgrounds?.();
-          } else await storePicture(role, entry);
-          await openDialog(role);
-        });
-      }
-      appendButton(row, "Rename", async () => {
-        const name = window.prompt("Picture name", entry.name);
-        if (name === null || !name.trim()) return;
-        const items = mediaStore.pictureLibrary.map(item => item.id === entry.id ? { ...item, name:name.trim().slice(0,180) } : item);
-        await saveStore({ ...mediaStore, pictureLibrary:items }); await openDialog("library");
-      });
-      appendButton(row, "Remove", async () => {
-        const items = mediaStore.pictureLibrary.filter(item => item.id !== entry.id);
-        await saveStore({ ...mediaStore, pictureLibrary:items }); await openDialog("library");
-      });
-      gallery.appendChild(row);
-    }
-    section.appendChild(gallery);
-  }
-
-  function closeDialog() {
-    document.getElementById("ds-chat-background-dialog")?.remove();
-  }
-
-  async function openDialog(requestedTab) {
-    closeDialog();
-    await loadStore();
-    const installedTabs = activeCustomPictureFeatures();
-    if (requestedTab && installedTabs[requestedTab]) activePictureTab = requestedTab;
-    if (!installedTabs[activePictureTab]) activePictureTab = Object.keys(installedTabs).find(name => installedTabs[name]) || "backgrounds";
+  function buildBackgroundSection(panel) {
+    mediaStore = kit.getStore();
     const key = chatKey();
     const override = key ? mediaStore.chats?.[key] : null;
     const globalItem = mediaStore.global;
     const sceneGallery = mediaStore.galleries?.[key];
-
-    const modal = document.createElement("div");
-    modal.id = "ds-chat-background-dialog";
-    modal.className = "ds-chat-background-dialog";
-    const backdrop = document.createElement("div");
-    backdrop.className = "ds-chat-background-backdrop";
-    const panel = document.createElement("div");
-    panel.className = "ds-chat-background-panel";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
 
     const title = document.createElement("h3");
     title.textContent = "Custom Pictures · Backgrounds";
@@ -764,7 +387,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       choose.disabled = true;
       try {
         const ok = await chooseChatImage();
-        if (ok) closeDialog();
+        if (ok) kit.close();
       } finally { choose.disabled = false; }
     });
 
@@ -790,7 +413,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     urlStatus.textContent = "Local copies keep the original URL for later refresh. URL-only images require the host to stay available.";
     useUrlButton.addEventListener("click", async () => {
       useUrlButton.disabled = true; urlStatus.textContent = "Checking image…";
-      try { await saveChatImageUrl(urlInput.value, modeSelect.value); openDialog(); }
+      try { await saveChatImageUrl(urlInput.value, modeSelect.value); DS.openCustomPicturesMenu?.("backgrounds"); }
       catch (error) { urlStatus.textContent = error?.message || "Unable to use that image URL."; }
       finally { useUrlButton.disabled = false; }
     });
@@ -802,7 +425,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       refresh.title = "Re-download the linked source while keeping this chat's current settings.";
       refresh.addEventListener("click", async () => {
         refresh.disabled = true;
-        try { await saveChatImageUrl(override.sourceUrl, "local", { refresh: true }); openDialog(); }
+        try { await saveChatImageUrl(override.sourceUrl, "local", { refresh: true }); DS.openCustomPicturesMenu?.("backgrounds"); }
         catch (error) { urlStatus.textContent = error?.message || "Could not refresh the image."; refresh.disabled = false; }
       });
       urlBox.appendChild(refresh);
@@ -815,7 +438,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     clear.title = "Hide the picture on this chat, including automatic avatar and global backgrounds. Saved gallery/global images are kept.";
     clear.addEventListener("click", async () => {
       clear.disabled = true;
-      try { await resetChatBackground({ suppress: true }); openDialog(); }
+      try { await resetChatBackground({ suppress: true }); DS.openCustomPicturesMenu?.("backgrounds"); }
       catch { DS.setQuickStatus?.("Could not clear the background. Try again."); clear.disabled = false; }
     });
 
@@ -826,7 +449,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     restore.title = "Remove this chat's background override and use the global image or automatic avatar if enabled.";
     restore.addEventListener("click", async () => {
       restore.disabled = true;
-      try { await resetChatBackground(); openDialog(); }
+      try { await resetChatBackground(); DS.openCustomPicturesMenu?.("backgrounds"); }
       catch { DS.setQuickStatus?.("Could not reset the background. Try again."); restore.disabled = false; }
     });
 
@@ -840,7 +463,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const done = document.createElement("button");
     done.type = "button";
     done.textContent = "Close";
-    done.addEventListener("click", closeDialog);
+    done.addEventListener("click", kit.close);
 
     const actions = document.createElement("div");
     actions.className = "ds-chat-background-actions";
@@ -957,94 +580,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       panel.appendChild(sceneSection);
     }
     panel.append(actions);
-    // Reuse the exact existing Backgrounds UI, storage keys, and scene gallery.
-    const bgSection = document.createElement("section");
-    bgSection.dataset.dsPictureTab = "backgrounds";
-    while (panel.firstChild) bgSection.appendChild(panel.firstChild);
-    const tabs = document.createElement("div"); tabs.className = "ds-chat-background-actions";
-    tabs.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px";
-    for (const [name, label] of [["backgrounds","Backgrounds"],["character","Character pictures"],
-      ["persona","Persona pictures"],["generation","Image generation"],["library","Picture library"]]) {
-      if (!installedTabs[name]) continue;
-      const button = document.createElement("button"); button.type = "button"; button.textContent = label;
-      button.setAttribute("aria-pressed", activePictureTab === name ? "true" : "false");
-      button.addEventListener("click", () => { activePictureTab = name; void openDialog(name); });
-      tabs.appendChild(button);
-    }
-    panel.appendChild(tabs);
-    const closeCustom = document.createElement("button"); closeCustom.type = "button";
-    closeCustom.textContent = "Close Custom Pictures";
-    closeCustom.addEventListener("click", closeDialog);
-    panel.appendChild(closeCustom);
-    bgSection.hidden = activePictureTab !== "backgrounds";
-    bgSection.style.display = activePictureTab === "backgrounds" ? "block" : "none";
-    if (installedTabs.backgrounds) panel.appendChild(bgSection);
-    addPictureTab(panel, "character", "Character pictures", section => buildPictureEditor(section, "character", "Current character look"), installedTabs.character);
-    addPictureTab(panel, "persona", "Persona pictures", section => buildPictureEditor(section, "persona", "Current persona look"), installedTabs.persona);
-    addPictureTab(panel, "library", "Picture library", buildPictureLibrary, installedTabs.library);
-    addPictureTab(panel, "generation", "Image generation", section => {
-      const heading = document.createElement("h3"); heading.textContent = "Native image generation";
-      const note = document.createElement("p"); note.textContent = "Automatic image requests use SpicyChat's native button without touching your message draft. A local character picture does not change the reference used internally by SpicyChat.";
-      section.append(heading,note);
-      appendButton(section,"Open image settings",async () => {
-        if (!DS.openAutoImageSettings?.()) throw new Error("Image controls are not ready on this chat.");
-      });
-      const help = document.createElement("p"); help.textContent = "Configure per-chat intervals in the native Img helper. Generating images never edits or sends your typed message.";
-      section.appendChild(help);
-    }, installedTabs.generation);
-    modal.append(backdrop, panel);
-    document.documentElement.appendChild(modal);
-    backdrop.addEventListener("click", closeDialog);
   }
-
-  DS.applyChatBackgrounds = async function applyChatBackgrounds() {
-    const settings = DS.state?.settings || {};
-    const features = activeCustomPictureFeatures(settings);
-    if (!settings.enabled || !Object.values(features).some(Boolean) || !DS.isSingleChatPage?.()) {
-      removeLayer(); removeControl(); clearPictureOverrides();
-      DS.state.chatBackgroundsWasActive = false;
-      return;
-    }
-    DS.state.chatBackgroundsWasActive = true;
-    await loadStore();
-    if (features.backgrounds) applyLayer(currentItem());
-    else removeLayer();
-    applyPictureOverrides();
-    // Popup is the only BG launcher. Clear any header button from an older pass.
+  kit.registerTab("backgrounds", "Backgrounds", "chat-backgrounds", "enableChatBackgrounds", buildBackgroundSection);
+  DS.applyBackgroundLayer = async function applyBackgroundLayer(enabled) {
+    mediaStore = kit.getStore();
+    if (enabled) applyLayer(currentItem()); else removeLayer();
     document.getElementById("ds-chat-background-control")?.remove();
   };
-
-  DS.removeChatBackgrounds = function removeChatBackgrounds() {
-    removeLayer();
-    removeControl();
-    clearPictureOverrides();
-    DS.state.chatBackgroundsWasActive = false;
-  };
-
-  DS.openCustomPicturesMenu = openDialog;
-  DS.hasCustomPictures = () => Object.values(activeCustomPictureFeatures()).some(Boolean);
-
-  try {
-    chrome.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
-      if (message?.type !== "DS_GET_CHAT_BACKGROUND_MENU_STATE" &&
-          message?.type !== "DS_OPEN_CHAT_BACKGROUND_MENU") return false;
-      const settings = DS.state?.settings || {};
-      const available = !!(settings.enabled && Object.values(activeCustomPictureFeatures(settings)).some(Boolean) && DS.isSingleChatPage?.());
-      sendResponse({ ok: available });
-      if (message.type === "DS_OPEN_CHAT_BACKGROUND_MENU" && available)
-        openDialog().catch(() => DS.setQuickStatus?.("Could not open chat background menu."));
-      return false;
-    });
-  } catch {}
-
-  try {
-    chrome.storage?.onChanged?.addListener((changes, areaName) => {
-      if (areaName !== "local" || !changes?.[STORE_KEY]) return;
-      mediaStore = cleanStore(changes[STORE_KEY].newValue);
-      mediaLoaded = true;
-      DS.applyChatBackgrounds?.();
-    });
-  } catch {}
+  DS.removeBackgroundLayer = () => { removeLayer(); removeControl(); };
 })();
-
 }

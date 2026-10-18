@@ -1,0 +1,14 @@
+{
+  "id": "rulebook-diagnostics",
+  "primary": "content/rulebook-diagnostics.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableRulebookDiagnostics"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}
