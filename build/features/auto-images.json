@@ -1,0 +1,20 @@
+{
+  "id": "auto-images",
+  "primary": "content/auto-images.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "showAutoImageInlineButton"
+  ],
+  "requiredHelpers": [
+    "content/chat-picture-core.js",
+    "content/custom-pictures-menu.js"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/automatic-images.js"
+  ]
+}

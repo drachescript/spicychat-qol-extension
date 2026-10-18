@@ -1,0 +1,44 @@
+/* v0.1.8.87 - Focus / Immersive Mode */
+html.ds-focus-mode-active.ds-focus-hide-sidebar nav {
+  display: none !important;
+}
+
+html.ds-focus-mode-active.ds-focus-hide-topbar .ds-focus-mode-topbar-target,
+html.ds-focus-mode-active.ds-focus-hide-chat-header .ds-focus-mode-chat-header-target,
+html.ds-focus-mode-active.ds-focus-hide-qol-panel #ds-qol-panel {
+  display: none !important;
+}
+
+#ds-focus-mode-exit {
+  position: fixed;
+  z-index: 2147483646;
+  top: 12px;
+  right: 12px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(25, 25, 29, 0.92);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+#ds-focus-mode-exit:hover,
+#ds-focus-mode-exit:focus-visible {
+  background: rgba(45, 45, 52, 0.96);
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  #ds-focus-mode-exit {
+    top: 8px;
+    right: 8px;
+    min-height: 32px;
+    padding: 5px 10px;
+  }
+}
+

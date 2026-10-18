@@ -287,6 +287,116 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return count;
   };
 
+  // The Mini Panel's DOM filter cannot find native cards which SpicyChat never mounted.
+  // Search compact locally imported metadata separately; no network, no extra cards.
+  const CHAT_INDEX_KEY = "dsQolChatIndexV1";
+  const CHAT_RESULTS_LIMIT = 12;
+  let importedSearchTimer = 0;
+  let importedSearchSerial = 0;
+  let importedIndexCache = null;
+  let importedIndexLoadedAt = 0;
+  let importedIndexPromise = null;
+  let importedLastQuery = "";
+  let importedLastRenderedAt = 0;
+  const searchNormalize = value => String(value ?? "").normalize("NFKC").toLocaleLowerCase().trim();
+  const uuidLike = value => /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(String(value || ""));
+  async function readImportCatalog() {
+    if (importedIndexCache && Date.now() - importedIndexLoadedAt < 12000) return importedIndexCache;
+    if (importedIndexPromise) return importedIndexPromise;
+    importedIndexPromise = Promise.resolve(DS.storageGet?.([CHAT_INDEX_KEY]))
+      .then(data => {
+        importedIndexCache = data?.[CHAT_INDEX_KEY]?.entries || {};
+        importedIndexLoadedAt = Date.now();
+        return importedIndexCache;
+      }).catch(() => ({})).finally(() => { importedIndexPromise = null; });
+    return importedIndexPromise;
+  }
+  function importedChatCandidates(entries, query) {
+    const results = new Map();
+    const normalizedQuery = searchNormalize(query);
+    const openedMeta = DS.state?.openedChatMeta || {};
+    for (const [conversationId, item] of Object.entries(entries || {})) {
+      const botId = String(item?.botId || "").toLowerCase();
+      if (!uuidLike(botId) || !uuidLike(conversationId)) continue;
+      const name = String((item?.name && item.name !== botId ? item.name : "") || openedMeta[botId]?.name || botId);
+      if (!searchNormalize(`${name} ${botId} ${conversationId}`).includes(normalizedQuery)) continue;
+      results.set(conversationId.toLowerCase(), { id: conversationId, botId, name,
+        url: `/chat/${botId}/${conversationId}`, messageCount: Number(item?.messageCount || 0), exact: true });
+    }
+    // Previous API imports stored bot metadata even when Chat Index was OFF.
+    // Reuse their exact conversation links until the user chooses an API refresh.
+    for (const [botId, item] of Object.entries(openedMeta)) {
+      if (!uuidLike(botId)) continue;
+      const name = String(item?.name || botId);
+      if (!searchNormalize(`${name} ${botId}`).includes(normalizedQuery)) continue;
+      const urls = [item?.chatUrl, ...(Array.isArray(item?.chatUrls) ? item.chatUrls : [])];
+      for (const rawUrl of urls.slice(0, 50)) {
+        let url;
+        try { url = new URL(rawUrl, location.origin); } catch { continue; }
+        if (url.origin !== location.origin) continue;
+        const found = url.pathname.match(/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/?$/i);
+        if (!found || found[1].toLowerCase() !== botId.toLowerCase()) continue;
+        const key = found[2].toLowerCase();
+        if (!results.has(key)) results.set(key, { id:key, botId, name, url:url.pathname,
+          messageCount:Number(item?.messageCount || 0), exact:true });
+      }
+    }
+    return [...results.values()].sort((a,b) =>
+      (searchNormalize(a.name).startsWith(normalizedQuery) ? -1 : 0) - (searchNormalize(b.name).startsWith(normalizedQuery) ? -1 : 0)
+      || b.messageCount - a.messageCount || a.name.localeCompare(b.name));
+  }
+  async function renderImportedChatMatches(serial) {
+    const container = document.getElementById("ds-qol-imported-chat-results");
+    const input = document.getElementById("ds-qol-chat-search");
+    if (!container || !input || !DS.isChatListPage?.() || DS.state?.settings?.showChatListTools !== true
+        || DS.state?.settings?.quickPanelShowChatSearch !== true) return;
+    const query = String(input.value || "").trim();
+    if (query.length < 2) { container.hidden = true; container.replaceChildren(); return; }
+    const records = await readImportCatalog();
+    if (serial !== importedSearchSerial || String(input.value || "").trim() !== query || !container.isConnected) return;
+    const matches = importedChatCandidates(records, query);
+    container.replaceChildren();
+    const status = document.createElement("div");
+    status.className = "ds-qol-small-note";
+    status.textContent = `${matches.length.toLocaleString()} matching imported conversations · ${Object.keys(records).length.toLocaleString()} indexed`;
+    container.append(status);
+    const list = document.createElement("div"); list.className = "ds-qol-imported-chat-list";
+    for (const match of matches.slice(0, CHAT_RESULTS_LIMIT)) {
+      const a = document.createElement("a");
+      a.href = match.url;
+      a.className = "ds-qol-imported-chat-link";
+      a.title = "Open exact conversation from local import";
+      a.textContent = `${match.name} · ${match.messageCount.toLocaleString()} msgs`;
+      list.append(a);
+    }
+    if (!matches.length) {
+      const hint = document.createElement("p"); hint.className = "ds-qol-small-note";
+      hint.textContent = "No locally saved match. API full rescan can rebuild the index; native cards may still be incomplete.";
+      list.append(hint);
+    } else if (matches.length > CHAT_RESULTS_LIMIT) {
+      const hint = document.createElement("p"); hint.className = "ds-qol-small-note";
+      hint.textContent = `Showing first ${CHAT_RESULTS_LIMIT} matches. Enable Chat Index to browse the whole catalog.`;
+      list.append(hint);
+    }
+    container.append(list); container.hidden = false;
+  }
+  DS.scheduleImportedChatMatches = function scheduleImportedChatMatches() {
+    const query = String(document.getElementById("ds-qol-chat-search")?.value || "").trim();
+    if (query === importedLastQuery && Date.now() - importedLastRenderedAt < 1500) return;
+    importedLastQuery = query;
+    importedLastRenderedAt = Date.now();
+    clearTimeout(importedSearchTimer);
+    const serial = ++importedSearchSerial;
+    importedSearchTimer = setTimeout(() => { void renderImportedChatMatches(serial); }, 180);
+  };
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes[CHAT_INDEX_KEY]) return;
+      importedIndexCache = null; importedIndexLoadedAt = 0; importedLastRenderedAt = 0;
+      if (document.getElementById("ds-qol-chat-search")?.value) DS.scheduleImportedChatMatches();
+    });
+  } catch {}
+
   DS.applyChatListSearch = function applyChatListSearch(rows) {
     const input = document.getElementById("ds-qol-chat-search");
     const query = DS.normalize(input?.value || "");
@@ -323,21 +433,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyChatListFilters = function applyChatListFilters(rows) {
     const settings = DS.state?.settings || {};
-    const openedFilter = document.getElementById("ds-qol-chat-opened-filter")?.value || settings.chatListOpenedFilter || "all";
     const messageFilter = document.getElementById("ds-qol-chat-message-filter")?.value || settings.chatListMessageFilter || "all";
     const savedFilter = document.getElementById("ds-qol-chat-saved-filter")?.value || settings.chatListSavedFilter || "all";
     const blockedFilter = document.getElementById("ds-qol-chat-blocked-filter")?.value || settings.chatListBlockedFilter || "all";
     let visible = 0;
 
     for (const item of rows) {
-      const opened = !!DS.state.openedChats?.has(item.id);
       const blocked = !!DS.state.blockedBotIdSet?.has(item.id);
       const count = DS.getChatRowMessageCount(item.row);
-      const openedMatches = openedFilter === "all" || (openedFilter === "opened" ? opened : !opened);
       const messagesMatch = matchesMessageFilter(count, messageFilter);
       const savedMatches = matchesSavedFilter(item.id, savedFilter);
       const blockedMatches = blockedFilter === "all" || (blockedFilter === "blocked" ? blocked : !blocked);
-      const matches = openedMatches && messagesMatch && savedMatches && blockedMatches;
+      const matches = messagesMatch && savedMatches && blockedMatches;
       setRowClass(item.row, "ds-qol-chat-row-blocked", blocked);
       setRowDataset(item.row, "dsQolBlocked", blocked ? "1" : "0");
       setRowClass(item.row, "ds-chat-row-hidden-by-filter", !matches);

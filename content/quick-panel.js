@@ -830,9 +830,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             <input
               id="ds-qol-chat-search"
               type="text"
-              placeholder="Search chats, descriptions, messages..."
+              placeholder="Search loaded and imported chat names..."
             >
           </div>
+
+          <div id="ds-qol-imported-chat-results" class="ds-qol-imported-chat-results" role="region" aria-label="Locally imported chat search matches" hidden></div>
 
           <div id="ds-qol-chat-sort-wrap">
             <select id="ds-qol-chat-sort">
@@ -845,11 +847,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           </div>
 
           <div id="ds-qol-chat-filter-wrap">
-            <select id="ds-qol-chat-opened-filter" aria-label="Filter chats by opened state">
-              <option value="all">All chats</option>
-              <option value="opened">Opened/known only</option>
-              <option value="unopened">Unopened only</option>
-            </select>
             <select id="ds-qol-chat-message-filter" aria-label="Filter chats by message count">
               <option value="all">All message counts</option>
               <option value="0">0 messages</option>
@@ -878,8 +875,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
           <div class="ds-qol-row" id="ds-qol-chat-list-buttons">
             <button id="ds-qol-scan-visible" type="button">Scan visible</button>
-            <button id="ds-qol-load-all-chats" type="button">Load all</button>
-            <button id="ds-qol-full-rescan-chats" type="button" style="display:none;">Full rescan</button>
+            <button id="ds-qol-load-all-chats" type="button">Import via API</button>
+            <button id="ds-qol-full-rescan-chats" type="button" style="display:none;">Rescan API</button>
+            <select id="ds-qol-native-load-pages" aria-label="Native Load More pages per click" title="Limit native Load More clicks to prevent page slowdowns">
+              <option value="1">1 native page</option>
+              <option value="5">5 native pages</option>
+              <option value="20">20 native pages</option>
+            </select>
+            <button id="ds-qol-load-native-chats" type="button" title="Manually click SpicyChat's native Load More, in bounded batches. This adds actual page cards and can slow large chat lists.">Load native cards</button>
+            <button id="ds-qol-chat-message-index" type="button" title="Search previously indexed message text. Indexing is manual and opt-in.">Search messages</button>
           </div>
           <div id="ds-qol-load-all-status" class="ds-qol-small-note" role="status" aria-live="polite" style="display:none;"></div>
         </div>
@@ -1021,6 +1025,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     panel.querySelector("#ds-qol-full-rescan-chats")?.addEventListener("click", async () => {
       await DS.manualFullRescanChatsAndImport?.();
     });
+    panel.querySelector("#ds-qol-load-native-chats")?.addEventListener("click", async () => {
+      await DS.manualNativeLoadChats?.();
+    });
+    panel.querySelector("#ds-qol-chat-message-index")?.addEventListener("click", async () => {
+      await DS.openChatIndexMessages?.();
+    });
 
     panel.querySelector("#ds-qol-auto-voice")?.addEventListener("click", () => {
       DS.toggleAutoVoice?.();
@@ -1072,6 +1082,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     panel.querySelector("#ds-qol-chat-search")?.addEventListener("input", () => {
       DS.applyChatListTools?.();
+      DS.scheduleImportedChatMatches?.();
     });
 
     panel.querySelector("#ds-qol-chat-sort")?.addEventListener("change", async event => {
@@ -1079,10 +1090,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.applyChatListTools?.();
     });
 
-    panel.querySelector("#ds-qol-chat-opened-filter")?.addEventListener("change", async event => {
-      await DS.saveSettingsPatch?.({ chatListOpenedFilter: event.target.value });
-      DS.applyChatListTools?.();
-    });
 
     panel.querySelector("#ds-qol-chat-message-filter")?.addEventListener("change", async event => {
       await DS.saveSettingsPatch?.({ chatListMessageFilter: event.target.value });
@@ -1180,7 +1187,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   const PANEL_SIGNATURE_SETTINGS = [
     "quickPanelShowStatus", "quickPanelShowLoadedMessageCount", "quickPanelShowFeatureSummary", "quickPanelStatusShowOpened", "quickPanelStatusShowBlocked",
-    "quickPanelShowOptions", "quickPanelShowFillNow", "showChatListTools", "quickPanelShowChatSearch", "quickPanelShowChatSort",
+    "quickPanelShowOptions", "quickPanelShowFillNow", "showChatListTools", "quickPanelShowChatSearch", "quickPanelShowChatMessageSearch", "quickPanelShowChatSort",
     "quickPanelShowScanVisible", "quickPanelShowLoadAll", "showChatSearch", "chatSearchShowPanel", "enableFocusMode",
     "enableCharacterQolProfiles", "enableSavedTextSnippets", "enableContextKeeper", "enableStoryDayTracker", "storyDayTrackerShowQuickPanel", "enableRpStateTracker", "rpStateShowQuickPanel", "quickPanelShowAutoVoice", "autoPairAsterisks",
     "quickPanelShowAutoAsterisk", "enableTranslation", "quickPanelShowTranslation", "translationAutoAi", "enableSoundscapes",
@@ -1475,7 +1482,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return false;
     }
     const panel = getSingleQuickPanel();
-    if (!panel) return false;
+    if (!panel) {
+      // React can remove the panel with a larger native subtree on navigation.
+      // Repair it at most once per second, never while the per-tab switch is
+      // disabled. createQuickPanel performs the normal initial render itself.
+      const now = Date.now();
+      if (now - Number(DS.state.quickPanelMissingRecoverAt || 0) >= 1200) {
+        DS.state.quickPanelMissingRecoverAt = now;
+        DS.createQuickPanel?.();
+      }
+      return false;
+    }
     if (panelInteractionActive(panel)) return false;
 
     // Never make the Mini Panel compete with SpicyChat while a chat is mounting
@@ -1570,6 +1587,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const showOptions = settings.quickPanelShowOptions !== false;
     const showFill = !!(
       settings.quickPanelShowFillNow === true &&
+      settings.autoFillListings === true &&
+      shortcutAvailable("list-fill", true, typeof DS.getListingAutoFillStatus === "function") &&
       !onSingleChatPage &&
       !onChatListPage
     );
@@ -1594,16 +1613,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const showSort = showChatTools && settings.quickPanelShowChatSort === true;
     const showScan = showChatTools && settings.quickPanelShowScanVisible === true;
     const showLoadAll = showChatTools && settings.quickPanelShowLoadAll === true;
+    const showMessages = showChatTools && settings.enableChatIndex === true
+      && settings.quickPanelShowChatMessageSearch === true
+      && shortcutAvailable("chat-index", true, typeof DS.openChatIndexMessages === "function");
 
     setShown(document.getElementById("ds-qol-chat-search-wrap"), showSearch);
     setShown(document.getElementById("ds-qol-chat-sort-wrap"), showSort);
     setShown(document.getElementById("ds-qol-scan-visible"), showScan);
     setShown(document.getElementById("ds-qol-load-all-chats"), showLoadAll);
     setShown(document.getElementById("ds-qol-full-rescan-chats"), showLoadAll && !!DS.state.chatImportBaselineReady && !DS.state.loadAllChats?.running);
-    setShown(document.getElementById("ds-qol-chat-list-buttons"), showScan || showLoadAll, "flex");
+    setShown(document.getElementById("ds-qol-load-native-chats"), showLoadAll && typeof DS.manualNativeLoadChats === "function");
+    setShown(document.getElementById("ds-qol-native-load-pages"), showLoadAll && typeof DS.manualNativeLoadChats === "function");
+    setShown(document.getElementById("ds-qol-chat-message-index"), showMessages);
+    setShown(document.getElementById("ds-qol-chat-list-buttons"), showScan || showLoadAll || showMessages, "flex");
+    if (!showSearch) {
+      const imported = document.getElementById("ds-qol-imported-chat-results");
+      if (imported) { imported.hidden = true; imported.replaceChildren(); }
+    } else DS.scheduleImportedChatMatches?.();
     setShown(
       document.getElementById("ds-qol-chat-list-tools"),
-      showChatTools && (showSearch || showSort || showScan || showLoadAll),
+      showChatTools && (showSearch || showSort || showScan || showLoadAll || showMessages),
       "block"
     );
 
@@ -1644,13 +1673,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     setShown(document.getElementById("ds-qol-saved-snippets-row"), showSavedSnippets, "flex");
 
     const showCustomPictures = onSingleChatPage && settings.quickPanelShowCustomPictures === true &&
-      shortcutAvailable("chat-backgrounds", !!DS.hasCustomPictures?.(), typeof DS.openCustomPicturesMenu === "function");
+      (!!DS.hasCustomPictures?.() && typeof DS.openCustomPicturesMenu === "function");
     setShown(document.getElementById("ds-qol-custom-pictures-row"), showCustomPictures, "flex");
     const showCreatorPreview = onSingleChatPage && settings.quickPanelShowCreatorPreview === true &&
       shortcutAvailable("lorebook-consistency", !!settings.enableCreatorTriggerPreview, typeof DS.openCreatorTriggerPreview === "function");
     setShown(document.getElementById("ds-qol-creator-trigger-row"), showCreatorPreview, "flex");
     const showImageGen = onSingleChatPage && settings.quickPanelShowImageGenerator === true &&
-      shortcutAvailable("auto-voice", true, typeof DS.openAutoImageSettings === "function") &&
+      shortcutAvailable("auto-images", true, typeof DS.openAutoImageSettings === "function") &&
       !!document.querySelector('[data-testid="ImageGenerationButton"]');
     setShown(document.getElementById("ds-qol-image-gen-row"), showImageGen, "flex");
     const showRulebook = onSingleChatPage && settings.quickPanelShowRulebookDiagnostics === true &&
@@ -1777,10 +1806,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (sort && document.activeElement !== sort && sort.value !== storedSortMode) {
       sort.value = storedSortMode;
     }
-
-    const openedFilter = document.getElementById("ds-qol-chat-opened-filter");
-    const storedOpenedFilter = ["all", "opened", "unopened"].includes(settings.chatListOpenedFilter) ? settings.chatListOpenedFilter : "all";
-    if (openedFilter && document.activeElement !== openedFilter && openedFilter.value !== storedOpenedFilter) openedFilter.value = storedOpenedFilter;
 
     const messageFilter = document.getElementById("ds-qol-chat-message-filter");
     const storedMessageFilter = ["all", "0", "1-9", "10-49", "50-99", "100-499", "500+", "unknown"].includes(settings.chatListMessageFilter) ? settings.chatListMessageFilter : "all";

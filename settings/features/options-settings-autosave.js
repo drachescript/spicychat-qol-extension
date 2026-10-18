@@ -57,7 +57,7 @@ function readSettingsFromPage() {
     enableLorebookConsistency: checked("enableLorebookConsistency"),
     enableCreatorTriggerPreview: checked("enableCreatorTriggerPreview"),
     lorebookConsistencyShowMatches: checked("lorebookConsistencyShowMatches", true),
-    lorebookConsistencyAutoQueue: checked("lorebookConsistencyAutoQueue", true),
+    lorebookConsistencyAutoQueue: checked("lorebookConsistencyAutoQueue", false),
     lorebookConsistencyMaxEntries: Math.max(1, Math.min(5, Number(value("lorebookConsistencyMaxEntries", "3")) || 3)),
     lorebookDefaultEntriesTab: checked("lorebookDefaultEntriesTab", false),
     lorebookRememberEntrySort: checked("lorebookRememberEntrySort", false),
@@ -232,6 +232,7 @@ function readSettingsFromPage() {
     quickPanelShowFillNow: checked("quickPanelShowFillNow", true),
     quickPanelShowSmartFilterPins: checked("quickPanelShowSmartFilterPins"),
     quickPanelShowChatSearch: checked("quickPanelShowChatSearch", true),
+    quickPanelShowChatMessageSearch: checked("quickPanelShowChatMessageSearch"),
     quickPanelShowChatSort: checked("quickPanelShowChatSort", true),
     quickPanelShowScanVisible: checked("quickPanelShowScanVisible", true),
     quickPanelShowLoadAll: checked("quickPanelShowLoadAll", true),
@@ -252,6 +253,7 @@ function readSettingsFromPage() {
     quickPanelShowSavedSnippets: checked("quickPanelShowSavedSnippets"),
     quickPanelShowCreatorPreview: checked("quickPanelShowCreatorPreview"),
     quickPanelShowImageGenerator: checked("quickPanelShowImageGenerator"),
+    showAutoImageInlineButton: checked("showAutoImageInlineButton"),
     quickPanelShowRulebookDiagnostics: checked("quickPanelShowRulebookDiagnostics"),
     compactAfterHiding: checked("compactAfterHiding"),
     neverHideFavorites: checked("neverHideFavorites"),
@@ -323,6 +325,10 @@ function readSettingsFromPage() {
     alternateDialogueBackgroundColor: value("alternateDialogueBackgroundColor", "#1f2430"),
     alternateDialogueBorderColor: value("alternateDialogueBorderColor", "#596273"),
     enableReplyInstructions: checked("enableReplyInstructions"),
+    enableChatSceneNotes: checked("enableChatSceneNotes"),
+    chatSceneNotesEnableBotApply: checked("chatSceneNotesEnableBotApply"),
+    chatSceneNotesAutoInclude: checked("chatSceneNotesAutoInclude"),
+    chatSceneNotesAutoMode: value("chatSceneNotesAutoMode") === "every" ? "every" : "session",
     replyInstructionText: value("replyInstructionText", "").trim().slice(0, 2000),
     replyInstructionSendMode: ["every", "session", "manual"].includes(value("replyInstructionSendMode")) ? value("replyInstructionSendMode") : "session",
     replyInstructionOocWrapper: checked("replyInstructionOocWrapper", true),
@@ -347,6 +353,7 @@ function readSettingsFromPage() {
     enableChatBackgrounds: checked("enableChatBackgrounds"),
     enableCustomCharacterPictures: checked("enableCustomCharacterPictures"),
     enableCustomPersonaPictures: checked("enableCustomPersonaPictures"),
+    enableCustomPictureLibrary: checked("enableCustomPictureLibrary"),
     chatSceneGalleriesEnabled: checked("chatSceneGalleriesEnabled"),
     chatBackgroundUseAvatar: checked("chatBackgroundUseAvatar"),
     chatBackgroundAnimateAvatar: checked("chatBackgroundAnimateAvatar"),
@@ -750,7 +757,7 @@ function readSingleSettingFromPage(settingKey) {
     case "enableLorebookConsistency": return (checked("enableLorebookConsistency"));
     case "enableCreatorTriggerPreview": return (checked("enableCreatorTriggerPreview"));
     case "lorebookConsistencyShowMatches": return (checked("lorebookConsistencyShowMatches", true));
-    case "lorebookConsistencyAutoQueue": return (checked("lorebookConsistencyAutoQueue", true));
+    case "lorebookConsistencyAutoQueue": return (checked("lorebookConsistencyAutoQueue", false));
     case "lorebookConsistencyMaxEntries": return (Math.max(1, Math.min(5, Number(value("lorebookConsistencyMaxEntries", "3")) || 3)));
     case "lorebookDefaultEntriesTab": return (checked("lorebookDefaultEntriesTab", false));
     case "lorebookRememberEntrySort": return (checked("lorebookRememberEntrySort", false));
@@ -918,6 +925,7 @@ function readSingleSettingFromPage(settingKey) {
     case "quickPanelShowFillNow": return (checked("quickPanelShowFillNow", true));
     case "quickPanelShowSmartFilterPins": return (checked("quickPanelShowSmartFilterPins"));
     case "quickPanelShowChatSearch": return (checked("quickPanelShowChatSearch", true));
+    case "quickPanelShowChatMessageSearch": return checked("quickPanelShowChatMessageSearch");
     case "quickPanelShowChatSort": return (checked("quickPanelShowChatSort", true));
     case "quickPanelShowScanVisible": return (checked("quickPanelShowScanVisible", true));
     case "quickPanelShowLoadAll": return (checked("quickPanelShowLoadAll", true));
@@ -938,6 +946,7 @@ function readSingleSettingFromPage(settingKey) {
     case "quickPanelShowSavedSnippets": return checked("quickPanelShowSavedSnippets");
     case "quickPanelShowCreatorPreview": return checked("quickPanelShowCreatorPreview");
     case "quickPanelShowImageGenerator": return checked("quickPanelShowImageGenerator");
+    case "showAutoImageInlineButton": return checked("showAutoImageInlineButton");
     case "quickPanelShowRulebookDiagnostics": return checked("quickPanelShowRulebookDiagnostics");
     case "compactAfterHiding": return (checked("compactAfterHiding"));
     case "neverHideFavorites": return (checked("neverHideFavorites"));
@@ -1027,6 +1036,7 @@ function readSingleSettingFromPage(settingKey) {
     case "enableChatBackgrounds": return (checked("enableChatBackgrounds"));
     case "enableCustomCharacterPictures": return checked("enableCustomCharacterPictures");
     case "enableCustomPersonaPictures": return checked("enableCustomPersonaPictures");
+    case "enableCustomPictureLibrary": return checked("enableCustomPictureLibrary");
     case "chatSceneGalleriesEnabled": return (checked("chatSceneGalleriesEnabled"));
     case "chatBackgroundDim": return (Math.min(90, Math.max(0, Number(value("chatBackgroundDim", "45")) || 0)));
     case "chatBackgroundBlur": return (Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)));

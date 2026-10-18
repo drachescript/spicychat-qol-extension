@@ -1,39 +1,14 @@
 {
-  "schema": "dsq-feature/v1",
   "id": "rulebook-diagnostics",
-  "label": "Rulebook Diagnostics",
-  "category": "chat",
-  "requiredFeatures": [],
-  "runtimeScripts": [
-    "content/rulebook-diagnostics.js"
-  ],
-  "settingsScripts": [],
-  "settingKeys": [
+  "primary": "content/rulebook-diagnostics.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
     "enableRulebookDiagnostics"
   ],
-  "cssFiles": [],
-  "backgroundServices": [],
-  "permissions": [],
-  "sharedDependencies": {
-    "runtime": [
-      "content/core.js",
-      "content/main.js"
-    ],
-    "settings": [
-      "options.js",
-      "options.html"
-    ],
-    "background": [
-      "background/background-events.js"
-    ]
-  },
-  "customBuildStatus": "blocked",
-  "fullRuntimeStatus": "lifecycle-gated",
-  "blockers": [
-    "Custom package and Settings behavior need browser verification before treating this feature as independent."
-  ],
-  "notes": [
-    "Rulebook diagnostic controls in chat.",
-    "Experimental selection, not yet standalone browser-validated."
-  ]
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
 }

@@ -234,9 +234,11 @@ function renderBotAvailability(renderOptions = {}) {
   const notMonitoredCount = base.length - eligibleEntries.length;
   const uncheckedNotMonitoredCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0).length;
   const checkedUnknownCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && String(entry.status || "") === "unknown").length;
-  const excludedBlockedUncheckedCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && (blockedState?.ids || []).includes(entry.id)).length;
-  const manualBlockedIds = new Set(normalizeBotStore(blockedState).ids);
-  const manualOutsideCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && !manualBlockedIds.has(entry.id) && !botStatusIdIgnored(entry.id)).length;
+  // A prebuilt Set avoids repeated O(number of blocked bots) array scans for
+  // every known bot when large Bot Status views are refreshed.
+  const manualBlockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
+  const excludedBlockedUncheckedCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && manualBlockedIds.has(String(entry.id || "").toLowerCase())).length;
+  const manualOutsideCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && !manualBlockedIds.has(String(entry.id || "").toLowerCase()) && !botStatusIdIgnored(entry.id)).length;
   const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
   let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
   const shown = entries.slice(0, limit);
@@ -512,11 +514,57 @@ function isBotStatusAccessFailure(result) {
   return /\b(?:cors|unauthori[sz]ed|expired token|invalid token|401|login required|authentication was not ready|failed to fetch|networkerror|network error|network request failed|ERR_BLOCKED_BY_CLIENT)\b/i.test(reason);
 }
 
+// All unfinished scans must keep both the next page of selected bots and any
+// unselected tail left by a configured max-bots limit. This also applies to
+// the FIRST run, not only to Resume. IDs are saved, not entire bot profiles.
+function botStatusPendingIds(entries, nextIndex, deferredIds = [], omittedIds = [], keepLast = false) {
+  const unfinished = [
+    ...deferredIds,
+    ...entries.slice(Math.max(0, nextIndex)).map(entry => entry.id),
+    ...omittedIds
+  ];
+  const pending = [...new Set(unfinished.filter(validBotId))];
+  // Until all completed records are saved, keep the last item recoverable.
+  if (keepLast && !pending.length && entries.length && validBotId(entries[entries.length - 1].id)) {
+    pending.push(entries[entries.length - 1].id);
+  }
+  return pending;
+}
+
 async function botStatusPausedQueue() {
   try {
     const value = (await storageGet([BOT_STATUS_PAUSED_QUEUE_KEY]))?.[BOT_STATUS_PAUSED_QUEUE_KEY];
     return value && Array.isArray(value.ids) ? value : null;
   } catch { return null; }
+}
+
+const BOT_STATUS_LAST_RUN_FEEDBACK_KEY = "botStatusLastRunFeedbackV1";
+
+function formatBotStatusLastRunFeedback(report) {
+  if (!report || !Number.isFinite(Number(report.at))) return "No Bot Status run has been recorded yet.";
+  const checked = Math.max(0, Number(report.checked || 0));
+  const pending = Math.max(0, Number(report.pending || 0));
+  const deferred = Math.max(0, Number(report.deferred || 0));
+  const changed = Math.max(0, Number(report.changed || 0));
+  const recovered = Math.max(0, Number(report.recovered || 0));
+  const unknown = Math.max(0, Number(report.unknown || 0));
+  const parts = [`Last scan ${new Date(Number(report.at)).toLocaleString()}`, `${checked} checks completed`];
+  if (pending) parts.push(`${pending} pending (Resume available)`);
+  if (deferred) parts.push(`${deferred} deferred after network/auth problems`);
+  if (unknown) parts.push(`${unknown} inconclusive`);
+  if (changed) parts.push(`${changed} updated`);
+  if (recovered) parts.push(`${recovered} recovered`);
+  if (report.saveVerified === false) parts.push("Save verification failed — check previous checkpoints");
+  return parts.join(" · ") + ".";
+}
+
+async function refreshBotStatusLastRunFeedback() {
+  const host = $("botStatusLastRunSummary");
+  if (!host) return;
+  try {
+    const report = (await storageGet([BOT_STATUS_LAST_RUN_FEEDBACK_KEY]))?.[BOT_STATUS_LAST_RUN_FEEDBACK_KEY];
+    host.textContent = formatBotStatusLastRunFeedback(report);
+  } catch { host.textContent = "Last scan summary unavailable; existing saved results were not changed."; }
 }
 
 async function refreshBotStatusPauseButton() {
@@ -659,6 +707,7 @@ async function runBotAvailabilityScan(options = {}) {
   const archiveChangedIds = new Set();
   const checkpointSavedIds = new Set();
   let checkpointCount = 0;
+  let finalResultsSaved = true;
   const checkpointEvery = BOT_STATUS_PROGRESS_EVERY;
   async function saveScanCheckpoint(force = false) {
     const pending = [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id));
@@ -692,14 +741,9 @@ async function runBotAvailabilityScan(options = {}) {
     const now = Date.now();
     if (!force && completed - lastQueueCheckpointCompleted < BOT_STATUS_PROGRESS_EVERY && now - lastQueueCheckpointAt < BOT_STATUS_PROGRESS_MS) return true;
     if (!(await saveScanCheckpoint(true))) return false;
-    const pending = [...new Set([
-      ...deferredAccessIds,
-      ...entries.slice(nextIndex).map(entry => entry.id),
-      ...(options?.resume ? omittedByBotLimit : [])
-    ])];
-    // Keep the final ID recoverable until the end-of-run metadata/recovery
-    // writes finish. The finalizer clears the queue only after those writes.
-    if (!pending.length && entries.length) pending.push(entries[entries.length - 1].id);
+    // Do not drop bots deferred by the configured limit on a fresh run.
+    const pending = botStatusPendingIds(entries, nextIndex, deferredAccessIds, omittedByBotLimit, true);
+    // Keep the last completed ID until final persistence has succeeded.
     try {
       const queueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: {
         version: 1, mode, scope, ids: pending, phase: "running",
@@ -784,7 +828,7 @@ async function runBotAvailabilityScan(options = {}) {
             terminalMessage = "Paused on an authentication/network failure, but the latest results could not be saved. The previous durable checkpoint remains recoverable.";
             break;
           }
-          const remaining = [...new Set([...deferredAccessIds, ...entries.slice(scanIndex + 1).map(item => item.id), ...(options?.resume ? omittedByBotLimit : [])])];
+          const remaining = botStatusPendingIds(entries, scanIndex + 1, deferredAccessIds, omittedByBotLimit);
           const payload = { version: 1, mode, scope, ids: remaining, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
           const pausedSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: payload });
           if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
@@ -893,11 +937,13 @@ async function runBotAvailabilityScan(options = {}) {
         : { ok: true };
 
       if (!deltaSaved?.ok) {
-        await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
+        const availabilitySaved = await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
+        let archiveSaved = true;
         if (archiveChangedCount > 0) {
           await nextOptionsIdleSlice(140);
-          await storageSet({ [BOT_ARCHIVE_KEY]: botArchiveState });
+          archiveSaved = await storageSet({ [BOT_ARCHIVE_KEY]: botArchiveState });
         }
+        if (!availabilitySaved || !archiveSaved) finalResultsSaved = false;
       }
 
       if (botStatusMetadataDirty || recoveryStateDirty) {
@@ -916,26 +962,28 @@ async function runBotAvailabilityScan(options = {}) {
             payload.settings = settings;
           }
         }
-        await storageSet(payload);
+        if (!await storageSet(payload)) finalResultsSaved = false;
       }
     }
     // Only advance/clear the resume queue after the final result and recovery
     // writes above complete. On a page crash, the most recent saved queue is
     // still available and may safely recheck the unfinished tail.
-    if (!accessPauseTriggered) {
-      const outstanding = new Set(deferredAccessIds);
-      if (options?.resume) omittedByBotLimit.forEach(id => outstanding.add(id));
-      entries.slice(nextScanIndex).forEach(entry => outstanding.add(entry.id));
+    if (!accessPauseTriggered && finalResultsSaved) {
+      const outstanding = new Set(botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit));
       try {
         const finalQueueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: outstanding.size ? {
           version: 1, mode, scope, ids: [...outstanding], phase: "paused",
           updatedAt: Date.now(), startedAt: runStartedAt,
           completed, total: entries.length,
-          reason: botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : "Retry skipped checks"
+          reason: botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : omittedByBotLimit.length ? "Bot limit reached" : "Retry skipped checks"
         } : null });
         if (!finalQueueSaved) throw new Error("Could not persist Bot Status resume queue");
         if (outstanding.size && !terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} still pending; use Resume paused scan.`;
-      } catch (error) { console.warn("[SpicyChat QoL] Could not finalize Bot Status resume queue", error); }
+      } catch (error) {
+        finalResultsSaved = false;
+        terminalMessage = "Could not verify the saved Resume queue. Earlier checkpoints were kept; do not assume the scan is complete.";
+        console.warn("[SpicyChat QoL] Could not finalize Bot Status resume queue", error);
+      }
     }
     botStatusMetadataDirty = false;
     botAvailabilityScanRunning = false;
@@ -966,8 +1014,10 @@ async function runBotAvailabilityScan(options = {}) {
       : mode === "archived"
         ? `${completed} checked · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked left alone` : ""}.`
         : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${changesPreserved ? `${changesPreserved} profile change${changesPreserved === 1 ? "" : "s"} preserved in history. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
-    if (status) status.textContent = finalStatusText;
-    if (archivedStatus) archivedStatus.textContent = finalStatusText;
+    const safeStatusText = finalResultsSaved ? finalStatusText
+      : `${finalStatusText} Save/queue verification failed; review the last durable checkpoint before running another scan.`;
+    if (status) status.textContent = safeStatusText;
+    if (archivedStatus) archivedStatus.textContent = safeStatusText;
     await noteBotStatusRunEvent("bot-status-run-complete", {
       mode, scope, completed, requested: entries.length, totalCandidates, maxBots, maxMinutes,
       stopped: !!botAvailabilityStopRequested || timeLimitReached || countLimitReached,
@@ -978,6 +1028,22 @@ async function runBotAvailabilityScan(options = {}) {
     });
     botAvailabilityStopRequested = false;
     await refreshBotStatusPauseButton();
+    // The persisted resume queue remains authoritative; never use a guessed
+    // value to label an interrupted or limited scan as complete.
+    const pauseState = await botStatusPausedQueue();
+    const pendingCount = Array.isArray(pauseState?.ids) ? pauseState.ids.length : 0;
+    const feedback = {
+      at: Date.now(), mode, checked: completed,
+      pending: pendingCount,
+      deferred: deferredAccessIds.length,
+      changed: changesPreserved,
+      recovered: recoveredCount,
+      unknown: unknownCount,
+      saveVerified: finalResultsSaved
+    };
+    await storageSet({ [BOT_STATUS_LAST_RUN_FEEDBACK_KEY]: feedback });
+    const feedbackEl = $("botStatusLastRunSummary");
+    if (feedbackEl) feedbackEl.textContent = formatBotStatusLastRunFeedback(feedback);
 
     // Auto-clean only the blocked IDs touched by this scan, and only after an
     // exact remotely-preserved archive fingerprint is confirmed. Keep this as
@@ -2345,6 +2411,7 @@ function setupBotAvailabilityControls() {
     $(id)?.addEventListener("change", () => { save().catch(() => {}); updateBotStatusScanEstimate(); });
     $(id)?.addEventListener("input", updateBotStatusScanEstimate);
   }
+  refreshBotStatusLastRunFeedback().catch(() => {});
   storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
     const rate = Number(result?.[BOT_STATUS_LAST_RATE_KEY] || 0);
     if (rate >= 100 && rate <= 120000) botStatusPreviousScanRateMs = rate;

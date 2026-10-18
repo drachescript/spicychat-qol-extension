@@ -1,39 +1,14 @@
 {
-  "schema": "dsq-feature/v1",
   "id": "story-reading-layout",
-  "label": "Story Reading Layout",
-  "category": "chat",
-  "requiredFeatures": [],
-  "runtimeScripts": [
-    "content/story-reading-layout.js"
-  ],
-  "settingsScripts": [],
-  "settingKeys": [
+  "primary": "content/story-reading-layout.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
     "storyReadingLayout"
   ],
-  "cssFiles": [],
-  "backgroundServices": [],
-  "permissions": [],
-  "sharedDependencies": {
-    "runtime": [
-      "content/core.js",
-      "content/main.js"
-    ],
-    "settings": [
-      "options.js",
-      "options.html"
-    ],
-    "background": [
-      "background/background-events.js"
-    ]
-  },
-  "customBuildStatus": "blocked",
-  "fullRuntimeStatus": "lifecycle-gated",
-  "blockers": [
-    "Custom package and Settings behavior need browser verification before treating this feature as independent."
-  ],
-  "notes": [
-    "Reading layout controls for story chats.",
-    "Experimental selection, not yet standalone browser-validated."
-  ]
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
 }

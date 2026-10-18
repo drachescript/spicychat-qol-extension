@@ -178,6 +178,7 @@ function setupMiniPanelPreview() {
     "quickPanelShowFillNow",
     "quickPanelShowSmartFilterPins",
     "quickPanelShowChatSearch",
+    "quickPanelShowChatMessageSearch",
     "quickPanelShowChatSort",
     "quickPanelShowScanVisible",
     "quickPanelShowLoadAll",

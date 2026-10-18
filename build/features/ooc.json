@@ -1,52 +1,14 @@
 {
-  "schema": "dsq-feature/v1",
   "id": "ooc",
-  "label": "OOC presets and insert buttons",
-  "category": "chat",
-  "requiredFeatures": [],
-  "runtimeScripts": [
-    "content/ooc.js",
+  "primary": "content/ooc.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [],
+  "requiredHelpers": [
     "content/ooc-composer.js"
   ],
-  "settingsScripts": [
-    "settings/options-ooc.js"
-  ],
-  "settingKeys": [
-    "showOocTools",
-    "replaceChatImageWithOocButton",
-    "quickPanelShowOoc",
-    "androidTopBarOoc",
-    "oocTemplates"
-  ],
-  "cssFiles": [
-    "content/styles/ooc.css"
-  ],
-  "backgroundServices": [],
-  "permissions": [],
-  "sharedDependencies": {
-    "runtime": [
-      "content/core-settings-defaults.js",
-      "custom/ooc-runtime-core.js"
-    ],
-    "settings": [
-      "custom/ooc-options.html",
-      "custom/ooc-options.js"
-    ],
-    "styles": [
-      "content/styles/ooc.css"
-    ]
-  },
-  "customBuildStatus": "experimental-test-only",
-  "blockers": [
-    "Real Chrome/Brave unpacked startup and storage/route behavior still require user validation.",
-    "This fixed recipe is not arbitrary feature selection."
-  ],
-  "notes": [
-    "OOC insertion/composer are the same files in Full and Core+OOC.",
-    "The minimal recipe uses a small Settings page with compatible OOC settings keys, but separately installed Chrome extensions have isolated local storage."
-  ],
-  "fullRuntimeStatus": "lifecycle-gated",
-  "fullRuntimeNotes": [
-    "The composer button implementation lives in content/ooc-composer.js and loads independently from chat-ui.js."
-  ]
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
 }

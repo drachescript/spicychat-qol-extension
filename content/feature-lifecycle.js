@@ -13,6 +13,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Only attach an automatic stop hook when the feature has an explicit,
   // existing idempotent cleanup. Other features keep their existing guards.
   const stopActions = Object.freeze({
+    "automatic rule blocking": () => DS.stopAutoBlockRules?.(),
     "OOC": () => DS.removeOocTools?.(),
     "chat search": () => DS.removeChatSearch?.(),
     "chat bookmarks": () => DS.removeChatBookmarks?.(),

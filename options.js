@@ -28,6 +28,7 @@ const BOT_DISCOVERY_INDEX_KEY = "botDiscoveryIndexV1";
 const LOREBOOK_BACKUPS_KEY = "lorebookBackups";
 const SAVED_TEXT_SNIPPETS_KEY = "savedTextSnippets";
 const CONTEXT_KEEPER_DATA_KEY = "contextKeeperData";
+const CHAT_SCENE_NOTES_KEY = "chatSceneNotesV1";
 const STORY_DAY_TRACKER_KEY = "storyDayTrackerData";
 const RP_STATE_TRACKER_KEY = "rpStateTrackerData";
 const CHAT_NUDGE_STORE_KEY = "chatNudgeSubscriptionsV1";
@@ -881,6 +882,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableRulebookDiagnostics",
   "showOocTools",
   "enableReplyInstructions",
+  "enableChatSceneNotes",
   "enableGlobalMemory",
   "autoAcceptPersonaChange",
   "savePersonasFromPages",
@@ -900,6 +902,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableChatBackgrounds",
   "enableCustomCharacterPictures",
   "enableCustomPersonaPictures",
+  "enableCustomPictureLibrary",
   "chatBackgroundUseAvatar",
   "chatBackgroundAnimateAvatar",
   "favoritePageFoldersEnabled",
@@ -2388,7 +2391,7 @@ const BACKUP_STORAGE_KEYS = [
   "settings", QOL_SYNC_DEVICE_PREFS_KEY, "dsMemoryVaultV1", OPENED_KEY, OPENED_META_KEY, BLOCKED_BOTS_KEY, QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY,
   NOT_INTERESTED_KEY, PERSONAS_KEY, LEGACY_PERSONAS_KEY, PERSONA_ORG_KEY, OOC_TEMPLATES_KEY, FAVORITE_CREATORS_KEY,
   FOLLOWED_CREATORS_KEY, CREATOR_BOT_WATCH_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY, BOT_ORGANIZER_KEY, CHAT_ORGANIZER_KEY, CHARACTER_QOL_PROFILES_KEY,
-  BOT_AVAILABILITY_KEY, BOT_UNAVAILABLE_RECOVERY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_STATUS_KEY, LOREBOOK_BACKUPS_KEY, CHATBOT_LOREBOOK_LINKS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY,
+  BOT_AVAILABILITY_KEY, BOT_UNAVAILABLE_RECOVERY_KEY, BOT_ARCHIVE_KEY, LOREBOOK_STATUS_KEY, LOREBOOK_BACKUPS_KEY, CHATBOT_LOREBOOK_LINKS_KEY, SAVED_TEXT_SNIPPETS_KEY, CONTEXT_KEEPER_DATA_KEY, CHAT_SCENE_NOTES_KEY,
   STORY_DAY_TRACKER_KEY, RP_STATE_TRACKER_KEY, CHAT_NUDGE_STORE_KEY, GENERATION_PROFILES_KEY, SMART_FILTER_PRESETS_KEY, SMART_FILTER_PINNED_KEY,
   BOT_EDITOR_DRAFT_HISTORY_KEY, CHAT_BOOKMARKS_KEY, RECENTLY_SEEN_BOTS_KEY, SOUNDSCAPES_KEY, SOUNDSCAPE_AUDIO_KEY, CHAT_BACKGROUNDS_KEY,
   TAB_CLEANUP_SESSIONS_KEY, TAB_CLEANUP_TOPICS_KEY, TAB_CLEANUP_ENRICHMENT_KEY, LOCAL_CHANGE_HISTORY_KEY
@@ -2398,7 +2401,7 @@ const BACKUP_SCOPE_IDS = [
   "settings", "accountSyncRules",
   "opened", "blocked", "notInterested", "favoriteCreators", "followedCreators", "creatorBotWatch", "favoriteBots", "laterBots",
   "memoryVault", "botOrganization", "chatOrganization", "characterQolProfiles", "botAvailability", "botArchive", "lorebookStatus", "lorebookBackups", "chatbotLorebookLinks",
-  "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization",
+  "savedTextSnippets", "contextKeeperData", "storyDayTrackerData", "chatSceneNotes", "rpStateTrackerData", "chatNudges", "personas", "personaOrganization",
   "ooc", "generationProfiles", "smartFilterPresets", "smartFilterPins", "botEditorDraftHistory", "chatBookmarks", "recentlySeenBots",
   "soundscapes", "tabCleanupSessions", "tabCleanupTopics", "tabCleanupEnrichment", "localChangeHistory", "localMedia"
 ];
@@ -2432,6 +2435,7 @@ const BACKUP_DATA_SCOPE_DEFS = {
   chatbotLorebookLinks: { count: result => Object.keys(result[CHATBOT_LOREBOOK_LINKS_KEY] && typeof result[CHATBOT_LOREBOOK_LINKS_KEY] === "object" ? result[CHATBOT_LOREBOOK_LINKS_KEY] : {}).length },
   savedTextSnippets: { count: result => Array.isArray(result[SAVED_TEXT_SNIPPETS_KEY]) ? result[SAVED_TEXT_SNIPPETS_KEY].length : 0 },
   contextKeeperData: { count: result => Object.keys(result[CONTEXT_KEEPER_DATA_KEY] && typeof result[CONTEXT_KEEPER_DATA_KEY] === "object" ? result[CONTEXT_KEEPER_DATA_KEY] : {}).length },
+  chatSceneNotes: { count: result => Object.keys(result[CHAT_SCENE_NOTES_KEY] && typeof result[CHAT_SCENE_NOTES_KEY] === "object" ? result[CHAT_SCENE_NOTES_KEY] : {}).length },
   storyDayTrackerData: { count: result => Object.keys(result[STORY_DAY_TRACKER_KEY] && typeof result[STORY_DAY_TRACKER_KEY] === "object" ? result[STORY_DAY_TRACKER_KEY] : {}).length },
   rpStateTrackerData: { count: result => Object.keys(result[RP_STATE_TRACKER_KEY] && typeof result[RP_STATE_TRACKER_KEY] === "object" ? result[RP_STATE_TRACKER_KEY] : {}).length },
   chatNudges: { count: result => normalizeChatNudgeStore(result[CHAT_NUDGE_STORE_KEY]).length },
@@ -2449,7 +2453,7 @@ const BACKUP_DATA_SCOPE_DEFS = {
   tabCleanupTopics: { count: result => normalizeTabCleanupTopics(result[TAB_CLEANUP_TOPICS_KEY]).topics.length },
   tabCleanupEnrichment: { count: result => Object.keys(result[TAB_CLEANUP_ENRICHMENT_KEY]?.meta || {}).length },
   localChangeHistory: { count: result => Array.isArray(result[LOCAL_CHANGE_HISTORY_KEY]) ? result[LOCAL_CHANGE_HISTORY_KEY].length : 0 },
-  localMedia: { count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).global ? 1 : 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).chats || {}).length + Object.values(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0), large: true }
+  localMedia: { count: result => normalizeSoundscapeAudio(result[SOUNDSCAPE_AUDIO_KEY]).items.length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).global ? 1 : 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).chats || {}).length + Object.values(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).galleries || {}).reduce((n, g) => n + (g.items?.length || 0), 0) + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).portraits || {}).length + Object.keys(normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).personaPictures || {}).length + (normalizeChatBackgroundMediaStore(result[CHAT_BACKGROUNDS_KEY]).pictureLibrary || []).length, large: true }
 };
 
 
@@ -2792,6 +2796,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "lorebookEntryManager", name: "Lorebook entry manager", children: ["lorebookMultiEntryWorkspace", "lorebookEntrySelectionCheckbox", "lorebookEntryShowTokenCount", "lorebookEntryShowHiddenKeywordCount", "lorebookEntryShowNoKeywordsWarning", "lorebookEntryShowCharacterCount", "lorebookEntryRenameButton", "lorebookEntryCopyButton", "lorebookEntryDuplicateButton", "lorebookBulkSelectAll", "lorebookBulkClear", "lorebookBulkAnalyze", "lorebookBulkExportSelected", "lorebookBulkCopySelected", "lorebookBulkDuplicateSelected", "lorebookBulkAddKeyword", "lorebookBulkRemoveKeyword", "lorebookBulkToggleEnabled", "lorebookBulkDeleteSelected", "lorebookBulkFindKeyword"] },
   { parent: "creatorModerationWarnings", name: "Creator wording warnings", children: ["creatorModerationWarningsChatbots"] },
   { parent: "enableReplyInstructions", name: "Reply Instructions", children: ["replyInstructionText", "replyInstructionSendMode", "replyInstructionOocWrapper", "replyInstructionShowChatButton"] },
+  { parent: "enableChatSceneNotes", name: "Per-chat Scene Notes", children: ["chatSceneNotesAutoInclude", "chatSceneNotesAutoMode", "chatSceneNotesEnableBotApply"] },
   { parent: "enableLorebookConsistency", name: "Lorebook response consistency", children: ["lorebookConsistencyShowMatches", "lorebookConsistencyAutoQueue", "lorebookConsistencyMaxEntries"] },
   { parent: "enableSoundscapes", name: "Soundscapes", children: ["soundscapeShowChatControl", "soundscapeMasterVolume", "soundscapeOnChat", "soundscapeOnHome", "soundscapeOnChats", "soundscapeOnProfiles", "soundscapeOnOther"] },
   { parent: "enableRpFormatRepair", name: "RP Format Repair", children: ["rpFormatRepairAuto", "rpFormatConvertBoldActions", "rpFormatRemoveActionParens", "rpFormatPreserveInlineEmphasis", "rpFormatPreserveSemanticQuotes", "rpFormatPreserveBackticks", "rpFormatShowMessageButtons"] },
@@ -2936,6 +2941,18 @@ $("exportSettings")?.addEventListener("click", exportSettings);
 $("selectActiveUsedExportScopes")?.addEventListener("click", () => selectActiveUsedExportScopes());
 $("selectAllExportScopes")?.addEventListener("click", () => document.querySelectorAll("[data-export-scope]").forEach(input => { input.checked = true; }));
 $("clearExportScopes")?.addEventListener("click", () => document.querySelectorAll("[data-export-scope]").forEach(input => { input.checked = false; }));
+$("backupQuickPresets")?.addEventListener("click", event => {
+  const preset = event.target?.closest?.("[data-backup-preset]")?.dataset?.backupPreset;
+  const presets = {
+    settings: SETTINGS_BACKUP_SCOPE_IDS,
+    lists: ["blocked", "notInterested", "favoriteBots", "laterBots", "opened", "favoriteCreators", "followedCreators", "botOrganization", "chatOrganization"],
+    creator: ["lorebookBackups", "lorebookStatus", "chatbotLorebookLinks", "botEditorDraftHistory", "botArchive", "characterQolProfiles", "personas", "personaOrganization"],
+    pictures: ["localMedia"]
+  };
+  if (!Object.prototype.hasOwnProperty.call(presets, preset)) return;
+  const wanted = new Set(presets[preset]);
+  document.querySelectorAll("[data-export-scope]").forEach(input => { input.checked = wanted.has(input.dataset.exportScope); });
+});
 $("validateImport")?.addEventListener("click", validateImportBackup);
 $("previewImport")?.addEventListener("click", previewImportSettings);
 document.querySelectorAll("input[name='importMode']").forEach(input => input.addEventListener("change", refreshImportPreviewImpact));
@@ -2943,6 +2960,7 @@ $("selectAllImportScopes")?.addEventListener("click", () => { document.querySele
 $("clearImportScopes")?.addEventListener("click", () => { document.querySelectorAll("[data-import-scope]").forEach(input => { input.checked = false; }); refreshImportPreviewImpact(); });
 $("importSettings")?.addEventListener("click", importSettings);
 $("cancelImportPreview")?.addEventListener("click", cancelImportPreview);
+$("activateRestoredSync")?.addEventListener("change", refreshImportPreviewImpact);
 $("retryImportAfterRecoveryFailure")?.addEventListener("click", () => importSettings());
 $("downloadImportSafetyCopy")?.addEventListener("click", () => {
   if (!pendingImportSafetyDownload) {

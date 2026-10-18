@@ -1,0 +1,22 @@
+{
+  "id": "persona-pictures",
+  "primary": "content/persona-pictures.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableCustomPersonaPictures"
+  ],
+  "requiredHelpers": [
+    "content/chat-picture-core.js",
+    "content/custom-pictures-menu.js",
+    "content/chat-picture-editor-core.js",
+    "content/chat-picture-override-core.js"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/persona-pictures.js"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

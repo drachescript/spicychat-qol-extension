@@ -298,7 +298,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         chatUrls: nextUrls,
         profileUrl: existing.profileUrl || `${location.origin}/chatbot/${id}`,
         savedAt: existing.savedAt || Date.now(),
-        lastSeenAt: Date.now(),
+        // Reopening the same imported page should not rewrite thousands of
+        // unchanged bot metadata rows just because their scan time changed.
+        lastSeenAt: Math.floor(Date.now() / 3600000) > Math.floor(Number(existing.lastSeenAt || 0) / 3600000)
+          ? Date.now() : Number(existing.lastSeenAt || 0),
         cardMetaCaptured: true,
         apiMetaCaptured: true
       };
@@ -394,8 +397,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const state = loadAllState();
 
     if (button) {
+      button.disabled = !!state.running && state.mode !== "api";
       const baselineReady = !!DS.state.chatImportBaselineReady;
-      const idleLabel = baselineReady ? "Refresh chats" : "Load all";
+      const idleLabel = baselineReady ? "Refresh API" : "Import via API";
       DS.setTextIfChanged?.(button, state.running ? "Stop loading" : idleLabel);
       button.setAttribute("aria-busy", state.running ? "true" : "false");
       button.title = state.running
@@ -413,6 +417,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       fullRescan.title = "Reread the entire conversation history from page 1 to repair or rebuild imported chat data.";
     }
 
+    const nativeButton = document.getElementById("ds-qol-load-native-chats");
+    if (nativeButton) {
+      DS.setTextIfChanged?.(nativeButton, state.running && state.mode === "dom" ? "Stop native load" : "Load native cards");
+      nativeButton.disabled = !!state.running && state.mode !== "dom";
+    }
     if (progress) {
       const showProgress = !!state.statusText && (state.running || Date.now() < Number(state.statusVisibleUntil || 0));
       DS.setTextIfChanged?.(progress, state.statusText || "");
@@ -441,21 +450,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.findLoadMoreButton = function findLoadMoreButton() {
-    const buttons = DS.qsa("button");
-
-    for (const button of buttons) {
-      if (button.disabled) continue;
-
-      const text = DS.normalize(button.textContent);
-      const hasLoadMoreKey = !!button.querySelector(
-        "[data-translate-key='common:loadMore']"
-      );
-
-      if (text === "load more" || hasLoadMoreKey) {
-        return button;
-      }
+    // Only click the native chat-list pager. Never hit our own "Load older"
+    // current-chat search button, helper panels or hidden controls.
+    for (const button of DS.qsa("button")) {
+      if (button.disabled || button.hidden || button.closest("#ds-qol-panel,[data-ds-qol-owned='1'],[id^='ds-qol-']")) continue;
+      const text = DS.normalize(button.textContent).trim().toLowerCase();
+      const hasLoadMoreKey = !!button.querySelector("[data-translate-key='common:loadMore']");
+      if (!["load more", "show more", "load older", "show older"].includes(text) && !hasLoadMoreKey) continue;
+      if (!button.getClientRects().length) continue;
+      return button;
     }
-
     return null;
   };
 
@@ -676,7 +680,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const completedNormally = /^Done\./.test(String(message || ""));
-    if (completedNormally) {
+    const apiMode = state.mode === "api";
+    if (completedNormally && apiMode) {
       const now = Date.now();
       if (state.refreshMode) {
         await writeChatImportState({
@@ -693,16 +698,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
-    try { await DS.chatIndexImportFinish?.({ complete: completedNormally, full: !state.refreshMode }); }
-    catch (error) { console.warn(`[${DS.EXT_NAME}] final chat index save failed`, error); }
+    if (apiMode) {
+      try { await DS.chatIndexImportFinish?.({ complete: completedNormally, full: !state.refreshMode }); }
+      catch (error) { console.warn(`[${DS.EXT_NAME}] final chat index save failed`, error); }
+    }
 
     // Only clear a completed scan after the final metadata/index save. A
     // stopped or failed scan remains resumable after a browser restart.
-    if (completedNormally && !state.dirty) {
+    if (apiMode && completedNormally && !state.dirty) {
       if (!(await localStorageSet({ [CHAT_IMPORT_PROGRESS_KEY]: null }))) {
         console.warn(`[${DS.EXT_NAME}] Could not clear completed chat import checkpoint`);
       }
-    } else {
+    } else if (apiMode) {
       try { await saveChatImportProgress(state, "paused"); }
       catch (error) { console.warn(`[${DS.EXT_NAME}] Could not save final chat import cursor`, error); }
     }
@@ -917,7 +924,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const { settings } = DS.state;
     const state = loadAllState();
 
-    if (!state.running || !state.userStarted) {
+    if (!state.running || !state.userStarted || state.mode !== "dom") {
       state.running = false;
       state.userStarted = false;
       updateLoadAllButton();
@@ -956,7 +963,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const imported = await DS.importVisibleOpenedChats({ force: true });
       state.importedTotal += imported.added;
 
-      const maxPages = Number(settings.deepImportMaxPages || 80);
+      const maxPages = state.mode === "dom"
+        ? Math.max(1, Math.min(20, Number(state.nativeMaxPages || 1)))
+        : Number(settings.deepImportMaxPages || 80);
 
       if (state.clicked >= maxPages) {
         await DS.finishLoadAllChats(
@@ -1066,6 +1075,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     await DS.startLoadAllChats(true, { forceFullRescan: false });
+  };
+
+  DS.manualNativeLoadChats = async function manualNativeLoadChats() {
+    const state = loadAllState();
+    if (state.running) {
+      if (state.mode === "dom") await DS.stopLoadAllChats();
+      return;
+    }
+    if (!isChatListPage()) return;
+    if (document.hidden) { setLoadAllStatus("Open the chat list tab to load native cards.", false); return; }
+    if (!DS.findLoadMoreButton?.()) {
+      setLoadAllStatus("SpicyChat has no native Load More button right now. Clear native search filters and try again.", false);
+      return;
+    }
+    state.running = true;
+    state.userStarted = true;
+    state.cancel = false;
+    state.stepping = false;
+    state.mode = "dom";
+    state.nativeMaxPages = Math.max(1, Math.min(20, Number(document.getElementById("ds-qol-native-load-pages")?.value || 1)));
+    state.clicked = 0;
+    state.importedTotal = 0;
+    state.noChange = 0;
+    state.dirty = false;
+    state.statusText = "";
+    setLoadAllStatus("Manually loading native cards. This adds actual page elements and can be slow for large lists.", true);
+    updateLoadAllButton();
+    void DS.runLoadAllChatsLoop?.();
   };
 
   DS.manualFullRescanChatsAndImport = async function manualFullRescanChatsAndImport() {

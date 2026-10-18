@@ -411,13 +411,6 @@ Testing"></textarea></label>
 <option value="alpha-desc">alphabetical Z-A</option>
 </select>
 </label>
-<label>Opened-state filter
-          <select id="chatListOpenedFilter">
-<option value="all">all chats</option>
-<option value="opened">opened/known bots only</option>
-<option value="unopened">not yet opened/known only</option>
-</select>
-</label>
 <label>Message-count filter
           <select id="chatListMessageFilter">
 <option value="all">all message counts</option>
@@ -451,10 +444,10 @@ Testing"></textarea></label>
 <h3>Chat Index</h3>
 <label class="row"><input id="enableChatIndex" type="checkbox"/><span>Enable Chat Index on the chat list (off by default)</span></label>
 <label class="row"><input id="chatIndexEnhanceNativeSearch" type="checkbox"/><span>Show additional Chat Index matches under SpicyChat's native History search (off by default)</span></label>
-<p class="hint">Uses the existing locally imported conversation names/IDs; no chats are fetched or mounted when searching. The native Search button keeps working, and pressing Enter in its search field also searches. Requires Chat Index to be enabled. Message-text indexing remains a separate manual tool.</p>
+<p class="hint">Uses the existing locally imported conversation names/IDs; no chats are fetched or mounted when searching. The native Search button keeps working, and pressing Enter in its search field also searches. Requires Chat List Tools or Chat Index to be enabled. Message-text indexing remains a separate manual tool.</p>
 <p class="hint">When enabled, a Chat Index button appears with the chat list tools on /chats. It opens a larger searchable window with local chat favorites, status filters and manual API refresh controls. Existing indexed data stays saved when disabled. No automatic scan is started by this option.</p>
 </section>
-<p class="hint">Search uses the whole visible chat row, so it can match the bot name, persona name, description and visible message text. Opened/message/saved/blocked filters combine with search and sorting. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state. <strong>Load all / Refresh chats also imports every conversation bot into Bot Status Center's Opened history</strong> with the metadata SpicyChat's conversation API exposes; blocked bots remain tracked through the Blocked source instead.</p>
+<p class="hint">Visible chat cards and the locally imported conversation catalog are searched separately, so matches don't require loading thousands of cards. Message/saved/blocked filters affect native cards; the imported results show matching saved conversation names/IDs and link to their exact chats. Full API rescan refreshes chat names and IDs, not the actual message text. For message content, enable Chat Index and choose Messages / text, then manually index selected batches. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state. <strong>Load all / Refresh chats also imports every conversation bot into Bot Status Center's Opened history</strong> with the metadata SpicyChat's conversation API exposes; blocked bots remain tracked through the Blocked source instead.</p>
 </section>
 
 
@@ -840,6 +833,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
 </div>
+<p class="hint" id="botStatusLastRunSummary" role="status">Last scan summary loading…</p>
 <progress id="botStatusScanProgress" max="1" value="0" hidden style="width:100%; max-width:680px; height:10px" aria-label="Bot Status scan progress"></progress>
 <p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
 <details class="sub-card bot-status-maintenance-card">
@@ -1238,6 +1232,13 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <h2>Saved Text / Snippets</h2>
 <label class="row"><input id="enableSavedTextSnippets" type="checkbox"/><span>Enable Saved Snippets in chats</span></label>
 <p class="hint">Adds a Saved snippets button to the QoL panel. Save reusable text locally, search it by name or content, edit/delete entries, use your current draft as a snippet, and insert saved text back into the chat box.</p>
+</section><section class="card" id="chatSceneNotesSettingsCard">
+<h2>Per-chat Scene Notes</h2>
+<label class="row"><input id="enableChatSceneNotes" type="checkbox"/><span>Enable a separate Scene field for each conversation (off by default)</span></label>
+<label class="row"><input id="chatSceneNotesAutoInclude" type="checkbox"/><span>Include saved scene notes in outgoing messages automatically (off by default)</span></label>
+<label class="row"><input id="chatSceneNotesEnableBotApply" type="checkbox"/><span>Allow staging Scene Notes into my bot’s actual Scenario field (Private/Unlisted only, off by default)</span></label>
+<label>When auto-including notes <select id="chatSceneNotesAutoMode"><option value="session">Once per conversation session</option><option value="every">Every message (repeats the notes)</option></select></label>
+<p class="hint">When enabled, use the new Scene button in a chat to edit its private scene notes and optionally insert them into an unsent draft. Automatic inclusion is a separate opt-in and adds visible OOC text to your message. Local notes do not change the bot or native Memories. The separate Apply to bot action is available only for bots you own that are confirmed Private or Unlisted. It fills the owned bot's native Scenario editor for review; saving it changes the bot for all its conversations. QoL never changes visibility or saves it automatically.</p>
 </section><section class="card" id="replyInstructionsCard">
 <h2>Reply Instructions</h2>
 <label class="row"><input id="enableReplyInstructions" type="checkbox"/><span>Enable persistent reply instructions</span></label>
@@ -1445,66 +1446,11 @@ Testing" spellcheck="false"></textarea></label>
 <div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Everything is optional.</p>
 <section class="card" id="customPicturesCard">
 <h2>Custom Pictures</h2>
-<p class="hint">Manage pictures for individual conversations. Existing backgrounds and saved scenes are unchanged; Character and Persona pictures are local visual overrides only. They do not change the image-generation model's reference.</p>
-<label class="row"><input id="enableCustomCharacterPictures" type="checkbox"/><span>Enable per-chat Character Pictures</span></label>
-<label class="row"><input id="enableCustomPersonaPictures" type="checkbox"/><span>Enable per-chat Persona Pictures</span></label>
-<p class="hint">In a chat, use Custom Pictures to switch between Backgrounds, Character Pictures, Persona Pictures, Image Generation (if installed/enabled), and Picture Library. Only enabled and installed subsections appear.</p>
+<p class="hint">Manage per-conversation pictures here. These are local visual overrides and do not change the bot, the persona profile, or the image-generation model's reference.</p>
+<div id="ds-custom-pictures-feature-settings"></div>
+<p class="hint">Open Custom Pictures while chatting to switch between installed and enabled subsections. Saved background and scene images are preserved.</p>
 </section>
-<section class="card" id="chatBackgroundsCard">
-<h2>Custom Pictures → Backgrounds</h2>
-<p class="hint"><strong>Early version / experimental:</strong> Chat backgrounds are still being refined. Image placement, sizing and compatibility may change as we test them.</p>
-<label class="row"><input id="enableChatBackgrounds" type="checkbox"/><span>Enable local custom chat backgrounds</span></label>
-<label class="row"><input id="chatSceneGalleriesEnabled" type="checkbox"/><span>Enable scene galleries per conversation (manual image imports, optional)</span></label>
-<p class="hint">Open the QoL extension popup on a chat and choose Custom Pictures to set a picture or switch scenes. Import generated images by saving their files first; QoL does not call SpicyChat's image generator. Six images per chat, at most 1.5 MB each and a global gallery budget of 24 MB.</p>
-<label class="row"><input id="chatBackgroundUseAvatar" type="checkbox"/><span>Automatically use the chat character avatar when no custom image is set</span></label>
-<label class="row"><input id="chatBackgroundAnimateAvatar" type="checkbox"/><span>Allow animated character backgrounds (may use more CPU/GPU)</span></label>
-<label>Chat message opacity (%) <input id="chatBackgroundBubbleOpacity" type="number" min="25" max="100" value="100"/></label>
-<p class="hint">Avatar mode uses the original character image from SpicyChat's CDN when available (not the tiny chat-header thumbnail). This may download a larger image. Adjust its displayed size or optionally repeat the avatar into the left and right sides of the screen from each chat’s BG menu. Custom images take priority.</p>
-<p class="hint">Imported backgrounds and scenes are stored locally; avatar images are displayed from the CDN without saving a copy. Global backgrounds apply unless overridden for a chat. QoL does not upload background images to SpicyChat.</p>
-<label>Background dimming (%)
-<input id="chatBackgroundDim" max="90" min="0" step="5" type="number" value="45"/>
-</label>
-<label>Background blur (px)
-<input id="chatBackgroundBlur" max="30" min="0" step="1" type="number" value="0"/>
-</label>
-<label>Image fit
-<select id="chatBackgroundFit">
-<option value="cover">Cover</option>
-<option value="contain">Contain</option>
-<option value="tile">Tile / repeat</option>
-</select>
-</label>
-<label>Image position
-<select id="chatBackgroundPosition">
-<option value="center">Center</option>
-<option value="top">Top</option>
-<option value="bottom">Bottom</option>
-<option value="left">Left</option>
-<option value="right">Right</option>
-</select>
-</label>
-<h3>Global background</h3>
-<div class="button-row">
-<label class="button-link" for="chatBackgroundGlobalUpload">Choose image</label>
-<input accept="image/*" hidden="" id="chatBackgroundGlobalUpload" type="file"/>
-<button id="clearGlobalChatBackground" type="button">Clear global background</button>
-<button id="clearPerChatBackgrounds" type="button">Clear per-chat overrides</button>
-</div>
-<div class="ds-bg-url-entry">
-<label for="chatBackgroundGlobalUrl">Or paste an image URL (HTTPS)</label>
-<input id="chatBackgroundGlobalUrl" type="url" placeholder="https://example.com/background.png" autocomplete="url"/>
-<select id="chatBackgroundGlobalUrlMode" aria-label="Image URL storage mode">
-<option value="local">Download and save locally (default)</option>
-<option value="link">Keep URL only (no local copy)</option>
-</select>
-<button id="useGlobalChatBackgroundUrl" type="button">Use image URL</button>
-<button id="refreshGlobalChatBackgroundUrl" type="button">Refresh saved image from original URL</button>
-<p class="hint" id="chatBackgroundGlobalUrlStatus" role="status">Local copies preserve their original URL. Downloading from a new host may require permission; URL-only images depend on the host.</p>
-</div>
-<p class="hint" id="chatBackgroundGlobalStatus">No global image saved.</p>
-<div class="chat-background-preview" hidden="" id="chatBackgroundGlobalPreview"></div>
-<p class="hint">Images up to 8 MB can be stored locally. Per-chat overrides are managed from Custom Pictures inside an open conversation. Background image bytes are excluded from normal lightweight QoL backups and are listed separately in Storage Usage.</p>
-</section>
+<div id="ds-chat-backgrounds-settings-slot"></div>
 </div>
 <div class="tab-page" data-page="appearance"><p class="page-intro">Appearance, navigation cleanup, Mini Panel, ambience, premium/promo cleanup, and other interface controls.</p>
 <section class="card" id="accessibilityCard">
@@ -1629,6 +1575,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickPanelShowFillNow" type="checkbox"/><span>Show Fill now on bot listings</span></label>
 <label class="row"><input id="quickPanelShowSmartFilterPins" type="checkbox"/><span>Show pinned Smart Filter presets on bot listings</span></label>
 <label class="row"><input id="quickPanelShowChatSearch" type="checkbox"/><span>Show chat search on /chats</span></label>
+<label class="row"><input id="quickPanelShowChatMessageSearch" type="checkbox"/><span>Show Search messages in Mini Panel (requires Chat Index; off by default)</span></label>
 <label class="row"><input id="quickPanelShowChatSort" type="checkbox"/><span>Show chat sorting on /chats</span></label>
 <label class="row"><input id="quickPanelShowScanVisible" type="checkbox"/><span>Show Scan visible on /chats</span></label>
 <label class="row"><input id="quickPanelShowLoadAll" type="checkbox"/><span>Show Load all / Stop loading on /chats</span></label>
@@ -2342,7 +2289,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <strong>Lorebook response consistency</strong>
 <label class="row"><input id="enableLorebookConsistency" type="checkbox"/><span>Check settled AI replies for new locally-backed-up Lorebook matches</span></label>
 <label class="row"><input id="lorebookConsistencyShowMatches" type="checkbox"/><span>Show matched Lorebook entries under the AI reply</span></label>
-<label class="row"><input id="lorebookConsistencyAutoQueue" type="checkbox"/><span>Queue newly matched Lorebook context for the next user turn</span></label>
+<label class="row"><input id="lorebookConsistencyAutoQueue" type="checkbox"/><span>Queue newly matched Lorebook context for the next user turn (off by default)</span></label>
 <label>Maximum entries queued per reply <input id="lorebookConsistencyMaxEntries" type="number" min="1" max="5" step="1" value="3"/></label>
 <p class="hint">QoL compares an AI reply with the previous user message and looks for Lorebook keywords introduced by the AI. It can show those local backup entries and carry them into the next turn. SpicyChat does not expose a supported hook that lets QoL silently rewrite the response that already finished generating.</p>
 </div>
@@ -2897,7 +2844,10 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label>Not Interested bots <select data-sync-list="notInterestedBots"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 <label>Opened bot IDs <select data-sync-list="openedChats"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 </div>
-<div class="button-row"><button id="accountSyncSavePreferences" type="button">Save device sync choices</button></div>
+<div class="button-row" id="accountSyncQuickModes"><button type="button" data-sync-preset="all-off">Turn all off</button><button type="button" data-sync-preset="blocked-only">Blocked bots only</button><button type="button" data-sync-preset="desktop-upload">Desktop upload settings</button></div>
+<p class="hint">Quick modes only change this form; nothing is sent to the cloud until you save the choices.</p>
+<div class="button-row"><button id="accountSyncPreviewChoices" type="button">Preview directions</button><button id="accountSyncSavePreferences" type="button">Save device sync choices</button></div>
+<p id="accountSyncDirectionPreview" class="hint" role="status"></p>
 <p id="accountSyncSelectionSummary" class="hint"></p>
 <p class="hint">Cloud revisions are change counters, not proof that entire copies are stored. Historical revisions and cloud cleanup depend on the sync backend. ID-only lists use compact, deduplicated per-device updates; they do not upload unchanged lists on every check.</p>
 </div>
@@ -2927,6 +2877,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <fieldset class="export-scope-list" id="exportScopeList">
 <legend>Include in export</legend>
 <div class="button-row export-scope-actions"><button id="selectActiveUsedExportScopes" type="button">Active / Used</button><button id="selectAllExportScopes" type="button">Everything</button><button id="clearExportScopes" type="button">Clear</button></div>
+<div class="button-row export-scope-actions" id="backupQuickPresets"><button type="button" data-backup-preset="settings">Settings only</button><button type="button" data-backup-preset="lists">Saved lists</button><button type="button" data-backup-preset="creator">Creator data</button><button type="button" data-backup-preset="pictures">Pictures &amp; media</button></div>
 <p class="hint">Active / Used selects setting groups that differ from their defaults plus saved-data categories that currently contain data. Large local media stays opt-in even when present.</p>
 <p><strong>Settings</strong></p>
 <div class="export-scope-grid">
@@ -2943,7 +2894,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="settingsAdvanced" type="checkbox"/><span>Advanced &amp; Compatibility <span class="hint" data-export-count-for="settingsAdvanced"></span></span></label>
 <label class="row"><input data-export-scope="accountSyncRules" type="checkbox"/><span>Account &amp; Sync choices <span class="hint" data-export-count-for="accountSyncRules"></span></span></label>
 </div>
-<p class="hint">Account &amp; Sync backups include only sync directions and selected categories, not link codes, authentication tokens, account IDs or device identity. Restoring sync choices does not link a device. If restored on an already linked device, review its sync direction before the next automatic sync.</p>
+<p class="hint">Account &amp; Sync backups include only sync directions and selected categories, not link codes, authentication tokens, account IDs or device identity. Restoring sync choices does not link a device. On an already linked device, restore pauses sync by default so you can review directions before resuming.</p>
 <p><strong>Saved data</strong></p>
 <div class="export-scope-grid">
 <label class="row"><input data-export-scope="opened" type="checkbox"/><span>Bot Status Center opened history <span class="hint" data-export-count-for="opened"></span></span></label>
@@ -2964,6 +2915,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="chatbotLorebookLinks" type="checkbox"/><span>Chatbot ↔ Lorebook links <span class="hint" data-export-count-for="chatbotLorebookLinks"></span></span></label>
 <label class="row"><input data-export-scope="savedTextSnippets" type="checkbox"/><span>Saved snippets <span class="hint" data-export-count-for="savedTextSnippets"></span></span></label>
 <label class="row"><input data-export-scope="contextKeeperData" type="checkbox"/><span>Context Keeper <span class="hint" data-export-count-for="contextKeeperData"></span></span></label>
+<label class="row"><input data-export-scope="chatSceneNotes" type="checkbox"/><span>Per-chat Scene Notes <span class="hint" data-export-count-for="chatSceneNotes"></span></span></label>
 <label class="row"><input data-export-scope="storyDayTrackerData" type="checkbox"/><span>Internal Day Tracker <span class="hint" data-export-count-for="storyDayTrackerData"></span></span></label>
 <label class="row"><input data-export-scope="rpStateTrackerData" type="checkbox"/><span>RP State Tracker <span class="hint" data-export-count-for="rpStateTrackerData"></span></span></label>
 <label class="row"><input data-export-scope="chatNudges" type="checkbox"/><span>Chat Nudges <span class="hint" data-export-count-for="chatNudges"></span></span></label>
@@ -2981,7 +2933,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="tabCleanupTopics" type="checkbox"/><span>Tab Cleanup topics <span class="hint" data-export-count-for="tabCleanupTopics"></span></span></label>
 <label class="row"><input data-export-scope="tabCleanupEnrichment" type="checkbox"/><span>Tab Cleanup profile metadata <span class="hint" data-export-count-for="tabCleanupEnrichment"></span></span></label>
 <label class="row"><input data-export-scope="localChangeHistory" type="checkbox"/><span>Recent QoL change history <span class="hint" data-export-count-for="localChangeHistory"></span></span></label>
-<label class="row"><input data-export-scope="localMedia" type="checkbox"/><span>Local media (soundscape audio + chat backgrounds; can be large) <span class="hint" data-export-count-for="localMedia"></span></span></label>
+<label class="row"><input data-export-scope="localMedia" type="checkbox"/><span>Local media (soundscapes, backgrounds, character/persona pictures, picture library; may be large) <span class="hint" data-export-count-for="localMedia"></span></span></label>
 </div>
 <p class="hint">DeepL API keys, creator Discord webhook URLs, temporary caches, diagnostics, and refill/helper state are never included. Local media is intentionally excluded from Active / Used and must be selected explicitly.</p>
 </fieldset>
@@ -3005,6 +2957,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div class="import-preview-counts" id="importPreviewCounts"></div>
 <div class="button-row"><button id="selectAllImportScopes" type="button">Select all found</button><button id="clearImportScopes" type="button">Clear selection</button></div>
 <div class="import-mode">
+<label class="row"><input id="activateRestoredSync" type="checkbox"/><span>Allow restored cloud sync to run immediately (off by default; otherwise sync is paused until resumed)</span></label>
 <label class="row"><input checked="" name="importMode" type="radio" value="merge"/><span>Merge with current data and remove duplicates</span></label>
 <label class="row"><input name="importMode" type="radio" value="replace"/><span>Replace only the categories included in this backup</span></label>
 </div>
@@ -3233,7 +3186,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

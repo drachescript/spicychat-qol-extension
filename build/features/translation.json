@@ -1,36 +1,17 @@
 {
-  "schema": "dsq-feature/v1",
   "id": "translation",
-  "label": "Translation",
-  "category": "chat",
-  "requiredFeatures": [],
-  "runtimeScripts": [
-    "content/translation.js"
+  "primary": "content/translation.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableTranslation"
   ],
-  "settingsScripts": [],
-  "settingKeys": [],
-  "cssFiles": [],
-  "backgroundServices": [],
-  "permissions": [],
-  "sharedDependencies": {
-    "runtime": [
-      "content/core.js",
-      "content/main.js"
-    ],
-    "settings": [
-      "options.js",
-      "options.html"
-    ],
-    "background": [
-      "background/background-events.js"
-    ]
-  },
-  "customBuildStatus": "blocked",
-  "fullRuntimeStatus": "shared-lifecycle",
-  "blockers": [
-    "Feature-specific scheduler/Settings/background dependencies need end-to-end stop/reload validation before this can be omitted."
-  ],
-  "notes": [
-    "Inventory generated from the Full module graph. This is not a verified standalone feature."
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/background-translation.js"
   ]
 }

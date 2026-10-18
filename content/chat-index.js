@@ -38,6 +38,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let chatFavorites = null;
   let availability = null;
   let filter = "all";
+  let indexSort = "recent";
+  let multiChatOnly = false;
+  let searchMode = "conversations";
+  let expandedSampleId = "";
+  let expandedSampleLimit = 12;
+  let sampleReadSerial = 0;
+  const sampleCache = new Map();
   let searchText = "";
   let limit = PAGE_SIZE;
   let viewOpen = false;
@@ -119,6 +126,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function scheduleTextSearch(delay = 300) {
     clearTimeout(textSearchTimer);
     const serial = ++textSearchSequence;
+    // Matches belong to a specific query. Never display the previous query's
+    // results while an asynchronous storage search is still running.
+    if (textSearchHits.size) {
+      textSearchHits = new Map();
+      if (viewOpen) scheduleRender(0);
+    }
     if (!textSearchEnabled || !searchText.trim()) {
       textSearchHits = new Map(); textSearchRunning = false;
       scheduleRender(0); return;
@@ -158,7 +171,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (serial === textSearchSequence) { textSearchRunning = false; scheduleRender(0); }
     }
   }
-  async function indexNextChats() {
+  async function indexNextChats(recheck = false) {
     if (textScanActive || !viewOpen || !isEnabled() || !textSearchEnabled) return;
     textScanActive = true; textScanCancel = false;
     const op = DS.diagOperationStart?.("chat-index", "manual-message-index", { batch: textScanBatch });
@@ -167,11 +180,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await Promise.all([loadIndex(), loadTextIndex()]);
       if (typeof (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage) !== "function") throw Error("Authenticated chat-history reader unavailable");
       const entries = Object.values(snapshot.entries)
-        .filter(row => goodId(row?.botId) && goodId(row?.conversationId) && !textIndex.entries[row.conversationId])
-        .sort((a,b) => Number(b.indexRunAt || 0)-Number(a.indexRunAt || 0) || Number(a.indexRank || 0)-Number(b.indexRank || 0));
-      const availableSlots = Math.max(0, TEXT_MAX_CHATS - Object.keys(textIndex.entries).length);
+        .filter(row => goodId(row?.botId) && goodId(row?.conversationId)
+          && (recheck ? !!textIndex.entries[row.conversationId] : !textIndex.entries[row.conversationId]));
+      if (recheck) {
+        // Oldest locally sampled chats go first; never auto-refresh while browsing.
+        entries.sort((a,b) => Number(textIndex.entries[a.conversationId]?.at || 0)-Number(textIndex.entries[b.conversationId]?.at || 0));
+      } else {
+        entries.sort((a,b) => Number(b.indexRunAt || 0)-Number(a.indexRunAt || 0) || Number(a.indexRank || 0)-Number(b.indexRank || 0));
+      }
+      const availableSlots = recheck ? textScanBatch : Math.max(0, TEXT_MAX_CHATS - Object.keys(textIndex.entries).length);
       const batch = entries.slice(0, Math.min(textScanBatch, availableSlots));
-      if (!batch.length) { textScanMessage = availableSlots ? "All indexed chats have message samples." : "Local message index reached its 2,000-chat safety limit."; return; }
+      if (!batch.length) {
+        textScanMessage = recheck ? "No stored message samples to refresh." : (availableSlots ? "All indexed chats have message samples." : "Local message index reached its 2,000-chat safety limit.");
+        return;
+      }
       for (const entry of batch) {
         if (textScanCancel || !viewOpen || !isEnabled() || !textSearchEnabled) break;
         const seen = new Set(); const rows = []; let lastId = ""; let partial = true;
@@ -179,10 +201,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         try {
           for (let page = 0; page < 6 && rows.length < TEXT_MESSAGES_PER_CHAT && !textScanCancel; page++) {
             let response;
-            try { response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(entry.botId, entry.conversationId, { limit: pageSize, lastId }); requests++; }
+            try { response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(entry.botId, entry.conversationId, { limit: pageSize, lastId, forceRefresh: recheck }); requests++; }
             catch (error) {
               if (page === 0 && [400, 413, 422].includes(Number(error?.httpStatus || 0))) {
-                pageSize = 50; response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(entry.botId, entry.conversationId, { limit: pageSize, lastId }); requests++;
+                pageSize = 50; response = await (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(entry.botId, entry.conversationId, { limit: pageSize, lastId, forceRefresh: recheck }); requests++;
               } else throw error;
             }
             const incoming = response?.data?.messages;
@@ -203,7 +225,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (textScanCancel) break;
           const rowKey = `${TEXT_ROW_PREFIX}${entry.conversationId}`;
           if (await DS.storageSet({ [rowKey]: { messages: rows } }, { immediate: true }) === false) throw Error("Could not checkpoint indexed messages");
-          textIndex.entries[entry.conversationId] = { at: Date.now(), partial, count: rows.length };
+          sampleCache.delete(entry.conversationId);
+          textIndex.entries[entry.conversationId] = { at: Date.now(), partial, count: rows.length, messageCountAtIndex: Math.max(0, Number(entry.messageCount) || 0) };
           await saveTextIndex(); succeeded++;
           textScanMessage = `Indexed ${succeeded}/${batch.length} chats · ${requests} API requests. Partial chats are labeled.`;
           scheduleRender(200);
@@ -214,7 +237,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           break;
         }
       }
-      if (!errors && !textScanCancel) textScanMessage = `Indexed ${succeeded} more chats (${requests} requests). Use Index next for more.`;
+      if (!errors && !textScanCancel) textScanMessage = `${recheck ? "Refreshed" : "Indexed"} ${succeeded} chats (${requests} requests). ${recheck ? "Older stored samples remain until refreshed." : "Use Index next for more."}`;
       if (succeeded && textSearchEnabled && searchText.trim()) scheduleTextSearch(0);
     } catch (error) {
       textScanMessage = `Message scan stopped: ${error?.message || error}`;
@@ -262,7 +285,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // These hooks attach to the existing Load all chats API importer. They NEVER
   // issue duplicate conversation API requests and never mount native chat cards.
   DS.chatIndexImportStart = async function chatIndexImportStart() {
-    if (!isEnabled()) return;
+    if (DS.state?.settings?.enabled !== true || (!isEnabled() && DS.state?.settings?.showChatListTools !== true)) return;
     await loadIndex();
     indexActive = true;
     pendingPages = 0;
@@ -275,9 +298,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.chatIndexCaptureRows = async function chatIndexCaptureRows(rows) {
     if (!indexActive) return;
-    if (!isEnabled()) {
-      // Preserve buffered pages, then stop any extra indexing if the user
-      // disables the feature while an existing Load all import is running.
+    if (DS.state?.settings?.enabled !== true || (!isEnabled() && DS.state?.settings?.showChatListTools !== true)) {
+      // Preserve buffered pages, then stop if both optional list features
+      // are turned off while the manual API import continues.
       await DS.chatIndexImportFinish?.({ complete: false, full: false });
       return;
     }
@@ -288,7 +311,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const botId = normalizeId(row?.character_id || character.id || "");
       const conversationId = normalizeId(row?.id || "");
       if (!goodId(botId) || !goodId(conversationId)) continue;
-      if (DS.isBlockedForOpenedHistory?.(botId, { id: botId, name: clean(character.name) })) continue;
+      // An existing conversation remains searchable even when its bot is on
+      // the separate blocked list. Only the Opened-bot discovery source is
+      // excluded from automatic re-adding blocked bots.
       const prior = snapshot.entries[conversationId] || {};
       const rowRank = importRank++;
       const originalRank = Number(prior.indexRunAt || 0) === importRunAt
@@ -298,7 +323,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       snapshot.entries[conversationId] = {
         botId,
         conversationId,
-        name: clean(character.name).slice(0, 180) || prior.name || botId,
+        name: clean(character.name || row?.character_name || row?.chatbot?.name || row?.title || "").slice(0, 180)
+          || clean(DS.state?.openedChatMeta?.[botId]?.name || "").slice(0, 180)
+          || prior.name || botId,
         image: image || prior.image || "",
         messageCount: Number.isFinite(count) && count >= 0 ? Math.max(Math.floor(count), Number(prior.messageCount || 0)) : Number(prior.messageCount || 0),
         firstIndexedAt: Number(prior.firstIndexedAt || now),
@@ -381,7 +408,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return input instanceof HTMLInputElement ? input : null;
   }
   function nativeSearchAllowed() {
-    return isRoute() && isEnabled()
+    return isRoute() && DS.state?.settings?.enabled === true
+      && !DS.isQolPausedForTab?.()
+      && (DS.state.settings.enableChatIndex === true || DS.state.settings.showChatListTools === true)
       && DS.state.settings.chatIndexEnhanceNativeSearch === true;
   }
   function clearNativeResults() {
@@ -397,7 +426,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     nativeSearchLimit = NATIVE_PAGE_SIZE;
   }
   function nativeSearchTerm() {
-    return clean(nativeSearchInput()?.value || "").toLocaleLowerCase();
+    return clean(nativeSearchInput()?.value || "").normalize("NFKC").toLocaleLowerCase();
   }
   function nativeChatIds() {
     // Distinguish conversations with the same bot (the second URL segment).
@@ -456,7 +485,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const matches = Object.values(snapshot?.entries || {})
       .filter(entry => goodId(entry?.conversationId) && goodId(entry?.botId)
         && !present.has(entry.conversationId.toLowerCase())
-        && `${entry.name || ''} ${entry.botId} ${entry.conversationId}`.toLocaleLowerCase().includes(term));
+        && `${entry.name || ''} ${DS.state?.openedChatMeta?.[entry.botId]?.name || ''} ${entry.botId} ${entry.conversationId}`.normalize("NFKC").toLocaleLowerCase().includes(term));
     matches.sort((a,b) => Number(b.indexRunAt || 0)-Number(a.indexRunAt || 0)
       || Number(a.indexRank ?? 9999999)-Number(b.indexRank ?? 9999999));
     const heading = el('div', 'ds-qol-native-index-heading');
@@ -573,6 +602,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const heading = el("div", "ds-qol-ci-heading");
     heading.append(el("strong", "", "Chat index"), button("Close ×", () => setOpen(false), "Close chat index"));
     panel.append(heading, el("p", "ds-qol-ci-hint", "Saved chats · local favorites don't change SpicyChat favorites."));
+    const modes = el("div", "ds-qol-ci-modes");
+    const conversationMode = button("Conversations", () => chooseSearchMode("conversations"));
+    const messageMode = button("Messages / text", () => chooseSearchMode("messages"));
+    conversationMode.dataset.dsCiMode = "conversations";
+    messageMode.dataset.dsCiMode = "messages";
+    modes.append(conversationMode, messageMode);
+    panel.append(modes);
     const actions = el("div", "ds-qol-ci-actions");
     actions.append(
       button("Refresh index", async () => { await runScan(false); }, "Refresh recent chats or make the first complete index"),
@@ -583,27 +619,47 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const status = el("p", "ds-qol-ci-status", "Loading saved index…"); status.id = "ds-qol-ci-status";
     panel.append(status);
     const controls = el("div", "ds-qol-ci-filters");
-    const search = el("input"); search.type = "search"; search.placeholder = "Search bot or ID";
+    const search = el("input"); search.type = "search"; search.placeholder = searchMode === "messages" ? "Search saved message text" : "Search bot or ID";
     search.value = searchText; search.setAttribute("aria-label", "Search imported chats");
-    search.addEventListener("input", () => { searchText = search.value.toLowerCase().trim(); limit = PAGE_SIZE; scheduleTextSearch(); scheduleRender(); });
+    search.addEventListener("input", () => { searchText = search.value.normalize("NFKC").toLocaleLowerCase().trim(); limit = PAGE_SIZE; scheduleTextSearch(); scheduleRender(); });
     const select = el("select"); select.setAttribute("aria-label", "Filter chats");
-    for (const [value, label] of [["all", "All chats"], ["favorite", "Favorite chats"], ["unavailable", "Confirmed unavailable"], ["restricted", "Private / restricted"], ["unknown", "Not checked"], ["available", "Available"]]) {
+    for (const [value, label] of [["all", "All chats"], ["favorite", "Favorite chats"], ["blocked", "Blocked bot chats"], ["unavailable", "Confirmed unavailable"], ["restricted", "Private / restricted"], ["unknown", "Not checked"], ["available", "Available"]]) {
       const option = el("option", "", label); option.value = value; select.append(option);
     }
     select.value = filter;
     select.addEventListener("change", () => { filter = select.value; limit = PAGE_SIZE; scheduleRender(); });
-    controls.append(search, select);
+    const sorting = el("select"); sorting.setAttribute("aria-label", "Sort indexed conversations");
+    for (const [value, label] of [["recent", "Recent import order"], ["messages-desc", "Most messages"],
+      ["messages-asc", "Fewest messages"], ["alpha-asc", "Name A-Z"], ["alpha-desc", "Name Z-A"]]) {
+      const option = el("option", "", label); option.value = value; sorting.append(option);
+    }
+    sorting.value = indexSort;
+    sorting.addEventListener("change", () => { indexSort = sorting.value; limit = PAGE_SIZE; scheduleRender(); });
+    const duplicates = el("label", "ds-qol-ci-hint");
+    const duplicateToggle = el("input"); duplicateToggle.type = "checkbox"; duplicateToggle.checked = multiChatOnly;
+    duplicateToggle.addEventListener("change", () => { multiChatOnly = duplicateToggle.checked; limit = PAGE_SIZE; scheduleRender(); });
+    duplicates.append(duplicateToggle, document.createTextNode(" Multiple chats per bot only"));
+    controls.append(search, select, sorting, duplicates);
     panel.append(controls);
     const textTools = el("div", "ds-qol-ci-actions");
     const textToggle = el("label", "ds-qol-ci-hint");
     const textCheckbox = el("input"); textCheckbox.type = "checkbox"; textCheckbox.checked = textSearchEnabled;
-    textCheckbox.addEventListener("change", async () => { textSearchEnabled = textCheckbox.checked; if (!textSearchEnabled) textScanCancel = true; await loadTextIndex(); scheduleTextSearch(0); scheduleRender(); });
+    textCheckbox.addEventListener("change", async () => {
+      textSearchEnabled = textCheckbox.checked;
+      nextButton.disabled = !textSearchEnabled;
+      refreshButton.disabled = !textSearchEnabled;
+      if (!textSearchEnabled) { textScanCancel = true; if (searchMode === "messages") searchMode = "conversations"; }
+      await loadTextIndex(); scheduleTextSearch(0); scheduleRender();
+    });
     textToggle.append(textCheckbox, document.createTextNode(" Search saved chat message text (local, optional)"));
     const batchSelect = el("select"); batchSelect.setAttribute("aria-label", "Conversations per manual text scan");
     for (const n of [5, 20, 50]) { const option = el("option", "", `${n} chats per scan`); option.value = String(n); batchSelect.append(option); }
     batchSelect.value = String(textScanBatch);
     batchSelect.addEventListener("change", () => { textScanBatch = Number(batchSelect.value) || 5; });
     const nextButton = button("Index next chats", () => void indexNextChats(), "Manually fetch newest 300 messages per chat; requests stop on errors or cancellation");
+    const refreshButton = button("Refresh oldest samples", () => void indexNextChats(true), "Re-fetch existing samples starting with the oldest; replaces local text only after a successful fetch");
+    nextButton.disabled = !textSearchEnabled;
+    refreshButton.disabled = !textSearchEnabled;
     const stopButton = button("Stop text scan", () => { textScanCancel = true; textScanMessage = "Stopping after the current request…"; scheduleRender(); });
     const clearButton = button("Clear saved message text…", async () => {
       if (!window.confirm("Delete all message text stored by QoL Chat Index on this device? Your native chats and chat list are unaffected.")) return;
@@ -617,13 +673,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           else if (await DS.storageSet(Object.fromEntries(keys.map(key => [key, null])), { immediate: true }) === false) throw Error("Could not erase saved chat samples");
         }
         textIndex = { version: 1, entries: {}, updatedAt: Date.now() };
+        sampleCache.clear(); expandedSampleId = "";
         textSearchHits = new Map();
         await saveTextIndex(); textScanMessage = "Local message samples cleared.";
       } catch (error) { textScanMessage = `Clear stopped: ${error?.message || error}. Retry to finish removing samples.`; }
       scheduleRender();
     });
-    const help = el("p", "ds-qol-ci-hint", "Manual only. Index samples up to 300 recent messages per conversation (not full history); searches cover indexed messages only. Text stays in this browser's extension storage. Do not index private chats on shared devices.");
-    textTools.append(textToggle, batchSelect, nextButton, stopButton, clearButton);
+    const help = el("p", "ds-qol-ci-hint", "Message search is opt-in. Index or refresh up to 300 recent messages per conversation (not full history). Each locally saved message excerpt is limited to 450 characters. Open the conversation for its complete messages. No background requests. Avoid indexing private chats on shared devices.");
+    textTools.append(textToggle, batchSelect, nextButton, refreshButton, stopButton, clearButton);
     panel.append(textTools, help);
     const results = el("div", "ds-qol-ci-results"); results.id = "ds-qol-ci-results"; panel.append(results);
     const footer = el("div", "ds-qol-ci-footer");
@@ -635,6 +692,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await Promise.all([loadIndex(), loadFavorites(), loadAvailability(), loadTextIndex()]);
     if (viewOpen) scheduleRender();
   }
+
+  function chooseSearchMode(mode) {
+    searchMode = mode === "messages" ? "messages" : "conversations";
+    if (searchMode === "messages") textSearchEnabled = true; // Explicit user action, not a default.
+    const panel = uiRoot()?.querySelector("#ds-qol-ci-panel");
+    const box = panel?.querySelector('.ds-qol-ci-actions input[type="checkbox"]');
+    if (box) box.checked = textSearchEnabled;
+    for (const action of panel?.querySelectorAll(".ds-qol-ci-actions button") || []) {
+      if (action.textContent === "Index next chats" || action.textContent === "Refresh oldest samples") action.disabled = !textSearchEnabled;
+    }
+    const input = panel?.querySelector('.ds-qol-ci-filters input[type="search"]');
+    if (input) { input.placeholder = searchMode === "messages" ? "Search saved message text" : "Search bot or ID"; if (searchMode === "messages") input.focus(); }
+    scheduleTextSearch(0); scheduleRender(0);
+  }
+  // Launch a dedicated local message-search view only after its installed and
+  // enabled Chat Index parent and an explicit user action. Never auto-fetch.
+  DS.openChatIndexMessages = async function openChatIndexMessages() {
+    if (!isRoute() || !isEnabled()) return false;
+    ensureHost();
+    if (!host?.isConnected) return false;
+    if (!viewOpen) await setOpen(true, "standalone");
+    if (!viewOpen) return false;
+    chooseSearchMode("messages");
+    return true;
+  };
 
   // The launcher lives beside the native /chats toolbar, independent of Mini Panel.
   DS.toggleChatIndexPanel = async function toggleChatIndexPanel() {
@@ -687,6 +769,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     scheduleRender();
   }
 
+  async function fillMessageExcerpts(conversationId, hostNode) {
+    const serial = ++sampleReadSerial;
+    if (!sampleCache.has(conversationId)) {
+      try {
+        const saved = await DS.storageGet([`${TEXT_ROW_PREFIX}${conversationId}`]);
+        const rows = saved?.[`${TEXT_ROW_PREFIX}${conversationId}`]?.messages;
+        sampleCache.set(conversationId, Array.isArray(rows) ? rows.slice(0, TEXT_MESSAGES_PER_CHAT) : []);
+      } catch {
+        if (hostNode.isConnected) hostNode.textContent = "Could not read locally stored excerpts.";
+        return;
+      }
+    }
+    if (serial !== sampleReadSerial || expandedSampleId !== conversationId || !hostNode.isConnected) return;
+    const rows = sampleCache.get(conversationId) || [];
+    hostNode.replaceChildren();
+    if (!rows.length) { hostNode.append(el("p", "ds-qol-ci-hint", "No saved message text for this conversation.")); return; }
+    hostNode.append(el("p", "ds-qol-ci-hint", `${rows.length} locally saved excerpts · first 450 characters per message, not full chat history`));
+    const needle = searchMode === "messages" ? clean(searchText).toLocaleLowerCase() : "";
+    const matching = needle ? rows.filter(row => String(row.text || "").toLocaleLowerCase().includes(needle)) : rows;
+    if (!matching.length) { hostNode.append(el("p", "ds-qol-ci-hint", "No message excerpts match this search.")); return; }
+    for (const row of matching.slice(0, expandedSampleLimit)) {
+      hostNode.append(el("p", "ds-qol-ci-excerpt", String(row.text || "")));
+    }
+    if (matching.length > expandedSampleLimit) {
+      hostNode.append(button(`Show ${Math.min(12, matching.length - expandedSampleLimit)} more excerpts`, () => {
+        expandedSampleLimit += 12;
+        scheduleRender(0);
+      }));
+    }
+  }
+
   function render() {
     const rootNode = uiRoot();
     if (!viewOpen || !rootNode?.isConnected || !snapshot || !isEnabled()) return;
@@ -700,25 +813,50 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     const root = rootNode.querySelector("#ds-qol-ci-results");
     if (!root) return;
-    const entries = Object.values(snapshot.entries).filter(entry => {
+    for (const tab of rootNode.querySelectorAll("[data-ds-ci-mode]")) {
+      const selected = tab.dataset.dsCiMode === searchMode;
+      tab.setAttribute("aria-pressed", String(selected));
+      tab.classList.toggle("is-active", selected);
+    }
+    const allEntries = Object.values(snapshot.entries);
+    const perBotCounts = new Map();
+    for (const item of allEntries) {
+      if (!goodId(item?.botId) || !goodId(item?.conversationId)) continue;
+      perBotCounts.set(item.botId, (perBotCounts.get(item.botId) || 0) + 1);
+    }
+    const entries = allEntries.filter(entry => {
       if (!goodId(entry?.conversationId) || !goodId(entry?.botId)) return false;
+      if (multiChatOnly && Number(perBotCounts.get(entry.botId) || 0) <= 1) return false;
+      if (filter === "blocked" && !DS.state?.blockedBotIdSet?.has?.(entry.botId)) return false;
       if (filter === "favorite" && !chatFavorites?.has(entry.conversationId)) return false;
-      if (!["all", "favorite"].includes(filter) && statusFor(entry) !== filter) return false;
-      if (searchText) {
-        const nameMatch = `${entry.name} ${entry.botId} ${entry.conversationId}`.toLowerCase().includes(searchText);
+      if (!["all", "favorite", "blocked"].includes(filter) && statusFor(entry) !== filter) return false;
+      if (searchMode === "messages") {
+        // Metadata-only imports never imply actual message text is available.
+        if (!textIndex?.entries?.[entry.conversationId]) return false;
+        if (searchText && !textMatches(entry, searchText)?.count) return false;
+      } else if (searchText) {
+        const nameMatch = `${entry.name} ${DS.state?.openedChatMeta?.[entry.botId]?.name || ''} ${entry.botId} ${entry.conversationId}`.normalize("NFKC").toLocaleLowerCase().includes(searchText);
         if (!nameMatch && !(textSearchEnabled && textMatches(entry, searchText)?.count)) return false;
       }
       return true;
     });
     // Conversation API returns latest first: retain its rank across pages.
     // Old rows remain visible after incomplete/limited scans, but sort last.
-    entries.sort((a, b) =>
-      Number(b.indexRunAt || 0) - Number(a.indexRunAt || 0) ||
-      Number(a.indexRank ?? 9999999) - Number(b.indexRank ?? 9999999) ||
-      a.name.localeCompare(b.name)
-    );
+    entries.sort((a, b) => {
+      if (indexSort === "messages-desc" || indexSort === "messages-asc") {
+        const diff = (Number(b.messageCount || 0) - Number(a.messageCount || 0)) * (indexSort === "messages-desc" ? 1 : -1);
+        if (diff) return diff;
+      } else if (indexSort === "alpha-asc" || indexSort === "alpha-desc") {
+        const diff = String(a.name || "").localeCompare(String(b.name || "")) * (indexSort === "alpha-asc" ? 1 : -1);
+        if (diff) return diff;
+      }
+      return Number(b.indexRunAt || 0) - Number(a.indexRunAt || 0) ||
+        Number(a.indexRank ?? 9999999) - Number(b.indexRank ?? 9999999) ||
+        String(a.name || "").localeCompare(String(b.name || ""));
+    });
     root.replaceChildren();
-    const line = el("p", "ds-qol-ci-count", `Showing ${Math.min(limit, entries.length).toLocaleString()} of ${entries.length.toLocaleString()} matches`);
+    const multiBotCount = [...perBotCounts.values()].filter(n => n > 1).length;
+    const line = el("p", "ds-qol-ci-count", `Showing ${Math.min(limit, entries.length).toLocaleString()} of ${entries.length.toLocaleString()} matches · ${perBotCounts.size.toLocaleString()} unique bots · ${multiBotCount.toLocaleString()} with multiple conversations`);
     root.append(line);
     for (const entry of entries.slice(0, limit)) {
       const row = el("article", "ds-qol-ci-entry");
@@ -744,13 +882,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
       if (textSearchEnabled && textIndex?.entries?.[entry.conversationId]?.partial) body.append(el("span", "ds-qol-ci-hint", "Partial: recent messages only"));
+      const sample = textIndex?.entries?.[entry.conversationId];
+      if (textSearchEnabled && sample && Number(sample.messageCountAtIndex || 0) > 0
+        && Number(entry.messageCount || 0) > Number(sample.messageCountAtIndex)) {
+        body.append(el("span", "ds-qol-ci-hint", "Conversation has newer messages than this saved sample — refresh manually"));
+      }
+      if (sample && (textSearchEnabled || searchMode === "messages")) {
+        const expanded = expandedSampleId === entry.conversationId;
+        act.append(button(expanded ? "Hide excerpts" : "View saved excerpts", () => {
+          expandedSampleId = expanded ? "" : entry.conversationId;
+          expandedSampleLimit = 12;
+          scheduleRender(0);
+        }, "Read locally saved message excerpts; open the chat for complete history"));
+        if (expanded) {
+          const snippetHost = el("div", "ds-qol-ci-excerpts", "Loading saved excerpts…");
+          body.append(snippetHost);
+          void fillMessageExcerpts(entry.conversationId, snippetHost);
+        }
+      }
       body.append(title, details, act); row.append(body); root.append(row);
     }
     if (entries.length > limit) {
       const more = button("Show more", () => { limit += PAGE_SIZE; scheduleRender(); });
       more.classList.add("ds-qol-ci-more"); root.append(more);
     }
-    if (!entries.length) root.append(el("p", "ds-qol-ci-empty", count ? "No matches for this filter." : "No chats indexed yet. Press Refresh index for an initial full scan."));
+    if (!entries.length) root.append(el("p", "ds-qol-ci-empty", searchMode === "messages"
+      ? (Object.keys(textIndex?.entries || {}).length
+        ? (textSearchRunning ? "Searching saved messages…" : "No indexed message matches. Try a different phrase or refresh samples manually.")
+        : "No message excerpts saved yet. Choose a batch size, then press Index next chats. API conversation imports only save names and counts.")
+      : (count ? "No matches for this filter." : "No chats indexed yet. Press Refresh index for an initial full scan.")));
   }
 
   function scheduleRender(delay = 120) {
@@ -771,6 +931,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const result = previousRouteReset?.apply(this, args);
     if (indexActive) void DS.chatIndexImportFinish?.({ complete: false, full: false });
     if (viewOpen) void setOpen(false);
+    expandedSampleId = ""; sampleCache.clear();
     clearNativeResults();
     scheduleHostCheck();
     return result;

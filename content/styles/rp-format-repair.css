@@ -1,0 +1,38 @@
+/* v0.1.8.84: RP Format Repair */
+.ds-rp-repair-original-hidden {
+  display: none !important;
+}
+.ds-rp-repair-output[hidden] {
+  display: none !important;
+}
+.ds-rp-repair-line {
+  display: inline;
+}
+.ds-rp-repair-action,
+.ds-rp-repair-emphasis {
+  font-style: italic;
+}
+.ds-rp-repair-action {
+  color: #53b8f3;
+}
+.dark .ds-rp-repair-action {
+  color: #79c8f5;
+}
+.ds-rp-repair-toggle {
+  min-width: 34px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(128,128,128,.38);
+  border-radius: 999px;
+  background: rgba(25,25,25,.48);
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.ds-rp-repair-toggle[data-ds-rp-active="1"] {
+  border-color: rgba(90,166,255,.75);
+  background: rgba(48,110,190,.24);
+}
+

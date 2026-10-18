@@ -1,0 +1,17 @@
+{
+  "id": "auto-afk",
+  "primary": "content/auto-afk.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "autoAfkEnabled"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/background-auto-afk.js"
+  ]
+}

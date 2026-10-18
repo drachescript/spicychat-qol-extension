@@ -1,0 +1,17 @@
+{
+  "id": "chat-scene-notes",
+  "primary": "content/chat-scene-notes.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "chatSceneNotesAutoInclude",
+    "chatSceneNotesAutoMode",
+    "chatSceneNotesEnableBotApply",
+    "enableChatSceneNotes"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

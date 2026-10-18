@@ -1,0 +1,20 @@
+{
+  "id": "picture-library",
+  "primary": "content/picture-library.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableCustomPictureLibrary"
+  ],
+  "requiredHelpers": [
+    "content/chat-picture-core.js",
+    "content/custom-pictures-menu.js"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/picture-library.js"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

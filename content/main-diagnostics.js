@@ -52,6 +52,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           ok: true,
           tabQol: DS.getQolTabState?.() || null,
           performance: DS.getPerformanceReport?.() || [],
+          slowFeatureSamples: DS.getSlowFeatureSamples?.().slice(-80) || [],
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
           runtimeContext: {
             visibilityState: String(document.visibilityState || "unknown"),

@@ -1,0 +1,14 @@
+{
+  "id": "tag-aliases",
+  "primary": "content/tag-aliases.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableTagAliases"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

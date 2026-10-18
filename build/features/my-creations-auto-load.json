@@ -1,0 +1,14 @@
+{
+  "id": "my-creations-auto-load",
+  "primary": "content/my-creations-auto-load.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "autoLoadMyCreations"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

@@ -237,6 +237,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const maxLength = Number(textarea.getAttribute("maxlength") || 0) || 10000;
     const character = currentCharacter();
     const candidates = [];
+    const scene = s.enableChatSceneNotes && s.chatSceneNotesAutoInclude ? DS.getChatSceneSendCandidate?.() : null;
+    if (scene?.text) candidates.push({ kind: "scene", directive: scene.text, scene });
 
     const countKey = `ds-qol-context-sends:${encodeURIComponent(location.pathname)}`;
     let sentCount = 0;
@@ -288,6 +290,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (candidate.kind === "global" && candidate.mode === "session") markGlobalSessionSent(character.key, candidate.directive);
       if (candidate.kind === "reply" && candidate.mode === "session") markSessionSent(candidate.info.character.key, candidate.directive);
       if (candidate.kind === "rp-state") DS.markRpStateInjected?.(candidate.stateHash);
+      if (candidate.kind === "scene") DS.markChatSceneSent?.(candidate.scene);
     }
     if (!added.length) {
       if (skipped.length) showToast("QoL guidance could not be added because the message is too close to SpicyChat's character limit.");
@@ -308,6 +311,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             if (candidate.kind === "reply" && candidate.mode === "session") markSessionSent(candidate.info.character.key, candidate.directive);
             if (candidate.kind === "lorebook") DS.markLorebookConsistencyQueueSent?.(candidate.queueId);
             if (candidate.kind === "rp-state") DS.markRpStateInjected?.(candidate.stateHash);
+            if (candidate.kind === "scene") DS.markChatSceneSent?.(candidate.scene);
           }
           button.click();
         }

@@ -191,6 +191,7 @@ function buildExportPayload(scopes, result) {
   if (has("chatbotLorebookLinks")) payload.chatbotLorebookLinks = result[CHATBOT_LOREBOOK_LINKS_KEY] && typeof result[CHATBOT_LOREBOOK_LINKS_KEY] === "object" ? result[CHATBOT_LOREBOOK_LINKS_KEY] : {};
   if (has("savedTextSnippets")) payload.savedTextSnippets = Array.isArray(result[SAVED_TEXT_SNIPPETS_KEY]) ? result[SAVED_TEXT_SNIPPETS_KEY] : [];
   if (has("contextKeeperData")) payload.contextKeeperData = result[CONTEXT_KEEPER_DATA_KEY] && typeof result[CONTEXT_KEEPER_DATA_KEY] === "object" ? result[CONTEXT_KEEPER_DATA_KEY] : {};
+  if (has("chatSceneNotes")) payload.chatSceneNotes = result[CHAT_SCENE_NOTES_KEY] && typeof result[CHAT_SCENE_NOTES_KEY] === "object" ? result[CHAT_SCENE_NOTES_KEY] : {};
   if (has("storyDayTrackerData")) payload.storyDayTrackerData = result[STORY_DAY_TRACKER_KEY] && typeof result[STORY_DAY_TRACKER_KEY] === "object" ? result[STORY_DAY_TRACKER_KEY] : {};
   if (has("rpStateTrackerData")) payload.rpStateTrackerData = result[RP_STATE_TRACKER_KEY] && typeof result[RP_STATE_TRACKER_KEY] === "object" ? result[RP_STATE_TRACKER_KEY] : {};
   if (has("chatNudges")) payload.chatNudges = normalizeChatNudgeStore(result[CHAT_NUDGE_STORE_KEY]);

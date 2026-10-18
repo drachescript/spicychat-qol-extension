@@ -1056,11 +1056,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         entry.lastMs = elapsed;
         entry.lastAt = Date.now();
         entry.lastTrigger = String(DS.state.lastRunTrigger || "").slice(0, 120);
+        // Retain only the most recent slow steps. Useful when an older
+        // Inspector cannot receive the v2 operation trace handshake.
+        if (elapsed >= 24) {
+          const samples = DS.state.performanceSlowSamples || (DS.state.performanceSlowSamples = []);
+          samples.push({ feature: String(name || "step").slice(0, 100), durationMs: Math.round(elapsed * 10) / 10, at: Date.now(), route: String(location.pathname || "").slice(0, 100), trigger: entry.lastTrigger });
+          if (samples.length > 120) samples.splice(0, samples.length - 120);
+        }
       }
       if (diagToken) DS.diagOperationEnd?.(diagToken, { outcome: diagOutcome });
       await maybeYieldSlowSlice(name);
     }
   }
+
+  // Local, content-free diagnostics. Enable Performance Diagnostics in Settings,
+  // reproduce a pause, then inspect this report without requiring Inspector v2.
+  DS.getSlowFeatureSamples = function getSlowFeatureSamples() {
+    return [...(DS.state.performanceSlowSamples || [])];
+  };
 
   DS.getPerformanceReport = function getPerformanceReport() {
     const stats = DS.state.performanceStats || {};
@@ -1162,7 +1175,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function scheduleNextMessageLaneChunk(source = "incremental-message-chunk") {
     if (!DS.state?.messageDirtyRoots?.size) return;
-    const resume = () => DS.scheduleMessageLane?.(source);
+    const scheduledRoute = location.href;
+    const resume = () => {
+      if (location.href !== scheduledRoute || DS.isQolPausedForTab?.()) return;
+      DS.scheduleMessageLane?.(source);
+    };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(resume, { timeout: 240 });
     } else {
@@ -1569,9 +1586,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (singleChat) {
         DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
-        await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
+        await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
         await runFeatureStep("rulebook diagnostics", !!settings.enableRulebookDiagnostics || !!document.getElementById("ds-rulebook-diagnostics"), () => DS.applyRulebookDiagnostics?.());
-        await runFeatureStep("chat background button placement", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
+        await runFeatureStep("chat background button placement", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
         await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());
         if (settings.enableMessageBookmarks || DS.state.chatBookmarksWasActive) await runStep("chat bookmarks", () => DS.applyChatBookmarks?.());
         if (settings.showChatSearch || DS.state.chatSearchWasActive) await runStep("chat search", () => DS.applyChatSearch?.());
@@ -1584,6 +1601,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("composer", composerWanted(settings) || !!DS.state.composerControlWasActive, () => DS.applyComposerControl?.());
         await runFeatureStep("mobile chat layout", true, () => DS.applyMobileChatLayoutFixes?.());
         if (settings.enableReplyInstructions || settings.enableGlobalMemory || settings.enableRpStateTracker || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
+        if (settings.enableChatSceneNotes || document.querySelector(".ds-qol-scene-notes-button")) await runStep("chat scene notes", () => DS.applyChatSceneNotes?.());
         if (settings.showFormattingToolbar || DS.state.formattingToolbarWasActive) await runStep("formatting toolbar", () => DS.applyFormattingToolbar?.());
         // Adaptive/aggressive/maximum chat profiles use the dedicated message
         // lane below. Running the same message decorators again in the critical
@@ -1687,6 +1705,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runRoutedFeatureStep(plan, "botEditor", "bot editor local memory", () => !!botEditorRoute() && (!!settings.enableCreationAudit || !!settings.rememberBotImagePrompt || !!DS.state.botEditorLocalMemoryWasActive), () => DS.applyBotEditorLocalMemory?.());
       await runRoutedFeatureStep(plan, "botEditor", "bot editor backup", () => (!!settings.botBackupToolsEnabled && botEditorRoute()) || !!DS.state.botBackupWasActive || !!document.getElementById("ds-bot-backup-tools"), () => DS.applyBotBackupTools?.());
       await runRoutedFeatureStep(plan, "botEditor", "creator backup field restore", () => !!botEditorRoute() || !!document.getElementById("ds-qol-field-restore-banner"), () => DS.applyCreatorWorkspaceRestore?.());
+      await runRoutedFeatureStep(plan, "botEditor", "private scene scenario handoff", () => !!(settings.enableChatSceneNotes && settings.chatSceneNotesEnableBotApply && botEditorRoute()) || !!document.getElementById("ds-qol-scene-bot-handoff"), () => DS.applyBotSceneScenarioHandoff?.());
       await runRoutedFeatureStep(plan, "lorebookEditor", "lorebook backup", () => (!!settings.lorebookBackupToolsEnabled && lorebookEditorRoute()) || !!DS.state.lorebookBackupWasActive || !!document.getElementById("ds-lorebook-backup-tools"), () => DS.applyLorebookBackup?.());
     } finally {
       if (passToken) DS.diagOperationEnd?.(passToken, { outcome: "ok" });
@@ -1736,6 +1755,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
       await runFeatureStep("OOC", !!settings.showOocTools || !!settings.replaceChatImageWithOocButton || !!settings.quickPanelShowOoc, () => DS.applyOocTools?.());
       if (settings.enableReplyInstructions || settings.enableGlobalMemory || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
+        if (settings.enableChatSceneNotes || document.querySelector(".ds-qol-scene-notes-button")) await runStep("chat scene notes", () => DS.applyChatSceneNotes?.());
       if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
     }
 
@@ -1908,6 +1928,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
         await runFeatureStep("OOC", !!settings.showOocTools || !!settings.replaceChatImageWithOocButton || !!settings.quickPanelShowOoc, () => DS.applyOocTools?.());
         if (settings.enableReplyInstructions || settings.enableGlobalMemory || DS.state.replyInstructionsWasActive) await runStep("reply instructions", () => DS.applyReplyInstructions?.());
+        if (settings.enableChatSceneNotes || document.querySelector(".ds-qol-scene-notes-button")) await runStep("chat scene notes", () => DS.applyChatSceneNotes?.());
         if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
       }
 
@@ -2374,6 +2395,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.openedImportRevision = -1;
     DS.state.lastMarkedChatId = "";
     DS.state.messageDirtyRoots?.clear?.();
+    essentialChatDirtyRoots.clear();
     DS.state.messageLaneRoots = null;
     DS.state.chatEnhancerQuietUntil = 0;
     clearTimeout(messageEnhancerQuietTimer);
@@ -2385,7 +2407,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     invalidateLoadedChatMessageCount();
     DS.bumpDomRevision?.();
 
-    if (DS.isSingleChatPage?.()) startChatStartupQuietWindow("route-change");
+    if (DS.isSingleChatPage?.()) {
+      startChatStartupQuietWindow("route-change");
+      DS.diagPerformance?.("chat-navigation", { mountedMessages: loadedChatMessageCount(), phase: "route-start" });
+    }
     else {
       DS.state.chatStartupQuietUntil = 0;
       DS.state.chatStartupQuietRoute = "";
@@ -2469,7 +2494,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state.settings;
     try {
       if (settings.replaceChatImageWithOocButton) DS.applyEssentialOocShortcut?.();
-      if (settings.showOocTools || settings.quickPanelShowOoc) DS.applyOocTools?.();
+      // Message mounts should not rebuild the Mini Panel/OOC template picker.
+      // Critical Settings/route passes still reconcile it when preferences change.
+      if ((settings.showOocTools || settings.quickPanelShowOoc) &&
+          !document.getElementById("ds-qol-ooc-row")) DS.applyOocTools?.();
       const newRoots = [...essentialChatDirtyRoots].filter(root => root?.isConnected);
       essentialChatDirtyRoots.clear();
       // Only the native roots touched by this MutationObserver delivery.

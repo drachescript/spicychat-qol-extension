@@ -133,8 +133,8 @@
         "content/text-replacements.js",
         "content/translation.js",
         "content/chat-rulebook-metadata.js",
-        "content/rulebook-diagnostics.js",
-        "content/story-reading-layout.js"
+        "content/story-reading-layout.js",
+        "content/rulebook-diagnostics.js"
       ]
     },
     "chatList": {
@@ -438,8 +438,7 @@
       "chat": [
         "content/styles/chat-bubble-themes.css",
         "content/styles/memory-vault.css",
-        "content/styles/ooc.css",
-        "content/styles/story-reading-layout.css"
+        "content/styles/ooc.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",
@@ -451,9 +450,6 @@
       ],
       "personas": [
         "content/styles/persona-manager.css"
-      ],
-      "lorebook": [
-        "content/styles/lorebook-connections.css"
       ]
     }
   },
