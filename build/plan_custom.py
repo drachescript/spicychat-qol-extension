@@ -51,31 +51,55 @@ def plan(selected):
         'note':'Preview only. Do not install or publish this as an extension.'}
 
 def plan_features(feature_ids):
-    contracts={}
-    for file in sorted((ROOT/'build/features').glob('*.json')):
-        contract=json.loads(file.read_text())
-        contracts[contract['id']]=contract
-    unknown=set(feature_ids)-set(contracts)
-    if unknown: raise ValueError('Unknown features: '+', '.join(sorted(unknown)))
-    closure=set(feature_ids)
+    """Preview 0.2.52 primary/required helper contracts; never certify builds."""
+    contracts = {}
+    for file in sorted((ROOT / 'build/features').glob('*.json')):
+        item = json.loads(file.read_text())
+        contracts[item['id']] = item
+    unknown = set(feature_ids) - set(contracts)
+    if unknown:
+        raise ValueError('Unknown features: ' + ', '.join(sorted(unknown)))
+    closure = set(feature_ids)
     while True:
-        additions={dep for fid in closure for dep in contracts[fid]['requiredFeatures']}
-        if additions <= closure: break
-        closure |= additions
-    result={
-        'schema':'dsq-lite-feature-plan/v1',
-        'installable':False,
-        'requested':feature_ids,
-        'features':sorted(closure),
-        'runtimeScripts':sorted({p for fid in closure for p in contracts[fid]['runtimeScripts']}),
-        'settingsScripts':sorted({p for fid in closure for p in contracts[fid]['settingsScripts']}),
-        'stylesheets':sorted({p for fid in closure for p in contracts[fid]['cssFiles']}),
-        'backgroundServices':sorted({p for fid in closure for p in contracts[fid]['backgroundServices']}),
-        'sharedDependencies':{fid:contracts[fid]['sharedDependencies'] for fid in sorted(closure)},
-        'blockers':{fid:contracts[fid]['blockers'] for fid in sorted(closure) if contracts[fid]['customBuildStatus']!='validated'},
-        'note':'Feature-level dependency contract preview only. Do not install or publish as a custom extension.'
+        deps = {dep for fid in closure for dep in contracts[fid].get(
+            'dependencies', contracts[fid].get('requiredFeatures', []))}
+        missing = deps - set(contracts)
+        if missing:
+            raise ValueError('Missing feature dependency: ' + ', '.join(sorted(missing)))
+        if deps <= closure:
+            break
+        closure |= deps
+    def paths(item, new_key, legacy_key):
+        if new_key in item:
+            return item[new_key]
+        return item.get(legacy_key, [])
+    scripts = set()
+    settings = set()
+    styles = set()
+    background = set()
+    for fid in closure:
+        item = contracts[fid]
+        if item.get('primary'):
+            scripts.add(item['primary'])
+        scripts.update(item.get('runtimeScripts', []))
+        scripts.update(item.get('requiredHelpers', []))
+        settings.update(paths(item, 'settingsFiles', 'settingsScripts'))
+        styles.update(paths(item, 'styleFiles', 'cssFiles'))
+        background.update(item.get('backgroundFiles', []))
+        background.update(item.get('backgroundServices', []))
+    return {
+        'schema': 'dsq-lite-feature-plan/v2', 'installable': False,
+        'requested': feature_ids, 'features': sorted(closure),
+        'runtimeScripts': sorted(scripts),
+        'settingsScripts': sorted(settings),
+        'stylesheets': sorted(styles),
+        'backgroundServices': sorted(background),
+        'blockers': {fid: 'Browser, Settings and background closure not certified'
+                     for fid in sorted(closure)
+                     if not all(contracts[fid].get(key) is True for key in
+                                ['browserVerified', 'settingsIsolated', 'stylesIsolated', 'backgroundIsolated'])},
+        'note': 'Source-only preview. Independent feature package is not browser-validated.'
     }
-    return result
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--bundles',help='Comma-separated bundle IDs');ap.add_argument('--features',help='Comma-separated feature IDs');ap.add_argument('--output',type=Path);args=ap.parse_args()
