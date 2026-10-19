@@ -22,3 +22,8 @@ The Full extension is the canonical implementation. Do not remove a runtime file
 Additional reusable regression checks are in `build/test_*.js`. Historical migration comparisons, old browser snapshots and dated development notes are preserved in the `archive/qol-legacy-reference` branch, rather than in the working `main` tree.
 
 Do not put generated ZIPs, extracted distribution folders, logs, or local diagnostic exports in source control.
+
+## Repository hygiene
+
+Keep reusable build scripts and tests named for their purpose, not for a release, chat, batch or development session. Do not add temporary patch assemblers, dated handoff notes, snapshots or one-off status files to the working source tree. Keep runtime asset names (including size-specific icons) unchanged when referenced by the browser manifest.
+

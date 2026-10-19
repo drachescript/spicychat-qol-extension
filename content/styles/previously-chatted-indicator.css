@@ -1,0 +1,4 @@
+.ds-chatted-indicator{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:17px;min-height:17px;margin:3px;padding:2px 4px;border:1px solid currentColor;border-radius:50%;font:700 12px/1 system-ui;color:#76b9ff;background:rgba(70,125,184,.13);vertical-align:middle;pointer-events:none}
+.ds-chatted-indicator[data-state="opened"]{opacity:.6;color:inherit;background:transparent}
+
+.ds-chatted-indicator[data-state="probable"]{opacity:.8;background:rgba(70,125,184,.08)}

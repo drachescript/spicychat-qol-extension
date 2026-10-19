@@ -1,6 +1,6 @@
 # Custom Lite feature isolation status (0.2.52 development)
 
-The runtime feature inventory tracks 118 independently named primary feature modules, including the newly separated Auto Images and Auto Voice. This **does not** certify 118 individually shippable Chrome/Firefox extensions.
+The runtime feature inventory now tracks 121 independently named primary feature modules, including the newly separated Auto Images and Auto Voice. This **does not** certify 118 individually shippable Chrome/Firefox extensions.
 
 A Custom Lite package must omit the unselected feature's source file, remove its manifest registration, and hide its Settings and Mini Panel entry without clearing saved user preferences. A feature's prerequisite modules and background services must also remain available. `tools/verify-lite-contracts.py --profile profile.json --package-root out/` checks primary-file inclusion/omission, known dependencies, required helpers and declared manifest paths. Its `--strict` mode refuses to certify unverified builds.
 
@@ -35,3 +35,15 @@ Until all blockers above are resolved, consider Custom Lite builds **experimenta
 - `custom-pictures-menu.js` hosts the feature-aware menu; independent picture modules register their own tabs and behaviors.
 - `chat-backgrounds.js`, `character-pictures.js`, `persona-pictures.js`, `picture-library.js` are independent feature owners with shared helpers. The Library now defaults OFF.
 - Static manifest and generated-package checks can detect missing helpers and omitted owner files. Real-world Chrome/Brave interaction and wider shared background/Settings/CSS ownership are not yet certified.
+
+## v0.2.53 Batch 2: experimental physical package builder
+
+`tools/build-lite-package.py` can create a **test-only** package from an unpacked Full extension. Its profile is JSON with `features: [feature IDs]`. It refuses incomplete declared dependencies; use `--experimental` explicitly. It does not publish or change the source directory.
+
+- Removes omitted registered feature primary modules and exclusive Settings/CSS/background ownership files; rewrites `manifest.json`, `options.html`, static background imports and Firefox `background.scripts` when present.
+- Removes declared shared helpers when none of the selected features require them (picture cores and OOC composer). Keeps shared helpers needed by retained features.
+- Generates a content and background build profile containing explicit feature IDs without modifying saved feature preferences.
+- `tools/verify-lite-contracts.py` checks background primary ownership, real Firefox background-script order, and Options script targets in addition to earlier primary-module/Settings/CSS checks.
+- `tools/test-lite-packaging.py` covers seven positive/negative cases with executable package inspections.
+
+**Still experimental:** feature calls inside shared `content/main.js`, `options.js`, listeners and event routers are not all independently separated. The availability of individually owned source files does not certify browser functionality of arbitrary Lite combinations. Test your selection in Chrome/Brave/Firefox before distributing it. Full remains the supported release target.

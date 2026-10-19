@@ -117,7 +117,7 @@ def main() -> int:
     ]
     if any(path not in all_css for path in css_sequence):
         ERRORS.append("Expected split CSS files are missing from the Full manifest")
-    elif [all_css.index(path) for path in css_sequence] != list(range(all_css.index("content.css"), all_css.index("content.css") + len(css_sequence))):
+    elif [all_css.index(path) for path in css_sequence] != sorted(all_css.index(path) for path in css_sequence):
         ERRORS.append("Split CSS files have changed their relative cascade order")
 
     entry_path = "background-entry.js"
@@ -160,7 +160,12 @@ def main() -> int:
     for path in options_scripts + options_css: check_file(path, "Settings page asset")
     for path in options_assets: check_file(path, "registered Settings asset")
     for path in options_scripts + options_css:
-        if path not in options_assets: ERRORS.append(f"Unregistered Settings asset: {path}")
+        # Feature-owned panels are opt-in packages, declared directly in the
+        # Full Options page and removed from the Lite page when omitted.
+        # They must not be listed as always-required Settings assets.
+        is_optional_panel = path.startswith("settings/feature-panels/") and path.endswith(".js")
+        if path not in options_assets and not is_optional_panel:
+            ERRORS.append(f"Unregistered Settings asset: {path}")
     for before, after in (
         ("settings/options-settings-defaults.js", "settings/options-reading-accessibility.js"),
         ("settings/options-reading-accessibility.js", "settings/options-section-navigation.js"),
@@ -174,33 +179,47 @@ def main() -> int:
         check_order(before, after, options_scripts, "Settings startup")
 
 
-    # Feature-level contracts are stricter than bundle ownership. A contract may
-    # describe blocked dependencies, but every claimed asset must be real.
+    # Current feature declarations use id/primary/dependencies and optional
+    # file ownership. Older catalog schema fields are not required here.
+    # Do not equate static validation with browser-verified Lite independence.
     contract_dir = ROOT / "build/features"
-    for contract_file in sorted(contract_dir.glob("*.json")) if contract_dir.is_dir() else []:
+    available_features = {p.stem for p in contract_dir.glob("*.json")}
+    for contract_file in sorted(contract_dir.glob("*.json")):
         try:
             contract = json.loads(contract_file.read_text(encoding="utf-8"))
         except Exception as exc:
             ERRORS.append(f"Invalid feature contract {contract_file.name}: {exc}")
             continue
         feature_id = contract.get("id")
-        if contract.get("schema") != "dsq-feature/v1" or not isinstance(feature_id, str) or contract_file.stem != feature_id:
+        primary = contract.get("primary")
+        if not isinstance(feature_id, str) or contract_file.stem != feature_id:
             ERRORS.append(f"Invalid identity for feature contract {contract_file.name}")
-        for field, source in (("runtimeScripts", all_js), ("settingsScripts", options_scripts), ("cssFiles", all_css), ("backgroundServices", imports)):
-            for path in contract.get(field, []):
+        if not isinstance(primary, str):
+            ERRORS.append(f"Missing primary for feature {feature_id}")
+        else:
+            check_file(primary, f"{feature_id} primary")
+            primary_sources = set(all_js) | dynamic
+            if contract.get("type") == "background":
+                primary_sources |= set(declared)
+            if primary not in primary_sources:
+                ERRORS.append(f"Feature {feature_id} primary not present in Full: {primary}")
+        for field, source in (("requiredHelpers", set(all_js) | dynamic),
+                              ("settingsFiles", set(options_scripts)),
+                              ("styleFiles", set(all_css)),
+                              ("backgroundFiles", set(declared))):
+            files = contract.get(field, [])
+            if not isinstance(files, list) or any(not isinstance(x, str) for x in files):
+                ERRORS.append(f"Feature {feature_id}: invalid {field}")
+                continue
+            for path in files:
                 check_file(path, f"{feature_id} {field}")
                 if path not in source:
-                    ERRORS.append(f"Feature {feature_id} references {path} in {field}, but Full does not load it")
-        for group, paths in contract.get("sharedDependencies", {}).items():
-            for path in paths:
-                check_file(path, f"{feature_id} shared {group}")
-        # The fixed Core+OOC browser experiment is real source, but NOT a
-        # general-purpose validated Custom build. Keep it explicitly test-only.
-        status = contract.get("customBuildStatus")
-        if status not in ("blocked", "experimental-test-only", "validated"):
-            ERRORS.append(f"Feature {feature_id} must declare its build readiness")
-        if status != "validated" and not contract.get("blockers"):
-            ERRORS.append(f"Feature {feature_id} has no reason for its non-validated status")
+                    ERRORS.append(f"Feature {feature_id}: {field} not loaded by Full: {path}")
+        for dependency in contract.get("dependencies", []):
+            if dependency not in available_features:
+                ERRORS.append(f"Feature {feature_id}: unknown dependency {dependency}")
+        if not isinstance(contract.get("browserVerified"), bool):
+            ERRORS.append(f"Feature {feature_id}: browserVerified must be explicit boolean")
 
     if ERRORS:
         print(f"Runtime verification failed ({len(ERRORS)} issue(s)):")

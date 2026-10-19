@@ -1,0 +1,270 @@
+{
+  "command-palette": {
+    "cardId": "commandPaletteCard",
+    "ids": [
+      "enableCommandPalette",
+      "commandPaletteShortcut",
+      "commandPaletteShowSavedItems",
+      "openCommandPaletteFromOptions",
+      "clearCommandPaletteHistory",
+      "commandPaletteStatus"
+    ],
+    "title": "Command Palette"
+  },
+  "translation": {
+    "cardId": "translationSettingsCard",
+    "ids": [
+      "translationProvider",
+      "translationAllowRemoteFallback",
+      "testLocalTranslator",
+      "localTranslatorStatus",
+      "copyEnglishFirstOoc",
+      "translationPerChatControls",
+      "enableTranslation",
+      "translationShowMessageButtons",
+      "translationAutoAi",
+      "translationAutoUser",
+      "translationTargetLanguage",
+      "translationUnderstoodLanguages",
+      "translationProtectedTerms",
+      "libreTranslateUrl",
+      "libreTranslateApiKey",
+      "saveLibreTranslate",
+      "testLibreTranslate",
+      "libreTranslateStatus",
+      "deeplApiKey",
+      "saveDeeplKey",
+      "testDeepl",
+      "checkDeeplUsage",
+      "deeplStatus"
+    ],
+    "title": "Chat translation"
+  },
+  "rp-format-repair": {
+    "cardId": "rpFormatRepairCard",
+    "ids": [
+      "enableRpFormatRepair",
+      "rpFormatRepairAuto",
+      "rpFormatStyle",
+      "rpFormatDetection",
+      "rpFormatConvertBoldActions",
+      "rpFormatRemoveActionParens",
+      "rpFormatPreserveInlineEmphasis",
+      "rpFormatPreserveSemanticQuotes",
+      "rpFormatPreserveBackticks",
+      "rpFormatShowMessageButtons"
+    ],
+    "title": "RP Format Repair"
+  },
+  "chat-scene-notes": {
+    "cardId": "chatSceneNotesSettingsCard",
+    "ids": [
+      "enableChatSceneNotes",
+      "chatSceneNotesAutoInclude",
+      "chatSceneNotesEnableBotApply",
+      "chatSceneNotesAutoMode"
+    ],
+    "title": "Per-chat Scene Notes"
+  },
+  "reply-instructions": {
+    "cardId": "replyInstructionsCard",
+    "ids": [
+      "enableReplyInstructions",
+      "replyInstructionText",
+      "replyInstructionSendMode",
+      "replyInstructionOocWrapper",
+      "replyInstructionShowChatButton"
+    ],
+    "title": "Reply Instructions"
+  },
+  "context-keeper": {
+    "cardId": "contextKeeperCard",
+    "ids": [
+      "enableContextKeeper",
+      "contextKeeperAutoCapture",
+      "contextKeeperAutoSensitivity",
+      "contextKeeperAutoEveryMessages",
+      "contextKeeperAutoMaxDetails",
+      "contextKeeperMessageButtons",
+      "enableSelectionRemember",
+      "contextKeeperRecapSize",
+      "contextKeeperAutoRecall",
+      "contextKeeperRecallEverySends",
+      "contextKeeperRecallMaxChars"
+    ],
+    "title": "Context Keeper — local, standalone memories"
+  },
+  "story-day-tracker": {
+    "cardId": "storyDayTrackerCard",
+    "ids": [
+      "enableStoryDayTracker",
+      "storyDayTrackerMode",
+      "storyDayTrackerIncludeInContext",
+      "storyDayTrackerShowQuickPanel"
+    ],
+    "title": "Internal Day Tracker"
+  },
+  "rp-state-tracker": {
+    "cardId": "rpStateTrackerCard",
+    "ids": [
+      "enableRpStateTracker",
+      "rpStateTrackerMode",
+      "rpStateInjectMode",
+      "rpStateMaxContextChars",
+      "rpStateShowQuickPanel"
+    ],
+    "title": "RP State Tracker"
+  },
+  "chat-nudges": {
+    "cardId": "chatNudgesCard",
+    "ids": [
+      "enableChatNudges",
+      "chatNudgeDefaultHours",
+      "chatNudgeBrowserNotifications",
+      "chatNudgeRequestNotifications",
+      "chatNudgeRefresh",
+      "chatNudgePermissionStatus",
+      "chatNudgeList"
+    ],
+    "title": "Chat Nudges"
+  },
+  "character-qol-profiles": {
+    "cardId": "characterQolProfilesCard",
+    "ids": [
+      "enableCharacterQolProfiles"
+    ],
+    "title": "Per-character QoL profiles"
+  },
+  "alternate-dialogue": {
+    "cardId": "alternateDialogueCard",
+    "ids": [
+      "styleAlternateDialogue",
+      "alternateDialogueScope",
+      "alternateDialogueStyle",
+      "alternateDialogueCustomColors",
+      "alternateDialogueTextColor",
+      "alternateDialogueBackgroundColor",
+      "alternateDialogueBorderColor"
+    ],
+    "title": "Alternate dialogue styling"
+  },
+  "soundscapes": {
+    "cardId": "soundscapesCard",
+    "ids": [
+      "enableSoundscapes",
+      "soundscapeShowChatControl",
+      "soundscapeMasterVolume",
+      "soundscapeMasterVolumeValue",
+      "soundscapeOnChat",
+      "soundscapeOnHome",
+      "soundscapeOnChats",
+      "soundscapeOnProfiles",
+      "soundscapeOnOther",
+      "soundscapeAudioUpload",
+      "soundscapeAudioStatus",
+      "soundscapeAudioList",
+      "soundscapeNewSceneName",
+      "soundscapeAddScene",
+      "soundscapeSceneList"
+    ],
+    "title": "Soundscapes / Ambience"
+  },
+  "animation-control": {
+    "cardId": "animatedImagesCard",
+    "ids": [
+      "reduceAnimatedBotImages",
+      "animatedImageMode",
+      "animatedImagesListings",
+      "animatedImagesChats",
+      "animatedImagesProfiles",
+      "animatedImagesChatMedia"
+    ],
+    "title": "Animated bot images"
+  },
+  "chat-topbar": {
+    "cardId": "chatTopBarCard",
+    "ids": [
+      "showChatTopBarTools",
+      "chatTopBarInlineCreator",
+      "hideChatTopBarRatingButton",
+      "hideChatTopBarModelButton",
+      "hideChatTopBarContextDot",
+      "hideChatDropdownVoiceUpsell",
+      "hideChatDropdownMemoryItem"
+    ],
+    "title": "Chat top bar"
+  },
+  "chat-search": {
+    "cardId": "chatSearchCard",
+    "ids": [
+      "showChatSearch",
+      "chatSearchShowPanel",
+      "chatSearchShowFindButton",
+      "chatSearchExactPhrase",
+      "chatSearchCaseSensitive",
+      "chatSearchWholeWord",
+      "chatSearchRegex",
+      "chatSearchLoadUntilMatch"
+    ],
+    "title": "Search inside current chat"
+  },
+  "chat-bookmarks": {
+    "cardId": "messageBookmarksCard",
+    "ids": [
+      "enableMessageBookmarks",
+      "messageBookmarkButtons"
+    ],
+    "title": "Message bookmarks / multiple local pins"
+  },
+  "focus-mode": {
+    "cardId": "focusModeCard",
+    "ids": [
+      "enableFocusMode",
+      "focusHideSidebar",
+      "focusHideTopBar",
+      "focusHideChatHeader",
+      "focusHideQolPanel"
+    ],
+    "title": "Focus / Immersive Mode"
+  },
+  "native-rating-helpers": {
+    "cardId": "nativeRatingHelpersCard",
+    "ids": [
+      "enableNativeRatingHelpers"
+    ],
+    "title": "Native rating helpers"
+  },
+  "profile-export": {
+    "cardId": "profileExportCard",
+    "ids": [
+      "enableProfileExport"
+    ],
+    "title": "Bot / profile export"
+  },
+  "creator-writing-assistant": {
+    "cardId": "creatorWritingAssistantCard",
+    "ids": [
+      "enableCreatorWritingAssistant",
+      "creatorWritingUseBrowserAi",
+      "creatorWritingTargetLanguage",
+      "creatorWritingDictionary"
+    ],
+    "title": "Creator Writing Assistant"
+  },
+  "card-workflow": {
+    "cardId": "cardWorkflowCard",
+    "ids": [
+      "cardDensityMode",
+      "cardClickBehavior",
+      "showCopyBotInfoButtons",
+      "trackRecentlySeenBots",
+      "showRecentlySeenButton",
+      "recentlySeenLimit",
+      "enableBotComparison",
+      "showQuickNotInterestedButtons",
+      "showQuickLessLikeButtons",
+      "showQuickDislikeButtons"
+    ],
+    "title": "Card / discovery workflow"
+  }
+}

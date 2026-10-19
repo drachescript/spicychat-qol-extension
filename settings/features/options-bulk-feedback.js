@@ -44,7 +44,7 @@ function applyQuickDislikeResponseToLocalHistory(id, name, response) {
   if (!botId || !response?.ok) return false;
   let status = String(response.status || "");
   if (status === "already-handled") status = String(response.rememberedStatus || "");
-  if (!["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(status)) return false;
+  if (!["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked", "dislike-event-pending"].includes(status)) return false;
   quickDislikeHistoryState = normalizeQuickDislikeHistory(quickDislikeHistoryState);
   const previous = quickDislikeHistoryState.bots[botId] || {};
   const repeated = response.status === "already-handled" && previous.status === status;
@@ -55,7 +55,8 @@ function applyQuickDislikeResponseToLocalHistory(id, name, response) {
     crossHandledBy: response.crossHandledBy === "less-like" ? "less-like" : (repeated ? previous.crossHandledBy || "" : ""),
     ratingSource: ["less-like", "dislike"].includes(response.ratingSource) ? response.ratingSource : (repeated ? previous.ratingSource || "" : (status === "disliked" ? "dislike" : "")),
     ratingAt: Number(response.ratingAt || 0) || (repeated ? Number(previous.ratingAt || 0) : 0),
-    requestSent: status === "disliked" && (response.requestSent === true || (repeated && previous.requestSent === true))
+    requestSent: status === "disliked" && (response.requestSent === true || (repeated && previous.requestSent === true)),
+    nativeEventConfirmed: status === "disliked" && (response.nativeEventConfirmed === true || (repeated && previous.nativeEventConfirmed === true))
   };
   return true;
 }
@@ -71,7 +72,7 @@ async function refreshQuickDislikeHistoryState() {
 
 function blockedBulkCandidateIds(mode = "remaining") {
   const allBlocked = uniqueClean(blockedState?.ids || []);
-  const stillEligible = id => allBlocked.includes(id) && !quickDislikeHistoryEntry(id) && !blockedFeedbackRatedByLessLike(id);
+  const stillEligible = id => allBlocked.includes(id) && !quickDislikeHistoryEntry(id);
   if (mode === "selected") return [...botManagerBulkSet("blocked")].filter(stillEligible);
   if (mode === "resume") {
     const stored = uniqueClean([quickDislikeBulkState.currentId, ...(quickDislikeBulkState.pendingIds || [])]);
@@ -130,8 +131,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
   let disliked = 0;
   let alreadySet = 0;
   let alreadyDisliked = 0;
-  let coveredByLessLike = 0;
-  let sentRequests = 0;
+    let sentRequests = 0;
   let creatorBlocked = 0;
   let unavailable = 0;
   let failed = 0;
@@ -157,7 +157,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
           ? "There is no unfinished Bulk Dislike run to resume."
           : mode === "selected"
             ? "Select at least one unhandled blocked bot first."
-            : ((blockedState?.ids || []).length ? "No independent Dislike requests are needed: blocked bots are already negatively rated through Dislike/Less Like, or are confirmed unavailable. Clearing Dislike history does not undo previous Less Like ratings." : "No blocked bot IDs are available to rate.");
+            : ((blockedState?.ids || []).length ? "No blocked bots remain eligible for Dislike. Less Like history does not count as Dislike, and legacy unverified ratings can be retried." : "No blocked bot IDs are available to rate.");
       showSettingsToast(message);
       return;
     }
@@ -178,7 +178,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
     for (let index = 0; index < candidates.length; index += 1) {
       if (blockedBulkDislikeStopRequested || quickDislikeBulkState?.stopRequested) break;
       const id = candidates[index];
-      if (quickDislikeHistoryEntry(id) || blockedFeedbackRatedByLessLike(id) || !(blockedState?.ids || []).includes(id)) continue;
+      if (quickDislikeHistoryEntry(id) || !(blockedState?.ids || []).includes(id)) continue;
       processed += 1;
       const meta = blockedState?.meta?.[id] || {};
       const name = String(meta.name || id);
@@ -247,12 +247,11 @@ async function runBlockedBulkDislike(mode = "remaining") {
 
       const remembered = applyQuickDislikeResponseToLocalHistory(id, name, response);
       const status = response?.status === "already-handled" ? response?.rememberedStatus : response?.status;
-      if (remembered && status === "disliked") {
+      if (remembered && status === "disliked" && response?.nativeEventConfirmed === true) {
         disliked += 1;
-        if (response?.requestSent === true) sentRequests += 1;
+        if (response?.nativeEventConfirmed === true) sentRequests += 1;
       } else if (remembered && status === "already-disliked") {
-        if (quickDislikeHistoryEntry(id)?.crossHandledBy === "less-like" && quickDislikeHistoryEntry(id)?.ratingSource !== "dislike") coveredByLessLike += 1;
-        else alreadyDisliked += 1;
+        alreadyDisliked += 1;
       }
       else if (remembered && status === "already-rated-or-unavailable") alreadySet += 1;
       else if (remembered && status === "unavailable-creator-blocked") creatorBlocked += 1;
@@ -282,7 +281,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
       });
 
       const counts = blockedQuickDislikeCounts();
-      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} Dislike requests sent · ${coveredByLessLike} covered by Less Like · ${alreadyDisliked} already disliked/legacy · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${counts.remaining} remaining`);
+      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} Dislikes confirmed · ${alreadyDisliked} already disliked/legacy · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${counts.remaining} remaining`);
 
       if (blockedBulkDislikeStopRequested) break;
       if (index < candidates.length - 1) {
@@ -321,8 +320,8 @@ async function runBlockedBulkDislike(mode = "remaining") {
       showSettingsToast(autoPausedAfterFailures
         ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive failures (including 401/CORS). Remaining bots were kept for Resume.`
         : stopped
-          ? `Bulk Dislike stopped. ${sentRequests} Dislike requests sent, ${coveredByLessLike} covered by Less Like, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`
-          : `Bulk Dislike finished. ${sentRequests} Dislike requests sent, ${coveredByLessLike} covered by Less Like, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
+          ? `Bulk Dislike stopped. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`
+          : `Bulk Dislike finished. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
     }
   }
 }

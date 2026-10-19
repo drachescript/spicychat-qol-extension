@@ -387,6 +387,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function evaluatePerformance() {
+    // Automatic performance escalation changes presentation, not chat data.
+    // Wait for visibility before taking DOM/heap/long-task snapshots. This
+    // avoids one heavy metrics pass per 5s across dozens of inactive tabs.
+    if (document.hidden && !DS.state?.qolBackgroundWorker) {
+      const perf = DS.state?.runtimePerformance;
+      if (perf) perf.hiddenPressureCheckSkips = Number(perf.hiddenPressureCheckSkips || 0) + 1;
+      return;
+    }
     const currentRoute = routeKey();
     restorePersistedPressure();
     if (currentRoute !== performanceRouteKey) {

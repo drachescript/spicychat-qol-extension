@@ -1,3 +1,18 @@
+## 0.2.53
+- Maximum Performance now enables related performance options automatically while remembering any options you turn off individually.
+- Fixed Dislike and Less Like being treated as interchangeable: Dislike now submits its separate native character-rating event and keeps independent completion history.
+- Corrected bulk feedback filters and counters so Less Like does not mark Dislike as complete, or vice versa. Previous recommendation-only records no longer prevent a real Dislike.
+- Added lightweight timing information for chat navigation and expensive page-observer callbacks to help diagnose intermittent freezes.
+- Improved experimental Custom Lite packaging so unselected features and their owned Settings, styles, background services and unused picture helpers can be left out together. Invalid feature combinations now fail validation.
+- Fixed Custom Lite feature checks for Custom Pictures, Rulebook Diagnostics and My Creations auto-load, so installed features do not disappear and omitted features do not leave unusable shortcuts.
+- Aligned Scene Notes and automatic-blocking dependency checks across chat runtime and Settings, without changing saved options.
+- Reduced redundant tab-switch refreshes, hidden-tab checks and performance snapshots when several SpicyChat tabs are open.
+- Added optional Chat Lorebook Manager actions to turn visible chat messages and Memories into editable local Lorebook entry drafts. Drafts can be copied, exported or prepared in an existing Lorebook editor for review; QoL does not automatically save or attach them.
+- Added guidance for attaching a Lorebook to your own chatbot using SpicyChat’s native chatbot editor.
+- Added optional Model Quick Access shortcuts with user-defined model order, using SpicyChat’s normal model selection.
+- Added optional Previously Chatted indicators on bot cards, distinguishing confirmed conversations from less certain imported chat history and bots that were only opened.
+- Expanded feature-owned Settings panels and experimental Custom Lite packaging so omitted panels can be left out without resetting their saved preferences.
+
 ## 0.2.52
 - Firefox compatibility fix of warning "Unsafe call to target.insertAdjacentHTML for argument 1" in Custom Pictures settings.
 - Improved search on the Chats page so conversations imported through QoL can be found by name even when their cards are not loaded.

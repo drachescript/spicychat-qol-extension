@@ -328,6 +328,11 @@ async function load() {
   setChecked("expandModelSelectorDescriptions", !!settings.expandModelSelectorDescriptions);
   setChecked("hideModelUpgradeButtons", !!settings.hideModelUpgradeButtons);
   setChecked("customizeModelQuickMenu", !!settings.customizeModelQuickMenu);
+  setChecked("enableModelQuickAccess", !!settings.enableModelQuickAccess);
+  setValue("modelQuickAccessNames", settings.modelQuickAccessNames || "");
+  setChecked("enableChatLorebookManager", !!settings.enableChatLorebookManager);
+  setChecked("enablePreviouslyChattedIndicator", !!settings.enablePreviouslyChattedIndicator);
+  setChecked("chattedIndicatorShowOpened", !!settings.chattedIndicatorShowOpened);
   setChecked("modelQuickFavoritesOnly", !!settings.modelQuickFavoritesOnly);
   setValue("modelFavoriteNames", settings.modelFavoriteNames || "");
   setValue("modelHiddenNames", settings.modelHiddenNames || "");
@@ -917,6 +922,7 @@ async function load() {
 
   optionsDataLoaded = true;
   settingsAutosaveReady = true;
+  initializeMaximumPerformancePreset();
   updateBlockedBulkResumeControls();
   updateSettingDependencies();
   refreshPlatformCompatibilityUi(settings);

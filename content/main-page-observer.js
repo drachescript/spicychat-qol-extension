@@ -13,6 +13,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let lastNonCardListingScheduleAt = 0;
     const observer = new MutationObserver(mutations => {
       if (DS.isQolPausedForTab?.()) return;
+      const callbackStartedAt = performance.now();
+      try {
       const counters = runtimeCounters();
       counters.observerBatches = Number(counters.observerBatches || 0) + 1;
       counters.mutations += mutations.length;
@@ -282,6 +284,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } else {
         DS.scheduleRun?.({ source: "dom-mutation" });
       }
+      } finally {
+        const elapsedMs = performance.now() - callbackStartedAt;
+        // Track only actual expensive callbacks; no message contents are read.
+        if (elapsedMs >= 24) {
+          const perf = runtimeCounters();
+          perf.heavyPageObserverCallbacks = Number(perf.heavyPageObserverCallbacks || 0) + 1;
+          perf.pageObserverWorstMs = Math.max(Number(perf.pageObserverWorstMs || 0), Math.round(elapsedMs * 10) / 10);
+          DS.diagPerformance?.("page-observer-slow", { durationMs: Math.round(elapsedMs * 10) / 10,
+            mutationCount: mutations.length, chat: !!DS.isSingleChatPage?.() });
+        }
+      }
     });
 
     observer.observe(document.documentElement, {
@@ -294,9 +307,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       subtree: true
     });
 
-    // SPA navigation normally changes the DOM and is caught above. This is a
-    // low-frequency fallback for route changes that happen without a render.
-    setInterval(checkRouteChange, 2000);
+    // SPA navigation normally changes the DOM and is caught above. An
+    // unfocused tab does not need route polling every 2s: its observer still
+    // handles real DOM navigation, and main.js checks the route on visibility.
+    setInterval(() => {
+      if (document.hidden || DS.isQolPausedForTab?.()) {
+        const perf = DS.state?.runtimePerformance;
+        if (perf) perf.hiddenRoutePollSkips = Number(perf.hiddenRoutePollSkips || 0) + 1;
+        return;
+      }
+      checkRouteChange();
+    }, 2000);
   };
   };
 })();

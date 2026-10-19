@@ -1748,6 +1748,32 @@ if (!(() => { try {
     });
   });
 
+  // Native one-star chat rating emits a second event that Less Like does NOT.
+  // Sending only the recommendation rating and changing its result label is not Dislike.
+  async function postNativeCharacterRatingEvent(botId) {
+    const headers = {
+      Accept: "application/json", "Content-Type": "application/json",
+      "x-app-id": "spicychat", "x-platform": "WEB", "x-platform-os": "DESKTOP"
+    };
+    const appVersion = clean(capturedAppVersion || document.querySelector('meta[name="app-version"]')?.content);
+    if (appVersion) headers["x-app-version"] = appVersion;
+    if (capturedCountry) headers["x-country"] = capturedCountry;
+    if (isGuest(capturedGuest)) headers["x-guest-userid"] = capturedGuest;
+    // The captured native characterRating event uses site/app identity headers;
+    // avoid adding an Authorization header not observed on that request.
+    try {
+      const response = await nativeFetch("https://prod.nd-api.com/event", {
+        method: "POST", credentials: "include", cache: "no-store", headers,
+        // A background rating has no known conversation length. Never invent one.
+        body: JSON.stringify({ event_name: "characterRating", character_id: botId, rating: 1, conversation_length: 0 })
+      });
+      return { ok: response.ok, httpStatus: Number(response.status || 0),
+        status: response.ok ? "disliked" : "dislike-event-failed" };
+    } catch {
+      return { ok: false, httpStatus: 0, status: "dislike-event-unconfirmed" };
+    }
+  }
+
   window.addEventListener(FEEDBACK_REQUEST_EVENT, async event => {
     const detail = event?.detail || {};
     if (!active) return;
@@ -1758,7 +1784,8 @@ if (!(() => { try {
 
     const started = Date.now();
     let coalesced = false;
-    let work = recombeeFeedbackInFlight.get(botId) || null;
+    const flightKey = `${mode}:${botId}`;
+    let work = recombeeFeedbackInFlight.get(flightKey) || null;
     if (work) {
       coalesced = true;
     } else {
@@ -1781,33 +1808,35 @@ if (!(() => { try {
           };
         }
 
+        const eventOnly = mode === "dislike" && detail.eventOnly === true;
         const userLookupStartedAt = Date.now();
-        const userId = currentRecombeeUserId();
+        const userId = eventOnly ? "" : currentRecombeeUserId();
         const userLookupMs = Math.max(0, Date.now() - userLookupStartedAt);
-        if (!userId) {
+        if (!eventOnly && !userId) {
           return {
-            ok: false,
-            status: "recombee-user-not-found",
-            stage: "user-discovery",
+            ok: false, status: "recombee-user-not-found", stage: "user-discovery",
             reason: "No SpicyChat/Recombee user ID was available in this page context.",
-            httpStatus: availability.httpStatus || 0,
-            attempts: 0,
-            networkAttempts: 0,
+            httpStatus: availability.httpStatus || 0, attempts: 0, networkAttempts: 0,
             availabilityNetworkAttempts: Number(availability.availabilityNetworkAttempts || 0),
-            availabilityConfirmed: true,
-            requestSent: false,
-            characterId: botId,
-            availabilityMs,
-            availabilityHttpStatus: Number(availability?.httpStatus || 0),
-            userLookupMs,
-            ratingMs: 0,
-            ratingHttpStatus: 0
+            availabilityConfirmed: true, requestSent: false, characterId: botId,
+            availabilityMs, availabilityHttpStatus: Number(availability?.httpStatus || 0),
+            userLookupMs, ratingMs: 0, ratingHttpStatus: 0
           };
         }
         const ratingStartedAt = Date.now();
-        let result = await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        let result = eventOnly ? { ok: true, status: "less-liked", requestSent: false, networkAttempts: 0, httpStatus: 0 }
+          : await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+        const ratingHttpStatus = Number(result?.httpStatus || 0);
         if (mode === "dislike" && result?.ok && result?.status === "less-liked") {
-          result = { ...result, status: "disliked", reason: "Matching Recombee negative-rating request returned 2xx." };
+          const eventResult = await postNativeCharacterRatingEvent(botId);
+          result = eventResult.ok
+            ? { ...result, ok: true, status: "disliked", nativeEventConfirmed: true,
+                eventHttpStatus: eventResult.httpStatus, ratingHttpStatus,
+                reason: "Negative rating and native characterRating event both succeeded." }
+            : { ...result, ok: false, status: "dislike-event-pending", nativeEventConfirmed: false,
+                eventHttpStatus: eventResult.httpStatus, ratingHttpStatus,
+                ratingSubmitted: true, stage: "character-rating-event",
+                reason: "Recommendation rating succeeded, but the native Dislike event was not confirmed. Retry will send only the missing event." };
         }
         const ratingMs = Math.max(0, Date.now() - ratingStartedAt);
         return {
@@ -1818,17 +1847,20 @@ if (!(() => { try {
           availabilityHttpStatus: Number(availability?.httpStatus || 0),
           userLookupMs,
           ratingMs,
-          ratingHttpStatus: Number(result?.httpStatus || 0)
+          ratingHttpStatus: Number(result?.ratingHttpStatus ?? result?.httpStatus ?? 0),
+          nativeEventConfirmed: result?.nativeEventConfirmed === true,
+          eventHttpStatus: Number(result?.eventHttpStatus || 0),
+          ratingSubmitted: result?.ratingSubmitted === true
         };
       })();
-      recombeeFeedbackInFlight.set(botId, work);
+      recombeeFeedbackInFlight.set(flightKey, work);
     }
 
     let result;
     try {
       result = await work;
     } finally {
-      if (!coalesced && recombeeFeedbackInFlight.get(botId) === work) recombeeFeedbackInFlight.delete(botId);
+      if (!coalesced && recombeeFeedbackInFlight.get(flightKey) === work) recombeeFeedbackInFlight.delete(flightKey);
     }
 
     feedbackSend({
@@ -1853,6 +1885,9 @@ if (!(() => { try {
       userLookupMs: Number(result?.userLookupMs || 0),
       ratingMs: Number(result?.ratingMs || 0),
       ratingHttpStatus: Number(result?.ratingHttpStatus || 0),
+      nativeEventConfirmed: result?.nativeEventConfirmed === true,
+      eventHttpStatus: Number(result?.eventHttpStatus || 0),
+      ratingSubmitted: result?.ratingSubmitted === true,
       retryable: !!result?.retryable,
       retryAfterMs: Math.max(0, Number(result?.retryAfterMs || 0) || 0),
       throttleSignal: clean(result?.throttleSignal || ""),

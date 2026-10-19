@@ -2,7 +2,9 @@
   "id": "chat-scene-notes",
   "primary": "content/chat-scene-notes.js",
   "type": "content",
-  "dependencies": [],
+  "dependencies": [
+    "reply-instructions"
+  ],
   "settingsKeys": [
     "chatSceneNotesAutoInclude",
     "chatSceneNotesAutoMode",

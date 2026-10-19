@@ -180,7 +180,7 @@ function managerExtraFilter(entry, kind) {
   if (kind === "blocked") {
     const dislikeFilter = value("blockedBotDislikeFilter", "all");
     const lessLikeFilter = value("blockedBotLessLikeFilter", "all");
-    const dislikeHandled = !!quickDislikeHistoryEntry(id) || !!blockedFeedbackRatedByLessLike(id);
+    const dislikeHandled = !!quickDislikeHistoryEntry(id);
     const lessLikeHandled = !!quickLessLikeHistoryEntry(id);
     if (dislikeFilter === "handled" && !dislikeHandled) return false;
     if (dislikeFilter === "remaining" && dislikeHandled) return false;
@@ -519,30 +519,24 @@ async function applyBotManagerBulkAction(kind) {
 
 function blockedQuickDislikeCounts() {
   const ids = uniqueClean(blockedState?.ids || []);
-  let handled = 0, sent = 0, viaLessLike = 0, legacyUnknown = 0, unavailable = 0;
+  let handled = 0, sent = 0, legacyUnknown = 0, unavailable = 0;
   ids.forEach(id => {
     const entry = quickDislikeHistoryEntry(id);
-    const cross = blockedFeedbackRatedByLessLike(id);
-    if (!entry && !cross) return;
+    if (!entry) return;
     handled++;
-    if (entry?.requestSent === true && entry?.ratingSource === "dislike") sent++;
-    else if (cross && cross.status === "less-liked" && cross.stage !== "cross-feedback-dedupe") viaLessLike++;
-    else if (entry?.fromBotStatus || entry?.status === "unavailable-private-or-deleted") unavailable++;
-    else if (entry?.crossHandledBy === "less-like" && entry?.ratingSource !== "dislike") viaLessLike++;
+    if (entry.nativeEventConfirmed === true) sent++;
+    else if (entry.fromBotStatus || entry.status === "unavailable-private-or-deleted") unavailable++;
     else legacyUnknown++;
   });
-  return {
-    total: ids.length, handled, sent, viaLessLike, legacyUnknown, unavailable,
-    remaining: Math.max(0, ids.length - handled),
-    nameOnly: uniqueClean(blockedState?.names || []).length
-  };
+  return { total: ids.length, handled, sent, viaLessLike: 0, legacyUnknown, unavailable,
+    remaining: Math.max(0, ids.length - handled), nameOnly: uniqueClean(blockedState?.names || []).length };
 }
 
 function updateBlockedDislikeStatus(text = "") {
   const status = $("blockedBotDislikeStatus");
   if (!status) return;
   const counts = blockedQuickDislikeCounts();
-  const next = text || `${counts.handled} handled · ${counts.sent} Dislike requests confirmed · ${counts.viaLessLike} covered by Less Like · ${counts.unavailable} unavailable/skipped · ${counts.legacyUnknown} other/legacy · ${counts.remaining} remaining`;
+  const next = text || `${counts.handled} handled · ${counts.sent} Dislikes confirmed · ${counts.unavailable} unavailable/skipped · ${counts.legacyUnknown} other/legacy · ${counts.remaining} remaining`;
   if (status.textContent !== next) status.textContent = next;
   const shared = $("blockedBotNameOnlyStatus");
   if (shared) {

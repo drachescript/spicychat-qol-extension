@@ -262,6 +262,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const image = canonicalConversationImage(character.avatar_url || character.avatar || character.image || "");
       const lastMessagePreview = conversationMessageText(row?.last_text_message || row?.last_message);
       const messageCount = Math.max(0, Number(row?.num_messages ?? row?.message_count ?? 0) || 0);
+      const userMessageCount = Math.max(0, Number(row?.num_user_messages ?? row?.user_message_count ?? row?.user_messages_count ?? 0) || 0);
       const chatUrl = exactConversationUrl(id, conversationId);
       const candidateMeta = { id, name, image, description, chatUrl };
 
@@ -294,6 +295,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         description: description || existing.description || "",
         lastMessagePreview: lastMessagePreview || existing.lastMessagePreview || "",
         messageCount: Math.max(messageCount, Number(existing.messageCount || 0) || 0),
+        userMessageCount: Math.max(userMessageCount, Number(existing.userMessageCount || 0) || 0),
         chatUrl: nextChatUrl,
         chatUrls: nextUrls,
         profileUrl: existing.profileUrl || `${location.origin}/chatbot/${id}`,

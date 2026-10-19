@@ -805,7 +805,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function modelSelectorWanted(settings) {
-    return anySetting(settings, ["expandModelSelectorDescriptions", "hideModelUpgradeButtons", "customizeModelQuickMenu"]);
+    return anySetting(settings, ["expandModelSelectorDescriptions", "hideModelUpgradeButtons", "customizeModelQuickMenu", "enableModelQuickAccess"]);
   }
 
   function generationMetadataWanted(settings) {
@@ -1578,6 +1578,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (listing) {
         await runFeatureStep("card hiding", cardFilteringWanted(settings) || !!document.querySelector("[data-ds-hidden-card],.ds-card-hidden,.ds-card-dimmed"), () => DS.applyCardHiding?.());
         await runFeatureStep("card block buttons", cardBlockUiWanted(settings) || !!document.querySelector(".ds-card-block-button"), () => DS.applyCardBlockButtons?.());
+        await runFeatureStep("previously chatted indicator", !!settings.enablePreviouslyChattedIndicator || !!document.querySelector(".ds-chatted-indicator"), () => DS.applyPreviouslyChattedIndicator?.());
         await runFeatureStep("bot organizer", !!settings.enableBotOrganizer || !!document.querySelector("[data-ds-bot-organizer],.ds-bot-organizer"), () => DS.applyBotOrganizer?.());
       } else if (singleChat || DS.isBotProfilePage?.()) {
         await runFeatureStep("bot organizer context", !!settings.enableBotOrganizer || !!document.querySelector("[data-ds-bot-organizer],.ds-bot-organizer"), () => DS.applyBotOrganizer?.());
@@ -1585,6 +1586,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       if (singleChat) {
         DS.refreshMessageEnhancerConfig?.(settings);
+        await runFeatureStep("previously chatted recording", !!settings.enablePreviouslyChattedIndicator, () => DS.applyPreviouslyChattedIndicator?.());
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
         await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
         await runFeatureStep("rulebook diagnostics", !!settings.enableRulebookDiagnostics || !!document.getElementById("ds-rulebook-diagnostics"), () => DS.applyRulebookDiagnostics?.());
@@ -1700,6 +1702,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (/^\/lorebook\/[0-9a-f-]{20,}(?:\/|$)/i.test(String(location.pathname || ""))) {
         await runFeatureStep("public lorebook profile/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0), () => DS.applyPublicLorebookQoL?.());
       }
+      await runFeatureStep("chat lorebook manager", !!settings.enableChatLorebookManager, () => DS.applyChatLorebookManager?.());
       const lorebookWorkflowWanted = anySetting(settings, ["lorebookDefaultEntriesTab", "lorebookRememberEntrySort", "lorebookProtectEntryDrafts", "lorebookEditShortcuts", "lorebookEntryManager"]);
       await runRoutedFeatureStep(plan, "lorebook", "lorebook workflow tools", () => lorebookWorkflowWanted || !!document.getElementById("ds-lorebook-manager-toolbar") || !!document.querySelector(".ds-lb-draft-banner,.ds-lb-edit-page-shortcut,[data-ds-edit-lorebook-menu]"), () => DS.applyLorebookWorkflowTools?.());
       await runRoutedFeatureStep(plan, "botEditor", "bot editor local memory", () => !!botEditorRoute() && (!!settings.enableCreationAudit || !!settings.rememberBotImagePrompt || !!DS.state.botEditorLocalMemoryWasActive), () => DS.applyBotEditorLocalMemory?.());
@@ -1922,7 +1925,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (singleChat) {
         if (options.force || DS.isModelSelectorDirty?.()) {
           await runFeatureStep("model selector", modelSelectorWanted(settings) || !!DS.state.modelQuickMenuWasActive || !!DS.isModelSelectorDirty?.(), () => DS.applyModelSelectorTools?.());
+          await runFeatureStep("model quick access", !!settings.enableModelQuickAccess || !!document.querySelector(".ds-model-quick-access"), () => DS.applyModelQuickAccess?.());
         }
+        await runFeatureStep("chat lorebook manager", !!settings.enableChatLorebookManager || !!document.getElementById("ds-chat-lorebook-modal"), () => DS.applyChatLorebookManager?.());
         await runFeatureStep("chat tags", !!settings.showChatTagLinks || !!settings.showChatTagAddButtons, () => DS.applyChatTagTools?.());
         await runFeatureStep("generation metadata", generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning"), () => DS.applyGenerationMetadata?.());
         await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
@@ -1965,6 +1970,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runThrottledFeatureStep("creator favorite buttons", !!settings.showCreatorFavoriteButtons || !!document.querySelector(".ds-creator-fav-button"), listingCardInterval, () => DS.updateCreatorFavoriteButtons?.(), !!options.force);
         await runThrottledFeatureStep("creator follow buttons", !!settings.showFollowCreatorButtons || !!document.querySelector(".ds-creator-follow-button"), listingCardInterval, () => DS.updateCreatorFollowButtons?.(), !!options.force);
         await runThrottledFeatureStep("later buttons", !!settings.showLaterBotButtons || !!document.querySelector(".ds-later-bot-button"), listingCardInterval, () => DS.updateLaterBotButtons?.(), !!options.force);
+        await runThrottledFeatureStep("previously chatted indicator", !!settings.enablePreviouslyChattedIndicator || !!document.querySelector(".ds-chatted-indicator"), listingCardInterval, () => DS.applyPreviouslyChattedIndicator?.(), !!options.force);
         await runThrottledFeatureStep("card descriptions", !!settings.expandLongCardDescriptions || !!document.querySelector("[data-ds-description-expanded]"), listingCardInterval, () => DS.applyCardDescriptionExpansion?.(), !!options.force);
         await runThrottledFeatureStep("card greeting token info", !!settings.showCardGreetingTokenInfo || !!document.querySelector(".ds-card-token-info"), listingCardInterval, () => DS.applyCardGreetingTokenInfo?.(), !!options.force);
         await runThrottledFeatureStep("listing auto-fill", !!settings.autoFillListings || !!settings.showListingRefillButton || !!settings.showListingFilterStats || !!DS.state.listingRefillWorker, listingCardInterval, () => DS.applyListingAutoFill?.(), !!options.force);
@@ -2387,6 +2393,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function checkRouteChange() {
     if (location.href === DS.state.lastUrl) return false;
+    const routeCheckStartedAt = performance.now();
 
     DS.state.lastUrl = location.href;
     slowStepThrottle.clear();
@@ -2437,6 +2444,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.markModelSelectorDirty?.("route-change");
     DS.markAdvertBannerDirty?.("route-change");
     DS.scheduleRun?.({ immediate: true, source: "route-change", dirty: ["all"] });
+    // Separate the synchronous QoL route handler cost from subsequent native
+    // React mounting / deferred feature work in Inspector and support data.
+    const syncMs = Math.max(0, performance.now() - routeCheckStartedAt);
+    const routePerf = runtimeCounters();
+    routePerf.chatNavigationSyncLastMs = Math.round(syncMs * 10) / 10;
+    routePerf.chatNavigationSyncWorstMs = Math.max(Number(routePerf.chatNavigationSyncWorstMs || 0), routePerf.chatNavigationSyncLastMs);
+    routePerf.chatNavigationCount = Number(routePerf.chatNavigationCount || 0) + 1;
+    DS.diagPerformance?.("route-sync", { durationMs: routePerf.chatNavigationSyncLastMs, route: DS.isSingleChatPage?.() ? "chat" : "other" });
     return true;
   }
 
@@ -2604,6 +2619,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (DS.state.refreshTrackersInstalled) return;
     DS.state.refreshTrackersInstalled = true;
 
+    // One activation may emit both pageshow and visibilitychange. Do not run
+    // two immediate full-page passes, especially with dozens of open tabs.
+    // Coalesce only visible presentation work; background data/tracking lanes
+    // and the explicit user-configured hidden-tab pause remain unchanged.
+    let visibleWakeTimer = 0;
+    function scheduleSettledVisibleWake(source) {
+      const perf = runtimeCounters();
+      perf.tabVisibleWakeRequests = Number(perf.tabVisibleWakeRequests || 0) + 1;
+      if (visibleWakeTimer) {
+        perf.tabVisibleWakeCoalesced = Number(perf.tabVisibleWakeCoalesced || 0) + 1;
+        clearTimeout(visibleWakeTimer);
+      }
+      visibleWakeTimer = window.setTimeout(() => {
+        visibleWakeTimer = 0;
+        if (document.hidden || DS.isQolPausedForTab?.()) return;
+        // A hidden tab can navigate while timers are suspended. Reconcile its
+        // route before trying to repair UI belonging to the previous page.
+        if (checkRouteChange()) return;
+        perf.tabVisibleWakeRuns = Number(perf.tabVisibleWakeRuns || 0) + 1;
+        scheduleNonChatPresentationRecovery(source);
+        scheduleSavedOpenedLane(source, 40);
+        primeLargeChatMessageLane(source);
+        DS.scheduleRun?.({ source: `${source}-settled`, dirty: ["all"] });
+      }, 160);
+    }
+
     document.addEventListener("scroll", () => {
       DS.state.userScrollingUntil = Date.now() + 220;
       scheduleLazyHistoryEnhancement();
@@ -2613,16 +2654,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.applyPerformanceMode?.();
 
       if (document.hidden) {
+        clearTimeout(visibleWakeTimer);
+        visibleWakeTimer = 0;
         if (!discardedWakeSessionActive()) DS.maybeAutoReadNotifications?.("tab-hidden");
       } else if (discardedWakeSessionActive()) {
+        clearTimeout(visibleWakeTimer);
+        visibleWakeTimer = 0;
         noteDiscardedWakeVisible("visibilitychange");
         DS.scheduleRun?.({ priority: "critical", immediate: true, source: "discarded-wake-visible" });
         scheduleChatStartupQuietResume("discarded-visible");
       } else {
-        scheduleNonChatPresentationRecovery("visible");
-        scheduleSavedOpenedLane("visible", 40);
-        primeLargeChatMessageLane("visible");
-        DS.scheduleRun?.({ immediate: true, source: "visible", dirty: ["all"] });
+        scheduleSettledVisibleWake("visible");
       }
     }, true);
 
@@ -2633,10 +2675,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         scheduleChatStartupQuietResume("discarded-pageshow");
         return;
       }
-      scheduleNonChatPresentationRecovery("pageshow");
-      scheduleSavedOpenedLane("pageshow", 40);
-      primeLargeChatMessageLane("pageshow");
-      DS.scheduleRun?.({ immediate: true, source: "pageshow", dirty: ["all"] });
+      // pageshow can fire alongside visibilitychange when returning to a
+      // background tab. A single settled wake handles both events.
+      if (!document.hidden) scheduleSettledVisibleWake("pageshow");
     }, true);
 
     window.addEventListener("popstate", () => {

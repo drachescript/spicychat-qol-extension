@@ -1,0 +1,22 @@
+{
+  "id": "chat-lorebook-manager",
+  "primary": "content/chat-lorebook-manager.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableChatLorebookManager"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/chat-lorebook-manager.js"
+  ],
+  "styleFiles": [
+    "content/styles/chat-lorebook-manager.css"
+  ],
+  "backgroundFiles": [],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

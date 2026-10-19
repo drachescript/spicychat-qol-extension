@@ -642,6 +642,8 @@ const DEFAULT_SETTINGS = {
   autoRetryFailedMessageSends: false,
   chatPerformanceMode: false,
   runtimePerformanceMode: "adaptive",
+  maximumPerformancePresetInitialized: false,
+  maximumPerformanceOptOuts: [],
   desktopAppPerformanceGuard: true,
   pauseQolInHiddenTabs: false,
   autoPerformanceLargeChats: true,

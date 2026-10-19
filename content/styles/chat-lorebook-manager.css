@@ -1,0 +1,14 @@
+.ds-chat-lorebook-action,.ds-memory-lorebook-button,.ds-message-lorebook-button{font:600 11px/1.25 system-ui;color:inherit;background:rgba(130,130,130,.12);border:1px solid rgba(120,120,120,.38);border-radius:7px;padding:5px 7px;cursor:pointer;margin:3px}
+.ds-chat-lorebook-overlay{position:fixed;inset:0;z-index:2147483600;display:grid;place-items:center;padding:12px;background:rgba(0,0,0,.72)}
+.ds-chat-lorebook-dialog{width:min(600px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px;box-sizing:border-box;padding:18px;background:#181818;color:#f0f0f0;border-radius:12px;border:1px solid #646464;box-shadow:0 12px 40px #0008;font-family:system-ui,sans-serif}
+.ds-chat-lorebook-dialog h2{font-size:18px;font-weight:650;margin:0}
+.ds-chat-lorebook-dialog p{font-size:12px;margin:0}
+.ds-chat-lorebook-dialog label{font:600 12px/1.4 system-ui;display:grid;gap:4px}
+.ds-chat-lorebook-dialog input,.ds-chat-lorebook-dialog textarea{width:100%;box-sizing:border-box;border:1px solid #555;border-radius:8px;background:#252525;color:inherit;padding:8px;font:13px/1.4 system-ui}
+.ds-chat-lorebook-dialog textarea{min-height:140px;resize:vertical}
+.ds-lb-draft-actions{display:flex;gap:7px;flex-wrap:wrap}
+.ds-lb-draft-actions button{border:1px solid #777;border-radius:8px;background:#303030;color:inherit;padding:7px 9px;cursor:pointer}
+.ds-lb-draft-actions button:focus-visible,.ds-chat-lorebook-dialog input:focus-visible,.ds-chat-lorebook-dialog textarea:focus-visible{outline:2px solid #80aef9;outline-offset:2px}
+
+.ds-chat-lorebook-pending{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;border:1px solid #7e96b1;border-radius:8px;padding:8px;font:12px system-ui;color:inherit}
+.ds-chat-lorebook-pending button{border:1px solid #777;border-radius:7px;background:rgba(130,130,130,.1);color:inherit;padding:5px 8px;cursor:pointer}
