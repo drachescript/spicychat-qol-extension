@@ -734,7 +734,7 @@ async function runDirectCharacterFeedback(message, mode) {
   const sendFeedback = async () => {
     const feedbackStartedAt = Date.now();
     response = await tabsSendMessage(tabId, {
-      type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId,
+      type: "DS_DIRECT_CHARACTER_FEEDBACK", mode, botId, eventOnly: message?.eventOnly === true,
       botName: String(message?.botName || "").slice(0, 160)
     });
     feedbackMs += Date.now() - feedbackStartedAt;
@@ -809,35 +809,7 @@ async function runQuickLessLikeBot(message) {
     if (remembered && !(remembered.status === "unavailable" &&
         await feedbackUnavailableSuperseded(botId, remembered.handledAt))) return { ok: true, status: "already-handled", rememberedStatus: remembered.status || "less-liked", handledAt: remembered.handledAt || 0 };
 
-    const crossHandled = await completedRecommendationFeedbackForBot(botId, "less-like");
-    if (crossHandled?.source === "dislike") {
-      const handledAt = crossHandled.handledAt || Date.now();
-      await rememberQuickLessLikeEntry(botId, {
-        status: "less-liked",
-        name: String(botName || crossHandled.name || "").slice(0, 160),
-        handledAt,
-        stage: "cross-feedback-dedupe",
-        reason: "A successful Dislike rating for this bot is already recorded, so QoL skipped a duplicate recommendation rating POST.",
-        httpStatus: 0
-      }, {
-        immediate: !String(message?.bulkRunId || "").trim(),
-        runId: String(message?.bulkRunId || "").trim()
-      });
-      await recordHelperLifecycle("recommendationFeedbackCrossDedupe", {
-        botId,
-        skipped: "less-like",
-        completedBy: "dislike"
-      });
-      return {
-        ok: true,
-        status: "already-handled",
-        rememberedStatus: "less-liked",
-        handledAt,
-        crossHandledBy: "dislike",
-        networkAttempts: 0,
-        requestSent: false
-      };
-    }
+
   }
 
   let result;

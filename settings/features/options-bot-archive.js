@@ -18,7 +18,7 @@ function normalizeQuickDislikeHistory(raw) {
   Object.entries(bots).forEach(([id, value]) => {
     const botId = String(id || "").trim();
     const status = String(value?.status || "");
-    if (!botId || !["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(status)) return;
+    if (!botId || !["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked", "dislike-event-pending"].includes(status)) return;
     normalized[botId] = {
       status,
       name: String(value?.name || "").slice(0, 160),
@@ -26,7 +26,8 @@ function normalizeQuickDislikeHistory(raw) {
       crossHandledBy: value?.crossHandledBy === "less-like" ? "less-like" : "",
       ratingSource: ["dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
       ratingAt: Number(value?.ratingAt || 0) || 0,
-      requestSent: value?.requestSent === true
+      requestSent: value?.requestSent === true,
+      nativeEventConfirmed: value?.nativeEventConfirmed === true
     };
   });
   return { version: 1, bots: normalized };
@@ -50,7 +51,7 @@ function blockedFeedbackConfirmedUnavailable(id) {
 
 function blockedFeedbackRatedByLessLike(id) {
   const entry = quickLessLikeHistoryState?.bots?.[String(id || "").trim().toLowerCase()];
-  return entry?.status === "less-liked" ? entry : null;
+  return entry?.status === "less-liked" && entry?.stage !== "cross-feedback-dedupe" ? entry : null;
 }
 
 function quickDislikeHistoryEntry(id) {
@@ -66,26 +67,16 @@ function quickDislikeHistoryEntry(id) {
     return unavailable ? { status: "unavailable-private-or-deleted", fromBotStatus: true,
       handledAt: Number(unavailable.checkedAt || 0), name: String(unavailable.name || "") } : null;
   }
-  if (entry.status !== "already-disliked" || entry.crossHandledBy) return entry;
-  // Legacy entries omitted provenance. Reconstruct a *display-only*, labeled
-  // inference from the earlier Less Like success rather than rewriting history.
-  const lessLike = quickLessLikeHistoryState?.bots?.[botId];
-  const lessAt = Number(lessLike?.handledAt || 0);
-  if (lessLike?.status === "less-liked" && lessLike?.stage !== "cross-feedback-dedupe" &&
-      lessAt > 0 && lessAt <= Number(entry.handledAt || 0)) {
-    return { ...entry, crossHandledBy: "less-like", ratingSource: "less-like", ratingAt: lessAt, sourceInferred: true };
-  }
+  // Legacy "disliked" and "already-disliked" entries only prove a Recombee
+  // rating. Do not count them as completed native chat Dislikes without the event.
+  if (["disliked", "already-disliked"].includes(entry.status) && entry.nativeEventConfirmed !== true) return null;
+  if (entry.status === "dislike-event-pending") return null;
   return entry;
 }
 
 function quickDislikeHistoryLabel(entry) {
   if (!entry) return "";
-  if (entry.status === "disliked") return entry.requestSent ? "Dislike request sent" : "Disliked (legacy history; request count unknown)";
-  if (entry.status === "already-disliked" && entry.crossHandledBy === "less-like") {
-    if (entry.ratingSource === "dislike") return "Previously rated via Dislike (Less Like history confirms it)";
-    return entry.sourceInferred ? "Already negatively rated via Less Like (inferred from saved history)" :
-      "Already negatively rated via Less Like (no new request)";
-  }
+  if (entry.status === "disliked") return entry.nativeEventConfirmed ? "Dislike confirmed (rating + event)" : "Legacy rating only (Dislike unverified)";
   if (entry.status === "already-disliked") return "Already disliked (source not recorded)";
   if (entry.status === "already-rated-or-unavailable") return "Rating already set / unavailable";
   if (entry.status === "unavailable-private-or-deleted") return entry.fromBotStatus
@@ -130,6 +121,7 @@ function quickLessLikeHistoryEntry(id) {
   const botId = String(id || "").trim().toLowerCase();
   if (!botId) return null;
   const entry = quickLessLikeHistoryState?.bots?.[botId] || null;
+  if (entry?.status === "less-liked" && entry?.stage === "cross-feedback-dedupe") return null;
   if (entry?.status === "unavailable" && botAvailabilityState?.meta?.[botId]?.status === "available" &&
       Number(botAvailabilityState.meta[botId].checkedAt || 0) > Number(entry.handledAt || 0)) return null;
   if (entry) return entry;
@@ -140,8 +132,7 @@ function quickLessLikeHistoryEntry(id) {
 
 function quickLessLikeHistoryLabel(entry) {
   if (!entry) return "";
-  if (entry.status === "less-liked") return entry.stage === "cross-feedback-dedupe" ?
-    "Already negatively rated via Dislike (no new Less Like request)" : "Stop recommending sent";
+  if (entry.status === "less-liked") return "Stop recommending sent";
   if (entry.status === "unavailable") return entry.fromBotStatus
     ? "Confirmed unavailable in Bot Status · no rating needed"
     : "Unavailable / deleted · skipped";

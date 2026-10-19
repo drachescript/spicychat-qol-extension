@@ -4,7 +4,7 @@
 function readSettingsFromPage() {
   const oocTemplates = oocTemplatesFromPage();
 
-  return {
+  const result = {
     enabled: checked("enabled"),
     saiToolkitCompatibility: checked("saiToolkitCompatibility", false),
     globalNsfwMode: value("globalNsfwMode", "ignore"),
@@ -122,6 +122,11 @@ function readSettingsFromPage() {
     expandModelSelectorDescriptions: checked("expandModelSelectorDescriptions"),
     hideModelUpgradeButtons: checked("hideModelUpgradeButtons"),
     customizeModelQuickMenu: checked("customizeModelQuickMenu"),
+    enableModelQuickAccess: checked("enableModelQuickAccess"),
+    modelQuickAccessNames: value("modelQuickAccessNames", ""),
+    enableChatLorebookManager: checked("enableChatLorebookManager"),
+    enablePreviouslyChattedIndicator: checked("enablePreviouslyChattedIndicator"),
+    chattedIndicatorShowOpened: checked("chattedIndicatorShowOpened"),
     modelQuickFavoritesOnly: checked("modelQuickFavoritesOnly"),
     modelFavoriteNames: value("modelFavoriteNames", ""),
     modelHiddenNames: value("modelHiddenNames", ""),
@@ -492,6 +497,8 @@ function readSettingsFromPage() {
     autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
     chatPerformanceMode: checked("chatPerformanceMode"),
     runtimePerformanceMode: ["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive",
+    maximumPerformancePresetInitialized: loadedSettingsSnapshot.maximumPerformancePresetInitialized === true,
+    maximumPerformanceOptOuts: Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : [],
     desktopAppPerformanceGuard: checked("desktopAppPerformanceGuard", true),
     pauseQolInHiddenTabs: checked("pauseQolInHiddenTabs"),
     autoPerformanceLargeChats: checked("autoPerformanceLargeChats"),
@@ -701,8 +708,22 @@ function readSettingsFromPage() {
     deepImportMaxPages: 80,
     showBlockCurrentBotButton: false,
     enablePersonalUsageSummary: checked("enablePersonalUsageSummary"),
-    debug: checked("debug")
-  };
+    debug: checked("debug")  };
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features)) {
+    const installed = new Set(profile.features);
+    const owners = window.__DSQ_FEATURE_SETTING_OWNERS__ || {};
+    for (const [feature, keys] of Object.entries(owners)) {
+      if (installed.has(feature)) continue;
+      for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(result, key)) continue;
+        if (Object.prototype.hasOwnProperty.call(loadedSettingsSnapshot || {}, key))
+          result[key] = loadedSettingsSnapshot[key];
+        else delete result[key];
+      }
+    }
+  }
+  return result;
 }
 
 function readSingleSettingFromPage(settingKey) {
@@ -821,6 +842,11 @@ function readSingleSettingFromPage(settingKey) {
     case "expandModelSelectorDescriptions": return (checked("expandModelSelectorDescriptions"));
     case "hideModelUpgradeButtons": return (checked("hideModelUpgradeButtons"));
     case "customizeModelQuickMenu": return (checked("customizeModelQuickMenu"));
+    case "enableModelQuickAccess": return checked("enableModelQuickAccess");
+    case "modelQuickAccessNames": return value("modelQuickAccessNames", "");
+    case "enableChatLorebookManager": return checked("enableChatLorebookManager");
+    case "enablePreviouslyChattedIndicator": return checked("enablePreviouslyChattedIndicator");
+    case "chattedIndicatorShowOpened": return checked("chattedIndicatorShowOpened");
     case "modelQuickFavoritesOnly": return (checked("modelQuickFavoritesOnly"));
     case "modelFavoriteNames": return (value("modelFavoriteNames", ""));
     case "modelHiddenNames": return (value("modelHiddenNames", ""));
@@ -1171,6 +1197,8 @@ function readSingleSettingFromPage(settingKey) {
     case "autoRetryFailedMessageSends": return (checked("autoRetryFailedMessageSends"));
     case "chatPerformanceMode": return (checked("chatPerformanceMode"));
     case "runtimePerformanceMode": return (["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive");
+    case "maximumPerformancePresetInitialized": return (loadedSettingsSnapshot.maximumPerformancePresetInitialized === true);
+    case "maximumPerformanceOptOuts": return (Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : []);
     case "desktopAppPerformanceGuard": return (checked("desktopAppPerformanceGuard", true));
     case "pauseQolInHiddenTabs": return (checked("pauseQolInHiddenTabs"));
     case "autoPerformanceLargeChats": return (checked("autoPerformanceLargeChats"));

@@ -1,0 +1,25 @@
+{
+  "id": "previously-chatted-indicator",
+  "primary": "content/previously-chatted-indicator.js",
+  "type": "content",
+  "dependencies": [
+    "opened-chats"
+  ],
+  "settingsKeys": [
+    "enablePreviouslyChattedIndicator",
+    "chattedIndicatorShowOpened"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/previously-chatted-indicator.js"
+  ],
+  "styleFiles": [
+    "content/styles/previously-chatted-indicator.css"
+  ],
+  "backgroundFiles": [],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

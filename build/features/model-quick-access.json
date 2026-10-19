@@ -1,0 +1,25 @@
+{
+  "id": "model-quick-access",
+  "primary": "content/model-quick-access.js",
+  "type": "content",
+  "dependencies": [
+    "model-selector"
+  ],
+  "settingsKeys": [
+    "enableModelQuickAccess",
+    "modelQuickAccessNames"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/model-quick-access.js"
+  ],
+  "styleFiles": [
+    "content/styles/model-quick-access.css"
+  ],
+  "backgroundFiles": [],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

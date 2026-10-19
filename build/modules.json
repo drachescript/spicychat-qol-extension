@@ -143,7 +143,9 @@
         "content/persona-pictures.js",
         "content/picture-library.js",
         "content/chat-scene-notes.js",
-        "content/auto-images.js"
+        "content/auto-images.js",
+        "content/model-quick-access.js",
+        "content/chat-lorebook-manager.js"
       ]
     },
     "chatList": {
@@ -197,7 +199,8 @@
         "content/tags-nsfw.js",
         "content/local-tag-matching.js",
         "content/rulebook-filter.js",
-        "content/auto-blocking.js"
+        "content/auto-blocking.js",
+        "content/previously-chatted-indicator.js"
       ]
     },
     "creator": {
@@ -424,6 +427,7 @@
         "settings/features/options-diagnostics.js",
         "settings/features/options-translation.js",
         "settings/features/options-release-notes.js",
+        "settings/options-performance-presets.js",
         "settings/features/options-settings-controls.js",
         "options.js",
         "shared/feature-registry.js",
@@ -432,7 +436,8 @@
         "background/bot-status-storage-cleanup.js",
         "shared/storage-metrics.js",
         "content/build-profile.js",
-        "settings/options-feature-availability.js"
+        "settings/options-feature-availability.js",
+        "settings/feature-setting-owners.js"
       ]
     },
     "styles": {
@@ -448,18 +453,32 @@
       "chat": [
         "content/styles/chat-bubble-themes.css",
         "content/styles/memory-vault.css",
-        "content/styles/ooc.css"
+        "content/styles/ooc.css",
+        "content/styles/model-quick-access.css",
+        "content/styles/chat-lorebook-manager.css",
+        "content/styles/character-qol-profiles.css",
+        "content/styles/chat-search.css",
+        "content/styles/focus-mode.css",
+        "content/styles/rp-format-repair.css",
+        "content/styles/story-reading-layout.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",
         "content/styles/pagination.css",
-        "content/styles/rulebook-filter.css"
+        "content/styles/rulebook-filter.css",
+        "content/styles/previously-chatted-indicator.css"
       ],
       "chatList": [
         "content/styles/chat-index.css"
       ],
       "personas": [
         "content/styles/persona-manager.css"
+      ],
+      "interface": [
+        "content/styles/android-app.css"
+      ],
+      "lorebook": [
+        "content/styles/lorebook-connections.css"
       ]
     }
   },

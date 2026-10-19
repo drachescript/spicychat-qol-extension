@@ -761,14 +761,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return { ok: false, status: "invalid-feedback-request" };
     }
 
-    const existing = directFeedbackInFlight.get(botId);
+    const flightKey = `${mode}:${botId}`;
+    const existing = directFeedbackInFlight.get(flightKey);
     if (existing) return existing;
 
     const diagKind = mode === "dislike" ? "quick-dislike" : "quick-less-like";
     const successStatus = mode === "dislike" ? "disliked" : "less-liked";
     const operation = DS.diagOperationStart?.(diagKind, "direct-api", { botId, mode });
     const availabilityNetwork = DS.diagNetworkStart?.(diagKind, "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { phase: "availability-preflight", botId });
-    const ratingNetwork = DS.diagNetworkStart?.(diagKind, "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });
+    const ratingNetwork = message?.eventOnly === true ? null : DS.diagNetworkStart?.(diagKind, "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });
+    const eventNetwork = mode === "dislike" ? DS.diagNetworkStart?.(diagKind, "POST", "https://prod.nd-api.com/event", { phase: "character-rating-event", botId }) : null;
     const work = (async () => {
       try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
       const preferredRecombeeToken = await cachedRecombeePublicToken();
@@ -804,7 +806,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }), 45000);
         try {
           window.dispatchEvent(new CustomEvent(DIRECT_FEEDBACK_REQUEST_EVENT, {
-            detail: { requestId, botId, mode, preferredRecombeeToken }
+            detail: { requestId, botId, mode, eventOnly: message?.eventOnly === true, preferredRecombeeToken }
           }));
         } catch (error) {
           finish({ ok: false, status: "direct-feedback-unavailable", error: String(error?.message || error || ""), requestSent: false, networkAttempts: 0 });
@@ -831,6 +833,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         availabilityConfirmed: !!result?.availabilityConfirmed,
         tokenSource: String(result?.tokenSource || ""),
         requestSent: !!result?.requestSent,
+        nativeEventConfirmed: result?.nativeEventConfirmed === true,
+        eventHttpStatus: Number(result?.eventHttpStatus || 0),
         retryable: !!result?.retryable,
         retryAfterMs: Number(result?.retryAfterMs || 0),
         throttleSignal: String(result?.throttleSignal || ""),
@@ -845,19 +849,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         ok: !!result?.availabilityConfirmed,
         outcome: result?.availabilityConfirmed ? "confirmed" : String(result?.stage || result?.status || "unknown")
       });
-      DS.diagNetworkEnd?.(ratingNetwork, {
+      if (ratingNetwork) DS.diagNetworkEnd?.(ratingNetwork, {
         status: Number(result?.ratingHttpStatus || (result?.requestSent ? result?.httpStatus : 0) || 0),
-        ok: !!(result?.ok && result?.status === successStatus),
-        outcome: result?.requestSent ? String(result?.status || "unknown") : "not-sent"
+        ok: Number(result?.ratingHttpStatus || 0) >= 200 && Number(result?.ratingHttpStatus || 0) < 300,
+        outcome: result?.requestSent ? "rating-submitted" : "not-sent"
+      });
+      if (eventNetwork) DS.diagNetworkEnd?.(eventNetwork, {
+        status: Number(result?.eventHttpStatus || 0),
+        ok: result?.nativeEventConfirmed === true,
+        outcome: result?.nativeEventConfirmed === true ? "native-dislike-confirmed" : "event-unconfirmed"
       });
       return result;
     })();
 
-    directFeedbackInFlight.set(botId, work);
+    directFeedbackInFlight.set(flightKey, work);
     try {
       return await work;
     } finally {
-      if (directFeedbackInFlight.get(botId) === work) directFeedbackInFlight.delete(botId);
+      if (directFeedbackInFlight.get(flightKey) === work) directFeedbackInFlight.delete(flightKey);
     }
   }
 

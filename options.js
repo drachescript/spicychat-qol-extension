@@ -3356,6 +3356,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 setupTabs();
+setupMaximumPerformancePreset();
 setupSettingsAutosave();
 load();
 
