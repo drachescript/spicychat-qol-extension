@@ -28,7 +28,9 @@ assert.equal(custom.dsqBackgroundMessageAllowed('DS_GET_DIAGNOSTIC_CONTEXT'),tru
 const context=vm.createContext({window:{__DSQ_TAB_GATE__:{paused:false},__DSQ_BUILD_PROFILE__:{generated:true,features:['ooc'],bundles:['core','chat']},DragonScriptQoL:{state:{runtimePerformance:{},settings:{}}}},console});
 run('content/feature-build-map.js',context);
 const ds=context.window.DragonScriptQoL;
-assert.equal(ds.featureBuildProfile.allFeatureIds.length,109);
+assert(ds.featureBuildProfile.allFeatureIds.length >= 109, 'All current feature IDs should remain registered');
+for (const id of ['model-quick-access','chat-lorebook-manager','previously-chatted-indicator'])
+  assert(ds.featureBuildProfile.allFeatureIds.includes(id), 'Missing new v0.2.53 feature '+id);
 assert.equal(ds.featureBuildProfile.isTaskInstalled('OOC'),true);
 assert.equal(ds.featureBuildProfile.isTaskInstalled('chat search'),false);
 assert.equal(ds.featureBuildProfile.isTaskInstalled('bot organizer'),false);
@@ -40,5 +42,5 @@ let seen=0;
   await ds.runtimeKernel.runFeature({...base,name:'chat search'});
   await ds.runtimeKernel.runFeature({...base,name:'OOC'});
   assert.equal(seen,1,'Only selected OOC task executed');
-  console.log('PASS feature-level build gating and 87 background-message ownership contracts');
+  console.log('PASS feature-level build gating and background-message ownership contracts');
 })().catch(e=>{console.error(e);process.exitCode=1;});
