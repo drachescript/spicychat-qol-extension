@@ -26,7 +26,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify v0.2.52 Custom feature ownership and catalog
+      - name: Generate Custom feature catalog from this checkout
+        run: python scripts/export_custom_feature_catalog.py
+
+      - name: Check Custom feature ownership and catalog
         run: python -m unittest discover -s build -p 'test_custom_52.py' -v
 
       - name: Test feature recipes and minimal package
