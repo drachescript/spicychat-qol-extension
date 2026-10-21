@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.54",
+  "sourceVersion": "0.2.55",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -236,7 +236,9 @@
       "runtime": "background/features/background-worker-bot-status.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-worker-bot-status.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -666,7 +668,9 @@
       "runtime": "content/creator-workspace.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-creator-watch.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -876,7 +880,9 @@
       "runtime": "content/lorebook-backup.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-lorebook-export.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1151,7 +1157,9 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "styles": [],
+      "styles": [
+        "content/styles/ooc.css"
+      ],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"
