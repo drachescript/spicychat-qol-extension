@@ -4,7 +4,17 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableTranslation"
+    "enableTranslation",
+    "libreTranslateUrl",
+    "translationAllowRemoteFallback",
+    "translationAutoAi",
+    "translationAutoUser",
+    "translationPerChatControls",
+    "translationProtectedTerms",
+    "translationProvider",
+    "translationShowMessageButtons",
+    "translationTargetLanguage",
+    "translationUnderstoodLanguages"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
@@ -13,5 +23,8 @@
   "browserVerified": false,
   "backgroundFiles": [
     "background/background-translation.js"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/translation.js"
   ]
 }

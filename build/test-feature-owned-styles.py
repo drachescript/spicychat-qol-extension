@@ -11,6 +11,7 @@ for fid,keyword in (
   ('wiki-lorebook-importer','/* Wiki / Web Lorebook Importer */'),
   ('story-day-tracker','/* v0.1.9.112 - Internal Day Tracker / Storydate */'),
   ('rp-state-tracker','/* RP State Tracker */'),
+  ('soundscapes','/* v0.1.9.41 - Soundscape Mini Panel controls */'),
 ):
     path=f'content/styles/{fid}.css'
     contract=json.loads((R/f'build/features/{fid}.json').read_text())
@@ -22,5 +23,5 @@ for fid,keyword in (
     assert keyword not in shared,fid
     assert contents.count('{')==contents.count('}'),fid
     assert contents.strip(),fid
-assert all_css.index('content/styles/remaining-styles.css') < min(all_css.index(f'content/styles/{id}.css') for id in ['wiki-lorebook-importer','story-day-tracker','rp-state-tracker'])
-print('PASS: three feature-owned styles, manifest/contract/registry parity, shared CSS moved')
+assert all_css.index('content/styles/remaining-styles.css') < min(all_css.index(f'content/styles/{id}.css') for id in ['wiki-lorebook-importer','story-day-tracker','rp-state-tracker','soundscapes'])
+print('PASS: four feature-owned styles, manifest/contract/registry parity, shared CSS moved')

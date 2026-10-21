@@ -76,3 +76,20 @@ async function fetchWikiPageSource(value) {
 }
 
 
+
+// Feature-owned message handlers. The shared router only dispatches registered types.
+dsqRegisterBackgroundMessageHandler("DS_WIKI_REQUEST_PERMISSION", "wiki-lorebook-importer", (message, sender, sendResponse) => {
+  const origin = wikiOriginPattern(message.url);
+  if (!origin) {
+    sendResponse({ ok: false, error: "Enter a valid http:// or https:// page URL." });
+    return false;
+  }
+  requestOptionalOrigin(origin).then(sendResponse);
+  return true;
+});
+dsqRegisterBackgroundMessageHandler("DS_WIKI_FETCH", "wiki-lorebook-importer", (message, sender, sendResponse) => {
+  fetchWikiPageSource(message.url)
+    .then(sendResponse)
+    .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+});

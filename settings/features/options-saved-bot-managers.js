@@ -1,20 +1,23 @@
 // Feature-owned options helpers: saved-bot-managers. Full QoL and Custom use the same source.
 // Shared storage/settings state remains in the core controller for now.
 
-function botEntriesFromStore(store, includeNames = true) {
+function botEntriesFromStore(store, includeNames = true, kindlessOpenedStore = false) {
   const entries = [];
   const seen = new Set();
   const meta = store.meta || {};
 
   (store.ids || []).forEach((id, index) => {
     const item = meta[id] || {};
+    const local = kindlessOpenedStore === true ? knownSavedBotProfile(id, item) : null;
     entries.push({
       type: "id",
       id,
-      name: bestKnownBotName(id, item.name) || (isPlaceholderBotName(item.name, id) ? "Unknown bot" : item.name) || id,
-      image: item.image || "",
-      creator: item.creator || item.creatorName || item.creatorHandle || "",
-      description: item.description || "",
+      name: local?.name || bestKnownBotName(id, item.name) || (isPlaceholderBotName(item.name, id) ? "Unknown bot" : item.name) || id,
+      title: local?.title || item.title || "",
+      greeting: local?.greeting || item.greeting || "",
+      image: local?.image || item.image || "",
+      creator: local?.creator || item.creator || item.creatorName || item.creatorHandle || "",
+      description: local?.description || item.description || "",
       profileUrl: item.profileUrl || (id ? `https://spicychat.ai/chatbot/${id}` : ""),
       chatUrl: item.chatUrl || (id ? `https://spicychat.ai/chat/${id}` : ""),
       savedAt: Number(item.savedAt || 0) || 0,

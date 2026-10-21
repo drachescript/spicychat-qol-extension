@@ -1,0 +1,1636 @@
+{
+  "schema": "spicychat-qol-custom-package-assets/v1",
+  "sourceVersion": "0.2.54",
+  "status": "experimental-not-browser-certified",
+  "preserveSavedSettings": true,
+  "newFeaturesDefaultOff": true,
+  "sourceOfTruth": "build/features/*.json",
+  "features": [
+    {
+      "id": "accessibility",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/accessibility.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "ad-banners",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/ad-banners.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "alternate-dialogue",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/alternate-dialogue.js",
+      "settings": [
+        "settings/feature-panels/alternate-dialogue.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "android-app",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/android-app.js",
+      "settings": [],
+      "styles": [
+        "content/styles/android-app.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "animation-control",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/animation-control.js",
+      "settings": [
+        "settings/feature-panels/animation-control.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "auto-afk",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/auto-afk.js",
+      "settings": [],
+      "styles": [],
+      "background": [
+        "background/background-auto-afk.js"
+      ],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "auto-blocking",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "cards",
+        "bot-blocking"
+      ],
+      "runtime": "content/auto-blocking.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "auto-images",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/auto-images.js",
+      "settings": [
+        "settings/feature-panels/automatic-images.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "auto-voice",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/auto-voice.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-archive",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-archive.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-backup",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-backup.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-blocking",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-blocking.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-editor-actions",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-editor-actions.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-editor-history",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-editor-history.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-editor-memory",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-editor-memory.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-editor-snippets",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-editor-snippets.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-organizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bot-organizer.js",
+      "settings": [],
+      "styles": [
+        "content/styles/bot-organizer.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bot-status",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "background/features/background-worker-bot-status.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bulk-blocking",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bulk-blocking.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "card-token-info",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/card-token-info.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "card-workflow",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/card-workflow.js",
+      "settings": [
+        "settings/feature-panels/card-workflow.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "cards",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/cards.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "character-pictures",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/character-pictures.js",
+      "settings": [
+        "settings/feature-panels/character-pictures.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js",
+        "content/chat-picture-editor-core.js",
+        "content/chat-picture-override-core.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "character-qol-profiles",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/character-qol-profiles.js",
+      "settings": [
+        "settings/feature-panels/character-qol-profiles.js"
+      ],
+      "styles": [
+        "content/styles/character-qol-profiles.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-backgrounds",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-backgrounds.js",
+      "settings": [
+        "settings/feature-panels/chat-backgrounds.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-bookmarks",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-bookmarks.js",
+      "settings": [
+        "settings/feature-panels/chat-bookmarks.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-bubbles",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-bubbles.js",
+      "settings": [],
+      "styles": [
+        "content/styles/chat-bubble-themes.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-export",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-export.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-format-compatibility",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-format-compatibility.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-index",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-index.js",
+      "settings": [],
+      "styles": [
+        "content/styles/chat-index.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-list",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-list.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-lorebook-manager",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-lorebook-manager.js",
+      "settings": [
+        "settings/feature-panels/chat-lorebook-manager.js"
+      ],
+      "styles": [
+        "content/styles/chat-lorebook-manager.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-nudges",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-nudges.js",
+      "settings": [
+        "settings/feature-panels/chat-nudges.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-organizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-organizer.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-rulebook-metadata",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-rulebook-metadata.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-scene-notes",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "reply-instructions"
+      ],
+      "runtime": "content/chat-scene-notes.js",
+      "settings": [
+        "settings/feature-panels/chat-scene-notes.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-search",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-search.js",
+      "settings": [
+        "settings/feature-panels/chat-search.js"
+      ],
+      "styles": [
+        "content/styles/chat-search.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-stability",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-stability.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-tags",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-tags.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-topbar",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-topbar.js",
+      "settings": [
+        "settings/feature-panels/chat-topbar.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-ui",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-ui.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "command-palette",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/command-palette.js",
+      "settings": [
+        "settings/feature-panels/command-palette.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "composer-control",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/composer-control.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "context-keeper",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/context-keeper.js",
+      "settings": [
+        "settings/feature-panels/context-keeper.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "core-message-cache",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/core-message-cache.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creation-audit",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creation-audit.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creation-bulk-input",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creation-bulk-input.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creator-favorites",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creator-favorites.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creator-following",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creator-following.js",
+      "settings": [],
+      "styles": [],
+      "background": [
+        "background/features/background-creator-watch.js"
+      ],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creator-workspace",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creator-workspace.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creator-writing-assistant",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/creator-writing-assistant.js",
+      "settings": [
+        "settings/feature-panels/creator-writing-assistant.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "delete-guard",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/delete-guard.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "exact-message-counts",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/exact-message-counts.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "failed-message-helper",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/failed-message-helper.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "favorite-bots",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/favorite-bots.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "focus-mode",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/focus-mode.js",
+      "settings": [
+        "settings/feature-panels/focus-mode.js"
+      ],
+      "styles": [
+        "content/styles/focus-mode.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "footer-manager",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/footer-manager.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "formatting-toolbar",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/formatting-toolbar.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "generation-metadata",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/generation-metadata.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "generation-profiles",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/generation-profiles.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "interface-runtime-tools",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/interface-runtime-tools.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "language-filter",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/language-filter.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "later-bots",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/later-bots.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "list-fill",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/list-fill.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "listing-panel-position",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/listing-panel-position.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "local-tag-matching",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/local-tag-matching.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-backup",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-backup.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-connections",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-connections.js",
+      "settings": [],
+      "styles": [
+        "content/styles/lorebook-connections.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-consistency",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-consistency.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-entries",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-entries.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-filter",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-filter.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-public-qol",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-public-qol.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-search-filter",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-search-filter.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-tags",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-tags.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "lorebook-workflow",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/lorebook-workflow.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "memory-manager",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/memory-manager.js",
+      "settings": [],
+      "styles": [
+        "content/styles/memory-vault.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "message-options",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/message-options.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "mobile-bot-organizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/mobile-bot-organizer.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "mobile-listing-overflow",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/mobile-listing-overflow.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "model-quick-access",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "model-selector"
+      ],
+      "runtime": "content/model-quick-access.js",
+      "settings": [
+        "settings/feature-panels/model-quick-access.js"
+      ],
+      "styles": [
+        "content/styles/model-quick-access.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "model-selector",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/model-selector.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "moderation-warnings",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/moderation-warnings.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "my-chatbot-card-shortcuts",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/my-chatbot-card-shortcuts.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "my-creations-auto-load",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/my-creations-auto-load.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "my-creations-backup",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/my-creations-backup.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "my-creations-filters",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/my-creations-filters.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "my-creations-view-memory",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/my-creations-view-memory.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "native-rating-helpers",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/native-rating-helpers.js",
+      "settings": [
+        "settings/feature-panels/native-rating-helpers.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "ooc",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/ooc.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/ooc-composer.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "opened-chats",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/opened-chats.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "pagination-tools",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/pagination-tools.js",
+      "settings": [],
+      "styles": [
+        "content/styles/pagination.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "performance-mode",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/performance-mode.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "persona-full-backup",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/persona-full-backup.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "persona-organizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/persona-organizer.js",
+      "settings": [],
+      "styles": [
+        "content/styles/persona-manager.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "persona-pictures",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/persona-pictures.js",
+      "settings": [
+        "settings/feature-panels/persona-pictures.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js",
+        "content/chat-picture-editor-core.js",
+        "content/chat-picture-override-core.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "personas",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/personas.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "picture-library",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/picture-library.js",
+      "settings": [
+        "settings/feature-panels/picture-library.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [
+        "content/chat-picture-core.js",
+        "content/custom-pictures-menu.js"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "premium-notifications",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/premium-notifications.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "previously-chatted-indicator",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "opened-chats"
+      ],
+      "runtime": "content/previously-chatted-indicator.js",
+      "settings": [
+        "settings/feature-panels/previously-chatted-indicator.js"
+      ],
+      "styles": [
+        "content/styles/previously-chatted-indicator.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "profile-export",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/profile-export.js",
+      "settings": [
+        "settings/feature-panels/profile-export.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "quick-panel",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/quick-panel.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "recommendation-helpers",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/recommendation-helpers.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "reply-instructions",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/reply-instructions.js",
+      "settings": [
+        "settings/feature-panels/reply-instructions.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "rp-format-repair",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/rp-format-repair.js",
+      "settings": [
+        "settings/feature-panels/rp-format-repair.js"
+      ],
+      "styles": [
+        "content/styles/rp-format-repair.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "rp-state-tracker",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/rp-state-tracker.js",
+      "settings": [
+        "settings/feature-panels/rp-state-tracker.js"
+      ],
+      "styles": [
+        "content/styles/rp-state-tracker.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "rulebook-diagnostics",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/rulebook-diagnostics.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "rulebook-filter",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/rulebook-filter.js",
+      "settings": [],
+      "styles": [
+        "content/styles/rulebook-filter.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "saved-chat-actions",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/saved-chat-actions.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "saved-lists-overlay",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/saved-lists-overlay.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "saved-snippets",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/saved-snippets.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "scroll-to-top",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/scroll-to-top.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "selection-memory",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/selection-memory.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "sidebar",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/sidebar.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "smart-filter-presets",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/smart-filter-presets.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "soundscapes",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/soundscapes.js",
+      "settings": [
+        "settings/feature-panels/soundscapes.js"
+      ],
+      "styles": [
+        "content/styles/soundscapes.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "story-day-tracker",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/story-day-tracker.js",
+      "settings": [
+        "settings/feature-panels/story-day-tracker.js"
+      ],
+      "styles": [
+        "content/styles/story-day-tracker.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "story-reading-layout",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/story-reading-layout.js",
+      "settings": [],
+      "styles": [
+        "content/styles/story-reading-layout.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "tag-aliases",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/tag-aliases.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "tags-nsfw",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/tags-nsfw.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "text-replacements",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/text-replacements.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "top-bar",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/top-bar.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "translation",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/translation.js",
+      "settings": [
+        "settings/feature-panels/translation.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/background-translation.js"
+      ],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "ui-layout-fixes",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/ui-layout-fixes.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "wiki-lorebook-importer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/wiki-lorebook-importer.js",
+      "settings": [],
+      "styles": [
+        "content/styles/wiki-lorebook-importer.css"
+      ],
+      "background": [
+        "background/background-wiki-fetch.js"
+      ],
+      "helpers": [],
+      "fullyIndependent": false
+    }
+  ]
+}

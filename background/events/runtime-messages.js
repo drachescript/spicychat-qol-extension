@@ -6,6 +6,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: false, error: "This feature is not installed in this build." });
     return false;
   }
+  const ownedMessageHandler = dsqBackgroundFeatureMessageHandlers[String(message?.type || "")];
+  if (ownedMessageHandler) return ownedMessageHandler(message, sender, sendResponse);
   if (message?.type === "DS_QOL_DIAGNOSTIC_SUBSCRIBE") {
     sendResponse(qolDiagnosticSubscribe(sender, message));
     return false;
@@ -136,24 +138,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     dsqFetchBackgroundImage(message.url).then(sendResponse).catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
-
-  if (message?.type === "DS_WIKI_REQUEST_PERMISSION") {
-    const origin = wikiOriginPattern(message.url);
-    if (!origin) {
-      sendResponse({ ok: false, error: "Enter a valid http:// or https:// page URL." });
-      return;
-    }
-    requestOptionalOrigin(origin).then(sendResponse);
-    return true;
-  }
-
-  if (message?.type === "DS_WIKI_FETCH") {
-    fetchWikiPageSource(message.url)
-      .then(sendResponse)
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
-
 
   if (message?.type === "DS_CHARACTER_INDEX_METADATA_FETCH") {
     fetchCharacterIndexMetadata(message)
@@ -618,49 +602,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-
-  if (message?.type === "DS_QOL_TRANSLATE" && message.provider === "libre") {
-    libreTranslate(message)
-      .then(result => sendResponse({ ok: true, ...result }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
-
-  if (message?.type === "DS_DEEPL_TRANSLATE_BATCH") {
-    deeplTranslateBatch(message)
-      .then(translations => sendResponse({ ok: true, translations }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
-
-  if (message?.type === "DS_DEEPL_TRANSLATE") {
-    deeplTranslate(message)
-      .then(result => sendResponse({ ok: true, ...result }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
-
-  if (message?.type === "DS_DEEPL_TEST") {
-    deeplRequest("/v2/usage")
-      .then(data => sendResponse({
-        ok: true,
-        characterCount: Number(data.character_count || 0),
-        characterLimit: Number(data.character_limit || 0)
-      }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
-
-  if (message?.type === "DS_DEEPL_USAGE") {
-    deeplRequest("/v2/usage")
-      .then(data => sendResponse({
-        ok: true,
-        characterCount: Number(data.character_count || 0),
-        characterLimit: Number(data.character_limit || 0)
-      }))
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
-    return true;
-  }
 
   if (message?.type === "DS_GET_SPICYCHAT_TAB_SUMMARY") {
     getSpicyChatTabSummary()

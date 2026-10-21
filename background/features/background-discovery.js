@@ -322,11 +322,19 @@ async function fetchPublicLorebookRecovery(message) {
         continue;
       }
 
+      // Typesense can respond successfully while returning only part of the
+      // indexed entries or omitting their actual text. Such a result is NOT a
+      // restorable Lorebook copy; leave the previous copy untouched.
+      const reported = found === null ? entries.length : found;
+      if (entries.length && (entries.length < reported || entries.length < expectedCount || entries.some(entry => !String(entry.content || "").trim()))) {
+        lastError = `Incomplete Lorebook recovery: ${entries.length} entry records, ${reported} indexed, ${expectedCount} expected; some content may be missing. Old copy preserved.`;
+        continue;
+      }
       const result = {
         ok: true,
         lorebookId,
         entries,
-        found: found === null ? entries.length : found,
+        found: reported,
         complete: true,
         source: `typesense:${config.entryCollection || PUBLIC_LOREBOOK_ENTRY_TYPESENSE_COLLECTION}`,
         filterField,

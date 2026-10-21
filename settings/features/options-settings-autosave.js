@@ -156,17 +156,6 @@ function readSettingsFromPage() {
     chatTextReplacementScope: ["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai",
     chatTextReplacementMode: value("chatTextReplacementMode") === "save" ? "save" : "display",
     chatTextReplacementPreview: checked("chatTextReplacementPreview"),
-    enableTranslation: checked("enableTranslation"),
-    translationShowMessageButtons: checked("translationShowMessageButtons"),
-    translationAutoAi: checked("translationAutoAi"),
-    translationAutoUser: checked("translationAutoUser"),
-    translationProvider: value("translationProvider", "deepl"),
-    libreTranslateUrl: value("libreTranslateUrl", "").trim(),
-    translationAllowRemoteFallback: checked("translationAllowRemoteFallback"),
-    translationPerChatControls: checked("translationPerChatControls"),
-    translationTargetLanguage: value("translationTargetLanguage", "EN-US"),
-    translationUnderstoodLanguages: value("translationUnderstoodLanguages", "EN"),
-    translationProtectedTerms: value("translationProtectedTerms", ""),
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
@@ -312,11 +301,6 @@ function readSettingsFromPage() {
     formatToolbarBraces: checked("formatToolbarBraces"),
     formatToolbarCustomWrappers: value("formatToolbarCustomWrappers", ""),
 
-    enableReplyInstructions: checked("enableReplyInstructions"),
-    enableChatSceneNotes: checked("enableChatSceneNotes"),
-    chatSceneNotesEnableBotApply: checked("chatSceneNotesEnableBotApply"),
-    chatSceneNotesAutoInclude: checked("chatSceneNotesAutoInclude"),
-    chatSceneNotesAutoMode: value("chatSceneNotesAutoMode") === "every" ? "every" : "session",
     replyInstructionText: value("replyInstructionText", "").trim().slice(0, 2000),
     replyInstructionSendMode: ["every", "session", "manual"].includes(value("replyInstructionSendMode")) ? value("replyInstructionSendMode") : "session",
     replyInstructionOocWrapper: checked("replyInstructionOocWrapper", true),
@@ -403,33 +387,13 @@ function readSettingsFromPage() {
 
 
     enableSavedTextSnippets: checked("enableSavedTextSnippets"),
-    enableContextKeeper: checked("enableContextKeeper"),
-    contextKeeperAutoCapture: checked("contextKeeperAutoCapture", true),
-    contextKeeperAutoSensitivity: ["strict", "balanced", "broad"].includes(value("contextKeeperAutoSensitivity")) ? value("contextKeeperAutoSensitivity") : "balanced",
-    contextKeeperAutoEveryMessages: Math.max(1, Math.min(20, Number(value("contextKeeperAutoEveryMessages", "4")) || 4)),
-    contextKeeperAutoMaxDetails: Math.max(20, Math.min(300, Number(value("contextKeeperAutoMaxDetails", "120")) || 120)),
-    contextKeeperMessageButtons: checked("contextKeeperMessageButtons"),
     enableSelectionRemember: checked("enableSelectionRemember"),
-    contextKeeperRecapSize: ["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced",
-    contextKeeperAutoRecall: checked("contextKeeperAutoRecall"),
-    contextKeeperRelevantRecall: checked("contextKeeperRelevantRecall"),
-    contextKeeperRecallEverySends: [1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5,
-    contextKeeperRecallMaxChars: [450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900,
 
-    enableRpStateTracker: checked("enableRpStateTracker"),
     rpStateTrackerMode: ["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative",
     rpStateInjectMode: ["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed",
     rpStateMaxContextChars: Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)),
     rpStateShowQuickPanel: checked("rpStateShowQuickPanel", true),
 
-    enableSoundscapes: checked("enableSoundscapes"),
-    soundscapeShowChatControl: checked("soundscapeShowChatControl", true),
-    soundscapeMasterVolume: Number.isFinite(Number(value("soundscapeMasterVolume", "65"))) ? Math.min(100, Math.max(0, Number(value("soundscapeMasterVolume", "65")))) : 65,
-    soundscapeOnChat: checked("soundscapeOnChat", true),
-    soundscapeOnHome: checked("soundscapeOnHome"),
-    soundscapeOnChats: checked("soundscapeOnChats"),
-    soundscapeOnProfiles: checked("soundscapeOnProfiles"),
-    soundscapeOnOther: checked("soundscapeOnOther"),
     messageQuickActionCopy: checked("messageQuickActionCopy"),
     messageQuickActionEdit: checked("messageQuickActionEdit"),
     messageQuickActionRemoveImage: checked("messageQuickActionRemoveImage"),
@@ -836,17 +800,6 @@ function readSingleSettingFromPage(settingKey) {
     case "chatTextReplacementScope": return (["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai");
     case "chatTextReplacementMode": return (value("chatTextReplacementMode") === "save" ? "save" : "display");
     case "chatTextReplacementPreview": return (checked("chatTextReplacementPreview"));
-    case "enableTranslation": return (checked("enableTranslation"));
-    case "translationShowMessageButtons": return (checked("translationShowMessageButtons"));
-    case "translationAutoAi": return (checked("translationAutoAi"));
-    case "translationAutoUser": return (checked("translationAutoUser"));
-    case "translationProvider": return (value("translationProvider", "deepl"));
-    case "libreTranslateUrl": return (value("libreTranslateUrl", "").trim());
-    case "translationAllowRemoteFallback": return (checked("translationAllowRemoteFallback"));
-    case "translationPerChatControls": return (checked("translationPerChatControls"));
-    case "translationTargetLanguage": return (value("translationTargetLanguage", "EN-US"));
-    case "translationUnderstoodLanguages": return (value("translationUnderstoodLanguages", "EN"));
-    case "translationProtectedTerms": return (value("translationProtectedTerms", ""));
     case "showChatListTools": return (checked("showChatListTools"));
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
     case "chatCollections": return (value("chatCollections", ""));
@@ -982,7 +935,6 @@ function readSingleSettingFromPage(settingKey) {
     case "formatToolbarBraces": return (checked("formatToolbarBraces"));
     case "formatToolbarCustomWrappers": return (value("formatToolbarCustomWrappers", ""));
 
-    case "enableReplyInstructions": return (checked("enableReplyInstructions"));
     case "replyInstructionText": return (value("replyInstructionText", "").trim().slice(0, 2000));
     case "replyInstructionSendMode": return (["every", "session", "manual"].includes(value("replyInstructionSendMode")) ? value("replyInstructionSendMode") : "session");
     case "replyInstructionOocWrapper": return (checked("replyInstructionOocWrapper", true));
@@ -1065,33 +1017,13 @@ function readSingleSettingFromPage(settingKey) {
 
 
     case "enableSavedTextSnippets": return (checked("enableSavedTextSnippets"));
-    case "enableContextKeeper": return (checked("enableContextKeeper"));
-    case "contextKeeperAutoCapture": return (checked("contextKeeperAutoCapture", true));
-    case "contextKeeperAutoSensitivity": return (["strict", "balanced", "broad"].includes(value("contextKeeperAutoSensitivity")) ? value("contextKeeperAutoSensitivity") : "balanced");
-    case "contextKeeperAutoEveryMessages": return (Math.max(1, Math.min(20, Number(value("contextKeeperAutoEveryMessages", "4")) || 4)));
-    case "contextKeeperAutoMaxDetails": return (Math.max(20, Math.min(300, Number(value("contextKeeperAutoMaxDetails", "120")) || 120)));
-    case "contextKeeperMessageButtons": return (checked("contextKeeperMessageButtons"));
     case "enableSelectionRemember": return (checked("enableSelectionRemember"));
-    case "contextKeeperRecapSize": return (["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced");
-    case "contextKeeperAutoRecall": return checked("contextKeeperAutoRecall");
-    case "contextKeeperRelevantRecall": return checked("contextKeeperRelevantRecall");
-    case "contextKeeperRecallEverySends": return ([1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5);
-    case "contextKeeperRecallMaxChars": return ([450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900);
 
-    case "enableRpStateTracker": return (checked("enableRpStateTracker"));
     case "rpStateTrackerMode": return (["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative");
     case "rpStateInjectMode": return (["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed");
     case "rpStateMaxContextChars": return (Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)));
     case "rpStateShowQuickPanel": return (checked("rpStateShowQuickPanel", true));
 
-    case "enableSoundscapes": return (checked("enableSoundscapes"));
-    case "soundscapeShowChatControl": return (checked("soundscapeShowChatControl", true));
-    case "soundscapeMasterVolume": return (Number.isFinite(Number(value("soundscapeMasterVolume", "65"))) ? Math.min(100, Math.max(0, Number(value("soundscapeMasterVolume", "65")))) : 65);
-    case "soundscapeOnChat": return (checked("soundscapeOnChat", true));
-    case "soundscapeOnHome": return (checked("soundscapeOnHome"));
-    case "soundscapeOnChats": return (checked("soundscapeOnChats"));
-    case "soundscapeOnProfiles": return (checked("soundscapeOnProfiles"));
-    case "soundscapeOnOther": return (checked("soundscapeOnOther"));
     case "messageQuickActionCopy": return (checked("messageQuickActionCopy"));
     case "messageQuickActionEdit": return (checked("messageQuickActionEdit"));
     case "messageQuickActionRemoveImage": return (checked("messageQuickActionRemoveImage"));

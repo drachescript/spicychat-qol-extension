@@ -1063,16 +1063,6 @@ html[data-ds-card-density="dense"] .ds-card-density-target [class*="gap-4"] {
   padding: 10px;
 }
 
-/* v0.1.9.41 - Soundscape Mini Panel controls */
-#ds-qol-soundscape-row select {
-  min-width: 0;
-  flex: 1 1 140px;
-}
-#ds-qol-soundscape-toggle {
-  flex: 0 0 auto;
-}
-
-
 /* v0.1.9.47 - on-page listing refill */
 .ds-listing-refill-button {
   flex: 0 0 auto;

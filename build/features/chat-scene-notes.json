@@ -15,5 +15,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/chat-scene-notes.js"
+  ]
 }

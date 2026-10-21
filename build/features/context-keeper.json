@@ -4,11 +4,24 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableContextKeeper"
+    "enableContextKeeper",
+    "contextKeeperAutoCapture",
+    "contextKeeperAutoSensitivity",
+    "contextKeeperAutoEveryMessages",
+    "contextKeeperAutoMaxDetails",
+    "contextKeeperMessageButtons",
+    "contextKeeperRecapSize",
+    "contextKeeperAutoRecall",
+    "contextKeeperRelevantRecall",
+    "contextKeeperRecallEverySends",
+    "contextKeeperRecallMaxChars"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/context-keeper.js"
+  ]
 }

@@ -11,6 +11,76 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.observePage = function observePage() {
     if (DS.isQolPausedForTab?.()) return;
     let lastNonCardListingScheduleAt = 0;
+    const CHAT_VISIBILITY_DIAGNOSTIC_KEY = "dsQolChatVisibilitySummary";
+    const CHAT_VISIBILITY_FIELDS = [
+      "chatUnexpectedEmptyTransitions", "chatUnexpectedEmptyRecovered", "chatUnexpectedEmptyUnresolved",
+      "chatUnexpectedEmptyLastAt", "chatUnexpectedEmptyLastBefore", "chatUnexpectedEmptyLastAfter",
+      "chatUnexpectedEmptyLastRecoveryMs", "chatUnexpectedEmptyLastVisibility", "chatUnexpectedEmptyLastGeneration"
+    ];
+    function persistEmptySummary() {
+      try {
+        const counters = runtimeCounters();
+        const summary = { savedAt: Date.now() };
+        for (const key of CHAT_VISIBILITY_FIELDS) summary[key] = counters[key] ?? null;
+        sessionStorage.setItem(CHAT_VISIBILITY_DIAGNOSTIC_KEY, JSON.stringify(summary));
+      } catch { /* Diagnostics must never interrupt SpicyChat. */ }
+    }
+    try {
+      const summary = JSON.parse(sessionStorage.getItem(CHAT_VISIBILITY_DIAGNOSTIC_KEY) || "null");
+      if (summary && Date.now() - Number(summary.savedAt || 0) < 24 * 60 * 60 * 1000) {
+        const counters = runtimeCounters();
+        for (const key of CHAT_VISIBILITY_FIELDS) {
+          if (summary[key] != null && counters[key] == null) counters[key] = summary[key];
+        }
+      }
+    } catch { /* Ignore missing or malformed previous summaries. */ }
+    // Only check again after a suspicious disappearance, never poll normal chats.
+    let emptyWatch = null;
+    let emptyWatchTimer = 0;
+    function stopEmptyWatch() {
+      if (emptyWatchTimer) clearTimeout(emptyWatchTimer);
+      emptyWatchTimer = 0;
+      emptyWatch = null;
+    }
+    function checkEmptyRecovery() {
+      if (!emptyWatch) return;
+      const watch = emptyWatch;
+      if (location.pathname !== watch.route || !DS.isSingleChatPage?.()) {
+        stopEmptyWatch();
+        return;
+      }
+      // Read actual roots after React settles. No message content is inspected.
+      const mounted = document.querySelectorAll("div[id^='message-']").length;
+      if (mounted > 0) {
+        const counters = runtimeCounters();
+        counters.chatUnexpectedEmptyRecovered = Number(counters.chatUnexpectedEmptyRecovered || 0) + 1;
+        counters.chatUnexpectedEmptyLastRecoveryMs = Date.now() - watch.at;
+        counters.chatUnexpectedEmptyLastAfter = mounted;
+        persistEmptySummary();
+        DS.diagPerformance?.("chat-message-roots-recovered", {
+          afterMessages: mounted, elapsedMs: counters.chatUnexpectedEmptyLastRecoveryMs
+        });
+        stopEmptyWatch();
+      } else if (Date.now() - watch.at >= 4500) {
+        const counters = runtimeCounters();
+        counters.chatUnexpectedEmptyUnresolved = Number(counters.chatUnexpectedEmptyUnresolved || 0) + 1;
+        counters.chatUnexpectedEmptyLastAfter = 0;
+        persistEmptySummary();
+        DS.diagPerformance?.("chat-message-roots-still-empty", {
+          elapsedMs: Date.now() - watch.at, visibility: document.visibilityState
+        });
+        stopEmptyWatch();
+      } else {
+        emptyWatchTimer = setTimeout(checkEmptyRecovery, 1600);
+      }
+    }
+    function checkGenerationState() {
+      try {
+        if (typeof DS.isGenerationActive === "function") return DS.isGenerationActive() ? "active" : "inactive";
+        if (typeof DS.isChatGenerationActive === "function") return DS.isChatGenerationActive() ? "active" : "inactive";
+      } catch {}
+      return "unknown";
+    }
     const observer = new MutationObserver(mutations => {
       if (DS.isQolPausedForTab?.()) return;
       const callbackStartedAt = performance.now();
@@ -18,7 +88,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const counters = runtimeCounters();
       counters.observerBatches = Number(counters.observerBatches || 0) + 1;
       counters.mutations += mutations.length;
-      if (checkRouteChange()) return;
+      if (checkRouteChange()) {
+        stopEmptyWatch();
+        return;
+      }
 
       if (DS.isSingleChatPage?.()) {
         const roots = new Set();
@@ -173,13 +246,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const previousMounted = loadedChatMessageCount();
         updateLoadedChatMessageCountFromMutations(mutations);
         const currentMounted = loadedChatMessageCount();
-        if (previousMounted >= 3 && currentMounted === 0 && !DS.state?.bulkChatHistoryLoadActive) {
+        if (emptyWatch) checkEmptyRecovery();
+        if (previousMounted >= 3 && currentMounted === 0 && !DS.state?.bulkChatHistoryLoadActive && !emptyWatch) {
+          const at = Date.now();
           counters.chatUnexpectedEmptyTransitions = Number(counters.chatUnexpectedEmptyTransitions || 0) + 1;
-          counters.chatUnexpectedEmptyLastAt = Date.now();
-          // Report DOM state only. The messages may still be stored by SpicyChat;
-          // no chat text, IDs, forced remounts, or automatic reloads.
+          counters.chatUnexpectedEmptyLastAt = at;
+          counters.chatUnexpectedEmptyLastBefore = previousMounted;
+          counters.chatUnexpectedEmptyLastAfter = 0;
+          counters.chatUnexpectedEmptyLastVisibility = document.visibilityState;
+          counters.chatUnexpectedEmptyLastGeneration = checkGenerationState();
+          emptyWatch = { at, route: location.pathname };
+          persistEmptySummary();
+          emptyWatchTimer = setTimeout(checkEmptyRecovery, 1300);
+          // Report DOM state only. Do not force reload or collect message text/IDs.
           DS.diagPerformance?.("chat-message-roots-unmounted", {
-            beforeMessages: previousMounted, afterMessages: 0, visibility: document.visibilityState
+            beforeMessages: previousMounted, afterMessages: 0,
+            visibility: document.visibilityState, generation: counters.chatUnexpectedEmptyLastGeneration
           });
         }
       }

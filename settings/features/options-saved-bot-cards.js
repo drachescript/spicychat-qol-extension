@@ -35,8 +35,17 @@ function botManagerCardElement(entry, kind) {
     text: displayNormalizedSavedText(entry.name || entry.id || "Unknown bot")
   }));
 
+  if (entry.title) main.appendChild(makeElement("div", { className: "bot-manager-creator", text: displayNormalizedSavedText(entry.title) }));
   if (entry.creator) main.appendChild(makeElement("div", { className: "bot-manager-creator", text: displayNormalizedSavedText(entry.creator) }));
   main.appendChild(makeElement("div", { className: "bot-manager-id", text: entry.id || "name-only block" }));
+  if (kind === "opened" && entry.greeting) {
+    const greeting = makeElement("details", { className: "bot-history-details" });
+    greeting.appendChild(makeElement("summary", { text: "Greeting" }));
+    const text = makeElement("div", { className: "bot-manager-description", text: String(entry.greeting) });
+    text.style.whiteSpace = "pre-wrap";
+    greeting.appendChild(text);
+    main.appendChild(greeting);
+  }
 
   if (kind === "blocked" && entry.id) {
     const dislikeHandled = quickDislikeHistoryEntry(entry.id);
@@ -147,7 +156,7 @@ function renderBotManager(kind) {
   const host = $(managerElementId(kind, "Manager"));
   if (!host) return;
 
-  const allEntries = botEntriesFromStore(storeForManagerKind(kind), isBlocked);
+  const allEntries = botEntriesFromStore(storeForManagerKind(kind), isBlocked, kind === "opened");
   const entries = getBotManagerEntries(kind, allEntries);
   const ui = botManagerUiState[kind] || { visible: 10, collapsed: true, query: "" };
   const hasSearch = !!getBotManagerSearch(kind);
@@ -202,6 +211,7 @@ function renderBotManager(kind) {
   }
 
   host.replaceChildren(...shownEntries.map(entry => botManagerCardElement(entry, kind)));
+  if (kind === "opened") hydrateOpenedArchiveProfiles(shownEntries).catch(() => {});
   updateBotManagerBulkCount(kind);
 
   host.querySelectorAll(".bot-manager-later-toggle").forEach(button => {

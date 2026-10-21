@@ -183,32 +183,96 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return "";
   }
 
+  function readSelectedTags() {
+    // Scope the lookup to SpicyChat's *actual* Tags field. Broad page scans can
+    // pick up QoL bulk tools, picker suggestions, or unrelated selected buttons.
+    const form = activeForm || editorForm();
+    const field = form?.querySelector?.('[data-field-name="tags"]');
+    if (!field) return { tags: "", expected: null, reliable: false };
+
+    // Native's selected-count label is useful for detecting a broken DOM
+    // selector: if it says 5/12, exporting zero tags would corrupt a backup.
+    const countText = clean(field.textContent, 6000);
+    const countMatch = countText.match(/(?:^|\D)(\d{1,2})\s*\/\s*12(?!\d)/);
+    const expected = countMatch ? Number(countMatch[1]) : null;
+    const input = [...field.querySelectorAll('input')].find(node =>
+      /tag/i.test(String(node.placeholder || "")) && !node.closest?.('[data-ds-tool]'));
+    const host = input?.closest?.('[data-testid="Input-Container"]') ||
+      field.querySelector('[data-testid="Input-Container"]');
+    if (!host) return { tags: "", expected, reliable: expected === 0 };
+
+    const tags = [];
+    const used = new Set();
+    const skipText = /^(?:add tags?|insert copied|clear(?: all)?|remove|all tags|search|suggest(?:ed)? tags?|x|×)$/i;
+    const record = raw => {
+      const value = clean(raw, 120).replace(/\s+/g, " ").trim();
+      if (!value || value.length > 60 || skipText.test(value) || /^\d+\s*\/\s*12$/.test(value)) return;
+      const normalized = value.toLocaleLowerCase();
+      if (used.has(normalized)) return;
+      used.add(normalized);
+      tags.push(value);
+    };
+    const extractText = node => {
+      const explicit = node.getAttribute?.('data-tag-value') ||
+        node.querySelector?.('[data-tag-value]')?.getAttribute?.('data-tag-value');
+      if (explicit) return explicit;
+      const labeled = node.querySelector?.('[data-testid="tag-name"], [data-testid="tag-label"], [data-testid="tag-value"]');
+      if (labeled) return labeled.textContent;
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll?.('button,[role="button"],svg,input,textarea,[aria-hidden="true"],.sr-only').forEach(child => child.remove());
+      return clone.textContent;
+    };
+    const hasRemove = node => !!node.querySelector?.(
+      'button[aria-label*="remove" i],button[aria-label*="delete" i],'
+      + '[data-testid*="remove-tag" i],[data-testid*="tag-remove" i],'
+      + 'svg.lucide-x,svg[class*="lucide-x"],svg[data-lucide="x"]');
+    const hasSelected = node => node.getAttribute?.('aria-pressed') === 'true' ||
+      node.getAttribute?.('data-selected') === 'true' ||
+      node.querySelector?.('[aria-pressed="true"],[data-selected="true"]');
+
+    // The selected pills are siblings of the Add Tags input, sometimes inside
+    // an extra wrapping element. Only inspect that path, never picker popovers.
+    const candidates = [];
+    let level = input?.parentElement || host;
+    while (level && host.contains(level)) {
+      for (const child of level.children || []) {
+        if (child === input || child.contains(input) || child.closest?.('[data-ds-tool]')) continue;
+        if (!candidates.includes(child)) candidates.push(child);
+      }
+      if (level === host) break;
+      level = level.parentElement;
+    }
+    // A chip group can wrap multiple pills. Visit only its marked or removable
+    // descendants, rather than interpreting the whole group as one long tag.
+    for (const candidate of candidates) {
+      const nested = [...candidate.querySelectorAll?.(
+        '[data-tag-value],[data-testid*="tag-chip" i],[data-testid*="selected-tag" i]') || []];
+      if (nested.length) {
+        for (const node of nested) record(extractText(node));
+        continue;
+      }
+      const childChips = [...candidate.children || []].filter(child =>
+        hasRemove(child) || hasSelected(child) || child.hasAttribute?.('data-tag-value'));
+      if (childChips.length > 1) {
+        for (const child of childChips) record(extractText(child));
+        continue;
+      }
+      if (hasRemove(candidate) || hasSelected(candidate) || candidate.hasAttribute?.('data-tag-value') || expected > 0) {
+        record(extractText(candidate));
+      }
+    }
+
+    // Count mismatches must not silently turn selected tags into an empty or
+    // partial JSON array. The export UI will explicitly report the problem.
+    return {
+      tags: tags.slice(0, 30).join(', '),
+      expected,
+      reliable: expected === null ? tags.length > 0 : tags.length === expected
+    };
+  }
+
   function selectedTags() {
-    const inputs = [...document.querySelectorAll('input[placeholder*="tag" i]')]
-      .filter(node => !node.closest(`#${PANEL_ID},#ds-qol-panel`));
-    const label = [...document.querySelectorAll("label,p,span,strong")]
-      .find(node => clean(node.textContent, 80).toLowerCase() === "tags" && !node.closest(`#${PANEL_ID},#ds-qol-panel`));
-    const roots = [];
-    for (const input of inputs) {
-      let root = input.parentElement;
-      for (let i = 0; root && i < 5; i += 1, root = root.parentElement) roots.push(root);
-    }
-    if (label) {
-      let root = label.parentElement;
-      for (let i = 0; root && i < 5; i += 1, root = root.parentElement) roots.push(root);
-    }
-    for (const root of roots) {
-      const tags = [];
-      root.querySelectorAll("button,[data-selected='true'],[aria-pressed='true']").forEach(node => {
-        if (node.closest?.(`#${PANEL_ID},#ds-qol-panel`)) return;
-        const text = clean(node.textContent, 120);
-        if (!text || text.length > 60 || /^(add tags?|all tags|search|clear|remove|suggest tag|x)$/i.test(text)) return;
-        const selected = node.getAttribute?.("aria-pressed") === "true" || node.dataset?.selected === "true" || node.dataset?.state === "active" || !!node.querySelector?.("svg.lucide-x,svg[class*='lucide-x']");
-        if (selected) tags.push(text);
-      });
-      if (tags.length) return [...new Set(tags)].slice(0, 30).join(", ");
-    }
-    return "";
+    return readSelectedTags().tags;
   }
 
   function currentAvatarUrl() {
@@ -259,7 +323,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const info = editorInfo();
     if (!info) return null;
     const captured = captureTextFields();
-    captured.tags = selectedTags();
+    const tagSelection = readSelectedTags();
+    captured.tags = tagSelection.tags;
     captured.visibility = selectedVisibility();
     captured.image = currentAvatarUrl();
     // Only actual creator fields enter the backup payload/signature. SpicyChat's
@@ -268,7 +333,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const fields = sanitizeBackupFields(captured);
     const coverage = BACKUP_FIELD_KEYS.filter(key => clean(fields[key]));
     if (!coverage.length) return null;
-    return { info, fields, coverage, readOnlyReview: transientModerationState(), readOnlyEditor: editorReadOnlyState() };
+    return {
+      info, fields, coverage,
+      tagCaptureIncomplete: !tagSelection.reliable,
+      expectedTagCount: tagSelection.expected,
+      capturedTagCount: fields.tags ? fields.tags.split(',').filter(Boolean).length : 0,
+      readOnlyReview: transientModerationState(), readOnlyEditor: editorReadOnlyState()
+    };
   }
 
   function signature(profile) {
@@ -396,6 +467,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function saveOwnBackup(reason = "Own bot editor", options = {}) {
     const profile = captureProfile();
     if (!profile?.info?.id || profile.info.mode !== "edit") return false;
+    if (profile.tagCaptureIncomplete) {
+      if (options.manual) setStatus(`Backup stopped: could not verify ${profile.expectedTagCount ?? "the"} selected tag(s). Reopen the Tags field and try again.`);
+      return false;
+    }
     const op = DS.diagOperationStart?.("creator-backup", "save-own-bot", {
       botId: profile.info.id,
       reason,
@@ -976,6 +1051,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     exportButton.addEventListener("click", () => {
       const profile = captureProfile();
       if (!profile) return setStatus("No chatbot fields were found yet.");
+      if (profile.tagCaptureIncomplete) {
+        return setStatus(`Export stopped: SpicyChat shows ${profile.expectedTagCount ?? "an unknown number of"} selected tag(s), but QoL could read ${profile.capturedTagCount}. Reopen Tags and try again; no incomplete JSON was downloaded.`);
+      }
       const payload = portableJson(profile);
       downloadJson(payload, `${safeFilename(profile.fields.name)}-spicychat-backup.json`);
       setStatus("Importable Character Card v2 JSON downloaded.");

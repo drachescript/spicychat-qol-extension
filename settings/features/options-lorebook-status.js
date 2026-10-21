@@ -291,8 +291,10 @@ function reconcileLorebookStatus(previousValue, checkedValue) {
   const now = Number(checked.checkedAt || Date.now()) || Date.now();
   const live = checked.meta && typeof checked.meta === "object" ? checked.meta : {};
   const available = String(checked.availabilityStatus || "") === "available";
-  const hasNewRecovery = checked.recoveryCopy && typeof checked.recoveryCopy === "object";
-  const recoveryAttempted = checked.recoveryAttempted === true;
+  const possibleRecovery = checked.recoveryCopy && typeof checked.recoveryCopy === "object" ? checked.recoveryCopy : null;
+  const expectedEntries = Math.max(0, Number(checked.meta?.entryCount ?? previous.entryCount ?? 0) || 0);
+  const hasNewRecovery = !!possibleRecovery && lorebookRecoveryIsComplete(possibleRecovery, expectedEntries);
+  const recoveryAttempted = checked.recoveryAttempted === true || !!possibleRecovery;
   const publicConfirmed = checked.publicConfirmed === true;
   const nextRecovery = hasNewRecovery ? checked.recoveryCopy : previous.recoveryCopy;
 
@@ -313,7 +315,7 @@ function reconcileLorebookStatus(previousValue, checkedValue) {
     recoveryCopy: nextRecovery || null,
     recoverySavedAt: hasNewRecovery ? now : Number(previous.recoverySavedAt || previous.recoveryCopy?.savedAt || 0),
     recoveryStatus: hasNewRecovery ? "saved" : (recoveryAttempted ? "failed" : String(previous.recoveryStatus || "")),
-    recoveryError: hasNewRecovery ? "" : (recoveryAttempted ? String(checked.recoveryError || checked.reason || "Recovery copy refresh failed.") : String(previous.recoveryError || ""))
+    recoveryError: hasNewRecovery ? "" : (recoveryAttempted ? (possibleRecovery ? "New recovery was incomplete; retained the previous complete copy." : String(checked.recoveryError || checked.reason || "Recovery copy refresh failed.")) : String(previous.recoveryError || ""))
   });
 
   const changes = available && previous.id ? lorebookMeaningfulChanges(previous, next) : [];
@@ -328,6 +330,13 @@ function reconcileLorebookStatus(previousValue, checkedValue) {
   return next;
 }
 
+function lorebookRecoveryIsComplete(copy, expected = 0) {
+  if (!copy || !Array.isArray(copy.entries)) return false;
+  const required = Math.max(0, Number(expected || 0) || 0);
+  if (copy.entries.length < required) return false;
+  return copy.entries.every(entry => entry && typeof entry === "object" && String(entry.content || entry.text || "").trim());
+}
+
 async function persistLorebookStatusEntries(entries) {
   const cleanEntries = {};
   for (const [id, item] of Object.entries(entries || {})) {
@@ -336,7 +345,21 @@ async function persistLorebookStatusEntries(entries) {
   }
   if (!Object.keys(cleanEntries).length) return true;
   const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_MERGE", key: LOREBOOK_STATUS_KEY, entries: cleanEntries });
-  return !!response?.ok;
+  if (!response?.ok) throw new Error(`Lorebook records could not be saved: ${String(response?.error || "storage error")}`);
+  // Verify copies came back from persistent IndexedDB, not merely the scan's
+  // in-memory cache. This also catches incomplete compressed write/read paths.
+  const withCopies = Object.values(cleanEntries).filter(row => row.recoveryCopy && Array.isArray(row.recoveryCopy.entries));
+  if (withCopies.length) {
+    const verify = await runtimeMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key: LOREBOOK_STATUS_KEY, ids: withCopies.map(row => row.id) });
+    if (!verify?.ok) throw new Error("Could not verify saved Lorebook entries after writing.");
+    for (const row of withCopies) {
+      const stored = verify.records?.[row.id]?.recoveryCopy;
+      if (!stored || JSON.stringify(stored.entries) !== JSON.stringify(row.recoveryCopy.entries)) {
+        throw new Error(`Saved Lorebook entry verification failed for ${row.name || row.id}.`);
+      }
+    }
+  }
+  return true;
 }
 
 async function checkLorebookAvailability(item, { keepHelper = false, forceOwnHelper = false, timeoutMs = 24000 } = {}) {
@@ -527,7 +550,9 @@ function renderLorebookCenter() {
     if (item.visibility) chipValues.push(item.visibility);
     if (item.status && item.status !== item.visibility) chipValues.push(item.status);
     if (Number(item.entryCount || 0)) chipValues.push(`${Number(item.entryCount)} entries`);
-    if (item.recoveryCopy) chipValues.push("Recovery copy saved");
+    const storedEntries = lorebookRecoveryEntries(item);
+    if (item.recoveryCopy) chipValues.push(`${storedEntries.length} stored entr${storedEntries.length === 1 ? "y" : "ies"}`);
+    if (item.recoveryCopy && !lorebookRecoveryIsComplete(item.recoveryCopy, Number(item.entryCount || 0))) chipValues.push("Partial / review copy");
     if (Number(item.version || 0)) chipValues.push(`v${Number(item.version)}`);
     const historyCount = lorebookHistoryCount(item);
     if (historyCount) chipValues.push(`${historyCount} change${historyCount === 1 ? "" : "s"}`);
@@ -545,6 +570,28 @@ function renderLorebookCenter() {
     const checkButton = makeElement("button", { className: "lorebook-status-recheck", text: item.checkedAt ? "Recheck" : "Check now", attrs: { type: "button" } });
     actions.appendChild(checkButton);
     main.appendChild(actions);
+
+    // Show the actual saved contents on demand. An entry-count badge alone
+    // cannot demonstrate that keywords and text survived storage.
+    if (storedEntries.length) {
+      const details = makeElement("details", { className: "bot-history-details" });
+      details.appendChild(makeElement("summary", { text: `Inspect stored entries (${storedEntries.length})` }));
+      details.addEventListener("toggle", () => {
+        if (!details.open || details.dataset.loaded) return;
+        details.dataset.loaded = "1";
+        for (const [index, entry] of storedEntries.entries()) {
+          const block = makeElement("div", { className: "bot-history-snapshot" });
+          block.appendChild(makeElement("div", { className: "bot-update-field", text: String(entry.name || `Entry ${index + 1}`) }));
+          block.appendChild(makeElement("div", { className: "bot-update-before", text: `Keywords: ${[].concat(entry.keywords || []).join(", ") || "(none)"}` }));
+          const content = makeElement("div", { className: "bot-update-after" });
+          content.style.whiteSpace = "pre-wrap";
+          content.textContent = String(entry.content || entry.text || "(no saved content)");
+          block.appendChild(content);
+          details.appendChild(block);
+        }
+      });
+      main.appendChild(details);
+    }
 
     if (historyCount) {
       const details = makeElement("details", { className: "bot-history-details" });
@@ -929,7 +976,7 @@ function lorebookArchiveExportRecord(value) {
       avatarIsNsfw: recoveryMeta.avatarIsNsfw === true || item.avatarIsNsfw === true,
       profileUrl: item.profileUrl || `https://spicychat.ai/lorebook/${item.id}`
     },
-    recoveryAvailable: !!recovery,
+    recoveryAvailable: !!recovery && lorebookRecoveryIsComplete(recovery, Number(item.entryCount || 0)),
     entries
   };
 }

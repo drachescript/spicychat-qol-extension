@@ -107,3 +107,36 @@ async function libreTranslate(message) {
 }
 const LIBRE_TRANSLATE_KEY_BACKGROUND = "dsLibreTranslateKeyV1";
 
+
+// Translation operations only exist when this feature is installed.
+dsqRegisterBackgroundMessageHandler("DS_QOL_TRANSLATE", "translation", (message, sender, sendResponse) => {
+  if (message.provider !== "libre") return false;
+  libreTranslate(message)
+    .then(result => sendResponse({ ok: true, ...result }))
+    .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+});
+dsqRegisterBackgroundMessageHandler("DS_DEEPL_TRANSLATE_BATCH", "translation", (message, sender, sendResponse) => {
+  deeplTranslateBatch(message)
+    .then(translations => sendResponse({ ok: true, translations }))
+    .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+});
+dsqRegisterBackgroundMessageHandler("DS_DEEPL_TRANSLATE", "translation", (message, sender, sendResponse) => {
+  deeplTranslate(message)
+    .then(result => sendResponse({ ok: true, ...result }))
+    .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+});
+for (const type of ["DS_DEEPL_TEST", "DS_DEEPL_USAGE"]) {
+  dsqRegisterBackgroundMessageHandler(type, "translation", (message, sender, sendResponse) => {
+    deeplRequest("/v2/usage")
+      .then(data => sendResponse({
+        ok: true,
+        characterCount: Number(data.character_count || 0),
+        characterLimit: Number(data.character_limit || 0)
+      }))
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  });
+}

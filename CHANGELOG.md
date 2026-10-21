@@ -1,3 +1,18 @@
+## 0.2.55
+- Improved Lorebook recovery integrity checks, preserved existing complete copies when a public entry fetch is incomplete, and added on-demand inspection of saved Lorebook entries.
+- Improved Opened History cards using locally saved bot copies, including unlisted creations, with available title, greeting, creator and refreshed image data; broken image URLs now fall back safely.
+- Fixed chatbot JSON backup tag detection for SpicyChat’s current tag picker. Export now reads selected tag chips from the creator form and warns instead of silently omitting tags when the picker count disagrees.
+- Improved experimental Custom Lite packaging so omitted features also omit their dedicated Settings panels, panel placeholders and more feature-specific stylesheets.
+- Reduced experimental Custom Lite installation size by excluding development tools, test scripts and build metadata from generated extension packages.
+- Moved more optional Settings controls, including Scene Notes, Reply Instructions, RP State Tracker and Translation, into their own feature panels while preserving existing saved preferences.
+- Separated Translation and Wiki Fetch message handling from the shared background dispatcher so omitted Custom/Lite features do not register those request handlers.
+- Moved Context Keeper and Soundscapes Settings read/load controls into their feature-owned panels so omitted Lite features do not register those handlers or overwrite saved preferences.
+- Separated Soundscapes Mini Panel styles from the shared stylesheet for smaller feature-specific builds.
+- Improved support exports so Diagnostics, Performance Report and Self-Check use the same live chat snapshot instead of reporting conflicting availability.
+- Expanded disappearing-chat diagnostics to record unexpected message unmounts, whether messages reappear without a reload and whether the chat stays empty after a short check, without reading or changing message text. The last summary survives a refresh in the same tab.
+- Added blank-chat recovery counts and a manual visible-versus-hidden message check to the Performance Troubleshooter and support report for easier bug investigation.
+- Avoided unnecessary Mini Panel refresh requests from saved-list updates when the panel is disabled.
+
 ## 0.2.54
 - Added an on-demand Performance Troubleshooter that shows measured QoL feature-step activity without uploading chat content or automatically disabling features.
 - Reduced unnecessary Context Keeper toolbar checks when its message shortcuts are disabled, without changing saved memories.

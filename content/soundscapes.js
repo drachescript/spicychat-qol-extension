@@ -226,9 +226,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.querySelectorAll(`.${CHAT_POPOVER_CLASS}`).forEach(node => node.remove());
   }
 
+  // Native page events are only needed while the feature's chat control exists.
+  // Off features must not retain document-wide pointer/key handlers.
+  let chatDismissListenersInstalled = false;
+  const onChatPopoverPointerDown = event => {
+    const popover = document.querySelector(`.${CHAT_POPOVER_CLASS}`);
+    if (!popover) return;
+    if (popover.contains(event.target) || event.target?.closest?.(`.${CHAT_BUTTON_CLASS}`)) return;
+    closeChatPopover();
+  };
+  const onChatPopoverKeyDown = event => {
+    if (event.key === "Escape" && document.querySelector(`.${CHAT_POPOVER_CLASS}`)) closeChatPopover();
+  };
+  function removeChatDismissListeners() {
+    if (!chatDismissListenersInstalled) return;
+    document.removeEventListener("pointerdown", onChatPopoverPointerDown, true);
+    document.removeEventListener("keydown", onChatPopoverKeyDown, true);
+    chatDismissListenersInstalled = false;
+  }
+  function installChatDismissListeners() {
+    if (chatDismissListenersInstalled) return;
+    document.addEventListener("pointerdown", onChatPopoverPointerDown, true);
+    document.addEventListener("keydown", onChatPopoverKeyDown, true);
+    chatDismissListenersInstalled = true;
+  }
+
   function removeChatControl() {
     document.querySelectorAll(`.${CHAT_CONTROL_CLASS}`).forEach(node => node.remove());
     closeChatPopover();
+    removeChatDismissListeners();
   }
 
   function makeChatPopover(button) {
@@ -301,18 +327,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); makeChatPopover(button); });
     wrapper.appendChild(button); row.insertBefore(wrapper, inputWrap);
 
-    if (!DS.state.soundscapeDismissListenerInstalled) {
-      DS.state.soundscapeDismissListenerInstalled = true;
-      document.addEventListener("pointerdown", event => {
-        const popover = document.querySelector(`.${CHAT_POPOVER_CLASS}`);
-        if (!popover) return;
-        if (popover.contains(event.target) || event.target?.closest?.(`.${CHAT_BUTTON_CLASS}`)) return;
-        closeChatPopover();
-      }, true);
-      document.addEventListener("keydown", event => {
-        if (event.key === "Escape" && document.querySelector(`.${CHAT_POPOVER_CLASS}`)) closeChatPopover();
-      }, true);
-    }
+    installChatDismissListeners();
   }
 
   DS.getSoundscapePanelState = function getSoundscapePanelState() {
@@ -345,8 +360,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.applySoundscapes = async function applySoundscapes() {
-    await ensureLoaded();
     const settings = DS.state?.settings || {};
+    syncSoundscapeStorageListener(settings);
+    if (settings.enabled && settings.enableSoundscapes) await ensureLoaded();
     ensureChatControl(settings);
     if (!settings.enabled || !settings.enableSoundscapes || !scopeAllowed(settings)) {
       if (playing || players.size) await stopAll({ quiet: true });
@@ -357,11 +373,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.removeSoundscapes = async function removeSoundscapes() {
+    syncSoundscapeStorageListener({ enabled: false, enableSoundscapes: false });
     removeChatControl();
     if (playing || players.size) await stopAll({ quiet: true });
   };
 
-  chrome.storage?.onChanged?.addListener((changes, area) => {
+  const onSoundscapeStorageChanged = (changes, area) => {
     if (area !== "local") return;
     if (changes[SOUNDSCAPES_KEY] || changes[AUDIO_KEY]) {
       sceneStore = normalizeSceneStore(changes[SOUNDSCAPES_KEY]?.newValue ?? sceneStore);
@@ -382,12 +399,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         else nextSettings[name] = change.newValue;
       }
       ensureChatControl(nextSettings);
+      syncSoundscapeStorageListener(nextSettings);
       if (playing) {
         if (!nextSettings.enableSoundscapes || !scopeAllowed(nextSettings)) stopAll({ quiet: true });
         else for (const player of players.values()) setPlayerVolume(player, player.layerVolume, 1);
       }
     }
-  });
+  };
+  let storageListenerInstalled = false;
+  function syncSoundscapeStorageListener(settings = DS.state?.settings || {}) {
+    const wanted = settings.enabled === true && settings.enableSoundscapes === true;
+    const events = chrome.storage?.onChanged;
+    if (wanted && !storageListenerInstalled && events?.addListener) {
+      events.addListener(onSoundscapeStorageChanged);
+      storageListenerInstalled = true;
+    } else if (!wanted && storageListenerInstalled) {
+      try { events?.removeListener?.(onSoundscapeStorageChanged); } catch {}
+      storageListenerInstalled = false;
+    }
+  }
 })();
 
 }
