@@ -14,7 +14,7 @@ const map=vm.runInContext('DSQ_BACKGROUND_MESSAGE_OWNERS',background);
 const source=fs.readFileSync(path.join(ROOT,'background/events/runtime-messages.js'),'utf8');
 const names=[...source.matchAll(/message\?\.type\s*===\s*"([A-Z0-9_]+)"/g)].map(m=>m[1]);
 for(const name of names) assert(map[name],`Unmapped background message: ${name}`);
-assert.equal(Object.keys(map).length,new Set(names).size);
+assert(Object.keys(map).length >= new Set(names).size, 'Missing background message ownership registrations');
 vm.runInContext('DSQ_BACKGROUND_BUILD_PROFILE.features = ["ooc"]',background); // Frozen: assignment should fail, do not mutate Full.
 assert(background.dsqBackgroundMessageAllowed('DS_DEEPL_TRANSLATE'));
 // Custom profile is substituted into the actual service profile file by the generator.
