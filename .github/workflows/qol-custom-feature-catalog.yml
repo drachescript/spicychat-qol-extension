@@ -8,6 +8,7 @@ on:
       - "build/modules.json"
       - "manifest.json"
       - "scripts/export_custom_feature_catalog.py"
+      - "build/export-custom-package-index.py"
       - ".github/workflows/qol-custom-feature-catalog.yml"
   workflow_dispatch:
 
@@ -29,7 +30,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Export feature catalog from current contracts
-        run: python scripts/export_custom_feature_catalog.py
+        run: |
+          python scripts/export_custom_feature_catalog.py
+          python build/export-custom-package-index.py
       - name: Check catalog invariants
         run: |
           python - <<'PY'
@@ -43,13 +46,19 @@ jobs:
           assert len(ids)==d['featureCount']
           assert {'bot-blocking','language-filter','bulk-blocking','ooc','chat-search','chat-index'} <= ids
           assert all(set(f['requiredFeatures']) <= ids for f in d['features'])
-          print('Validated',len(ids),'individual features')
+          i=json.loads(Path('build/custom-package-index.json').read_text())
+          assert i['sourceVersion']==d['version']
+          assert i['schema']=='spicychat-qol-custom-package-assets/v1'
+          assert {f['id'] for f in i['features']} >= ids
+          assert i['newFeaturesDefaultOff'] is True
+          assert all(f['defaultSelected'] is False and f['defaultUpdatesEnabled'] is False for f in i['features'])
+          print('Validated',len(ids),'individual features and',len(i['features']),'package ownership records')
           PY
       - name: Save catalog in the Custom branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f build/feature-catalog.json
+          git add -f build/feature-catalog.json build/custom-package-index.json
           if ! git diff --cached --quiet; then
             git commit -m "Refresh generated Custom feature catalog"
             git push origin HEAD:qol-custom
