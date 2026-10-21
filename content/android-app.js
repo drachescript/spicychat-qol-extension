@@ -231,7 +231,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       button.id = BUTTON_ID;
       button.type = "button";
       button.className = "ds-android-qol-menu-button";
-      button.textContent = "⚙";
+      button.textContent = "QoL";
       button.title = "SpicyChat QoL compact controls";
       button.setAttribute("aria-label", "SpicyChat QoL compact menu");
       button.setAttribute("aria-haspopup", "menu");
@@ -244,6 +244,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         else buildMenu(button);
       });
     }
+
+    // Repair an existing compact control as well as newly created controls.
+    if (button.textContent !== "QoL") button.textContent = "QoL";
 
     // Preserve the same button and its click handler on React remounts; do not
     // leave an orphaned button in the old action row or create duplicates.

@@ -1,0 +1,17 @@
+/* v0.1.9.112 - Internal Day Tracker / Storydate */
+.ds-story-day-dialog { max-width: min(720px, calc(100vw - 28px)); }
+.ds-story-day-summary { display:flex; flex-direction:column; gap:4px; padding:10px 12px; border:1px solid rgba(148,163,184,.28); border-radius:8px; background:rgba(30,41,59,.25); }
+.ds-story-day-controls { display:grid; grid-template-columns:auto auto minmax(90px,1fr) minmax(130px,1fr) auto; gap:7px; align-items:center; margin-top:10px; }
+.ds-story-day-controls input, .ds-story-day-controls select { min-width:0; }
+.ds-story-day-note-row { display:grid; grid-template-columns:1fr auto; gap:7px; }
+.ds-story-day-list { display:flex; flex-direction:column; gap:6px; max-height:220px; overflow:auto; }
+.ds-story-day-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border:1px solid rgba(148,163,184,.22); border-radius:7px; background:rgba(31,41,55,.18); font-size:12px; line-height:1.35; }
+.ds-story-day-item-actions { display:flex; gap:5px; flex:0 0 auto; }
+.ds-story-day-item-actions button { width:auto !important; }
+@media (max-width:700px) {
+  .ds-story-day-controls { grid-template-columns:1fr 1fr; }
+  .ds-story-day-controls input, .ds-story-day-controls select, .ds-story-day-controls button:last-child { grid-column:span 2; }
+  .ds-story-day-note-row { grid-template-columns:1fr; }
+  .ds-story-day-item { align-items:flex-start; flex-direction:column; }
+}
+

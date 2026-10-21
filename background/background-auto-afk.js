@@ -403,3 +403,9 @@ async function runAutoAfkScan() {
   return summary;
 }
 
+
+// Optional alarm handler owned by performance-mode. Omitted modules do not register a handler.
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))["ds-auto-afk-scan-v1"] = {
+  owner: "performance-mode",
+  run: () => { runAutoAfkScan(); }
+};

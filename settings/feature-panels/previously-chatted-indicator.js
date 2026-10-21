@@ -18,4 +18,12 @@
   }
   const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Reuses saved chat metadata; opened does not mean messaged. No background rescans."; section.append(hint);
   host.replaceWith(section);
+  // Feature-owned Settings read handlers. The shared Settings controller never
+  // needs to know the keys or defaults when this optional panel is excluded.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  readers["enablePreviouslyChattedIndicator"] = () => !!document.getElementById("enablePreviouslyChattedIndicator")?.checked;
+  readers["chattedIndicatorShowOpened"] = () => !!document.getElementById("chattedIndicatorShowOpened")?.checked;
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  loaders["enablePreviouslyChattedIndicator"] = (settings) => { setChecked("enablePreviouslyChattedIndicator", !!settings.enablePreviouslyChattedIndicator); };
+  loaders["chattedIndicatorShowOpened"] = (settings) => { setChecked("chattedIndicatorShowOpened", !!settings.chattedIndicatorShowOpened); };
 })();

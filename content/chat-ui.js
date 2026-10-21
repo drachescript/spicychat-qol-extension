@@ -975,58 +975,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         );
       }
 
-      const oocShortcutMode = settings.replaceChatImageWithOocButton
-        ? (settings.hideChatImageButton ? "replace" : "alongside")
-        : "off";
-
+      const oocShortcutMode = settings.replaceChatImageWithOocButton ? "alongside" : "off";
       if (DS.state.oocShortcutMode !== oocShortcutMode) {
         DS.removeEssentialOocShortcut?.();
         DS.state.oocShortcutMode = oocShortcutMode;
       }
 
-      if (settings.replaceChatImageWithOocButton) {
-        // "Show OOC button" no longer forces Image off. It only occupies the
-        // Image slot when the separate Hide image generation option is enabled.
+      // Image visibility is independent of OOC. An enabled OOC button has
+      // its own composer slot to the left of Suggest, including while typing.
+      if (settings.hideChatImageButton) {
+        DS.qsa('button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]').forEach(button => {
+          DS.hideSmallControlWrapper(button, "chat-ui:image", ['[data-tooltip-content="Image"]', ".inline-flex"]);
+        });
+        DS.qsa('[data-tooltip-content="Image"]').forEach(el => {
+          const buttons = DS.qsa("button", el);
+          const textboxes = DS.qsa("textarea, input[type='text'], [contenteditable='true'], [role='textbox']", el);
+          if (buttons.length <= 1 && textboxes.length === 0) DS.hideElement(el, "chat-ui:image-tooltip");
+        });
+      } else {
         DS.restoreChatUiReason("chat-ui:image");
         DS.restoreChatUiReason("chat-ui:image-tooltip");
+      }
+
+      if (settings.replaceChatImageWithOocButton) {
         DS.applyEssentialOocShortcut?.();
-      } else {
-        // The mode-change branch above already restored removed OOC controls.
-        // Only inspect again if a stale shortcut is actually present.
-        if (DS.qs(`.${OOC_SHORTCUT_CLASS}, .${OOC_WRAPPER_CLASS}, [data-ds-ooc-image-wrapper='1']`)) {
-          DS.removeEssentialOocShortcut?.();
-        }
-        DS.state.oocShortcutMode = "off";
-
-        if (settings.hideChatImageButton) {
-          DS.qsa(
-            'button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]'
-          ).forEach(button => {
-            DS.hideSmallControlWrapper(
-              button,
-              "chat-ui:image",
-              [
-                '[data-tooltip-content="Image"]',
-                ".inline-flex"
-              ]
-            );
-          });
-
-          DS.qsa('[data-tooltip-content="Image"]').forEach(el => {
-            const buttons = DS.qsa("button", el);
-            const textboxes = DS.qsa(
-              "textarea, input[type='text'], [contenteditable='true'], [role='textbox']",
-              el
-            );
-
-            if (buttons.length <= 1 && textboxes.length === 0) {
-              DS.hideElement(el, "chat-ui:image-tooltip");
-            }
-          });
-        } else {
-          DS.restoreChatUiReason("chat-ui:image");
-          DS.restoreChatUiReason("chat-ui:image-tooltip");
-        }
+      } else if (DS.qs(`.${OOC_SHORTCUT_CLASS}, .${OOC_WRAPPER_CLASS}, [data-ds-ooc-image-wrapper='1']`)) {
+        DS.removeEssentialOocShortcut?.();
       }
 
       if (wantsDedicatedAsteriskButton(settings)) {

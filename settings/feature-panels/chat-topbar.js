@@ -18,4 +18,22 @@
     return node;
   };
   host.replaceWith(make(["section",{"class":"card","id":"chatTopBarCard"},"\n",["h2",{},"Chat top bar"],"\n",["p",{"class":"hint"},"Small cleanup tools for the bot title area on chat pages."],"\n",["label",{"class":"row"},["input",{"id":"showChatTopBarTools","type":"checkbox"}],["span",{},"Enable chat top bar tools"]],"\n",["label",{"class":"row"},["input",{"id":"chatTopBarInlineCreator","type":"checkbox"}],["span",{},"Keep the creator star on the creator line"]],"\n",["label",{"class":"row"},["input",{"id":"hideChatTopBarRatingButton","type":"checkbox"}],["span",{},"Hide the rating button in the chat header"]],"\n",["label",{"class":"row"},["input",{"id":"hideChatTopBarModelButton","type":"checkbox"}],["span",{},"Hide the model button in the chat header"]],"\n",["label",{"class":"row"},["input",{"id":"hideChatTopBarContextDot","type":"checkbox"}],["span",{},"Hide the memory/context dot"]],"\n",["label",{"class":"row"},["input",{"id":"hideChatDropdownVoiceUpsell","type":"checkbox"}],["span",{},"Hide Unlock Custom Voices in the chat menu"]],"\n",["label",{"class":"row"},["input",{"id":"hideChatDropdownMemoryItem","type":"checkbox"}],["span",{},"Hide Enable/Disable Memory in the chat menu"]],"\n"]));
+  // Only an installed panel registers its read/load handlers.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["showChatTopBarTools"] = () => (checked("showChatTopBarTools"));
+  loaders["showChatTopBarTools"] = (settings) => { setChecked("showChatTopBarTools", !!settings.showChatTopBarTools); };
+  readers["chatTopBarInlineCreator"] = () => (checked("chatTopBarInlineCreator"));
+  loaders["chatTopBarInlineCreator"] = (settings) => { setChecked("chatTopBarInlineCreator", !!settings.chatTopBarInlineCreator); };
+  readers["hideChatTopBarRatingButton"] = () => (checked("hideChatTopBarRatingButton"));
+  loaders["hideChatTopBarRatingButton"] = (settings) => { setChecked("hideChatTopBarRatingButton", !!settings.hideChatTopBarRatingButton); };
+  readers["hideChatTopBarModelButton"] = () => (checked("hideChatTopBarModelButton"));
+  loaders["hideChatTopBarModelButton"] = (settings) => { setChecked("hideChatTopBarModelButton", !!settings.hideChatTopBarModelButton); };
+  readers["hideChatTopBarContextDot"] = () => (checked("hideChatTopBarContextDot"));
+  loaders["hideChatTopBarContextDot"] = (settings) => { setChecked("hideChatTopBarContextDot", !!settings.hideChatTopBarContextDot); };
+  readers["hideChatDropdownVoiceUpsell"] = () => (checked("hideChatDropdownVoiceUpsell"));
+  loaders["hideChatDropdownVoiceUpsell"] = (settings) => { setChecked("hideChatDropdownVoiceUpsell", !!settings.hideChatDropdownVoiceUpsell); };
+  readers["hideChatDropdownMemoryItem"] = () => (checked("hideChatDropdownMemoryItem"));
+  loaders["hideChatDropdownMemoryItem"] = (settings) => { setChecked("hideChatDropdownMemoryItem", !!settings.hideChatDropdownMemoryItem); };
+
 })();

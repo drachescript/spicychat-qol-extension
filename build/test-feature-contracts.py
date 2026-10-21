@@ -13,7 +13,21 @@ assert 'modelQuickAccessNames: ""' in core
 load=(R/'settings/features/options-settings-load.js').read_text()
 auto=(R/'settings/features/options-settings-autosave.js').read_text()
 owners=(R/'settings/feature-setting-owners.js').read_text()
-assert all(x in load and x in auto and x in owners for x in new+['modelQuickAccessNames'])
+# Feature-owned loaders live with their panels, not in shared Settings load code.
+assert all(x in owners for x in new+['modelQuickAccessNames'])
+assert '__DSQ_FEATURE_SETTINGS_LOADERS__' in load
+assert all(x not in load for x in new+['modelQuickAccessNames'])
+# These three new features own their Settings read path; the generic reader
+# must use the optional registry instead of embedding their keys directly.
+assert '__DSQ_FEATURE_SETTINGS_READERS__' in auto
+for feature, keys in {
+    'model-quick-access':['enableModelQuickAccess','modelQuickAccessNames'],
+    'chat-lorebook-manager':['enableChatLorebookManager'],
+    'previously-chatted-indicator':['enablePreviouslyChattedIndicator','chattedIndicatorShowOpened'],
+}.items():
+    panel=(R/'settings/feature-panels'/f'{feature}.js').read_text()
+    assert all(key in panel for key in keys)
+    assert all(f'case "{key}"' not in auto for key in keys)
 for feature in ('model-quick-access','chat-lorebook-manager','previously-chatted-indicator'):
     assert feature in (R/'content/feature-build-map.js').read_text()
     assert feature in (R/'settings/options-feature-availability.js').read_text()

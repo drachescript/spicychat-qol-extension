@@ -4,18 +4,25 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "cardClickBehavior",
+    "cardDensityMode",
     "enableBotComparison",
+    "recentlySeenLimit",
     "showBlockButtonOnMyCreations",
     "showCopyBotInfoButtons",
     "showQuickDislikeButtons",
     "showQuickLessLikeButtons",
     "showQuickNotInterestedButtons",
     "showQuickUnblockButtons",
+    "showRecentlySeenButton",
     "trackRecentlySeenBots"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/card-workflow.js"
+  ]
 }

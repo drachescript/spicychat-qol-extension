@@ -51,30 +51,50 @@ def plan(selected):
         'note':'Preview only. Do not install or publish this as an extension.'}
 
 def plan_features(feature_ids):
+    """Plan the *current* per-feature contract schema, never a build recipe."""
     contracts={}
     for file in sorted((ROOT/'build/features').glob('*.json')):
         contract=json.loads(file.read_text())
-        contracts[contract['id']]=contract
+        if contract.get('id') != file.stem or file.stem in contracts:
+            raise ValueError('Invalid/duplicate feature contract: '+str(file))
+        contracts[file.stem]=contract
     unknown=set(feature_ids)-set(contracts)
     if unknown: raise ValueError('Unknown features: '+', '.join(sorted(unknown)))
     closure=set(feature_ids)
     while True:
-        additions={dep for fid in closure for dep in contracts[fid]['requiredFeatures']}
-        if additions <= closure: break
-        closure |= additions
+        additions={dep for fid in closure for dep in contracts[fid].get('dependencies',[])}
+        unknown_dependencies=additions-set(contracts)
+        if unknown_dependencies:
+            raise ValueError('Unknown required feature(s): '+', '.join(sorted(unknown_dependencies)))
+        if additions <= closure:break
+        closure|=additions
+    def assets(key):
+        return sorted({p for fid in closure for p in contracts[fid].get(key,[])})
+    content_scripts=sorted({contracts[fid]['primary'] for fid in closure if contracts[fid].get('type')=='content'}|
+                           {p for fid in closure for p in contracts[fid].get('requiredHelpers',[])})
+    background_scripts=sorted({contracts[fid]['primary'] for fid in closure if contracts[fid].get('type')=='background'}|
+                              {p for fid in closure for p in contracts[fid].get('backgroundFiles',[])})
+    blockers={}
+    for fid in sorted(closure):
+        c=contracts[fid]
+        unfinished=[k for k in ('settingsIsolated','stylesIsolated','backgroundIsolated','browserVerified') if c.get(k) is not True]
+        if unfinished: blockers[fid]=unfinished
     result={
-        'schema':'dsq-lite-feature-plan/v1',
+        'schema':'dsq-lite-feature-plan/v2',
         'installable':False,
-        'requested':feature_ids,
+        'requested':list(feature_ids),
         'features':sorted(closure),
-        'runtimeScripts':sorted({p for fid in closure for p in contracts[fid]['runtimeScripts']}),
-        'settingsScripts':sorted({p for fid in closure for p in contracts[fid]['settingsScripts']}),
-        'stylesheets':sorted({p for fid in closure for p in contracts[fid]['cssFiles']}),
-        'backgroundServices':sorted({p for fid in closure for p in contracts[fid]['backgroundServices']}),
-        'sharedDependencies':{fid:contracts[fid]['sharedDependencies'] for fid in sorted(closure)},
-        'blockers':{fid:contracts[fid]['blockers'] for fid in sorted(closure) if contracts[fid]['customBuildStatus']!='validated'},
-        'note':'Feature-level dependency contract preview only. Do not install or publish as a custom extension.'
+        'runtimeScripts':content_scripts,
+        'settingsScripts':assets('settingsFiles'),
+        'stylesheets':assets('styleFiles'),
+        'backgroundServices':background_scripts,
+        'sharedDependencies':{fid:contracts[fid].get('requiredHelpers',[]) for fid in sorted(closure)},
+        'blockers':blockers,
+        'note':'Feature-level dependency/ownership preview only; no arbitrary Custom package is certified.'
     }
+    # Fail closed if a physical resource declared by an owner is missing.
+    for path in content_scripts+background_scripts+result['settingsScripts']+result['stylesheets']:
+        if not (ROOT/path).is_file():raise ValueError('Feature-owned file is missing: '+path)
     return result
 
 def main():

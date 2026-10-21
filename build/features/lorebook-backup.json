@@ -10,5 +10,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/features/background-lorebook-export.js"
+  ]
 }

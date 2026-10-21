@@ -4,11 +4,17 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "creatorWritingDictionary",
+    "creatorWritingTargetLanguage",
+    "creatorWritingUseBrowserAi",
     "enableCreatorWritingAssistant"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/creator-writing-assistant.js"
+  ]
 }

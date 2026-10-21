@@ -328,14 +328,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!DS.isSingleChatPage?.()) return;
     const roots = new Set();
     for (const mutation of mutations || []) {
+      // Plain streaming text mutations cannot create an editor. Inspect only
+      // structural additions or a root already in the edit lifecycle.
       const targetRoot = messageRootFromNode(mutation.target);
-      if (targetRoot) roots.add(targetRoot);
-      for (const node of mutation.addedNodes || []) {
-        const direct = messageRootFromNode(node);
+      if (targetRoot?.dataset.dsEditSavePending === "1") roots.add(targetRoot);
+      if (mutation.type !== "childList" || !mutation.addedNodes?.length) continue;
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        const possibleEditor = node.matches?.("textarea, [contenteditable='true']")
+          || (node.childElementCount <= 16 && !!node.querySelector?.("textarea, [contenteditable='true']"));
+        if (!possibleEditor) continue;
+        const direct = messageRootFromNode(node) || targetRoot;
         if (direct) roots.add(direct);
-        if (node instanceof Element) {
-          node.querySelectorAll?.("div[id^='message-']").forEach(root => roots.add(root));
-        }
+        // A new message subtree can include multiple editable roots, but
+        // searching the whole chat after every token is unnecessary.
+        if (node.matches?.("div[id^='message-']")) roots.add(node);
+        node.querySelectorAll?.("div[id^='message-'] textarea, div[id^='message-'] [contenteditable='true']").forEach(editor => {
+          const root = messageRootFromNode(editor);
+          if (root) roots.add(root);
+        });
       }
     }
 

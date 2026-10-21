@@ -18,4 +18,10 @@
     return node;
   };
   host.replaceWith(make(["section",{"class":"card","id":"nativeRatingHelpersCard"},"\n",["h2",{},"Native rating helpers"],"\n",["label",{"class":"row"},["input",{"id":"enableNativeRatingHelpers","type":"checkbox"}],["span",{},"Add compact Dislike / Like / Double-like shortcuts beside SpicyChat's rating button"]],"\n",["p",{"class":"hint"},"The shortcuts open and use SpicyChat's normal Rate Chatbot dialog and its native Done button. QoL does not invent a separate rating or call a hidden rating API."],"\n"]));
+  // Only an installed panel registers its read/load handlers.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["enableNativeRatingHelpers"] = () => (checked("enableNativeRatingHelpers"));
+  loaders["enableNativeRatingHelpers"] = (settings) => { setChecked("enableNativeRatingHelpers", !!settings.enableNativeRatingHelpers); };
+
 })();

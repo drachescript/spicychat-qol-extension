@@ -18,4 +18,12 @@
   }
   const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Uses native model actions. Models missing from the compact menu are opened through Explore All when available. Mobile native model rows are not rearranged."; section.append(hint);
   host.replaceWith(section);
+  // Feature-owned Settings read handlers. The shared Settings controller never
+  // needs to know the keys or defaults when this optional panel is excluded.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  readers["enableModelQuickAccess"] = () => !!document.getElementById("enableModelQuickAccess")?.checked;
+  readers["modelQuickAccessNames"] = () => String(document.getElementById("modelQuickAccessNames")?.value || "");
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  loaders["enableModelQuickAccess"] = (settings) => { setChecked("enableModelQuickAccess", !!settings.enableModelQuickAccess); };
+  loaders["modelQuickAccessNames"] = (settings) => { setValue("modelQuickAccessNames", settings.modelQuickAccessNames || ""); };
 })();

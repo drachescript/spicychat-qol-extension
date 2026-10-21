@@ -4,11 +4,20 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableStoryDayTracker"
+    "enableStoryDayTracker",
+    "storyDayTrackerIncludeInContext",
+    "storyDayTrackerMode",
+    "storyDayTrackerShowQuickPanel"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/story-day-tracker.js"
+  ],
+  "styleFiles": [
+    "content/styles/story-day-tracker.css"
+  ]
 }

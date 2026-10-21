@@ -8,5 +8,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/features/background-worker-bot-status.js"
+  ]
 }

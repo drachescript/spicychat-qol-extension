@@ -18,4 +18,18 @@
     return node;
   };
   host.replaceWith(make(["section",{"class":"card","id":"focusModeCard"},"\n",["h2",{},"Focus / Immersive Mode"],"\n",["label",{"class":"row"},["input",{"id":"enableFocusMode","type":"checkbox"}],["span",{},"Enable Focus / Immersive Mode in chats"]],"\n",["div",{"class":"sub-card"},"\n",["label",{"class":"row"},["input",{"id":"focusHideSidebar","type":"checkbox"}],["span",{},"Hide the sidebar while Focus Mode is active"]],"\n",["label",{"class":"row"},["input",{"id":"focusHideTopBar","type":"checkbox"}],["span",{},"Hide top-bar controls while Focus Mode is active"]],"\n",["label",{"class":"row"},["input",{"id":"focusHideChatHeader","type":"checkbox"}],["span",{},"Hide the current chat header while Focus Mode is active"]],"\n",["label",{"class":"row"},["input",{"id":"focusHideQolPanel","type":"checkbox"}],["span",{},"Hide the QoL panel while Focus Mode is active"]],"\n"],"\n",["p",{"class":"hint"},"Adds a Focus mode button to the QoL panel on individual chats. Focus Mode temporarily hides the selected UI without changing your normal visibility settings. An Exit focus button stays available, and Escape also exits the mode."],"\n"]));
+  // Only an installed panel registers its read/load handlers.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["enableFocusMode"] = () => (checked("enableFocusMode"));
+  loaders["enableFocusMode"] = (settings) => { setChecked("enableFocusMode", !!settings.enableFocusMode); };
+  readers["focusHideSidebar"] = () => (checked("focusHideSidebar", true));
+  loaders["focusHideSidebar"] = (settings) => { setChecked("focusHideSidebar", settings.focusHideSidebar !== false); };
+  readers["focusHideTopBar"] = () => (checked("focusHideTopBar", true));
+  loaders["focusHideTopBar"] = (settings) => { setChecked("focusHideTopBar", settings.focusHideTopBar !== false); };
+  readers["focusHideChatHeader"] = () => (checked("focusHideChatHeader", true));
+  loaders["focusHideChatHeader"] = (settings) => { setChecked("focusHideChatHeader", settings.focusHideChatHeader !== false); };
+  readers["focusHideQolPanel"] = () => (checked("focusHideQolPanel", true));
+  loaders["focusHideQolPanel"] = (settings) => { setChecked("focusHideQolPanel", settings.focusHideQolPanel !== false); };
+
 })();
