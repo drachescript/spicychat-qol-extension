@@ -14,7 +14,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (options.idsOnly !== true) payload[DS.OPENED_META_KEY] = DS.state.openedChatMeta || {};
     await DS.storageSet(payload);
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveOpenedChatMeta = function saveOpenedChatMeta(id, meta = {}) {
@@ -59,7 +59,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     await DS.storageSet(payload);
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
 
@@ -77,7 +77,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.NOT_INTERESTED_KEY]: DS.state.notInterestedBots
     });
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveFavoriteCreators = async function saveFavoriteCreators(store = DS.state.favoriteCreators) {
@@ -89,7 +89,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.FAVORITE_CREATORS_KEY]: DS.state.favoriteCreators
     });
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveFollowedCreators = async function saveFollowedCreators(store = DS.state.followedCreators) {
@@ -101,7 +101,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.FOLLOWED_CREATORS_KEY]: DS.state.followedCreators
     });
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveFavoriteBots = async function saveFavoriteBots(store = DS.state.favoriteBots) {
@@ -130,7 +130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.BOT_ORGANIZER_KEY]: DS.state.botOrganization
     });
     if (saved === false) throw new Error("QoL could not save the bot folders. Please try again.");
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
     return true;
   };
 
@@ -142,7 +142,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await DS.storageSet({
       [DS.CHAT_ORGANIZER_KEY]: DS.state.chatOrganization
     });
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveRecentlySeenBots = async function saveRecentlySeenBots(store = DS.state.recentlySeenBots) {
@@ -153,7 +153,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await DS.storageSet({
       [DS.RECENTLY_SEEN_BOTS_KEY]: DS.state.recentlySeenBots
     });
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
   DS.saveLaterBots = async function saveLaterBots(store = DS.state.laterBots) {
@@ -170,7 +170,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.LATER_BOTS_KEY]: DS.state.laterBots
     });
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 
 
@@ -278,7 +278,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       [DS.PERSONAS_KEY]: DS.state.savedPersonas
     });
 
-    DS.updateQuickPanel?.();
+    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
   };
 })();
 }

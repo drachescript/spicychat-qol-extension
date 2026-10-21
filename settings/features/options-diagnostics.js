@@ -403,6 +403,10 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     diagnosticLines.push(`Notification auto-read: ${Number(runtime.notificationAutoReadAttempts || 0)} attempts; ${Number(runtime.notificationAutoReadClicks || 0)} native clicks; ${Number(runtime.notificationAutoReadSuccesses || 0)} cleared; ${Number(runtime.notificationAutoReadUncleared || 0)} still unread; ${Number(runtime.notificationAutoReadMissingButtons || 0)} missing-button checks; ${Number(runtime.notificationAutoReadFailures || 0)} failures; last source ${runtime.notificationAutoReadLastSource || "none"}`);
     diagnosticLines.push(`Incremental chat work: search ${Number(runtime.chatSearchIncrementalUpdates || 0)} updates / ${Number(runtime.chatSearchFullPasses || 0)} full passes; message actions ${Number(runtime.messageOptionsIncrementalUpdates || 0)}; alternate dialogue ${Number(runtime.alternateDialogueIncrementalUpdates || 0)}; translation ${Number(runtime.translationIncrementalUpdates || 0)}`);
     diagnosticLines.push(`Installed desktop-app performance guard: ${runtime.desktopAppGuardActive ? "active" : "inactive"}`);
+    diagnosticLines.push(`Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages; last empty ${Number(runtime.chatUnexpectedEmptyLastAt || 0) ? new Date(Number(runtime.chatUnexpectedEmptyLastAt)).toISOString() : "none"}; last recovery ${Number(runtime.chatUnexpectedEmptyLastRecoveryMs || 0)} ms; visibility ${runtime.chatUnexpectedEmptyLastVisibility || "unknown"}; generation ${runtime.chatUnexpectedEmptyLastGeneration || "unknown"}`);
+    { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
+      if (v) diagnosticLines.push(`Current chat DOM: ${Number(v.mounted || 0)} mounted; ${Number(v.hidden || 0)}/${Number(v.inspected || 0)} sampled messages hidden by layout/styles; composer present ${v.composerPresent ? "yes" : "no"}`);
+    }
     diagnosticLines.push(`Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicate invalidations avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text message mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped`);
     if (Number(runtime.longTasks || 0)) diagnosticLines.push(`Browser long tasks: ${Number(runtime.longTasks || 0)}; last ${Number(runtime.lastLongTaskMs || 0)} ms; max ${Number(runtime.maxLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`);
     diagnosticLines.push(`QoL performance entries: ${perf.length}`);
@@ -503,6 +507,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep always on; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
+    `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages`,
+    (() => { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility; return v ? `Current chat DOM: ${Number(v.mounted || 0)} mounted; ${Number(v.hidden || 0)}/${Number(v.inspected || 0)} sampled messages hidden by layout/styles; composer present ${v.composerPresent ? "yes" : "no"}` : "Current chat DOM: unavailable"; })(),
     ...((settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.slowFeatureSamples))
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)
       : []),
@@ -635,6 +641,7 @@ async function buildFastSupportSnapshot() {
 }
 
 async function buildAllSupportInfo() {
+  return withSharedSupportRuntimeSnapshot(async () => {
   const sectionTimeoutMs = 7000;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
@@ -692,6 +699,7 @@ async function buildAllSupportInfo() {
     sections.push("", "===== PERFORMANCE BASELINE COMPARISON =====", baselineText);
   }
   return sections.join("\n");
+  });
 }
 
 async function copyAllSupportInfo() {
@@ -802,6 +810,6 @@ async function refreshPerformanceTroubleshooter() {
   const counters = runtime.runtimePerformance || {};
   notes.push(`Observer batches: ${Number(counters.observerBatches || 0)}; message-lane runs: ${Number(counters.messageLaneRuns || 0)}; skipped disabled steps: ${Number(counters.disabledFeatureStepSkips || 0)}`);
   const emptyTransitions = Number(counters.chatUnexpectedEmptyTransitions || 0);
-  if (emptyTransitions) notes.push(`Possible blank-chat transitions: ${emptyTransitions} (the DOM went empty; messages were not proven deleted)`);
+  if (emptyTransitions) notes.push(`Possible blank-chat transitions: ${emptyTransitions}; recovered ${Number(counters.chatUnexpectedEmptyRecovered || 0)}; still empty after checks ${Number(counters.chatUnexpectedEmptyUnresolved || 0)}; last previous count ${Number(counters.chatUnexpectedEmptyLastBefore || 0)}; generation ${counters.chatUnexpectedEmptyLastGeneration || "unknown"} (DOM-only observation; no proof of deletion)`);
   output.textContent = notes.join("\n");
 }

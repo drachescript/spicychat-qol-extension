@@ -96,3 +96,18 @@ function dsqBackgroundMessageAllowed(type) {
   const owner = DSQ_BACKGROUND_MESSAGE_OWNERS[String(type || "")];
   return !owner || owner === "core" || dsqBackgroundHasFeature(owner);
 }
+
+// Optional handlers are registered by their feature modules before event startup.
+// Omitted modules register nothing; the shared router does not reference their APIs.
+const dsqBackgroundFeatureMessageHandlers = Object.create(null);
+function dsqRegisterBackgroundMessageHandler(type, owner, handler) {
+  const name = String(type || "");
+  if (DSQ_BACKGROUND_MESSAGE_OWNERS[name] !== owner || typeof handler !== "function") {
+    throw new Error(`Invalid background message owner: ${name}`);
+  }
+  if (!dsqBackgroundHasFeature(owner)) return;
+  if (Object.prototype.hasOwnProperty.call(dsqBackgroundFeatureMessageHandlers, name)) {
+    throw new Error(`Duplicate background handler: ${name}`);
+  }
+  dsqBackgroundFeatureMessageHandlers[name] = handler;
+}

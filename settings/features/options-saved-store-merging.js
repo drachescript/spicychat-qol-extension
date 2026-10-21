@@ -198,6 +198,55 @@ function enforceBlockedPriorityOverOpenedState(options = {}) {
   return { ids: kept, meta, removed };
 }
 
+// Profile copies discovered in the bot archive are already local and work for
+// owned unlisted bots, unlike public-index-only status scans. Request only the
+// currently visible unknown cards instead of loading thousands of backups.
+const openedArchiveProfileCache = new Map();
+const openedArchiveProfileLookedUp = new Set();
+let openedArchiveProfilePending = false;
+
+function knownSavedBotProfile(id, current = {}) {
+  const archive = botArchiveState?.meta?.[id] || openedArchiveProfileCache.get(id) || {};
+  const fields = archive.fields && typeof archive.fields === "object" ? archive.fields : {};
+  const snapshot = botAvailabilityState?.meta?.[id]?.snapshot?.fields || {};
+  const favorite = favoriteBotState?.meta?.[id] || {};
+  const later = laterBotState?.meta?.[id] || {};
+  const pick = (...values) => values.map(v => String(v || "").trim()).find(Boolean) || "";
+  const realName = pick(...[current.name, fields.name, archive.name, snapshot.name, favorite.name, later.name].filter(v => !isPlaceholderBotName(v, id)));
+  return {
+    name: realName || "Unknown bot",
+    title: pick(current.title, fields.title, snapshot.title, archive.title),
+    creator: pick(fields.creator, archive.creator, snapshot.creator, current.creator, favorite.creator, later.creator),
+    image: pick(fields.image, archive.image, current.image, snapshot.image, favorite.image, later.image),
+    greeting: pick(current.greeting, fields.greeting, snapshot.greeting),
+    description: pick(current.description, fields.description, snapshot.description, favorite.description),
+  };
+}
+
+async function hydrateOpenedArchiveProfiles(entries) {
+  if (openedArchiveProfilePending) return;
+  const ids = (entries || []).map(row => String(row.id || ""))
+    .filter(id => BOT_ID_RE.test(id) && !openedArchiveProfileLookedUp.has(id) && !botArchiveState?.meta?.[id])
+    .slice(0, 20);
+  if (!ids.length) return;
+  ids.forEach(id => openedArchiveProfileLookedUp.add(id));
+  openedArchiveProfilePending = true;
+  try {
+    const result = await runtimeMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key: BOT_ARCHIVE_KEY, ids });
+    if (!result?.ok) { ids.forEach(id => openedArchiveProfileLookedUp.delete(id)); return; }
+    let updated = false;
+    for (const id of ids) {
+      const record = result.records?.[id];
+      if (record && typeof record === "object") {
+        openedArchiveProfileCache.set(id, record);
+        updated = true;
+      }
+    }
+    if (updated && activeOptionsTab() === "saved") renderBotManager("opened");
+  } catch { ids.forEach(id => openedArchiveProfileLookedUp.delete(id)); }
+  finally { openedArchiveProfilePending = false; }
+}
+
 function openedStoreFromState() {
   const clean = enforceBlockedPriorityOverOpenedState({ detached: true });
   return {

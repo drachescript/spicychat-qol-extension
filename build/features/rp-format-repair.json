@@ -11,5 +11,8 @@
   "browserVerified": false,
   "styleFiles": [
     "content/styles/rp-format-repair.css"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/rp-format-repair.js"
   ]
 }

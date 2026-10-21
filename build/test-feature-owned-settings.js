@@ -8,7 +8,8 @@ const ids = [
   'chat-search','focus-mode','command-palette','story-day-tracker',
   'chat-nudges','chat-topbar','card-workflow','native-rating-helpers',
   'profile-export','creator-writing-assistant','chat-bookmarks','alternate-dialogue',
-  'model-quick-access','chat-lorebook-manager','previously-chatted-indicator'
+  'model-quick-access','chat-lorebook-manager','previously-chatted-indicator',
+  'context-keeper','soundscapes','chat-scene-notes','reply-instructions','rp-state-tracker','translation'
 ];
 function makeNode() { return { append(){},appendChild(){},setAttribute(){},replaceWith(){},checked:false,value:'' }; }
 function evaluate(id, installed) {
@@ -17,6 +18,7 @@ function evaluate(id, installed) {
   const context = { window:{ __DSQ_BUILD_PROFILE__:{generated:true,features:installed?[id]:[]} },
     document:{ getElementById:key=>key===`ds-feature-panel-${id}` ? host : (nodes[key] ||= makeNode()),
       createElement:()=>makeNode(),createTextNode:()=>makeNode()},
+    $:(key)=>nodes[key] || null,
     checked:(key, defaultValue=false)=>nodes[key]?.checked ?? defaultValue,
     value:(key,defaultValue='')=>nodes[key]?.value ?? defaultValue,
     setChecked:(key,val)=>(nodes[key] ||= makeNode()).checked=val,
@@ -55,6 +57,7 @@ for(const id of ids){
   for (const [,key] of panel.matchAll(/readers\["([A-Za-z]\w+)"\]/g)) {
     assert.doesNotMatch(sharedLoad,new RegExp(`set(?:Checked|Value)\\("${key}"`),`${id}.${key} still in shared loader`);
     assert.doesNotMatch(sharedRead,new RegExp(`case "${key}"`),`${id}.${key} still in shared granular reader`);
+    assert.doesNotMatch(sharedRead,new RegExp(`^ {4}${key}\\s*:`, 'm'),`${id}.${key} still in shared full-page reader`);
   }
 }
 console.log(`PASS: ${ids.length} feature-owned Settings modules, ${count} handlers, inclusion/omission, no central duplicates`);

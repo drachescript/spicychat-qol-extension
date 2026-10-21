@@ -443,7 +443,8 @@
     "styles": {
       "core": [
         "content.css",
-        "content/styles/remaining-styles.css"
+        "content/styles/remaining-styles.css",
+        "content/styles/soundscapes.css"
       ],
       "profiles": [
         "content/styles/bot-organizer.css",

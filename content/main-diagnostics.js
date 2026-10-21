@@ -48,6 +48,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             textareaPaddingRight: composer ? getComputedStyle(composer).paddingRight : ""
           };
         })();
+        // Run only when the user requests diagnostics, not in the hot observer.
+        // Inspect styling and layout of three recent message roots; never read
+        // message text or expose chat IDs. Hidden DOM is different from unmount.
+        const chatVisibility = (() => {
+          if (!DS.isSingleChatPage?.()) return null;
+          const roots = [...document.querySelectorAll("div[id^='message-']")];
+          const sample = roots.slice(-3);
+          const hidden = sample.filter(root => {
+            try {
+              let node = root;
+              for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
+                const style = getComputedStyle(node);
+                if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return true;
+              }
+              return root.getClientRects().length === 0;
+            } catch { return false; }
+          }).length;
+          return {
+            mounted: roots.length,
+            inspected: sample.length,
+            hidden,
+            composerPresent: !!document.querySelector("textarea, [contenteditable='true']")
+          };
+        })();
         sendResponse({
           ok: true,
           tabQol: DS.getQolTabState?.() || null,
@@ -55,6 +79,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           slowFeatureSamples: DS.getSlowFeatureSamples?.().slice(-80) || [],
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
           runtimeContext: {
+            chatVisibility,
             visibilityState: String(document.visibilityState || "unknown"),
             focused: typeof document.hasFocus === "function" ? !!document.hasFocus() : null,
             mountedMessages: loadedChatMessageCount(),

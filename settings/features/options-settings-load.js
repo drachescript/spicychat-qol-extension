@@ -357,17 +357,6 @@ async function load() {
   setValue("chatTextReplacementScope", ["ai", "user", "both"].includes(settings.chatTextReplacementScope) ? settings.chatTextReplacementScope : "ai");
   setValue("chatTextReplacementMode", settings.chatTextReplacementMode === "save" ? "save" : "display");
   setChecked("chatTextReplacementPreview", !!settings.chatTextReplacementPreview);
-  setChecked("enableTranslation", !!settings.enableTranslation);
-  setChecked("translationShowMessageButtons", !!settings.translationShowMessageButtons);
-  setChecked("translationAutoAi", !!settings.translationAutoAi);
-  setChecked("translationAutoUser", !!settings.translationAutoUser);
-  setValue("translationProvider", settings.translationProvider || "deepl");
-  setValue("libreTranslateUrl", settings.libreTranslateUrl || "");
-  setChecked("translationAllowRemoteFallback", !!settings.translationAllowRemoteFallback);
-  setChecked("translationPerChatControls", !!settings.translationPerChatControls);
-  setValue("translationTargetLanguage", settings.translationTargetLanguage || "EN-US");
-  setValue("translationUnderstoodLanguages", settings.translationUnderstoodLanguages || "EN");
-  setValue("translationProtectedTerms", settings.translationProtectedTerms || "");
   setValue("deeplApiKey", String(result[DEEPL_API_KEY] || ""));
   setValue("libreTranslateApiKey", String(result[LIBRE_TRANSLATE_KEY] || ""));
   const deeplStatus = $("deeplStatus");
@@ -529,11 +518,6 @@ async function load() {
   setChecked("formatToolbarBraces", !!settings.formatToolbarBraces);
   setValue("formatToolbarCustomWrappers", settings.formatToolbarCustomWrappers || "");
 
-  setChecked("enableReplyInstructions", !!settings.enableReplyInstructions);
-  setChecked("enableChatSceneNotes", !!settings.enableChatSceneNotes);
-  setChecked("chatSceneNotesEnableBotApply", !!settings.chatSceneNotesEnableBotApply);
-  setChecked("chatSceneNotesAutoInclude", !!settings.chatSceneNotesAutoInclude);
-  setValue("chatSceneNotesAutoMode", settings.chatSceneNotesAutoMode === "every" ? "every" : "session");
   setValue("replyInstructionText", settings.replyInstructionText || "");
   setValue("replyInstructionSendMode", ["every", "session", "manual"].includes(settings.replyInstructionSendMode) ? settings.replyInstructionSendMode : "session");
   setChecked("replyInstructionOocWrapper", settings.replyInstructionOocWrapper !== false);
@@ -619,20 +603,8 @@ async function load() {
   setChecked("showMessageQuickActions", !!settings.showMessageQuickActions);
 
   setChecked("enableSavedTextSnippets", !!settings.enableSavedTextSnippets);
-  setChecked("enableContextKeeper", !!settings.enableContextKeeper);
-  setChecked("contextKeeperAutoCapture", settings.contextKeeperAutoCapture !== false);
-  setValue("contextKeeperAutoSensitivity", ["strict", "balanced", "broad"].includes(settings.contextKeeperAutoSensitivity) ? settings.contextKeeperAutoSensitivity : "balanced");
-  setValue("contextKeeperAutoEveryMessages", String(Math.max(1, Math.min(20, Number(settings.contextKeeperAutoEveryMessages) || 4))));
-  setValue("contextKeeperAutoMaxDetails", String(Math.max(20, Math.min(300, Number(settings.contextKeeperAutoMaxDetails) || 120))));
-  setChecked("contextKeeperMessageButtons", !!settings.contextKeeperMessageButtons);
   setChecked("enableSelectionRemember", !!settings.enableSelectionRemember);
-  setValue("contextKeeperRecapSize", ["compact", "balanced", "full"].includes(settings.contextKeeperRecapSize) ? settings.contextKeeperRecapSize : "balanced");
-  setChecked("contextKeeperAutoRecall", !!settings.contextKeeperAutoRecall);
-  setChecked("contextKeeperRelevantRecall", !!settings.contextKeeperRelevantRecall);
-  setValue("contextKeeperRecallEverySends", String([1,3,5,10].includes(Number(settings.contextKeeperRecallEverySends)) ? settings.contextKeeperRecallEverySends : 5));
-  setValue("contextKeeperRecallMaxChars", String([450,900,1400].includes(Number(settings.contextKeeperRecallMaxChars)) ? settings.contextKeeperRecallMaxChars : 900));
 
-  setChecked("enableRpStateTracker", !!settings.enableRpStateTracker);
   setValue("rpStateTrackerMode", ["manual", "conservative", "assisted"].includes(settings.rpStateTrackerMode) ? settings.rpStateTrackerMode : "conservative");
   setValue("rpStateInjectMode", ["manual", "changed", "every"].includes(settings.rpStateInjectMode) ? settings.rpStateInjectMode : "changed");
   setValue("rpStateMaxContextChars", String(Math.max(300, Math.min(3000, Number(settings.rpStateMaxContextChars) || 1200))));
@@ -640,16 +612,6 @@ async function load() {
 
   renderChatNudgeManager(result[CHAT_NUDGE_STORE_KEY]);
   refreshChatNudgePermissionStatus();
-  setChecked("enableSoundscapes", !!settings.enableSoundscapes);
-  setChecked("soundscapeShowChatControl", settings.soundscapeShowChatControl !== false);
-  const soundscapeMaster = Number.isFinite(Number(settings.soundscapeMasterVolume)) ? Math.min(100, Math.max(0, Number(settings.soundscapeMasterVolume))) : 65;
-  setValue("soundscapeMasterVolume", soundscapeMaster);
-  if ($("soundscapeMasterVolumeValue")) $("soundscapeMasterVolumeValue").textContent = `${soundscapeMaster}%`;
-  setChecked("soundscapeOnChat", settings.soundscapeOnChat !== false);
-  setChecked("soundscapeOnHome", !!settings.soundscapeOnHome);
-  setChecked("soundscapeOnChats", !!settings.soundscapeOnChats);
-  setChecked("soundscapeOnProfiles", !!settings.soundscapeOnProfiles);
-  setChecked("soundscapeOnOther", !!settings.soundscapeOnOther);
   armLazySoundscapeManager();
   setChecked("messageQuickActionCopy", !!settings.messageQuickActionCopy);
   setChecked("messageQuickActionEdit", !!settings.messageQuickActionEdit);

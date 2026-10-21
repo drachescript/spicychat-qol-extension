@@ -485,7 +485,29 @@ function runtimeMessage(message) {
   });
 }
 
+// During one support export, all sections must describe the same content tab
+// at the same instant. Otherwise a successful Diagnostics request can be
+// followed by an unrelated Performance/Self-Check timeout.
+let supportRuntimeSnapshotPromise = null;
+let supportRuntimeSnapshotReaders = 0;
+
+async function withSharedSupportRuntimeSnapshot(build) {
+  if (!supportRuntimeSnapshotPromise) {
+    supportRuntimeSnapshotPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500);
+  }
+  supportRuntimeSnapshotReaders += 1;
+  try {
+    return await build();
+  } finally {
+    supportRuntimeSnapshotReaders -= 1;
+    if (supportRuntimeSnapshotReaders === 0) supportRuntimeSnapshotPromise = null;
+  }
+}
+
 function runtimeMessageWithTimeout(message, timeoutMs = 15000) {
+  if (message?.type === "DS_GET_DIAGNOSTIC_CONTEXT" && supportRuntimeSnapshotPromise) {
+    return supportRuntimeSnapshotPromise;
+  }
   return new Promise(resolve => {
     let settled = false;
     const finish = value => {
@@ -1082,6 +1104,11 @@ function makeDeferredManagerImage(src) {
   });
   host.appendChild(image);
   if (value) {
+    // Broken CDN URLs must not leave an empty image box. When a refreshed
+    // card discovers a different URL, the rebuilt card retries naturally.
+    image.addEventListener("error", () => {
+      host.replaceChildren(makeElement("span", { className: "bot-manager-placeholder", text: "?" }));
+    }, { once: true });
     image.addEventListener("load", () => setupManagerHoverAnimation(image, host), { once: true });
     if (image.complete && image.naturalWidth) window.setTimeout(() => setupManagerHoverAnimation(image, host), 0);
   }

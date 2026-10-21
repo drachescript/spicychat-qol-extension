@@ -1,3 +1,24 @@
+## Current Custom package boundary work
+
+The checked-out source has 124 feature contracts. All 29 dedicated Settings-panel
+scripts are now declared in those contracts, including the panels split during
+recent feature Settings work. Nine additional single-feature stylesheets are
+now owned and can be physically omitted from experimental Lite packages.
+
+`tools/build-lite-package.py` removes declared owner modules, unused declared
+helpers, Settings script tags and unique placeholder mounts. It also excludes
+non-runtime development directories. `build/custom-package-index.json` is the
+machine-readable asset and dependency map for a future website-side package
+integration; the website is **not** updated by this source patch.
+`build/update-custom-selection.py` can update recipes while preserving existing
+per-feature auto-update decisions and leaving newly added features' update
+setting OFF. It does not alter browser storage or install files.
+
+There are still shared Settings controllers, styles, background event handlers
+and content runtime helpers. Physical asset closure is not browser-functionality
+certification. Generated Lite packages remain experimental; production-ready
+Custom/Lite and automatic website updates are not claimed.
+
 # Custom Lite feature isolation status (0.2.52 development)
 
 The runtime feature inventory now tracks 121 independently named primary feature modules, including the newly separated Auto Images and Auto Voice. This **does not** certify 118 individually shippable Chrome/Firefox extensions.

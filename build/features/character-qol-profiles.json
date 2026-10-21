@@ -11,5 +11,8 @@
   "browserVerified": false,
   "styleFiles": [
     "content/styles/character-qol-profiles.css"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/character-qol-profiles.js"
   ]
 }
