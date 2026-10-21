@@ -4,11 +4,20 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "alternateDialogueBackgroundColor",
+    "alternateDialogueBorderColor",
+    "alternateDialogueCustomColors",
+    "alternateDialogueScope",
+    "alternateDialogueStyle",
+    "alternateDialogueTextColor",
     "styleAlternateDialogue"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/alternate-dialogue.js"
+  ]
 }

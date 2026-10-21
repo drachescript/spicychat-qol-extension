@@ -465,3 +465,9 @@ async function configureCreatorBotWatchAlarm(runNow = false) {
     });
   } catch {}
 }
+
+// Optional alarm handler owned by creator-workspace. Omitted modules do not register a handler.
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))["ds-creator-bot-watch-v1"] = {
+  owner: "creator-workspace",
+  run: () => { queueCreatorBotScan({ force: false, reason: "alarm" }); }
+};

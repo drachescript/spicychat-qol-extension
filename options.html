@@ -1075,7 +1075,7 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <label class="row"><input id="hideChatPlusButton" type="checkbox"/><span>Hide plus button in chat input</span></label>
 <label class="row"><input id="hideChatImageButton" type="checkbox"/><span>Hide image generation button</span></label>
 <label class="row"><input id="replaceChatImageWithOocButton" type="checkbox"/><span>Show OOC button in the chat input</span></label>
-<p class="hint">The chat-input OOC button inserts the preset currently selected in the mini panel. Compact/mobile controls insert immediately when only one OOC preset exists and only show a preset choice when there are multiple. If Hide image generation button is enabled, OOC uses that button's slot; otherwise Image stays visible and OOC appears beside it.</p>
+<p class="hint">The chat-input OOC button inserts the preset currently selected in the mini panel. Compact/mobile controls insert immediately when only one OOC preset exists and only show a preset choice when there are multiple. OOC appears immediately to the left of Suggest and stays available while typing. The separate Hide image generation option only affects Image.</p>
 <label class="row"><input id="showAsteriskButton" type="checkbox"/><span>Show dedicated * button in the chat input</span></label>
 <label>Dedicated * / backtick shortcut position
 <select id="composerShortcutPlacement">
@@ -1216,6 +1216,12 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="deepSleepDisabledFeatures" type="checkbox" checked disabled/><span>Disabled features stay asleep (always enabled)</span></label>
 <p class="hint">Disabled features are no longer scheduled, even if an older backup had this switched off. A one-time cleanup may still run when an enabled feature is turned off. Packaged scripts can still be parsed at page load; this is runtime gating, not yet on-demand script injection.</p>
 <label class="row"><input id="performanceDiagnostics" type="checkbox"/><span>Collect local QoL performance timings for Diagnostics</span></label>
+<div class="sub-card" id="performanceTroubleshooterCard">
+<h3>Performance Troubleshooter</h3>
+<p class="hint">After reproducing a slowdown, inspect the slowest measured QoL steps. Does not disable features or upload data. Timings are not a CPU profiler.</p>
+<button type="button" id="refreshPerformanceTroubleshooter">Show measured feature activity</button>
+<pre id="performanceTroubleshooterResults" class="diagnostic-output" style="white-space:pre-wrap">No performance snapshot requested.</pre>
+</div>
 <p class="hint">Adaptive is the normal recommended mode. Aggressive waits a little longer before non-essential QoL updates, while Maximum is meant for unusually large or slow chats. The large-chat option can switch to stronger handling automatically after your chosen message count. Performance reports stay local unless you copy one.</p>
 </section></div>
 <div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Everything is optional.</p>
@@ -1754,8 +1760,8 @@ Testing" spellcheck="false"></textarea></label>
 <section class="card">
 <h2>Compact chat top-bar controls</h2>
 <label class="row"><input id="androidTopBarMenu" type="checkbox"/><span>Show one compact QoL menu in the chat top bar</span></label>
-<label class="row"><input id="androidHideComposerShortcuts" type="checkbox"/><span>Use the compact top-bar menu instead of QoL OOC/* composer buttons</span></label>
-<p class="hint">If the compact menu checkbox is enabled manually, it is allowed to appear on normal Firefox/Chrome, Firefox Android, installed web apps and the Android APK even when Auto does not detect a WebView. Setting the mode to Never is the hard-off override.</p>
+<label class="row"><input id="androidHideComposerShortcuts" type="checkbox"/><span>Use the compact top-bar menu instead of separate * composer buttons</span></label>
+<p class="hint">If the compact menu checkbox is enabled manually, it is allowed to appear on normal Firefox/Chrome, Firefox Android, installed web apps and the Android APK even when Auto does not detect a WebView. Setting the mode to Never is the hard-off override. The OOC composer button remains visible when its separate option is enabled.</p>
 <h3>Actions in the compact QoL menu</h3>
 <label class="row"><input id="androidTopBarOoc" type="checkbox"/><span>OOC</span></label>
 <label class="row"><input id="androidTopBarAsterisk" type="checkbox"/><span>* action wrapper</span></label>

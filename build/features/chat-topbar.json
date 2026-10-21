@@ -4,11 +4,20 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "chatTopBarInlineCreator",
+    "hideChatDropdownMemoryItem",
+    "hideChatDropdownVoiceUpsell",
+    "hideChatTopBarContextDot",
+    "hideChatTopBarModelButton",
+    "hideChatTopBarRatingButton",
     "showChatTopBarTools"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/chat-topbar.js"
+  ]
 }

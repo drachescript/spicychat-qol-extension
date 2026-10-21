@@ -119,3 +119,9 @@ function configureChatNudgeAlarm(runNow = false) {
     });
   } catch {}
 }
+
+// Optional alarm handler owned by chat-nudges. Omitted modules do not register a handler.
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))["ds-chat-nudge-scan-v1"] = {
+  owner: "chat-nudges",
+  run: () => { runChatNudgeScan(); }
+};

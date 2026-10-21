@@ -89,6 +89,7 @@
       "enableSelectionRemember",
       "contextKeeperRecapSize",
       "contextKeeperAutoRecall",
+      "contextKeeperRelevantRecall",
       "contextKeeperRecallEverySends",
       "contextKeeperRecallMaxChars"
     ],

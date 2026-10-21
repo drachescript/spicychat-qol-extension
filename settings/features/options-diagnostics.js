@@ -153,9 +153,10 @@ function setupControlCenterControls() {
     const status = $("controlSupportStatus");
     if (status) status.textContent = "Building full support check for download…";
     const downloaded = await downloadAllSupportInfo();
+    const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
     if (status) status.textContent = downloaded
-      ? "Full support check downloaded. It includes no chat text or saved private content."
-      : "Could not download the full support check; review Quick diagnostics for details.";
+      ? (androidWebView ? "Full support check copied instead of downloaded on Android. Paste it into your report." : "Full support check downloaded. It includes no chat text or saved private content.")
+      : (androidWebView ? "Android export could not be verified. Open Data & Backup to copy the generated report." : "Could not download the full support check; review Quick diagnostics for details.");
   });
 }
 
@@ -177,6 +178,22 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
   }
 
   const mime = "text/plain;charset=utf-8";
+  const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
+  // Some Android wrapper revisions report success while producing an empty
+  // exported .txt. Keep a copyable fallback instead of claiming a real file.
+  if (androidWebView) {
+    const box = $("settingsJson");
+    if (box) box.value = body;
+    try {
+      await navigator.clipboard.writeText(body);
+      if (status) status.textContent = "Report copied. Android app log export may produce an empty file; paste this report instead.";
+      return true;
+    } catch {
+      if (box) { setActiveTab("data"); box.focus(); box.select(); }
+      if (status) status.textContent = "Android file export is unverified. Report placed in Data / Backup for copying.";
+      return false;
+    }
+  }
   try {
     if (await tryNativeBackupSave(body, filename, mime)) {
       if (status) status.textContent = successMessage;
@@ -755,4 +772,36 @@ async function resetPerformanceCounters() {
   OPTIONS_PERFORMANCE.blockedManagerRefreshBatches = 0;
   OPTIONS_PERFORMANCE.slowStorageReads = [];
   if (status) status.textContent = response?.ok ? "Performance counters reset for Settings and the source SpicyChat tab." : "Settings counters reset. No reachable SpicyChat source tab responded.";
+}
+
+// On-demand local performance summary: no new background watcher or remote calls.
+async function refreshPerformanceTroubleshooter() {
+  const output = $("performanceTroubleshooterResults");
+  if (!output) return;
+  output.textContent = "Reading local feature timings…";
+  const response = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500).catch(() => null);
+  const runtime = response?.pageDiagnostics;
+  if (!runtime || response?.runtimeAvailable === false) {
+    output.textContent = "No responsive SpicyChat page was found. Open a chat with QoL enabled, then try again. Android WebView may not expose this runtime to Settings; use Copy all support info in that case.";
+    return;
+  }
+  const enabled = !!$("performanceDiagnostics")?.checked;
+  const entries = Array.isArray(runtime.performance) ? runtime.performance : [];
+  const rows = entries.filter(entry => Number.isFinite(Number(entry?.totalMs)) && Number(entry.totalMs) > 0)
+    .sort((a,b) => Number(b.totalMs || 0) - Number(a.totalMs || 0)).slice(0, 8);
+  const notes = [
+    `Page: ${sanitizeDiagnosticPath(response?.url || "") || "unknown"}`,
+    `Local timing collection: ${enabled ? "ON" : "OFF"}`,
+    "These are elapsed timings (which may include waiting), not proven CPU usage or causation."
+  ];
+  if (!rows.length) notes.push("No feature timings collected yet. Enable local performance timings, use a chat for a while, then refresh.");
+  else {
+    notes.push("Top recorded QoL steps by total elapsed time:");
+    rows.forEach(item => notes.push(`• ${String(item.name || "step").slice(0,70)}: ${Number(item.totalMs || 0).toFixed(1)} ms total; ${Number(item.calls || 0)} calls; ${Number(item.maxMs || 0).toFixed(1)} ms max`));
+  }
+  const counters = runtime.runtimePerformance || {};
+  notes.push(`Observer batches: ${Number(counters.observerBatches || 0)}; message-lane runs: ${Number(counters.messageLaneRuns || 0)}; skipped disabled steps: ${Number(counters.disabledFeatureStepSkips || 0)}`);
+  const emptyTransitions = Number(counters.chatUnexpectedEmptyTransitions || 0);
+  if (emptyTransitions) notes.push(`Possible blank-chat transitions: ${emptyTransitions} (the DOM went empty; messages were not proven deleted)`);
+  output.textContent = notes.join("\n");
 }

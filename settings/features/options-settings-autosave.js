@@ -122,11 +122,6 @@ function readSettingsFromPage() {
     expandModelSelectorDescriptions: checked("expandModelSelectorDescriptions"),
     hideModelUpgradeButtons: checked("hideModelUpgradeButtons"),
     customizeModelQuickMenu: checked("customizeModelQuickMenu"),
-    enableModelQuickAccess: checked("enableModelQuickAccess"),
-    modelQuickAccessNames: value("modelQuickAccessNames", ""),
-    enableChatLorebookManager: checked("enableChatLorebookManager"),
-    enablePreviouslyChattedIndicator: checked("enablePreviouslyChattedIndicator"),
-    chattedIndicatorShowOpened: checked("chattedIndicatorShowOpened"),
     modelQuickFavoritesOnly: checked("modelQuickFavoritesOnly"),
     modelFavoriteNames: value("modelFavoriteNames", ""),
     modelHiddenNames: value("modelHiddenNames", ""),
@@ -142,18 +137,12 @@ function readSettingsFromPage() {
     topBarProfilePillCustomText: value("topBarProfilePillCustomText", ""),
     topBarProfilePillPersonaPrefix: checked("topBarProfilePillPersonaPrefix"),
 
-    showChatTopBarTools: checked("showChatTopBarTools"),
-    chatTopBarInlineCreator: checked("chatTopBarInlineCreator"),
     chatTopBarAddLaterButton: checked("chatTopBarAddLaterButton"),
     closeChatTabAfterSavingLater: checked("closeChatTabAfterSavingLater"),
     showPerCharacterChatHistory: checked("showPerCharacterChatHistory"),
     showQuickNewChatButton: checked("showQuickNewChatButton"),
-    hideChatTopBarRatingButton: checked("hideChatTopBarRatingButton"),
-    enableNativeRatingHelpers: checked("enableNativeRatingHelpers"),
-    hideChatTopBarModelButton: checked("hideChatTopBarModelButton"),
-    hideChatTopBarContextDot: checked("hideChatTopBarContextDot"),
-    hideChatDropdownVoiceUpsell: checked("hideChatDropdownVoiceUpsell"),
-    hideChatDropdownMemoryItem: checked("hideChatDropdownMemoryItem"),
+
+
     enableBulkMemoryManager: checked("enableBulkMemoryManager"),
     enableMemoryVault: checked("enableMemoryVault"),
     showCopyMemoryAction: checked("showCopyMemoryAction"),
@@ -322,13 +311,7 @@ function readSettingsFromPage() {
     formatToolbarBrackets: checked("formatToolbarBrackets"),
     formatToolbarBraces: checked("formatToolbarBraces"),
     formatToolbarCustomWrappers: value("formatToolbarCustomWrappers", ""),
-    styleAlternateDialogue: checked("styleAlternateDialogue"),
-    alternateDialogueScope: ["ai", "user", "both"].includes(value("alternateDialogueScope")) ? value("alternateDialogueScope") : "ai",
-    alternateDialogueStyle: value("alternateDialogueStyle", "dialogue"),
-    alternateDialogueCustomColors: checked("alternateDialogueCustomColors"),
-    alternateDialogueTextColor: value("alternateDialogueTextColor", "#f4d35e"),
-    alternateDialogueBackgroundColor: value("alternateDialogueBackgroundColor", "#1f2430"),
-    alternateDialogueBorderColor: value("alternateDialogueBorderColor", "#596273"),
+
     enableReplyInstructions: checked("enableReplyInstructions"),
     enableChatSceneNotes: checked("enableChatSceneNotes"),
     chatSceneNotesEnableBotApply: checked("chatSceneNotesEnableBotApply"),
@@ -417,21 +400,8 @@ function readSettingsFromPage() {
 
     stackChatMessages: checked("stackChatMessages"),
     showMessageQuickActions: checked("showMessageQuickActions"),
-    showChatSearch: checked("showChatSearch"),
-    chatSearchShowPanel: checked("chatSearchShowPanel", true),
-    chatSearchShowFindButton: checked("chatSearchShowFindButton"),
-    chatSearchExactPhrase: checked("chatSearchExactPhrase"),
-    chatSearchCaseSensitive: checked("chatSearchCaseSensitive"),
-    chatSearchWholeWord: checked("chatSearchWholeWord"),
-    chatSearchRegex: checked("chatSearchRegex"),
-    chatSearchLoadUntilMatch: checked("chatSearchLoadUntilMatch"),
-    enableMessageBookmarks: checked("enableMessageBookmarks"),
-    messageBookmarkButtons: checked("messageBookmarkButtons", true),
-    enableFocusMode: checked("enableFocusMode"),
-    focusHideSidebar: checked("focusHideSidebar", true),
-    focusHideTopBar: checked("focusHideTopBar", true),
-    focusHideChatHeader: checked("focusHideChatHeader", true),
-    focusHideQolPanel: checked("focusHideQolPanel", true),
+
+
     enableSavedTextSnippets: checked("enableSavedTextSnippets"),
     enableContextKeeper: checked("enableContextKeeper"),
     contextKeeperAutoCapture: checked("contextKeeperAutoCapture", true),
@@ -442,20 +412,16 @@ function readSettingsFromPage() {
     enableSelectionRemember: checked("enableSelectionRemember"),
     contextKeeperRecapSize: ["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced",
     contextKeeperAutoRecall: checked("contextKeeperAutoRecall"),
+    contextKeeperRelevantRecall: checked("contextKeeperRelevantRecall"),
     contextKeeperRecallEverySends: [1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5,
     contextKeeperRecallMaxChars: [450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900,
-    enableStoryDayTracker: checked("enableStoryDayTracker"),
-    storyDayTrackerMode: ["manual", "conservative", "assisted"].includes(value("storyDayTrackerMode")) ? value("storyDayTrackerMode") : "conservative",
-    storyDayTrackerIncludeInContext: checked("storyDayTrackerIncludeInContext", true),
-    storyDayTrackerShowQuickPanel: checked("storyDayTrackerShowQuickPanel", true),
+
     enableRpStateTracker: checked("enableRpStateTracker"),
     rpStateTrackerMode: ["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative",
     rpStateInjectMode: ["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed",
     rpStateMaxContextChars: Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)),
     rpStateShowQuickPanel: checked("rpStateShowQuickPanel", true),
-    enableChatNudges: checked("enableChatNudges"),
-    chatNudgeDefaultHours: [5, 8, 24, 48, 168].includes(Number(value("chatNudgeDefaultHours", "24"))) ? Number(value("chatNudgeDefaultHours", "24")) : 24,
-    chatNudgeBrowserNotifications: checked("chatNudgeBrowserNotifications", true),
+
     enableSoundscapes: checked("enableSoundscapes"),
     soundscapeShowChatControl: checked("soundscapeShowChatControl", true),
     soundscapeMasterVolume: Number.isFinite(Number(value("soundscapeMasterVolume", "65"))) ? Math.min(100, Math.max(0, Number(value("soundscapeMasterVolume", "65")))) : 65,
@@ -512,9 +478,7 @@ function readSettingsFromPage() {
     settingsPageWidth: ["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable",
     collapseSettingsSectionsByDefault: checked("collapseSettingsSectionsByDefault"),
     featureIndexCollapsedCategories: normalizeFeatureIndexCollapsedCategories(loadedSettingsSnapshot.featureIndexCollapsedCategories),
-    enableCommandPalette: checked("enableCommandPalette", false),
-    commandPaletteShortcut: ["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(value("commandPaletteShortcut")) ? value("commandPaletteShortcut") : "ctrl-k",
-    commandPaletteShowSavedItems: checked("commandPaletteShowSavedItems", true),
+
     deepSleepDisabledFeatures: true,
     performanceDiagnostics: checked("performanceDiagnostics"),
     enableLocalChangeHistory: checked("enableLocalChangeHistory"),
@@ -633,11 +597,9 @@ function readSettingsFromPage() {
     enableSmartFilterPresets: checked("enableSmartFilterPresets"),
     enableCreationAudit: checked("enableCreationAudit"),
     creationAuditQuickStatus: checked("creationAuditQuickStatus"),
-    enableCreatorWritingAssistant: checked("enableCreatorWritingAssistant"),
-    creatorWritingUseBrowserAi: checked("creatorWritingUseBrowserAi"),
-    creatorWritingDictionary: value("creatorWritingDictionary"),
-    creatorWritingTargetLanguage: value("creatorWritingTargetLanguage", "English"),
-    enableProfileExport: checked("enableProfileExport"),
+
+
+
     enableMyCreationsFilters: checked("enableMyCreationsFilters"),
     enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
     showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
@@ -658,16 +620,7 @@ function readSettingsFromPage() {
     recommendationOnlyLorebook: checked("recommendationOnlyLorebook"),
     recommendationSessionHideButtons: checked("recommendationSessionHideButtons"),
     recommendationRandomButton: checked("recommendationRandomButton"),
-    cardDensityMode: ["normal", "compact", "dense"].includes(value("cardDensityMode")) ? value("cardDensityMode") : "normal",
-    cardClickBehavior: ["default", "profile"].includes(value("cardClickBehavior")) ? value("cardClickBehavior") : "default",
-    showCopyBotInfoButtons: checked("showCopyBotInfoButtons"),
-    trackRecentlySeenBots: checked("trackRecentlySeenBots"),
-    showRecentlySeenButton: checked("showRecentlySeenButton"),
-    recentlySeenLimit: Math.max(10, Math.min(250, Number(value("recentlySeenLimit", "100")) || 100)),
-    enableBotComparison: checked("enableBotComparison"),
-    showQuickNotInterestedButtons: checked("showQuickNotInterestedButtons"),
-    showQuickLessLikeButtons: checked("showQuickLessLikeButtons"),
-    showQuickDislikeButtons: checked("showQuickDislikeButtons"),
+
     showQuickUnblockButtons: checked("showQuickUnblockButtons"),
     reduceAnimatedBotImages: checked("reduceAnimatedBotImages"),
     animatedImageMode: "hover",
@@ -708,7 +661,13 @@ function readSettingsFromPage() {
     deepImportMaxPages: 80,
     showBlockCurrentBotButton: false,
     enablePersonalUsageSummary: checked("enablePersonalUsageSummary"),
-    debug: checked("debug")  };
+    debug: checked("debug"),
+    // Only installed feature modules contribute their controls here.
+    // Omitted modules cannot silently write default values for their keys.
+    ...Object.fromEntries(Object.entries(window.__DSQ_FEATURE_SETTINGS_READERS__ || {}).map(
+      ([key, reader]) => [key, reader()]
+    ))
+  };
   const profile = window.__DSQ_BUILD_PROFILE__;
   if (profile?.generated && Array.isArray(profile.features)) {
     const installed = new Set(profile.features);
@@ -727,6 +686,8 @@ function readSettingsFromPage() {
 }
 
 function readSingleSettingFromPage(settingKey) {
+  const ownedReader = window.__DSQ_FEATURE_SETTINGS_READERS__?.[String(settingKey || "")];
+  if (typeof ownedReader === "function") return ownedReader();
   switch (String(settingKey || "")) {
     case "enabled": return (checked("enabled"));
     case "saiToolkitCompatibility": return (checked("saiToolkitCompatibility", false));
@@ -842,11 +803,6 @@ function readSingleSettingFromPage(settingKey) {
     case "expandModelSelectorDescriptions": return (checked("expandModelSelectorDescriptions"));
     case "hideModelUpgradeButtons": return (checked("hideModelUpgradeButtons"));
     case "customizeModelQuickMenu": return (checked("customizeModelQuickMenu"));
-    case "enableModelQuickAccess": return checked("enableModelQuickAccess");
-    case "modelQuickAccessNames": return value("modelQuickAccessNames", "");
-    case "enableChatLorebookManager": return checked("enableChatLorebookManager");
-    case "enablePreviouslyChattedIndicator": return checked("enablePreviouslyChattedIndicator");
-    case "chattedIndicatorShowOpened": return checked("chattedIndicatorShowOpened");
     case "modelQuickFavoritesOnly": return (checked("modelQuickFavoritesOnly"));
     case "modelFavoriteNames": return (value("modelFavoriteNames", ""));
     case "modelHiddenNames": return (value("modelHiddenNames", ""));
@@ -860,18 +816,13 @@ function readSingleSettingFromPage(settingKey) {
     case "topBarProfilePillMode": return (value("topBarProfilePillMode", "normal"));
     case "topBarProfilePillCustomText": return (value("topBarProfilePillCustomText", ""));
     case "topBarProfilePillPersonaPrefix": return (checked("topBarProfilePillPersonaPrefix"));
-    case "showChatTopBarTools": return (checked("showChatTopBarTools"));
-    case "chatTopBarInlineCreator": return (checked("chatTopBarInlineCreator"));
+
     case "chatTopBarAddLaterButton": return (checked("chatTopBarAddLaterButton"));
     case "closeChatTabAfterSavingLater": return (checked("closeChatTabAfterSavingLater"));
     case "showPerCharacterChatHistory": return (checked("showPerCharacterChatHistory"));
     case "showQuickNewChatButton": return (checked("showQuickNewChatButton"));
-    case "hideChatTopBarRatingButton": return (checked("hideChatTopBarRatingButton"));
-    case "enableNativeRatingHelpers": return (checked("enableNativeRatingHelpers"));
-    case "hideChatTopBarModelButton": return (checked("hideChatTopBarModelButton"));
-    case "hideChatTopBarContextDot": return (checked("hideChatTopBarContextDot"));
-    case "hideChatDropdownVoiceUpsell": return (checked("hideChatDropdownVoiceUpsell"));
-    case "hideChatDropdownMemoryItem": return (checked("hideChatDropdownMemoryItem"));
+
+
     case "enableBulkMemoryManager": return (checked("enableBulkMemoryManager"));
     case "enableMemoryVault": return (checked("enableMemoryVault"));
     case "showCopyMemoryAction": return (checked("showCopyMemoryAction"));
@@ -1030,13 +981,7 @@ function readSingleSettingFromPage(settingKey) {
     case "formatToolbarBrackets": return (checked("formatToolbarBrackets"));
     case "formatToolbarBraces": return (checked("formatToolbarBraces"));
     case "formatToolbarCustomWrappers": return (value("formatToolbarCustomWrappers", ""));
-    case "styleAlternateDialogue": return (checked("styleAlternateDialogue"));
-    case "alternateDialogueScope": return (["ai", "user", "both"].includes(value("alternateDialogueScope")) ? value("alternateDialogueScope") : "ai");
-    case "alternateDialogueStyle": return (value("alternateDialogueStyle", "dialogue"));
-    case "alternateDialogueCustomColors": return (checked("alternateDialogueCustomColors"));
-    case "alternateDialogueTextColor": return (value("alternateDialogueTextColor", "#f4d35e"));
-    case "alternateDialogueBackgroundColor": return (value("alternateDialogueBackgroundColor", "#1f2430"));
-    case "alternateDialogueBorderColor": return (value("alternateDialogueBorderColor", "#596273"));
+
     case "enableReplyInstructions": return (checked("enableReplyInstructions"));
     case "replyInstructionText": return (value("replyInstructionText", "").trim().slice(0, 2000));
     case "replyInstructionSendMode": return (["every", "session", "manual"].includes(value("replyInstructionSendMode")) ? value("replyInstructionSendMode") : "session");
@@ -1117,21 +1062,8 @@ function readSingleSettingFromPage(settingKey) {
     case "hideUnlockCustomVoices": return (checked("hideUnlockCustomVoices"));
     case "stackChatMessages": return (checked("stackChatMessages"));
     case "showMessageQuickActions": return (checked("showMessageQuickActions"));
-    case "showChatSearch": return (checked("showChatSearch"));
-    case "chatSearchShowPanel": return (checked("chatSearchShowPanel", true));
-    case "chatSearchShowFindButton": return (checked("chatSearchShowFindButton"));
-    case "chatSearchExactPhrase": return (checked("chatSearchExactPhrase"));
-    case "chatSearchCaseSensitive": return (checked("chatSearchCaseSensitive"));
-    case "chatSearchWholeWord": return (checked("chatSearchWholeWord"));
-    case "chatSearchRegex": return (checked("chatSearchRegex"));
-    case "chatSearchLoadUntilMatch": return (checked("chatSearchLoadUntilMatch"));
-    case "enableMessageBookmarks": return (checked("enableMessageBookmarks"));
-    case "messageBookmarkButtons": return (checked("messageBookmarkButtons", true));
-    case "enableFocusMode": return (checked("enableFocusMode"));
-    case "focusHideSidebar": return (checked("focusHideSidebar", true));
-    case "focusHideTopBar": return (checked("focusHideTopBar", true));
-    case "focusHideChatHeader": return (checked("focusHideChatHeader", true));
-    case "focusHideQolPanel": return (checked("focusHideQolPanel", true));
+
+
     case "enableSavedTextSnippets": return (checked("enableSavedTextSnippets"));
     case "enableContextKeeper": return (checked("enableContextKeeper"));
     case "contextKeeperAutoCapture": return (checked("contextKeeperAutoCapture", true));
@@ -1142,20 +1074,16 @@ function readSingleSettingFromPage(settingKey) {
     case "enableSelectionRemember": return (checked("enableSelectionRemember"));
     case "contextKeeperRecapSize": return (["compact", "balanced", "full"].includes(value("contextKeeperRecapSize")) ? value("contextKeeperRecapSize") : "balanced");
     case "contextKeeperAutoRecall": return checked("contextKeeperAutoRecall");
+    case "contextKeeperRelevantRecall": return checked("contextKeeperRelevantRecall");
     case "contextKeeperRecallEverySends": return ([1,3,5,10].includes(Number(value("contextKeeperRecallEverySends"))) ? Number(value("contextKeeperRecallEverySends")) : 5);
     case "contextKeeperRecallMaxChars": return ([450,900,1400].includes(Number(value("contextKeeperRecallMaxChars"))) ? Number(value("contextKeeperRecallMaxChars")) : 900);
-    case "enableStoryDayTracker": return (checked("enableStoryDayTracker"));
-    case "storyDayTrackerMode": return (["manual", "conservative", "assisted"].includes(value("storyDayTrackerMode")) ? value("storyDayTrackerMode") : "conservative");
-    case "storyDayTrackerIncludeInContext": return (checked("storyDayTrackerIncludeInContext", true));
-    case "storyDayTrackerShowQuickPanel": return (checked("storyDayTrackerShowQuickPanel", true));
+
     case "enableRpStateTracker": return (checked("enableRpStateTracker"));
     case "rpStateTrackerMode": return (["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative");
     case "rpStateInjectMode": return (["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed");
     case "rpStateMaxContextChars": return (Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)));
     case "rpStateShowQuickPanel": return (checked("rpStateShowQuickPanel", true));
-    case "enableChatNudges": return (checked("enableChatNudges"));
-    case "chatNudgeDefaultHours": return ([5, 8, 24, 48, 168].includes(Number(value("chatNudgeDefaultHours", "24"))) ? Number(value("chatNudgeDefaultHours", "24")) : 24);
-    case "chatNudgeBrowserNotifications": return (checked("chatNudgeBrowserNotifications", true));
+
     case "enableSoundscapes": return (checked("enableSoundscapes"));
     case "soundscapeShowChatControl": return (checked("soundscapeShowChatControl", true));
     case "soundscapeMasterVolume": return (Number.isFinite(Number(value("soundscapeMasterVolume", "65"))) ? Math.min(100, Math.max(0, Number(value("soundscapeMasterVolume", "65")))) : 65);
@@ -1212,9 +1140,7 @@ function readSingleSettingFromPage(settingKey) {
     case "settingsPageWidth": return (["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable");
     case "collapseSettingsSectionsByDefault": return (checked("collapseSettingsSectionsByDefault"));
     case "featureIndexCollapsedCategories": return normalizeFeatureIndexCollapsedCategories(loadedSettingsSnapshot.featureIndexCollapsedCategories);
-    case "enableCommandPalette": return (checked("enableCommandPalette", false));
-    case "commandPaletteShortcut": return (["ctrl-k", "ctrl-shift-k", "alt-k", "off"].includes(value("commandPaletteShortcut")) ? value("commandPaletteShortcut") : "ctrl-k");
-    case "commandPaletteShowSavedItems": return (checked("commandPaletteShowSavedItems", true));
+
     case "deepSleepDisabledFeatures": return true;
     case "performanceDiagnostics": return (checked("performanceDiagnostics"));
     case "enableLocalChangeHistory": return (checked("enableLocalChangeHistory"));
@@ -1324,11 +1250,9 @@ function readSingleSettingFromPage(settingKey) {
     case "enableSmartFilterPresets": return (checked("enableSmartFilterPresets"));
     case "enableCreationAudit": return (checked("enableCreationAudit"));
     case "creationAuditQuickStatus": return (checked("creationAuditQuickStatus"));
-    case "enableCreatorWritingAssistant": return (checked("enableCreatorWritingAssistant"));
-    case "creatorWritingUseBrowserAi": return (checked("creatorWritingUseBrowserAi"));
-    case "creatorWritingDictionary": return (value("creatorWritingDictionary"));
-    case "creatorWritingTargetLanguage": return (value("creatorWritingTargetLanguage", "English"));
-    case "enableProfileExport": return (checked("enableProfileExport"));
+
+
+
     case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
     case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
     case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
@@ -1350,16 +1274,7 @@ function readSingleSettingFromPage(settingKey) {
     case "recommendationOnlyLorebook": return (checked("recommendationOnlyLorebook"));
     case "recommendationSessionHideButtons": return (checked("recommendationSessionHideButtons"));
     case "recommendationRandomButton": return (checked("recommendationRandomButton"));
-    case "cardDensityMode": return (["normal", "compact", "dense"].includes(value("cardDensityMode")) ? value("cardDensityMode") : "normal");
-    case "cardClickBehavior": return (["default", "profile"].includes(value("cardClickBehavior")) ? value("cardClickBehavior") : "default");
-    case "showCopyBotInfoButtons": return (checked("showCopyBotInfoButtons"));
-    case "trackRecentlySeenBots": return (checked("trackRecentlySeenBots"));
-    case "showRecentlySeenButton": return (checked("showRecentlySeenButton"));
-    case "recentlySeenLimit": return (Math.max(10, Math.min(250, Number(value("recentlySeenLimit", "100")) || 100)));
-    case "enableBotComparison": return (checked("enableBotComparison"));
-    case "showQuickNotInterestedButtons": return (checked("showQuickNotInterestedButtons"));
-    case "showQuickLessLikeButtons": return (checked("showQuickLessLikeButtons"));
-    case "showQuickDislikeButtons": return (checked("showQuickDislikeButtons"));
+
     case "showQuickUnblockButtons": return (checked("showQuickUnblockButtons"));
     case "reduceAnimatedBotImages": return (checked("reduceAnimatedBotImages"));
     case "animatedImageMode": return "hover";

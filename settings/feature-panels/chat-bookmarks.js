@@ -18,4 +18,12 @@
     return node;
   };
   host.replaceWith(make(["section",{"class":"card","id":"messageBookmarksCard"},"\n",["h2",{},"Message bookmarks / multiple local pins"],"\n",["label",{"class":"row"},["input",{"id":"enableMessageBookmarks","type":"checkbox"}],["span",{},"Enable local message bookmarks in chats"]],"\n",["label",{"class":"row"},["input",{"id":"messageBookmarkButtons","type":"checkbox"}],["span",{},"Show a bookmark star on each loaded message"]],"\n",["p",{"class":"hint"},"Bookmark as many messages as you want without changing SpicyChat's native pins. Bookmarks are stored locally per chat, can have optional notes, can be searched, add Back/Forward location history, and provide ★ Prev / Next ★ navigation between loaded bookmarks."],"\n"]));
+  // Only an installed panel registers its read/load handlers.
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["enableMessageBookmarks"] = () => (checked("enableMessageBookmarks"));
+  loaders["enableMessageBookmarks"] = (settings) => { setChecked("enableMessageBookmarks", !!settings.enableMessageBookmarks); };
+  readers["messageBookmarkButtons"] = () => (checked("messageBookmarkButtons", true));
+  loaders["messageBookmarkButtons"] = (settings) => { setChecked("messageBookmarkButtons", settings.messageBookmarkButtons !== false); };
+
 })();

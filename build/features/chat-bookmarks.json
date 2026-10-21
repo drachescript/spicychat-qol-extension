@@ -3,10 +3,16 @@
   "primary": "content/chat-bookmarks.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "enableMessageBookmarks",
+    "messageBookmarkButtons"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/chat-bookmarks.js"
+  ]
 }

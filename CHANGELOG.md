@@ -1,3 +1,18 @@
+## 0.2.54
+- Added an on-demand Performance Troubleshooter that shows measured QoL feature-step activity without uploading chat content or automatically disabling features.
+- Reduced unnecessary Context Keeper toolbar checks when its message shortcuts are disabled, without changing saved memories.
+- Reduced chat-observer work during ordinary message streaming by checking edit guards only for relevant message/editor mutations.
+- Added content-free diagnostics for sudden chat-message unmounts, without forcing reloads or altering conversations.
+- Improved diagnostic trace negotiation with compatible Inspector versions, including legacy operation markers when connected.
+- Avoided reading unused saved memory and organizer data during the initial Settings load, especially helpful on storage-heavy devices.
+- Improved optional Context Keeper recall with local topic-aware matching and more varied continuity details; no external AI service or subscription is required.
+- Added reviewable Context Keeper updates and consolidation for character development and long-running stories. Older versions stay saved but are excluded from active recaps.
+- Expanded Context Keeper categories for character growth, recurring NPCs and major story events, with optional review-only suggestions for obvious conflicting facts.
+- Improved Android WebView support-report exporting by offering a copyable report instead of reporting an unverified file download as successful.
+- Kept the optional OOC chat-input shortcut immediately left of Suggest and available while typing, without replacing the Image button.
+- Changed the optional compact chat controls button from a gear icon to a QoL label.
+- Separated more optional feature Settings and styles into individual modules and reduced unnecessary background alarm handling for omitted features, without resetting saved preferences.
+
 ## 0.2.53
 - Maximum Performance now enables related performance options automatically while remembering any options you turn off individually.
 - Fixed Dislike and Less Like being treated as interchangeable: Dislike now submits its separate native character-rating event and keeps independent completion history.

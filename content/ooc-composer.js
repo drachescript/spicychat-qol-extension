@@ -17,6 +17,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     oocHealthConfirmTimer = 0;
     DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
     DS.qsa(`.${OOC_SHORTCUT_CLASS}`).forEach(button => button.remove());
+    DS.qsa(".ds-chat-ooc-controls-fallback").forEach(row => row.remove());
 
     DS.qsa("[data-ds-ooc-image-wrapper='1']").forEach(wrapper => {
       const original = wrapper.querySelector(
@@ -72,33 +73,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (aScore !== bScore) return bScore - aScore;
       return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
     })[0] || null;
-  }
-
-  function findComposerControlsRow(field) {
-    if (!field) return null;
-
-    // The current SpicyChat composer has three direct branches: left-side
-    // controls, the message field, and Send. Find that shared shell from the
-    // textbox instead of deriving placement from Plus/Image, because those
-    // native controls can themselves be hidden by QoL.
-    for (let shell = field.parentElement; shell && shell !== document.body; shell = shell.parentElement) {
-      const directChildren = Array.from(shell.children || []);
-      if (directChildren.length < 2) continue;
-
-      const fieldBranch = directChildren.find(child => child === field || child.contains(field));
-      if (!fieldBranch) continue;
-
-      const controlsBranch = directChildren.find(child => {
-        if (child === fieldBranch) return false;
-        return !!child.querySelector?.(
-          'button[aria-label="Plus-button"], button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"], .ds-chat-ooc-shortcut, .ds-chat-asterisk-shortcut'
-        );
-      });
-
-      if (controlsBranch) return controlsBranch;
-    }
-
-    return null;
   }
 
   function preferredOocTemplateIndex() {
@@ -226,9 +200,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function createOocShortcut(original) {
     const button = original.cloneNode(false);
 
-    // The replacement is cloned from SpicyChat's Image button so it keeps the
-    // native sizing/classes. Never inherit QoL's marker, inline display:none,
-    // or SpicyChat's transient generation-time disabled state.
+    // Prefer the native Image button as a size template, but keep OOC in its
+    // own sibling wrapper. Never inherit its transient disabled/hidden state.
     button.removeAttribute("data-testid");
     button.removeAttribute("id");
     button.removeAttribute("data-ds-ooc-original-image");
@@ -242,147 +215,120 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return button;
   }
 
-  function imageWrapperFor(original) {
-    return (
-      original?.closest('[data-tooltip-content="Image"]') ||
-      original?.parentElement?.closest(".inline-flex") ||
-      original?.parentElement ||
-      null
-    );
+  function findComposerPlacement(field) {
+    if (!field) return null;
+    // The chat composer keeps a stable message-field shell even when React
+    // temporarily removes Image, Suggest and Plus while the user is typing.
+    // Mount into that shell rather than making OOC depend on those buttons.
+    for (let shell = field.parentElement; shell && shell !== document.body; shell = shell.parentElement) {
+      const children = Array.from(shell.children || []);
+      if (children.length < 2) continue;
+      const fieldBranch = children.find(child => child === field || child.contains(field));
+      if (!fieldBranch) continue;
+      // Prefer native controls when they return after typing; a temporary
+      // fallback row must not capture OOC permanently ahead of Image/Suggest.
+      const nativeControls = children.find(child => child !== fieldBranch &&
+        !child.matches?.(".ds-chat-ooc-controls-fallback") &&
+        child.querySelector?.('button[aria-label="Plus-button"], button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"], button[aria-label="autogenerate"]')
+      );
+      const fallbackControls = children.find(child => child.matches?.(".ds-chat-ooc-controls-fallback"));
+      const controls = nativeControls || fallbackControls || null;
+      if (controls) return { shell, fieldBranch, controls };
+      // The native left controls can be entirely unmounted while typing.
+      if (shell.classList.contains("items-end") && shell.classList.contains("w-full")) {
+        return { shell, fieldBranch, controls: null };
+      }
+    }
+    return null;
   }
 
-  function ensureOocShortcut(replaceImage) {
-    const imageButtons = DS.qsa(
-      'button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]'
-    ).filter(button => !button.classList.contains(OOC_SHORTCUT_CLASS));
+  function ensureOocShortcut() {
+    const field = document.querySelector('textarea[placeholder="Message..."], textarea[placeholder*="Message"], textarea[aria-label="Message"]')
+      || composerFieldNear(document.body);
+    const placement = findComposerPlacement(field);
+    if (!placement || placement.shell.closest("#ds-qol-panel")) return;
 
-    // When the user starts typing, SpicyChat replaces its Image/voice controls
-    // with Send. OOC must not depend on Image continuing to exist. Keep the
-    // shortcut on the composer controls row (next to Plus) until Image returns.
-    if (!imageButtons.length) {
-      const field = composerFieldNear(document.body);
-      const controlRow = findComposerControlsRow(field);
-      if (!controlRow || controlRow.closest("#ds-qol-panel")) return;
-
-      const wrappers = DS.qsa(`.${OOC_WRAPPER_CLASS}`);
-      let holder = wrappers.find(wrapper => wrapper.parentElement === controlRow) || null;
-      wrappers.forEach(wrapper => { if (wrapper !== holder) wrapper.remove(); });
-
-      // A native Image wrapper may have been removed by React. Never keep a
-      // detached/stale shortcut or create more than one visible button.
-      DS.qsa(`.${OOC_SHORTCUT_CLASS}`).forEach(button => {
-        if (!holder?.contains(button)) button.remove();
-      });
-
-      if (!holder) {
-        const template = DS.qsa('button[aria-label="Plus-button"]', controlRow)[0]
-          || DS.qsa('button[aria-label="send-message"]', controlRow)[0];
-        if (!template) return;
-        holder = document.createElement("div");
-        holder.className = `inline-flex max-w-full ${OOC_WRAPPER_CLASS}`;
-        holder.setAttribute("data-tooltip-content", "OOC");
-        const shortcut = createOocShortcut(template);
-        // A fallback cloned from Plus/Send should look like the normal Image-
-        // based OOC shortcut, not inherit a filled Plus or Send background.
-        shortcut.className = `inline-flex items-center justify-center transition-all duration-200 rounded-full bg-transparent text-black dark:text-white w-9 h-9 cursor-pointer ${OOC_SHORTCUT_CLASS}`;
-        holder.appendChild(shortcut);
-      }
-
-      const plusContainer = DS.qsa('button[aria-label="Plus-button"]', controlRow)[0]
-        ?.closest(".relative") || null;
-      const anchor = plusContainer?.parentElement === controlRow
-        ? plusContainer
-        : Array.from(controlRow.children).find(child => child !== holder) || null;
-      if (anchor && anchor.nextElementSibling !== holder) {
-        anchor.insertAdjacentElement("afterend", holder);
-      } else if (!anchor && holder.parentElement !== controlRow) {
-        controlRow.appendChild(holder);
-      }
-      const shortcut = holder.querySelector(`.${OOC_SHORTCUT_CLASS}`);
-      bindOocShortcut(normalizeOocShortcut(shortcut));
-      scheduleOocShortcutHealthCheck();
-      return;
+    let { shell, fieldBranch, controls } = placement;
+    if (!controls) {
+      // No native left-side controls remain during typing. Create a small
+      // standalone lane immediately to the left of the message field.
+      controls = document.createElement("div");
+      controls.className = "h-full flex items-end gap-sm mb-1 ds-chat-ooc-controls-fallback";
+      shell.insertBefore(controls, fieldBranch);
     }
 
-    // In replace mode, the native Image wrapper hosts OOC. Drop only the
-    // temporary composer-row fallback before attaching there again.
-    if (replaceImage) {
-      DS.qsa(`.${OOC_WRAPPER_CLASS}`).forEach(wrapper => wrapper.remove());
-    }
-
-    imageButtons.forEach(original => {
-      const wrapper = imageWrapperFor(original);
-      if (!wrapper || wrapper.closest("#ds-qol-panel")) return;
-
-      if (replaceImage) {
-        DS.setDatasetIfChanged?.(wrapper, "dsOocImageWrapper", "1");
-
-        if (wrapper.dataset.dsOocOriginalTooltip === undefined) {
-          wrapper.dataset.dsOocOriginalTooltip = wrapper.getAttribute("data-tooltip-content") || "";
-        }
-
-        DS.setAttributeIfChanged?.(wrapper, "data-tooltip-content", "OOC");
-        DS.setDatasetIfChanged?.(original, "dsOocOriginalImage", "1");
-        if (original.style.getPropertyValue("display") !== "none" ||
-            original.style.getPropertyPriority("display") !== "important") {
-          original.style.setProperty("display", "none", "important");
-        }
-
-        const existingShortcut = wrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`);
-        if (!existingShortcut) {
-          wrapper.appendChild(createOocShortcut(original));
-        } else {
-          // Repair buttons created from a transiently-disabled native Image
-          // control without requiring the user to reload the conversation.
-          if (existingShortcut.hasAttribute("data-ds-ooc-original-image")) {
-            existingShortcut.removeAttribute("data-ds-ooc-original-image");
-          }
-          normalizeOocShortcut(existingShortcut);
-          bindOocShortcut(existingShortcut);
-        }
-        scheduleOocShortcutHealthCheck();
-        return;
+    // Restore any old image-slot replacement from previous code/reloads.
+    // The OOC shortcut is always its own button; Image is controlled only by
+    // the independent Hide image generation setting.
+    DS.qsa("[data-ds-ooc-image-wrapper='1']").forEach(wrapper => {
+      const nativeImage = wrapper.querySelector('button[data-ds-ooc-original-image="1"], button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]');
+      if (nativeImage?.hasAttribute("data-ds-ooc-original-image")) {
+        nativeImage.style.removeProperty("display");
+        nativeImage.removeAttribute("data-ds-ooc-original-image");
       }
-
-      if (original.style.getPropertyValue("display")) original.style.removeProperty("display");
-      if (original.hasAttribute("data-ds-ooc-original-image")) original.removeAttribute("data-ds-ooc-original-image");
-
-      const controlRow = wrapper.parentElement;
-      if (!controlRow) return;
-
-      // SpicyChat rerenders/repositions the Image control whenever the composer
-      // changes. An injected sibling is not part of React's tree, so it can be
-      // left behind while a new Image wrapper is inserted beside it. Reuse one
-      // shortcut and remove every stale copy before placing it back after Image.
-      const existingWrappers = DS.qsa(`.${OOC_WRAPPER_CLASS}`);
-      let shortcutWrapper = existingWrappers.find(
-        candidate => candidate.parentElement === controlRow
-      ) || null;
-
-      existingWrappers.forEach(candidate => {
-        if (candidate !== shortcutWrapper) candidate.remove();
-      });
-
-      if (!shortcutWrapper) {
-        shortcutWrapper = document.createElement("div");
-        shortcutWrapper.className = `inline-flex max-w-full ${OOC_WRAPPER_CLASS}`;
-        shortcutWrapper.setAttribute("data-tooltip-content", "OOC");
-        shortcutWrapper.appendChild(createOocShortcut(original));
+      const oldTooltip = wrapper.dataset.dsOocOriginalTooltip;
+      if (oldTooltip !== undefined) {
+        if (oldTooltip) wrapper.setAttribute("data-tooltip-content", oldTooltip);
+        else wrapper.removeAttribute("data-tooltip-content");
       }
-
-      // Moving the existing node is intentional and keeps the button strictly
-      // single-instance even when SpicyChat inserts a fresh Image wrapper.
-      if (wrapper.nextElementSibling !== shortcutWrapper) {
-        wrapper.insertAdjacentElement("afterend", shortcutWrapper);
-      }
-
-      const shortcut = shortcutWrapper.querySelector(`.${OOC_SHORTCUT_CLASS}`);
-      if (shortcut) {
-        normalizeOocShortcut(shortcut);
-        bindOocShortcut(shortcut);
-      }
-      scheduleOocShortcutHealthCheck();
+      delete wrapper.dataset.dsOocOriginalTooltip;
+      delete wrapper.dataset.dsOocImageWrapper;
     });
+
+    const existingHolders = DS.qsa(`.${OOC_WRAPPER_CLASS}`);
+    let holder = existingHolders.find(node => node.parentElement === controls) || null;
+    const legacyButton = DS.qsa(`.${OOC_SHORTCUT_CLASS}`).find(button => !holder?.contains(button)) || null;
+    for (const old of existingHolders) if (old !== holder) old.remove();
+    DS.qsa(`.${OOC_SHORTCUT_CLASS}`).forEach(button => {
+      if (!holder?.contains(button)) button.remove();
+    });
+    DS.qsa(".ds-chat-ooc-controls-fallback").forEach(row => {
+      if (row !== controls) row.remove();
+    });
+
+    if (!holder) {
+      const template = controls.querySelector('button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"], button[aria-label="autogenerate"], button[aria-label="Plus-button"]')
+        || legacyButton;
+      holder = document.createElement("div");
+      holder.className = `inline-flex max-w-full ${OOC_WRAPPER_CLASS}`;
+      holder.setAttribute("data-tooltip-content", "OOC");
+      const button = template ? createOocShortcut(template) : document.createElement("button");
+      if (!template) {
+        button.className = OOC_SHORTCUT_CLASS;
+        button.setAttribute("aria-label", "Insert OOC message");
+        button.title = "Insert selected OOC message";
+        button.textContent = "OOC";
+        bindOocShortcut(normalizeOocShortcut(button));
+      }
+      // Keep the fallback identical in dimensions to native composer icons,
+      // regardless of whether the template was Image, Suggest or Plus.
+      button.className = `inline-flex items-center justify-center transition-all duration-200 rounded-full bg-transparent text-black dark:text-white w-9 h-9 cursor-pointer ${OOC_SHORTCUT_CLASS}`;
+      holder.appendChild(button);
+    }
+
+    // With Suggest available the intended order is Image → OOC → Suggest.
+    // React may remove Suggest while typing; OOC stays in the same left lane.
+    const suggestion = controls.querySelector('button[aria-label="autogenerate"]');
+    const suggestionWrapper = suggestion?.closest?.('[data-tooltip-content="Suggest"]') || suggestion?.parentElement;
+    const image = controls.querySelector('button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"]');
+    const imageWrapper = image?.closest?.('[data-tooltip-content="Image"]') || image?.parentElement;
+    const plus = controls.querySelector('button[aria-label="Plus-button"]');
+    const plusWrapper = plus?.closest?.(".relative") || plus?.parentElement;
+    if (suggestionWrapper?.parentElement === controls) {
+      if (holder.parentElement !== controls || holder.nextElementSibling !== suggestionWrapper) {
+        controls.insertBefore(holder, suggestionWrapper);
+      }
+    } else if (imageWrapper?.parentElement === controls) {
+      if (imageWrapper.nextElementSibling !== holder) imageWrapper.insertAdjacentElement("afterend", holder);
+    } else if (plusWrapper?.parentElement === controls) {
+      if (plusWrapper.nextElementSibling !== holder) plusWrapper.insertAdjacentElement("afterend", holder);
+    } else if (holder.parentElement !== controls) {
+      controls.appendChild(holder);
+    }
+
+    const shortcut = holder.querySelector(`.${OOC_SHORTCUT_CLASS}`);
+    bindOocShortcut(normalizeOocShortcut(shortcut));
+    scheduleOocShortcutHealthCheck();
   }
 
   // Early composer OOC mount, independent of the expensive chat-UI pass.
@@ -394,12 +340,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyEssentialOocShortcut = function applyEssentialOocShortcut() {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.replaceChatImageWithOocButton || !DS.isSingleChatPage?.()) return;
-    const mode = settings.hideChatImageButton ? "replace" : "alongside";
-    if (DS.state.oocShortcutMode !== mode) {
+    if (DS.state.oocShortcutMode !== "alongside") {
       restoreOocShortcuts();
-      DS.state.oocShortcutMode = mode;
+      DS.state.oocShortcutMode = "alongside";
     }
-    ensureOocShortcut(!!settings.hideChatImageButton);
+    ensureOocShortcut();
   };
 
 

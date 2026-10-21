@@ -453,3 +453,9 @@ async function runQuickDislikeBot(message) {
   });
   return { ...result, totalMs: Date.now() - totalStartedAt, executor: "persistent-recommendation-worker" };
 }
+
+// Optional alarm handler owned by bot-blocking. Omitted modules do not register a handler.
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))["ds-quick-dislike-worker-gc"] = {
+  owner: "bot-blocking",
+  run: () => { cleanupStaleQuickDislikeWorkers(); }
+};

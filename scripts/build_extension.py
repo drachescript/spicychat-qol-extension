@@ -43,6 +43,7 @@ EXCLUDED_TOP_LEVEL = {
     "release_build",
     "node_modules",
     "scripts",
+    "tools",
 }
 
 EXCLUDED_ROOT_FILES = {
@@ -72,6 +73,7 @@ FORBIDDEN_PACKAGE_PREFIXES = {
     "release_build",
     "node_modules",
     "scripts",
+    "tools",
 }
 
 FORBIDDEN_TOOL_SUFFIXES = {

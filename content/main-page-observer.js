@@ -169,7 +169,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
 
-      if (messageRootsChanged) updateLoadedChatMessageCountFromMutations(mutations);
+      if (messageRootsChanged) {
+        const previousMounted = loadedChatMessageCount();
+        updateLoadedChatMessageCountFromMutations(mutations);
+        const currentMounted = loadedChatMessageCount();
+        if (previousMounted >= 3 && currentMounted === 0 && !DS.state?.bulkChatHistoryLoadActive) {
+          counters.chatUnexpectedEmptyTransitions = Number(counters.chatUnexpectedEmptyTransitions || 0) + 1;
+          counters.chatUnexpectedEmptyLastAt = Date.now();
+          // Report DOM state only. The messages may still be stored by SpicyChat;
+          // no chat text, IDs, forced remounts, or automatic reloads.
+          DS.diagPerformance?.("chat-message-roots-unmounted", {
+            beforeMessages: previousMounted, afterMessages: 0, visibility: document.visibilityState
+          });
+        }
+      }
 
       // Loading previous chat history can prepend dozens of message roots in a
       // burst. Debounce QoL work until that batch settles instead of rescanning

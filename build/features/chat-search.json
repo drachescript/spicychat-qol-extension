@@ -4,6 +4,13 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "chatSearchCaseSensitive",
+    "chatSearchExactPhrase",
+    "chatSearchLoadUntilMatch",
+    "chatSearchRegex",
+    "chatSearchShowFindButton",
+    "chatSearchShowPanel",
+    "chatSearchWholeWord",
     "showChatSearch"
   ],
   "requiredHelpers": [],
@@ -13,5 +20,8 @@
   "browserVerified": false,
   "styleFiles": [
     "content/styles/chat-search.css"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/chat-search.js"
   ]
 }

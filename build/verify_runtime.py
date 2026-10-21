@@ -184,6 +184,8 @@ def main() -> int:
     # Do not equate static validation with browser-verified Lite independence.
     contract_dir = ROOT / "build/features"
     available_features = {p.stem for p in contract_dir.glob("*.json")}
+    feature_style_owners: dict[str, list[str]] = {}
+    feature_background_owners: dict[str, list[str]] = {}
     for contract_file in sorted(contract_dir.glob("*.json")):
         try:
             contract = json.loads(contract_file.read_text(encoding="utf-8"))
@@ -215,11 +217,35 @@ def main() -> int:
                 check_file(path, f"{feature_id} {field}")
                 if path not in source:
                     ERRORS.append(f"Feature {feature_id}: {field} not loaded by Full: {path}")
+        for style in contract.get("styleFiles", []):
+            feature_style_owners.setdefault(style, []).append(feature_id)
+        for service in contract.get("backgroundFiles", []):
+            feature_background_owners.setdefault(service, []).append(feature_id)
         for dependency in contract.get("dependencies", []):
             if dependency not in available_features:
                 ERRORS.append(f"Feature {feature_id}: unknown dependency {dependency}")
         if not isinstance(contract.get("browserVerified"), bool):
             ERRORS.append(f"Feature {feature_id}: browserVerified must be explicit boolean")
+
+    # A dedicated CSS file that lacks feature ownership can leak into every
+    # Custom package. Explicit shared files remain shared until fully split.
+    shared_css = {
+        "content.css", "content/styles/remaining-styles.css",
+        "content/styles/explorer-base.css", "content/styles/explorer-covers.css",
+    }
+    for style in all_css:
+        if style in shared_css: continue
+        ids = feature_style_owners.get(style, [])
+        if len(ids) != 1:
+            ERRORS.append(f"Dedicated CSS needs exactly one feature owner: {style} -> {ids}")
+    for service in (
+        "background/background-auto-afk.js",
+        "background/background-translation.js",
+        "background/background-wiki-fetch.js",
+    ):
+        ids = feature_background_owners.get(service, [])
+        if len(ids) != 1:
+            ERRORS.append(f"Optional background service needs exactly one feature owner: {service} -> {ids}")
 
     if ERRORS:
         print(f"Runtime verification failed ({len(ERRORS)} issue(s)):")

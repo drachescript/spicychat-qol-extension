@@ -861,3 +861,9 @@ async function runQuickLessLikeBot(message) {
   }
   return timed;
 }
+
+// Optional alarm handler owned by list-fill. Omitted modules do not register a handler.
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))["ds-listing-refill-worker-gc"] = {
+  owner: "list-fill",
+  run: () => { cleanupStaleListingRefillWorkers({ closeLegacy: true }); }
+};

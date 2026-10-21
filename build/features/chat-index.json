@@ -8,5 +8,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "styleFiles": [
+    "content/styles/chat-index.css"
+  ]
 }

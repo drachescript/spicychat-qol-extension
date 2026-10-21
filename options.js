@@ -2778,7 +2778,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "showChatSearch", name: "Search Inside Current Chat", children: ["chatSearchShowPanel", "chatSearchShowFindButton", "chatSearchExactPhrase", "chatSearchCaseSensitive", "chatSearchWholeWord", "chatSearchRegex", "chatSearchLoadUntilMatch"] },
   { parent: "enableMessageBookmarks", name: "Message bookmarks", children: ["messageBookmarkButtons"] },
   { parent: "enableFocusMode", name: "Focus / Immersive Mode", children: ["focusHideSidebar", "focusHideTopBar", "focusHideChatHeader", "focusHideQolPanel"] },
-  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember", "contextKeeperAutoRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
+  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember", "contextKeeperAutoRecall", "contextKeeperRelevantRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
   { parent: "enableStoryDayTracker", name: "Internal Day Tracker", children: ["storyDayTrackerMode", "storyDayTrackerIncludeInContext", "storyDayTrackerShowQuickPanel"] },
   { parent: "enableRpStateTracker", name: "RP State Tracker", children: ["rpStateTrackerMode", "rpStateInjectMode", "rpStateMaxContextChars", "rpStateShowQuickPanel"] },
   { parent: "enableGlobalMemory", name: "Global Memory", children: ["globalMemoryText", "globalMemorySendMode", "globalMemoryOocWrapper", "globalMemoryShowChatButton"] },
@@ -2993,6 +2993,7 @@ $("downloadAllSupportInfo")?.addEventListener("click", downloadAllSupportInfo);
 $("copyDiagnostics")?.addEventListener("click", copyDiagnostics);
 $("downloadDiagnostics")?.addEventListener("click", downloadDiagnostics);
 $("copyPerformanceReport")?.addEventListener("click", copyPerformanceReport);
+$("refreshPerformanceTroubleshooter")?.addEventListener("click", refreshPerformanceTroubleshooter);
 $("downloadPerformanceReport")?.addEventListener("click", downloadPerformanceReport);
 $("runPerformanceSelfCheck")?.addEventListener("click", runPerformanceSelfCheck);
 $("downloadPerformanceSelfCheck")?.addEventListener("click", downloadPerformanceSelfCheck);

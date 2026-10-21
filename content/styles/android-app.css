@@ -8,8 +8,9 @@
   border-radius: 999px;
   background: rgba(20,20,20,.42);
   color: inherit;
-  font-size: 21px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .01em;
   line-height: 1;
   cursor: pointer;
 }
@@ -62,9 +63,7 @@
   text-align: center;
   font-size: 11px;
 }
-html.ds-android-hide-composer-shortcuts .ds-chat-ooc-shortcut,
 html.ds-android-hide-composer-shortcuts .ds-chat-asterisk-shortcut,
-html.ds-android-hide-composer-shortcuts .ds-chat-ooc-wrapper,
 html.ds-android-hide-composer-shortcuts .ds-chat-asterisk-wrapper {
   display: none !important;
 }

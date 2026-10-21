@@ -11,5 +11,8 @@
   "browserVerified": false,
   "backgroundFiles": [
     "background/background-wiki-fetch.js"
+  ],
+  "styleFiles": [
+    "content/styles/wiki-lorebook-importer.css"
   ]
 }

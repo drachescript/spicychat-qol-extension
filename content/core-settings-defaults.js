@@ -185,6 +185,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   enableSelectionRemember: false,
   contextKeeperRecapSize: "balanced",
   contextKeeperAutoRecall: false,
+  contextKeeperRelevantRecall: false,
   contextKeeperRecallEverySends: 5,
   contextKeeperRecallMaxChars: 900,
   enableStoryDayTracker: false,

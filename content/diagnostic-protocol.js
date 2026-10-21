@@ -409,7 +409,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       v2State.peerSupportsV2 = true;
       v2State.peerProtocol = PROTOCOL_V2;
       if (peer.recording === false) v2State.recording = false;
-      else if (peer.recording === true || data?.type === "recording-start") v2State.recording = true;
+      else if (peer.recording === true || data?.type === "recording-start" ||
+        (peer.traceLevel && requestedLevel !== "off" && !["recording-stop", "stop"].includes(data?.type))) {
+        // Inspector builds that negotiate a traceLevel but omit the optional
+        // recording boolean are requesting traces; discovery alone is not.
+        v2State.recording = true;
+      }
       v2State.traceLevel = v2State.recording ? (requestedLevel === "deep" ? "deep" : (v2State.traceLevel === "deep" && !peer.traceLevel ? "deep" : "normal")) : "off";
     } else if (!v2State.peerSupportsV2) {
       v2State.peerProtocol = PROTOCOL;
@@ -1166,7 +1171,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.isDiagnosticInspectorConnected = () => active();
-  DS.isDiagnosticTraceActive = (level = "normal") => v2Active(level);
+  DS.isDiagnosticTraceActive = (level = "normal") => v2Active(level) ||
+    (level === "normal" && active() && !v2State.peerSupportsV2);
   DS.getDiagnosticTraceLevel = () => v2State.traceLevel;
 
   DS.getDiagnosticProtocolState = function getDiagnosticProtocolState() {

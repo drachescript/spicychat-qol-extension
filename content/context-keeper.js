@@ -23,6 +23,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const CATEGORY_LABELS = {
     identity: "Identity/background",
     relationship: "Relationships/dynamics",
+    growth: "Character development",
+    npc: "Recurring characters/NPCs",
+    event: "Major story events",
     preference: "Preferences",
     rule: "Rules/boundaries",
     history: "History/routines",
@@ -81,13 +84,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           enabled: item?.enabled !== false,
           pinned: item?.pinned === true,
           needsReview: item?.needsReview === true,
+          supersededBy: clean(item?.supersededBy || "").slice(0, 120),
+          supersedes: (Array.isArray(item?.supersedes) ? item.supersedes : [item?.supersedes]).filter(Boolean).slice(0, 20).map(value => clean(value).slice(0, 120)),
+          updatedAt: Number(item?.updatedAt || 0),
           messageId: clean(item?.messageId || item?.message_id || "").slice(0, 160),
           role: clean(item?.role || item?.speaker || "").slice(0, 40),
           storyDay: Number(item?.storyDay) > 0 ? Math.floor(Number(item.storyDay)) : 0,
           storyPhase: ["morning", "afternoon", "evening", "night", "unknown"].includes(String(item?.storyPhase || "")) ? String(item.storyPhase) : "unknown",
           storydate: clean(item?.storydate || "").slice(0, 40)
         };
-        if (normalizedDetails.some(existing => isSimilarText(existing.text, detail.text))) continue;
+        if (normalizedDetails.some(existing =>
+          !existing.supersededBy && !existing.supersedes?.length &&
+          !detail.supersededBy && !detail.supersedes.length &&
+          !possibleConflict(existing.text, detail.text) && isSimilarText(existing.text, detail.text))) continue;
         normalizedDetails.push(detail);
       }
       output[String(chatId)] = {
@@ -198,6 +207,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ["need", /\b(trigger(?:s|ed)?|panic|freeze response|ground(?:ing|ed)?|needs? (?:space|quiet|predictability|control|routine)|sensitive to|overwhelm(?:ed|ing)?|noise[- ]cancel(?:ing|ling)|headphones?|unfamiliar places?|predictab(?:le|ility)|feels? (?:safe|unsafe|trapped)|discomfort|calms? (?:him|her|them)|comforted by)\b/i],
       ["identity", /\b(real name|identity|alias|called|name is|works? as|job|occupation|age|years old|from [a-z]|lives? (?:in|with)|roommate|yakuza boss|doctor|surgeon|mechanic|racer|programmer|developer)\b/i],
       ["ability", /\b(skilled|expert|experienced|trained|training|talent|ability|abilities|capable|proficient|elite[- ]level|professional|legendary status|mechanical experience|motorcycle control|riding skills?|coding abilities?|built an? (?:antivirus|program|system)|decompiles?|decrypts?|firearms?|shooting range|assemble and disassemble)\b/i],
+      ["growth", /\b(became|becoming|changed|change of heart|learned to trust|trust (?:grew|deepened)|began to trust|no longer (?:fears?|hates?|distrusts?)|forgave|forgiven|reconciled|overcame|grew closer|grew apart|relationship (?:changed|evolved)|started opening up|began opening up|developed feelings)\b/i],
+      ["npc", /\b(npc|side character|recurring character|met (?:a|the) (?:guard|merchant|captain|innkeeper|doctor|neighbor|neighbour)|introduced (?:him|her|them)self|joined (?:the|our) (?:party|group))\b/i],
+      ["event", /\b(betrayal|betrayed|rescued|escaped|discovered|revelation|reunited|lost (?:his|her|their) life|battle ended|confession|confessed|was killed|died|wedding|married|mission completed)\b/i],
       ["relationship", /\b(friend|best friend|girlfriend|boyfriend|wife|husband|lover|partner|dating|married|sister|brother|mother|father|roommate|trusts?|distrusts?|loves?|hates?|dynamic|belongs? to|ownership|together|relationship|commitment|committed|grow old|long[- ]term|only person|first person|protect(?:s|ive)?|cherish)\b/i],
       ["preference", /\b(likes?|dislikes?|prefers?|favorite|favourite|enjoys?|doesn'?t like|does not like|hates?|would rather|choice|requested?|asks? for|chooses?|ordered?|food|drink|music|color|colour|exactly what (?:he|she|they|i) like|water bottle|breakfast|pancakes?|coffee|milk|spaghetti|fried eggs?)\b/i],
       ["history", /\b(for \d+ years?|\d+ years?|used to|previously|before they|before he|before she|in the past|grew up|since childhood|since (?:he|she|they|i) (?:was|were)|earliest memories|learned from|history|habit|routine|usually|normally|always|every (?:day|night|morning|week)|friend (?:died|was killed)|survived the crash)\b/i],
@@ -237,8 +249,42 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return jaccard >= 0.64 || (common >= 5 && smallerCoverage >= 0.78);
   }
 
+  // Deliberately narrow, review-only hints. These are NOT semantic certainty:
+  // avoid making automatic changes based on language heuristics.
+  const CONFLICT_CUES = [
+    [/\b(?:trusts?|trusted)\b/i, /\b(?:distrusts?|distrusted|does not trust|no longer trusts?)\b/i],
+    [/\b(?:likes?|enjoys?)\b/i, /\b(?:dislikes?|hates?|does not like)\b/i],
+    [/\b(?:alive|survived)\b/i, /\b(?:dead|died|killed)\b/i],
+    [/\b(?:friends?|allies)\b/i, /\b(?:enemies|enemy|rivals?)\b/i],
+    [/\b(?:married|spouses?)\b/i, /\b(?:divorced|separated)\b/i]
+  ];
+  function possibleConflict(a, b) {
+    const left = clean(a), right = clean(b);
+    if (!left || !right || left === right) return false;
+    const opposing = CONFLICT_CUES.some(([positive, negative]) =>
+      (positive.test(left) && negative.test(right)) || (negative.test(left) && positive.test(right)));
+    if (!opposing) return false;
+    const polarity = new Set(["trust", "trusts", "trusted", "distrust", "distrusts", "distrusted", "like", "likes", "enjoys", "dislike", "dislikes", "hate", "hates", "alive", "dead", "survived", "died", "killed", "friend", "friends", "allies", "enemy", "enemies", "rival", "rivals", "married", "spouse", "spouses", "divorced", "separated"]);
+    const aWords = [...tokens(left)].filter(word => !polarity.has(word));
+    const bWords = tokens(right);
+    return aWords.filter(word => bWords.has(word)).length >= 2;
+  }
+
+  function possibleConflicts(details) {
+    const current = (details || []).filter(row => row.enabled !== false && !row.needsReview && !row.supersededBy).slice(-150);
+    const found = [];
+    for (let i = 0; i < current.length && found.length < 12; i++) {
+      for (let j = i + 1; j < current.length && found.length < 12; j++) {
+        if (!possibleConflict(current[i].text, current[j].text)) continue;
+        const olderFirst = Number(current[i].createdAt || 0) <= Number(current[j].createdAt || 0);
+        found.push(olderFirst ? [current[i], current[j]] : [current[j], current[i]]);
+      }
+    }
+    return found;
+  }
+
   function hasPersistentCue(value) {
-    return /\b(prefers?|favorite|favourite|enjoys?|likes?|dislikes?|hates?|always|never|usually|normally|habit|routine|for \d+ years?|\d+ years?|since childhood|since (?:he|she|they|i) (?:was|were)|grew up|learned from|promised?|agreed?|committed|commitment|relationship|partner|married|dating|trusts?|secret|identity|skill|skilled|experienced|trained|trigger|boundary|doesn'?t enjoy|does not enjoy|needs? (?:space|quiet|predictability|control|routine)|safe|unsafe|protective|long[- ]term|grow old|first date)\b/i.test(value);
+    return /\b(became|forgave|reconciled|overcame|developed feelings|betrayed|confessed|died|reunited|prefers?|favorite|favourite|enjoys?|likes?|dislikes?|hates?|always|never|usually|normally|habit|routine|for \d+ years?|\d+ years?|since childhood|since (?:he|she|they|i) (?:was|were)|grew up|learned from|promised?|agreed?|committed|commitment|relationship|partner|married|dating|trusts?|secret|identity|skill|skilled|experienced|trained|trigger|boundary|doesn'?t enjoy|does not enjoy|needs? (?:space|quiet|predictability|control|routine)|safe|unsafe|protective|long[- ]term|grow old|first date)\b/i.test(value);
   }
 
   function scoreSentence(text) {
@@ -249,6 +295,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const base = {
       identity: 7,
       relationship: 7,
+      growth: 7,
+      npc: 6,
+      event: 6,
       preference: 6,
       rule: 8,
       history: 7,
@@ -547,6 +596,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const categoryBonus = {
       identity: 6,
       relationship: 6,
+      growth: 6,
+      npc: 4,
+      event: 5,
       rule: 6,
       history: 5,
       preference: 5,
@@ -563,7 +615,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function detailsForRecap(details) {
-    const enabled = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview);
+    const enabled = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy);
     const mode = recapMode();
     const limits = {
       compact: { count: 6, chars: 1700 },
@@ -615,33 +667,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!cfg.enabled || !cfg.enableContextKeeper || !cfg.contextKeeperAutoRecall || !DS.isSingleChatPage?.()) return null;
     const id = currentChatId();
     if (activeRecall.chatId !== id || !activeRecall.ready) { prepareRecall(); return null; }
-    const enabled = activeRecall.details.filter(x => x.enabled !== false && !x.needsReview);
+    const enabled = activeRecall.details.filter(x => x.enabled !== false && !x.needsReview && !x.supersededBy);
     if (!enabled.length) return null;
     const selected = [];
-    const words = new Set(clean(draft).toLowerCase().match(/[a-z]{4,}/g) || []);
+    const relevantRecall = cfg.contextKeeperRelevantRecall === true;
+    // Reuse the user's outgoing draft; never scan the whole DOM in the send path.
+    const words = relevantRecall ? tokens(draft) : new Set(clean(draft).toLowerCase().match(/[a-z]{4,}/g) || []);
     const ranked = enabled.map(detail => {
-      const hits = [...new Set(clean(detail.text).toLowerCase().match(/[a-z]{4,}/g) || [])]
-        .filter(word => words.has(word) && !STOP_WORDS.has(word)).length;
+      const hits = [...tokens(detail.text)].filter(word => words.has(word)).length;
       const dynamic = detail.category === "location" || detail.category === "state";
       const penalty = dynamic && !detail.pinned && hits === 0 ? 12 : 0;
-      return { detail, rank: detailPriority(detail) + Math.min(hits, 5) * 4 - penalty };
+      const topicBoost = relevantRecall ? Math.min(hits, 6) * 12 : Math.min(hits, 5) * 4;
+      return { detail, hits, rank: detailPriority(detail) + topicBoost - penalty };
     }).sort((a,b) => b.rank - a.rank || Number(b.detail.createdAt||0)-Number(a.detail.createdAt||0));
     const budget = [450,900,1400].includes(Number(cfg.contextKeeperRecallMaxChars)) ? Number(cfg.contextKeeperRecallMaxChars) : 900;
     const lead = "[OOC: Remember these established continuity details: ";
     const tail = ". Keep the roleplay consistent.]";
     let used = lead.length + tail.length;
-    for (const { detail } of ranked) {
+    const usedCategories = new Map();
+    for (const { detail, hits } of ranked) {
+      // Favor coverage across the ongoing scene, relationships, and established
+      // boundaries, without suppressing pinned facts or a strong topical match.
+      if (relevantRecall && !detail.pinned && hits === 0 && (usedCategories.get(detail.category) || 0) >= 2) continue;
       const candidate = clean(detail.text).replace(/[.;]+$/g, "");
       const cost = candidate.length + (selected.length ? 2 : 0);
       if (used + cost > budget) continue;
       selected.push(candidate); used += cost;
+      usedCategories.set(detail.category, (usedCategories.get(detail.category) || 0) + 1);
       if (selected.length >= 12) break;
     }
     return selected.length ? { directive: lead + selected.join("; ") + tail, count: selected.length } : null;
   };
 
   async function insertRecap(details) {
-    const active = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview);
+    const active = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy);
     const timelineOnly = DS.getStoryDayContextLine?.({ includeNotes: true }) || "";
     if (!active.length && !timelineOnly) {
       DS.setQuickStatus?.("Context Keeper has no recap-enabled details or Storydate timeline for this chat yet.");
@@ -711,7 +770,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       sourceFilter.append(make("option", { value }, label));
     });
     const reviewFilter = make("select", { "aria-label": "Filter Context Keeper by review status" });
-    [["all", "All review statuses"], ["review", "Needs review"], ["active", "Included in recap"], ["excluded", "Excluded from recap"]].forEach(([value, label]) => {
+    [["all", "All review statuses"], ["review", "Needs review"], ["active", "Included in recap"], ["excluded", "Excluded from recap"], ["past", "Past versions"]].forEach(([value, label]) => {
       reviewFilter.append(make("option", { value }, label));
     });
     const savedTools = make("div", { className: "ds-tool-actions" });
@@ -719,6 +778,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const removeDisabled = make("button", { type: "button" }, "Remove excluded");
     const removeAll = make("button", { type: "button", className: "ds-danger" }, "Remove all");
     const copyRecap = make("button", { type: "button" }, "Copy OOC recap");
+    const evolveSelected = make("button", { type: "button" }, "Update selected fact");
+    const consolidateSelected = make("button", { type: "button" }, "Consolidate selected");
+    const reviewConflicts = make("button", { type: "button" }, "Review possible conflicts");
     const selectAll = make("button", { type: "button" }, "Select filtered");
     const selectNone = make("button", { type: "button" }, "Clear selection");
     const bulkPin = make("button", { type: "button" }, "Pin selected");
@@ -733,9 +795,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const exportJson = make("button", { type: "button" }, "Export JSON");
     const importJson = make("button", { type: "button" }, "Import JSON…");
     const selectedDetails = new Set();
-    savedTools.append(selectAll, selectNone, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkReview, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
+    savedTools.append(selectAll, selectNone, evolveSelected, consolidateSelected, reviewConflicts, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkReview, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
     savedFilters.append(savedSearch, categoryFilter, sourceFilter, reviewFilter);
     const savedList = make("div", { className: "ds-tool-list" });
+    const conflictList = make("div", { className: "ds-tool-list" });
     const suggestionTitle = make("h3", {}, "Scan suggestions");
     const suggestionList = make("div", { className: "ds-tool-list" });
 
@@ -749,15 +812,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     function renderStatus() {
       const nowCount = roots().length;
       const since = entry.lastRecapAt ? Math.max(0, nowCount - (entry.lastRecapMessageCount || 0)) : 0;
-      const enabled = entry.details.filter(detail => detail.enabled !== false && !detail.needsReview).length;
+      const enabled = entry.details.filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy).length;
       const review = entry.details.filter(detail => detail.needsReview).length;
+      const past = entry.details.filter(detail => detail.supersededBy).length;
       const automatic = entry.details.filter(detail => detail.source === "auto").length;
       const preview = recapText(entry.details).text;
       const approxTokens = preview ? Math.max(1, Math.round(preview.length / 4)) : 0;
       const recapInfo = `Recap: ${recapMode()} · about ${approxTokens.toLocaleString("en-US")} token${approxTokens === 1 ? "" : "s"} if inserted now.`;
       status.textContent = entry.lastRecapAt
-        ? `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}). Last recap was inserted about ${since} loaded message${since === 1 ? "" : "s"} ago. ${recapInfo}`
-        : `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}). No recap inserted yet. ${recapInfo}`;
+        ? `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}${past ? `, ${past} past versions` : ""}). Last recap was inserted about ${since} loaded message${since === 1 ? "" : "s"} ago. ${recapInfo}`
+        : `${entry.details.length} saved (${enabled} used, ${automatic} automatic${review ? `, ${review} need review` : ""}${past ? `, ${past} past versions` : ""}). No recap inserted yet. ${recapInfo}`;
     }
 
     function renderSaved() {
@@ -776,9 +840,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (query && !clean(detail.text).toLowerCase().includes(query)) return false;
         if (categoryWanted !== "all" && String(detail.category || "other") !== categoryWanted) return false;
         if (sourceWanted !== "all" && String(detail.source || "manual") !== sourceWanted) return false;
+        if (reviewWanted === "past" && !detail.supersededBy) return false;
+        if (reviewWanted !== "past" && detail.supersededBy) return false;
         if (reviewWanted === "review" && !detail.needsReview) return false;
         if (reviewWanted === "active" && (detail.enabled === false || detail.needsReview)) return false;
-        if (reviewWanted === "excluded" && detail.enabled !== false && !detail.needsReview) return false;
+        if (reviewWanted === "excluded" && detail.enabled !== false && !detail.needsReview && !detail.supersededBy) return false;
         return true;
       });
       if (!visibleDetails.length) {
@@ -795,15 +861,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         selectLabel.append(checked, document.createTextNode("Select"));
         checked.addEventListener("change", () => { if (checked.checked) selectedDetails.add(detail.id); else selectedDetails.delete(detail.id); });
         const includeLabel = make("label", { className: "ds-context-include" });
-        const include = make("input", { type: "checkbox", checked: detail.enabled !== false && !detail.needsReview });
+        const include = make("input", { type: "checkbox", checked: detail.enabled !== false && !detail.needsReview && !detail.supersededBy });
+        include.disabled = !!detail.supersededBy;
         includeLabel.append(include, document.createTextNode("Use in recap"));
         meta.append(selectLabel, badge, sourceBadge, includeLabel);
+        if (detail.supersededBy) meta.append(make("span", { className: "ds-context-category" }, "Past version — kept for history"));
         if (detail.pinned) meta.append(make("span", { className: "ds-context-category" }, "Pinned"));
         if (detail.needsReview) meta.append(make("span", { className: "ds-context-category" }, "Needs review — excluded from recall"));
         const value = make("div", { className: "ds-tool-item-text" }, detail.text);
         const actions = make("div", { className: "ds-tool-actions" });
         const edit = make("button", { type: "button" }, "Edit");
+        edit.disabled = !!detail.supersededBy;
         const pin = make("button", { type: "button" }, detail.pinned ? "Unpin" : "Pin");
+        pin.disabled = !!detail.supersededBy;
         pin.addEventListener("click", async () => {
           const latest = await readStore(); const found = latest[id]?.details?.find(item => item.id === detail.id);
           if (!found) return;
@@ -823,7 +893,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         include.addEventListener("change", async () => {
           const latest = await readStore();
           const found = latest[id]?.details?.find(item => item.id === detail.id);
-          if (found) { found.enabled = include.checked; if (include.checked) found.needsReview = false; }
+          if (found && !found.supersededBy) { found.enabled = include.checked; if (include.checked) found.needsReview = false; }
           await writeStore(latest);
           await refreshEntry();
         });
@@ -904,6 +974,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (mode === "delete") target.details = target.details.filter(detail => !wanted.has(detail.id));
       else for (const detail of target.details) {
         if (!wanted.has(detail.id)) continue;
+        if (detail.supersededBy && mode !== "delete") continue;
         if (mode === "pin") detail.pinned = true;
         if (mode === "unpin") detail.pinned = false;
         if (mode === "exclude") detail.enabled = false;
@@ -915,14 +986,90 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await writeStore(latest, `Context Keeper bulk ${mode}`);
       await refreshEntry();
     }
+    async function saveEvolvedDetail(previous, replacement, sources) {
+      const text = clean(replacement).slice(0, MAX_DETAIL);
+      if (!text) return false;
+      const latest = await readStore();
+      const target = latest[id];
+      if (!target || currentChatId() !== id) return false;
+      const old = (sources || []).map(source => target.details.find(row => row.id === source.id)).filter(row => row && !row.supersededBy);
+      if (old.length !== sources.length || target.details.some(row => !old.includes(row) && !row.supersededBy && isSimilarText(row.text, text))) return false;
+      const now = Date.now();
+      const story = DS.getStoryDaySnapshot?.() || null;
+      const next = {
+        id: `detail-${now}-${Math.random().toString(36).slice(2, 7)}`,
+        text, category: old.length === 1 ? old[0].category : normalizeCategory(previous?.category || "history"),
+        source: "manual", score: Math.max(8, scoreSentence(text)), enabled: true,
+        pinned: old.some(row => row.pinned), needsReview: false,
+        supersedes: old.map(row => row.id), updatedAt: now, createdAt: now,
+        messageId: "", role: "", storyDay: Number(story?.day || 0),
+        storyPhase: story?.phase || "unknown", storydate: clean(story?.code || "").slice(0, 40)
+      };
+      for (const row of old) { row.supersededBy = next.id; row.enabled = false; row.pinned = false; }
+      target.details.push(next); await writeStore(latest, "Updated Context Keeper continuity");
+      selectedDetails.clear(); await refreshEntry(); return true;
+    }
+    evolveSelected.addEventListener("click", async () => {
+      const chosen = selectedRows();
+      if (chosen.length !== 1 || chosen[0].supersededBy) { status.textContent = "Select one current fact to update. Past versions remain in history."; return; }
+      const nextText = window.prompt("Write the CURRENT version of this fact. The old version will remain in Past versions.", chosen[0].text);
+      if (nextText === null || !clean(nextText) || clean(nextText) === chosen[0].text) return;
+      const result = await saveEvolvedDetail(chosen[0], nextText, chosen);
+      status.textContent = result ? "Fact updated. Previous version is saved in Past versions." : "Could not update this fact; check for a duplicate or changed chat.";
+    });
+    consolidateSelected.addEventListener("click", async () => {
+      const chosen = selectedRows();
+      if (chosen.length < 2 || chosen.length > 12 || chosen.some(row => row.supersededBy)) {
+        status.textContent = "Select 2–12 current details to consolidate. Past versions cannot be merged again."; return;
+      }
+      const suggestion = chosen.map(row => row.text).join("; ").slice(0, MAX_DETAIL);
+      const nextText = window.prompt("Review and write one concise fact that preserves what matters. Previous details will stay in Past versions.", suggestion);
+      if (nextText === null || !clean(nextText)) return;
+      if (!window.confirm(`Archive these ${chosen.length} details as past versions and keep your reviewed summary?`)) return;
+      const result = await saveEvolvedDetail({ category: chosen[0].category }, nextText, chosen);
+      status.textContent = result ? `Consolidated ${chosen.length} details into one current memory; originals remain in Past versions.` : "Consolidation not saved; check for a duplicate or changed chat.";
+    });
+    function renderConflictReview() {
+      conflictList.replaceChildren();
+      const pairs = possibleConflicts(entry.details);
+      if (!pairs.length) {
+        conflictList.append(make("p", { className: "ds-tool-empty" }, "No obvious conflicting active facts found. This only checks a few word pairs, not every possible contradiction."));
+        return;
+      }
+      for (const [older, newer] of pairs) {
+        const card = make("div", { className: "ds-tool-item" });
+        card.append(make("div", { className: "ds-tool-item-text" }, `Earlier: ${older.text}`));
+        card.append(make("div", { className: "ds-tool-item-text" }, `Later: ${newer.text}`));
+        const resolve = make("button", { type: "button" }, "Keep later; archive earlier");
+        resolve.addEventListener("click", async () => {
+          if (!window.confirm("This is only a possible contradiction. Keep the later fact active and move the earlier one to Past versions?")) return;
+          const latest = await readStore();
+          if (currentChatId() !== id) return;
+          const a = latest[id]?.details?.find(row => row.id === older.id);
+          const b = latest[id]?.details?.find(row => row.id === newer.id);
+          if (!a || !b || a.supersededBy || b.supersededBy) return;
+          a.supersededBy = b.id; a.enabled = false; a.pinned = false;
+          b.supersedes = [...new Set([...(b.supersedes || []), a.id])].slice(-20);
+          await writeStore(latest, "Reviewed Context Keeper continuity conflict");
+          await refreshEntry(); renderConflictReview();
+        });
+        card.append(resolve); conflictList.append(card);
+      }
+    }
+    reviewConflicts.addEventListener("click", () => {
+      renderConflictReview();
+      status.textContent = "Possible conflicts are suggestions only. Nothing changes unless you confirm an individual pair.";
+    });
     selectAll.addEventListener("click", () => {
       const query = clean(savedSearch.value).toLowerCase();
       for (const detail of entry.details) if ((!query || detail.text.toLowerCase().includes(query))
+        && (reviewFilter.value === "past" ? !!detail.supersededBy : !detail.supersededBy)
         && (categoryFilter.value === "all" || detail.category === categoryFilter.value)
         && (sourceFilter.value === "all" || detail.source === sourceFilter.value)
         && (reviewFilter.value === "all" || (reviewFilter.value === "review" && detail.needsReview)
-          || (reviewFilter.value === "active" && detail.enabled !== false && !detail.needsReview)
-          || (reviewFilter.value === "excluded" && (detail.enabled === false || detail.needsReview)))) selectedDetails.add(detail.id);
+          || (reviewFilter.value === "active" && detail.enabled !== false && !detail.needsReview && !detail.supersededBy)
+          || (reviewFilter.value === "excluded" && (detail.enabled === false || detail.needsReview))
+          || (reviewFilter.value === "past" && !!detail.supersededBy))) selectedDetails.add(detail.id);
       renderSaved();
     });
     selectNone.addEventListener("click", () => { selectedDetails.clear(); renderSaved(); });
@@ -962,16 +1109,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const latest = await readStore();
       const target = latest[id];
       if (!target?.details?.length) return;
-      target.details.forEach(detail => { if (!detail.needsReview) detail.enabled = true; });
+      target.details.forEach(detail => { if (!detail.needsReview && !detail.supersededBy) detail.enabled = true; });
       await writeStore(latest, "Enabled reviewed Context Keeper details");
       await refreshEntry();
     });
     removeDisabled.addEventListener("click", async () => {
-      const disabled = entry.details.filter(detail => detail.enabled === false).length;
+      const disabled = entry.details.filter(detail => detail.enabled === false && !detail.supersededBy).length;
       if (!disabled) { DS.setQuickStatus?.("Context Keeper has no excluded details to remove."); return; }
       if (!window.confirm(`Remove ${disabled} excluded Context Keeper detail${disabled === 1 ? "" : "s"}?`)) return;
       const latest = await readStore();
-      if (latest[id]) latest[id].details = latest[id].details.filter(detail => detail.enabled !== false);
+      if (latest[id]) latest[id].details = latest[id].details.filter(detail => detail.enabled !== false || detail.supersededBy);
       await writeStore(latest, "Removed excluded Context Keeper details");
       await refreshEntry();
     });
@@ -1096,7 +1243,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     backdrop.addEventListener("click", () => { apiScanState.cancel = true; modal.remove(); });
     modal.addEventListener("keydown", event => { if (event.key === "Escape") modal.remove(); });
 
-    dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, suggestionTitle, suggestionList);
+    dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, conflictList, suggestionTitle, suggestionList);
     modal.append(backdrop, dialog);
     document.documentElement.append(modal);
     renderSaved();
@@ -1215,29 +1362,75 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return settings.enabled === true && settings.enableContextKeeper === true
       && settings.contextKeeperMessageButtons === true && DS.isSingleChatPage?.();
   }
-  window.setInterval(() => { if (messageButtonsWanted()) scheduleMessageButtonRepair(300); }, 7000);
-  window.addEventListener("pageshow", () => { if (messageButtonsWanted()) scheduleMessageButtonRepair(450); }, true);
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && messageButtonsWanted()) scheduleMessageButtonRepair(450);
-  }, true);
-
-  // Keep local recall fresh if another QoL tab edits Context Keeper data.
-  try {
-    chrome.storage?.onChanged?.addListener(changes => {
-      if (!changes?.[KEY] || !DS.state?.settings?.enableContextKeeper) return;
-      rememberActive(normalize(changes[KEY].newValue));
-    });
-  } catch {}
-
+  let messageButtonWatchdog = 0;
+  let messageButtonListenersInstalled = false;
+  let recallListenerInstalled = false;
+  const onMessageButtonsPageShow = () => { if (messageButtonsWanted()) scheduleMessageButtonRepair(450); };
+  const onMessageButtonsVisible = () => { if (!document.hidden && messageButtonsWanted()) scheduleMessageButtonRepair(450); };
+  const onRecallStorageChanged = changes => {
+    if (!changes?.[KEY] || !DS.state?.settings?.enableContextKeeper) return;
+    rememberActive(normalize(changes[KEY].newValue));
+  };
+  function syncContextKeeperListeners() {
+    const wanted = messageButtonsWanted();
+    if (wanted && !messageButtonListenersInstalled) {
+      window.addEventListener("pageshow", onMessageButtonsPageShow, true);
+      document.addEventListener("visibilitychange", onMessageButtonsVisible, true);
+      messageButtonListenersInstalled = true;
+    } else if (!wanted && messageButtonListenersInstalled) {
+      window.removeEventListener("pageshow", onMessageButtonsPageShow, true);
+      document.removeEventListener("visibilitychange", onMessageButtonsVisible, true);
+      messageButtonListenersInstalled = false;
+    }
+    const recallWanted = DS.state?.settings?.enabled === true && DS.state?.settings?.enableContextKeeper === true;
+    try {
+      if (recallWanted && !recallListenerInstalled) {
+        chrome.storage?.onChanged?.addListener(onRecallStorageChanged);
+        recallListenerInstalled = true;
+      } else if (!recallWanted && recallListenerInstalled) {
+        chrome.storage?.onChanged?.removeListener(onRecallStorageChanged);
+        recallListenerInstalled = false;
+      }
+    } catch {}
+  }
+  function syncMessageButtonWatchdog() {
+    syncContextKeeperListeners();
+    const wanted = messageButtonsWanted();
+    if (wanted && !messageButtonWatchdog) {
+      messageButtonWatchdog = window.setInterval(() => {
+        if (messageButtonsWanted() && !document.hidden) scheduleMessageButtonRepair(300);
+      }, 7000);
+    } else if (!wanted && messageButtonWatchdog) {
+      clearInterval(messageButtonWatchdog);
+      messageButtonWatchdog = 0;
+      clearTimeout(messageButtonRepairTimer);
+      messageButtonRepairTimer = 0;
+    }
+  }
   DS.openContextKeeper = openManager;
   DS.addContextKeeperDetails = addManyDetails;
   DS.ensureContextKeeperMessageButtonForRoot = ensureMessageButtonForRoot;
   DS.applyContextKeeper = function applyContextKeeper() {
+    syncMessageButtonWatchdog();
     if (DS.state?.settings?.enableContextKeeper) prepareRecall();
     ensureMessageButtons();
     scheduleAutomaticCapture();
   };
   DS.removeContextKeeper = function removeContextKeeper() {
+    // A disabled feature must remove its subscriptions, even if it has no UI.
+    if (messageButtonListenersInstalled) {
+      window.removeEventListener("pageshow", onMessageButtonsPageShow, true);
+      document.removeEventListener("visibilitychange", onMessageButtonsVisible, true);
+      messageButtonListenersInstalled = false;
+    }
+    if (recallListenerInstalled) {
+      try { chrome.storage?.onChanged?.removeListener(onRecallStorageChanged); } catch {}
+      recallListenerInstalled = false;
+    }
+    clearInterval(messageButtonWatchdog);
+    messageButtonWatchdog = 0;
+    clearTimeout(messageButtonRepairTimer);
+    messageButtonRepairTimer = 0;
     if (!DS.state.contextKeeperWasActive && !document.getElementById(MODAL_ID)) return;
     document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => button.remove());
     document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-context-keeper-ready]`).forEach(root => delete root.dataset.dsContextKeeperReady);

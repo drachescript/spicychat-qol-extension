@@ -177,6 +177,7 @@ const DEFAULT_SETTINGS = {
   enableSelectionRemember: false,
   contextKeeperRecapSize: "balanced",
   contextKeeperAutoRecall: false,
+  contextKeeperRelevantRecall: false,
   contextKeeperRecallEverySends: 5,
   contextKeeperRecallMaxChars: 900,
   enableStoryDayTracker: false,

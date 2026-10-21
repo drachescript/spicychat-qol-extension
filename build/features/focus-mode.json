@@ -4,7 +4,11 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableFocusMode"
+    "enableFocusMode",
+    "focusHideChatHeader",
+    "focusHideQolPanel",
+    "focusHideSidebar",
+    "focusHideTopBar"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
@@ -13,5 +17,8 @@
   "browserVerified": false,
   "styleFiles": [
     "content/styles/focus-mode.css"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/focus-mode.js"
   ]
 }

@@ -460,7 +460,9 @@
         "content/styles/chat-search.css",
         "content/styles/focus-mode.css",
         "content/styles/rp-format-repair.css",
-        "content/styles/story-reading-layout.css"
+        "content/styles/story-reading-layout.css",
+        "content/styles/story-day-tracker.css",
+        "content/styles/rp-state-tracker.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",
@@ -478,7 +480,8 @@
         "content/styles/android-app.css"
       ],
       "lorebook": [
-        "content/styles/lorebook-connections.css"
+        "content/styles/lorebook-connections.css",
+        "content/styles/wiki-lorebook-importer.css"
       ]
     }
   },
