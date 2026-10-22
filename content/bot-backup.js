@@ -1113,7 +1113,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyBotBackupTools = function applyBotBackupTools() {
     const cfg = settings();
     const info = editorInfo();
-    const shouldShow = !!(cfg.enabled && cfg.botBackupToolsEnabled && info);
+    const isExportWorker = new URLSearchParams(location.search).get("dsQolBotBackupWorker") === "1";
+    const shouldShow = !!(cfg.enabled && cfg.botBackupToolsEnabled && info && !isExportWorker);
     if (!shouldShow) {
       if (DS.state.botBackupWasActive || document.getElementById(PANEL_ID)) cleanup();
       return;
@@ -1151,6 +1152,68 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
   };
+
+  // Live, read-only capture for My Creations bulk export. A fetched HTML shell
+  // is never accepted as evidence that the React editor has current values.
+  // This helper only reads hydrated controls. It never saves or publishes.
+  async function captureCurrentEditorForExport(message) {
+    const wanted = clean(message?.id, 200).toLowerCase();
+    const actual = editorInfo();
+    const params = new URLSearchParams(location.search);
+    if (params.get("dsQolBotBackupWorker") !== "1" || !wanted || actual?.mode !== "edit" ||
+        actual.id.toLowerCase() !== wanted) {
+      return { ok: false, retryable: true, error: "Bot export helper is still navigating to the requested editor." };
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 26000) {
+      const now = editorInfo();
+      if (now?.id?.toLowerCase() !== wanted) {
+        return { ok: false, retryable: true, error: "Editor navigated during capture." };
+      }
+      const form = editorForm();
+      if (form) {
+        const nameControl = directField("name", form);
+        const greetingControl = directField("greeting", form);
+        const personaControl = directField("personality", form);
+        // Only capture after actual creator-controlled fields hydrate, not the
+        // blank app shell or pre-hydration placeholder inputs.
+        if (nameControl && greetingControl && personaControl && clean(nameControl.value, 300)) {
+          activeForm = form;
+          const profile = captureProfile();
+          const stable = editorInfo();
+          if (!profile || stable?.id?.toLowerCase() !== wanted) {
+            return { ok: false, retryable: true, error: "Editor changed while reading values." };
+          }
+          if (profile.tagCaptureIncomplete) {
+            return { ok: false, error: `Selected tags could not be verified (${profile.capturedTagCount}/${profile.expectedTagCount ?? "?"}).` };
+          }
+          const keys = ["name", "title", "greeting", "personality", "scenario", "exampleDialogues", "description"];
+          const present = Object.fromEntries(keys.map(key => [key, !!directField(key, form)]));
+          if (!present.name || !present.greeting || !present.personality) {
+            return { ok: false, retryable: true, error: "Creator definition controls are still loading." };
+          }
+          return {
+            ok: true, id: wanted, source: "current-rendered-owner-editor",
+            fields: profile.fields, present,
+            tagCount: profile.expectedTagCount,
+            capturedAt: Date.now()
+          };
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    return { ok: false, error: "Bot editor did not hydrate its name, greeting and personality fields." };
+  }
+
+  try {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "DS_BOT_EXPORT_RUN") return false;
+      captureCurrentEditorForExport(message)
+        .then(sendResponse)
+        .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    });
+  } catch {}
 
   DS.removeBotBackupTools = cleanup;
 })();

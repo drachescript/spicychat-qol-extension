@@ -174,10 +174,6 @@ function readSettingsFromPage() {
     chatListBlockedFilter: ["all", "blocked", "unblocked"].includes(value("chatListBlockedFilter")) ? value("chatListBlockedFilter") : "all",
 
     trackOpenedChats: checked("trackOpenedChats"),
-    botStatusScanSpeed: Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, value("botStatusScanSpeed", "safe")) ? value("botStatusScanSpeed", "safe") : "safe",
-    botStatusStaleDays: [1, 7, 14, 30].includes(Number(value("botStatusStaleDays", "7"))) ? Number(value("botStatusStaleDays", "7")) : 7,
-    botStatusMaxBots: Math.min(100000, Math.max(0, Math.floor(Number(value("botStatusMaxBots", "0")) || 0))),
-    botStatusMaxMinutes: Math.min(1440, Math.max(0, Math.floor(Number(value("botStatusMaxMinutes", "0")) || 0))),
     lorebookStatusScanSpeed: Object.prototype.hasOwnProperty.call(LOREBOOK_STATUS_SCAN_SPEED_DELAYS, value("lorebookStatusScanSpeed", "safe")) ? value("lorebookStatusScanSpeed", "safe") : "safe",
     lorebookStatusStaleDays: [1, 7, 14, 30].includes(Number(value("lorebookStatusStaleDays", "7"))) ? Number(value("lorebookStatusStaleDays", "7")) : 7,
     importOpenedFromChatsPage: checked("importOpenedFromChatsPage"),
@@ -404,6 +400,9 @@ function readSettingsFromPage() {
     keepChatPositionWhileTyping: checked("keepChatPositionWhileTyping"),
     showScrollToTopButton: checked("showScrollToTopButton"),
     showScrollToBottomButton: checked("showScrollToBottomButton"),
+    showSwipeJumpButtons: checked("showSwipeJumpButtons"),
+    showSwipeJumpToNumber: checked("showSwipeJumpToNumber"),
+    restoreFirstSwipeOnLoad: checked("restoreFirstSwipeOnLoad"),
     scrollNavOnHome: checked("scrollNavOnHome", true),
     scrollNavOnChats: checked("scrollNavOnChats", true),
     scrollNavOnChat: checked("scrollNavOnChat", true),
@@ -413,15 +412,6 @@ function readSettingsFromPage() {
     scrollTopLoadPreviousMessages: checked("scrollTopLoadPreviousMessages"),
     scrollTopLoadPreviousMode: ["one", "all"].includes(value("scrollTopLoadPreviousMode")) ? value("scrollTopLoadPreviousMode") : "all",
     scrollTopLoadPreviousTiming: ["before", "background"].includes(value("scrollTopLoadPreviousTiming")) ? value("scrollTopLoadPreviousTiming") : "before",
-    botArchiveRememberSeenPublic: checked("botArchiveRememberSeenPublic"),
-    botBackupToolsEnabled: checked("botBackupToolsEnabled"),
-    botArchiveOwnEditorBackups: checked("botArchiveOwnEditorBackups"),
-    lorebookBackupToolsEnabled: checked("lorebookBackupToolsEnabled"),
-    lorebookBackupsEnabled: checked("lorebookBackupsEnabled"),
-    botArchiveOwnRevisionLimit: Math.max(1, Math.min(50, Number(value("botArchiveOwnRevisionLimit", "10")) || 10)),
-    botArchiveOnProfileVisit: checked("botArchiveOnProfileVisit"),
-    botArchiveOnChatOpen: checked("botArchiveOnChatOpen"),
-    botArchiveRefreshHours: [6, 24, 72, 168].includes(Number(value("botArchiveRefreshHours"))) ? Number(value("botArchiveRefreshHours")) : 24,
     protectDraftDuringMessageRemoval: checked("protectDraftDuringMessageRemoval"),
     failedMessageHelper: checked("failedMessageHelper"),
     autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
@@ -816,8 +806,6 @@ function readSingleSettingFromPage(settingKey) {
     case "chatListSavedFilter": return (["all", "favorite", "later", "both", "saved", "neither"].includes(value("chatListSavedFilter")) ? value("chatListSavedFilter") : "all");
     case "chatListBlockedFilter": return (["all", "blocked", "unblocked"].includes(value("chatListBlockedFilter")) ? value("chatListBlockedFilter") : "all");
     case "trackOpenedChats": return (checked("trackOpenedChats"));
-    case "botStatusScanSpeed": return (Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, value("botStatusScanSpeed", "safe")) ? value("botStatusScanSpeed", "safe") : "safe");
-    case "botStatusStaleDays": return ([1, 7, 14, 30].includes(Number(value("botStatusStaleDays", "7"))) ? Number(value("botStatusStaleDays", "7")) : 7);
     case "lorebookStatusScanSpeed": return (Object.prototype.hasOwnProperty.call(LOREBOOK_STATUS_SCAN_SPEED_DELAYS, value("lorebookStatusScanSpeed", "safe")) ? value("lorebookStatusScanSpeed", "safe") : "safe");
     case "lorebookStatusStaleDays": return ([1, 7, 14, 30].includes(Number(value("lorebookStatusStaleDays", "7"))) ? Number(value("lorebookStatusStaleDays", "7")) : 7);
     case "importOpenedFromChatsPage": return (checked("importOpenedFromChatsPage"));
@@ -1034,6 +1022,9 @@ function readSingleSettingFromPage(settingKey) {
     case "keepChatPositionWhileTyping": return (checked("keepChatPositionWhileTyping"));
     case "showScrollToTopButton": return (checked("showScrollToTopButton"));
     case "showScrollToBottomButton": return (checked("showScrollToBottomButton"));
+    case "showSwipeJumpButtons": return (checked("showSwipeJumpButtons"));
+    case "showSwipeJumpToNumber": return (checked("showSwipeJumpToNumber"));
+    case "restoreFirstSwipeOnLoad": return (checked("restoreFirstSwipeOnLoad"));
     case "scrollNavOnHome": return (checked("scrollNavOnHome", true));
     case "scrollNavOnChats": return (checked("scrollNavOnChats", true));
     case "scrollNavOnChat": return (checked("scrollNavOnChat", true));
@@ -1043,15 +1034,6 @@ function readSingleSettingFromPage(settingKey) {
     case "scrollTopLoadPreviousMessages": return (checked("scrollTopLoadPreviousMessages"));
     case "scrollTopLoadPreviousMode": return (["one", "all"].includes(value("scrollTopLoadPreviousMode")) ? value("scrollTopLoadPreviousMode") : "all");
     case "scrollTopLoadPreviousTiming": return (["before", "background"].includes(value("scrollTopLoadPreviousTiming")) ? value("scrollTopLoadPreviousTiming") : "before");
-    case "botArchiveRememberSeenPublic": return (checked("botArchiveRememberSeenPublic"));
-    case "botBackupToolsEnabled": return (checked("botBackupToolsEnabled"));
-    case "botArchiveOwnEditorBackups": return (checked("botArchiveOwnEditorBackups"));
-    case "lorebookBackupToolsEnabled": return (checked("lorebookBackupToolsEnabled"));
-    case "lorebookBackupsEnabled": return (checked("lorebookBackupsEnabled"));
-    case "botArchiveOwnRevisionLimit": return (Math.max(1, Math.min(50, Number(value("botArchiveOwnRevisionLimit", "10")) || 10)));
-    case "botArchiveOnProfileVisit": return (checked("botArchiveOnProfileVisit"));
-    case "botArchiveOnChatOpen": return (checked("botArchiveOnChatOpen"));
-    case "botArchiveRefreshHours": return ([6, 24, 72, 168].includes(Number(value("botArchiveRefreshHours"))) ? Number(value("botArchiveRefreshHours")) : 24);
     case "protectDraftDuringMessageRemoval": return (checked("protectDraftDuringMessageRemoval"));
     case "failedMessageHelper": return (checked("failedMessageHelper"));
     case "autoRetryFailedMessageSends": return (checked("autoRetryFailedMessageSends"));

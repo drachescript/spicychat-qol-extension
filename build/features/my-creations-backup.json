@@ -2,7 +2,12 @@
   "id": "my-creations-backup",
   "primary": "content/my-creations-backup.js",
   "type": "content",
-  "dependencies": [],
+  "dependencies": [
+    "bot-backup",
+    "card-token-info",
+    "lorebook-backup",
+    "lorebook-tags"
+  ],
   "settingsKeys": [
     "enableMyCreationsBulkBackup"
   ],
@@ -10,5 +15,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/features/background-bot-export.js"
+  ]
 }

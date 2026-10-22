@@ -45,6 +45,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function getCardEntries() {
     const entries = [];
     const seen = new Set();
+    // Index each grid only once per pass. The previous sibling scan was
+    // quadratic when many My Creations cards shared the same parent.
+    const siblingIndices = new Map();
     const scope = listingScope();
     if (!scope) return entries;
 
@@ -58,9 +61,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const parent = target?.parentElement;
       if (!target || !parent) continue;
 
-      if (!target.dataset.dsLorebookOriginalIndex) {
-        const siblings = [...parent.children];
-        target.dataset.dsLorebookOriginalIndex = String(Math.max(0, siblings.indexOf(target)));
+      if (target.dataset.dsLorebookOriginalIndex === undefined) {
+        let indices = siblingIndices.get(parent);
+        if (!indices) {
+          indices = new Map(Array.from(parent.children, (child, index) => [child, index]));
+          siblingIndices.set(parent, indices);
+        }
+        target.dataset.dsLorebookOriginalIndex = String(indices.get(target) ?? 0);
       }
 
       entries.push({ card, target, parent, lorebook: hasLorebook(card) });
@@ -71,9 +78,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function restore(entries) {
     for (const entry of entries) {
-      entry.target.classList.remove("ds-lorebook-filter-hidden");
-      delete entry.target.dataset.dsLorebookFilterHidden;
+      if (entry.target.classList.contains("ds-lorebook-filter-hidden")) entry.target.classList.remove("ds-lorebook-filter-hidden");
+      if (entry.target.dataset.dsLorebookFilterHidden !== undefined) delete entry.target.dataset.dsLorebookFilterHidden;
     }
+  }
+
+  // Reparenting a card that is already in the desired position causes a real
+  // React/DOM mutation and can trigger the other listing observers. Do not
+  // touch the grid unless its direct-child card order actually differs.
+  function reorderParentIfNeeded(parent, group) {
+    const targets = group.map(entry => entry.target);
+    const targetSet = new Set(targets);
+    const current = Array.from(parent.children).filter(node => targetSet.has(node));
+    if (current.length === targets.length && current.every((node, index) => node === targets[index])) return false;
+    for (const target of targets) parent.appendChild(target);
+    return true;
   }
 
   function restoreOrder(entries) {
@@ -84,9 +103,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     for (const [parent, group] of byParent) {
-      group
-        .sort((a, b) => Number(a.target.dataset.dsLorebookOriginalIndex || 0) - Number(b.target.dataset.dsLorebookOriginalIndex || 0))
-        .forEach(entry => parent.appendChild(entry.target));
+      group.sort((a, b) => Number(a.target.dataset.dsLorebookOriginalIndex || 0) - Number(b.target.dataset.dsLorebookOriginalIndex || 0));
+      reorderParentIfNeeded(parent, group);
     }
   }
 
@@ -110,21 +128,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         return Number(a.target.dataset.dsLorebookOriginalIndex || 0) - Number(b.target.dataset.dsLorebookOriginalIndex || 0);
       });
-      group.forEach(entry => parent.appendChild(entry.target));
+      reorderParentIfNeeded(parent, group);
     }
   }
 
   function applyFilter(entries, mode) {
-    restore(entries);
+    const strict = !!DS.state?.settings?.lorebookUnknownSafeFilter;
     for (const entry of entries) {
-      const strict = !!DS.state?.settings?.lorebookUnknownSafeFilter;
-      const state = DS.cardLorebookState(entry.card);
+      // No card-metadata inspection is needed for the unfiltered view.
+      const state = mode === "all" ? null : DS.cardLorebookState(entry.card);
       const hidden = mode === "has" ? state !== "has" :
         mode === "none" ? (strict ? state !== "none" : entry.lorebook) :
         mode === "unknown" ? (!strict || state !== "unknown") : false;
-      if (!hidden) continue;
-      entry.target.classList.add("ds-lorebook-filter-hidden");
-      entry.target.dataset.dsLorebookFilterHidden = "1";
+      if (entry.target.classList.contains("ds-lorebook-filter-hidden") !== hidden) {
+        entry.target.classList.toggle("ds-lorebook-filter-hidden", hidden);
+      }
+      if (hidden && entry.target.dataset.dsLorebookFilterHidden !== "1") entry.target.dataset.dsLorebookFilterHidden = "1";
+      if (!hidden && entry.target.dataset.dsLorebookFilterHidden !== undefined) delete entry.target.dataset.dsLorebookFilterHidden;
     }
   }
 
@@ -218,7 +238,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const total = entries.length;
     const withLorebook = entries.filter(entry => entry.lorebook).length;
     const count = toolbar.querySelector("#ds-lorebook-count");
-    if (count) count.textContent = `📖 ${withLorebook}/${total} loaded${total ? ` · ${total - withLorebook} without` : ""}`;
+    const countText = `📖 ${withLorebook}/${total} loaded${total ? ` · ${total - withLorebook} without` : ""}`;
+    if (count && count.textContent !== countText) count.textContent = countText;
 
     const needs = toolbar.querySelector("#ds-lorebook-needs");
     if (needs) needs.hidden = !DS.isMyCreationsChatbotsPage?.();

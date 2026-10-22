@@ -67,7 +67,7 @@
     F("chat-search", "Search Inside Current Chat", "Chat Tools", "Search loaded messages, jump between matches and optionally keep loading older history until a match is found. Active searches update changed/new messages incrementally on long chats.", { setting: "showChatSearch", updated: "0.1.9.65", aliases: ["find message", "regex", "case sensitive", "whole word", "search messages"] }),
     F("bookmarks", "Message bookmarks / multiple local pins", "Chat Tools", "Bookmark as many messages as you want locally, add notes, keep Back/Forward location history and jump to the previous/next loaded bookmark.", { setting: "enableMessageBookmarks", added: "0.1.9.2", updated: "0.1.9.62" }),
     F("focus-mode", "Focus / Immersive Mode", "Chat Tools", "Temporarily hide selected navigation and chat UI while keeping an Exit control available.", { setting: "enableFocusMode", added: "0.1.8.87" }),
-    F("scroll-nav", "Scroll navigation & older-message loading", "Chat Tools", "Show floating top/bottom controls and optionally let Chat ↑ load older message batches.", { settings: ["showScrollToTopButton", "showScrollToBottomButton"], statusMode: "any", updated: "0.1.9.31" }),
+    F("scroll-nav", "Scroll navigation & reply-swipes", "Chat Tools", "Show floating top/bottom controls, load older message batches and optionally navigate to the first or last generated reply.", { settings: ["showScrollToTopButton", "showScrollToBottomButton", "showSwipeJumpButtons", "showSwipeJumpToNumber", "restoreFirstSwipeOnLoad"], statusMode: "any", updated: "0.1.9.31" }),
     F("memory-manager", "Bulk Memory Manager", "Chat Tools", "Add multi-select, loading, JSON export/import, pin/delete, Context Keeper transfer helpers, and pinned-memory reordering to SpicyChat Memories. Pinned memories can be dragged or moved with arrows without losing your scroll position, and pin/unpin changes allow SpicyChat time to finish updating before they are treated as failed.", { setting: "enableBulkMemoryManager", added: "0.1.8.71", updated: "0.2.14", aliases: ["memory import", "memory export", "reorder pinned memory", "pinned memory order", "memory block order", "drag pinned memory"] }),
     F("context-keeper", "Context Keeper", "Chat Tools", "Automatically capture high-confidence durable continuity locally after chats settle, open the manager directly from the chat menu, review/edit saved details, control recap inclusion and build reusable OOC continuity notes for long chats.", { setting: "enableContextKeeper", updated: "0.1.9.112", aliases: ["continuity", "recap", "remember detail", "saved details", "automatic memory", "auto context", "chat menu"] }),
     F("story-day-tracker", "Internal Day Tracker / Storydate", "Chat Tools", "Keep a local numbered in-story day and compact Storydate code, detect conservative day/night transitions, review assisted suggestions, add dated timeline anchors, and pass the current relative-day map into Context Keeper recaps. Regenerated responses replace the same turn's automatic timeline event instead of advancing it twice. Suggestion credit: Chibs.", { setting: "enableStoryDayTracker", added: "0.1.9.112", updated: "0.1.9.122", target: "storyDayTrackerCard", aliases: ["day tracker", "storydate", "timeline", "yesterday", "tomorrow", "last night", "day 35"] }),
@@ -905,8 +905,26 @@
   }
 
   function boot(attempt = 0) {
-    if (typeof readSettingsFromPage !== "function" || typeof collectTrackedAvailabilityBots !== "function" || typeof runtimeMessageWithTimeout !== "function") {
+    // The feature registry is loaded before options.js. Its function declarations
+    // can already be visible while the controller's top-level `let` state has
+    // not been initialized yet (especially on a slow Settings page). Never
+    // install the Bot Status render wrapper until all of that state is ready.
+    const ready = typeof botAvailabilityState !== "undefined"
+      && typeof botArchiveState !== "undefined"
+      && typeof openedChatMetaState !== "undefined"
+      && typeof favoriteBotState !== "undefined"
+      && typeof laterBotState !== "undefined"
+      && typeof botOrganizationState !== "undefined"
+      && typeof blockedState !== "undefined"
+      && typeof notInterestedState !== "undefined"
+      && typeof readSettingsFromPage === "function"
+      && typeof readSingleSettingFromPage === "function"
+      && typeof collectTrackedAvailabilityBots === "function"
+      && typeof runtimeMessageWithTimeout === "function"
+      && typeof renderBotAvailability === "function";
+    if (!ready) {
       if (attempt < 120) later(() => boot(attempt + 1), 50);
+      else console.warn("[SpicyChat QoL options] options controller unavailable; skipped optional Bot Status enhancements");
       return;
     }
     addStyles();
@@ -935,6 +953,12 @@
     } catch {}
   }
 
-  later(() => boot());
+  // All classic Settings scripts, including options.js, have executed by
+  // DOMContentLoaded. Waiting avoids races with deferred script fetches.
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => boot(), { once: true });
+  } else {
+    later(() => boot());
+  }
 })();
 /* END SPICYCHAT QOL OPTIONS ENHANCEMENTS */

@@ -3,10 +3,18 @@
   "primary": "content/bot-archive.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "botArchiveRememberSeenPublic",
+    "botArchiveOnProfileVisit",
+    "botArchiveOnChatOpen",
+    "botArchiveRefreshHours"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/bot-archive.js"
+  ]
 }

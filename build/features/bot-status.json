@@ -3,13 +3,18 @@
   "primary": "background/features/background-worker-bot-status.js",
   "type": "background",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "botStatusScanSpeed",
+    "botStatusStaleDays",
+    "botStatusMaxBots",
+    "botStatusMaxMinutes"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
   "browserVerified": false,
-  "backgroundFiles": [
-    "background/features/background-worker-bot-status.js"
+  "settingsFiles": [
+    "settings/feature-panels/bot-status.js"
   ]
 }

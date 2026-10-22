@@ -3,6 +3,12 @@ const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 let tabCleanupTopicState = { version: 1, topics: [] };
 let activeTabCleanupSessionId = "";
 let tabCleanupSessionSelection = new Set();
+let tabCleanupReviewPageLimit = 60;
+let tabCleanupReviewAvailability = Object.create(null);
+let tabCleanupReviewProfiles = Object.create(null);
+let tabCleanupReviewUnchecked = Object.create(null);
+let tabCleanupLastSnapshotUndo = null;
+const TAB_CLEANUP_REVIEW_PAGE_SIZE = 60;
 
 const TAB_CLEANUP_ENRICHMENT_KEY = "tabCleanupEnrichment";
 const TAB_CLEANUP_SESSIONS_KEY = "tabCleanupSessions";
@@ -269,13 +275,32 @@ function setTabCleanupEnrichControls() {
   }
 }
 
+// If messaging fails before the background worker can save a result, retain the
+// unresolved ID and reason locally so the next scan can retry it. Never delete
+// an earlier profile/archival field just because a fresh request failed.
+async function tabCleanupPreserveUnchecked(botId, reason) {
+  const id = String(botId || "").trim();
+  if (!id) return;
+  const data = await storageGet([TAB_CLEANUP_ENRICHMENT_KEY]);
+  const store = data?.[TAB_CLEANUP_ENRICHMENT_KEY] && typeof data[TAB_CLEANUP_ENRICHMENT_KEY] === "object"
+    ? data[TAB_CLEANUP_ENRICHMENT_KEY] : { version: 1, meta: {} };
+  if (!store.meta || typeof store.meta !== "object") store.meta = {};
+  const previous = store.meta[id] && typeof store.meta[id] === "object" ? store.meta[id] : {};
+  store.meta[id] = {
+    ...previous, id, status: "unchecked", checkedAt: Date.now(),
+    lastError: String(reason || "Could not verify this bot").slice(0, 300),
+    source: "Tab Session scan (incomplete request)"
+  };
+  if (!await storageSet({ [TAB_CLEANUP_ENRICHMENT_KEY]: store })) throw Error("Could not preserve unchecked bot status");
+}
+
 async function enrichTabCleanupDiagnostic(forceMissing = false) {
   if (tabCleanupEnrichState.running) return;
   const status = $("tabCleanupDiagnosticStatus");
   tabCleanupEnrichState = { running: true, paused: false, cancelled: false, completed: 0, total: 0 };
   setTabCleanupEnrichControls();
 
-  const counts = { fetched: 0, localOnly: 0, cached: 0, noData: 0, unavailable: 0, failed: 0 };
+  const counts = { fetched: 0, localOnly: 0, cached: 0, noData: 0, unavailable: 0, failed: 0, unchecked: 0 };
   let lastError = "";
   try {
     const initial = await requestTabCleanupDiagnostic();
@@ -308,28 +333,28 @@ async function enrichTabCleanupDiagnostic(forceMissing = false) {
       const bot = pending[index];
       const label = bot.identity?.bestName || bot.names?.[0] || bot.id;
       let response = null;
-      while (!tabCleanupEnrichState.cancelled) {
-        if (status) status.textContent = `${forceMissing ? "Retrying" : "Analyzing"} ${index + 1}/${pending.length}: ${label}`;
-        response = await runtimeMessage({ type: "DS_TAB_DIAGNOSTIC_ENRICH_ONE", botId: bot.id, force: !!forceMissing });
-        if (!response?.verificationRequired && String(response?.metadata?.status || "") !== "verification-required") break;
-
-        tabCleanupEnrichState.paused = true;
-        setTabCleanupEnrichControls();
-        if (status) status.textContent = `SpicyChat verification is blocking the temporary analysis tab. Complete verification in the tab QoL opened, then press Resume. Analysis is paused at ${index + 1}/${pending.length}.`;
-        while (tabCleanupEnrichState.paused && !tabCleanupEnrichState.cancelled) await tabCleanupSleep(220);
-        if (tabCleanupEnrichState.cancelled) break outer;
-        // Verification was completed/resumed: retry this same bot instead of skipping it.
+      if (status) status.textContent = `${forceMissing ? "Retrying" : "Analyzing"} ${index + 1}/${pending.length}: ${label}`;
+      response = await runtimeMessage({ type: "DS_TAB_DIAGNOSTIC_ENRICH_ONE", botId: bot.id, force: !!forceMissing });
+      // Verification-required records are persisted by the background helper.
+      // Keep them in Unchecked rather than halting the entire scan or treating them as deleted.
+      if (response?.verificationRequired || String(response?.metadata?.status || "") === "verification-required") {
+        counts.unchecked++;
+        if (status) status.textContent = `Verification blocked ${label}; preserved under Unchecked / Needs recheck. Continuing analysis.`;
+        await runtimeMessage({ type: "DS_TAB_DIAGNOSTIC_WORKER_CLOSE" });
       }
       if (tabCleanupEnrichState.cancelled) break;
 
+      if (!response?.metadata && !response?.ok) {
+        await tabCleanupPreserveUnchecked(bot.id, response?.error || "Scan did not return a usable result");
+      }
       const meta = response?.metadata || {};
-      const state = String(meta.status || (response?.ok ? "profile-fetched" : "failed"));
+      const state = String(meta.status || (response?.ok ? "profile-fetched" : "unchecked"));
       if (response?.cached && state !== "local-only") counts.cached += 1;
       if (state === "profile-fetched") counts.fetched += response?.cached ? 0 : 1;
       else if (state === "local-only") counts.localOnly += 1;
-      else if (state === "no-usable-data") counts.noData += 1;
-      else if (state === "unavailable") counts.unavailable += 1;
-      else counts.failed += 1;
+      else if (state === "no-usable-data") { counts.noData += 1; counts.unchecked += 1; }
+      else if (state === "unavailable") { counts.unavailable += 1; counts.unchecked += 1; }
+      else if (state !== "verification-required") { counts.failed += 1; counts.unchecked += 1; }
       if (!response?.ok && response?.error) lastError = response.error;
 
       tabCleanupEnrichState.completed = index + 1;
@@ -339,7 +364,7 @@ async function enrichTabCleanupDiagnostic(forceMissing = false) {
 
     const report = await requestTabCleanupDiagnostic();
     const prefix = tabCleanupEnrichState.cancelled ? "Analysis cancelled" : "Analysis finished";
-    const detail = `${counts.fetched} rendered profiles, ${counts.localOnly} local-only, ${counts.cached} recent cached results, ${counts.noData} no usable data, ${counts.unavailable} unavailable, ${counts.failed} failed.`;
+    const detail = `${counts.fetched} rendered profiles, ${counts.localOnly} local-only, ${counts.cached} recent cached results, ${counts.noData} no usable data, ${counts.unavailable} unavailable, ${counts.failed} failed, ${counts.unchecked} unchecked/needs recheck (retained for retry).`;
     renderTabCleanupDiagnostic(report, `${prefix}: ${detail}${lastError && counts.failed ? ` Last error: ${lastError}` : ""}`);
   } catch (error) {
     if (status) status.textContent = `Could not analyze open bots: ${error?.message || String(error)}`;
@@ -665,18 +690,121 @@ function tabCleanupAgeLabel(timestamp) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+// Saved Bot Status is a useful *review signal*, not proof that a chat URL is dead.
+// A single HTTP 404 is not enough to classify private/unlisted/restricted bots as deleted.
+function tabCleanupIsConfirmedUnavailable(botId) {
+  const record = tabCleanupReviewAvailability[String(botId || "")] || null;
+  return !!record && record.status === "unavailable" && Number(record.unavailableEvidenceCount || 0) >= 2;
+}
+
+// A title of "404" may be a browser page title. It is never evidence by itself
+// that a chatbot was deleted. Editor URLs must resolve the *actual* character ID.
+function tabCleanupBotIdForTab(tab) {
+  const stored = String(tab?.botId || "").trim();
+  try {
+    const pathname = new URL(String(tab?.url || "")).pathname;
+    const edit = pathname.match(/^\/chatbot\/edit\/([0-9a-f-]{32,36})(?:\/|$)/i);
+    if (edit) return edit[1];
+    if (stored && stored !== "edit") return stored;
+    return pathname.match(/^\/(?:chat|chatbot)\/([0-9a-f-]{32,36})(?:\/|$)/i)?.[1] || "";
+  } catch { return stored && stored !== "edit" ? stored : ""; }
+}
+
+function tabCleanupReviewProfile(tab) {
+  const id = tabCleanupBotIdForTab(tab);
+  const current = tabCleanupReviewProfiles[id] || {};
+  const availability = tabCleanupReviewAvailability[id] || {};
+  return {
+    id,
+    name: String(current.name || availability.name || tab?.botName || "").trim(),
+    creator: String(current.creator || availability.creator || tab?.creator || "").replace(/^@/, "").trim(),
+    image: String(current.image || current.imageUrl || availability.image || availability.imageUrl || tab?.image || "").trim()
+  };
+}
+
+const TAB_CLEANUP_UNCHECKED_STATES = new Set(["verification-required", "failed", "no-usable-data", "unavailable", "rate-limited", "unchecked"]);
+function tabCleanupUncheckedReason(tab) {
+  const id = tabCleanupBotIdForTab(tab);
+  if (!id) return "";
+  const item = tabCleanupReviewUnchecked[id];
+  if (!item || !TAB_CLEANUP_UNCHECKED_STATES.has(String(item.status || ""))) return "";
+  return String(item.lastError || item.status || "Needs recheck").slice(0, 240);
+}
+
+function tabCleanupReviewCategory(tab, counts) {
+  if (/\/chatbot\/(?:edit\/)?/i.test(String(tab?.url || ""))) return "profile";
+  if (!tabCleanupBotIdForTab(tab)) return "other";
+  if (String(tab.pageType || "").toLowerCase() === "profile") return "profile";
+  return "chat";
+}
+
+function tabCleanupReviewStats(session) {
+  const tabs = Array.isArray(session?.tabs) ? session.tabs : [];
+  const counts = new Map();
+  const seen = new Set();
+  let exactDuplicates = 0, chats = 0, profiles = 0, other = 0, unavailable = 0, unchecked = 0, discarded = 0, archived = 0;
+  for (const tab of tabs) {
+    const url = tabCleanupExactUrlKey(tab.url);
+    if (url && seen.has(url)) exactDuplicates += 1;
+    if (url) seen.add(url);
+    const botId = tabCleanupBotIdForTab(tab);
+    if (botId) counts.set(botId, (counts.get(botId) || 0) + 1);
+    const type = tabCleanupReviewCategory(tab);
+    if (type === "chat") chats++; else if (type === "profile") profiles++; else other++;
+    if (tabCleanupIsConfirmedUnavailable(botId)) unavailable++;
+    if (tabCleanupUncheckedReason(tab)) unchecked++;
+    if (tab.discarded) discarded++;
+    if (tab.savedLocalCopy) archived++;
+  }
+  return { counts, exactDuplicates, chats, profiles, other, unavailable, unchecked, discarded, archived,
+    repeatedBotRefs: [...counts.values()].reduce((n, c) => n + Math.max(0, c - 1), 0) };
+}
+
+function tabCleanupReviewFilterMatches(tab, filter, stats) {
+  switch (filter) {
+    case "other": return tabCleanupReviewCategory(tab) === "other";
+    case "profiles": return tabCleanupReviewCategory(tab) === "profile";
+    case "repeated": return !!tabCleanupBotIdForTab(tab) && (stats.counts.get(tabCleanupBotIdForTab(tab)) || 0) > 1;
+    case "unavailable": return tabCleanupIsConfirmedUnavailable(tabCleanupBotIdForTab(tab));
+    case "unchecked": return !!tabCleanupUncheckedReason(tab);
+    case "discarded": return !!tab.discarded;
+    case "old": return Number(tab.lastAccessed) > 0 && Date.now() - Number(tab.lastAccessed) >= 30 * 86400000;
+    case "missing": return !!tabCleanupBotIdForTab(tab) && !String(tab.botName || "").trim();
+    default: return true;
+  }
+}
+
+async function tabCleanupLoadReviewAvailability() {
+  try {
+    const data = await storageGet(["botAvailability", TAB_CLEANUP_ENRICHMENT_KEY]);
+    tabCleanupReviewAvailability = data?.botAvailability?.meta || Object.create(null);
+    const profiles = data?.[TAB_CLEANUP_ENRICHMENT_KEY]?.meta || Object.create(null);
+    tabCleanupReviewProfiles = profiles;
+    tabCleanupReviewUnchecked = profiles;
+  } catch {
+    // Missing/unreadable status information means there are no *confirmed* candidates.
+    tabCleanupReviewAvailability = Object.create(null);
+    tabCleanupReviewProfiles = Object.create(null);
+    tabCleanupReviewUnchecked = Object.create(null);
+  }
+}
+
 function tabCleanupReviewVisibleTabs(session) {
   const search = String($("tabCleanupSessionSearch")?.value || "").trim().toLowerCase();
   const topicFilter = String($("tabCleanupSessionTopicFilter")?.value || "all");
+  const reviewFilter = String($("tabCleanupSnapshotReviewFilter")?.value || "all");
+  const stats = tabCleanupReviewStats(session);
   const smart = topicFilter.startsWith("smart:") ? tabCleanupSmartGroupForId(session, topicFilter) : null;
   const smartUrls = smart ? new Set(smart.urls.map(tabCleanupExactUrlKey).filter(Boolean)) : null;
   return (Array.isArray(session?.tabs) ? session.tabs : []).filter(tab => {
-    const topics = tabCleanupTopicIdsForBot(tab.botId);
+    const topics = tabCleanupTopicIdsForBot(tabCleanupBotIdForTab(tab));
     if (topicFilter === "none" && topics.length) return false;
     if (topicFilter !== "all" && topicFilter !== "none" && !topicFilter.startsWith("smart:") && !topics.includes(topicFilter)) return false;
     if (smartUrls && !smartUrls.has(tabCleanupExactUrlKey(tab.url))) return false;
+    if (!tabCleanupReviewFilterMatches(tab, reviewFilter, stats)) return false;
     if (!search) return true;
-    const haystack = `${tab.botName || ""}\n${tab.creator || ""}\n${tab.title || ""}\n${tab.url || ""}\n${(tab.tags || []).join(" ")}\n${tabCleanupTopicNamesForBot(tab.botId).join(" ")}`.toLowerCase();
+    const current = tabCleanupReviewProfile(tab);
+    const haystack = `${current.name}\n${current.creator}\n${tab.title || ""}\n${tab.url || ""}\n${(tab.tags || []).join(" ")}\n${tabCleanupTopicNamesForBot(current.id).join(" ")}`.toLowerCase();
     return haystack.includes(search);
   });
 }
@@ -684,9 +812,12 @@ function tabCleanupReviewVisibleTabs(session) {
 async function openTabCleanupSessionReview(id) {
   activeTabCleanupSessionId = String(id || "");
   tabCleanupSessionSelection.clear();
+  tabCleanupReviewPageLimit = TAB_CLEANUP_REVIEW_PAGE_SIZE;
+  const filter = $("tabCleanupSnapshotReviewFilter");
+  if (filter) filter.value = "all";
   const host = $("tabCleanupSessionReview");
   if (host) host.hidden = false;
-  await loadTabCleanupTopics();
+  await Promise.all([loadTabCleanupTopics(), tabCleanupLoadReviewAvailability()]);
   await renderTabCleanupSessionReview();
   host?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
@@ -726,16 +857,30 @@ async function renderTabCleanupSessionReview() {
   const allUrls = new Set((session.tabs || []).map(tab => String(tab.url || "")).filter(Boolean));
   for (const url of [...tabCleanupSessionSelection]) if (!allUrls.has(url)) tabCleanupSessionSelection.delete(url);
   const visible = tabCleanupReviewVisibleTabs(session);
+  const stats = tabCleanupReviewStats(session);
+  const overview = $("tabCleanupSnapshotReviewSummary");
+  if (overview) overview.textContent = `${stats.chats} chats · ${stats.profiles} profile/editor pages · ${stats.other} other pages · ${stats.exactDuplicates} exact duplicates · ${stats.repeatedBotRefs} extra bot references (may be separate chats) · ${stats.unavailable} confirmed-unavailable status records (saved Bot Status data) · ${stats.unchecked} unchecked/needs recheck · ${stats.discarded} unloaded · ${stats.archived} local profile archives (NOT 404 errors).`;
+  const shown = visible.slice(0, tabCleanupReviewPageLimit);
+  const showMore = $("tabCleanupSnapshotShowMore");
+  if (showMore) {
+    showMore.hidden = visible.length <= shown.length;
+    showMore.textContent = `Show ${Math.min(TAB_CLEANUP_REVIEW_PAGE_SIZE, visible.length - shown.length)} more (${visible.length - shown.length} left)`;
+  }
+  const showing = $("tabCleanupSnapshotShowing");
+  if (showing) showing.textContent = `Showing ${shown.length} of ${visible.length} matching tabs. Selection applies to all matching results, including rows not yet rendered.`;
   const conversationCounts = new Map();
-  for (const tab of session.tabs || []) if (tab.botId) conversationCounts.set(tab.botId, (conversationCounts.get(tab.botId) || 0) + 1);
+  for (const tab of session.tabs || []) {
+    const id = tabCleanupBotIdForTab(tab);
+    if (id) conversationCounts.set(id, (conversationCounts.get(id) || 0) + 1);
+  }
 
   list.replaceChildren();
   if (!visible.length) {
     list.append(makeElement("div", { className: "bot-manager-empty", text: "No saved tabs match these filters." }));
   } else {
-    for (const tab of visible) {
+    for (const tab of shown) {
       const url = String(tab.url || "");
-      const row = makeElement("label", { className: `tab-cleanup-review-row${tabCleanupSessionSelection.has(url) ? " is-selected" : ""}` });
+      const row = makeElement("div", { className: `tab-cleanup-review-row${tabCleanupSessionSelection.has(url) ? " is-selected" : ""}` });
       const checkbox = makeElement("input", { attrs: { type: "checkbox" } });
       checkbox.checked = tabCleanupSessionSelection.has(url);
       checkbox.addEventListener("change", () => {
@@ -743,21 +888,59 @@ async function renderTabCleanupSessionReview() {
         renderTabCleanupSessionReview();
       });
       const body = makeElement("div", { className: "tab-cleanup-review-body" });
-      body.append(makeElement("strong", { text: tab.botName || tab.title || tab.url || "SpicyChat tab" }));
+      const profile = tabCleanupReviewProfile(tab);
+      const heading = makeElement("div", { className: "tab-cleanup-review-identity" });
+      if (/^https:\/\//i.test(profile.image) && !/\s/.test(profile.image)) {
+        const portrait = document.createElement("img");
+        portrait.className = "tab-cleanup-review-avatar";
+        portrait.loading = "lazy";
+        portrait.alt = "";
+        portrait.referrerPolicy = "no-referrer";
+        portrait.src = profile.image;
+        portrait.addEventListener("error", () => { portrait.removeAttribute("src"); portrait.classList.add("is-missing"); }, { once: true });
+        heading.append(portrait);
+      } else {
+        heading.append(makeElement("div", { className: "tab-cleanup-review-avatar is-missing", text: "?" }));
+      }
+      const title = makeElement("div", { className: "tab-cleanup-review-title" });
+      const isErrorTitle = /^(?:404|403|not found|error)$/i.test(String(tab.title || "").trim());
+      title.append(makeElement("strong", { text: profile.name && !/^(?:404|403)$/i.test(profile.name) ? profile.name : (isErrorTitle ? "Unverified editor page" : (tab.botName || tab.title || tab.url || "SpicyChat tab")) }));
+      if (isErrorTitle) title.append(makeElement("small", { text: `Saved page title: ${tab.title} — not evidence of deletion.` }));
+      heading.append(title);
+      body.append(heading);
       const bits = [];
-      if (tab.creator) bits.push(`@${tab.creator}`);
-      if (tab.botId && (conversationCounts.get(tab.botId) || 0) > 1) bits.push(`${conversationCounts.get(tab.botId)} conversations`);
+      if (profile.creator) bits.push(`@${profile.creator}`);
+      if (profile.id && (conversationCounts.get(profile.id) || 0) > 1) bits.push(`${conversationCounts.get(profile.id)} saved URLs`);
       bits.push(tabCleanupAgeLabel(tab.lastAccessed));
       if (tab.favoriteHistory) bits.push("Favorite history");
       if (tab.later) bits.push("Later");
-      if (tab.savedLocalCopy) bits.push("Local archive");
+      if (tab.savedLocalCopy) bits.push("Local archive (profile only)");
+      if (tabCleanupIsConfirmedUnavailable(profile.id)) bits.push("Bot Status: confirmed unavailable (recheck)");
+      if (tabCleanupUncheckedReason(tab)) bits.push("Unchecked / needs recheck");
       if (tab.discarded) bits.push("discarded");
       if (tab.pinned) bits.push("pinned");
       body.append(makeElement("div", { className: "hint", text: bits.filter(Boolean).join(" · ") }));
-      const topicNames = tabCleanupTopicNamesForBot(tab.botId);
+      const topicNames = tabCleanupTopicNamesForBot(profile.id);
       if (topicNames.length) body.append(makeElement("div", { className: "tab-cleanup-row-topics", text: topicNames.join(" · ") }));
       if ((tab.tags || []).length) body.append(makeElement("div", { className: "tab-cleanup-row-tags", text: (tab.tags || []).slice(0, 8).join(" · ") }));
       body.append(makeElement("div", { className: "tab-cleanup-url", text: url }));
+      const uncheckedReason = tabCleanupUncheckedReason(tab);
+      if (uncheckedReason) body.append(makeElement("div", { className: "hint tab-cleanup-review-reason", text: `Pending verification: ${uncheckedReason}` }));
+      const actions = makeElement("div", { className: "tab-cleanup-review-actions button-row" });
+      const open = makeElement("button", { text: "Open tab", attrs: { type: "button" } });
+      open.addEventListener("click", () => openSingleTabCleanupEntry(tab, false));
+      actions.append(open);
+      if (session.id !== "__live__") {
+        const openAndRemove = makeElement("button", { text: "Open & remove", attrs: { type: "button", title: "Open a browser tab first, then remove this exact URL from the saved snapshot only" } });
+        openAndRemove.addEventListener("click", () => openSingleTabCleanupEntry(tab, true));
+        actions.append(openAndRemove);
+      }
+      if (profile.id) {
+        const profileButton = makeElement("button", { text: "Bot profile", attrs: { type: "button" } });
+        profileButton.addEventListener("click", () => openTabCleanupBrowserUrl(`https://spicychat.ai/chatbot/${encodeURIComponent(profile.id)}`));
+        actions.append(profileButton);
+      }
+      body.append(actions);
       row.append(checkbox, body);
       list.append(row);
     }
@@ -765,12 +948,127 @@ async function renderTabCleanupSessionReview() {
   if ($("tabCleanupSessionSelectedCount")) $("tabCleanupSessionSelectedCount").textContent = `${tabCleanupSessionSelection.size} selected`;
   const closeButton = $("tabCleanupCloseSelected");
   if (closeButton) closeButton.disabled = !tabCleanupSessionSelection.size;
+  const removeButton = $("tabCleanupRemoveSelectedSnapshot");
+  if (removeButton) removeButton.disabled = !tabCleanupSessionSelection.size || activeTabCleanupSessionId === "__live__";
+  const undoButton = $("tabCleanupUndoSnapshotRemoval");
+  if (undoButton) undoButton.hidden = !tabCleanupLastSnapshotUndo || tabCleanupLastSnapshotUndo.id !== session.id;
+}
+
+// Individual tab actions never restore an entire saved session. Browser tab creation
+// success is required before snapshot removal; it does NOT imply the page is available.
+async function openTabCleanupBrowserUrl(url) {
+  try {
+    const target = new URL(String(url || ""));
+    if (target.protocol !== "https:" || !["spicychat.ai", "www.spicychat.ai"].includes(target.hostname)) throw new Error("Only SpicyChat URLs are allowed");
+    const tab = await new Promise((resolve, reject) => {
+      chrome.tabs.create({ url: target.href, active: true }, created => {
+        const error = chrome.runtime.lastError;
+        if (error || !created?.id) reject(new Error(error?.message || "Could not open the browser tab"));
+        else resolve(created);
+      });
+    });
+    return { ok: true, tabId: tab.id };
+  } catch (error) {
+    const status = $("tabCleanupSessionReviewStatus");
+    if (status) status.textContent = `Could not open tab: ${error?.message || String(error)}. Snapshot unchanged.`;
+    return { ok: false };
+  }
+}
+
+async function openSingleTabCleanupEntry(tab, removeFromSnapshot) {
+  const sessionId = activeTabCleanupSessionId;
+  const status = $("tabCleanupSessionReviewStatus");
+  const current = await getActiveTabCleanupSession();
+  const url = String(tab?.url || "");
+  if (!current || !url || !current.tabs?.some(item => item.url === url)) return;
+  if (removeFromSnapshot && (sessionId === "__live__" || current.tabs.length <= 1)) {
+    if (status) status.textContent = "Keep at least one entry in a saved session. Use Delete snapshot for an entire snapshot.";
+    return;
+  }
+  const opened = await openTabCleanupBrowserUrl(url);
+  if (!opened.ok || !removeFromSnapshot) return;
+  try {
+    const remainingUrls = current.tabs.filter(item => tabCleanupExactUrlKey(item.url) !== tabCleanupExactUrlKey(url)).map(item => tabCleanupExactUrlKey(item.url)).sort();
+    const undo = { id: sessionId, previous: JSON.parse(JSON.stringify(current)), remainingUrls };
+    await removeUrlsFromTabCleanupSession(sessionId, [url]);
+    tabCleanupLastSnapshotUndo = undo;
+    tabCleanupSessionSelection.delete(url);
+    await renderTabCleanupSessionReview();
+    if (status) status.textContent = "Browser tab opened and the saved URL was removed from this snapshot only. Site availability is not verified. Undo last cleanup is available; chat data and other browser tabs are unchanged.";
+  } catch (error) {
+    if (status) status.textContent = `Tab opened, but snapshot cleanup failed: ${error?.message || String(error)}. Check the saved snapshot before retrying.`;
+  }
 }
 
 async function selectShownTabCleanupSessionTabs() {
   const session = await getActiveTabCleanupSession();
   if (!session) return;
   for (const tab of tabCleanupReviewVisibleTabs(session)) if (tab.url) tabCleanupSessionSelection.add(String(tab.url));
+  await renderTabCleanupSessionReview();
+}
+
+// An explicit, reversible cleanup of saved snapshot *records*. Never closes browser tabs.
+// Download a lossless copy before altering a saved session so it can be restored externally.
+async function removeSelectedTabCleanupSnapshotEntries() {
+  const status = $("tabCleanupSessionReviewStatus");
+  const session = await getActiveTabCleanupSession();
+  if (!session || session.id === "__live__" || !tabCleanupSessionSelection.size) return;
+  const selected = (session.tabs || []).filter(tab => tabCleanupSessionSelection.has(String(tab.url || "")));
+  if (!selected.length) return;
+  if (selected.length >= session.tabs.length) {
+    if (status) status.textContent = "To remove the entire snapshot, use Delete snapshot instead. No changes made.";
+    return;
+  }
+  if (!confirm(`Remove ${selected.length} selected URL${selected.length === 1 ? "" : "s"} from this saved QoL snapshot?\n\nThis does NOT close browser tabs, delete chats, or remove Bot Archive records. Different conversation URLs may belong to the same bot.\n\nQoL will download the original snapshot JSON before changing it.`)) return;
+  try {
+    // User-initiated download before mutation. Does not assume download always succeeds.
+    downloadJsonFile(session, `spicychat-qol-snapshot-before-cleanup-${new Date().toISOString().slice(0, 10)}.json`);
+    const removedKeys = new Set(selected.map(tab => tabCleanupExactUrlKey(tab.url)));
+    const remainingUrls = (session.tabs || []).filter(tab => !removedKeys.has(tabCleanupExactUrlKey(tab.url))).map(tab => tabCleanupExactUrlKey(tab.url)).sort();
+    const undo = { id: session.id, previous: JSON.parse(JSON.stringify(session)), remainingUrls };
+    await removeUrlsFromTabCleanupSession(session.id, selected.map(tab => tab.url));
+    tabCleanupLastSnapshotUndo = undo;
+    tabCleanupSessionSelection.clear();
+    await renderTabCleanupSessionReview();
+    if (status) status.textContent = `Removed ${selected.length} selected URL record${selected.length === 1 ? "" : "s"} from this snapshot only. Original snapshot download was requested. Existing browser tabs, chats and archives are unchanged.`;
+  } catch (error) {
+    if (status) status.textContent = `Could not clean snapshot: ${error?.message || String(error)}. Check the downloaded backup before retrying.`;
+  }
+}
+
+async function undoTabCleanupSnapshotRemoval() {
+  const status = $("tabCleanupSessionReviewStatus");
+  const undo = tabCleanupLastSnapshotUndo;
+  if (!undo) return;
+  try {
+    const data = await storageGet([TAB_CLEANUP_SESSIONS_KEY]);
+    const store = normalizeTabCleanupSessions(data[TAB_CLEANUP_SESSIONS_KEY]);
+    const i = store.sessions.findIndex(item => item.id === undo.id);
+    if (i < 0 || JSON.stringify((store.sessions[i].tabs || []).map(tab => tabCleanupExactUrlKey(tab.url)).sort()) !== JSON.stringify(undo.remainingUrls)) {
+      if (status) status.textContent = "Snapshot changed since cleanup. Undo was not applied to protect those later changes. Use the downloaded original JSON for recovery.";
+      return;
+    }
+    store.sessions[i] = undo.previous;
+    if (!await storageSet({ [TAB_CLEANUP_SESSIONS_KEY]: store })) throw new Error("Could not save restored snapshot");
+    tabCleanupLastSnapshotUndo = null;
+    tabCleanupSessionSelection.clear();
+    await renderTabCleanupSessions();
+    await renderTabCleanupSessionReview();
+    if (status) status.textContent = "Last snapshot cleanup undone. Browser tabs and chat data were not changed.";
+  } catch (error) {
+    if (status) status.textContent = `Could not undo snapshot cleanup: ${error?.message || String(error)}`;
+  }
+}
+
+async function invertMatchingTabCleanupSelection() {
+  const session = await getActiveTabCleanupSession();
+  if (!session) return;
+  for (const tab of tabCleanupReviewVisibleTabs(session)) {
+    const url = String(tab.url || "");
+    if (!url) continue;
+    if (tabCleanupSessionSelection.has(url)) tabCleanupSessionSelection.delete(url);
+    else tabCleanupSessionSelection.add(url);
+  }
   await renderTabCleanupSessionReview();
 }
 
@@ -798,8 +1096,9 @@ async function removeUrlsFromTabCleanupSession(sessionId, urls) {
   session.tabs = (session.tabs || []).filter(tab => !removeKeys.has(tabCleanupExactUrlKey(tab.url)));
   session.tabCount = session.tabs.length;
   session.botCount = new Set(session.tabs.map(tab => tab.botId).filter(Boolean)).size;
+  session.windows = tabCleanupWindowsSummary(session.tabs);
   if (!session.tabs.length) store.sessions = store.sessions.filter(item => item.id !== sessionId);
-  await storageSet({ [TAB_CLEANUP_SESSIONS_KEY]: store });
+  if (!await storageSet({ [TAB_CLEANUP_SESSIONS_KEY]: store })) throw new Error("Saved snapshot cleanup could not be persisted");
   if (!session.tabs.length && activeTabCleanupSessionId === sessionId) closeTabCleanupSessionReview();
   await renderTabCleanupSessions();
 }
@@ -839,6 +1138,7 @@ function makeTabCleanupSession(report, overrides = {}) {
       tabs.push({
         botId: bot.id,
         botName: bot.identity?.bestName || bot.names?.[0] || "",
+        image: bot.identity?.image || "",
         creator: bot.identity?.bestCreator || "",
         tags: [...new Set((bot.tags || []).map(tag => String(tag || "").trim()).filter(Boolean))],
         favoriteHistory: !!bot.local?.favoriteHistory,
@@ -860,6 +1160,7 @@ function makeTabCleanupSession(report, overrides = {}) {
     tabs.push({
       botId: "",
       botName: "",
+      image: "",
       creator: "",
       tags: [],
       favoriteHistory: false,
@@ -1209,9 +1510,15 @@ $("downloadTabCleanupDiagnostic")?.addEventListener("click", downloadTabCleanupD
 $("tabCleanupAddTopic")?.addEventListener("click", addManualTabCleanupTopic);
 $("tabCleanupNewTopicName")?.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); addManualTabCleanupTopic(); } });
 $("tabCleanupCloseReview")?.addEventListener("click", closeTabCleanupSessionReview);
-$("tabCleanupSessionSearch")?.addEventListener("input", () => renderTabCleanupSessionReview());
-$("tabCleanupSessionTopicFilter")?.addEventListener("change", () => renderTabCleanupSessionReview());
+$("tabCleanupSessionSearch")?.addEventListener("input", () => { tabCleanupReviewPageLimit = TAB_CLEANUP_REVIEW_PAGE_SIZE; renderTabCleanupSessionReview(); });
+$("tabCleanupSnapshotReviewFilter")?.addEventListener("change", () => { tabCleanupReviewPageLimit = TAB_CLEANUP_REVIEW_PAGE_SIZE; renderTabCleanupSessionReview(); });
+$("tabCleanupSnapshotShowMore")?.addEventListener("click", () => { tabCleanupReviewPageLimit += TAB_CLEANUP_REVIEW_PAGE_SIZE; renderTabCleanupSessionReview(); });
+$("tabCleanupSnapshotRefreshStatus")?.addEventListener("click", async () => { await tabCleanupLoadReviewAvailability(); await renderTabCleanupSessionReview(); });
+$("tabCleanupRemoveSelectedSnapshot")?.addEventListener("click", removeSelectedTabCleanupSnapshotEntries);
+$("tabCleanupUndoSnapshotRemoval")?.addEventListener("click", undoTabCleanupSnapshotRemoval);
+$("tabCleanupSessionTopicFilter")?.addEventListener("change", () => { tabCleanupReviewPageLimit = TAB_CLEANUP_REVIEW_PAGE_SIZE; renderTabCleanupSessionReview(); });
 $("tabCleanupSessionSelectShown")?.addEventListener("click", selectShownTabCleanupSessionTabs);
+$("tabCleanupSessionInvertSelection")?.addEventListener("click", invertMatchingTabCleanupSelection);
 $("tabCleanupSessionClearSelection")?.addEventListener("click", () => { tabCleanupSessionSelection.clear(); renderTabCleanupSessionReview(); });
 $("tabCleanupAddSelectedToTopic")?.addEventListener("click", () => applyTopicToSelectedTabCleanup(true));
 $("tabCleanupRemoveSelectedFromTopic")?.addEventListener("click", () => applyTopicToSelectedTabCleanup(false));

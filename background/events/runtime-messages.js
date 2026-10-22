@@ -112,6 +112,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BOT_EXPORT_HELPER") {
+    const id = String(message?.id || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) {
+      sendResponse({ ok: false, error: "Invalid chatbot ID." });
+      return false;
+    }
+    queueFreshBotEditor({ id }).then(sendResponse).catch(error => {
+      sendResponse({ ok: false, error: error?.message || String(error) });
+    });
+    return true;
+  }
+
   if (message?.type === "DS_LOREBOOK_EXPORT_HELPER") {
     const url = String(message.url || "");
     const token = String(message.token || "").trim().slice(0, 140);

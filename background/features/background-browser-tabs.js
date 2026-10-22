@@ -514,7 +514,7 @@ async function runDuplicateTabScan(options = {}) {
   const groups = new Map();
 
   for (const tab of tabs) {
-    if (!tab?.id || tabCleanupWorkerTabIds.has(Number(tab.id)) || quickDislikeWorkerTabIds.has(Number(tab.id)) || quickLessLikeWorkerTabIds.has(Number(tab.id)) || botStatusWorkerTabIds.has(Number(tab.id)) || listingRefillWorkerTabIds.has(Number(tab.id)) || isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl) || isQuickLessLikeWorkerUrl(tab.url || tab.pendingUrl) || isBotStatusWorkerUrl(tab.url || tab.pendingUrl) || isListingRefillWorkerUrl(tab.url || tab.pendingUrl)) continue;
+    if (!tab?.id || isDedicatedWorkerTab(tab) || tabCleanupWorkerTabIds.has(Number(tab.id)) || quickDislikeWorkerTabIds.has(Number(tab.id)) || quickLessLikeWorkerTabIds.has(Number(tab.id)) || botStatusWorkerTabIds.has(Number(tab.id)) || listingRefillWorkerTabIds.has(Number(tab.id)) || isQuickDislikeWorkerUrl(tab.url || tab.pendingUrl) || isQuickLessLikeWorkerUrl(tab.url || tab.pendingUrl) || isBotStatusWorkerUrl(tab.url || tab.pendingUrl) || isListingRefillWorkerUrl(tab.url || tab.pendingUrl)) continue;
     const key = duplicateTabKey(tab.url || tab.pendingUrl, settings);
     if (!key) continue;
     summary.checked += 1;

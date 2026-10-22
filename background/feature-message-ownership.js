@@ -8,6 +8,7 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_BACKGROUND_JOB_RELEASE": "core",
   "DS_BG_FETCH_IMAGE_URL": "chat-backgrounds",
   "DS_BG_REQUEST_IMAGE_PERMISSION": "chat-backgrounds",
+  "DS_BOT_EXPORT_HELPER": "my-creations-backup",
   "DS_BOT_STATUS_HELPER_CHECK": "bot-status",
   "DS_BOT_STATUS_HELPER_PREPARE": "bot-status",
   "DS_BOT_STATUS_HELPER_RELEASE": "bot-status",

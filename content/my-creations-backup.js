@@ -156,7 +156,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const visibility = clean(c.visibility || raw.visibility || "", 100).toLowerCase();
     const report = raw.moderationReport || raw.moderation_report || c.moderationReport || c.moderation_report;
     const reviewStatus = clean(report?.moderation_status || report?.moderationStatus || "", 100).toLowerCase();
-    return { id, name, category: classifyOwnedBot(raw), visibility, reviewStatus, source: "owned-list" };
+    // Live My Creations list is an independent, owner-scoped freshness signal.
+    // Keep fields only when explicitly present; an omitted property is not an empty value.
+    // Description is not a title; treating it as one falsely marks fresh
+    // editors stale when the owned-list endpoint omits the real title.
+    const listTitle = typeof c.title === "string" ? c.title :
+      (typeof c.tagline === "string" ? c.tagline : (typeof c.subtitle === "string" ? c.subtitle : ""));
+    const listedUpdatedAt = c.updated_at ?? c.updatedAt ?? c.modified_at ?? c.modifiedAt ?? null;
+    return {
+      id, name, category: classifyOwnedBot(raw), visibility, reviewStatus,
+      listedTitle: clean(listTitle, 800),
+      listedUpdatedAt,
+      creator: clean(c.creator_username || c.creatorUsername || c.creator?.username || raw.creator_username || "", 160),
+      source: "owned-list"
+    };
   }
 
   function requestOwnedListPage(lastKey = "", limit = 50) {
@@ -388,6 +401,73 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return batches;
   }
 
+  function equivalentVisibleText(left, right) {
+    // SpicyChat normalizes punctuation in listing cards; ignore only display
+    // formatting differences, not substantive changes to creator text.
+    const normalize = text => clean(text, 800).normalize("NFKC")
+      .replace(/[\u2010-\u2015]/g, "-").replace(/\s+/g, " ").toLowerCase();
+    return normalize(left) === normalize(right);
+  }
+
+  function parseListingDate(value) {
+    if (value == null || value === "") return 0;
+    if (typeof value === "number") {
+      const date = value < 1e11 ? value * 1000 : value;
+      return Number.isFinite(date) ? date : 0;
+    }
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function verifyAgainstOwnedList(snapshot, item) {
+    const reasons = [];
+    if (item?.name && snapshot?.name && !equivalentVisibleText(item.name, snapshot.name)) {
+      reasons.push("name differs from the live owned-bot listing");
+    }
+    if (item?.listedTitle && snapshot?.title && !equivalentVisibleText(item.listedTitle, snapshot.title)) {
+      reasons.push("title differs from the live owned-bot listing");
+    }
+    const listedAt = parseListingDate(item?.listedUpdatedAt);
+    const fetchedAt = parseListingDate(snapshot?.updatedAt);
+    if (listedAt && fetchedAt && listedAt - fetchedAt > 60000) {
+      reasons.push("character API revision is older than the owned-bot listing");
+    }
+    return reasons;
+  }
+
+  async function verifyBotViaRenderedEditor(snapshot, item) {
+    const response = await runtimeMessage({ type: "DS_BOT_EXPORT_HELPER", id: item.id });
+    if (!response?.ok || response.id !== item.id || !response.fields || !response.present) {
+      throw new Error(`Fresh owner editor verification failed: ${clean(response?.error || "unavailable", 300)}`);
+    }
+    const fields = response.fields;
+    if (item.name && !equivalentVisibleText(item.name, fields.name)) {
+      throw new Error("Rendered owner editor name differs from live My Creations listing.");
+    }
+    if (item.listedTitle && response.present.title && !equivalentVisibleText(item.listedTitle, fields.title)) {
+      throw new Error("Rendered owner editor title differs from live My Creations listing.");
+    }
+    const verified = { ...snapshot };
+    for (const key of ["name", "title", "description", "greeting", "personality", "scenario", "exampleDialogues"]) {
+      if (response.present[key]) verified[key] = clean(fields[key], 24000);
+    }
+    if (response.tagCount != null) {
+      verified.tags = clean(fields.tags, 500).split(/\s*,\s*/).filter(Boolean);
+    } else {
+      throw new Error("Owner editor did not expose a verifiable selected-tag count.");
+    }
+    if (fields.visibility) verified.visibility = clean(fields.visibility, 100);
+    if (fields.image) verified.image = clean(fields.image, 3000);
+    if (!verified.creator && item.creator) verified.creator = item.creator;
+    verified.source = snapshot?.source === "character-api-unavailable"
+      ? "current-rendered-owner-editor" : "current-rendered-owner-editor+character-api";
+    verified.ownerEditorVerified = true;
+    verified.ownerEditorCapturedAt = new Date(response.capturedAt || Date.now()).toISOString();
+    // An owner's editor reflects the latest saved editable revision, not a
+    // separate unsaved draft in an already-open browser tab.
+    return verified;
+  }
+
   function botPortableJson(snapshot) {
     const tags = Array.isArray(snapshot.tags) ? snapshot.tags : [];
     return {
@@ -413,6 +493,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             export_version: 1,
             exported_at: new Date().toISOString(),
             current_live_fetch: true,
+            owner_listing_checked: !!snapshot.ownedListingChecked,
+            owner_editor_verified: !!snapshot.ownerEditorVerified,
+            owner_editor_captured_at: snapshot.ownerEditorCapturedAt || null,
+            latest_unpublished_revision_verified: false,
             spicychat_id: snapshot.id,
             avatar_url: snapshot.image || "",
             visibility: snapshot.visibility || "",
@@ -603,11 +687,52 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runPool(items, async item => {
         if (job.cancelled) return;
         try {
-          const snapshot = await fetchWithRetry(kind, item.id, job);
+          let snapshot;
+          try {
+            snapshot = await fetchWithRetry(kind, item.id, job);
+          } catch (error) {
+            if (kind !== "chatbots") throw error;
+            // Unlisted/reviewed bot APIs can redact creator-only fields.
+            // Do not give up if the fresh hydrated owner editor can supply
+            // them; never use local historical copies as a fallback.
+            snapshot = { id: item.id, name: item.name || item.id, title: item.listedTitle || "",
+              creator: item.creator || "", source: "character-api-unavailable" };
+          }
           if (job.cancelled) return;
+          if (kind === "lorebooks" && item.name && snapshot?.lorebook?.name &&
+              !equivalentVisibleText(item.name, snapshot.lorebook.name)) {
+            // The owned-Lorebooks page disagrees with the API, which may be
+            // serving an older revision. Try an actual editor capture rather
+            // than labeling that API result a successful current backup.
+            if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") {
+              throw new Error("Lorebook name disagrees with the live listing, and the editor verifier is unavailable.");
+            }
+            snapshot = await DS.getCurrentOwnLorebookBackupDataFromEditor(item.id);
+            if (!snapshot?.lorebook?.name || !equivalentVisibleText(item.name, snapshot.lorebook.name)) {
+              throw new Error("Lorebook editor does not match the live owned-Lorebook listing; no stale copy was exported.");
+            }
+          }
           if (kind === "chatbots") {
+            // A successful API request can still reflect an older published
+            // revision. Compare it against the owner-scoped live listing and
+            // retry once before rejecting an inconsistent export.
+            let discrepancies = verifyAgainstOwnedList(snapshot, item);
+            if (discrepancies.length) {
+              // The API may contain an older published copy while the owner
+              // editor has the current revision. Continue to editor capture,
+              // which must independently agree with the owned listing.
+              snapshot.apiDiscrepancies = discrepancies;
+            }
+          }
+          if (kind === "chatbots") {
+            setStatus(`Verifying current owner editor: ${job.completed + 1} / ${items.length}`);
+            snapshot = await verifyBotViaRenderedEditor(snapshot, item);
             const indexed = indexedBotMetadata.get(String(item.id || "").toLowerCase()) || null;
             snapshot.ownedVisibility = item.visibility || "";
+            snapshot.ownedListingChecked = true;
+            // The rendered owner editor is the actual source of truth for
+            // creator-editable fields, not an SSR shell or public API alone.
+            snapshot.ownerEditorVerified = !!snapshot.ownerEditorVerified;
             snapshot.reviewStatus = item.reviewStatus || (item.category === "review" ? "pending" : "");
             let usedIndexedMetadata = false;
             if (!snapshot.createdAt && indexed?.createdAt) {
@@ -661,6 +786,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         historyIncluded: false,
         kind,
         selection: job.scope || (requestedItems ? "selected-or-retry" : "all"),
+        freshnessNote: kind === "chatbots"
+          ? "Each successful bot has a fresh owner-scoped list, character API request and read-only capture of the hydrated owner editor. Failed editor verification does not produce a bot file. Unsaved changes in another browser tab are not included."
+          : "Entries came from fresh live Lorebook API responses or a new owner-editor capture; saved local history is not used as export data.",
         reviewDataNote: kind === "chatbots" && items.some(item => item.category === "review")
           ? "Under Review bots were fetched from the current owner API. Whether a pending edit or the last approved revision is returned is not independently verified."
           : null,
@@ -678,7 +806,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       files.unshift({ name: "manifest.json", data: JSON.stringify(manifest, null, 2) });
       files.push({
         name: "README.txt",
-        data: "SpicyChat QoL My Creations backup\n\nEach JSON was fetched from the current live SpicyChat item during this backup. Local QoL revision/history copies are not used as the source. See manifest.json for failures.\n"
+        data: "SpicyChat QoL My Creations backup\n\nFor each successful chatbot, the export reads the live owner listing and character API, then opens an authenticated, read-only editor helper to capture current saved creator fields and tags. Failed helper verification is reported rather than replaced by cached history. This does not capture unsaved edits in other open tabs. Lorebooks use fresh paged API entries with an editor fallback when the API fails or disagrees with the listing. See manifest.json for per-file source and errors.\n"
       });
 
       const stamp = exportedAt.replace(/[:.]/g, "-");

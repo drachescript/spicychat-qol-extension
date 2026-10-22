@@ -115,6 +115,7 @@
 <section class="card" id="controlSupportCard">
 <h2>Performance & support</h2>
 <p class="hint">Save a performance snapshot to compare later, or copy/download one support report with the useful diagnostics, performance info and data-health results. These reports do not include chat text.</p>
+<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include exact enabled feature names in shared support reports (optional; OFF by default)</label>
 <div class="button-row"><button id="savePerformanceBaseline" type="button">Save performance baseline</button><button id="comparePerformanceBaseline" type="button">Compare to baseline</button><button id="controlCopySupport" type="button">Copy full support check</button><button id="controlDownloadSupport" type="button">Download full support check</button></div>
 <p class="hint" id="controlSupportStatus"></p>
 <div class="control-performance-diff" id="controlPerformanceDiff"></div>
@@ -338,9 +339,20 @@
 </div>
 <div class="tab-cleanup-review-controls">
 <input id="tabCleanupSessionSearch" placeholder="Search bot, creator or URL" type="search"/>
+<select id="tabCleanupSnapshotReviewFilter" aria-label="Review saved session by category">
+<option value="all">All saved URLs</option>
+<option value="other">Other SpicyChat pages (not chats/bot profiles)</option>
+<option value="profiles">Bot profiles and editors</option>
+<option value="repeated">Bot appears in multiple saved URLs (review, not duplicate)</option>
+<option value="unavailable">Confirmed unavailable in saved Bot Status (recheck)</option>
+<option value="unchecked">Unchecked / needs recheck after scan</option>
+<option value="discarded">Unloaded tabs</option>
+<option value="old">Not accessed in 30+ days</option>
+<option value="missing">Bot names missing in saved snapshot</option>
+</select>
 <select id="tabCleanupSessionTopicFilter"><option value="all">All topics</option></select>
-<button id="tabCleanupSessionSelectShown" type="button">Select shown</button>
-<button id="tabCleanupSessionInvertSelection" type="button">Invert shown</button>
+<button id="tabCleanupSessionSelectShown" type="button">Select all matching</button>
+<button id="tabCleanupSessionInvertSelection" type="button">Invert matching</button>
 <button id="tabCleanupSessionClearSelection" type="button">Clear selection</button>
 <span class="hint" id="tabCleanupSessionSelectedCount">0 selected</span>
 </div>
@@ -354,12 +366,20 @@
 <button id="tabCleanupReopenSelectedNewWindow" type="button">Open selected in new window</button>
 <button id="tabCleanupRestoreSelectedWindows" type="button">Restore selected by saved windows</button>
 </div>
+<div class="tab-cleanup-review-controls">
+<button id="tabCleanupSnapshotRefreshStatus" type="button">Refresh local status and pictures</button>
+<button id="tabCleanupRemoveSelectedSnapshot" type="button" disabled="">Remove selected from snapshot only…</button>
+<button id="tabCleanupUndoSnapshotRemoval" type="button" hidden="">Undo last snapshot cleanup</button>
+</div>
+<p class="hint" id="tabCleanupSnapshotReviewSummary">Snapshot cleanup preview loading…</p>
+<p class="hint">Confirmed-unavailable status is a saved Bot Status signal, not a fresh live HTTP check. Private/unlisted/restricted and unknown bots are never classified as deleted from a single 404. Removing from snapshot does not close tabs or delete chat data. A JSON backup download is requested before removal.</p>
 <div class="tab-cleanup-review-controls tab-cleanup-close-controls">
 <button id="tabCleanupCloseSelected" type="button">Save session + close selected</button>
 <label class="row" hidden="" id="tabCleanupRemoveReopenedWrap"><input id="tabCleanupRemoveReopened" type="checkbox"/><span>Remove successfully reopened entries from this closed-session recovery list</span></label>
 </div>
 <p class="hint" id="tabCleanupSessionReviewStatus">Closing is always a separate reviewed action. QoL saves a recovery session before it closes any matching tab.</p>
 <div class="tab-cleanup-review-list" id="tabCleanupSessionReviewList"></div>
+<div class="tab-cleanup-review-controls"><span id="tabCleanupSnapshotShowing" class="hint"></span><button id="tabCleanupSnapshotShowMore" type="button" hidden="">Show more</button></div>
 </div>
 </div>
 </section><section class="card" id="notificationCleanupCard"><h2>Notifications</h2><p class="hint">Optional cleanup for SpicyChat notification controls and browser-tab notification badges.</p><label class="row"><input id="hideNotifications" type="checkbox"/><span>Hide notifications button/badge on SpicyChat</span></label><label class="row"><input id="hideFeatureReleasePopups" type="checkbox"/><span>Hide feature release popups</span></label><label class="row"><input id="hideTabNotificationBadge" type="checkbox"/><span>Hide unread notification badge from the browser tab</span></label><label class="row"><input id="autoReadNotifications" type="checkbox"/><span>Clear new product-update notifications in background tabs</span></label><p class="hint">Auto-read is experimental. If it opens something weird, turn it back off.</p></section></div>
@@ -775,6 +795,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </select>
 <select aria-label="Bot status filter" id="botAvailabilityStatusFilter">
 <option value="all">All tracked bots</option>
+<option value="pending">Pending recheck (saved resume queue)</option>
 <option value="updated">Has detected changes</option>
 <option value="archived">Has saved local copy</option>
 <option value="unarchived">No saved local copy</option>
@@ -826,6 +847,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
 </div>
+<p class="hint" id="botStatusPendingQueueSummary" role="status">Loading saved pending rechecks…</p>
 <p class="hint" id="botStatusLastRunSummary" role="status">Last scan summary loading…</p>
 <progress id="botStatusScanProgress" max="1" value="0" hidden style="width:100%; max-width:680px; height:10px" aria-label="Bot Status scan progress"></progress>
 <p class="hint bot-status-auto-note">Profile changes are preserved automatically in local history and the newest live copy becomes the next baseline. Duplicate/reupload matching is calculated automatically when you open one of the duplicate filters.</p>
@@ -1834,6 +1856,11 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <h2>Scroll navigation</h2>
 <label class="row"><input id="showScrollToTopButton" type="checkbox"/><span>Show floating scroll-to-top button on long SpicyChat pages</span></label>
 <label class="row"><input id="showScrollToBottomButton" type="checkbox"/><span>Show floating scroll-to-bottom button on long SpicyChat pages</span></label>
+<div class="sub-card"><strong>Generated reply (swipe/reroll) navigation — optional</strong>
+<label class="row"><input id="showSwipeJumpButtons" type="checkbox"/><span>Show First/Last reply buttons beside native swipe counters</span></label>
+<label class="row"><input id="showSwipeJumpToNumber" type="checkbox"/><span>Show an optional reply-number field to jump to a specific generated reply</span></label>
+<label class="row"><input id="restoreFirstSwipeOnLoad" type="checkbox"/><span>Return to the first reply when opening/refreshing a chat or loading previous messages</span></label>
+<p class="hint">Uses SpicyChat's own previous/next swipe controls. Large histories can take time because each jump uses paced native steps; use Stop to cancel. These options do not change or delete stored replies. OFF by default, and only operates where native swipe controls are present.</p></div>
 <div class="sub-card">
 <strong>Show enabled scroll buttons on</strong>
 <label class="row"><input id="scrollNavOnHome" type="checkbox"/><span>Home</span></label>
@@ -2788,6 +2815,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <section class="card" id="diagnosticsCard">
 <h2>Quick diagnostics</h2>
 <p class="hint">Copies the extension version, browser, enabled feature names, storage counts, Toolkit detection status, and a sanitized SpicyChat page type. It does not copy chat text, memories, personas, blocked words, or other saved content.</p>
+<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include exact enabled feature names in shared support reports (optional; OFF by default)</label>
 <div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
 <p class="hint">If someone asks for everything, use <strong>Copy all support info</strong> or <strong>Download all support info</strong>. The separate copy/download buttons are there if they only need one report. Downloads are plain text and none of these reports include chat text.</p>
 <p class="hint" id="diagnosticsStatus"></p>
@@ -2858,6 +2886,11 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <script src="settings/feature-panels/model-quick-access.js"></script>
 <script src="settings/feature-panels/chat-lorebook-manager.js"></script>
 <script src="settings/feature-panels/previously-chatted-indicator.js"></script>
+<script src="settings/feature-panels/bot-status.js"></script>
+<script src="settings/feature-panels/bot-archive.js"></script>
+<script src="settings/feature-panels/bot-backup.js"></script>
+<script src="settings/feature-panels/lorebook-backup.js"></script>
+
 <script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
 </body>
 </html>

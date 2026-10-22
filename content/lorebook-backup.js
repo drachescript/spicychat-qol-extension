@@ -430,24 +430,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const capture = DS.captureLorebookEntriesFully;
     if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
     let result = null;
+    let progressWrite = Promise.resolve();
+    const onProgress = state => {
+      const message = state?.message || "Reading Lorebook entries…";
+      setStatus(message);
+      if (exportToken) {
+        const progress = {
+          status: "working", id: info.id, target: "entries",
+          current: Number(state?.current) || 0,
+          total: Number(state?.total) || 0,
+          message, updatedAt: Date.now()
+        };
+        // Serialize progress writes: the final done+capture record must never
+        // get overwritten by an earlier asynchronous progress update.
+        progressWrite = progressWrite.catch(() => {}).then(() => setExportJob(exportToken, progress));
+      }
+    };
     try {
-      result = await capture({
-        progress: state => {
-          const message = state?.message || "Reading Lorebook entries…";
-          setStatus(message);
-          if (exportToken) {
-            setExportJob(exportToken, {
-              status: "working",
-              id: info.id,
-              target: "entries",
-              current: Number(state?.current) || 0,
-              total: Number(state?.total) || 0,
-              message,
-              updatedAt: Date.now()
-            }).catch(() => {});
-          }
-        }
-      });
+      result = await capture({ progress: onProgress });
     } catch (error) {
       // An owned Lorebook with zero entries is still a valid, complete backup.
       // Give the editor a short chance to finish mounting rows before treating
@@ -457,36 +457,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await new Promise(resolve => setTimeout(resolve, 250));
       }
       if (captureListEntries().length) {
-        result = await capture({
-          progress: state => {
-            const message = state?.message || "Reading Lorebook entries…";
-            setStatus(message);
-            if (exportToken) {
-              setExportJob(exportToken, {
-                status: "working",
-                id: info.id,
-                target: "entries",
-                current: Number(state?.current) || 0,
-                total: Number(state?.total) || 0,
-                message,
-                updatedAt: Date.now()
-              }).catch(() => {});
-            }
-          }
-        });
+        result = await capture({ progress: onProgress });
       } else {
         result = { id: info.id, entries: [], complete: true };
       }
     }
+    await progressWrite;
     // A reused helper can navigate while the async crawler is running.
     // Never write rows collected for a route that has since changed.
     const liveInfo = routeInfo();
     if (!liveInfo || liveInfo.id.toLowerCase() !== info.id.toLowerCase() || liveInfo.page !== "entries") {
       throw new Error("Lorebook page changed during entry collection. No entries were replaced.");
     }
-    const ok = await updateStoredEntries(info.id, result?.entries || [], "Full Lorebook export", { replace: true });
-    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries?.length || 0 });
-    return ok;
+    if (result?.complete !== true || !Array.isArray(result.entries)) {
+      throw new Error("Lorebook editor did not confirm a complete current entry list.");
+    }
+    const ok = await updateStoredEntries(info.id, result.entries, "Full Lorebook export", { replace: true });
+    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries.length });
+    if (!ok) throw new Error("Failed to save captured Lorebook entries.");
+    return exportToken ? result : true;
   }
 
   function jobKey(token) { return `${EXPORT_JOB_PREFIX}${clean(token, 140)}`; }
@@ -540,7 +529,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         lastMessage = job.message;
         setStatus(`${statusPrefix}${job.message}`);
       }
-      if (job?.status === "done") { await removeExportJob(token); return true; }
+      if (job?.status === "done") {
+        await removeExportJob(token);
+        if (!job.capture || job.id !== safeId || job.target !== target) {
+          throw new Error(`Lorebook ${target} helper finished without a verified current capture.`);
+        }
+        return job.capture;
+      }
       if (job?.status === "error") {
         await removeExportJob(token);
         throw new Error(job.error || "Lorebook export helper failed.");
@@ -556,89 +551,51 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return requestEditorPageCapture(info.id, target);
   }
 
-  function lorebookSnapshotFromStoredItem(id, item) {
-    if (!item) return null;
-    const entries = Object.values(item.entries || {}).map((entry, index) => ({
-      id: `editor:${index + 1}`,
-      name: clean(entry?.name, 500),
-      keywords: unique(entry?.keywords || [], 12),
-      secondaryKeywords: [],
-      content: clean(entry?.content, 24000),
-      version: "",
-      createdAt: "",
-      updatedAt: "",
-      priority: "",
-      status: "",
-      enabled: true,
-      constant: false,
-      selective: false,
-      caseSensitive: false,
-      probability: null,
-      depth: null,
-      role: "",
-      isNsfw: false
-    })).filter(entry => entry.name);
-    return {
-      schema: "spicychat-qol-lorebook-recovery-copy",
-      version: 1,
-      savedAt: Date.now(),
-      fetchedAt: new Date().toISOString(),
-      source: "current-live-editor",
-      completeness: { details: true, entries: true, entryCountVerified: true },
-      lorebook: {
-        id,
-        name: clean(item.name || id, 500),
-        description: clean(item.description, 4000),
-        creator: "",
-        creatorId: "",
-        image: clean(item.image, 3000),
-        tags: unique(item.tags || [], 12),
-        visibility: clean(item.visibility, 40),
-        status: "",
-        version: 0,
-        entryCount: entries.length,
-        numAttachedCharacters: 0,
-        createdAt: "",
-        updatedAt: "",
-        isNsfw: false,
-        avatarIsNsfw: false
-      },
-      entries
-    };
-  }
-
   async function captureCurrentLorebookThroughEditors(lorebookId) {
     const id = clean(lorebookId, 200).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
-
     const task = async () => {
-      const beforeResult = await DS.storageGet?.([KEY]) || {};
-      const beforeStore = normalizeStore(beforeResult[KEY]);
-      const previous = beforeStore.meta[id] ? JSON.parse(JSON.stringify(beforeStore.meta[id])) : null;
-      let snapshot = null;
-      try {
-        await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
-        await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
-        const currentResult = await DS.storageGet?.([KEY]) || {};
-        const current = normalizeStore(currentResult[KEY]).meta[id] || null;
-        snapshot = lorebookSnapshotFromStoredItem(id, current);
-        if (!snapshot) throw new Error("The Lorebook editor fallback did not produce a current snapshot.");
-        return snapshot;
-      } finally {
-        // Bulk backup may use the editor as a fallback even when the user has
-        // not enabled persistent Lorebook backups. Restore the pre-existing
-        // local backup record so a one-time export does not silently create or
-        // replace history on the device.
-        try {
-          const latestResult = await DS.storageGet?.([KEY]) || {};
-          const latest = normalizeStore(latestResult[KEY]);
-          if (previous) latest.meta[id] = previous;
-          else delete latest.meta[id];
-          await DS.storageSet?.({ [KEY]: latest });
-        } catch {}
+      // This fallback used to read from the persistent Lorebook backup store,
+      // accidentally merging an older entry into a supposedly fresh export.
+      // Explicitly capture both pages now and assemble ONLY those results.
+      const details = await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
+      const entries = await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
+      if (!details || details.page !== "details" || details.id !== id || !details.data?.name) {
+        throw new Error("Lorebook editor did not confirm fresh details; refusing historical data.");
       }
+      if (!entries || entries.page !== "entries" || entries.id !== id || entries.complete !== true || !Array.isArray(entries.data)) {
+        throw new Error("Lorebook editor did not confirm a complete fresh entry list.");
+      }
+      const payload = {
+        ...details.data,
+        id,
+        entryCount: entries.data.length,
+        entries: entries.data
+      };
+      return {
+        schema: "spicychat-qol-lorebook-recovery-copy",
+        version: 1,
+        savedAt: Date.now(),
+        fetchedAt: new Date().toISOString(),
+        source: "current-live-editor",
+        completeness: { details: true, entries: true, entryCountVerified: true },
+        lorebook: {
+          id, name: clean(payload.name, 500), description: clean(payload.description, 4000),
+          creator: "", creatorId: "", image: clean(payload.image, 3000),
+          tags: unique(payload.tags || [], 12), visibility: clean(payload.visibility, 40),
+          status: "", version: 0, entryCount: payload.entryCount,
+          numAttachedCharacters: 0, createdAt: "", updatedAt: "",
+          isNsfw: false, avatarIsNsfw: false
+        },
+        entries: payload.entries.map((entry, index) => ({
+          id: `editor:${index + 1}`, name: clean(entry?.name, 500),
+          keywords: unique(entry?.keywords || [], 12), secondaryKeywords: [],
+          content: clean(entry?.content, 24000), version: "", createdAt: "", updatedAt: "",
+          priority: "", status: "", enabled: true, constant: false, selective: false,
+          caseSensitive: false, probability: null, depth: null, role: "", isNsfw: false
+        }))
+      };
     };
-
     const queued = currentEditorFallbackQueue.then(task, task);
     currentEditorFallbackQueue = queued.catch(() => {});
     return queued;
@@ -686,13 +643,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         message: target === "entries" ? "Reading Lorebook entries…" : "Reading Lorebook details…",
         updatedAt: Date.now()
       });
+      const detailsCapture = target === "details" ? currentCapture()?.details : null;
+      if (target === "details" && !detailsCapture?.name) {
+        throw new Error("The Lorebook Details editor has no current name; cannot verify the capture.");
+      }
       await saveCapture("Lorebook full export helper");
-      if (target === "entries") await captureFullEntriesHere(token);
+      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token) : null;
       const finalInfo = routeInfo();
       if (!finalInfo || finalInfo.page !== target || finalInfo.id.toLowerCase() !== info.id.toLowerCase()) {
         throw new Error("Lorebook page changed during export; the result was not marked complete.");
       }
-      await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
+      const capture = target === "entries"
+        ? { id: info.id, page: "entries", complete: entriesCapture?.complete === true, data: entriesCapture?.entries || [] }
+        : { id: info.id, page: "details", data: detailsCapture };
+      if (!(await setExportJob(token, { status: "done", id: info.id, target, capture, finishedAt: Date.now() }))) {
+        throw new Error("Current Lorebook capture could not be delivered to the exporter.");
+      }
       return { ok: true };
     } catch (error) {
       const messageText = error?.message || String(error);
@@ -729,9 +695,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     helperRunning = true;
     try {
       await new Promise(resolve => setTimeout(resolve, 900));
+      const detailsCapture = target === "details" ? currentCapture()?.details : null;
+      if (target === "details" && !detailsCapture?.name) {
+        throw new Error("The Lorebook Details editor has no current name; cannot verify the capture.");
+      }
       await saveCapture("Lorebook full export helper");
-      if (target === "entries") await captureFullEntriesHere(token);
-      await setExportJob(token, { status: "done", id: info.id, target, finishedAt: Date.now() });
+      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token) : null;
+      const capture = target === "entries"
+        ? { id: info.id, page: "entries", complete: entriesCapture?.complete === true, data: entriesCapture?.entries || [] }
+        : { id: info.id, page: "details", data: detailsCapture };
+      if (!(await setExportJob(token, { status: "done", id: info.id, target, capture, finishedAt: Date.now() }))) {
+        throw new Error("Current Lorebook capture could not be delivered to the exporter.");
+      }
     } catch (error) {
       await setExportJob(token, { status: "error", id: info.id, target, error: error?.message || String(error), finishedAt: Date.now() });
     } finally {

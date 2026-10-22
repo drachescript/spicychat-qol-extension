@@ -431,18 +431,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.isQolOwnedNode = function isQolOwnedNode(node) {
     const el = node instanceof Element ? node : node?.parentElement;
     if (!el) return false;
-    if (el.dataset?.dsOwned === "1" || el.dataset?.dsOwner === "qol") return true;
-    if (String(el.id || "").startsWith("ds-")) return true;
-    if (Array.from(el.classList || []).some(name => String(name).startsWith("ds-"))) return true;
-    return !!el.closest?.("[data-ds-owned='1'],[data-ds-owner='qol'],#ds-qol-panel,#ds-chat-export-modal");
+    // CSS decoration on a *native* React message/card never gives QoL
+    // ownership of that node or its children. Otherwise streaming tokens and
+    // toolbar remounts can be wrongly discarded as "QoL-only" mutations.
+    const ownedRootSelector = [
+      "[data-ds-owned='1']", "[data-ds-owner='qol']",
+      "[id^='ds-']", "#ds-qol-panel", "#ds-chat-export-modal",
+      ".ds-qol-swipe-jump", ".ds-message-quick-actions",
+      ".ds-message-quick-action", ".ds-message-bookmark-button",
+      ".ds-generation-metadata", ".ds-translation-output",
+      ".ds-rp-repair-toggle", ".ds-rp-repair-output"
+    ].join(",");
+    return !!el.closest?.(ownedRootSelector);
   };
 
   DS.mutationIsQolOnly = function mutationIsQolOnly(mutation) {
     if (!mutation) return false;
     const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-    if (target && DS.isQolOwnedNode(target)) return true;
-
     const nodes = [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+
+    // QoL decorates *native* listing grids/cards with ds-* classes. A React
+    // insertion into one of those elements remains a native mutation, even
+    // when its parent has ds-grid-dense or ds-listing-card-lite. Otherwise a
+    // refreshed blocked card can bypass the observer's re-hide pass entirely.
+    if (mutation.type === "childList" && nodes.some(node =>
+      node instanceof Element && (
+        node.matches?.('[data-testid="CharacterCard"], a[aria-label^="chat-with-"][href*="/chat/"]') ||
+        node.querySelector?.('[data-testid="CharacterCard"], a[aria-label^="chat-with-"][href*="/chat/"]')
+      )
+    )) return false;
+
+    if (target && DS.isQolOwnedNode(target)) return true;
     if (!nodes.length) return false;
     return nodes.every(node => DS.isQolOwnedNode(node));
   };

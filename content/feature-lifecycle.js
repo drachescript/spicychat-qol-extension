@@ -55,6 +55,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "animation controls": () => DS.removeAnimationControls?.(),
     "soundscapes": () => DS.removeSoundscapes?.(),
     "scroll to top": () => DS.removeScrollToTopButton?.(),
+    "swipe navigation": () => DS.removeSwipeNavigation?.(),
     "selection remember": () => DS.removeSelectionRemember?.(),
     "profile export": () => DS.removeProfileExport?.(),
     "persona organizer": () => DS.removePersonaOrganizer?.(),
@@ -119,6 +120,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "chat search": ["showChatSearch"],
       "chat nudges": ["enableChatNudges"],
       "soundscapes": ["enableSoundscapes"],
+      "swipe navigation": ["showSwipeJumpButtons", "showSwipeJumpToNumber", "restoreFirstSwipeOnLoad"],
       "bot organizer": ["enableBotOrganizer"],
       "bot organizer settled": ["enableBotOrganizer"],
       "bot organizer context": ["enableBotOrganizer"],
@@ -147,6 +149,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await runStep("accessibility cleanup", () => DS.applyAccessibilitySettings?.());
     syncNativeScrollBackToTopVisibility();
     await runStep("scroll to top cleanup", () => DS.removeScrollToTopButton?.());
+    await runStep("swipe navigation cleanup", () => DS.removeSwipeNavigation?.());
     await runStep("soundscape cleanup", () => DS.removeSoundscapes?.());
     await runStep("chat background cleanup", () => DS.removeChatBackgrounds?.());
     await runStep("rulebook diagnostics cleanup", () => DS.removeRulebookDiagnostics?.());

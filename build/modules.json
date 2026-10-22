@@ -302,6 +302,7 @@
         "background/features/background-update-recovery.js",
         "background/features/background-discovery.js",
         "background/features/background-lorebook-export.js",
+        "background/features/background-bot-export.js",
         "background.js",
         "background/background-translation.js",
         "background/background-auto-afk.js",
@@ -367,7 +368,8 @@
         "background/features/background-diagnostic-profile.js",
         "background/features/background-update-recovery.js",
         "background/features/background-discovery.js",
-        "background/features/background-lorebook-export.js"
+        "background/features/background-lorebook-export.js",
+        "background/features/background-bot-export.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",
