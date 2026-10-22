@@ -1800,6 +1800,7 @@ function botAvailabilityEntries(baseEntries = null, duplicateMatches = null) {
     .map(entry => ({ ...entry, duplicateMatches: duplicates.get(entry.id) || [] }))
     .filter(entry => {
       if (filter === "all") return true;
+      if (filter === "pending") return typeof botStatusPendingReviewIds !== "undefined" && botStatusPendingReviewIds.has(entry.id);
       if (filter === "updated") return (entry.changedFields || []).length > 0;
       if (filter === "archived") return !!entry.archive;
       if (filter === "unarchived") return !entry.archive;

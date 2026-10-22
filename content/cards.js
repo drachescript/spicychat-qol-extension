@@ -184,6 +184,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.runtimeLog?.("error", "cards", "Safety watchdog prevented a page-scale card hide", { restored, route: location.pathname });
         DS.setQuickStatus?.("QoL prevented a listing filter from hiding the whole page.");
       }
+      // Reuse this already-installed, attribute-only watcher for blocked cards.
+      // Native React can strip ds-hidden from an existing wrapper without
+      // adding any nodes; the main page observer deliberately watches hrefs
+      // rather than every class change for performance. Only the affected
+      // card is checked, never the full grid.
+      if (DS.state?.blockedBotIdSet?.size) DS.hideBlockedCardMounts?.(records);
     });
     observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["class", "data-ds-hidden", "data-ds-reason"] });
     DS.state.cardHideSafetyWatchdog = observer;
@@ -216,17 +222,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.hideCard = function hideCard(card, reason = "") {
     const target = DS.getBestHideTarget(card);
 
-    if (!target || target.dataset.dsHidden === "1" || DS.isUnsafeCardHideTarget?.(target)) {
-      return false;
-    }
+    if (!target || DS.isUnsafeCardHideTarget?.(target)) return false;
+
+    // React/listing helpers can reuse a hidden wrapper and overwrite its class
+    // while leaving QoL's data-ds-hidden marker behind. Repair that mismatch
+    // instead of deciding the card is already hidden and letting it reappear.
+    const dim = DS.state.settings.hiddenCardMode === "dim";
+    const wasHidden = target.dataset.dsHidden === "1";
+    const hasVisualHide = dim
+      ? target.classList.contains("ds-dimmed")
+      : target.classList.contains("ds-hidden");
+    if (wasHidden && hasVisualHide) return false;
 
     target.dataset.dsHidden = "1";
-    target.dataset.dsReason = reason;
-
-    if (DS.state.settings.hiddenCardMode === "dim") {
+    if (!wasHidden || !target.dataset.dsReason) target.dataset.dsReason = reason;
+    if (dim) {
+      target.classList.remove("ds-hidden");
       target.classList.add("ds-dimmed");
       DS.addDebugBadge(target, reason);
     } else {
+      target.classList.remove("ds-dimmed");
       target.classList.add("ds-hidden");
     }
 
@@ -1299,15 +1314,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!target || DS.isUnsafeCardHideTarget?.(target)) return;
       if (DS.hideCard?.(card, `card:blocked bot id: ${id}`)) hidden++;
     };
+    const checkCard = element => {
+      if (!element || !(element instanceof Element)) return;
+      // Never query the whole listing/grid for an ordinary class or style
+      // mutation. Only inspect the exact native card or its one-card wrapper.
+      const card = element.matches?.('[data-testid="CharacterCard"]')
+        ? element
+        : element.closest?.('[data-testid="CharacterCard"]') ||
+          (element.children?.length === 1 && element.firstElementChild?.matches?.('[data-testid="CharacterCard"]')
+            ? element.firstElementChild : null);
+      if (!card || !DS.isRecommendationCardRoot?.(card)) return;
+      checkLink(card.querySelector("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']"));
+    };
     for (const mutation of mutations || []) {
-      // Include the changed anchor when React reuses a card and replaces href.
-      if (mutation.type === "attributes" && mutation.attributeName === "href") {
-        if (mutation.target?.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) checkLink(mutation.target);
+      if (mutation.type === "attributes") {
+        if (mutation.attributeName === "href" && mutation.target?.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) {
+          checkLink(mutation.target);
+        } else if (["class", "style", "data-ds-hidden"].includes(mutation.attributeName)) {
+          // Native React and listing UI may recycle the *same* card without
+          // inserting an anchor. A class update can make its blocked wrapper
+          // visible again even though the bot ID has not changed.
+          checkCard(mutation.target);
+        }
         continue;
       }
+      if (mutation.type !== "childList") continue;
       for (const node of mutation.addedNodes || []) {
         if (!(node instanceof Element)) continue;
         if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) checkLink(node);
+        checkCard(node);
         node.querySelectorAll?.("a[href*='/chat/'], a[href*='/chatbot/']").forEach(checkLink);
       }
     }

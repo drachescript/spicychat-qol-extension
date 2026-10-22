@@ -579,7 +579,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         continue;
       }
 
-      if (card.querySelector(".ds-card-block-button")) {
+      const existingButton = card.querySelector(".ds-card-block-button");
+      if (existingButton) {
+        // Native React may reuse a card and keep our disabled X from the bot
+        // previously occupying that slot. Do not make a different bot's X inert.
+        const liveAnchor = card.querySelector("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
+        const liveId = DS.botIdFromHref?.(liveAnchor?.href || "") || DS.chatIdFromHref?.(liveAnchor?.href || "");
+        if (liveId && existingButton.dataset.dsBlockBotId !== liveId) {
+          existingButton.dataset.dsBlockBotId = liveId;
+          existingButton.disabled = false;
+        } else if (liveId && !DS.state.blockedBotIdSet?.has(liveId) &&
+                   existingButton.disabled && existingButton.dataset.dsBlockInFlight !== "1") {
+          existingButton.disabled = false;
+        }
+        if (liveId && DS.state.blockedBotIdSet?.has(liveId)) {
+          DS.hideCard?.(card, `card:blocked bot id: ${liveId}`);
+        }
         skipped++;
         continue;
       }
@@ -607,6 +622,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       blockButton.setAttribute("aria-label", "Block this bot");
       blockButton.title = "Block this bot";
       blockButton.textContent = "×";
+      blockButton.dataset.dsBlockBotId = DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref?.(anchor?.href || "") || "";
 
       blockButton.addEventListener(
         "click",
@@ -616,16 +632,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           event.stopImmediatePropagation();
 
           blockButton.disabled = true;
+          blockButton.dataset.dsBlockInFlight = "1";
           // React can recycle an existing bot card without removing QoL's X.
           // Resolve the *current* anchor at click time, not the link captured
           // when the button was first created.
-          const currentAnchor = card.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+          const currentAnchor = card.querySelector?.("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
+          const clickedId = DS.botIdFromHref?.(currentAnchor?.href || "") || DS.chatIdFromHref?.(currentAnchor?.href || "");
           try {
             const result = await DS.blockBotFromCard(card, currentAnchor);
-            if (!result?.ok) blockButton.disabled = false;
+            const newestAnchor = card.querySelector?.("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
+            const newestId = DS.botIdFromHref?.(newestAnchor?.href || "") || DS.chatIdFromHref?.(newestAnchor?.href || "");
+            if (result?.ok && clickedId && newestId === clickedId) {
+              // Persisted blocks remain authoritative after React remounts.
+              DS.hideCard?.(card, `card:blocked bot id: ${clickedId}`);
+            } else {
+              blockButton.disabled = false;
+            }
           } catch (error) {
             blockButton.disabled = false;
             DS.runtimeLog?.("warn", "card-block", String(error?.message || error));
+          } finally {
+            delete blockButton.dataset.dsBlockInFlight;
           }
         },
         true

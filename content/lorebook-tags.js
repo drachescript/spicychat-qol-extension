@@ -363,6 +363,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const payload = lorebookPayload(api?.data);
       const copy = normalizeLorebookRecoveryCopy(payload, id);
       if (!copy?.lorebook?.id) throw new Error("Current Lorebook data could not be normalized.");
+      const returnedId = clean(payload?.id || payload?.uuid || payload?.lorebook_id || "").toLowerCase();
+      if (returnedId && returnedId !== id) throw new Error("Live Lorebook endpoint returned a different Lorebook ID.");
       if (!meta) meta = copy.lorebook;
       expected = Math.max(expected, Number(copy.lorebook.entryCount) || 0);
 
@@ -860,6 +862,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   let editorExpansionObserver = null;
   let editorExpansionTimer = null;
+  let editorExpansionRunning = false;
+  let editorExpansionPending = false;
+  let editorLastTypingAt = 0;
+  let editorInputListening = false;
+
+  function onEditorInput(event) {
+    if (!(event.target instanceof Element) || !event.target.closest("input,textarea,[contenteditable='true']")) return;
+    // Defer optional keyword decoration while the native editor processes
+    // typing. The actual field value and SpicyChat's Save flow are untouched.
+    editorLastTypingAt = Date.now();
+  }
+
+  function containsCollapsedCounter(node) {
+    if (!(node instanceof Element)) return false;
+    const isCounter = el => {
+      if (el.children?.length) return false;
+      const raw = el.textContent || "";
+      return raw.length <= 12 && /^\+\d+$/.test(raw.trim());
+    };
+    if (node.matches?.("p,span") && isCounter(node)) return true;
+    for (const candidate of node.querySelectorAll?.("p,span") || []) {
+      if (isCounter(candidate)) return true;
+    }
+    return false;
+  }
 
   function editorExpansionEnabled() {
     const settings = DS.state?.settings || {};
@@ -872,6 +899,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function stopEditorExpansionObserver() {
     editorExpansionObserver?.disconnect();
     editorExpansionObserver = null;
+    if (editorInputListening) document.removeEventListener("input", onEditorInput, true);
+    editorInputListening = false;
+    editorExpansionPending = false;
   }
 
   function scheduleEditorExpansion(delay = 120) {
@@ -882,25 +912,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       restoreExpandedRows();
       return;
     }
+    const typingDelay = Math.max(0, 650 - (Date.now() - editorLastTypingAt));
     editorExpansionTimer = setTimeout(() => {
       editorExpansionTimer = null;
-      // The privacy guard can return undefined instead of a Promise. Catch
-      // both synchronous errors and rejected async reads without dereferencing it.
-      Promise.resolve().then(() => DS.applyLorebookTagExpansion?.()).catch(() => {});
-    }, Math.max(0, delay));
+      if (!editorExpansionEnabled()) return;
+      if (editorExpansionRunning) {
+        editorExpansionPending = true;
+        return;
+      }
+      editorExpansionRunning = true;
+      // This feature is read-only, but its fetch and DOM scans should never
+      // overlap during rapid editor updates or React reconciliation.
+      Promise.resolve().then(() => DS.applyLorebookTagExpansion?.()).catch(() => {}).finally(() => {
+        editorExpansionRunning = false;
+        if (editorExpansionPending && editorExpansionEnabled()) {
+          editorExpansionPending = false;
+          scheduleEditorExpansion(180);
+        }
+      });
+    }, Math.max(0, delay, typingDelay));
   }
 
   function ensureEditorExpansionObserver() {
     if (!editorExpansionEnabled() || editorExpansionObserver || !document.body) return;
+    if (!editorInputListening) {
+      document.addEventListener("input", onEditorInput, true);
+      editorInputListening = true;
+    }
     editorExpansionObserver = new MutationObserver(mutations => {
       let relevant = false;
       for (const mutation of mutations) {
         if (DS.mutationIsQolOnly?.(mutation)) continue;
         for (const node of mutation.addedNodes || []) {
           if (!(node instanceof Element)) continue;
-          const hasCounter = /^\+\d+$/.test(clean(node.textContent)) ||
-            [...(node.querySelectorAll?.("p, span") || [])].some(el => /^\+\d+$/.test(clean(el.textContent)));
-          if (hasCounter) {
+          if (containsCollapsedCounter(node)) {
             relevant = true;
             break;
           }

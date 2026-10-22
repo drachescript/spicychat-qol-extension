@@ -2010,3 +2010,13 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 /* Generated Lite packages may omit selected feature bundles. Values remain stored. */
 .ds-lite-omitted-setting{display:none!important}
 #ds-lite-settings-notice{padding:10px 14px;border:1px solid #555;border-radius:9px;margin-bottom:14px}
+
+/* Compact per-record Tab Session review, including local metadata previews. */
+.tab-cleanup-review-identity { display: flex; gap: .6rem; align-items: flex-start; min-width: 0; }
+.tab-cleanup-review-avatar { width: 48px; height: 64px; object-fit: cover; border-radius: 7px; flex: none; background: var(--panel, #252525); }
+.tab-cleanup-review-avatar.is-missing { display: grid; place-items: center; opacity: .6; border: 1px solid var(--border, #444); }
+.tab-cleanup-review-title { min-width: 0; overflow-wrap: anywhere; }
+.tab-cleanup-review-title small { display: block; opacity: .7; margin-top: .15rem; }
+.tab-cleanup-review-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+.tab-cleanup-review-actions button { font-size: .8rem; padding: .3rem .45rem; }
+.tab-cleanup-review-reason { overflow-wrap: anywhere; margin-top: .35rem; }

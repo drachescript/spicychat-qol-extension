@@ -1,6 +1,10 @@
 // Feature-owned options helpers: bot-status. Full QoL and Custom use the same source.
 // Shared storage/settings state remains in the core controller for now.
 
+// Unfinished scan work is separate from checkedAt and previous availability results.
+// Kept as a lightweight cache of the durable resume queue for the review UI.
+let botStatusPendingReviewIds = new Set();
+
 function shortBotCharacterId(value) {
   const id = String(value || "").trim();
   if (!BOT_ID_RE.test(id)) return id;
@@ -140,6 +144,14 @@ function botAvailabilityCard(entry) {
     text: entry.checkedAt ? botAvailabilityStatusLabel(entry.status) : "Not checked",
     dataset: { status: entry.checkedAt ? entry.status : "unknown" }
   }));
+  if (botStatusPendingReviewIds.has(entry.id)) {
+    badgeRow.appendChild(makeElement("span", {
+      className: "bot-update-badge",
+      text: "Pending recheck",
+      dataset: { status: "current" },
+      attrs: { title: "This bot is in the saved Resume scan queue. Its last checked status has been preserved." }
+    }));
+  }
   if ((entry.changedFields || []).length) {
     badgeRow.appendChild(makeElement("span", { className: "bot-update-badge", text: "Change history", dataset: { status: "updated" } }));
   }
@@ -206,9 +218,32 @@ function renderBotAvailability(renderOptions = {}) {
   if (!host) return;
 
   const scope = String($("botAvailabilityScope")?.value || "all");
-  const base = Array.isArray(renderOptions?.baseEntries)
-    ? renderOptions.baseEntries
-    : botStatusCenterBaseEntries(scope);
+  const statusFilter = String($("botAvailabilityStatusFilter")?.value || botAvailabilityUiState.status || "all");
+  // The resume queue is durable and may contain bots that are no longer in
+  // the selected routine scope. Never make these IDs disappear from review.
+  const scopeForReview = statusFilter === "pending" ? "all" : scope;
+  const suppliedBase = Array.isArray(renderOptions?.baseEntries) ? renderOptions.baseEntries : null;
+  const base = suppliedBase && statusFilter !== "pending" ? suppliedBase : botStatusCenterBaseEntries(scopeForReview);
+  if (statusFilter === "pending") {
+    const knownIds = new Set(base.map(entry => entry.id));
+    const archives = normalizeBotArchive(botArchiveState).meta;
+    const checked = normalizeBotAvailability(botAvailabilityState).meta;
+    for (const id of botStatusPendingReviewIds) {
+      if (knownIds.has(id)) continue;
+      const history = checked[id] || {};
+      const archive = archives[id] || {};
+      base.push({
+        id, name: cleanAuthoritativeBotName(history.name, id) || cleanAuthoritativeBotName(archive.fields?.name || archive.name, id) || `Bot ${shortBotCharacterId(id)}`,
+        image: history.image || archive.image || archive.fields?.image || "",
+        creator: history.creator || archive.creator || archive.fields?.creator || "",
+        profileUrl: history.profileUrl || archive.profileUrl || `https://spicychat.ai/chatbot/${id}`,
+        status: history.status || "unknown", checkedAt: Number(history.checkedAt || 0),
+        reason: history.reason || "Saved in an unfinished scan, but no longer in the tracked list.",
+        sources: history.sources || [], archive: archives[id] || null,
+        _scanEligible: false, changedFields: history.changedFields || []
+      });
+    }
+  }
   const duplicates = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? botDuplicateMatchesCache
     : new Map();
@@ -231,6 +266,7 @@ function renderBotAvailability(renderOptions = {}) {
   // instead of normalizing thousands of saved bots a second time each paint.
   const eligibleEntries = base.filter(entry => entry._scanEligible === true);
   const uncheckedCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) <= 0).length;
+  const pendingRecheckCount = botStatusPendingReviewIds.size;
   const notMonitoredCount = base.length - eligibleEntries.length;
   const uncheckedNotMonitoredCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0).length;
   const checkedUnknownCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && String(entry.status || "") === "unknown").length;
@@ -248,7 +284,7 @@ function renderBotAvailability(renderOptions = {}) {
     const matches = entries.length !== base.length ? ` · ${entries.length} matching` : "";
     const duplicateText = duplicateBots == null ? "" : ` · ${duplicateBots} duplicate matches`;
     const monitoredChecked = eligibleEntries.length - uncheckedCount;
-    summary.textContent = `${base.length} known · ${eligibleEntries.length} routinely monitored (${monitoredChecked} checked, ${uncheckedCount} unchecked, ${checkedUnknownCount} unresolved/Unknown)${notMonitoredCount ? ` · ${notMonitoredCount} outside routine scans (${uncheckedNotMonitoredCount} unchecked; ${excludedBlockedUncheckedCount} blocked/excluded)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
+    summary.textContent = `${base.length} known · ${pendingRecheckCount ? `${pendingRecheckCount} pending rechecks · ` : ""}${eligibleEntries.length} routinely monitored (${monitoredChecked} checked, ${uncheckedCount} unchecked, ${checkedUnknownCount} unresolved/Unknown)${notMonitoredCount ? ` · ${notMonitoredCount} outside routine scans (${uncheckedNotMonitoredCount} unchecked; ${excludedBlockedUncheckedCount} blocked/excluded)` : ""} · ${archivedCount} saved copies · ${updatedCount} with change history${duplicateText}${matches}`;
     const manualButton = $("scanUnmonitoredBotAvailability");
     if (manualButton && !botAvailabilityScanRunning) { manualButton.disabled = manualOutsideCount === 0; manualButton.textContent = manualOutsideCount ? `Check outside routine scope (${manualOutsideCount})` : "No unblocked outside-scope bots"; manualButton.title = "One-time manual scan only. Blocked bots remain excluded."; }
   }
@@ -568,15 +604,21 @@ async function refreshBotStatusLastRunFeedback() {
 }
 
 async function refreshBotStatusPauseButton() {
-  const button = $("resumePausedBotAvailability");
-  if (!button) return;
   const state = await botStatusPausedQueue();
-  const count = (state?.ids || []).length;
-  button.disabled = botAvailabilityScanRunning || !count;
-  button.hidden = !count;
-  button.textContent = count
-    ? `${state?.phase === "running" ? "Resume interrupted scan" : "Resume paused scan"} (${count})`
-    : "Resume paused scan";
+  botStatusPendingReviewIds = new Set((state?.ids || []).filter(validBotId));
+  const count = botStatusPendingReviewIds.size;
+  const button = $("resumePausedBotAvailability");
+  if (button) {
+    button.disabled = botAvailabilityScanRunning || !count;
+    button.hidden = !count;
+    button.textContent = count
+      ? `${state?.phase === "running" ? "Resume interrupted scan" : "Resume pending rechecks"} (${count})`
+      : "Resume pending rechecks";
+  }
+  const hint = $("botStatusPendingQueueSummary");
+  if (hint) hint.textContent = count
+    ? `${count} IDs still queued. These are pending rechecks, not necessarily never-checked bots. Their previous status remains intact. New scans won't overwrite this queue.`
+    : "No pending rechecks. Unchecked means no completed historical check.";
 }
 
 async function runBotAvailabilityScan(options = {}) {
@@ -586,8 +628,12 @@ async function runBotAvailabilityScan(options = {}) {
   const pausedQueue = options?.resume ? await botStatusPausedQueue() : null;
   if (!options?.resume) {
     const unfinished = await botStatusPausedQueue();
-    if (unfinished?.ids?.length && !confirm(`A previous Bot Status scan has ${unfinished.ids.length} unchecked IDs saved. Start a new scan and replace that resume queue? Choose Cancel to resume the saved scan instead.`)) {
-      await refreshBotStatusPauseButton();
+    if (unfinished?.ids?.length) {
+      // Never let a new scan overwrite a partially completed queue. Those
+      // IDs can have valid previous statuses, so don't zero checkedAt either.
+      const resumeNow = confirm(`${unfinished.ids.length} Bot Status rechecks are still pending.\n\nOK: Resume those IDs first.\nCancel: Keep the queue untouched and don't start a new scan.\n\nExisting availability results remain intact.`);
+      if (resumeNow) await runBotAvailabilityScan({ resume: true });
+      else await refreshBotStatusPauseButton();
       return;
     }
   }
@@ -642,16 +688,32 @@ async function runBotAvailabilityScan(options = {}) {
     entries = allEntries.filter(entry => pending.has(entry.id))
       .sort((a,b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
+  // IDs that are no longer in the source scope must remain in the durable
+  // queue for review, rather than disappearing from a resumed run.
+  const unresolvablePendingIds = options?.resume
+    ? pausedQueue.ids.filter(validBotId).filter(id => !entries.some(entry => entry.id === id))
+    : [];
   const totalCandidates = entries.length;
   const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
   const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
   const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;
-  const omittedByBotLimit = maxBots && entries.length > maxBots ? entries.slice(maxBots).map(item => item.id) : [];
+  const omittedByBotLimit = [
+    ...(maxBots && entries.length > maxBots ? entries.slice(maxBots).map(item => item.id) : []),
+    ...unresolvablePendingIds
+  ];
   if (maxBots && entries.length > maxBots) entries = entries.slice(0, maxBots);
 
   const status = $("botAvailabilityScanStatus");
   const archivedStatus = mode === "archived" ? $("deletedSavedBotRecheckStatus") : null;
   if (!entries.length) {
+    if (unresolvablePendingIds.length) {
+      const message = `${unresolvablePendingIds.length} saved pending IDs are no longer in the current scan scope. The queue was preserved. Check whether those bots were blocked, excluded or removed from tracked lists before retrying.`;
+      if (status) status.textContent = message;
+      if (archivedStatus) archivedStatus.textContent = message;
+      await refreshBotStatusPauseButton();
+      showSettingsToast(message);
+      return;
+    }
     const message = mode === "archived"
       ? (archivedBlockedSkipped
           ? `No unblocked archived bots need rechecking. ${archivedBlockedSkipped} blocked bot${archivedBlockedSkipped === 1 ? " was" : "s were"} left alone.`
@@ -2325,7 +2387,7 @@ function setupBotAvailabilityControls() {
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
   $("scanUnknownBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unknown" }));
   $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true }));
-  void refreshBotStatusPauseButton();
+  void refreshBotStatusPauseButton().then(() => renderBotAvailability({ skipRecoveryRerender: true })).catch(() => {});
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));

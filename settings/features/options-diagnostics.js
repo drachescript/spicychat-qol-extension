@@ -122,6 +122,7 @@ async function setupControlCenterView() {
 }
 
 function setupControlCenterControls() {
+  setupSupportFeaturePrivacyControls();
   $("openCommandPaletteFromOptions")?.addEventListener("click", async () => {
     await flushSettingsAutosave({ force: true });
     const status = $("commandPaletteStatus");
@@ -250,6 +251,53 @@ function sanitizeDiagnosticPath(url) {
   }
 }
 
+// Support files are regularly shared in public bug threads. Report feature counts
+// by category by default; exact option names need an explicit, session-only choice.
+function supportIncludeFeatureNames() {
+  return !!document.querySelector('[data-ds-support-feature-names]:checked');
+}
+
+function supportFeatureCounts(enabledKeys) {
+  const categories = {
+    "Chat and memory": 0,
+    "Bot discovery and filtering": 0,
+    "Lorebooks and creation": 0,
+    "Personas": 0,
+    "Interface and appearance": 0,
+    "Other tools": 0
+  };
+  for (const name of enabledKeys) {
+    if (/context|memory|chat|message|ooc|reply|rpstate|story|generation|translation|bookmark/i.test(name)) categories["Chat and memory"]++;
+    else if (/block|filter|favorite|later|creatorBot|listing|card|botStatus|dislike|lessLike/i.test(name)) categories["Bot discovery and filtering"]++;
+    else if (/lorebook|botCreation|creation|editor|tagAlias|wiki/i.test(name)) categories["Lorebooks and creation"]++;
+    else if (/persona/i.test(name)) categories.Personas++;
+    else if (/hide|show|background|bubble|scroll|sidebar|panel|theme|focus|image|animation/i.test(name)) categories["Interface and appearance"]++;
+    else categories["Other tools"]++;
+  }
+  return Object.entries(categories).map(([category, count]) => `${category} ${count}`).join("; ");
+}
+
+// Only simple metrics and sanitized names are exported. No chat content is
+// collected by this sanitizer and no report is uploaded anywhere.
+function sanitizeSupportReportText(raw) {
+  return String(raw || "")
+    .replace(/\b(?:https?:\/\/|wss?:\/\/)[^\s<>"']+/gi, "[URL omitted]")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "[ID omitted]")
+    .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/gi, "[email omitted]")
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._~+\/-]+/gi, "$1 [redacted]")
+    .replace(/((?:["']?)(?:authorization|cookie|x-guest-userid|guestuserid|access_token|refresh_token|sessionId|api_key)(?:["']?)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;|}]+)/gi, "$1[redacted]");
+}
+
+function setupSupportFeaturePrivacyControls() {
+  const toggles = [...document.querySelectorAll('[data-ds-support-feature-names]')];
+  for (const toggle of toggles) {
+    toggle.checked = false;
+    toggle.addEventListener('change', () => {
+      for (const other of toggles) if (other !== toggle) other.checked = toggle.checked;
+    });
+  }
+}
+
 async function copyDiagnostics({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building diagnostic info...";
@@ -349,18 +397,22 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Smart filter presets: ${normalizeSmartFilterPresets(result[SMART_FILTER_PRESETS_KEY]).length}; pinned: ${normalizeSmartFilterPins(result[SMART_FILTER_PINNED_KEY], result[SMART_FILTER_PRESETS_KEY]).length}`,
     `Editor draft snapshots: ${Object.values(normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]).entries).reduce((n, list) => n + list.length, 0)}`,
     `Message bookmarks: ${Object.values(result[CHAT_BOOKMARKS_KEY] || {}).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0)}`,
-    `Enabled optional features (${enabledFeatures.length}): ${enabledFeatures.join(", ") || "none"}`,
+    `Enabled optional features: ${enabledFeatures.length} of ${OPTIONAL_FEATURE_KEYS.length} available; ${supportFeatureCounts(enabledFeatures)}`,
+    ...(supportIncludeFeatureNames() ? [`Enabled feature names (explicit opt-in): ${enabledFeatures.join(", ") || "none"}`] : []),
     ...(partialSources.length ? [`Partial diagnostics: ${partialSources.join(", ")} timed out or were unavailable; the rest of this section is still valid.`] : [])
   ];
 
   const runtimeLog = Array.isArray(context?.pageDiagnostics?.runtimeLog) ? context.pageDiagnostics.runtimeLog.slice(-60) : [];
   if (runtimeLog.length) {
-    diagnosticLines.push(`QoL runtime log: ${runtimeLog.length} recent entries`);
+    const grouped = new Map();
     for (const entry of runtimeLog) {
-      const when = entry?.at ? new Date(Number(entry.at)).toISOString() : "unknown-time";
-      const detail = entry?.detail ? ` | ${entry.detail}` : "";
-      diagnosticLines.push(`  ${when} [${entry?.level || "info"}] ${entry?.area || "runtime"}: ${entry?.message || ""}${detail}`);
+      const area = String(entry?.area || "runtime").replace(/[^a-z0-9-]/gi, "").slice(0, 32) || "runtime";
+      const level = /^(warn|error)$/i.test(entry?.level || "") ? String(entry.level).toLowerCase() : "info";
+      const group = `${area}/${level}`;
+      grouped.set(group, (grouped.get(group) || 0) + 1);
     }
+    diagnosticLines.push(`QoL runtime log: ${runtimeLog.length} events (only category and severity totals, no messages or IDs)`);
+    diagnosticLines.push(`  ${[...grouped].map(([label, count]) => `${label} ${count}`).join("; ")}`);
   } else {
     diagnosticLines.push(context?.runtimeAvailable ? "QoL runtime log: no recent entries" : "QoL runtime log: unavailable because no open SpicyChat content runtime responded");
   }
@@ -409,6 +461,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     }
     diagnosticLines.push(`Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicate invalidations avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text message mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped`);
     if (Number(runtime.longTasks || 0)) diagnosticLines.push(`Browser long tasks: ${Number(runtime.longTasks || 0)}; last ${Number(runtime.lastLongTaskMs || 0)} ms; max ${Number(runtime.maxLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`);
+    diagnosticLines.push(`Slow native click events: ${Number(runtime.nativeSlowClickSamples || 0)}; worst input delay ${Number(runtime.nativeWorstInputDelayMs || 0)} ms; worst click duration ${Number(runtime.nativeWorstClickMs || 0)} ms; last category ${runtime.nativeLastSlowClickCategory || "none"}`);
     diagnosticLines.push(`QoL performance entries: ${perf.length}`);
     perf.forEach(entry => diagnosticLines.push(`  ${entry.name}: ${entry.calls} calls, avg ${entry.averageMs} ms, max ${entry.maxMs} ms, last ${entry.lastMs || 0} ms, total ${entry.totalMs} ms`));
   }
@@ -416,7 +469,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     const env = context.pageDiagnostics.androidEnvironment;
     diagnosticLines.push(`Android detected: ${env.android ? "yes" : "no"}; WebView detected: ${env.webview ? "yes" : "no"}; installed/standalone app: ${env.installedApp ? `yes (${env.displayMode || "standalone"})` : "no"}; Firefox-family: ${env.firefox || env.waterfox ? "yes" : "no"}; Opera: ${env.opera ? "yes" : "no"}`);
   }
-  const text = diagnosticLines.join("\n");
+  const text = sanitizeSupportReportText(diagnosticLines.join("\n"));
   if (returnOnly) return text;
 
   try {
@@ -532,6 +585,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Notification auto-read: ${Number(runtime.notificationAutoReadAttempts || 0)} attempts; ${Number(runtime.notificationAutoReadClicks || 0)} native clicks; ${Number(runtime.notificationAutoReadSuccesses || 0)} cleared; ${Number(runtime.notificationAutoReadUncleared || 0)} still unread; ${Number(runtime.notificationAutoReadMissingButtons || 0)} missing-button checks; ${Number(runtime.notificationAutoReadFailures || 0)} failures; last source ${runtime.notificationAutoReadLastSource || "none"}`,
     `Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicates avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped; observer collapsed ${Number(runtime.messageCacheMutationCandidateNodes || 0)} changed nodes to ${Number(runtime.messageCacheMutationRoots || 0)} message-root targets (${Number(runtime.messageCacheMutationNodesCollapsed || 0)} node walks avoided)`,
     `Browser long tasks: ${Number(runtime.longTasks || 0)}; max ${Number(runtime.maxLongTaskMs || 0)} ms; last ${Number(runtime.lastLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`,
+    `Native click timing (Event Timing, slow events only): ${Number(runtime.nativeSlowClickSamples || 0)} samples; worst input delay ${Number(runtime.nativeWorstInputDelayMs || 0)} ms; worst click duration ${Number(runtime.nativeWorstClickMs || 0)} ms; last category ${runtime.nativeLastSlowClickCategory || "none"}; optional work delayed for native actions ${Number(runtime.nativeActionQuietDeferrals || 0)} times`,
     `Card-token request guard: MAIN bridge ${Number(runtime.cardTokenMainCircuitTrips || 0)} trips / ${Number(runtime.cardTokenMainCircuitSkips || 0)} skipped retries${Number(runtime.cardTokenMainCircuitUntil || 0) > Date.now() ? ` / cooling down ${Math.ceil((Number(runtime.cardTokenMainCircuitUntil) - Date.now()) / 1000)}s` : ""}; auth ${Number(runtime.cardTokenAuthCircuitTrips || 0)} rejected / ${Number(runtime.cardTokenAuthSkips || 0)} no-auth skips; background no-auth ${Number(runtime.cardTokenBackgroundAuthSkips || 0)} skipped`,
     `Options page: load ${OPTIONS_PERFORMANCE.loadMs.toFixed(1)} ms; DOM ${document.getElementsByTagName("*").length} nodes; storage reads ${OPTIONS_PERFORMANCE.storageReads} avg ${readAvg.toFixed(2)} ms max ${OPTIONS_PERFORMANCE.storageReadMaxMs.toFixed(2)} ms; writes ${OPTIONS_PERFORMANCE.storageWrites} avg ${writeAvg.toFixed(2)} ms max ${OPTIONS_PERFORMANCE.storageWriteMaxMs.toFixed(2)} ms`,
     ...(OPTIONS_PERFORMANCE.slowStorageReads.length ? [`Options slow storage reads: ${OPTIONS_PERFORMANCE.slowStorageReads.map(item => `${item.keys} ${item.ms} ms${item.bytes ? ` (${(item.bytes / 1024).toFixed(1)} KB)` : ""}`).join("; ")}`] : []),
@@ -698,7 +752,7 @@ async function buildAllSupportInfo() {
   if (String(baselineText || "").trim()) {
     sections.push("", "===== PERFORMANCE BASELINE COMPARISON =====", baselineText);
   }
-  return sections.join("\n");
+  return sanitizeSupportReportText(sections.join("\n"));
   });
 }
 

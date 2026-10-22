@@ -240,9 +240,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = entry.target;
       if (!target) continue;
       if (target.dataset.dsMyCreationsOriginalOrder !== undefined) {
-        target.style.order = target.dataset.dsMyCreationsOriginalOrder;
+        const original = target.dataset.dsMyCreationsOriginalOrder;
+        if (target.style.order !== original) target.style.order = original;
         delete target.dataset.dsMyCreationsOriginalOrder;
-      } else {
+      } else if (target.style.order) {
         target.style.removeProperty("order");
       }
     }
@@ -256,7 +257,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const sorted = sortEntries(list, mode);
     sorted.forEach((entry, index) => {
       rememberOriginalOrder(entry.target);
-      entry.target.style.order = String(index);
+      const nextOrder = String(index);
+      if (entry.target.style.order !== nextOrder) entry.target.style.order = nextOrder;
     });
   }
 
@@ -497,9 +499,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const activeCount = Object.keys(DEFAULT_FILTERS).filter(key => filters[key] !== DEFAULT_FILTERS[key]).length;
     const label = root.querySelector("[data-ds-filter-button-label]");
-    if (label) label.textContent = activeCount ? `QoL Filter: ${activeCount} active` : "QoL Filter: All";
+    const nextLabel = activeCount ? `QoL Filter: ${activeCount} active` : "QoL Filter: All";
+    if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
     const count = root.querySelector("[data-ds-filter-count]");
-    if (count) count.textContent = `Showing ${matched}/${total}`;
+    const nextCount = `Showing ${matched}/${total}`;
+    if (count && count.textContent !== nextCount) count.textContent = nextCount;
     return root;
   }
 
@@ -548,13 +552,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const list = entries();
-    restore(list);
     applyOrder(list, filters.sort || "native");
 
     let matched = 0;
     for (const entry of list) {
-      if (matches(entry.meta, filters)) matched += 1;
-      else entry.target.classList.add(HIDDEN_CLASS);
+      const show = matches(entry.meta, filters);
+      if (show) matched += 1;
+      const hidden = !show;
+      if (entry.target.classList.contains(HIDDEN_CLASS) !== hidden) entry.target.classList.toggle(HIDDEN_CLASS, hidden);
     }
     ensureUi(
       list.length,

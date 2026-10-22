@@ -430,6 +430,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.getElementById(MULTI_WORKSPACE_ID)?.remove();
       multiWorkspaceEntries = [];
     }
+    // While a native entry is being edited, preserve the existing manager
+    // toolbar and row helpers instead of rescanning every entry on React
+    // text-input updates. The next non-editing pass will refresh them.
+    const focused = document.activeElement;
+    if (document.getElementById(TOOLBAR_ID) && focused instanceof Element &&
+        focused.matches("textarea[name='content'],input[name='name'],[data-field-name='keywords'] input") &&
+        focused.closest("form")?.querySelector("textarea[name='content']")) return;
     const header = document.querySelector("[data-testid='EntriesListServer-Header']");
     if (!header) return;
 
@@ -1356,6 +1363,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           content: clean(data?.content, 24000),
           capturedAt: Date.now()
         });
+      }
+      if (entries.length !== rows.length) {
+        throw new Error(`Only ${entries.length} of ${rows.length} Lorebook editor entries were captured; refusing an incomplete export.`);
       }
       progress?.({ current: rows.length, total: rows.length, message: `Read ${entries.length} entr${entries.length === 1 ? "y" : "ies"} with complete keywords.` });
       return { id: route.id, entries, complete: true };

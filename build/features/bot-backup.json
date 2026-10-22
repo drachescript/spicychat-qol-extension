@@ -3,10 +3,17 @@
   "primary": "content/bot-backup.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "botBackupToolsEnabled",
+    "botArchiveOwnEditorBackups",
+    "botArchiveOwnRevisionLimit"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/bot-backup.js"
+  ]
 }

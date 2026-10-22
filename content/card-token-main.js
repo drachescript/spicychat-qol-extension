@@ -1386,6 +1386,31 @@ if (!(() => { try {
         };
       }
 
+      // HTTP 200 alone isn't always a live character. Some APIs return a
+      // tombstone/removed object with 200; Recombee's cascadeCreate rating API
+      // can independently accept an ID that no longer has a usable profile.
+      // Never treat private/unlisted/unpublished flags as deletion: those are
+      // different visibility states and may be accessible to their owners.
+      const record = (data.character && typeof data.character === "object") ? data.character
+        : (data.data?.character && typeof data.data.character === "object") ? data.data.character
+        : (data.data && typeof data.data === "object") ? data.data : data;
+      const terminalStatus = String(record.status || record.state || "").trim().toLowerCase();
+      const errorCode = typeof data.error === "string" ? data.error
+        : String(data.error?.code || data.code || "");
+      const terminal = record.deleted === true || record.isDeleted === true ||
+        record.is_deleted === true || !!record.deletedAt || !!record.deleted_at ||
+        ["deleted", "removed", "not_found", "not-found"].includes(terminalStatus) ||
+        /^(?:character[_-]?)?(?:not[_-]?found|deleted|removed)$/i.test(errorCode);
+      if (terminal) return {
+        ok: false,
+        status: "bot-not-found",
+        stage: "availability-preflight",
+        reason: "SpicyChat character API returned an explicit deleted/removed record (HTTP 200).",
+        httpStatus,
+        availabilityNetworkAttempts: 1,
+        availabilityConfirmed: true
+      };
+
       return {
         ok: true,
         status: "available",

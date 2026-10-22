@@ -299,13 +299,18 @@ async function runBlockedBulkDislike(mode = "remaining") {
       await runtimeMessage({ type: "DS_QUICK_DISLIKE_RELEASE_BULK", bulkRunId: runId }).catch?.(() => null);
     }
     await refreshQuickDislikeHistoryState();
-    const unfinished = stopped ? blockedBulkCandidateIds("resume") : [];
+    // Do not infer that the entire blocked list is complete just because the
+    // snapshot loop reached its end. New blocks, failed checks, and work skipped
+    // during a concurrent history update may still be eligible. Keep the real
+    // remainder as a resumable queue instead of silently discarding it.
+    const unfinished = blockedBulkCandidateIds("remaining");
     const finalFailed = uniqueClean([...(quickDislikeBulkState.failedIds || []), ...failedIds]).filter(id => !quickDislikeHistoryEntry(id));
+    const hasPending = unfinished.length > 0;
     await persistQuickDislikeBulkState({
       ...quickDislikeBulkState,
-      status: stopped && unfinished.length ? "paused" : (finalFailed.length ? "completed-with-failures" : "completed"),
+      status: hasPending ? "paused" : (finalFailed.length ? "completed-with-failures" : "completed"),
       currentId: "",
-      pendingIds: stopped ? unfinished : [],
+      pendingIds: unfinished,
       failedIds: finalFailed,
       startedAt,
       runId: "",
@@ -319,9 +324,9 @@ async function runBlockedBulkDislike(mode = "remaining") {
     if (candidates.length) {
       showSettingsToast(autoPausedAfterFailures
         ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive failures (including 401/CORS). Remaining bots were kept for Resume.`
-        : stopped
-          ? `Bulk Dislike stopped. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`
-          : `Bulk Dislike finished. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
+        : stopped || hasPending
+          ? `Bulk Dislike ${stopped ? "stopped" : "finished this batch"}. ${sentRequests} Dislikes confirmed, ${unavailable} unavailable, ${failed} failed; ${unfinished.length} still eligible. The remaining IDs are saved for Resume.`
+          : `Bulk Dislike completed all currently eligible blocked bots. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
     }
   }
 }
@@ -1181,18 +1186,20 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     const localFailureMeta = { ...(quickLessLikeBulkState.failureMeta || {}) };
     await refreshQuickLessLikeHistoryState();
     quickLessLikeBulkState.failureMeta = localFailureMeta;
-    const remainingFromQueue = stopped
-      ? candidates.slice(Math.max(0, Math.min(candidates.length, nextQueueIndex))).filter(id => !quickLessLikeHistoryEntry(id) && (blockedState?.ids || []).includes(id))
-      : [];
+    // A finished snapshot isn't proof that *every* currently blocked bot was
+    // handled. Reconcile against the live blocked list and independent Less
+    // Like history; retain failed and newly blocked IDs for explicit Resume.
+    const remainingFromQueue = blockedLessLikeCandidateIds("remaining");
+    const hasPending = remainingFromQueue.length > 0;
     const finalFailed = uniqueClean([...(quickLessLikeBulkState.failedIds || []), ...failedIds]).filter(id => !quickLessLikeHistoryEntry(id));
     const finalFailedSet = new Set(finalFailed);
     const finalFailureMeta = Object.fromEntries(Object.entries(quickLessLikeBulkState.failureMeta || {}).filter(([id]) => finalFailedSet.has(id)));
     await persistQuickLessLikeBulkState({
       ...quickLessLikeBulkState,
       version: 2,
-      status: stopped && remainingFromQueue.length ? "paused" : (finalFailed.length ? "completed-with-failures" : "completed"),
+      status: hasPending ? "paused" : (finalFailed.length ? "completed-with-failures" : "completed"),
       currentId: "",
-      pendingIds: stopped ? remainingFromQueue : [],
+      pendingIds: remainingFromQueue,
       failedIds: finalFailed,
       failureMeta: finalFailureMeta,
       startedAt,
@@ -1200,7 +1207,7 @@ async function runBlockedBulkLessLike(mode = "remaining") {
       jobId,
       stopRequested: false,
       totalBots: candidates.length,
-      nextQueuePosition: stopped ? Math.max(0, Math.min(candidates.length, nextQueueIndex)) : candidates.length,
+      nextQueuePosition: Math.max(0, Math.min(candidates.length, nextQueueIndex)),
       attempted: Number(stats?.attempted || 0),
       succeeded: Number(stats?.succeeded || 0),
       failedCount: Number(stats?.failed || 0),
@@ -1211,14 +1218,14 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     if (clearButton) clearButton.disabled = false;
     renderBotManager("blocked");
     updateBlockedLessLikeActionState();
-    if (stats && pacing) renderQuickLessLikeJobStats(stats, pacing, { force: true, note: stopped ? "Paused" : "Finished" });
+    if (stats && pacing) renderQuickLessLikeJobStats(stats, pacing, { force: true, note: hasPending ? "Paused — more bots remain" : "Completed" });
     else updateBlockedLessLikeStatus();
     if (candidates.length) {
       showSettingsToast(autoPausedAfterFailures
         ? `Stop recommending paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive transient failures (including authentication/CORS). Remaining bots were kept for Resume.`
-        : stopped
-          ? `Stop recommending stopped. ${updated} sent, ${unavailable} unavailable, ${failed} failed.`
-          : `Stop recommending finished. ${updated} sent, ${unavailable} unavailable, ${failed} failed.`);
+        : stopped || hasPending
+          ? `Stop recommending ${stopped ? "stopped" : "finished this batch"}. ${updated} sent, ${unavailable} unavailable, ${failed} failed; ${remainingFromQueue.length} still eligible and saved for Resume.`
+          : `Stop recommending completed all currently eligible blocked bots. ${updated} sent, ${unavailable} unavailable, ${failed} failed.`);
     }
   }
 }

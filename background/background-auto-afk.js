@@ -136,7 +136,9 @@ function isDedicatedWorkerTab(tab) {
     listingRefillWorkerTabIds.has(id) ||
     personaRefreshWorkerTabIds.has(id) ||
     Number(lorebookExportHelperTabId || 0) === id ||
+    Number(botExportHelperTabId || 0) === id ||
     isLorebookExportWorkerUrl(url) ||
+    isBotExportWorkerUrl(url) ||
     isQuickDislikeWorkerUrl(url) ||
     isQuickLessLikeWorkerUrl(url) ||
     isBotStatusWorkerUrl(url) ||

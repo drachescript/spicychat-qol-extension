@@ -4,14 +4,15 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "lorebookBackupToolsEnabled"
+    "lorebookBackupToolsEnabled",
+    "lorebookBackupsEnabled"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
   "browserVerified": false,
-  "backgroundFiles": [
-    "background/features/background-lorebook-export.js"
+  "settingsFiles": [
+    "settings/feature-panels/lorebook-backup.js"
   ]
 }

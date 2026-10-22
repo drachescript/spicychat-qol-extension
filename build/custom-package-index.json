@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.55",
+  "sourceVersion": "0.2.56",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -136,7 +136,9 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-archive.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/bot-archive.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -148,7 +150,9 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-backup.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/bot-backup.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -234,11 +238,11 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "background/features/background-worker-bot-status.js",
-      "settings": [],
-      "styles": [],
-      "background": [
-        "background/features/background-worker-bot-status.js"
+      "settings": [
+        "settings/feature-panels/bot-status.js"
       ],
+      "styles": [],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -668,9 +672,7 @@
       "runtime": "content/creator-workspace.js",
       "settings": [],
       "styles": [],
-      "background": [
-        "background/features/background-creator-watch.js"
-      ],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -878,11 +880,11 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/lorebook-backup.js",
-      "settings": [],
-      "styles": [],
-      "background": [
-        "background/features/background-lorebook-export.js"
+      "settings": [
+        "settings/feature-panels/lorebook-backup.js"
       ],
+      "styles": [],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1104,11 +1106,18 @@
       "id": "my-creations-backup",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
-      "dependencies": [],
+      "dependencies": [
+        "bot-backup",
+        "card-token-info",
+        "lorebook-backup",
+        "lorebook-tags"
+      ],
       "runtime": "content/my-creations-backup.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-bot-export.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1157,9 +1166,7 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "styles": [
-        "content/styles/ooc.css"
-      ],
+      "styles": [],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"

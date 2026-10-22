@@ -1,3 +1,36 @@
+## 0.2.56
+- Improved generated-reply navigation when only part of a larger swipe history is loaded, with optional cancellable loading for a chosen reply number.
+- Fixed First reply becoming unavailable while older generated replies could still be loaded.
+- Reduced repeated swipe scans in long chats and fixed some native message updates being mistaken for QoL-only changes.
+- Fixed Dislike and Less Like runs showing as completed while blocked bots were still waiting. Remaining bots can now be resumed.
+- Improved bulk negative-rating checks for removed or unavailable bots without treating private or unlisted bots as deleted.
+- Fixed blocked bots reappearing on listings after SpicyChat loads or refreshes cards.
+- Fixed greyed-out Block buttons staying attached to the wrong bot when cards are reused.
+- Improved support reports with safer default privacy, feature-category summaries and an optional list of enabled feature names.
+- Reduced optional QoL work around Send and Regenerate clicks and added more local timing details to help investigate slow responses.
+- Fixed new Bot Status scans replacing unfinished queues so pending checks can be resumed without losing previous results.
+- Added Pending recheck counts, filters and indicators to Bot Status, including bots outside the current scan scope.
+- Added Open tab, Open & remove, and Bot profile actions to saved Tab Session cards, with saved bot pictures when available.
+- Kept failed or unreadable Bot Status checks available for retry instead of dropping them or marking bots as deleted.
+- Improved recognition of bot editor links in saved tab snapshots, including pages titled 404.
+- Improved large Tab Session reviews with category filters, clearer counts and progressive loading instead of displaying every entry at once.
+- Added a review filter for saved bots marked unavailable in Bot Status, without assuming private or restricted bots are deleted.
+- Added selective removal from saved tab snapshots with a backup download and Undo, without closing tabs or deleting chats.
+- Added an optional Go to reply number field for generated responses, including cancellable navigation through large swipe histories.
+- Fixed First/Last reply buttons appearing in the wrong order and stopping after only one swipe.
+- Fixed First/Last reply buttons not appearing with SpicyChat's updated swipe-counter layout.
+- Improved automatic return-to-first navigation after loading older messages and reduced unnecessary swipe-control updates.
+- Added optional First/Last generated-reply buttons and an option to return to the first reply on chat load, refresh or loading older messages.
+- Fixed Bot Status retry controls failing when the Settings page opened before their data was ready.
+- Improved My Creations sorting and filtering by avoiding unnecessary card rearrangement and repeated updates.
+- Reduced Lorebook entry-list refreshes while typing in an editor.
+- Reduced unnecessary Lorebook keyword checks and overlapping updates during editing.
+- Fixed a Settings startup error introduced while separating feature controls.
+- Improved My Creations backups by checking current bot editor fields and selected tags, and reporting exports that could not be verified.
+- Separated more Bot Status, Bot Archive and chatbot/Lorebook backup Settings for smaller Custom builds without resetting saved preferences.
+- Fixed My Creations bulk backups accepting outdated chatbot details without warning when current owned-bot information disagreed.
+- Fixed Lorebook bulk exports mixing older saved entries into new backups and improved reporting of where exported data came from.
+
 ## 0.2.55
 - Improved Lorebook recovery integrity checks, preserved existing complete copies when a public entry fetch is incomplete, and added on-demand inspection of saved Lorebook entries.
 - Improved Opened History cards using locally saved bot copies, including unlisted creations, with available title, greeting, creator and refreshed image data; broken image URLs now fall back safely.

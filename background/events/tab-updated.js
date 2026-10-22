@@ -13,7 +13,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // Never navigate the helper back to the marker URL just because it vanished.
     return;
   }
-  if (quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
+  if (isBotExportWorkerUrl(spicyUrl) || Number(botExportHelperTabId || 0) === Number(tabId) || quickDislikeWorkerTabIds.has(Number(tabId)) || quickLessLikeWorkerTabIds.has(Number(tabId)) || botStatusWorkerTabIds.has(Number(tabId)) || listingRefillWorkerTabIds.has(Number(tabId)) || personaRefreshWorkerTabIds.has(Number(tabId)) || isQuickDislikeWorkerUrl(spicyUrl) || isQuickLessLikeWorkerUrl(spicyUrl) || isBotStatusWorkerUrl(spicyUrl) || isListingRefillWorkerUrl(spicyUrl) || isPersonaRefreshWorkerUrl(spicyUrl)) return;
 
   // A real page load after an extension update receives the current content
   // scripts again, so its stale-runtime warning can be cleared safely.

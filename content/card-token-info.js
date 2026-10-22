@@ -1459,6 +1459,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       throw new Error(reasons || "Current chatbot data could not be read. The owner editor page returned only an app shell, so QoL refused to save an empty backup.");
     }
 
+    // A populated response for another ID must never become the requested
+    // bot's backup (even if the server returns HTTP 200).
+    const returnedId = cleanText(sc?.id || sc?.uuid || sc?.character_id || sc?.characterId || "").toLowerCase();
+    if (returnedId && returnedId !== id) {
+      throw new Error("SpicyChat returned a different chatbot ID; current backup rejected.");
+    }
+
     const apiFields = fieldsFromApiCharacter(sc, true);
     // Owner-editor data is strongest for creator-only definition fields; API
     // data fills anything the SSR editor did not expose.

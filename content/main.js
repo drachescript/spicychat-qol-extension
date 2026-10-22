@@ -1346,6 +1346,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       delay = Math.max(delay, desktopAppPerformanceGuardActive() ? (profile === "maximum" ? 2200 : (profile === "aggressive" ? 1500 : 1100)) : (profile === "maximum" ? 1100 : (profile === "aggressive" ? 700 : 460)));
       counters.deferredWhileScrolling = Number(counters.deferredWhileScrolling || 0) + 1;
     }
+    if (Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
+      delay = Math.max(delay, Number(DS.state.nativeActionQuietUntil) - Date.now() + 160);
+      counters.nativeActionQuietDeferrals = Number(counters.nativeActionQuietDeferrals || 0) + 1;
+    }
     if (DS.state?.settings?.deferQolWhileTyping && Date.now() < Number(DS.state.userTypingUntil || 0)) {
       delay = Math.max(delay, profile === "maximum" ? 1400 : 900);
       counters.typingDeferrals = Number(counters.typingDeferrals || 0) + 1;
@@ -1596,6 +1600,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (singleChat) {
+        // The targeted slow lane can skip general feature startup on chats.
+        // Install the light swipe observer during the critical chat pass once,
+        // so First/Last buttons also appear when no full slow pass occurs.
+        if ((settings.showSwipeJumpButtons || settings.showSwipeJumpToNumber || settings.restoreFirstSwipeOnLoad) &&
+            !DS.isSwipeNavigationActive?.()) {
+          await runFeatureStep("swipe navigation startup", true, () => DS.applySwipeNavigation?.());
+        }
         DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("previously chatted recording", !!settings.enablePreviouslyChattedIndicator, () => DS.applyPreviouslyChattedIndicator?.());
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
@@ -1764,6 +1775,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (slowDirtyHas(dirty, "chat-chrome")) {
+      if (settings.showSwipeJumpButtons || settings.showSwipeJumpToNumber || settings.restoreFirstSwipeOnLoad || document.querySelector(".ds-qol-swipe-jump")) {
+        await runFeatureStep("swipe navigation", true, () => DS.applySwipeNavigation?.());
+      }
       await runRoutedFeatureStep(plan, "chat", "generation profiles", () => !!settings.enableGenerationProfiles || !!document.querySelector("[data-ds-generation-profile]"), () => DS.applyGenerationProfileTools?.());
       await runFeatureStep("chat tags", !!settings.showChatTagLinks || !!settings.showChatTagAddButtons, () => DS.applyChatTagTools?.());
       await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
@@ -1795,6 +1809,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Hidden tabs do not need cosmetic DOM work. Critical tracking/filtering has
     // its own lane and the slow lane is refreshed immediately when the tab is shown.
     if (document.hidden && !options.force) return;
+    // Defer the cosmetic lane while the user is pressing native Send/Regenerate.
+    // Crucial tracking remains on its own lane and is not suppressed.
+    if (!options.force && Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
+      DS.scheduleRun?.({ priority: "slow", source: "native-action-quiet" });
+      runtimeCounters().nativeActionQuietDeferrals = Number(runtimeCounters().nativeActionQuietDeferrals || 0) + 1;
+      return;
+    }
 
     const slowQueueDelayMs = Math.max(0, Date.now() - Number(DS.state?.diagSlowScheduledAt || Date.now()));
     const slowToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "slow-pass", {
@@ -1867,6 +1888,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runFeatureStep("S.AI Toolkit detection", !!settings.saiToolkitCompatibility, () => DS.startSaiToolkitDetection?.());
       syncNativeScrollBackToTopVisibility();
       await runFeatureStep("scroll to top", !!settings.showScrollToTopButton || !!settings.showScrollToBottomButton || !!document.querySelector("#ds-scroll-to-top,#ds-scroll-to-bottom"), () => DS.applyScrollToTopButton?.());
+      await runFeatureStep("swipe navigation", !!settings.showSwipeJumpButtons || !!settings.showSwipeJumpToNumber || !!settings.restoreFirstSwipeOnLoad || !!document.querySelector(".ds-qol-swipe-jump"), () => DS.applySwipeNavigation?.());
       await runFeatureStep("soundscapes", !!settings.enableSoundscapes || !!document.querySelector("[data-ds-soundscape],#ds-soundscape-player,.ds-chat-soundscape-wrapper"), () => DS.applySoundscapes?.());
       await runFeatureStep("tag aliases", !!settings.enableTagAliases || !!document.querySelector("[data-ds-tag-alias-original]"), () => DS.applyTagAliases?.());
       await runFeatureStep("local tag matching", !!settings.localTagMatchEnabled, () => DS.applyLocalTagMatching?.());
@@ -2176,6 +2198,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         slowDelay = Math.max(slowDelay, remainingScrollMs + 450);
         counters.listingScrollDeferrals = Number(counters.listingScrollDeferrals || 0) + 1;
       }
+    }
+
+    if (!immediate && DS.isSingleChatPage?.() && Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
+      // Do not delay critical chat tracking; only the cosmetic slow lane.
+      slowDelay = Math.max(slowDelay, Number(DS.state.nativeActionQuietUntil) - Date.now() + 180);
+      counters.nativeActionQuietDeferrals = Number(counters.nativeActionQuietDeferrals || 0) + 1;
     }
 
     if (document.hidden) {
@@ -2702,6 +2730,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.addEventListener("dragonscript-qol-compact", () => {
       DS.scheduleRun?.({ priority: "slow", source: "compact" });
     }, true);
+
+    // Protect native Regenerate/Send interactions from nonessential QoL work.
+    // Never preventDefault(), synthesize a click, or inspect message text.
+    document.addEventListener("pointerdown", event => {
+      if (!DS.isSingleChatPage?.() || !DS.state?.settings?.enabled) return;
+      const button = event.target?.closest?.("button");
+      if (!button || button.matches?.("[id^='ds-'],[class*='ds-qol']") || button.closest?.("#ds-qol-panel,[data-ds-qol-owned]")) return;
+      const label = String(button.getAttribute("aria-label") || button.getAttribute("title") || button.textContent || "").trim().slice(0, 90);
+      if (!/\b(?:regenerat(?:e|ion)?|reroll|retry|send(?: message)?)\b/i.test(label)) return;
+      DS.state.nativeActionQuietUntil = Date.now() + 1100;
+      const counters = runtimeCounters();
+      counters.nativeActionGuardStarts = Number(counters.nativeActionGuardStarts || 0) + 1;
+    }, { capture: true, passive: true });
+
+    // Event Timing reveals actual input delay. Keep only aggregate timings; do
+    // not collect text, full selectors, message IDs, or raw event records.
+    try {
+      if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("event")) {
+        const inputObserver = new PerformanceObserver(list => {
+          if (!DS.state?.settings?.performanceDiagnostics || document.hidden) return;
+          const counters = runtimeCounters();
+          for (const entry of list.getEntries()) {
+            if (entry.name !== "click" || !DS.isSingleChatPage?.()) continue;
+            const delay = Math.max(0, Number(entry.processingStart || 0) - Number(entry.startTime || 0));
+            const duration = Math.max(0, Number(entry.duration || 0));
+            const target = entry.target?.closest?.("button");
+            const label = String(target?.getAttribute?.("aria-label") || target?.getAttribute?.("title") || "").slice(0, 60);
+            const category = /regenerat|reroll|retry/i.test(label) ? "regenerate" : /send/i.test(label) ? "send" : "other";
+            counters.nativeSlowClickSamples = Number(counters.nativeSlowClickSamples || 0) + 1;
+            counters.nativeWorstInputDelayMs = Math.max(Number(counters.nativeWorstInputDelayMs || 0), Math.round(delay));
+            counters.nativeWorstClickMs = Math.max(Number(counters.nativeWorstClickMs || 0), Math.round(duration));
+            counters.nativeLastSlowClickCategory = category;
+          }
+        });
+        inputObserver.observe({ type: "event", durationThreshold: 64 });
+        DS.state.nativeInputObserver = inputObserver;
+      }
+    } catch {}
 
     try {
       if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {

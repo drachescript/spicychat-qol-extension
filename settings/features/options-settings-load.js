@@ -378,10 +378,6 @@ async function load() {
   setValue("chatListBlockedFilter", ["all", "blocked", "unblocked"].includes(settings.chatListBlockedFilter) ? settings.chatListBlockedFilter : "all");
 
   setChecked("trackOpenedChats", settings.trackOpenedChats);
-  setValue("botStatusScanSpeed", Object.prototype.hasOwnProperty.call(BOT_STATUS_SCAN_SPEED_DELAYS, settings.botStatusScanSpeed) ? settings.botStatusScanSpeed : "safe");
-  setValue("botStatusStaleDays", [1, 7, 14, 30].includes(Number(settings.botStatusStaleDays)) ? String(Number(settings.botStatusStaleDays)) : "7");
-  setValue("botStatusMaxBots", Number(settings.botStatusMaxBots) > 0 ? String(Math.min(100000, Math.floor(Number(settings.botStatusMaxBots)))) : "");
-  setValue("botStatusMaxMinutes", Number(settings.botStatusMaxMinutes) > 0 ? String(Math.min(1440, Math.floor(Number(settings.botStatusMaxMinutes)))) : "");
   setValue("lorebookStatusScanSpeed", Object.prototype.hasOwnProperty.call(LOREBOOK_STATUS_SCAN_SPEED_DELAYS, settings.lorebookStatusScanSpeed) ? settings.lorebookStatusScanSpeed : "safe");
   setValue("lorebookStatusStaleDays", [1, 7, 14, 30].includes(Number(settings.lorebookStatusStaleDays)) ? String(Number(settings.lorebookStatusStaleDays)) : "7");
   setChecked("importOpenedFromChatsPage", settings.importOpenedFromChatsPage);
@@ -624,6 +620,9 @@ async function load() {
   setChecked("keepChatPositionWhileTyping", !!settings.keepChatPositionWhileTyping);
   setChecked("showScrollToTopButton", !!settings.showScrollToTopButton);
   setChecked("showScrollToBottomButton", !!settings.showScrollToBottomButton);
+  setChecked("showSwipeJumpButtons", !!settings.showSwipeJumpButtons);
+  setChecked("showSwipeJumpToNumber", !!settings.showSwipeJumpToNumber);
+  setChecked("restoreFirstSwipeOnLoad", !!settings.restoreFirstSwipeOnLoad);
   setChecked("scrollNavOnHome", settings.scrollNavOnHome !== false);
   setChecked("scrollNavOnChats", settings.scrollNavOnChats !== false);
   setChecked("scrollNavOnChat", settings.scrollNavOnChat !== false);
@@ -633,16 +632,6 @@ async function load() {
   setChecked("scrollTopLoadPreviousMessages", !!settings.scrollTopLoadPreviousMessages);
   setValue("scrollTopLoadPreviousMode", ["one", "all"].includes(settings.scrollTopLoadPreviousMode) ? settings.scrollTopLoadPreviousMode : "all");
   setValue("scrollTopLoadPreviousTiming", ["before", "background"].includes(settings.scrollTopLoadPreviousTiming) ? settings.scrollTopLoadPreviousTiming : "before");
-  setChecked("botArchiveRememberSeenPublic", !!settings.botArchiveRememberSeenPublic);
-  setChecked("botBackupToolsEnabled", !!settings.botBackupToolsEnabled);
-  if ($("botBackupToolsEnabled")) $("botBackupToolsEnabled").dataset.dsAutoBackupDefaultUsed = settings.botBackupToolsEnabled ? "1" : "0";
-  setChecked("botArchiveOwnEditorBackups", !!settings.botArchiveOwnEditorBackups);
-  setChecked("lorebookBackupToolsEnabled", !!settings.lorebookBackupToolsEnabled);
-  setChecked("lorebookBackupsEnabled", !!settings.lorebookBackupsEnabled);
-  setValue("botArchiveOwnRevisionLimit", String(Math.max(1, Math.min(50, Number(settings.botArchiveOwnRevisionLimit) || 10))));
-  setChecked("botArchiveOnProfileVisit", !!settings.botArchiveOnProfileVisit);
-  setChecked("botArchiveOnChatOpen", !!settings.botArchiveOnChatOpen);
-  setValue("botArchiveRefreshHours", [6, 24, 72, 168].includes(Number(settings.botArchiveRefreshHours)) ? String(Number(settings.botArchiveRefreshHours)) : "24");
   setValue("botStatusArchiveEndpoint", normalizeArchiveImportEndpoint(result[ARCHIVE_IMPORT_ENDPOINT_KEY] || DEFAULT_ARCHIVE_IMPORT_ENDPOINT) || DEFAULT_ARCHIVE_IMPORT_ENDPOINT);
   setValue("botStatusArchiveToken", String(result[ARCHIVE_IMPORT_TOKEN_KEY] || ""));
   setChecked("enableBotStatusArchiveContribution", result[ARCHIVE_CONTRIBUTION_ENABLED_KEY] === true);

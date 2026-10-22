@@ -169,5 +169,26 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   "previously-chatted-indicator": [
     "enablePreviouslyChattedIndicator",
     "chattedIndicatorShowOpened"
-  ]
+  ],
+  "bot-status": [
+    "botStatusScanSpeed",
+    "botStatusStaleDays",
+    "botStatusMaxBots",
+    "botStatusMaxMinutes"
+  ],
+  "bot-archive": [
+    "botArchiveRememberSeenPublic",
+    "botArchiveOnProfileVisit",
+    "botArchiveOnChatOpen",
+    "botArchiveRefreshHours"
+  ],
+  "bot-backup": [
+    "botBackupToolsEnabled",
+    "botArchiveOwnEditorBackups",
+    "botArchiveOwnRevisionLimit"
+  ],
+  "lorebook-backup": [
+    "lorebookBackupToolsEnabled",
+    "lorebookBackupsEnabled"
+  ],
 });
