@@ -1,3 +1,9 @@
+## 0.2.59
+- Reduced optional chat processing and message decoration while Android is rendering, scrolling or streaming replies.
+- Avoided repeated listing cleanup scans during chat updates and reduced Android performance-monitor polling.
+- Fixed a background startup error involving Context Keeper and native Memory checks.
+- Improved Support History storage and downloads, and made performance reports clearer when runtime data is unavailable.
+
 ## 0.2.58
 - Kept privacy-safe support and performance history across extension updates, compressed older history when needed, and added large .gz downloads plus a Clear history button.
 - Made Settings descriptions, the Simple Feature Guide and the feature list easier to understand, including clearer explanations for experimental Memory and Lorebook tools.

@@ -612,6 +612,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function clearListingClasses() {
+    // Chat/message passes call this helper frequently. When no listing guard
+    // was ever active, do not scan the whole document looking for stale menus.
+    if (!DS.state.listingPerformanceWasActive && !listingPaintCards.size && !menuCard &&
+        listingPaintRevision < 0 &&
+        !document.documentElement.classList.contains("ds-listing-performance")) return;
     clearNativeCardMenuState();
     DS.setClassState?.(document.documentElement, "ds-listing-performance", false);
     // Only touch cards this helper marked. A document-wide cleanup scan on a
@@ -677,7 +682,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyPerformanceMode = function applyPerformanceMode() {
     const s = settings();
-    applyListingPaintGuard();
+    // Listing paint protection has its own route-specific lane. Do not run
+    // listing cleanup (or a document-wide menu query) for every chat reply.
+    if (DS.state?.listingPerformanceWasActive) clearListingClasses();
     const active = isActiveChatPerformance();
 
     // A newly mounted reply gets the main thread first. Performance folding and
