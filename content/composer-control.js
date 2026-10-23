@@ -22,7 +22,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     editLayoutOriginalStyles: new WeakMap(),
     editLayoutTouchedNodes: new Set(),
     editLayoutDiagRoots: new WeakSet(),
-    pendingComposerHeightRepairs: new WeakSet()
+    pendingComposerHeightRepairs: new WeakSet(),
+    mobileScanEditsPending: false,
+    lastMobileRoute: "",
+    lastMobileViewportWidth: 0
   };
 
   function settings() {
@@ -53,7 +56,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function getMessageTextareas() {
     return DS.qsa("textarea")
       .filter(isMessageTextarea)
-      .filter(textarea => !textarea.closest("#ds-qol-panel, #ds-chat-export-modal"));
+      // Message edit textareas are owned by SpicyChat's edit flow. Never
+      // force-enable or restyle them as though they were the chat composer.
+      .filter(textarea => !textarea.closest("[id^='message-'], #ds-qol-panel, #ds-chat-export-modal"));
   }
 
   function isPrimaryComposerTextarea(textarea) {
@@ -68,6 +73,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function composerHeightLooksCollapsed(textarea) {
     if (!isPrimaryComposerTextarea(textarea)) return false;
 
+    // React updates inline autosize on nearly every input. A healthy explicit
+    // height cannot represent the 0px-collapse bug; avoid a synchronous
+    // layout read for every mobile keyboard stroke.
+    const inlineHeight = Number.parseFloat(String(textarea.style.height || ""));
+    if (Number.isFinite(inlineHeight) && inlineHeight > 18) return false;
     const rect = textarea.getBoundingClientRect?.();
     if (!rect || rect.width < 120) return false;
 
@@ -75,7 +85,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try { computed = getComputedStyle(textarea); } catch {}
     if (computed && (computed.display === "none" || computed.visibility === "hidden")) return false;
 
-    const inlineHeight = Number.parseFloat(String(textarea.style.height || ""));
     const rectCollapsed = rect.height > 0 && rect.height < 18;
     const inlineCollapsed = Number.isFinite(inlineHeight) && inlineHeight <= 4;
     return inlineCollapsed || rectCollapsed;
@@ -710,45 +719,55 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     cleanupStaleMessageEditLayoutFixes();
 
-    document.querySelectorAll("textarea").forEach(textarea => {
+    // Only native message editors can need the compact Save/Cancel layout.
+    // Scanning every textarea also visits the composer and optional QoL dialogs.
+    document.querySelectorAll("[id^='message-'] textarea").forEach(textarea => {
       if (isMessageEditTextarea(textarea)) {
         resizeAndroidMessageEdit(textarea);
       }
     });
   }
 
-  function scheduleAndroidMessageEditResize(textarea = null) {
+  function scheduleAndroidMessageEditResize(textarea = null, reason = "mount") {
     if (!mobileLayoutActive()) return;
+    // A keyboard resize without an active editor must not scan the whole chat.
+    // A newly mounted editor is discovered by the structural mutation path.
+    const editor = textarea?.isConnected && isMessageEditTextarea(textarea)
+      ? textarea
+      : (document.activeElement instanceof HTMLTextAreaElement && isMessageEditTextarea(document.activeElement)
+        ? document.activeElement : null);
+    if (!editor) return;
 
-    cancelAnimationFrame(state.editResizeRaf);
     clearTimeout(state.editResizeTimer);
+    if (reason === "typing" || reason === "viewport") {
+      // Critical: do not write multiple textarea styles, read scrollHeight,
+      // inspect Save/Cancel layout, or schedule rAF per keystroke/IME event.
+      // Only repair after the input or soft keyboard has settled.
+      cancelAnimationFrame(state.editResizeRaf);
+      state.editResizeRaf = 0;
+      state.editResizeTimer = setTimeout(() => {
+        state.editResizeTimer = 0;
+        if (editor.isConnected && isMessageEditTextarea(editor)) resizeAndroidMessageEdit(editor);
+      }, reason === "typing" ? 480 : 210);
+      return;
+    }
 
+    // New/focused editors still get an immediate initial repair.
+    if (state.editResizeRaf) return;
     state.editResizeRaf = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (textarea?.isConnected && isMessageEditTextarea(textarea)) {
-          resizeAndroidMessageEdit(textarea);
-        } else {
-          normalizeAndroidMessageEditors();
-        }
-      });
+      state.editResizeRaf = 0;
+      if (editor.isConnected && isMessageEditTextarea(editor)) resizeAndroidMessageEdit(editor);
     });
-
-    // SpicyChat/React can write its own height at the end of the input event.
-    // One bounded delayed pass fixes that race without an endless observer loop.
-    state.editResizeTimer = setTimeout(() => {
-      if (textarea?.isConnected && isMessageEditTextarea(textarea)) {
-        resizeAndroidMessageEdit(textarea);
-      } else {
-        normalizeAndroidMessageEditors();
-      }
-    }, 90);
   }
 
-  function scheduleMobileSendWrapperNormalize() {
-    cancelAnimationFrame(state.mobileNormalizeRaf);
+  function scheduleMobileSendWrapperNormalize(scanEdits = false) {
+    state.mobileScanEditsPending ||= scanEdits;
+    if (state.mobileNormalizeRaf) return;
     state.mobileNormalizeRaf = requestAnimationFrame(() => {
+      state.mobileNormalizeRaf = 0;
       normalizeMobileSendWrapper();
-      normalizeAndroidMessageEditors();
+      if (state.mobileScanEditsPending) normalizeAndroidMessageEditors();
+      state.mobileScanEditsPending = false;
     });
   }
 
@@ -779,16 +798,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (node.matches?.(selector)) return true;
         if (node.querySelector?.(selector)) return true;
 
-        // A composer/edit wrapper can be replaced while the actual textarea is
-        // a sibling rather than a descendant of the changed node.
-        const parent = node.parentElement;
-        return !!parent?.querySelector?.(selector);
+        // Never query the parent subtree of every changed node: an ordinary
+        // React re-render can give it the entire chat as parent.
+        return false;
       });
     });
 
     state.mobileObserver = new MutationObserver(records => {
       if (!mobileMutationTouchesComposer(records)) return;
-      scheduleMobileSendWrapperNormalize();
+      scheduleMobileSendWrapperNormalize(true);
     });
 
     const mobileObserveRoot = document.body || document.documentElement;
@@ -808,22 +826,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.addEventListener("input", event => {
       const textarea = event.target;
       if (!isMessageEditTextarea(textarea)) return;
-      scheduleAndroidMessageEditResize(textarea);
+      scheduleAndroidMessageEditResize(textarea, "typing");
     }, true);
 
     window.addEventListener("resize", () => {
-      scheduleMobileSendWrapperNormalize();
-      scheduleAndroidMessageEditResize();
+      // Soft keyboards usually change height, not width. A keyboard opening
+      // must not wake the full composer normalization path.
+      const width = Math.round(window.innerWidth || 0);
+      if (width !== state.lastMobileViewportWidth) {
+        state.lastMobileViewportWidth = width;
+        scheduleMobileSendWrapperNormalize(true);
+      }
+      scheduleAndroidMessageEditResize(null, "viewport");
     }, { passive: true });
 
     window.visualViewport?.addEventListener("resize", () => {
-      scheduleAndroidMessageEditResize();
+      scheduleAndroidMessageEditResize(null, "viewport");
     }, { passive: true });
   }
 
   DS.applyMobileChatLayoutFixes = function applyMobileChatLayoutFixes() {
     if (!enabled() || !mobileLayoutActive()) return;
+    const route = String(location.pathname || "");
+    const needsInitialPass = route !== state.lastMobileRoute || !state.mobileListenersInstalled;
+    state.lastMobileRoute = route;
+    state.lastMobileViewportWidth = Math.round(window.innerWidth || 0);
     installMobileChatLayoutFixes();
+    // Runtime slow passes can fire during typing and native edits. Once the
+    // observer is installed, structural changes request repairs themselves.
+    if (!needsInitialPass) return;
     normalizeMobileSendWrapper();
     normalizeAndroidMessageEditors();
   };

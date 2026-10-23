@@ -384,6 +384,10 @@ async function load() {
   setChecked("hideOpenedChats", settings.hideOpenedChats);
   setValue("openedBotSortMode", settings.openedBotSortMode || "newest");
   setValue("qolInterfaceScale", [100, 110, 125, 150].includes(Number(settings.qolInterfaceScale)) ? Number(settings.qolInterfaceScale) : 100);
+  setChecked("enableChatWidthControls", settings.enableChatWidthControls === true);
+  setValue("chatStreamWidth", Math.min(1600, Math.max(520, Number(settings.chatStreamWidth) || 800)));
+  setValue("chatBubbleMaxWidth", Math.min(1500, Math.max(360, Number(settings.chatBubbleMaxWidth) || 650)));
+  setValue("chatComposerWidth", Math.min(1600, Math.max(520, Number(settings.chatComposerWidth) || 800)));
   setValue("chatTextScale", [100, 110, 125, 150].includes(Number(settings.chatTextScale)) ? Number(settings.chatTextScale) : 100);
   setValue("chatLineSpacing", ["native", "comfortable", "spacious"].includes(settings.chatLineSpacing) ? settings.chatLineSpacing : "native");
   setValue("settingsReadingFont", Object.hasOwn(SETTINGS_READING_FONTS, settings.settingsReadingFont) ? settings.settingsReadingFont : "native");

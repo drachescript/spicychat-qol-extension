@@ -180,6 +180,10 @@ function readSettingsFromPage() {
     hideOpenedChats: checked("hideOpenedChats"),
     openedBotSortMode: value("openedBotSortMode", "newest"),
     qolInterfaceScale: [100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100,
+    enableChatWidthControls: checked("enableChatWidthControls"),
+    chatStreamWidth: Math.min(1600, Math.max(520, Number(value("chatStreamWidth", "800")) || 800)),
+    chatBubbleMaxWidth: Math.min(1500, Math.max(360, Number(value("chatBubbleMaxWidth", "650")) || 650)),
+    chatComposerWidth: Math.min(1600, Math.max(520, Number(value("chatComposerWidth", "800")) || 800)),
     chatTextScale: [100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100,
     chatLineSpacing: ["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native",
     settingsReadingFont: Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native",
@@ -812,6 +816,10 @@ function readSingleSettingFromPage(settingKey) {
     case "hideOpenedChats": return (checked("hideOpenedChats"));
     case "openedBotSortMode": return (value("openedBotSortMode", "newest"));
     case "qolInterfaceScale": return ([100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100);
+    case "enableChatWidthControls": return checked("enableChatWidthControls");
+    case "chatStreamWidth": return Math.min(1600, Math.max(520, Number(value("chatStreamWidth", "800")) || 800));
+    case "chatBubbleMaxWidth": return Math.min(1500, Math.max(360, Number(value("chatBubbleMaxWidth", "650")) || 650));
+    case "chatComposerWidth": return Math.min(1600, Math.max(520, Number(value("chatComposerWidth", "800")) || 800));
     case "chatTextScale": return ([100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100);
     case "chatLineSpacing": return (["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native");
     case "settingsReadingFont": return Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native";

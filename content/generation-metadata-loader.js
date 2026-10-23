@@ -96,14 +96,15 @@ if (!(() => { try {
       settings?.showGenerationModel ||
       settings?.showGenerationElapsed ||
       settings?.showGenerationSettings ||
-      settings?.enableContextWindowWarning
+      settings?.enableContextWindowWarning ||
+      settings?.nativeMemoryQualityProbe
     );
   }
 
   window.__DSQ_SET_GENERATION_METADATA_ENABLED__ = setEnabled;
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
-  const watchedSettingNames = ["enabled", "saiToolkitCompatibility", "showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning"];
+  const watchedSettingNames = ["enabled", "saiToolkitCompatibility", "showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning", "nativeMemoryQualityProbe"];
   const watchedSettings = {};
 
   function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }

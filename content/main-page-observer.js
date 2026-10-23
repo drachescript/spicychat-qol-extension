@@ -11,6 +11,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.observePage = function observePage() {
     if (DS.isQolPausedForTab?.()) return;
     let lastNonCardListingScheduleAt = 0;
+    // This is baseline protection, not a user-selectable performance mode.
+    // SpicyChat sometimes remounts the title/header many times in one render
+    // burst. The old immediate full-runtime repair on *every* removed QoL
+    // button could feed another React remount and make a self-sustaining loop.
+    let chatControlRepairTimer = 0;
+    let lastChatControlRepairAt = -Infinity;
+    let chatControlRepairRoute = "";
+    let chatControlRepairReason = "";
+    const CHAT_CONTROL_REPAIR_GAP_MS = 1000;
+    const CHAT_CONTROL_SETTLE_MS = 140;
+    function queueChatControlRepair(reason) {
+      if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.()) return;
+      const counters = runtimeCounters();
+      if (chatControlRepairTimer) {
+        counters.chatControlRepairCoalesced = Number(counters.chatControlRepairCoalesced || 0) + 1;
+        return;
+      }
+      const now = Date.now();
+      const earliest = lastChatControlRepairAt + CHAT_CONTROL_REPAIR_GAP_MS;
+      const delay = Math.max(CHAT_CONTROL_SETTLE_MS, earliest - now);
+      const route = location.pathname;
+      chatControlRepairReason = reason;
+      chatControlRepairRoute = route;
+      chatControlRepairTimer = setTimeout(() => {
+        chatControlRepairTimer = 0;
+        if (DS.isQolPausedForTab?.() || !DS.state?.settings?.enabled ||
+            !DS.isSingleChatPage?.() || location.pathname !== chatControlRepairRoute) return;
+        // Wait for the actual native title to be mounted. A subsequent native
+        // header insertion requeues its own repair, rather than spinning here.
+        if (chatControlRepairReason !== "composer-shortcut" &&
+            !document.querySelector("a[aria-label='chatbot-profile'], button[aria-label='chat-dropdown']")) return;
+        lastChatControlRepairAt = Date.now();
+        counters.chatControlRepairRuns = Number(counters.chatControlRepairRuns || 0) + 1;
+        DS.scheduleRun?.({ priority: "critical", source: `chat-controls-repair-${chatControlRepairReason}` });
+      }, delay);
+      counters.chatControlRepairQueued = Number(counters.chatControlRepairQueued || 0) + 1;
+    }
     const CHAT_VISIBILITY_DIAGNOSTIC_KEY = "dsQolChatVisibilitySummary";
     const CHAT_VISIBILITY_FIELDS = [
       "chatUnexpectedEmptyTransitions", "chatUnexpectedEmptyRecovered", "chatUnexpectedEmptyUnresolved",
@@ -154,14 +191,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       const persistentChatShortcutRemoved = mutations.some(mutationRemovedPersistentChatShortcut);
       if (persistentChatShortcutRemoved) {
-        // React sometimes removes only our injected composer shortcut while
-        // rebuilding the text box. QoL-only mutations are normally ignored to
-        // prevent observer loops, so explicitly repair persistent chat controls.
-        DS.scheduleRun?.({
-          priority: "critical",
-          immediate: true,
-          source: "persistent-chat-shortcut-removed"
-        });
+        // Repair after native rendering settles; never synchronously re-enter
+        // a full chat pass for a QoL-owned button removal.
+        queueChatControlRepair("composer-shortcut");
       }
 
       const persistentChatHeaderRemoved = DS.isSingleChatPage?.() && mutations.some(mutationRemovedPersistentChatHeaderControl);
@@ -169,16 +201,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (persistentChatHeaderRemoved || nativeChatHeaderAdded) {
         counters.chatHeaderRepairRequests = Number(counters.chatHeaderRepairRequests || 0) + 1;
         counters.lastChatHeaderRepairSource = persistentChatHeaderRemoved ? "QoL controls removed" : "native header mounted";
-        // The chat header is frequently remounted as one React subtree. When
-        // that happens, all injected title buttons can disappear in the same
-        // QoL-only removal batch, which used to be intentionally ignored by
-        // the observer. Repair the interactive header immediately instead of
-        // waiting for an unrelated later mutation/slow cosmetic pass.
-        DS.scheduleRun?.({
-          priority: "critical",
-          immediate: true,
-          source: persistentChatHeaderRemoved ? "persistent-chat-header-removed" : "native-chat-header-mounted"
-        });
+        // A remount needs one settled repair, not one immediate whole-runtime
+        // pass per removed button. This also retains repairs on QoL-only batches.
+        queueChatControlRepair(nativeChatHeaderAdded ? "native-header" : "removed-header-control");
       }
 
       // QoL can add/remove several ds-* nodes in the same observer delivery as

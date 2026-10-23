@@ -52,6 +52,15 @@ if (!(() => { try {
     disable() { bridgeWanted = false; sendControl(false); }
   };
 
+  function isArchiveSetupRoute() {
+    try {
+      return /^\/lorebook\/create\/?$/i.test(location.pathname) &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          new URLSearchParams(location.search).get('dsQolArchiveSetup') ||
+          sessionStorage.getItem('dsQolArchiveSetupTokenV1') || '');
+    } catch { return false; }
+  }
+
   function isBotProfileRoute() {
     return /^\/(?:[a-z]{2}\/)?chatbot\/[0-9a-f-]{20,}(?:[/?#]|$)/i.test(String(location.pathname || ""));
   }
@@ -140,6 +149,7 @@ if (!(() => { try {
       chatListImportNeedsAuthBridge ||
       myCreationsBackupNeedsAuthBridge ||
       lorebookEditorNeedsAuthBridge ||
+      isArchiveSetupRoute() ||
       isRecommendationWorkerRoute() ||
       isBotStatusWorkerRoute() ||
       isLorebookBackupWorkerRoute()
@@ -152,7 +162,7 @@ if (!(() => { try {
   // SpicyChat performs the useful authenticated requests very early during page
   // boot. Start the lightweight MAIN-world bridge immediately on routes that can
   // later need that auth, before waiting for extension settings to hydrate.
-  if (isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isLorebookEditorRoute() || isLorebookBackupWorkerRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
+  if (isArchiveSetupRoute() || isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isLorebookEditorRoute() || isLorebookBackupWorkerRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }

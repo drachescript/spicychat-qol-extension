@@ -46,12 +46,13 @@ async function rememberQuickDislike(botId, botName, status, origin = {}) {
     nativeEventConfirmed: status === "disliked" && origin.nativeEventConfirmed === true
   };
 
-  // Keep this local ledger bounded even for very old installations.
+  // Retain 12,000 handled IDs (not 5,000); preserve existing dedupe across large queues.
+  // The extension declares unlimitedStorage, but we still bound legacy JSON growth to reduce large-write overhead.
   const entries = Object.entries(history.bots);
-  if (entries.length > 5000) {
+  if (entries.length > 12000) {
     entries
       .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
-      .slice(5000)
+      .slice(12000)
       .forEach(([id]) => delete history.bots[id]);
   }
 
@@ -87,10 +88,10 @@ function normalizeQuickLessLikePending(raw) {
 
 function trimQuickLessLikeHistory(history) {
   const entries = Object.entries(history?.bots || {});
-  if (entries.length > 5000) {
+  if (entries.length > 12000) {
     entries
       .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
-      .slice(5000)
+      .slice(12000)
       .forEach(([id]) => delete history.bots[id]);
   }
   return history;

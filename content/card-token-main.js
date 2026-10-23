@@ -33,6 +33,17 @@ if (!(() => { try {
   const CONVERSATION_LIST_RESPONSE_EVENT = "ds-qol-conversation-list-response-v1";
   const LOREBOOK_REQUEST_EVENT = "ds-qol-lorebook-request-v1";
   const LOREBOOK_RESPONSE_EVENT = "ds-qol-lorebook-response-v1";
+  const PRIVATE_READ_REQUEST = "ds-qol-private-lorebook-read-request-v1";
+  const PRIVATE_READ_RESPONSE = "ds-qol-private-lorebook-read-response-v1";
+  const PRIVATE_ARCHIVE_WRITE_REQUEST = "ds-qol-private-archive-write-request-v1";
+  const PRIVATE_ARCHIVE_WRITE_RESPONSE = "ds-qol-private-archive-write-response-v1";
+  // One-time handoff of the already captured native session for the user-approved
+  // private Archive setup. Never place the token in DOM attributes or storage.
+  // Only active on the dedicated Lorebook create route, with a setup UUID.
+  const PRIVATE_ARCHIVE_AUTH_REQUEST = "ds-qol-private-archive-auth-request-v1";
+  const PRIVATE_ARCHIVE_AUTH_RESPONSE = "ds-qol-private-archive-auth-response-v1";
+  const PRIVATE_ENTRY_AUTH_REQUEST = "ds-qol-private-entry-auth-request-v1";
+  const PRIVATE_ENTRY_AUTH_RESPONSE = "ds-qol-private-entry-auth-response-v1";
   const OWNED_LIST_REQUEST_EVENT = "ds-qol-owned-chatbots-list-request-v1";
   const OWNED_LIST_RESPONSE_EVENT = "ds-qol-owned-chatbots-list-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
@@ -606,6 +617,195 @@ if (!(() => { try {
     } catch (error) {
       reply({ ok: false, status: error?.name === "AbortError" ? "timeout" : "network-error" });
     } finally { clearTimeout(timer); }
+  });
+
+  // Read-only, allowlisted native-auth bridge. It does not expose the Bearer
+  // token or support writes; the isolated-world bridge still verifies ownership.
+  window.addEventListener(PRIVATE_READ_REQUEST, async event => {
+    const detail = event?.detail || {};
+    if (!active || !nativeFetch) return;
+    const requestId = clean(detail.requestId);
+    const path = clean(detail.path);
+    const allowed = path === '/v2/users' || path === '/lorebooks' ||
+      /^\/lorebooks\/[0-9a-f]{8}-[0-9a-f-]{27}\?sortBy=priority&lastSortPriority=0$/i.test(path) ||
+      /^\/v2\/characters\/[0-9a-f]{8}-[0-9a-f-]{27}\?include=rulebook$/i.test(path);
+    if (!/^[a-z0-9-]{12,90}$/i.test(requestId) || !allowed) return;
+    const sendRead = result => {
+      try { window.dispatchEvent(new CustomEvent(PRIVATE_READ_RESPONSE, {
+        detail: {requestId, ...result}
+      })); } catch {}
+    };
+    if (!isJwt(capturedToken)) {
+      sendRead({ok:false,status:'auth-not-ready'});
+      return;
+    }
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 14000);
+    try {
+      const headers = {
+        Accept:'application/json, text/plain, */*',
+        Authorization:'Bearer '+capturedToken,
+        'x-app-id':'spicychat', 'x-platform':'WEB', 'x-platform-os':'DESKTOP'
+      };
+      const version = clean(capturedAppVersion || document.querySelector('meta[name="app-version"]')?.content || '');
+      if (version && version.length < 80) headers['x-app-version'] = version;
+      if (capturedCountry) headers['x-country'] = capturedCountry;
+      if (isGuest(capturedGuest)) headers['x-guest-userid'] = capturedGuest;
+      const response = await nativeFetch('https://prod.nd-api.com'+path, {
+        method:'GET', credentials:'include', cache:'no-store', headers, signal:ctl.signal
+      });
+      if (response.status === 401) {
+        capturedToken = ''; capturedAt = 0; exposeCapturedAuthState();
+      }
+      if (!response.ok) {sendRead({ok:false,status:'http',httpStatus:response.status});return;}
+      const data = await response.json().catch(() => null);
+      if (!data || typeof data !== 'object') {sendRead({ok:false,status:'invalid-response'});return;}
+      sendRead({ok:true,status:'success',data});
+    } catch (error) {
+      sendRead({ok:false,status:error?.name==='AbortError'?'timeout':'network-failure'});
+    } finally {clearTimeout(timer);}
+  });
+
+  // The MAIN-world interceptor sees SpicyChat's Authorization header during
+  // normal page load. The isolated world cannot read this closed-over token or
+  // the site's transient auth state, so browser-storage lookup alone fails.
+  // Gate this narrow handoff to the explicit, time-limited setup tab. No export
+  // happens during normal browsing, and the bearer is never persisted/logged.
+  const privateArchiveAuthServed = new Set();
+  window.addEventListener(PRIVATE_ARCHIVE_AUTH_REQUEST, event => {
+    const detail = event?.detail || {};
+    const requestId = clean(detail.requestId);
+    const requestToken = clean(detail.setupToken);
+    const path = clean(detail.path);
+    if (!active || location.pathname !== '/lorebook/create' ||
+        !/^[a-z0-9-]{12,90}$/i.test(requestId) ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestToken) ||
+        requestToken !== new URLSearchParams(location.search).get('dsQolArchiveSetup') ||
+        !['/save-image', '/lorebooks'].includes(path) ||
+        privateArchiveAuthServed.has(requestId) ||
+        privateArchiveAuthServed.size >= 4 || !isJwt(capturedToken)) return;
+    privateArchiveAuthServed.add(requestId);
+    try {window.dispatchEvent(new CustomEvent(PRIVATE_ARCHIVE_AUTH_RESPONSE, {
+      detail: {requestId, token:capturedToken, capturedAt}
+    }));} catch {}
+  });
+
+  // One-time, narrowly gated entry authorization for a signed-in CHAT tab.
+  // The authorized background handler independently rechecks ownership,
+  // attachment and destination; this event cannot write anything by itself.
+  const privateEntryAuthorizations = new Map();
+  window.addEventListener(PRIVATE_ENTRY_AUTH_REQUEST,event=>{
+    const detail=event?.detail||{};
+    const requestId=clean(detail.requestId);
+    const botId=clean(detail.botId).toLowerCase();
+    const conversationId=clean(detail.conversationId).toLowerCase();
+    const match=/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/?$/i.exec(location.pathname);
+    for(const [id,at] of privateEntryAuthorizations)if(Date.now()-at>60000)privateEntryAuthorizations.delete(id);
+    if(!active||!match||match[1].toLowerCase()!==botId||match[2].toLowerCase()!==conversationId||
+      !/^[a-z0-9-]{12,90}$/i.test(requestId)||!isJwt(capturedToken)||
+      privateEntryAuthorizations.has(requestId)||privateEntryAuthorizations.size>=6)return;
+    privateEntryAuthorizations.set(requestId,Date.now());
+    try{window.dispatchEvent(new CustomEvent(PRIVATE_ENTRY_AUTH_RESPONSE,{detail:{
+      requestId,botId,conversationId,token:capturedToken
+    }}));}catch{}
+  });
+
+  // Explicit Archive-setup-only writes using the captured signed-in session.
+  // Never expose the token; never retry a POST after an ambiguous result.
+  let privateArchiveWriteBusy = false;
+  window.addEventListener(PRIVATE_ARCHIVE_WRITE_REQUEST, async event => {
+    const detail = event?.detail || {};
+    const requestId = clean(detail.requestId);
+    const path = clean(detail.path);
+    const payload = detail.payload;
+    const params = new URLSearchParams(location.search || '');
+    const setupToken = params.get('dsQolArchiveSetup') || '';
+    const allowedRoute = location.pathname === '/lorebook/create' &&
+      /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(setupToken);
+    const send = result => {
+      try { window.dispatchEvent(new CustomEvent(PRIVATE_ARCHIVE_WRITE_RESPONSE, {
+        detail: {requestId, ...result}
+      })); } catch {}
+    };
+    if (!allowedRoute || !/^[a-z0-9-]{12,90}$/i.test(requestId) ||
+        !active || !nativeFetch || privateArchiveWriteBusy) return;
+    let valid = false;
+    if (path === '/save-image') {
+      valid = payload && Object.keys(payload).length === 2 &&
+        payload.image_type === 'image/png' &&
+        payload.hash === '1cb2bc293cab0f4bc7bf203e3829aee7';
+    } else if (path === '/lorebooks') {
+      valid = payload && Object.keys(payload).length === 5 &&
+        payload.name === 'SpicyChat QoL Archive' &&
+        typeof payload.description === 'string' && payload.description.length <= 100 &&
+        payload.visibility === 'private' && Array.isArray(payload.tags) &&
+        payload.tags.length === 0 && typeof payload.avatar_url === 'string' &&
+        /^avatars\/[A-Za-z0-9._/-]{1,250}\.(?:png|jpg|jpeg|webp)$/i.test(payload.avatar_url) &&
+        !payload.avatar_url.includes('..');
+    }
+    if (!valid) { send({ok:false,status:'blocked'}); return; }
+    if (!isJwt(capturedToken)) { send({ok:false,status:'auth-not-ready'}); return; }
+    // SpicyChat's verified native /save-image flow uses XMLHttpRequest.
+    // Use the same browser transport instead of a fetch POST, which can fail
+    // before receiving an HTTP status in certain site/browser configurations.
+    // Exactly ONE request is sent. There is no automatic retry for writes.
+    privateArchiveWriteBusy = true;
+    try {
+      if (!XHR || !nativeOpen || !nativeSetRequestHeader || !nativeSend) {
+        send({ok:false,status:'xhr-unavailable'});
+        return;
+      }
+      const headers = {
+        Accept:'application/json, text/plain, */*',
+        'Content-Type':'application/json',
+        authorization:'Bearer '+capturedToken,
+        'x-app-id':'spicychat', 'x-platform':'WEB', 'x-platform-os':'DESKTOP'
+      };
+      const version = clean(capturedAppVersion || document.querySelector('meta[name="app-version"]')?.content || '');
+      if (version && version.length < 80) headers['x-app-version'] = version;
+      if (capturedCountry) headers['x-country'] = capturedCountry;
+      if (isGuest(capturedGuest)) headers['x-guest-userid'] = capturedGuest;
+      await new Promise(resolve => {
+        let finished = false;
+        const xhr = new XHR();
+        const finish = result => {
+          if (finished) return;
+          finished = true;
+          send(result);
+          resolve();
+        };
+        xhr.timeout = 16000;
+        xhr.withCredentials = true;
+        xhr.onload = () => {
+          const code = Number(xhr.status) || 0;
+          if (code === 401) {
+            capturedToken = ''; capturedAt = 0; exposeCapturedAuthState();
+          }
+          if (code < 200 || code >= 300) {
+            finish({ok:false,status:'http',httpStatus:code});
+            return;
+          }
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (!data || typeof data !== 'object') throw Error('invalid');
+            finish({ok:true,status:'success',httpStatus:code,data});
+          } catch {
+            finish({ok:false,status:'invalid-response',httpStatus:code});
+          }
+        };
+        xhr.onerror = () => finish({ok:false,status:'xhr-network-error',httpStatus:Number(xhr.status)||0});
+        xhr.ontimeout = () => finish({ok:false,status:'xhr-timeout',httpStatus:Number(xhr.status)||0});
+        xhr.onabort = () => finish({ok:false,status:'xhr-aborted',httpStatus:Number(xhr.status)||0});
+        try {
+          xhr.open('POST','https://prod.nd-api.com'+path,true);
+          for (const [name,value] of Object.entries(headers)) xhr.setRequestHeader(name,value);
+          xhr.send(JSON.stringify(payload));
+        } catch(error) {
+          // Do not log request headers or payload. Only the exception type.
+          finish({ok:false,status:'xhr-dispatch-error',errorType:clean(error?.name).slice(0,32)});
+        }
+      });
+    } finally {privateArchiveWriteBusy=false;}
   });
 
   function lorebookSend(detail) {

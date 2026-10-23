@@ -1,0 +1,7 @@
+/* Optional Smart Folders preview; only mounts after explicit enablement. */
+.ds-chat-smart-folders-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:6px 0;padding:7px;border:1px solid rgba(145,158,171,.30);border-radius:8px;font-size:12px}
+.ds-chat-smart-folders-tools>button,.ds-chat-smart-folders-tools #ds-chat-smart-folders-preview button{padding:5px 9px;background:rgba(70,80,95,.3);border:1px solid rgba(150,160,175,.5);color:inherit;border-radius:6px;cursor:pointer}
+.ds-chat-smart-folders-tools button:disabled{opacity:.45;cursor:default}
+#ds-chat-smart-folders-status{flex:1 1 200px}
+#ds-chat-smart-folders-preview{flex-basis:100%}
+#ds-chat-smart-folders-preview button{margin:3px}

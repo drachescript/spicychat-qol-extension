@@ -163,8 +163,17 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
     "enableModelQuickAccess",
     "modelQuickAccessNames"
   ],
+  "chat-smart-folders": ["enableChatSmartFolders","smartChatFolderDailyRefresh","smartChatFolderFetchBotTags","smartChatFolderRules"],
   "chat-lorebook-manager": [
-    "enableChatLorebookManager"
+    "enableChatLorebookManager", "enableContextLorebookSuggestions"
+  ],
+  "chat-lorebook-recall": [
+    "enableLocalLorebookRecall", "localLorebookRecallMaxChars", "localLorebookRecentMessages", "enableSharedOocBudget", "sharedOocBudgetChars"
+  ],
+  "private-lorebook-bridge": [
+    "enablePrivateLorebookBridge", "privateLorebookStorageMode", "privateLorebookArchiveId",
+    "privateLorebookSyncMode", "privateLorebookArchiveCleanup", "privateLorebookPromotionPolicy",
+    "privateLorebookRequireReview", "privateLorebookAllowAutoCreate", "privateLorebookAllowArchiveAutoSync"
   ],
   "previously-chatted-indicator": [
     "enablePreviouslyChattedIndicator",

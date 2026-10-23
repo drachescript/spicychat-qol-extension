@@ -1350,8 +1350,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       delay = Math.max(delay, Number(DS.state.nativeActionQuietUntil) - Date.now() + 160);
       counters.nativeActionQuietDeferrals = Number(counters.nativeActionQuietDeferrals || 0) + 1;
     }
-    if (DS.state?.settings?.deferQolWhileTyping && Date.now() < Number(DS.state.userTypingUntil || 0)) {
-      delay = Math.max(delay, profile === "maximum" ? 1400 : 900);
+    if ((DS.state?.settings?.deferQolWhileTyping || window.innerWidth <= 760 || !!DS.getRuntimeEnvironment?.()?.android) && Date.now() < Number(DS.state.userTypingUntil || 0)) {
+      delay = Math.max(delay, Math.max(900, Number(DS.state.userTypingUntil || 0) - Date.now() + 160));
       counters.typingDeferrals = Number(counters.typingDeferrals || 0) + 1;
     }
     messageLaneDueAt = Date.now() + delay;
@@ -1470,6 +1470,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const settings = DS.state?.settings || {};
 
       await runStep("accessibility", () => DS.applyAccessibilitySettings?.());
+      await runStep("chat width", () => DS.applyChatWidthSettings?.());
 
       if (DS.state.quickDislikeWorker) return;
       if (DS.state.bulkChatHistoryLoadActive) {
@@ -1725,6 +1726,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("public lorebook profile/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0), () => DS.applyPublicLorebookQoL?.());
       }
       await runFeatureStep("chat lorebook manager", !!settings.enableChatLorebookManager, () => DS.applyChatLorebookManager?.());
+      await runFeatureStep("private lorebook bridge", !!settings.enablePrivateLorebookBridge || !!document.getElementById("ds-private-lorebook-bridge-launch"), () => DS.applyPrivateLorebookBridge?.());
       const lorebookWorkflowWanted = anySetting(settings, ["lorebookDefaultEntriesTab", "lorebookRememberEntrySort", "lorebookProtectEntryDrafts", "lorebookEditShortcuts", "lorebookEntryManager"]);
       await runRoutedFeatureStep(plan, "lorebook", "lorebook workflow tools", () => lorebookWorkflowWanted || !!document.getElementById("ds-lorebook-manager-toolbar") || !!document.querySelector(".ds-lb-draft-banner,.ds-lb-edit-page-shortcut,[data-ds-edit-lorebook-menu]"), () => DS.applyLorebookWorkflowTools?.());
       await runRoutedFeatureStep(plan, "botEditor", "bot editor local memory", () => !!botEditorRoute() && (!!settings.enableCreationAudit || !!settings.rememberBotImagePrompt || !!DS.state.botEditorLocalMemoryWasActive), () => DS.applyBotEditorLocalMemory?.());
@@ -1814,6 +1816,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!options.force && Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
       DS.scheduleRun?.({ priority: "slow", source: "native-action-quiet" });
       runtimeCounters().nativeActionQuietDeferrals = Number(runtimeCounters().nativeActionQuietDeferrals || 0) + 1;
+      return;
+    }
+    if (!options.force && DS.isSingleChatPage?.() &&
+        (window.innerWidth <= 760 || !!DS.getRuntimeEnvironment?.()?.android) &&
+        Date.now() < Number(DS.state.userTypingUntil || 0)) {
+      // On phones the software keyboard and native React composer share the
+      // main thread. Hold nonessential QoL cosmetic work until typing settles.
+      DS.scheduleRun?.({ priority: "slow", source: "mobile-typing-quiet" });
+      runtimeCounters().mobileTypingSlowDeferrals = Number(runtimeCounters().mobileTypingSlowDeferrals || 0) + 1;
       return;
     }
 
@@ -1961,6 +1972,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await runFeatureStep("model quick access", !!settings.enableModelQuickAccess || !!document.querySelector(".ds-model-quick-access"), () => DS.applyModelQuickAccess?.());
         }
         await runFeatureStep("chat lorebook manager", !!settings.enableChatLorebookManager || !!document.getElementById("ds-chat-lorebook-modal"), () => DS.applyChatLorebookManager?.());
+        await runFeatureStep("private lorebook bridge", !!settings.enablePrivateLorebookBridge || !!document.getElementById("ds-private-lorebook-bridge") || !!document.getElementById("ds-private-lorebook-bridge-launch"), () => DS.applyPrivateLorebookBridge?.());
         await runFeatureStep("chat tags", !!settings.showChatTagLinks || !!settings.showChatTagAddButtons, () => DS.applyChatTagTools?.());
         await runFeatureStep("generation metadata", generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning"), () => DS.applyGenerationMetadata?.());
         await runFeatureStep("personas", personaToolsWanted(settings), () => DS.applyPersonas?.());
@@ -2198,6 +2210,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         slowDelay = Math.max(slowDelay, remainingScrollMs + 450);
         counters.listingScrollDeferrals = Number(counters.listingScrollDeferrals || 0) + 1;
       }
+    }
+
+    if (!immediate && DS.isSingleChatPage?.() &&
+        (window.innerWidth <= 760 || !!DS.getRuntimeEnvironment?.()?.android) &&
+        Date.now() < Number(DS.state.userTypingUntil || 0)) {
+      slowDelay = Math.max(slowDelay, Number(DS.state.userTypingUntil) - Date.now() + 180);
+      counters.mobileTypingScheduleDeferrals = Number(counters.mobileTypingScheduleDeferrals || 0) + 1;
     }
 
     if (!immediate && DS.isSingleChatPage?.() && Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
@@ -2731,6 +2750,51 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.scheduleRun?.({ priority: "slow", source: "compact" });
     }, true);
 
+    // Firefox/Android long-press selection shares the main thread with React
+    // and the native selection toolbar. Never cancel pointer/touch/selection
+    // events; simply keep optional QoL presentation work out of the way.
+    // Short bounded windows and no timers/DOM observers are added here.
+    let mobileMessageTouchActive = false;
+    let mobileSelectionLastAt = 0;
+    const isMobileSelectionContext = () => {
+      const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
+      return !!env.android || /Android/i.test(navigator.userAgent || "");
+    };
+    const messageForSelectionNode = node => {
+      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+      return el?.closest?.("div[id^='message-']") || null;
+    };
+    const quietMobileSelection = (duration, kind) => {
+      const now = Date.now();
+      DS.state.nativeActionQuietUntil = Math.max(Number(DS.state.nativeActionQuietUntil || 0), now + duration);
+      const perf = runtimeCounters();
+      if (kind === "start") perf.mobileTextSelectionStarts = Number(perf.mobileTextSelectionStarts || 0) + 1;
+      if (kind === "change") perf.mobileTextSelectionChanges = Number(perf.mobileTextSelectionChanges || 0) + 1;
+      perf.mobileTextSelectionLastAt = now;
+    };
+    document.addEventListener("pointerdown", event => {
+      if (event.pointerType !== "touch" || !DS.state?.settings?.enabled ||
+          !DS.isSingleChatPage?.() || !isMobileSelectionContext()) return;
+      mobileMessageTouchActive = !!messageForSelectionNode(event.target);
+      if (mobileMessageTouchActive) quietMobileSelection(650, "start");
+    }, { capture: true, passive: true });
+    document.addEventListener("pointerup", () => {
+      if (!mobileMessageTouchActive) return;
+      mobileMessageTouchActive = false;
+      quietMobileSelection(750, "end");
+    }, { capture: true, passive: true });
+    document.addEventListener("pointercancel", () => { mobileMessageTouchActive = false; }, { capture: true, passive: true });
+    document.addEventListener("selectionchange", () => {
+      if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.() ||
+          !isMobileSelectionContext()) return;
+      const now = Date.now();
+      if (now - mobileSelectionLastAt < 240) return;
+      const selection = window.getSelection?.();
+      if (!selection || selection.isCollapsed || !messageForSelectionNode(selection.anchorNode)) return;
+      mobileSelectionLastAt = now;
+      quietMobileSelection(1100, "change");
+    }, { passive: true });
+
     // Protect native Regenerate/Send interactions from nonessential QoL work.
     // Never preventDefault(), synthesize a click, or inspect message text.
     document.addEventListener("pointerdown", event => {
@@ -2738,10 +2802,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const button = event.target?.closest?.("button");
       if (!button || button.matches?.("[id^='ds-'],[class*='ds-qol']") || button.closest?.("#ds-qol-panel,[data-ds-qol-owned]")) return;
       const label = String(button.getAttribute("aria-label") || button.getAttribute("title") || button.textContent || "").trim().slice(0, 90);
-      if (!/\b(?:regenerat(?:e|ion)?|reroll|retry|send(?: message)?)\b/i.test(label)) return;
-      DS.state.nativeActionQuietUntil = Date.now() + 1100;
+      const mobile = window.innerWidth <= 760 || !!(DS.getRuntimeEnvironment?.()?.android);
+      const generationAction = /\b(?:regenerat(?:e|ion)?|reroll|retry|send(?: message)?)\b/i.test(label);
+      const mobileEditOrRating = mobile && /\b(?:edit|save|cancel|rating|rate|dislike|like|thumbs?\s*(?:up|down))\b/i.test(label);
+      if (!generationAction && !mobileEditOrRating) return;
+      DS.state.nativeActionQuietUntil = Math.max(Number(DS.state.nativeActionQuietUntil || 0), Date.now() + (mobile ? 1450 : 1100));
       const counters = runtimeCounters();
       counters.nativeActionGuardStarts = Number(counters.nativeActionGuardStarts || 0) + 1;
+      if (mobileEditOrRating) counters.mobileNativeActionQuietStarts = Number(counters.mobileNativeActionQuietStarts || 0) + 1;
     }, { capture: true, passive: true });
 
     // Event Timing reveals actual input delay. Keep only aggregate timings; do
