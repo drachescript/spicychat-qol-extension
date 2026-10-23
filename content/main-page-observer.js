@@ -224,6 +224,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       const isChatPage = !!DS.isSingleChatPage?.();
+      // Baseline early exit for keystroke/contenteditable changes. The native
+      // header/shortcut repair and message-edit guards already ran above; no
+      // chat message roots or page chrome can have changed inside the composer.
+      // Avoid all message-root, banner and model mutation classifiers here.
+      if (isChatPage && mutationsAreComposerOnly(mutations)) {
+        counters.composerOnlyMutationSkips = Number(counters.composerOnlyMutationSkips || 0) + mutations.length;
+        DS.state.lastChatMutationAt = Date.now();
+        counters.composerEarlyExits = Number(counters.composerEarlyExits || 0) + 1;
+        return;
+      }
       const messageRootsChanged = isChatPage ? mutationsAddOrRemoveMessageRoots(mutations) : false;
       const nonMessageMutations = isChatPage ? mutations.filter(mutation => !mutationIsMessageScoped(mutation)) : mutations;
       // Model/banner invalidation is intentionally evaluated only against
@@ -238,12 +248,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // above, and no saved-message root changed, so there is nothing for the
       // QoL message lane to process yet. Wait for the actual sent message/other
       // page mutation instead of waking chat features for each composer update.
-      if (!messageRootsChanged && isChatPage && mutationsAreComposerOnly(mutations)) {
-        counters.composerOnlyMutationSkips = Number(counters.composerOnlyMutationSkips || 0) + mutations.length;
-        DS.state.lastChatMutationAt = Date.now();
-        return;
-      }
-
       // Collapse all nested text/span mutations in the same message to one cache
       // invalidation target. During token streaming one rendered message can
       // produce many nested mutation records; invalidating the same message for
@@ -295,7 +299,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // burst. Debounce QoL work until that batch settles instead of rescanning
       // the growing chat after every React insertion. This also covers manual
       // use of SpicyChat's own Load Previous Messages button.
-      const addedRoots = isChatPage ? addedMessageRootCount(mutations) : 0;
+      const addedRoots = isChatPage && messageRootsChanged ? addedMessageRootCount(mutations) : 0;
       if (isChatPage && addedRoots > 0 && addedRoots < 3 && !DS.state.bulkChatHistoryLoadActive) {
         // A normal newly-mounted user/AI message gets a short native-render-first
         // window. Message decoration and performance folding resume afterwards.

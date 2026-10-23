@@ -482,21 +482,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // React can reconstruct the creator header frequently. Reapply only when
+  // its host or the requested mode changes, never on every routine chat pass.
+  let lastCreatorHost = null;
   function applyInlineCreator() {
     const settings = DS.state.settings || {};
-    const creator = getCreatorAnchor();
-    const host = creator?.parentElement;
-
-    DS.qsa(".ds-chat-topbar-creator-line").forEach(el => {
-      if (el !== host) el.classList.remove("ds-chat-topbar-creator-line");
-    });
-
-    if (!settings.chatTopBarInlineCreator || !host) {
-      host?.classList?.remove("ds-chat-topbar-creator-line");
-      return;
+    const host = settings.chatTopBarInlineCreator ? getCreatorAnchor()?.parentElement : null;
+    if (lastCreatorHost === host && (!host || host.classList?.contains("ds-chat-topbar-creator-line"))) return;
+    if (lastCreatorHost && lastCreatorHost !== host && lastCreatorHost.classList?.contains("ds-chat-topbar-creator-line")) {
+      lastCreatorHost.classList.remove("ds-chat-topbar-creator-line");
     }
-
-    host.classList.add("ds-chat-topbar-creator-line");
+    if (host && !host.classList.contains("ds-chat-topbar-creator-line")) host.classList.add("ds-chat-topbar-creator-line");
+    lastCreatorHost = host || null;
   }
 
   function hideHeaderControls() {
@@ -527,6 +524,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function applyMenuCleanup() {
     const settings = DS.state.settings || {};
+    // Most users leave menu cleanup switches OFF. Do not inspect every page
+    // button on each header refresh when there is no menu work to do.
+    if (!settings.hideChatDropdownVoiceUpsell && !settings.hideUnlockCustomVoices && !settings.hideChatDropdownMemoryItem) {
+      unhideReason("menu-voice-upsell");
+      unhideReason("menu-memory");
+      return;
+    }
 
     DS.qsa("button").forEach(button => {
       const text = cleanText(button.getAttribute("aria-label") || button.textContent);
@@ -558,9 +562,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function cleanupTopBarTools() {
-    DS.qsa(".ds-chat-topbar-creator-line").forEach(el => {
-      el.classList.remove("ds-chat-topbar-creator-line");
-    });
+    if (lastCreatorHost?.classList?.contains("ds-chat-topbar-creator-line")) {
+      lastCreatorHost.classList.remove("ds-chat-topbar-creator-line");
+    }
+    lastCreatorHost = null;
     unhideReason("context-dot");
     unhideReason("rating-button");
     unhideReason("model-button");

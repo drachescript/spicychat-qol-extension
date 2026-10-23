@@ -23,10 +23,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const revision = Number(DS.state.domRevision || 0);
     const cache = DS.state.loadedMessageRootsCache || (DS.state.loadedMessageRootsCache = { route: "", revision: -1, roots: [] });
     const cachedRoots = Array.isArray(cache.roots) ? cache.roots : [];
-    const reusable = !options.fresh && cache.route === route && cache.revision === revision && cachedRoots.every(root => root?.isConnected);
+    // Structural chat mutations bump domRevision. Rechecking every cached
+    // root's isConnected state on each lookup costs O(messages) even when the
+    // same reply is streaming and nothing was mounted or removed. The first
+    // and last nodes are cheap sentinels; a revision change forces a rescan.
+    const reusable = !options.fresh && cache.route === route && cache.revision === revision &&
+      (!cachedRoots.length || (cachedRoots[0]?.isConnected && cachedRoots[cachedRoots.length - 1]?.isConnected));
     if (reusable) {
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.loadedMessageRootCacheHits = Number(counters.loadedMessageRootCacheHits || 0) + 1;
+      counters.loadedMessageRootConnectivityChecksAvoided = Number(counters.loadedMessageRootConnectivityChecksAvoided || 0) + Math.max(0, cachedRoots.length - 2);
       return cachedRoots;
     }
     const roots = Array.from(document.querySelectorAll("div[id^='message-']"))

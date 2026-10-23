@@ -13,9 +13,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function mutationIsMessageScoped(mutation) {
     const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
     if (target?.closest?.("[id^='message-']")) return true;
-    const changed = [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])]
-      .filter(node => node?.nodeType === Node.ELEMENT_NODE || node?.parentElement);
-    return changed.length > 0 && changed.every(nodeIsOrContainsChatMessage);
+    let changed = false;
+    for (const nodes of [mutation?.addedNodes, mutation?.removedNodes]) {
+      for (const node of nodes || []) {
+        if (node?.nodeType !== Node.ELEMENT_NODE && !node?.parentElement) continue;
+        changed = true;
+        if (!nodeIsOrContainsChatMessage(node)) return false;
+      }
+    }
+    return changed;
   }
 
   function mutationsAreComposerOnly(mutations) {
@@ -32,18 +38,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
       if (!target) return false;
       if (target.closest?.("[id^='message-'], textarea, [contenteditable='true']")) return true;
-      return [...mutation.addedNodes, ...mutation.removedNodes].every(node => {
-        if (!(node instanceof Element)) return true;
-        return !!(node.matches?.("[id^='message-']") || node.closest?.("[id^='message-']") || node.querySelector?.("[id^='message-']"));
-      });
+      for (const nodes of [mutation.addedNodes, mutation.removedNodes]) {
+        for (const node of nodes || []) {
+          if (!(node instanceof Element)) continue;
+          if (!(node.matches?.("[id^='message-']") || node.closest?.("[id^='message-']") || node.querySelector?.("[id^='message-']"))) return false;
+        }
+      }
+      return true;
     });
   }
 
   function mutationsAddOrRemoveMessageRoots(mutations) {
-    return mutations.some(mutation => [...mutation.addedNodes, ...mutation.removedNodes].some(node => {
-      if (!(node instanceof Element)) return false;
-      return !!(node.matches?.("[id^='message-']") || node.querySelector?.("[id^='message-']"));
-    }));
+    for (const mutation of mutations) {
+      for (const nodes of [mutation.addedNodes, mutation.removedNodes]) {
+        for (const node of nodes || []) {
+          if (!(node instanceof Element)) continue;
+          if (node.matches?.("[id^='message-']") || (node.childElementCount > 0 && node.querySelector?.("[id^='message-']"))) return true;
+        }
+      }
+    }
+    return false;
   }
 
   function addedMessageRootCount(mutations) {
@@ -52,7 +66,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       for (const node of mutation.addedNodes || []) {
         if (!(node instanceof Element)) continue;
         if (node.matches?.("[id^='message-']")) roots.add(node);
-        node.querySelectorAll?.("[id^='message-']").forEach(root => roots.add(root));
+        if (node.childElementCount > 0) node.querySelectorAll?.("[id^='message-']").forEach(root => roots.add(root));
       }
     }
     return roots.size;
@@ -70,14 +84,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const textRoots = new Set();
     let candidateNodes = 0;
     const qolMessageDecorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
+    // One streaming delivery may contain dozens of records targeting the same
+    // text container. Reuse these DOM checks within the batch only; the next
+    // delivery gets a fresh cache and observes any changed text structure.
+    const textTargetCache = new WeakMap();
 
     const touchesMessageText = node => {
       const element = node instanceof Element ? node : node?.parentElement;
       if (!element) return false;
-      if (element.matches?.(qolMessageDecorationSelector) || element.closest?.(qolMessageDecorationSelector)) return false;
-      if (element.matches?.("div[class*='overflow-wrap']")) return true;
-      if (element.closest?.("div[class*='overflow-wrap']")) return true;
-      return !!element.querySelector?.("div[class*='overflow-wrap']");
+      if (textTargetCache.has(element)) return textTargetCache.get(element);
+      let result = false;
+      if (!(element.matches?.(qolMessageDecorationSelector) || element.closest?.(qolMessageDecorationSelector))) {
+        result = !!(element.matches?.("div[class*='overflow-wrap']") ||
+          element.closest?.("div[class*='overflow-wrap']") ||
+          element.querySelector?.("div[class*='overflow-wrap']"));
+      }
+      textTargetCache.set(element, result);
+      return result;
     };
 
     const addNode = (node, scanDescendants = false) => {
@@ -85,7 +108,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const root = messageRootForMutationNode(node);
       if (root) {
         roots.add(root);
-        if (touchesMessageText(node)) textRoots.add(root);
+        if (!textRoots.has(root) && touchesMessageText(node)) textRoots.add(root);
         return;
       }
       // A MutationRecord target can be the entire chat/message-list container.

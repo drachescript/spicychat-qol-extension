@@ -144,6 +144,77 @@ async function refreshStorageUsage() {
   });
 }
 
+
+// On-demand size breakdown. Read only key names and byte counts, never saved
+// values. Avoid chrome.storage.local.get(null), which loads the whole database.
+async function checkLocalStorageSizes() {
+  const host = $("localStorageBreakdown");
+  if (!host) return;
+  host.textContent = "Checking how much space each category uses…";
+  const area = chrome.storage?.local;
+  if (typeof area?.getKeys !== "function" || typeof area?.getBytesInUse !== "function") {
+    host.textContent = "This browser does not support checking individual storage sizes without reading saved content. Nothing was changed.";
+    return;
+  }
+  try {
+    const keys = await new Promise((resolve, reject) => {
+      let finished = false;
+      const done = value => { if (!finished) { finished = true; resolve(value); } };
+      try {
+        const result = area.getKeys(value => {
+          if (chrome.runtime?.lastError) { if (!finished) { finished = true; reject(new Error(chrome.runtime.lastError.message)); } }
+          else done(value);
+        });
+        if (result?.then) result.then(done, reject);
+      } catch (error) { reject(error); }
+    });
+    if (!Array.isArray(keys)) throw new Error("Could not list saved storage keys");
+    const groups = new Map([
+      ["Settings", []],
+      ["Saved lists and chat history", []],
+      ["Backups and recovery", []],
+      ["Memory and story notes", []],
+      ["Caches and bot data", []],
+      ["Other stored data", []]
+    ]);
+    function category(key) {
+      const name = String(key || "").toLowerCase();
+      if (name === "settings" || name.startsWith("dssettingv1:") || /setting|preference|config/.test(name)) return "Settings";
+      if (/backup|recovery|snapshot/.test(name)) return "Backups and recovery";
+      if (/memory|keeper|context|story.?notes/.test(name)) return "Memory and story notes";
+      if (/opened|blocked|favorite|later|notinterested|not_interested|history|bookmark|organizer|followed|personas|presets/.test(name)) return "Saved lists and chat history";
+      if (/cache|archive|bot|lorebook|index|diagnostic|scan|status|creator|token|presence/.test(name)) return "Caches and bot data";
+      return "Other stored data";
+    }
+    for (const key of keys) groups.get(category(key)).push(key);
+    const bytesFor = keysToCheck => new Promise((resolve, reject) => {
+      let finished = false;
+      const done = value => { if (!finished) { finished = true; resolve(Number(value) || 0); } };
+      try {
+        const result = area.getBytesInUse(keysToCheck, bytes => {
+          if (chrome.runtime?.lastError) { if (!finished) { finished = true; reject(new Error(chrome.runtime.lastError.message)); } }
+          else done(bytes);
+        });
+        if (result?.then) result.then(done, reject);
+      } catch (error) { reject(error); }
+    });
+    const rows = [];
+    for (const [name, groupKeys] of groups) {
+      if (!groupKeys.length) continue;
+      rows.push({ name, keys: groupKeys.length, bytes: await bytesFor(groupKeys) });
+    }
+    rows.sort((a, b) => b.bytes - a.bytes);
+    const total = await bytesFor(null);
+    const mb = size => `${(Math.max(0, size) / (1024 * 1024)).toFixed(2)} MB`;
+    host.replaceChildren();
+    host.appendChild(makeElement("p", { text: `chrome.storage.local: ${mb(total)} across ${keys.length} saved items.` }));
+    for (const item of rows) host.appendChild(makeElement("div", { text: `${item.name}: ${mb(item.bytes)} (${item.keys} items)` }));
+    host.appendChild(makeElement("p", { className: "hint", text: "Only sizes were checked. No saved content was opened, uploaded, changed or deleted. Compressed Support History and other IndexedDB data are not included in these sizes." }));
+  } catch (error) {
+    host.textContent = `Could not check storage sizes: ${error?.message || "browser did not respond"}. Nothing was changed.`;
+  }
+}
+
 function pruneMeta(meta, allowedKeys) {
   const raw = meta && typeof meta === "object" ? meta : {};
   const allowed = new Set(allowedKeys.filter(Boolean));

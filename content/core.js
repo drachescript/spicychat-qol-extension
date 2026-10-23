@@ -450,6 +450,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : DS.DEFAULT_SETTINGS[key];
   };
 
+  // Keep small, content-free performance snapshots in extension storage. The
+  // background writer owns the size cap and gzip rotation across tabs/updates.
+  // No message text, account IDs, bot IDs, URLs, or runtime log details leave this page.
+  let supportLastSnapshot = 0;
+  const sendSupportSnapshot = () => {
+    if (DS.isQolWorkerTab() || qolRuntimeSuspended || document.visibilityState === "hidden") return;
+    if (Date.now() - supportLastSnapshot < 45000) return;
+    const runtime = DS.state?.runtimePerformance || {};
+    const wanted = ["mutations", "observerBatches", "qolOnlyMutations", "composerOnlyMutationSkips", "runtimeKernelRuns", "messageLaneRuns", "messageLaneScheduleRequests", "messageCacheHits", "messageCacheMisses", "messageCacheInvalidations", "quickPanelUpdateCoalesced", "typingDeferrals", "hiddenSkips", "longTasks", "maxLongTaskMs", "blockedBotMutationSkips", "routeFeatureStepSkips", "disabledFeatureStepSkips"];
+    const metrics = {};
+    for (const key of wanted) {
+      if (Number.isFinite(Number(runtime[key]))) metrics[key] = Number(runtime[key]);
+    }
+    const path = location.pathname;
+    const page = /^\/chat\//.test(path) ? "chat" : /^\/chats/.test(path) ? "chats" : /^\/lorebook/.test(path) ? "lorebook" : /^\/chatbot/.test(path) ? "editor" : /^(?:\/|\/recommended-bots|\/favorite-bots)$/.test(path) ? "listing" : "other";
+    const recent = DS.getRuntimeLog?.(160) || [];
+    const levels = { warn: 0, error: 0 };
+    for (const event of recent) if (event.level === "warn" || event.level === "error") levels[event.level]++;
+    supportLastSnapshot = Date.now();
+    try {
+      chrome.runtime.sendMessage({ type: "DS_SUPPORT_HISTORY_APPEND", row: { page, version: chrome.runtime.getManifest().version, metrics, levels } }, () => { void chrome.runtime.lastError; });
+    } catch {}
+  };
+  if (!DS.isQolWorkerTab()) {
+    setTimeout(sendSupportSnapshot, 30000);
+    setInterval(sendSupportSnapshot, 120000);
+  }
+
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
 
   DS.bumpDomRevision = function bumpDomRevision() {
@@ -1803,16 +1831,20 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     const raw = DS.state.rawBlockedBots || { ids: [], names: [], meta: {} };
     const settings = DS.state.settings || {};
 
+    const pendingAdds = DS.pendingBlockedBotAdds instanceof Map ? DS.pendingBlockedBotAdds : new Map();
+    const pendingMeta = {};
+    for (const [id, pending] of pendingAdds) pendingMeta[id] = pending.meta || {};
     DS.state.blockedBots = {
       ids: DS.uniqueClean([
         ...(Array.isArray(settings.blockedBotIds) ? settings.blockedBotIds : []),
-        ...(Array.isArray(raw.ids) ? raw.ids : [])
+        ...(Array.isArray(raw.ids) ? raw.ids : []),
+        ...pendingAdds.keys()
       ]),
       names: DS.uniqueClean([
         ...(Array.isArray(settings.blockedBotNames) ? settings.blockedBotNames : []),
         ...(Array.isArray(raw.names) ? raw.names : [])
       ]),
-      meta: raw.meta && typeof raw.meta === "object" ? raw.meta : {}
+      meta: { ...(raw.meta && typeof raw.meta === "object" ? raw.meta : {}), ...pendingMeta }
     };
   }
 

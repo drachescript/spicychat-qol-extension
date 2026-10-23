@@ -111,9 +111,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return output;
   }
 
+  // Retain the raw read snapshot for optimistic, per-conversation writes.
+  // Never overwrite unrelated chats with a stale whole-object copy.
+  const readSnapshots = new WeakMap();
   async function readStore() {
     const result = await DS.storageGet?.([KEY]);
-    return normalize(result?.[KEY]);
+    const original = result?.[KEY] && typeof result[KEY] === "object" ? result[KEY] : {};
+    // Every normal Context Keeper operation edits the CURRENT conversation.
+    // Do not re-normalize hundreds of unrelated chat histories just to open
+    // this manager, save one fact, or check a settled reply. The background
+    // compare-and-set still receives the raw previous value for this chat.
+    const id = currentChatId();
+    const store = normalize({ [id]: original[id] });
+    readSnapshots.set(store, { normalized: JSON.parse(JSON.stringify(store)), raw: { [id]: original[id] } });
+    return store;
   }
 
   function rememberActive(store) {
@@ -126,29 +137,64 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (activeRecall.chatId === id && activeRecall.ready || recallReadPending) return;
     activeRecall = { chatId: id, details: [], ready: false };
     recallReadPending = true;
-    readStore().then(store => { if (currentChatId() === id) rememberActive(store); })
-      .catch(() => {})
-      .finally(() => { recallReadPending = false; });
+    // Only normalize the current conversation for passive recall. Normalizing
+    // hundreds of unrelated chat histories is unnecessary for a read-only hint.
+    Promise.resolve(DS.storageGet?.([KEY])).then(data => {
+      if (currentChatId() !== id) return;
+      const entry = normalize({[id]:data?.[KEY]?.[id]})[id];
+      activeRecall = { chatId:id, details:[...(entry?.details || [])], ready:true };
+    }).catch(() => {}).finally(() => { recallReadPending = false; });
   }
 
-  // Serialize storage writes and avoid an extra write when the normalized data is unchanged.
-  // This also keeps the before/after audit snapshots in the same confirmed order.
+  // A single background queue covers all tabs. Its compare-and-set rejects
+  // edits based on an outdated snapshot of the SAME conversation, while
+  // merging changes to DIFFERENT conversations safely. No silent rebase of
+  // fact history or automatic retries after an actual conflict.
   let writeChain = Promise.resolve();
   function writeStore(store, label = "Updated Context Keeper", { recordChange = true } = {}) {
+    const snapshot = readSnapshots.get(store);
+    if (!snapshot) return Promise.reject(new Error("Context Keeper needs a fresh storage snapshot before saving."));
     const after = normalize(store);
-    const work = writeChain.catch(() => {}).then(async () => {
-      const beforeResult = await DS.storageGet?.([KEY]);
-      const before = normalize(beforeResult?.[KEY]);
-      if (JSON.stringify(before) === JSON.stringify(after)) return false;
-      const ok = await DS.storageSet?.({ [KEY]: after });
-      if (ok === false) throw new Error("Context Keeper storage write failed");
-      if (recordChange) await DS.recordLocalChange?.(label, { [KEY]: before }, { [KEY]: after });
-      rememberActive(after);
+    const allKeys = new Set([...Object.keys(snapshot.normalized), ...Object.keys(after)]);
+    const patches = [];
+    for (const chatId of allKeys) {
+      if (JSON.stringify(snapshot.normalized[chatId] ?? null) === JSON.stringify(after[chatId] ?? null)) continue;
+      patches.push({ chatId, previous: snapshot.raw[chatId] ?? null, value: after[chatId] ?? null });
+    }
+    if (!patches.length) return Promise.resolve(false);
+    const originChat = currentChatId();
+    const work = writeChain.catch(() => {}).then(() => new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "DS_CONTEXT_KEEPER_MUTATE", patches, recordChange }, response => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!response?.ok) return reject(new Error(response?.error || "Context Keeper save not confirmed."));
+        resolve(response);
+      });
+    })).then(async response => {
+      if (recordChange && response.before && response.after) {
+        // Undo history remains local and is recorded only for a confirmed save.
+        await DS.recordLocalChange?.(label, { [KEY]: response.before }, { [KEY]: response.after });
+      }
+      if (currentChatId() === originChat) rememberActive(after);
       return true;
     });
     writeChain = work.catch(() => {});
     return work;
   }
+  // Used by the optional Archive legacy-import workflow. The caller must
+  // supply the EXACT snapshot it reviewed; this is not a blind overwrite.
+  DS.saveContextKeeperConversationPatch = async function saveContextKeeperConversationPatch(chatId, previous, value) {
+    if (currentChatId() !== chatId || !/^conversation:[0-9a-f-]{36}$/i.test(chatId))
+      throw new Error("Context Keeper conversation changed. Reopen before importing.");
+    return new Promise((resolve, reject) => chrome.runtime.sendMessage({
+      type: "DS_CONTEXT_KEEPER_MUTATE", recordChange: false,
+      patches: [{ chatId, previous: previous ?? null, value }]
+    }, response => {
+      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+      if (!response?.ok) return reject(new Error(response?.error || "Context Keeper import not confirmed."));
+      resolve(true);
+    }));
+  };
+
   function fingerprint(text) {
     let hash = 2166136261;
     for (const c of String(text || "")) { hash ^= c.charCodeAt(0); hash = Math.imul(hash, 16777619); }
@@ -156,6 +202,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function roots() {
+    // Shared scheduler cache is invalidated on structural DOM changes. Avoid
+    // a page-wide message query on every settled-turn continuity check.
+    if (typeof DS.getLoadedMessageRoots === "function") return DS.getLoadedMessageRoots();
     return Array.from(document.querySelectorAll(MESSAGE_SELECTOR))
       .filter(root => !root.parentElement?.closest?.(MESSAGE_SELECTOR));
   }
@@ -747,7 +796,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const close = make("button", { type: "button", className: "ds-tool-modal-close" }, "×");
     head.append(close);
 
-    const note = make("p", { className: "ds-tool-note" }, "Standalone local memories, independent of native Memory Manager. Saved facts cost no tokens until a manual recap or optional automatic recall is included with a message.");
+    const note = make("p", { className: "ds-tool-note" }, "Experimental — Context Keeper and its Lorebook/Archive integrations still need testing. Review continuity details and keep backups. Standalone local memories do not require native Memory Manager; facts use tokens only when sent as recaps or recall.");
     const status = make("p", { className: "ds-tool-status" });
     const topActions = make("div", { className: "ds-tool-actions" });
     const scan = make("button", { type: "button" }, "Scan loaded chat");
@@ -807,6 +856,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     savedTools.append(selectAll, selectNone, evolveSelected, consolidateSelected, reviewConflicts, bulkPin, bulkUnpin, bulkExclude, bulkInclude, bulkReview, bulkCategory, bulkDelete, exportJson, importJson, enableAll, removeDisabled, removeAll, copyRecap);
     savedFilters.append(savedSearch, categoryFilter, sourceFilter, reviewFilter);
     const savedList = make("div", { className: "ds-tool-list" });
+    // Large conversations can contain hundreds of facts. Keep the manager
+    // responsive by creating only a bounded number of editable cards at once.
+    // Filters and bulk actions still operate on the COMPLETE fact set.
+    const SAVED_PAGE_SIZE = 36;
+    let savedRenderLimit = SAVED_PAGE_SIZE;
+    const savedPagination = make("div", { className: "ds-tool-actions" });
+    const savedShowing = make("span", { className: "ds-tool-note" });
+    const savedShowMore = make("button", { type: "button" }, "Show more saved details");
+    savedShowMore.hidden = true;
+    savedPagination.append(savedShowing, savedShowMore);
     const conflictList = make("div", { className: "ds-tool-list" });
     const suggestionTitle = make("h3", {}, "Scan suggestions");
     const suggestionList = make("div", { className: "ds-tool-list" });
@@ -835,6 +894,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     function renderSaved() {
       savedList.replaceChildren();
+      savedPagination.hidden = true;
       const ids = new Set(entry.details.map(item => item.id));
       for (const selected of selectedDetails) if (!ids.has(selected)) selectedDetails.delete(selected);
       if (!entry.details.length) {
@@ -860,7 +920,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         savedList.append(make("p", { className: "ds-tool-empty" }, "No saved details match these filters."));
         return;
       }
-      visibleDetails.forEach(detail => {
+      const shownDetails = visibleDetails.slice(0, savedRenderLimit);
+      savedShowing.textContent = `Showing ${shownDetails.length} of ${visibleDetails.length} matching details`;
+      savedShowMore.hidden = shownDetails.length >= visibleDetails.length;
+      savedPagination.hidden = shownDetails.length >= visibleDetails.length;
+      shownDetails.forEach(detail => {
         const card = make("div", { className: "ds-tool-item" });
         const meta = make("div", { className: "ds-context-item-meta" });
         const badge = make("span", { className: "ds-context-category" }, detail.category || "other");
@@ -1118,10 +1182,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.body.append(input); input.click();
     });
 
-    savedSearch.addEventListener("input", renderSaved);
-    categoryFilter.addEventListener("change", renderSaved);
-    sourceFilter.addEventListener("change", renderSaved);
-    reviewFilter.addEventListener("change", renderSaved);
+    savedShowMore.addEventListener("click", () => {
+      savedRenderLimit += SAVED_PAGE_SIZE;
+      renderSaved();
+    });
+    const resetSavedPage = () => { savedRenderLimit = SAVED_PAGE_SIZE; renderSaved(); };
+    savedSearch.addEventListener("input", resetSavedPage);
+    categoryFilter.addEventListener("change", resetSavedPage);
+    sourceFilter.addEventListener("change", resetSavedPage);
+    reviewFilter.addEventListener("change", resetSavedPage);
     enableAll.addEventListener("click", async () => {
       const latest = await readStore();
       const target = latest[id];
@@ -1260,7 +1329,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     backdrop.addEventListener("click", () => { apiScanState.cancel = true; modal.remove(); });
     modal.addEventListener("keydown", event => { if (event.key === "Escape") modal.remove(); });
 
-    dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, conflictList, suggestionTitle, suggestionList);
+    dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, savedPagination, conflictList, suggestionTitle, suggestionList);
     modal.append(backdrop, dialog);
     document.documentElement.append(modal);
     // Offered only after verified PRIVATE bot + owned, private attached Lorebook.
@@ -1388,7 +1457,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const onMessageButtonsVisible = () => { if (!document.hidden && messageButtonsWanted()) scheduleMessageButtonRepair(450); };
   const onRecallStorageChanged = changes => {
     if (!changes?.[KEY] || !DS.state?.settings?.enableContextKeeper) return;
-    rememberActive(normalize(changes[KEY].newValue));
+    const id=currentChatId();
+    if (!id) return;
+    const changed=changes[KEY];
+    if (JSON.stringify(changed.oldValue?.[id] ?? null) === JSON.stringify(changed.newValue?.[id] ?? null)) return;
+    const entry=normalize({[id]:changed.newValue?.[id]})[id];
+    activeRecall={chatId:id,details:[...(entry?.details || [])],ready:true};
   };
   function syncContextKeeperListeners() {
     const wanted = messageButtonsWanted();

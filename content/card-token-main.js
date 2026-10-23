@@ -44,6 +44,8 @@ if (!(() => { try {
   const PRIVATE_ARCHIVE_AUTH_RESPONSE = "ds-qol-private-archive-auth-response-v1";
   const PRIVATE_ENTRY_AUTH_REQUEST = "ds-qol-private-entry-auth-request-v1";
   const PRIVATE_ENTRY_AUTH_RESPONSE = "ds-qol-private-entry-auth-response-v1";
+  const NATIVE_MEMORY_AUTH_REQUEST = "ds-qol-native-memory-auth-request-v1";
+  const NATIVE_MEMORY_AUTH_RESPONSE = "ds-qol-native-memory-auth-response-v1";
   const OWNED_LIST_REQUEST_EVENT = "ds-qol-owned-chatbots-list-request-v1";
   const OWNED_LIST_RESPONSE_EVENT = "ds-qol-owned-chatbots-list-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
@@ -708,6 +710,27 @@ if (!(() => { try {
     try{window.dispatchEvent(new CustomEvent(PRIVATE_ENTRY_AUTH_RESPONSE,{detail:{
       requestId,botId,conversationId,token:capturedToken
     }}));}catch{}
+  });
+
+  // Read-only Memory probe: reuse SpicyChat's already captured session instead
+  // of guessing which browser storage location holds the current token.
+  // No Memory text is accessed here; the existing background probe performs
+  // the GET and returns only aggregate counts.
+  const memoryAuthRequests = new Map();
+  window.addEventListener(NATIVE_MEMORY_AUTH_REQUEST, event => {
+    const detail = event?.detail || {};
+    const requestId = clean(detail.requestId);
+    const conversationId = clean(detail.conversationId).toLowerCase();
+    const route = /^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/?$/i.exec(location.pathname);
+    const now = Date.now();
+    for (const [id, at] of memoryAuthRequests) if (now - at > 60000) memoryAuthRequests.delete(id);
+    if (!active || !route || route[2].toLowerCase() !== conversationId ||
+        !/^[a-z0-9-]{16,90}$/i.test(requestId) || !isJwt(capturedToken) ||
+        memoryAuthRequests.has(requestId) || memoryAuthRequests.size >= 6) return;
+    memoryAuthRequests.set(requestId, now);
+    try { window.dispatchEvent(new CustomEvent(NATIVE_MEMORY_AUTH_RESPONSE, {detail: {
+      requestId, conversationId, token: capturedToken
+    }})); } catch {}
   });
 
   // Explicit Archive-setup-only writes using the captured signed-in session.

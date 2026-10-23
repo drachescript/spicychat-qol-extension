@@ -5,7 +5,25 @@
 (() => {
   const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const JWT=/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-  const previous=new Map(),inFlight=new Set();
+  const previous=new Map(),inFlight=new Set(),cooldowns=new Map(),failureCounts=new Map();
+  const MAX_BACKOFF=30*60*1000;
+  const MIN_CHECK_GAP=60*1000;
+  function retryAfterMs(response){
+    const raw=response.headers?.get('Retry-After')||'';
+    if(/^\d+$/.test(raw))return Math.min(MAX_BACKOFF,Math.max(MIN_CHECK_GAP,Number(raw)*1000));
+    const at=Date.parse(raw);
+    return Number.isFinite(at)?Math.min(MAX_BACKOFF,Math.max(MIN_CHECK_GAP,at-Date.now())):0;
+  }
+  function failureDelay(key,status,result){
+    if(status==='auth-rejected'||status==='invalid-chat-or-auth')return 5*60*1000;
+    if(status==='rate-limited')return result?.retryAfterMs||5*60*1000;
+    if(status==='access-denied')return 5*60*1000;
+    if(result?.retryAfterMs)return Math.min(MAX_BACKOFF,result.retryAfterMs);
+    if(status==='already-checking')return 0;
+    const attempts=Math.min(6,(failureCounts.get(key)||0)+1);
+    failureCounts.set(key,attempts);
+    return Math.min(MAX_BACKOFF,MIN_CHECK_GAP*Math.pow(2,Math.max(0,attempts-1)));
+  }
   const storageGet=key=>new Promise(resolve=>chrome.storage.local.get(key,result=>
     resolve(chrome.runtime.lastError?null:result?.[key]||null)));
   const storageSet=(key,value)=>new Promise(resolve=>chrome.storage.local.set({[key]:value},()=>
@@ -28,7 +46,7 @@
     for(const item of parts){if(typeof item==='string')return item.slice(0,16000);if(typeof item?.text==='string')return item.text.slice(0,16000);}
     return '';
   };
-  dsqRegisterBackgroundMessageHandler('DS_NATIVE_MEMORY_PROBE','context-keeper',(message,sender,respond)=>{
+  dsqRegisterBackgroundMessageHandler('DS_NATIVE_MEMORY_PROBE','native-memory-probe',(message,sender,respond)=>{
     const page=sender?.url||sender?.tab?.url||'';
     const match=/^https:\/\/(?:www\.)?spicychat\.ai\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:[/?#]|$)/i.exec(page);
     const conversationId=String(message?.conversationId||'').toLowerCase();
@@ -39,6 +57,10 @@
     // worker or a second tab doesn't reset every comparison to "first read".
     const account=accountKey(token);
     const key=`${account||token}:${conversationId}`;
+    const cooldown=cooldowns.get(key);
+    if(cooldown?.until>Date.now()){
+      respond({ok:false,status:'cooldown',httpStatus:cooldown.httpStatus||0,retryAfterMs:cooldown.until-Date.now()});return false;
+    }
     if(inFlight.has(key)){respond({ok:false,status:'already-checking'});return false;}
     inFlight.add(key);
     (async()=>{
@@ -52,6 +74,10 @@
           {method:'GET',headers,credentials:'include',cache:'no-store',signal:controller.signal});
       }finally{clearTimeout(timer);}
       if(response.status===401)return {ok:false,status:'auth-rejected',httpStatus:401};
+      if(response.status===429)return {ok:false,status:'rate-limited',httpStatus:429,
+        retryAfterMs:retryAfterMs(response)};
+      if(response.status===403)return {ok:false,status:'access-denied',httpStatus:403,retryAfterMs:5*60*1000};
+      if(response.status>=500)return {ok:false,status:'server-unavailable',httpStatus:response.status};
       if(!response.ok)return {ok:false,status:'http-failed',httpStatus:response.status};
       const json=await response.json();
       const items=Array.isArray(json)?json:Array.isArray(json?.memories)?json.memories:
@@ -73,7 +99,7 @@
           // Heuristics only: these flags never rewrite, remove or publish Memory.
           if(/\b(?:maybe|perhaps|might|probably|possibly|seems?|i think|unsure|not sure)\b/i.test(normalized))weak.uncertain++;
           if(/^(?:he|she|they|it|this|that|him|her|his|their)\b/i.test(normalized))weak.ambiguousReference++;
-          if(normalized.length>300 && !/[.!?;:\n]/.test(text))weak.unstructured++;
+          if(normalized.length>=100 && !/[.!?;:\n]/.test(text))weak.unstructured++;
           if(candidates.length<300){
             const subject=normalized.slice(0,90).replace(/\b(?:not|never|no|isn't|wasn't|doesn't)\b/g,'').replace(/\s+/g,' ');
             if(subject.length>=22)candidates.push({subject,negative:/\b(?:not|never|no|isn't|wasn't|doesn't)\b/i.test(normalized)});
@@ -106,10 +132,22 @@
       return {ok:true,changed,baseline:!prior,count:map.size,added,removed,updated,
         // Only perform quality checks when a *verified* change occurred.
         quality:changed?{empty: lengths.filter(n=>n===0).length,veryShort:lengths.filter(n=>n>0&&n<30).length,
-          long:lengths.filter(n=>n>1500).length,
+          long:lengths.filter(n=>n>200).length,overNativeLimit:lengths.filter(n=>n>250).length,
           exactDuplicateTexts:[...canonicalCounts.values()].reduce((n,count)=>n+Math.max(0,count-1),0),
           ...weak}:null};
-    })().then(respond).catch(err=>respond({ok:false,status:err?.name==='AbortError'?'timeout':'request-error'}))
+    })().then(result=>{
+      const status=result?.status||'';
+      const wait=result?.ok?MIN_CHECK_GAP:failureDelay(key,status,result);
+      if(result?.ok)failureCounts.delete(key);
+      if(wait){cooldowns.set(key,{until:Date.now()+wait,httpStatus:Number(result?.httpStatus)||0});
+        if(cooldowns.size>200)cooldowns.delete(cooldowns.keys().next().value);}
+      respond({...result,retryAfterMs:result?.ok?0:wait});
+    }).catch(err=>{
+      const status=err?.name==='AbortError'?'timeout':'request-error';
+      const wait=failureDelay(key,status);
+      cooldowns.set(key,{until:Date.now()+wait,httpStatus:0});
+      respond({ok:false,status,retryAfterMs:wait});
+    })
       .finally(()=>inFlight.delete(key));
     return true;
   });

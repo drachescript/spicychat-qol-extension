@@ -258,7 +258,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
 
   const CONTEXT_WARNING_ID = "ds-context-window-warning";
-  const contextWarningState = { route: "", dismissedAtPercent: 0, lastBrowserNoticeKey: "" };
+  const contextWarningState = { route: "", dismissedAtPercent: 0, meterDismissed: false, lastBrowserNoticeKey: "" };
 
   function currentChatRecords() {
     const loadedRoots = DS.getLoadedMessageRoots?.() || [...document.querySelectorAll("[id^='message-']")];
@@ -349,11 +349,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (contextWarningState.route !== route) {
       contextWarningState.route = route;
       contextWarningState.dismissedAtPercent = 0;
+      contextWarningState.meterDismissed = false;
       contextWarningState.lastBrowserNoticeKey = "";
     }
     const info = contextUsage(settings);
     const threshold = Math.min(99, Math.max(50, Number(settings.contextWarningThreshold) || 85));
-    if (!info.limit || info.percent < threshold || (contextWarningState.dismissedAtPercent && info.percent < contextWarningState.dismissedAtPercent + 5)) {
+    const meterOnly=!!settings.contextWarningShowMeter && info.limit && info.percent < threshold;
+    if (!info.limit || (meterOnly && contextWarningState.meterDismissed) || (!meterOnly && (info.percent < threshold || (contextWarningState.dismissedAtPercent && info.percent < contextWarningState.dismissedAtPercent + 5)))) {
       removeContextWarning();
       return;
     }
@@ -370,7 +372,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       dismiss.textContent = "×";
       dismiss.title = "Dismiss until context usage rises another 5%";
       dismiss.addEventListener("click", () => {
-        contextWarningState.dismissedAtPercent = Number(bar.dataset.percent || 0);
+        if(bar.dataset.meterOnly==='1') contextWarningState.meterDismissed=true;
+        else contextWarningState.dismissedAtPercent = Number(bar.dataset.percent || 0);
         bar.remove();
       });
       bar.append(text, dismiss);
@@ -379,10 +382,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const text = bar.querySelector(".ds-context-window-warning-text");
     const approx = info.source === "estimate" ? "~" : "";
     const detail = `${approx}${Math.round(info.used).toLocaleString()} / ${Math.round(info.limit).toLocaleString()} tokens`;
-    text.textContent = `Context ${Math.round(info.percent)}% full (${detail}). Older RP messages may start dropping from the model's context soon.`;
+    const isEstimate=info.source==='estimate';
+    const sourceText=isEstimate?'local estimate':'captured prompt usage + output reserve';
+    const caution='An exact message cutoff cannot be calculated from token usage alone; bot definitions, Memories and Lorebooks also use context.';
+    text.textContent=meterOnly?`Context ${Math.round(info.percent)}% (${detail}; ${sourceText}).`:
+      `Context ${Math.round(info.percent)}% full (${detail}; ${sourceText}). Older RP messages may start dropping from the model context.`;
+    bar.title=`${sourceText}. ${caution}`;
+    bar.dataset.meterOnly=meterOnly?'1':'0';
     bar.dataset.source = info.source;
     bar.dataset.percent = String(info.percent);
-    sendContextBrowserNotification(info);
+    if (!meterOnly) sendContextBrowserNotification(info);
   }
 
   function displayLines(record, root, settings) {

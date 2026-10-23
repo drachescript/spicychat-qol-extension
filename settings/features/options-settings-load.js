@@ -279,6 +279,7 @@ async function load() {
   setChecked("showGenerationSettings", !!settings.showGenerationSettings);
   setChecked("compactGenerationMetadata", !!settings.compactGenerationMetadata);
   setChecked("enableContextWindowWarning", !!settings.enableContextWindowWarning);
+  setChecked("contextWarningShowMeter", !!settings.contextWarningShowMeter);
   setValue("contextWarningThreshold", Math.min(99, Math.max(50, Number(settings.contextWarningThreshold) || 85)));
   setValue("contextWarningManualLimit", Math.max(0, Number(settings.contextWarningManualLimit) || 0));
   setChecked("contextWarningBrowserNotifications", !!settings.contextWarningBrowserNotifications);

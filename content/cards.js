@@ -517,7 +517,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.shouldHideBlockedBot = function shouldHideBlockedBot(card, anchor, preparedText = "", preparedFields = null) {
     const id = DS.botIdFromHref?.(anchor.href || "") || DS.chatIdFromHref(anchor.href || "");
 
-    if (id && DS.state.blockedBotIdSet?.has(id)) {
+    // A clicked Block is optimistic until chrome.storage confirms it. Keep
+    // the card visible during that short save instead of hiding on pending ID.
+    if (id && DS.state.blockedBotIdSet?.has(id) && DS.pendingBlockedBotAdds?.get(id)?.state !== "pending") {
       return `blocked bot id: ${id}`;
     }
 
@@ -1220,7 +1222,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!token) return;
       const started = performance.now();
       const finish = () => {
-        const blocked = !!(id && DS.state.blockedBotIdSet?.has(id));
+        const blocked = !!(id && DS.state.blockedBotIdSet?.has(id) && DS.pendingBlockedBotAdds?.get(id)?.state !== "pending");
         if (!blocked && performance.now() - started < 2600) {
           setTimeout(finish, 120);
           return;

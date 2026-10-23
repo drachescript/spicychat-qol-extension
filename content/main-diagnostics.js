@@ -55,20 +55,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (!DS.isSingleChatPage?.()) return null;
           const roots = [...document.querySelectorAll("div[id^='message-']")];
           const sample = roots.slice(-3);
-          const hidden = sample.filter(root => {
+          const counts = { hidden: 0, cssHidden: 0, zeroLayout: 0, transparent: 0, qolFolded: 0 };
+          for (const root of sample) {
+            // A folded old message is deliberately hidden by QoL, not a lost
+            // native message. Keep it separate from genuinely suspicious UI.
+            const folded = !!root.closest?.(".ds-chat-message-windowed") || root.classList?.contains("ds-chat-message-windowed");
+            if (folded) counts.qolFolded++;
+            let cause = "";
             try {
-              let node = root;
-              for (let depth = 0; node && depth < 9; depth++, node = node.parentElement) {
+              for (let node = root, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
                 const style = getComputedStyle(node);
-                if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return true;
+                if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.contentVisibility === "hidden") {
+                  cause = "css";
+                  break;
+                }
+                if (Number(style.opacity) === 0) {
+                  cause = "transparent";
+                  break;
+                }
               }
-              return root.getClientRects().length === 0;
-            } catch { return false; }
-          }).length;
+              if (!cause) {
+                const rect = root.getBoundingClientRect();
+                if (root.getClientRects().length === 0 || rect.width <= 0 || rect.height <= 0) cause = "zero-layout";
+              }
+            } catch { /* A diagnostic must not affect the live page. */ }
+            if (cause) {
+              counts.hidden++;
+              if (cause === "css") counts.cssHidden++;
+              else if (cause === "transparent") counts.transparent++;
+              else counts.zeroLayout++;
+            }
+          }
           return {
             mounted: roots.length,
             inspected: sample.length,
-            hidden,
+            ...counts,
+            sourceTabVisible: document.visibilityState === "visible",
+            performanceMode: document.documentElement.classList.contains("ds-chat-performance"),
             composerPresent: !!document.querySelector("textarea, [contenteditable='true']")
           };
         })();
