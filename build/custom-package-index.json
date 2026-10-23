@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.56",
+  "sourceVersion": "0.2.57",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -672,7 +672,9 @@
       "runtime": "content/creator-workspace.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-creator-watch.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1166,7 +1168,9 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "styles": [],
+      "styles": [
+        "content/styles/ooc.css"
+      ],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"
