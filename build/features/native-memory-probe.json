@@ -9,7 +9,9 @@
   "settingsKeys": [
     "nativeMemoryQualityProbe"
   ],
-  "settingsFiles": [],
+  "settingsFiles": [
+    "settings/feature-panels/native-memory-probe.js"
+  ],
   "styleFiles": [],
   "backgroundFiles": [
     "background/features/background-native-memory-probe.js"
