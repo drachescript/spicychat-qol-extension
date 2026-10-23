@@ -48,7 +48,13 @@ LABELS = {
     "chat-backgrounds":"Chat Backgrounds",
     "character-pictures":"Character Pictures",
     "persona-pictures":"Persona Pictures",
-    "picture-library":"Picture Library"
+    "picture-library":"Picture Library",
+    "chat-width-controls":"Chat Width Controls",
+    "native-memory-probe":"Native Memory Quality Probe",
+    "chat-smart-folders":"Smart Chat Folders",
+    "chat-lorebook-recall":"Local Lorebook Recall",
+    "chat-lorebook-suggestions":"Context Keeper Lorebook Suggestions",
+    "private-lorebook-bridge":"Private Lorebook Bridge"
 }
 DESCRIPTIONS = {
     "bot-blocking":"Block bots from listings or cards using individual block controls.",
@@ -69,6 +75,12 @@ DESCRIPTIONS = {
     "character-pictures":"Manage custom pictures for characters.",
     "persona-pictures":"Manage custom pictures for personas.",
     "picture-library":"Manage your stored picture library.",
+    "chat-width-controls":"Adjust chat, message bubble and typing-area widths on desktop.",
+    "native-memory-probe":"Opt-in read-only checks for native Memory quality. Memory contents are not exported.",
+    "chat-smart-folders":"Preview and organize conversations using their existing persona/tag metadata.",
+    "chat-lorebook-recall":"Use optional keyword-based local Lorebook context in chats without writing to native Lorebooks.",
+    "chat-lorebook-suggestions":"Review approved Context Keeper facts before adding them to a local Lorebook.",
+    "private-lorebook-bridge":"Review private bot/Lorebook transfers and optionally store history in a private Archive that is never attached to a bot."
 }
 SPECIAL_GROUPS = {
     "chat-backgrounds":"chat", "character-pictures":"chat",
@@ -79,6 +91,12 @@ SPECIAL_GROUPS = {
     "my-creations-auto-load":"creator",
     "lorebook-connections":"lorebook", "story-reading-layout":"chat",
     "rulebook-diagnostics":"chat",
+    "chat-width-controls":"interface",
+    "native-memory-probe":"chat",
+    "chat-smart-folders":"chatList",
+    "chat-lorebook-recall":"lorebook",
+    "chat-lorebook-suggestions":"lorebook",
+    "private-lorebook-bridge":"lorebook",
 }
 SECTIONS = {
     "chat":"Chat Tools", "chatList":"Chat List",
@@ -99,7 +117,7 @@ def strings(value, field):
 def section_for(fid, group):
     if fid in BLOCKING:return "Blocking"
     if fid in FILTERING:return "Filtering"
-    if fid in ORGANIZING:return "Organization"
+    if fid in ORGANIZING or fid=="chat-smart-folders":return "Organization"
     if fid in DISCOVERY:return "Discovery"
     if fid in PICTURES:return "Pictures"
     return SECTIONS.get(group,"Other Tools")
