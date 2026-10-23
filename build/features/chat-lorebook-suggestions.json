@@ -1,0 +1,20 @@
+{
+  "id": "chat-lorebook-suggestions",
+  "primary": "content/chat-lorebook-suggestions.js",
+  "type": "content",
+  "dependencies": [
+    "context-keeper",
+    "chat-lorebook-manager"
+  ],
+  "requiredHelpers": [],
+  "settingsKeys": [
+    "enableContextLorebookSuggestions"
+  ],
+  "settingsFiles": [],
+  "styleFiles": [],
+  "backgroundFiles": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

@@ -1,0 +1,35 @@
+{
+  "id": "private-lorebook-bridge",
+  "primary": "content/private-lorebook-bridge.js",
+  "type": "content",
+  "dependencies": [
+    "context-keeper",
+    "chat-lorebook-manager"
+  ],
+  "requiredHelpers": [
+    "content/private-lorebook-storage.js",
+    "content/private-lorebook-auth.js",
+    "content/private-lorebook-recovery.js",
+    "content/private-lorebook-archive-handoff.js",
+    "content/private-lorebook-archive-setup.js",
+    "content/private-lorebook-upload-main.js"
+  ],
+  "settingsKeys": [
+    "enablePrivateLorebookBridge"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/private-lorebook-bridge.js"
+  ],
+  "styleFiles": [
+    "content/styles/private-lorebook-bridge.css"
+  ],
+  "backgroundFiles": [
+    "background/features/background-private-lorebook-archive.js",
+    "background/features/background-private-archive-setup-write.js",
+    "background/features/background-private-lorebook-entry-create.js"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

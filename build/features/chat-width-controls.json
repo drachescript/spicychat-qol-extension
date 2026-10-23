@@ -1,0 +1,17 @@
+{
+  "id": "chat-width-controls",
+  "primary": "content/chat-width-controls.js",
+  "type": "content",
+  "dependencies": [],
+  "requiredHelpers": [],
+  "settingsKeys": [
+    "enableChatWidthControls"
+  ],
+  "settingsFiles": [],
+  "styleFiles": [],
+  "backgroundFiles": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

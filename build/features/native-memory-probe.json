@@ -1,0 +1,21 @@
+{
+  "id": "native-memory-probe",
+  "primary": "content/native-memory-probe.js",
+  "type": "content",
+  "dependencies": [
+    "generation-metadata"
+  ],
+  "requiredHelpers": [],
+  "settingsKeys": [
+    "nativeMemoryQualityProbe"
+  ],
+  "settingsFiles": [],
+  "styleFiles": [],
+  "backgroundFiles": [
+    "background/features/background-native-memory-probe.js"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

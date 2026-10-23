@@ -1,0 +1,23 @@
+{
+  "id": "chat-smart-folders",
+  "primary": "content/chat-smart-folders.js",
+  "type": "content",
+  "dependencies": [
+    "chat-organizer"
+  ],
+  "requiredHelpers": [],
+  "settingsKeys": [
+    "enableChatSmartFolders"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/chat-smart-folders.js"
+  ],
+  "styleFiles": [
+    "content/styles/chat-smart-folders.css"
+  ],
+  "backgroundFiles": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

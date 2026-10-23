@@ -1,0 +1,21 @@
+{
+  "id": "chat-lorebook-recall",
+  "primary": "content/chat-lorebook-recall.js",
+  "type": "content",
+  "dependencies": [
+    "chat-lorebook-manager"
+  ],
+  "requiredHelpers": [],
+  "settingsKeys": [
+    "enableLocalLorebookRecall"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/chat-lorebook-recall.js"
+  ],
+  "styleFiles": [],
+  "backgroundFiles": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}
