@@ -55,7 +55,8 @@
         "content/creator-editor-privacy-guard.js",
         "content/main-startup.js",
         "content/main-scheduler-utils.js",
-        "content/main-message-mutations.js"
+        "content/main-message-mutations.js",
+        "icons/icon128.png"
       ]
     },
     "interface": {
@@ -79,7 +80,8 @@
         "content/scroll-to-top.js",
         "content/sidebar.js",
         "content/soundscapes.js",
-        "content/top-bar.js"
+        "content/top-bar.js",
+        "content/chat-width-controls.js"
       ]
     },
     "chat": {
@@ -145,7 +147,17 @@
         "content/chat-scene-notes.js",
         "content/auto-images.js",
         "content/model-quick-access.js",
-        "content/chat-lorebook-manager.js"
+        "content/chat-lorebook-manager.js",
+        "content/native-memory-probe.js",
+        "content/chat-lorebook-suggestions.js",
+        "content/chat-lorebook-recall.js",
+        "content/private-lorebook-storage.js",
+        "content/private-lorebook-auth.js",
+        "content/private-lorebook-recovery.js",
+        "content/private-lorebook-archive-handoff.js",
+        "content/private-lorebook-bridge.js",
+        "content/private-lorebook-archive-setup.js",
+        "icons/qol-archive-cover.png"
       ]
     },
     "chatList": {
@@ -162,7 +174,8 @@
         "content/chat-tags.js",
         "content/opened-chats.js",
         "content/chat-index.js",
-        "content/saved-chat-actions.js"
+        "content/saved-chat-actions.js",
+        "content/chat-smart-folders.js"
       ]
     },
     "listings": {
@@ -465,7 +478,8 @@
         "content/styles/rp-format-repair.css",
         "content/styles/story-reading-layout.css",
         "content/styles/story-day-tracker.css",
-        "content/styles/rp-state-tracker.css"
+        "content/styles/rp-state-tracker.css",
+        "content/styles/private-lorebook-bridge.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",
@@ -474,7 +488,8 @@
         "content/styles/previously-chatted-indicator.css"
       ],
       "chatList": [
-        "content/styles/chat-index.css"
+        "content/styles/chat-index.css",
+        "content/styles/chat-smart-folders.css"
       ],
       "personas": [
         "content/styles/persona-manager.css"
