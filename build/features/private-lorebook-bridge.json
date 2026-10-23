@@ -12,7 +12,7 @@
     "content/private-lorebook-recovery.js",
     "content/private-lorebook-archive-handoff.js",
     "content/private-lorebook-archive-setup.js",
-    "content/private-lorebook-upload-main.js"
+    "content/private-lorebook-archive-upload-main.js"
   ],
   "settingsKeys": [
     "enablePrivateLorebookBridge"
