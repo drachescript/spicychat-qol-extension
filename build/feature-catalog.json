@@ -3032,7 +3032,9 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/native-memory-probe.js"
+      ],
       "backgroundFiles": [
         "background/features/background-native-memory-probe.js"
       ],

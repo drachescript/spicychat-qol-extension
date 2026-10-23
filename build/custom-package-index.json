@@ -1216,7 +1216,9 @@
         "generation-metadata"
       ],
       "runtime": "content/native-memory-probe.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/native-memory-probe.js"
+      ],
       "styles": [],
       "background": [
         "background/features/background-native-memory-probe.js"
