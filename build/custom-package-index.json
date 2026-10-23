@@ -443,6 +443,37 @@
       "fullyIndependent": false
     },
     {
+      "id": "chat-lorebook-recall",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "chat-lorebook-manager"
+      ],
+      "runtime": "content/chat-lorebook-recall.js",
+      "settings": [
+        "settings/feature-panels/chat-lorebook-recall.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-lorebook-suggestions",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "context-keeper",
+        "chat-lorebook-manager"
+      ],
+      "runtime": "content/chat-lorebook-suggestions.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
       "id": "chat-nudges",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
@@ -513,6 +544,24 @@
       "fullyIndependent": false
     },
     {
+      "id": "chat-smart-folders",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "chat-organizer"
+      ],
+      "runtime": "content/chat-smart-folders.js",
+      "settings": [
+        "settings/feature-panels/chat-smart-folders.js"
+      ],
+      "styles": [
+        "content/styles/chat-smart-folders.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
       "id": "chat-stability",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
@@ -556,6 +605,18 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-ui.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-width-controls",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-width-controls.js",
       "settings": [],
       "styles": [],
       "background": [],
@@ -1148,6 +1209,22 @@
       "fullyIndependent": false
     },
     {
+      "id": "native-memory-probe",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "generation-metadata"
+      ],
+      "runtime": "content/native-memory-probe.js",
+      "settings": [],
+      "styles": [],
+      "background": [
+        "background/features/background-native-memory-probe.js"
+      ],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
       "id": "native-rating-helpers",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
@@ -1317,6 +1394,36 @@
       ],
       "background": [],
       "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "private-lorebook-bridge",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "context-keeper",
+        "chat-lorebook-manager"
+      ],
+      "runtime": "content/private-lorebook-bridge.js",
+      "settings": [
+        "settings/feature-panels/private-lorebook-bridge.js"
+      ],
+      "styles": [
+        "content/styles/private-lorebook-bridge.css"
+      ],
+      "background": [
+        "background/features/background-private-lorebook-archive.js",
+        "background/features/background-private-archive-setup-write.js",
+        "background/features/background-private-lorebook-entry-create.js"
+      ],
+      "helpers": [
+        "content/private-lorebook-storage.js",
+        "content/private-lorebook-auth.js",
+        "content/private-lorebook-recovery.js",
+        "content/private-lorebook-archive-handoff.js",
+        "content/private-lorebook-archive-setup.js",
+        "content/private-lorebook-archive-upload-main.js"
+      ],
       "fullyIndependent": false
     },
     {

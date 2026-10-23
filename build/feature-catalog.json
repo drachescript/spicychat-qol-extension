@@ -3,7 +3,7 @@
   "version": "0.2.57",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 123,
+  "featureCount": 129,
   "sections": [
     "Blocking",
     "Chat List",
@@ -35,10 +35,6 @@
     "content/build-profile.js",
     "content/card-token-auth-loader.js",
     "content/card-token-main.js",
-    "content/chat-lorebook-recall.js",
-    "content/chat-lorebook-suggestions.js",
-    "content/chat-smart-folders.js",
-    "content/chat-width-controls.js",
     "content/compatibility.js",
     "content/core-settings-defaults.js",
     "content/core-storage-writers.js",
@@ -56,13 +52,6 @@
     "content/main-scheduler-utils.js",
     "content/main-startup.js",
     "content/main.js",
-    "content/native-memory-probe.js",
-    "content/private-lorebook-archive-handoff.js",
-    "content/private-lorebook-archive-setup.js",
-    "content/private-lorebook-auth.js",
-    "content/private-lorebook-bridge.js",
-    "content/private-lorebook-recovery.js",
-    "content/private-lorebook-storage.js",
     "content/runtime-improvements.js",
     "content/runtime-kernel.js",
     "content/runtime-plan.js",
@@ -73,10 +62,8 @@
   ],
   "sharedStyles": [
     "content.css",
-    "content/styles/chat-smart-folders.css",
     "content/styles/explorer-base.css",
     "content/styles/explorer-covers.css",
-    "content/styles/private-lorebook-bridge.css",
     "content/styles/remaining-styles.css"
   ],
   "allContentScriptPaths": [
@@ -1220,6 +1207,73 @@
       }
     },
     {
+      "id": "chat-lorebook-recall",
+      "label": "Chat Lorebook Recall",
+      "description": "Adds the chat lorebook recall tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [
+        "chat-lorebook-manager"
+      ],
+      "runtimeScripts": [
+        "content/chat-lorebook-recall.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-lorebook-recall.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableLocalLorebookRecall"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "chat-lorebook-suggestions",
+      "label": "Chat Lorebook Suggestions",
+      "description": "Adds the chat lorebook suggestions tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [
+        "context-keeper",
+        "chat-lorebook-manager"
+      ],
+      "runtimeScripts": [
+        "content/chat-lorebook-suggestions.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableContextLorebookSuggestions"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
       "id": "chat-nudges",
       "label": "Chat Nudges",
       "description": "Adds the chat nudges tools.",
@@ -1390,6 +1444,42 @@
       }
     },
     {
+      "id": "chat-smart-folders",
+      "label": "Chat Smart Folders",
+      "description": "Adds the chat smart folders tools.",
+      "section": "Chat List",
+      "group": "chatList",
+      "requiredFeatures": [
+        "chat-organizer"
+      ],
+      "runtimeScripts": [
+        "content/chat-smart-folders.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [
+        "content/styles/chat-smart-folders.css"
+      ],
+      "settingsScripts": [
+        "settings/feature-panels/chat-smart-folders.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableChatSmartFolders"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
       "id": "chat-stability",
       "label": "Chat Stability",
       "description": "Adds the chat stability tools.",
@@ -1502,6 +1592,36 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "chat-width-controls",
+      "label": "Chat Width Controls",
+      "description": "Adds the chat width controls tools.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-width-controls.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableChatWidthControls"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -2899,6 +3019,40 @@
       }
     },
     {
+      "id": "native-memory-probe",
+      "label": "Native Memory Probe",
+      "description": "Adds the native memory probe tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [
+        "generation-metadata"
+      ],
+      "runtimeScripts": [
+        "content/native-memory-probe.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundFiles": [
+        "background/features/background-native-memory-probe.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "nativeMemoryQualityProbe"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
       "id": "native-rating-helpers",
       "label": "Native Rating Helpers",
       "description": "Adds the native rating helpers tools.",
@@ -3258,6 +3412,54 @@
       "settingKeys": [
         "enablePreviouslyChattedIndicator",
         "chattedIndicatorShowOpened"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "private-lorebook-bridge",
+      "label": "Private Lorebook Bridge",
+      "description": "Adds the private lorebook bridge tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [
+        "context-keeper",
+        "chat-lorebook-manager"
+      ],
+      "runtimeScripts": [
+        "content/private-lorebook-bridge.js"
+      ],
+      "requiredHelpers": [
+        "content/private-lorebook-storage.js",
+        "content/private-lorebook-auth.js",
+        "content/private-lorebook-recovery.js",
+        "content/private-lorebook-archive-handoff.js",
+        "content/private-lorebook-archive-setup.js",
+        "content/private-lorebook-archive-upload-main.js"
+      ],
+      "cssFiles": [
+        "content/styles/private-lorebook-bridge.css"
+      ],
+      "settingsScripts": [
+        "settings/feature-panels/private-lorebook-bridge.js"
+      ],
+      "backgroundFiles": [
+        "background/features/background-private-lorebook-archive.js",
+        "background/features/background-private-archive-setup-write.js",
+        "background/features/background-private-lorebook-entry-create.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enablePrivateLorebookBridge"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
