@@ -8,6 +8,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   const ownedMessageHandler = dsqBackgroundFeatureMessageHandlers[String(message?.type || "")];
   if (ownedMessageHandler) return ownedMessageHandler(message, sender, sendResponse);
+  if (["DS_SUPPORT_HISTORY_APPEND", "DS_SUPPORT_HISTORY_GET", "DS_SUPPORT_HISTORY_CLEAR"].includes(message?.type)) {
+    return dsqSupportHistoryRequest(message, sender, sendResponse);
+  }
   if (message?.type === "DS_QOL_DIAGNOSTIC_SUBSCRIBE") {
     sendResponse(qolDiagnosticSubscribe(sender, message));
     return false;

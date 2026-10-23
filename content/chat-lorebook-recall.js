@@ -4,15 +4,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   'use strict';
   const DS = window.DragonScriptQoL;
   if (!DS) return;
-  const KEY='dsQolChatLorebookDraftsV1';
+  const KEY='dsQolChatLorebookDraftsV1',FACTS='contextKeeperData';
   let loadedScope='', revision=0, matches=[];
   const scope=()=>DS.getCurrentChatScope?.()?.key || '';
+  const active=()=>DS.state?.settings?.enabled!==false && DS.state?.settings?.enableLocalLorebookRecall===true;
   const normal=s=>String(s||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim();
   const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  function build(entries) {
+  function build(entries,details) {
     const list=[];
+    const currentFacts=new Map((Array.isArray(details)?details:[]).filter(f=>f?.id).map(f=>[f.id,f]));
     for(const record of Array.isArray(entries)?entries.slice(-200):[]){
       if(!record || record.disabled || !record.name || !record.content || !Array.isArray(record.keywords))continue;
+      // Reviewed CK-linked entries become stale when their source is updated,
+      // excluded or superseded. No old canon may be injected while awaiting
+      // the next review; manual local entries remain independent.
+      if(record.source==='context-keeper'||Array.isArray(record.sourceDetailIds)&&record.sourceDetailIds.length){
+        const ids=Array.isArray(record.sourceDetailIds)?record.sourceDetailIds:[];
+        if(!ids.length || !ids.every(id=>{
+          const fact=currentFacts.get(id);
+          return fact && fact.enabled!==false && !fact.needsReview && !fact.supersededBy &&
+            typeof record.sourceSnapshots?.[id]==='string' &&
+            String(fact.text||'').trim()===record.sourceSnapshots[id];
+        }))continue;
+      }
       const keywords=[];
       for(const value of record.keywords.slice(0,12)){
         const word=normal(value);
@@ -30,14 +44,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   function load(){
     const id=scope();const version=++revision;
     loadedScope=''; matches=[];
-    if(!id)return;
-    chrome.storage.local.get(KEY,data=>{
-      if(version!==revision || id!==scope() || chrome.runtime.lastError)return;
-      matches=build(data?.[KEY]?.[id]);loadedScope=id;
+    if(!id||!active())return;
+    chrome.storage.local.get([KEY,FACTS],data=>{
+      if(version!==revision || id!==scope() || !active() || chrome.runtime.lastError)return;
+      matches=build(data?.[KEY]?.[id],data?.[FACTS]?.[id]?.details);loadedScope=id;
     });
   }
   chrome.storage.onChanged.addListener((changes,area)=>{
-    if(area==='local'&&changes[KEY])load();
+    if(area!=='local')return;
+    // The storage keys hold data for many conversations. Editing another chat
+    // must not wake this chat's recall engine or parse its full entry list.
+    const chat=scope();
+    const changedForChat=[KEY,FACTS].some(key=>changes[key] &&
+      JSON.stringify(changes[key].oldValue?.[chat])!==JSON.stringify(changes[key].newValue?.[chat]));
+    if(changedForChat){if(active())load();else{++revision;loadedScope='';matches=[];}}
+    if(changes.settings||changes['dsSettingV1:enableLocalLorebookRecall']||changes['dsSettingV1:enabled'])queueMicrotask(load);
   });
   // React SPA route changes are caught without adding another MutationObserver.
   window.addEventListener('popstate',load);

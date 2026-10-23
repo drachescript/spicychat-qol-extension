@@ -208,3 +208,279 @@ async function withBackgroundJob(jobType, options, callback) {
     releaseBackgroundJob(lease?.leaseId);
   }
 }
+
+
+"use strict";
+// Support history is stored separately in IndexedDB. Each new snapshot is a
+// small write, rather than rewriting a large chrome.storage.local value on
+// every sample. Existing V1 history is migrated atomically and never discarded.
+const DSQ_SUPPORT_HISTORY_KEY = "dsSupportHistoryV1"; // migration only
+const DSQ_SUPPORT_DB_NAME = "SpicyChatQoLSupportHistory";
+const DSQ_SUPPORT_BATCH_SIZE = 256;
+const DSQ_SUPPORT_METRICS = [
+  "mutations", "observerBatches", "qolOnlyMutations", "composerOnlyMutationSkips",
+  "runtimeKernelRuns", "messageLaneRuns", "messageLaneScheduleRequests",
+  "messageCacheHits", "messageCacheMisses", "messageCacheInvalidations",
+  "quickPanelUpdateCoalesced", "typingDeferrals", "hiddenSkips",
+  "longTasks", "maxLongTaskMs", "blockedBotMutationSkips",
+  "routeFeatureStepSkips", "disabledFeatureStepSkips"
+];
+let dsqSupportHistoryQueue = Promise.resolve();
+let dsqSupportDbPromise = null;
+const dsqSupportRecentTabs = new Map();
+function dsqSupportSerial(task) {
+  const result = dsqSupportHistoryQueue.then(task, task);
+  dsqSupportHistoryQueue = result.catch(() => {});
+  return result;
+}
+function dsqSupportEmptyMeta() { return { key: "state", schema: 2, next: 1, count: 0, pending: 0, dropped: 0, segments: 0 }; }
+function dsqSupportOpen() {
+  if (!dsqSupportDbPromise) dsqSupportDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(DSQ_SUPPORT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
+      if (!db.objectStoreNames.contains("rows")) db.createObjectStore("rows", { keyPath: "seq" });
+      if (!db.objectStoreNames.contains("segments")) db.createObjectStore("segments", { keyPath: "from" });
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => { db.close(); dsqSupportDbPromise = null; };
+      resolve(db);
+    };
+    request.onerror = () => reject(request.error || new Error("Could not open saved support history"));
+    request.onblocked = () => reject(new Error("Support history database is blocked by another tab"));
+  }).catch(error => { dsqSupportDbPromise = null; throw error; });
+  return dsqSupportDbPromise;
+}
+function dsqSupportTransaction(db, stores, mode, apply) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(stores, mode);
+    let value;
+    tx.oncomplete = () => resolve(value);
+    tx.onerror = () => reject(tx.error || new Error("Support history write failed"));
+    tx.onabort = () => reject(tx.error || new Error("Support history write was cancelled"));
+    try { value = apply(tx); } catch (error) { try { tx.abort(); } catch {} reject(error); }
+  });
+}
+function dsqSupportRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Support history read failed"));
+  });
+}
+async function dsqSupportMeta(db) {
+  const tx = db.transaction("meta", "readonly");
+  return (await dsqSupportRequest(tx.objectStore("meta").get("state"))) || null;
+}
+async function dsqSupportDb() {
+  const db = await dsqSupportOpen();
+  if (await dsqSupportMeta(db)) return db;
+  // A failed migration leaves the original chrome.storage.local record intact.
+  const legacy = (await chrome.storage.local.get(DSQ_SUPPORT_HISTORY_KEY))?.[DSQ_SUPPORT_HISTORY_KEY];
+  const valid = legacy?.schema === 1 && Array.isArray(legacy.rows) && Array.isArray(legacy.chunks);
+  if (legacy != null && !valid) throw new Error("Older support history has an unknown format. Original data was kept.");
+  const oldRows = valid ? legacy.rows : [];
+  const oldSegments = valid ? legacy.chunks : [];
+  // An invalid row must block migration, not be filtered out and lost.
+  if (oldRows.some(row => !Number.isSafeInteger(row?.seq) || row.seq < 1) ||
+      oldSegments.some(chunk => !Number.isSafeInteger(chunk?.from) || !Number.isSafeInteger(chunk?.through) ||
+        chunk.through < chunk.from || !Number.isSafeInteger(chunk?.count) || chunk.count < 1 ||
+        typeof chunk?.gzip !== "string")) {
+    throw new Error("Older support history contains an invalid record. Original data was kept.");
+  }
+  const state = dsqSupportEmptyMeta();
+  state.next = valid ? Math.max(1, Number(legacy.next) || 1) : 1;
+  state.pending = oldRows.length;
+  state.segments = oldSegments.length;
+  state.count = oldRows.length + oldSegments.reduce((n, chunk) => n + Math.max(0, Number(chunk.count) || 0), 0);
+  state.dropped = valid ? Math.max(0, Number(legacy.dropped) || 0) : 0;
+  await dsqSupportTransaction(db, ["meta", "rows", "segments"], "readwrite", tx => {
+    for (const row of oldRows) tx.objectStore("rows").put(row);
+    for (const chunk of oldSegments) tx.objectStore("segments").put(chunk);
+    tx.objectStore("meta").put(state);
+  });
+  // Only remove legacy storage AFTER the complete IndexedDB transaction.
+  if (valid) {
+    try { await chrome.storage.local.remove(DSQ_SUPPORT_HISTORY_KEY); } catch {}
+  }
+  return db;
+}
+async function dsqSupportGzip(text) {
+  if (typeof CompressionStream !== "function") return null;
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function dsqSupportUngzip(value) {
+  if (typeof DecompressionStream !== "function") throw new Error("This browser cannot read compressed support history");
+  let bytes = value;
+  if (typeof value === "string") {
+    const raw = atob(value);
+    bytes = Uint8Array.from(raw, character => character.charCodeAt(0));
+  }
+  return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+}
+async function dsqSupportCompact(db, state) {
+  if (state.pending < DSQ_SUPPORT_BATCH_SIZE) return;
+  if (typeof CompressionStream !== "function") return; // keep originals; never discard samples
+  const rows = [];
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("rows", "readonly");
+    const cursor = tx.objectStore("rows").openCursor();
+    cursor.onerror = () => reject(cursor.error);
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (!item || rows.length >= DSQ_SUPPORT_BATCH_SIZE) return resolve();
+      rows.push(item.value);
+      item.continue();
+    };
+    tx.onabort = () => reject(tx.error);
+  });
+  if (rows.length < DSQ_SUPPORT_BATCH_SIZE) return;
+  const gzip = await dsqSupportGzip(JSON.stringify(rows));
+  if (!gzip?.length) return;
+  const updated = { ...state, pending: Math.max(0, state.pending - rows.length), segments: state.segments + 1 };
+  await dsqSupportTransaction(db, ["meta", "rows", "segments"], "readwrite", tx => {
+    tx.objectStore("segments").put({ from: rows[0].seq, through: rows[rows.length - 1].seq, count: rows.length, gzip });
+    for (const row of rows) tx.objectStore("rows").delete(row.seq);
+    tx.objectStore("meta").put(updated);
+  });
+}
+function dsqSupportSafeRow(value) {
+  const metrics = {};
+  for (const name of DSQ_SUPPORT_METRICS) {
+    const number = Number(value?.metrics?.[name]);
+    if (Number.isFinite(number) && number >= 0) metrics[name] = Math.min(1e12, Math.round(number * 10) / 10);
+  }
+  const type = String(value?.page || "other");
+  const page = ["chat", "chats", "listing", "editor", "lorebook", "other"].includes(type) ? type : "other";
+  const version = String(value?.version || "unknown").replace(/[^0-9A-Za-z._-]/g, "").slice(0, 24);
+  const levels = {};
+  for (const key of ["warn", "error"]) levels[key] = Math.max(0, Math.min(10000, Number(value?.levels?.[key]) || 0));
+  return { at: Date.now(), page, version, metrics, levels };
+}
+async function dsqSupportAppend(value, sender) {
+  const url = String(sender?.url || sender?.tab?.url || "");
+  if (!sender?.tab?.id || !/^https:\/\/(?:www\.)?spicychat\.ai\//i.test(url)) return { ok: false, error: "Not a SpicyChat tab." };
+  const tabId = sender.tab.id;
+  if (Date.now() - Number(dsqSupportRecentTabs.get(tabId) || 0) < 45000) return { ok: true, skipped: true };
+  const db = await dsqSupportDb();
+  const state = await dsqSupportMeta(db);
+  const row = dsqSupportSafeRow(value);
+  row.seq = state.next;
+  const updated = { ...state, next: row.seq + 1, count: state.count + 1, pending: state.pending + 1 };
+  await dsqSupportTransaction(db, ["rows", "meta"], "readwrite", tx => {
+    tx.objectStore("rows").put(row);
+    tx.objectStore("meta").put(updated);
+  });
+  dsqSupportRecentTabs.set(tabId, Date.now());
+  // Compaction failure never deletes the original row; later checks can retry.
+  try { await dsqSupportCompact(db, updated); } catch {}
+  return { ok: true, stored: true };
+}
+async function dsqSupportStoredRows(db) {
+  const tx = db.transaction(["rows", "segments"], "readonly");
+  const [rows, segments] = await Promise.all([
+    dsqSupportRequest(tx.objectStore("rows").getAll()),
+    dsqSupportRequest(tx.objectStore("segments").getAll())
+  ]);
+  return { rows, segments };
+}
+async function dsqSupportExport(options = {}) {
+  const db = await dsqSupportDb();
+  const state = await dsqSupportMeta(db);
+  if (options?.summaryOnly) return { ok: true, count: state.count, dropped: state.dropped, through: state.next - 1,
+    storedIn: "IndexedDB", compressedBatches: state.segments };
+  const stored = await dsqSupportStoredRows(db);
+  const rows = [...stored.rows];
+  for (const chunk of stored.segments) {
+    let data;
+    try { data = JSON.parse(await dsqSupportUngzip(chunk.gzip)); }
+    catch { return { ok: false, error: "Some saved checks could not be read. No history was removed." }; }
+    if (!Array.isArray(data) || data.length !== Number(chunk.count)) {
+      return { ok: false, error: "A saved history batch is incomplete. No history was removed." };
+    }
+    rows.push(...data);
+  }
+  rows.sort((a, b) => Number(a.seq) - Number(b.seq));
+  if (rows.length !== Number(state.count)) {
+    return { ok: false, error: "Support history changed while reading. Please try again; no history was removed." };
+  }
+  const lines = [
+    `History: ${rows.length} saved checks across extension updates; ${Number(state.dropped || 0)} older checks already removed by the previous storage limit.`,
+    "New checks are kept separately in IndexedDB and older ones are compressed. History is kept until you export and clear it or explicitly clear it.",
+    "Only version, page type, numeric performance counters and warning/error counts are stored. No chat text, prompts, tokens or account IDs."
+  ];
+  for (const row of rows) {
+    const metrics = Object.entries(row.metrics || {}).map(([key, item]) => `${key}=${item}`).join("; ");
+    lines.push(`${new Date(row.at).toISOString()} | v${row.version} | ${row.page} | warnings=${row.levels?.warn || 0}; errors=${row.levels?.error || 0}${metrics ? ` | ${metrics}` : ""}`);
+  }
+  return { ok: true, text: lines.join("\n"), count: rows.length, dropped: state.dropped || 0, through: state.next - 1 };
+}
+async function dsqSupportClear(through = null) {
+  const db = await dsqSupportDb();
+  const state = await dsqSupportMeta(db);
+  if (through == null) {
+    const reset = { ...dsqSupportEmptyMeta(), next: state.next };
+    await dsqSupportTransaction(db, ["rows", "segments", "meta"], "readwrite", tx => {
+      tx.objectStore("rows").clear();
+      tx.objectStore("segments").clear();
+      tx.objectStore("meta").put(reset);
+    });
+    dsqSupportRecentTabs.clear();
+    return { ok: true, cleared: state.count };
+  }
+  const target = Number(through);
+  if (!Number.isSafeInteger(target) || target < 0) return { ok: false, error: "Invalid support history checkpoint." };
+  const { rows, segments } = await dsqSupportStoredRows(db);
+  let removed = rows.filter(row => Number(row.seq) <= target).length;
+  const crossing = [];
+  for (const chunk of segments) {
+    if (Number(chunk.through) <= target) { removed += Number(chunk.count) || 0; continue; }
+    if (Number(chunk.from) > target) continue;
+    let data;
+    try { data = JSON.parse(await dsqSupportUngzip(chunk.gzip)); }
+    catch { return { ok: false, error: "Cannot safely split saved checks. No history was cleared." }; }
+    if (!Array.isArray(data) || data.length !== Number(chunk.count))
+      return { ok: false, error: "Saved checks were incomplete. No history was cleared." };
+    const newer = data.filter(row => Number(row.seq) > target);
+    const gzip = newer.length ? await dsqSupportGzip(JSON.stringify(newer)).catch(() => null) : null;
+    if (newer.length && !gzip) return { ok: false, error: "Cannot safely save newer checks. No history was cleared." };
+    removed += data.length - newer.length;
+    crossing.push({ old: chunk.from, newer, gzip });
+  }
+  const updated = { ...state,
+    count: Math.max(0, state.count - removed),
+    pending: rows.filter(row => Number(row.seq) > target).length,
+    segments: segments.filter(chunk => Number(chunk.from) > target).length + crossing.filter(x => x.newer.length).length,
+    dropped: 0 // past-limit removals were disclosed in the exported report
+  };
+  await dsqSupportTransaction(db, ["rows", "segments", "meta"], "readwrite", tx => {
+    const rowStore = tx.objectStore("rows"), segmentsStore = tx.objectStore("segments");
+    for (const row of rows) if (Number(row.seq) <= target) rowStore.delete(row.seq);
+    for (const chunk of segments) if (Number(chunk.through) <= target) segmentsStore.delete(chunk.from);
+    for (const item of crossing) {
+      segmentsStore.delete(item.old);
+      if (item.newer.length) segmentsStore.put({
+        from: item.newer[0].seq, through: item.newer[item.newer.length - 1].seq,
+        count: item.newer.length, gzip: item.gzip
+      });
+    }
+    tx.objectStore("meta").put(updated);
+  });
+  return { ok: true, cleared: removed, remaining: updated.count };
+}
+function dsqSupportHistoryRequest(message, sender, sendResponse) {
+  const action = String(message?.type || "");
+  const isOptions = String(sender?.url || "").startsWith(chrome.runtime.getURL("")) && !sender?.tab;
+  if (action !== "DS_SUPPORT_HISTORY_APPEND" && !isOptions) {
+    sendResponse({ ok: false, error: "Support history is available only from QoL Settings." }); return false;
+  }
+  const task = action === "DS_SUPPORT_HISTORY_APPEND" ? () => dsqSupportAppend(message.row, sender)
+    : action === "DS_SUPPORT_HISTORY_GET" ? () => dsqSupportExport(message)
+    : action === "DS_SUPPORT_HISTORY_CLEAR" ? () => dsqSupportClear(message.through)
+    : null;
+  if (!task) return false;
+  dsqSupportSerial(task).then(sendResponse, error => sendResponse({ ok: false, error: String(error?.message || error) }));
+  return true;
+}

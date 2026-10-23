@@ -12,7 +12,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const clamp = (v, limit) => String(v || '').trim().slice(0, limit);
   const chatId = () => DS.getCurrentChatScope?.()?.key || ''; // distinct saved conversations, not the shared bot ID
   function storageGet() { return new Promise(resolve => chrome.storage.local.get([KEY], data => resolve(data?.[KEY] || {}))); }
-  function storageSet(value) { return new Promise((resolve, reject) => chrome.storage.local.set({[KEY]: value}, () => chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve())); }
+  // All local Lorebook writes use one serialized background transaction across
+  // tabs. Reading a snapshot then calling storage.local.set here is not safe.
+  function mutate(op, chatId, details={}) {
+    return new Promise((resolve,reject)=>{
+      chrome.runtime.sendMessage({type:'DS_CHAT_LOREBOOK_MUTATE',op,chatId,...details},response=>{
+        if(chrome.runtime.lastError)return reject(new Error(chrome.runtime.lastError.message));
+        if(!response?.ok)return reject(new Error(response?.error||'Local Lorebook write was not confirmed.'));
+        resolve(response.result);
+      });
+    });
+  }
+  DS.localLorebookMutate=mutate;
   const $ = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text) el.textContent = text; return el; };
   function download(filename, text) {
     const blob = new Blob([text], {type: 'application/json;charset=utf-8'});
@@ -65,7 +76,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const id = chatId(); if (!id) return;
     const overlay = $('div','ds-chat-lorebook-overlay'); overlay.id = MODAL;
     const dialog = $('div','ds-chat-lorebook-dialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label','Lorebook draft editor');
-    dialog.append($('h2','','Chat Lorebook Manager'),$('p','ds-lb-description','Review and save a private local draft. Nothing will be published or attached automatically.'));
+    dialog.append($('h2','','Chat Lorebook Manager'),$('p','ds-lb-description','Review and save a private local draft. Nothing will be published or attached automatically.'),$('p','ds-lb-description','Experimental — test and review entries before relying on keyword recall; keep a backup of important lore.'));
     // Native bot-level attachment route verified against chatbot create-form captures.
     // It is intentionally guidance only: the captures do not establish an API or
     // control for attaching a personal lorebook to somebody else's existing chat.
@@ -153,17 +164,48 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const data=await takeSelection();if(!data)return;
       const name=clamp(title.value,50),text=clamp(content.value,2000);
       if(!name||!text)throw Error('Name and content are required.');
-      const updated={...data.record,name,content:text,
-        keywords:[...new Map(keywords.value.split(',').map(v=>v.trim()).filter(Boolean).map(v=>[v.toLowerCase(),v])).values()].slice(0,12),
+      const keys=[...new Map(keywords.value.split(',').map(v=>v.trim()).filter(Boolean).map(v=>[v.toLowerCase(),v])).values()].slice(0,12);
+      const history=Array.isArray(data.record.revisionHistory)?data.record.revisionHistory.slice(-7):[];
+      if(data.record.name!==name||data.record.content!==text||JSON.stringify(data.record.keywords||[])!==JSON.stringify(keys)){
+        history.push({at:Date.now(),name:clamp(data.record.name,50),content:clamp(data.record.content,2000),
+          keywords:(data.record.keywords||[]).slice(0,12),sourceDetailIds:(data.record.sourceDetailIds||[]).slice(0,30)});
+      }
+      const updated={...data.record,name,content:text,keywords:keys,revisionHistory:history.slice(-8),
         entryId:data.record.entryId||crypto.randomUUID(),updatedAt:Date.now()};
       if(!confirm(`Update local entry “${data.record.name}”? This will replace its local content.`))return;
       if(chatId()!==id)throw Error('Conversation changed during editing.');
       const latest=await storageGet();
       const fresh=locateEntry(Array.isArray(latest[id])?latest[id]:[],data.key);
       if(!fresh||JSON.stringify(fresh.entry)!==JSON.stringify(data.record))throw Error('Entry changed while you reviewed it. Reload before updating.');
-      latest[id][fresh.index]=updated;await storageSet(latest);
+      await mutate('replace',id,{key:data.key,expected:JSON.stringify(data.record),record:updated});
       currentEntryId=updated.entryId;await refreshSavedEntries(currentEntryId);
       localStatus.textContent='Saved the reviewed local entry update.';
+    });
+    addLocalAction('Restore last local revision (inactive)',async()=>{
+      const data=await takeSelection();if(!data)return;
+      const history=Array.isArray(data.record.revisionHistory)?data.record.revisionHistory:[];
+      if(!history.length)throw Error('There are no saved local revisions for this entry.');
+      const prior=history[history.length-1];
+      if(!prior?.name||!prior?.content)throw Error('The previous revision is incomplete. No changes made.');
+      if(!confirm(`Restore the previous version of “${data.record.name}” as INACTIVE? This will not change native Lorebooks or reactivate old canon.`))return;
+      if(chatId()!==id)throw Error('Conversation changed during restore.');
+      const latest=await storageGet();
+      const fresh=locateEntry(Array.isArray(latest[id])?latest[id]:[],data.key);
+      if(!fresh||JSON.stringify(fresh.entry)!==JSON.stringify(data.record))throw Error('Entry changed while reviewing history. Refresh first.');
+      if(latest[id].some((row,index)=>index!==fresh.index &&
+        (clamp(row.name,50).toLowerCase()===clamp(prior.name,50).toLowerCase() ||
+         clamp(row.content,2000).toLowerCase()===clamp(prior.content,2000).toLowerCase())))
+        throw Error('Restoring this revision would duplicate another local entry. Resolve it manually first.');
+      const next={...fresh.entry,entryId:fresh.entry.entryId||crypto.randomUUID(),
+        name:clamp(prior.name,50),content:clamp(prior.content,2000),
+        keywords:Array.isArray(prior.keywords)?prior.keywords.slice(0,12):[],
+        disabled:true,updatedAt:Date.now(),
+        revisionHistory:[...history.slice(0,-1),{at:Date.now(),name:clamp(fresh.entry.name,50),
+          content:clamp(fresh.entry.content,2000),keywords:(fresh.entry.keywords||[]).slice(0,12),
+          sourceDetailIds:(fresh.entry.sourceDetailIds||[]).slice(0,30)}].slice(-8)};
+      await mutate('replace',id,{key:data.key,expected:JSON.stringify(data.record),record:next});
+      await refreshSavedEntries(next.entryId);
+      localStatus.textContent='Previous local wording restored as INACTIVE. Review before activating; no native Lorebook was changed.';
     });
     addLocalAction('Activate / deactivate',async()=>{
       const data=await takeSelection();if(!data)return;
@@ -172,7 +214,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const latest=await storageGet();
       const fresh=locateEntry(Array.isArray(latest[id])?latest[id]:[],data.key);
       if(!fresh||JSON.stringify(fresh.entry)!==JSON.stringify(data.record))throw Error('Entry changed; reload before editing.');
-      latest[id][fresh.index]=next;await storageSet(latest);
+      await mutate('replace',id,{key:data.key,expected:JSON.stringify(data.record),record:next});
       await refreshSavedEntries(next.entryId);
       localStatus.textContent=next.disabled?'Entry deactivated; it will not trigger.':'Entry activated.';
     });
@@ -183,7 +225,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const latest=await storageGet();
       const fresh=locateEntry(Array.isArray(latest[id])?latest[id]:[],data.key);
       if(!fresh||JSON.stringify(fresh.entry)!==JSON.stringify(data.record))throw Error('Entry changed; reload before editing.');
-      latest[id][fresh.index]=next;await storageSet(latest);
+      await mutate('replace',id,{key:data.key,expected:JSON.stringify(data.record),record:next});
       await refreshSavedEntries(next.entryId);
     });
     addLocalAction('Delete selected',async()=>{
@@ -193,21 +235,68 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const latest=await storageGet();
       const fresh=locateEntry(Array.isArray(latest[id])?latest[id]:[],data.key);
       if(!fresh||JSON.stringify(fresh.entry)!==JSON.stringify(data.record))throw Error('Entry changed; reload before deleting.');
-      latest[id].splice(fresh.index,1);await storageSet(latest);
+      await mutate('delete',id,{key:data.key,expected:JSON.stringify(data.record)});
       currentEntryId='';await refreshSavedEntries();
     });
     const triggerTest=field(dialog,'Test keyword triggers (no messages sent)','textarea','',600);
     const matchPreview=$('p','ds-lb-draft-status');matchPreview.setAttribute('role','status');dialog.append(matchPreview);
     addLocalAction('Test keywords',async()=>{
-      const list=(await storageGet())[id]||[];
-      const normalize=s=>String(s||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ');
+      const data=await new Promise((resolve,reject)=>chrome.storage.local.get([KEY,'contextKeeperData'],value=>
+        chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(value||{})));
+      const list=Array.isArray(data[KEY]?.[id])?data[KEY][id].slice(-200):[];
+      const facts=new Map((data.contextKeeperData?.[id]?.details||[]).filter(f=>f?.id).map(f=>[f.id,f]));
+      const normalize=s=>String(s||'').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g,' ').trim();
       const escape=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
       const message=normalize(triggerTest.value);
-      const matched=list.filter(entry=>!entry.disabled&&(entry.keywords||[]).some(word=>{
-        const key=normalize(word).trim();if(!key||key.length>80)return false;
-        return new RegExp(`(^|[^\\p{L}\\p{N}])${escape(key)}(?=$|[^\\p{L}\\p{N}])`,'u').test(message);
-      }));
-      matchPreview.textContent=matched.length?`Matches: ${matched.map(e=>e.name).join(', ')}. These are local matches, NOT SpicyChat native activation results.`:'No local keyword matches.';
+      const eligible=entry=>{
+        if(!entry||entry.disabled||!entry.name||!entry.content||!Array.isArray(entry.keywords))return false;
+        if(entry.source==='context-keeper'||(entry.sourceDetailIds||[]).length){
+          const sources=Array.isArray(entry.sourceDetailIds)?entry.sourceDetailIds:[];
+          if(!sources.length||!sources.every(source=>{
+            const fact=facts.get(source);
+            return fact&&fact.enabled!==false&&!fact.needsReview&&!fact.supersededBy&&
+              typeof entry.sourceSnapshots?.[source]==='string'&&
+              String(fact.text||'').trim()===entry.sourceSnapshots[source];
+          }))return false;
+        }
+        return true;
+      };
+      let skippedOutdated=0;
+      const candidates=[];
+      for(const entry of list){
+        if(!eligible(entry)){
+          if(!entry?.disabled && (entry?.source==='context-keeper'||(entry?.sourceDetailIds||[]).length))skippedOutdated++;
+          continue;
+        }
+        let score=0;
+        for(const word of entry.keywords){
+          const key=normalize(word);if(!key||key.length>80)continue;
+          // Same Unicode phrase boundaries as the live outgoing recall engine.
+          try{if(new RegExp(`(^|[^\\p{L}\\p{N}])${escape(key)}(?=$|[^\\p{L}\\p{N}])`,'u').test(message))
+            score=Math.max(score,key.length);}catch{}
+        }
+        if(score)candidates.push({entry,score});
+      }
+      candidates.sort((a,b)=>Number(b.entry.pinned===true)-Number(a.entry.pinned===true)||
+        b.score-a.score||Number(b.entry.updatedAt||0)-Number(a.entry.updatedAt||0));
+      const recallEnabled=DS.state?.settings?.enableLocalLorebookRecall===true;
+      const max=Math.max(200,Math.min(1400,Number(DS.state?.settings?.localLorebookRecallMaxChars)||900));
+      const prefix='[OOC: Local lorebook facts for this specific conversation (reference only; preserve character knowledge and user agency): ';
+      let used=prefix.length+1,accepted=[],skippedBudget=0,skippedMax=0;
+      for(const {entry} of candidates){
+        if(accepted.length>=4){skippedMax++;continue;}
+        const piece=`${String(entry.name||'').slice(0,50).replace(/[\r\n\[\]]/g,' ')}: ${String(entry.content||'').slice(0,2000).replace(/[\[\]]/g,' ').replace(/\s+/g,' ').trim()}`;
+        const next=used+piece.length+(accepted.length?3:0);
+        if(next>max){skippedBudget++;continue;}
+        accepted.push(entry.name);used=next;
+      }
+      matchPreview.textContent=(candidates.length?`Matched ${candidates.length}: ${candidates.map(x=>x.entry.name).join(', ')}.`:'No active local keyword matches.')+
+        ` Would insert ${accepted.length} (${used}/${max} characters including OOC wrapper).`+
+        (skippedBudget?` ${skippedBudget} skipped by budget.`:'')+
+        (skippedMax?` ${skippedMax} skipped by four-entry limit.`:'')+
+        (skippedOutdated?` ${skippedOutdated} outdated/unreviewed linked entries excluded.`:'')+
+        (!recallEnabled?' Automatic recall is currently OFF.':'')+
+        ' Preview only; nothing sent or changed on SpicyChat.';
     });
     void refreshSavedEntries().catch(()=>{});
     const book = field(dialog, 'Optional existing lorebook editor URL', 'input', '', 240);
@@ -271,9 +360,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const all=await storageGet(); const list=Array.isArray(all[id])?all[id]:[];
         if(list.length>=MAX_ENTRIES){state.textContent=`This conversation has ${MAX_ENTRIES} local entries. Export or remove an older entry before adding another; none were discarded.`;return;}
         record.entryId=crypto.randomUUID();record.disabled=false;record.pinned=false;record.updatedAt=record.createdAt;
-        all[id]=[...list,record];
-        await storageSet(all);await refreshSavedEntries(record.entryId);
-        state.textContent=`Saved local lorebook entry (${all[id].length} for this conversation). It remains editable, with optional keyword recall.`;
+        const saved=await mutate('create',id,{record});
+        await refreshSavedEntries(record.entryId);
+        state.textContent=`Saved local lorebook entry (${saved.total} for this conversation). It remains editable, with optional keyword recall.`;
       } catch(error) {state.textContent='Could not save draft: '+String(error?.message||error);}
     });
     add('Load most recent', async () => {
@@ -316,8 +405,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if(chatId()!==id)throw Error('Conversation changed before import.');
         const latest=await storageGet(),existing=Array.isArray(latest[id])?latest[id]:[];
         if(JSON.stringify(existing)!==JSON.stringify(before))throw Error('Local entries changed in another tab. Retry the import.');
-        latest[id]=[...existing,...additions];await storageSet(latest);
-        await refreshSavedEntries();state.textContent=`Imported ${additions.length} inactive entries. Review them before activation.`;
+        const result=await mutate('import',id,{records:additions});
+        await refreshSavedEntries();state.textContent=`Imported ${result.count} inactive entries. Review them before activation.`;
       }catch(error){state.textContent=String(error?.message||error);}
     });
     dialog.append(importFile);
@@ -333,9 +422,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     overlay.addEventListener('click',event=>{if(event.target===overlay)overlay.remove()});
     title.focus();
   }
+  let lastMemoryButtonScan = 0;
+  let lastMemoryManager = null;
   function memoryButtons() {
     const manager = document.querySelector('[data-testid="ChatMemoryManagerCapabilityGate"]');
-    if (!manager) return;
+    if (!manager) {lastMemoryManager=null;return;}
+    // SpicyChat can rerun chat decorations many times per second. A fresh
+    // manager is processed immediately, while an unchanged one is bounded to
+    // one scan/second. Native Memory changes still become visible shortly.
+    const now = Date.now();
+    if (manager===lastMemoryManager && now-lastMemoryButtonScan<1000) return;
+    lastMemoryManager=manager;
+    lastMemoryButtonScan=now;
     const triggers=[...manager.querySelectorAll('button[data-slot="trigger"][aria-haspopup="true"]')].slice(0,100);
     for (const trigger of triggers) {
       let row=trigger.parentElement;
@@ -351,12 +449,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
   }
+  let recentRootsScope = '';
+  let recentRootsScannedAt = 0;
+  let cachedRecentRoots = [];
   function messageButtons() {
-    // Only currently loaded message elements, no new history fetching or observers.
-    // Capped so large chats do not incur another full-document augmentation pass.
+    // Only new/dirty lane roots need inspection on routine passes. An older
+    // toolbar may be remounted during native history loading, so recheck the
+    // last 12 mounted messages at a bounded interval rather than every pass.
     const lane=DS.getCurrentMessageLaneRoots?.()||[];
-    const recent=(DS.getLoadedMessageRoots?.()||[]).slice(-12);
-    const messages=[...new Set([...lane,...recent])].filter(el=>el?.isConnected).slice(-24);
+    const now=Date.now(), currentScope=chatId();
+    if (recentRootsScope!==currentScope || now-recentRootsScannedAt>=8000) {
+      cachedRecentRoots=(DS.getLoadedMessageRoots?.()||[]).slice(-12);
+      recentRootsScannedAt=now;
+      recentRootsScope=currentScope;
+    }
+    const messages=[...new Set([...lane,...cachedRecentRoots])].filter(el=>el?.isConnected).slice(-24);
     for (const msg of messages) {
       if (msg.querySelector('.ds-message-lorebook-button')) continue;
       const toolbar = msg.querySelector('div.flex.justify-between.items-center') || msg;
@@ -440,6 +547,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } finally {pendingReadInFlight=false;}
   }
   function cleanup() {
+    lastMemoryManager=null;
+    lastMemoryButtonScan=0;
+    recentRootsScope='';
+    recentRootsScannedAt=0;
+    cachedRecentRoots=[];
     document.querySelectorAll('.ds-memory-lorebook-button,.ds-message-lorebook-button,#ds-chat-lorebook-action').forEach(el=>el.remove());
     document.getElementById(MODAL)?.remove();
   }

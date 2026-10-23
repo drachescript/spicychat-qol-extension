@@ -8,15 +8,15 @@
   const h=document.createElement('h2');h.textContent='Local Lorebook Recall';section.append(h);
   const label=document.createElement('label');label.className='row';
   const enable=document.createElement('input');enable.type='checkbox';enable.id='enableLocalLorebookRecall';
-  const caption=document.createElement('span');caption.textContent='Automatically include matched local Lorebook facts when sending messages (OFF by default)';
+  const caption=document.createElement('span');caption.textContent='Add matching local Lorebook entries when I send a message (OFF by default)';
   label.append(enable,caption);section.append(label);
-  const limitLabel=document.createElement('label');limitLabel.textContent='Maximum lorebook context per send';
+  const limitLabel=document.createElement('label');limitLabel.textContent='Maximum Lorebook text added per message';
   const select=document.createElement('select');select.id='localLorebookRecallMaxChars';
   for(const [value,title] of [[450,'450 characters'],[900,'900 characters'],[1400,'1,400 characters']]){
     const option=document.createElement('option');option.value=String(value);option.textContent=title;select.append(option);
   }
   limitLabel.append(select);section.append(limitLabel);
-  const recent=document.createElement('label');recent.textContent='Recent messages to check for keyword matches (on send only) ';
+  const recent=document.createElement('label');recent.textContent='Check keywords in these messages (only when sending) ';
   const recentSelect=document.createElement('select');recentSelect.id='localLorebookRecentMessages';
   for(const [value,text] of [[0,'Outgoing message only (default)'],[1,'Outgoing + 1 recent message'],[2,'Outgoing + 2 recent messages']]){
     const option=document.createElement('option');option.value=String(value);option.textContent=text;recentSelect.append(option);
@@ -24,14 +24,17 @@
   recent.append(recentSelect);section.append(recent);
   const budgetLabel=document.createElement('label');budgetLabel.className='row';
   const budgetToggle=document.createElement('input');budgetToggle.type='checkbox';budgetToggle.id='enableSharedOocBudget';
-  budgetLabel.append(budgetToggle,document.createTextNode('Use one shared character budget for all QoL OOC guidance (OFF by default)'));
+  budgetLabel.append(budgetToggle,document.createTextNode('Limit the total QoL OOC text added to each message (OFF by default)'));
   section.append(budgetLabel);
-  const budgetLimit=document.createElement('label');budgetLimit.textContent='Shared OOC guidance budget per send ';
+  const budgetLimit=document.createElement('label');budgetLimit.textContent='Maximum total QoL OOC text per message ';
   const budgetSelect=document.createElement('select');budgetSelect.id='sharedOocBudgetChars';
   for(const value of [1000,1800,2800,4000,5000]){
     const option=document.createElement('option');option.value=String(value);option.textContent=value.toLocaleString()+' characters';budgetSelect.append(option);
   }
   budgetLimit.append(budgetSelect);section.append(budgetLimit);
+  const experiment=document.createElement('p');experiment.className='hint';
+  experiment.textContent='Experimental — test it in a spare chat first. It adds visible OOC text, not native Lorebook entries. Check the matches before relying on them.';
+  section.append(experiment);
   const desc=document.createElement('p');desc.className='hint';
   desc.textContent='Matches specific keywords in the outgoing text or at most two recent visible messages. No history download, observers or native Lorebook API. Nothing is sent automatically. Works without Context Keeper or native Memories. Recall itself always enforces a conservative shared context limit; the extra budget switch also covers other QoL guidance when recall is disabled.';
   section.append(desc);host.replaceWith(section);

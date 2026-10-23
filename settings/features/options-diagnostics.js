@@ -457,7 +457,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     diagnosticLines.push(`Installed desktop-app performance guard: ${runtime.desktopAppGuardActive ? "active" : "inactive"}`);
     diagnosticLines.push(`Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages; last empty ${Number(runtime.chatUnexpectedEmptyLastAt || 0) ? new Date(Number(runtime.chatUnexpectedEmptyLastAt)).toISOString() : "none"}; last recovery ${Number(runtime.chatUnexpectedEmptyLastRecoveryMs || 0)} ms; visibility ${runtime.chatUnexpectedEmptyLastVisibility || "unknown"}; generation ${runtime.chatUnexpectedEmptyLastGeneration || "unknown"}`);
     { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
-      if (v) diagnosticLines.push(`Current chat DOM: ${Number(v.mounted || 0)} mounted; ${Number(v.hidden || 0)}/${Number(v.inspected || 0)} sampled messages hidden by layout/styles; composer present ${v.composerPresent ? "yes" : "no"}`);
+      if (v) diagnosticLines.push(formatChatVisibilityStatus(v));
     }
     diagnosticLines.push(`Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicate invalidations avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text message mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped`);
     if (Number(runtime.longTasks || 0)) diagnosticLines.push(`Browser long tasks: ${Number(runtime.longTasks || 0)}; last ${Number(runtime.lastLongTaskMs || 0)} ms; max ${Number(runtime.maxLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`);
@@ -500,6 +500,21 @@ async function downloadDiagnostics() {
   }
 }
 
+function formatChatVisibilityStatus(v) {
+  if (!v) return "Current chat DOM: unavailable";
+  const mounted = Number(v.mounted || 0);
+  const checked = Number(v.inspected || 0);
+  const hidden = Number(v.hidden || 0);
+  const folded = Number(v.qolFolded || 0);
+  const details = [
+    `${Number(v.cssHidden || 0)} CSS-hidden`,
+    `${Number(v.zeroLayout || 0)} no-size`,
+    `${Number(v.transparent || 0)} transparent`,
+    `${folded} intentionally folded by QoL`
+  ];
+  return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}. This checks layout only, not whether chat text was deleted.`;
+}
+
 function performanceWarningLines(context, settings) {
   const lines = [];
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
@@ -509,6 +524,12 @@ function performanceWarningLines(context, settings) {
     if (max >= 5000) lines.push(`CRITICAL wall-time spike: ${entry.name} max ${max} ms (may include async waiting; compare browser long tasks).`);
     else if (max >= 1000) lines.push(`Large wall-time spike: ${entry.name} max ${max} ms.`);
     else if (max >= 250) lines.push(`Slow QoL step: ${entry.name} max ${max} ms.`);
+  }
+  const visibility = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
+  if (visibility && Number(visibility.inspected || 0) >= 2 &&
+      Number(visibility.hidden || 0) === Number(visibility.inspected || 0) &&
+      Number(visibility.qolFolded || 0) === 0) {
+    lines.push(`Possible hidden-chat UI: all ${Number(visibility.inspected)} recent message roots are present but not rendered; ${Number(visibility.cssHidden || 0)} CSS-hidden, ${Number(visibility.zeroLayout || 0)} no-size, ${Number(visibility.transparent || 0)} transparent. ${visibility.sourceTabVisible === false ? "The source chat tab was in the background when checked, so this alone cannot confirm a visible-page failure." : "The source chat tab was visible when checked."} This does not prove messages were deleted or that QoL caused it.`);
   }
   const invalidations = Number(runtime.messageCacheInvalidations || 0);
   const requests = Number(runtime.messageCacheInvalidationRequests || 0);
@@ -539,7 +560,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
   const perf = Array.isArray(context?.pageDiagnostics?.performance) ? context.pageDiagnostics.performance.slice(0, 20) : [];
   const env = context?.pageDiagnostics?.androidEnvironment || detectSettingsEnvironment();
-  const warnings = runtimeAvailable ? performanceWarningLines(context, settings) : [];
+  const warnings = runtimeAvailable ? performanceWarningLines(context, settings)
+    : ["No SpicyChat QoL runtime replied. Page performance counters below are unavailable, not zero measurements; reload the affected tab after updating QoL."];
   const readAvg = OPTIONS_PERFORMANCE.storageReads ? OPTIONS_PERFORMANCE.storageReadTotalMs / OPTIONS_PERFORMANCE.storageReads : 0;
   const writeAvg = OPTIONS_PERFORMANCE.storageWrites ? OPTIONS_PERFORMANCE.storageWriteTotalMs / OPTIONS_PERFORMANCE.storageWrites : 0;
   let lines = [
@@ -561,7 +583,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
     `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages`,
-    (() => { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility; return v ? `Current chat DOM: ${Number(v.mounted || 0)} mounted; ${Number(v.hidden || 0)}/${Number(v.inspected || 0)} sampled messages hidden by layout/styles; composer present ${v.composerPresent ? "yes" : "no"}` : "Current chat DOM: unavailable"; })(),
+    (() => { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility; return formatChatVisibilityStatus(v); })(),
     ...((settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.slowFeatureSamples))
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)
       : []),
@@ -635,6 +657,8 @@ async function buildPerformanceSelfCheckText() {
   const [{ read, storageMs }, context] = await Promise.all([readPromise, contextPromise]);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
   const warnings = performanceWarningLines(context, settings);
+  if (!context?.pageDiagnostics) warnings.push("SpicyChat's QoL runtime did not answer. Page-specific performance checks were unavailable; reload the affected SpicyChat tab and try again.");
+  if (storageMs >= 350) warnings.push(`Settings storage took ${storageMs.toFixed(0)} ms to respond. This is a measured delay, not proof that QoL caused the slowdown.`);
   const total = performance.now() - started;
   const domNodes = document.getElementsByTagName("*").length;
   const manifest = chrome.runtime.getManifest?.() || {};
@@ -695,8 +719,106 @@ async function buildFastSupportSnapshot() {
   ].join("\n");
 }
 
-async function buildAllSupportInfo() {
+// Saved support history is a small, privacy-safe timeline kept across normal
+// updates. This is not a copy of chat messages or the full Settings database.
+async function readSavedSupportHistory({ summaryOnly = false } = {}) {
+  const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, summaryOnly ? 12000 : 45000).catch(() => null);
+  return result?.ok ? result : { ok: false, text: result?.error || "Support history is currently unavailable.", count: 0, through: 0 };
+}
+async function refreshSavedSupportStatus() {
+  const label = $("dsSupportHistoryStatus");
+  if (!label) return;
+  // A status refresh must not decompress every archived report into Settings.
+  const history = await readSavedSupportHistory({ summaryOnly: true });
+  label.textContent = history.ok
+    ? `${history.count} saved checks (${history.compressedBatches || 0} compressed batches)${history.dropped ? ` · ${history.dropped} checks were already removed by the old history limit` : ""}. Saved separately from Settings. Download all support info to export; clear manually if the file can't be verified.`
+    : `Saved support history could not be checked: ${history.text}`;
+}
+async function clearSavedSupportHistory() {
+  if (!confirm("Clear saved support history? This cannot be undone unless you downloaded a copy.")) return;
+  const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR" }, 12000).catch(() => null);
+  if (result?.ok) {
+    await runtimeMessageWithTimeout({ type: "DS_CLEAR_PAGE_RUNTIME_LOG" }, 1500).catch(() => null);
+    const status = $("diagnosticsStatus");
+    if (status) status.textContent = "Saved support history cleared. New checks will be recorded as you use SpicyChat.";
+    await refreshSavedSupportStatus();
+  } else {
+    const status = $("diagnosticsStatus");
+    if (status) status.textContent = "Could not clear saved support history. Nothing was deleted.";
+  }
+}
+// Download verification is deliberately separate from starting a download. A
+// clicked <a download> cannot prove that the browser actually saved a file.
+async function downloadSupportVerified(text, compressed) {
+  const raw = compressed && typeof CompressionStream === "function"
+    ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
+    : new Blob([text], { type: "text/plain;charset=utf-8" });
+  const isGzip = compressed && raw.type !== "text/plain;charset=utf-8";
+  if (!raw.size) throw new Error("The generated support file was empty.");
+  const filename = isGzip ? supportReportFilename("support-info").replace(/\.txt$/, ".txt.gz") : supportReportFilename("support-info");
+  const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
+  if (androidWebView) {
+    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Report copied to clipboard.");
+    return { started, verified: false, isGzip: false };
+  }
+  let permission = false;
+  try { permission = !!chrome.downloads?.download && !!chrome.downloads?.onChanged &&
+    await new Promise(resolve => chrome.permissions.contains({ permissions: ["downloads"] }, allowed =>
+      resolve(!chrome.runtime.lastError && !!allowed))); } catch {}
+  if (permission) {
+    const url = URL.createObjectURL(raw);
+    try {
+      const result = await new Promise(resolve => {
+        let id = null, settled = false;
+        const done = (verified, started) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          chrome.downloads.onChanged.removeListener(onChanged);
+          resolve({ verified, started, isGzip });
+        };
+        const onChanged = delta => {
+          if (delta.id !== id) return;
+          if (delta.state?.current === "complete") done(true, true);
+          else if (delta.state?.current === "interrupted") done(false, true);
+        };
+        const timer = setTimeout(() => done(false, id !== null), 45000);
+        chrome.downloads.onChanged.addListener(onChanged);
+        chrome.downloads.download({ url, filename, conflictAction: "uniquify", saveAs: false }, downloadId => {
+          if (chrome.runtime.lastError || !Number.isSafeInteger(downloadId) || downloadId < 0) done(false, false);
+          else {
+            id = downloadId;
+            // Handles a completed small download before the callback is delivered.
+            chrome.downloads.search({ id }, matches => {
+              if (settled || chrome.runtime.lastError) return;
+              const state = matches?.[0]?.state;
+              if (state === "complete") done(true, true);
+              else if (state === "interrupted") done(false, true);
+            });
+          }
+        });
+      });
+      if (result.started) return result;
+    } catch {}
+    finally { setTimeout(() => URL.revokeObjectURL(url), 90000); }
+  }
+  // Fallback can trigger a download but can't confirm browser completion.
+  if (isGzip) {
+    const url = URL.createObjectURL(raw);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = filename;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      return { started: true, verified: false, isGzip: true };
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 90000); }
+  }
+  const started = await downloadSupportText(text, filename, "Support report download started.");
+  return { started, verified: false, isGzip: false };
+}
+
+async function buildAllSupportInfo({ history = null } = {}) {
   return withSharedSupportRuntimeSnapshot(async () => {
+  const historyPromise = history ? Promise.resolve(history) : readSavedSupportHistory();
   const sectionTimeoutMs = 7000;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
@@ -753,6 +875,9 @@ async function buildAllSupportInfo() {
   if (String(baselineText || "").trim()) {
     sections.push("", "===== PERFORMANCE BASELINE COMPARISON =====", baselineText);
   }
+  const saved = await historyPromise;
+  if (saved?.ok && saved.count) sections.push("", "===== SAVED SUPPORT HISTORY =====", saved.text);
+  else sections.push("", "===== SAVED SUPPORT HISTORY =====", saved?.ok ? "No saved checks yet." : `Could not read saved support history: ${saved?.text || "unknown error"}`);
   return sanitizeSupportReportText(sections.join("\n"));
   });
 }
@@ -783,10 +908,32 @@ async function downloadAllSupportInfo() {
   const status = $("diagnosticsStatus");
   if (status) status.textContent = "Building full support report for download...";
   try {
-    const text = await buildAllSupportInfo();
-    return downloadSupportText(text, supportReportFilename("support-info"), "Full support report downloaded. No chat text was included.");
+    // Capture the checkpoint before building. A later sample must survive.
+    const history = await readSavedSupportHistory();
+    if (!history.ok) {
+      if (status) status.textContent = `Could not read saved support history: ${history.text}. Nothing was cleared.`;
+      return false;
+    }
+    const text = await buildAllSupportInfo({ history });
+    const compressed = new TextEncoder().encode(text).byteLength > 256 * 1024;
+    const saved = await downloadSupportVerified(text, compressed);
+    if (!saved.started) {
+      if (status) status.textContent = "Could not start the support download. Saved history was kept.";
+      return false;
+    }
+    if (!saved.verified) {
+      if (status) status.textContent = "Report download started (or copied on Android), but saving the file could not be verified. Saved history was kept. Once you have the file, you can clear history yourself.";
+      await refreshSavedSupportStatus();
+      return true;
+    }
+    const cleared = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR", through: history.through }, 45000).catch(() => null);
+    if (cleared?.ok) {
+      await refreshSavedSupportStatus();
+      if (status) status.textContent = `Full support report saved${saved.isGzip ? " as .txt.gz" : ""}. ${cleared.cleared || 0} included history checks cleared; any newer checks were kept.`;
+    } else if (status) status.textContent = "Report saved, but its saved history could not be cleared. History was kept; you can retry later.";
+    return true;
   } catch (error) {
-    if (status) status.textContent = `Could not build full support report: ${error?.message || String(error || "unknown error")}`;
+    if (status) status.textContent = `Could not download support info: ${error?.message || String(error || "unknown error")}. History was kept.`;
     return false;
   }
 }

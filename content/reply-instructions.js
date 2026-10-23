@@ -317,11 +317,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (skipped.length) showToast(`${skipped.length} QoL guidance block${skipped.length === 1 ? " was" : "s were"} skipped because the message or shared guidance budget is full.`);
 
     event?.preventDefault?.(); event?.stopPropagation?.(); event?.stopImmediatePropagation?.();
+    // A preflight modifies the draft, then briefly defers the native click so
+    // React sees the new text. Navigation or a second edit in that gap must
+    // NEVER turn a prepared send into a send in a different conversation.
+    const preparedRoute = location.pathname;
+    const preparedComposer = textarea;
+    const preparedText = current;
     syntheticSendPending = true;
     window.setTimeout(() => {
       try {
+        if (DS.isQolPausedForTab?.() || !settings().enabled ||
+            !DS.isSingleChatPage?.() || location.pathname !== preparedRoute ||
+            !preparedComposer.isConnected || preparedComposer.disabled ||
+            findComposer() !== preparedComposer || preparedComposer.value !== preparedText) {
+          return; // Keep the user's draft; do not click Send or mark notes sent.
+        }
         const button = findSendButton();
-        if (button && !button.disabled) {
+        if (button && !button.disabled && button.isConnected) {
           for (const candidate of added) {
             if (candidate.kind === "global" && candidate.mode === "session") markGlobalSessionSent(character.key, candidate.directive);
             if (candidate.kind === "reply" && candidate.mode === "session") markSessionSent(candidate.info.character.key, candidate.directive);

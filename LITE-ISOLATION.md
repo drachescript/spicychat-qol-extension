@@ -1,3 +1,15 @@
+
+## v0.2.58 source contract notes (still experimental)
+
+- **Full is the reference build.** Feature modules and their Settings/CSS/background/message ownership must remain synchronized with both the manifest and modular build registry. A passed syntax or metadata check does not certify a Custom Lite combination.
+- Local Lorebook writes require the `DS_CHAT_LOREBOOK_MUTATE` background handler (Chat Lorebook Manager). Context Keeper conversation-safe writes now require `DS_CONTEXT_KEEPER_MUTATE` in the existing background storage module, owned by the Context Keeper feature. Both must be retained whenever the corresponding feature is packaged.
+- Native Memory Improvements uses its own `native-memory-probe` feature ID, Settings panel, saved setting (`nativeMemoryQualityProbe`), and background message owner (`DS_NATIVE_MEMORY_PROBE`); it does not depend on the standalone Context Keeper switch. Generated Custom Lite recipes must retain `content/native-memory-probe.js`, the new Settings panel and `background/features/background-native-memory-probe.js` only for selections including this feature. **This ZIP does not include the source-only build/custom-package-index or build/modules metadata:** sync those independently before certifying physical Lite packaging.
+- The native private Archive routes, review/handoff and local IndexedDB storage remain owned by the Private Lorebook Bridge. Do **not** bundle these writes as a general-purpose public Lorebook editor, and do not attach the shared Archive to a bot automatically.
+- Local Lorebook Recall is separately opt-in and must not implicitly enable Context Keeper, native Memory Manager or the private native bridge. Its local-entry dependency must be present in the Custom recipe; its content CSS and send preflight must be verified together.
+- Smart Chat Folders and the desktop chat-width feature have dedicated runtime/styles/Settings work, but their current physical independence should be checked in generated Chrome/Firefox packages before claiming full Custom availability.
+- The optional All / Any tag-search idea is **planned**, not a selectable or packageable Custom Lite feature yet. It is tracked in `features.md`, not a separate ROADMAP file.
+- Remaining shared main scheduler, Settings controllers and background imports still require browser-matrix checks before a generated Lite build is production ready. There is no automatic enablement of newly introduced features.
+
 ## Current Custom package boundary work
 
 The checked-out source has 124 feature contracts. All 29 dedicated Settings-panel

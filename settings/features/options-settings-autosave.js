@@ -110,6 +110,7 @@ function readSettingsFromPage() {
     showGenerationSettings: checked("showGenerationSettings"),
     compactGenerationMetadata: checked("compactGenerationMetadata"),
     enableContextWindowWarning: checked("enableContextWindowWarning"),
+    contextWarningShowMeter: checked("contextWarningShowMeter"),
     contextWarningThreshold: Math.min(99, Math.max(50, Number(value("contextWarningThreshold", "85")) || 85)),
     contextWarningManualLimit: Math.max(0, Number(value("contextWarningManualLimit", "0")) || 0),
     contextWarningBrowserNotifications: checked("contextWarningBrowserNotifications"),
@@ -750,6 +751,7 @@ function readSingleSettingFromPage(settingKey) {
     case "showGenerationSettings": return (checked("showGenerationSettings"));
     case "compactGenerationMetadata": return (checked("compactGenerationMetadata"));
     case "enableContextWindowWarning": return (checked("enableContextWindowWarning"));
+    case "contextWarningShowMeter": return (checked("contextWarningShowMeter"));
     case "contextWarningThreshold": return (Math.min(99, Math.max(50, Number(value("contextWarningThreshold", "85")) || 85)));
     case "contextWarningManualLimit": return (Math.max(0, Number(value("contextWarningManualLimit", "0")) || 0));
     case "contextWarningBrowserNotifications": return (checked("contextWarningBrowserNotifications"));

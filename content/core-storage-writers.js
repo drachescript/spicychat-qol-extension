@@ -30,38 +30,94 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   };
 
-  DS.saveBlockedBots = async function saveBlockedBots() {
-    DS.state.blockedBots.ids =
-      DS.uniqueClean(DS.state.blockedBots.ids);
-
-    DS.state.blockedBots.names =
-      DS.uniqueClean(DS.state.blockedBots.names);
-
-    if (!DS.state.blockedBots.meta || typeof DS.state.blockedBots.meta !== "object") {
-      DS.state.blockedBots.meta = {};
+  // A rapid series of card blocks must survive storage.onChanged events from
+  // earlier saves. Keep these optimistic additions until the corresponding
+  // write has settled, and merge them into every incoming storage snapshot.
+  const pendingBlockAdds = new Map();
+  let blockedWriteTail = Promise.resolve();
+  DS.pendingBlockedBotAdds = pendingBlockAdds;
+  DS.notePendingBotBlock = function notePendingBotBlock(id, meta = {}) {
+    const botId = String(id || "").trim().toLowerCase();
+    if (!botId) return null;
+    const record = { meta: { ...(meta || {}), id: botId }, state: "pending" };
+    pendingBlockAdds.set(botId, record);
+    return record;
+  };
+  DS.forgetPendingBotBlock = function forgetPendingBotBlock(id) {
+    pendingBlockAdds.delete(String(id || "").trim().toLowerCase());
+  };
+  DS.finishPendingBotBlock = function finishPendingBotBlock(id, record, saved) {
+    const botId = String(id || "").trim().toLowerCase();
+    const current = pendingBlockAdds.get(botId);
+    if (!current || (record && current !== record)) return;
+    if (!saved) {
+      pendingBlockAdds.delete(botId);
+      return;
     }
-
-    DS.state.rawBlockedBots = {
-      ids: [...DS.state.blockedBots.ids],
-      names: [...DS.state.blockedBots.names],
-      meta: DS.state.blockedBots.meta
-    };
-    DS.refreshFastLookupCaches?.();
-
-    const removedOpened = await DS.enforceBlockedPriorityOverOpened?.({ persist: false }) || 0;
-    const payload = {
-      [DS.BLOCKED_BOTS_KEY]: DS.state.blockedBots
-    };
-    if (removedOpened) {
-      payload[DS.OPENED_KEY] = [...DS.state.openedChats];
-      payload[DS.OPENED_META_KEY] = DS.state.openedChatMeta || {};
-    }
-
-    await DS.storageSet(payload);
-
-    if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
+    current.state = "saved";
+    // Keep the optimistic ID briefly so delayed storage events from an older
+    // block cannot overwrite the new one before the most recent event arrives.
+    setTimeout(() => {
+      if (pendingBlockAdds.get(botId) === current) pendingBlockAdds.delete(botId);
+    }, 2000);
   };
 
+  DS.saveBlockedBots = function saveBlockedBots() {
+    // Serialize full-list writes. chrome.storage.local.set is last-write-wins,
+    // so two overlapping writes of a 5k+ ID list can otherwise lose a click.
+    const write = async () => {
+      const store = DS.state.blockedBots || (DS.state.blockedBots = { ids: [], names: [], meta: {} });
+      store.ids = DS.uniqueClean([...(store.ids || []), ...pendingBlockAdds.keys()]);
+      store.names = DS.uniqueClean(store.names || []);
+      if (!store.meta || typeof store.meta !== "object") store.meta = {};
+      for (const [id, pending] of pendingBlockAdds) {
+        store.meta[id] = { ...(store.meta[id] || {}), ...pending.meta };
+      }
+      // rawBlockedBots mirrors confirmed storage, not an optimistic snapshot.
+      // Changing it before chrome.storage reports success can resurrect a
+      // failed block after the next settings refresh.
+      DS.refreshFastLookupCaches?.();
+
+      const removedOpened = await DS.enforceBlockedPriorityOverOpened?.({ persist: false }) || 0;
+      // Snapshot after the await, never pass a mutable live object into the
+      // shared write queue. New clicks will be written by the next queued save.
+      const current = DS.state.blockedBots || store;
+      const snapshot = {
+        ids: DS.uniqueClean([...(current.ids || []), ...pendingBlockAdds.keys()]),
+        names: DS.uniqueClean(current.names || []),
+        meta: { ...(current.meta || {}) }
+      };
+      for (const [id, pending] of pendingBlockAdds) {
+        snapshot.meta[id] = { ...(snapshot.meta[id] || {}), ...pending.meta };
+      }
+      const payload = { [DS.BLOCKED_BOTS_KEY]: snapshot };
+      if (removedOpened) {
+        payload[DS.OPENED_KEY] = [...DS.state.openedChats];
+        payload[DS.OPENED_META_KEY] = { ...(DS.state.openedChatMeta || {}) };
+      }
+      const saved = await DS.storageSet(payload, { immediate: true });
+      // storageSet resolves false on failure; it does not necessarily throw.
+      if (saved !== true) throw new Error("Blocked bot storage save failed");
+      DS.state.rawBlockedBots = {
+        ids: [...snapshot.ids], names: [...snapshot.names], meta: { ...snapshot.meta }
+      };
+      if (DS.state?.settings?.showQuickPanel) DS.updateQuickPanel?.();
+      return true;
+    };
+    const result = blockedWriteTail.catch(() => {}).then(write);
+    blockedWriteTail = result.catch(() => {});
+    return result;
+  };
+
+  // Block controls must not report success or hide their card merely because
+  // an optimistic in-memory lookup contains the ID. Wait for the stored copy.
+  DS.confirmBotBlockStored = async function confirmBotBlockStored(id) {
+    const botId = String(id || "").trim().toLowerCase();
+    if (!botId) return false;
+    const saved = await DS.storageGet([DS.BLOCKED_BOTS_KEY]);
+    const ids = saved?.[DS.BLOCKED_BOTS_KEY]?.ids;
+    return Array.isArray(ids) && ids.some(value => String(value || "").toLowerCase() === botId);
+  };
 
   DS.saveNotInterestedBots = async function saveNotInterestedBots() {
     DS.state.notInterestedBots.ids =

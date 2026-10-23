@@ -7,7 +7,10 @@
   if (!host) return;
   const section = document.createElement("section"); section.className = "card";
   const heading = document.createElement("h2"); heading.textContent = "Chat Lorebook Manager"; section.append(heading);
-  const fields = [["enableChatLorebookManager", "Enable local per-conversation Lorebook editing and To Lorebook actions", "checkbox"]];
+  const experiment = document.createElement('p');experiment.className = 'hint';
+  experiment.textContent = 'Experimental — test this with a spare conversation first. Review entries and keep a backup.';
+  section.append(experiment);
+  const fields = [["enableChatLorebookManager", "Enable a local Lorebook for each conversation", "checkbox"]];
   for (const [key, description, kind] of fields) {
     const label = document.createElement("label"); label.className = kind === "checkbox" ? "row" : "";
     const input = document.createElement(kind === "checkbox" ? "input" : "textarea"); input.id = key;
@@ -18,9 +21,9 @@
   }
   const suggestionLabel=document.createElement('label');suggestionLabel.className='row';
   const suggestionCheckbox=document.createElement('input');suggestionCheckbox.type='checkbox';suggestionCheckbox.id='enableContextLorebookSuggestions';
-  suggestionLabel.append(suggestionCheckbox,document.createTextNode('Enable reviewed Context Keeper → local Lorebook suggestions (OFF by default)'));
+  suggestionLabel.append(suggestionCheckbox,document.createTextNode('Suggest Lorebook entries from reviewed Context Keeper facts (OFF by default)'));
   section.append(suggestionLabel);
-  const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Save, edit, activate/deactivate, pin, test keywords and export local entries. Native Lorebook publishing remains an explicit reviewed handoff."; section.append(hint);
+  const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Edit, pin, turn entries on/off and test their keywords here. These are local entries; they won\'t change a native SpicyChat Lorebook unless you review and save them separately."; section.append(hint);
   host.replaceWith(section);
   // Feature-owned Settings read handlers. The shared Settings controller never
   // needs to know the keys or defaults when this optional panel is excluded.

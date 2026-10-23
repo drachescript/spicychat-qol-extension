@@ -36,6 +36,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
       }catch{}}
     }}catch{}return '';
   };
+  const MEMORY_AUTH_REQUEST='ds-qol-native-memory-auth-request-v1';
+  const MEMORY_AUTH_RESPONSE='ds-qol-native-memory-auth-response-v1';
+  let lastSuccessfulCheck=0;
+  // Exactly one scoped request for the active conversation; no bearer token
+  // goes into extension storage, page attributes, support reports or logs.
+  async function getCapturedAuth(conversationId){
+    const match=/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/?$/i.exec(location.pathname);
+    if(!match||match[2].toLowerCase()!==conversationId)return '';
+    try{window.DSCardTokenBridgeLoader?.ensure?.();}catch{}
+    const requestId='mem-'+crypto.randomUUID().replace(/-/g,'');
+    return new Promise(resolve=>{
+      let finished=false;
+      const finish=value=>{
+        if(finished)return;finished=true;clearTimeout(timer);
+        window.removeEventListener(MEMORY_AUTH_RESPONSE,onResponse);
+        window.removeEventListener('ds-qol-card-token-auth-captured-v1',onCaptured);
+        resolve(value);
+      };
+      const onResponse=event=>{
+        const data=event?.detail||{};
+        if(data.requestId!==requestId||data.conversationId!==conversationId)return;
+        finish(validToken(data.token)?data.token:'');
+      };
+      // SpicyChat may capture its token shortly after the bridge initializes.
+      // One re-dispatch on the genuine auth-capture signal is enough.
+      let resent=false;
+      const onCaptured=event=>{
+        if(resent||!event?.detail?.hasAuth)return;
+        resent=true;dispatch();
+      };
+      const dispatch=()=>{try{window.dispatchEvent(new CustomEvent(MEMORY_AUTH_REQUEST,{
+        detail:{requestId,conversationId}
+      }));}catch{}};
+      const timer=setTimeout(()=>finish(''),2200);
+      window.addEventListener(MEMORY_AUTH_RESPONSE,onResponse);
+      window.addEventListener('ds-qol-card-token-auth-captured-v1',onCaptured);
+      dispatch();
+    });
+  }
   async function getAuth(){
     let token=tokenFromStorage(localStorage)||tokenFromStorage(sessionStorage);
     if(token)return token;
@@ -62,23 +101,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
   async function check(id){
     const signal=++sequence;busy=true;lastCheck=Date.now();
     try{
-      const token=await getAuth();
-      if(!enabled||signal!==sequence)return;
-      if(!token){blockedUntil=Date.now()+60000;publish({ok:false,status:'auth-not-ready'});return;}
+      // Prefer SpicyChat's live captured login (also used by the Archive
+      // bridge); browser storage is only a fallback for older site sessions.
+      const captured=await getCapturedAuth(id);
+      const token=captured||await getAuth();
+      if(!enabled||signal!==sequence||route!==id)return;
+      if(!token){blockedUntil=Date.now()+60000;publish({ok:false,status:'auth-not-ready',
+        authSource:'unavailable',nextCheckAt:blockedUntil,lastSuccessfulCheck});return;}
       const response=await new Promise(resolve=>chrome.runtime.sendMessage({
         type:'DS_NATIVE_MEMORY_PROBE',conversationId:id,authToken:token,
         appVersion:document.querySelector('meta[name="app-version"]')?.content||''
       },r=>resolve(chrome.runtime.lastError?{ok:false,status:'extension-error'}:r)));
       if(!enabled||signal!==sequence||route!==id)return;
-      if(response?.status==='auth-rejected'||response?.status==='invalid-chat-or-auth')blockedUntil=Date.now()+300000;
+      const retryAfterMs=Math.max(0,Math.min(1800000,Number(response?.retryAfterMs)||0));
+      if(retryAfterMs)blockedUntil=Math.max(blockedUntil,Date.now()+retryAfterMs);
+      else if(response?.status==='auth-rejected'||response?.status==='invalid-chat-or-auth')blockedUntil=Date.now()+300000;
+      if(response?.ok)lastSuccessfulCheck=Date.now();
       publish({
         checkedAt:Date.now(),ok:!!response?.ok,status:response?.status||'',
+        authSource:captured?'captured-session':'browser-storage',lastSuccessfulCheck,
+        httpStatus:Number(response?.httpStatus)||0,nextCheckAt:blockedUntil||0,
         baseline:!!response?.baseline,changed:!!response?.changed,
         count:Number(response?.count||0),added:Number(response?.added||0),
         removed:Number(response?.removed||0),updated:Number(response?.updated||0),
         quality:response?.quality||null
       });
-    }catch{publish({ok:false,status:'unexpected-error'});}
+    }catch{publish({ok:false,status:'unexpected-error',lastSuccessfulCheck});}
     finally{busy=false;}
   }
   window.addEventListener('message',event=>{

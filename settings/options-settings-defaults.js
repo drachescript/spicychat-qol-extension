@@ -122,6 +122,7 @@ const DEFAULT_SETTINGS = {
   compactGenerationMetadata: false,
   enableContextWindowWarning: false,
   contextWarningThreshold: 85,
+  contextWarningShowMeter: false,
   contextWarningManualLimit: 0,
   contextWarningBrowserNotifications: false,
 

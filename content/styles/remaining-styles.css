@@ -1546,6 +1546,10 @@ html.ds-chat-custom-background div.flex.grow.flex-col.top-0.left-0.w-full.h-full
   font-size: 13px;
   line-height: 1.35;
 }
+#ds-context-window-warning[data-meter-only="1"] {
+  border-color: rgba(148,163,184,.42);
+  background: rgba(21,27,35,.94);
+}
 #ds-context-window-warning[data-source="estimate"] {
   border-style: dashed;
 }

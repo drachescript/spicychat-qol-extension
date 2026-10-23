@@ -923,8 +923,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         profileUrl: `https://spicychat.ai/chatbot/${id}`,
         savedAt: Date.now()
       };
+      const pending = DS.notePendingBotBlock?.(id, store.meta[id]);
       DS.refreshFastLookupCaches?.();
-      await DS.saveBlockedBots();
+      try {
+        await DS.saveBlockedBots();
+        DS.finishPendingBotBlock?.(id, pending, true);
+      } catch (error) {
+        DS.finishPendingBotBlock?.(id, pending, false);
+        throw error;
+      }
       return await waitForBlockedConfirmation(id, 2200);
     } catch (error) {
       console.warn("[SpicyChat QoL] Shared-state bulk block fallback failed", error);
@@ -1052,13 +1059,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       };
       DS.state.blockedBots = {
         ids: typeof DS.uniqueClean === "function"
-          ? DS.uniqueClean([...legacyIds, ...persisted.ids])
-          : [...new Set([...legacyIds, ...persisted.ids])],
+          ? DS.uniqueClean([...legacyIds, ...persisted.ids, ...(DS.pendingBlockedBotAdds?.keys?.() || [])])
+          : [...new Set([...legacyIds, ...persisted.ids, ...(DS.pendingBlockedBotAdds?.keys?.() || [])])],
         names: typeof DS.uniqueClean === "function"
           ? DS.uniqueClean([...legacyNames, ...persisted.names])
           : [...new Set([...legacyNames, ...persisted.names])],
-        meta: persisted.meta
+        meta: { ...persisted.meta }
       };
+      for (const [id, pending] of DS.pendingBlockedBotAdds || []) {
+        DS.state.blockedBots.meta[id] = { ...(DS.state.blockedBots.meta[id] || {}), ...(pending.meta || {}) };
+      }
       DS.refreshFastLookupCaches?.();
     } catch {}
   }
@@ -1126,6 +1136,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       names: [...existing.names],
       meta: { ...existing.meta }
     };
+    const pendingBlocks = blocked.map(item => [item.id, DS.notePendingBotBlock?.(item.id, existing.meta[item.id])]);
     DS.refreshFastLookupCaches?.();
 
     let normalSaveWorked = false;
@@ -1171,6 +1182,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch {}
     }
 
+    for (const [id, pending] of pendingBlocks) {
+      DS.finishPendingBotBlock?.(id, pending, verified.has(id));
+    }
     syncRuntimeBlockedStore(verify);
 
     for (const item of blocked) {

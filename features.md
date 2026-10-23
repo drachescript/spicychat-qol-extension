@@ -1,148 +1,168 @@
 # SpicyChat QoL — Feature List
 
-This file lists the features currently implemented in SpicyChat QoL. Release history and version-by-version changes live in `CHANGELOG.md`.
+A list of what SpicyChat QoL currently does. See `CHANGELOG.md` for release changes. Planned features are at the bottom.
 
-Everything is optional. Fresh installs keep the main extension switch on, while optional QoL features stay off until enabled directly or through a setup preset.
+Most features are optional and start OFF. You can turn them on individually or use a setup preset.
+
+**Still experimental:** Context Keeper automation, local Lorebooks and keyword recall, private Lorebook/Archive tools, native Memory checks, Smart Chat Folders and Custom Lite. These need live testing. Keep backups and review anything that changes saved data.
 
 ## Setup and compatibility
-- Automatic SpicyChat beta/experimental capability detection for features such as Public Lorebooks and Story Mode. Detection is capability-based instead of relying on a manual beta toggle, and Story Mode routes are treated separately from normal RP chat so user/persona assumptions are not applied blindly.
-- Chrome, Firefox, and Opera use the same core feature code, with browser-specific compatibility handling where their extension/download behavior differs.
-- Firefox packages keep the Gecko metadata needed for signing and supported Android installs.
-- Release builds avoid direct `document.write`, dynamic `innerHTML =`, `eval`, and `new Function` usage in extension JavaScript where possible to keep browser-store validation clean.
-- Settings keep the familiar classic tab row and single-column sections by default, with optional Grouped navigation, Adaptive columns, and Wide page width under Settings layout. Nested/sub-options are visually separated more clearly, while search/pin/collapse/reset behavior is preserved. The feature catalogue shows current On/Off/Built-in/Planned status and can jump to the relevant controls without changing stored setting keys.
-- Compact/collapsible **Find a setting** search across every Settings tab, including fuzzy/typo-tolerant matching for harder-to-find controls. The heavy search index is deferred until search is opened.
-- Built-in **Control Center** for fast navigation, creator backup/Lorebook relationships, read-only local data-health checks, per-dataset storage sizes, a no-write migration dry-run, performance baselines, and support checks.
-- Optional **QoL Command Palette** on SpicyChat pages with a configurable Ctrl/Cmd+K-style shortcut, fuzzy action search, pinned/recent actions, and quick access to locally known Favorite/Later bots, Lorebooks, and Personas.
-- Settings sections can be opened and closed like drop-downs, with an option to start them all collapsed to reduce scrolling. Sections can also be pinned, reopened from a recent-sections list, filtered to enabled/customized sections, or reset individually. Search and feature shortcuts open the matching section automatically.
-- Optional one-time What's New toast after an extension update with a direct link to the Changelog tab.
-- Minimal and recommended setup presets, plus a one-click way to turn optional features back off.
-- Passive S.AI Toolkit detection with optional compatibility handling for overlapping generation metadata, recovery, exports, sidebar cleanup, and Toolkit WYSIWYG editing.
-- Install/update notice in the extension popup and NEW/UPDATED markers for recent settings.
-- Safe diagnostic copy for bug reports without chat text or saved private content.
+- **SpicyChat beta features:** QoL detects beta-only tools when they're actually available on your account. It doesn't unlock them or assume Story Mode works like normal chats.
+- **Browser support:** Chrome, Firefox and Opera share the main code, with browser-specific fixes when needed.
+- **Firefox Android:** Firefox packages include the information needed for signing and supported Android installs.
+- **Store compatibility:** The build avoids browser APIs and JavaScript patterns that commonly cause extension-store validation problems.
+- **Settings layout:** Use normal tabs or grouped navigation, one column or several on wide screens. Sections can be collapsed, pinned, searched and reset without changing saved setting IDs.
+- **Settings search:** Find a feature even if you don't remember its exact name. The search index loads when you open it.
+- **Control Center:** Quick links, saved-data health checks, storage use, creator backups, performance comparisons and support reports in one place.
+- **Command Palette:** Find QoL actions with a keyboard shortcut, including locally saved bots, Lorebooks and personas. Pin the actions you use most.
+- **Collapsible Settings:** Close long sections, open them from search, or pin frequently used ones. You can choose to start with everything collapsed.
+- **What's New notice:** Optional update notice that links to the changelog.
+- **Quick setup:** Minimal, Recommended and Creator presets, plus a way to switch optional features off again.
+- **S.AI Toolkit compatibility:** Avoid running duplicate helpers when Toolkit already handles the same action.
+- **Update indicators:** Popup notices and NEW/UPDATED markers for recently changed Settings.
+- **Safe diagnostics:** Download useful bug reports without including chat text or private notes. QoL keeps a small history of versioned performance checks across updates, compresses older records and offers .txt.gz downloads for large reports. Download all support info or use Clear history to start fresh.
 
 ## Saved lists and bot discovery
-- Bot Status Center checks saved bots by ID, repairs known names/descriptions from live character data, distinguishes deleted/private/unknown results safely, keeps Saved Bot Info recovery copies, and has a separate Deleted / Unavailable Saved Bots view with old chat links when available. **Recheck archived bots** can bulk revalidate unblocked recovery copies, restore bots that became public again, keep recovery history, and leave currently blocked bots untouched. It reuses a signed-in SpicyChat page for API checks and only creates one Home helper when needed; it does not open every bot profile.
-- Favorite bot history, including bots that were later unfavorited on SpicyChat.
-- Favorite creators with optional filter protection.
-- Local Follow Creator list with Follow / Following buttons and Saved Lists management.
-- Later list with card and chat-page buttons, plus optional filtering/hiding behavior.
-- Blocked and Not Interested lists with search, sorting, links, and local management; blocked-bot metadata avoids recommendation badges such as `For You`, and legacy bad names can be repaired from saved/profile metadata.
-- Recently Changed / Undo support for selected local QoL actions including Bot Organizer changes, message bookmarks, Saved Text / Snippets, Context Keeper edits, Later changes, and supported bot-block actions.
-- Local Bot Organizer with multi-folder organization, private notes, personal tags, creator-only status labels, direct My Creations folder management, and Everything-backup support.
-- Unified Saved Bots Hub deduplicates Favorite history, Later, Recently Seen, Bot Organizer and Bot Status Center opened-history entries into one searchable local overview without merging the underlying stores. It can also multi-select the shown or entire filtered locally known bot set for bulk folder/tag organization without requiring bots to be added to Later first.
+- **Bot Status Center:** Check saved bot links, keep accessible profile copies and tell available, private/unknown and confirmed unavailable bots apart. Recheck archived bots without changing your block list. It reuses one helper page instead of opening every profile.
+- **Favorite history:** Remember bots you've favorited, including ones you later removed from Favorites.
+- **Favorite creators:** Save creators you like and optionally protect their bots from some filters.
+- **Follow creators:** Keep a separate QoL follow list. It doesn't change native SpicyChat following.
+- **Later:** Save bots you might want to try later without favoriting them.
+- **Blocked and Not Interested:** Manage hidden bots with search, links and saved details. Blocked IDs take priority over recommendation labels.
+- **Recently Changed / Undo:** Review or undo supported changes to lists, notes, bookmarks and other local data.
+- **Bot Organizer:** Make your own folders, private notes, tags and creator statuses. These don't change the public bot.
+- **Saved Bots Hub:** Search bots QoL remembers across Favorites, Later, opened history and other lists. Organize several at once without adding them to Later.
 
 ## Card and listing tools
-- Block/filter by tags, words, creators, bot IDs/names, groups, language, opened chats, and other saved states. Blocked-word matching is case-insensitive, while spelling still has to match; language detection can use descriptions, public profile text, and sentence-like titles when there is enough language evidence.
-- Optional Home For You cleanup.
-- Optional longer card descriptions.
-- Lorebook-aware listing filters/sorting with counts, a Needs Lorebook shortcut on My Creations, and a lightweight **Has Lorebook** toggle inside SpicyChat's native search/tag sidebar that filters currently loaded cards using the site's own Lorebook badge.
-- Card text blocking matches detected bot names/descriptions across both chat-link and profile-link layouts, with tolerant punctuation/spacing/compact-abbreviation handling, multi-word nickname/name matching, creator display-name/@handle checks, and a Settings tester for verifying current word/tag/creator rules. The QoL block X is suppressed on **My Creations** by default, with an explicit opt-in if someone really wants it there.
-- Smart Filter Presets with built-in and custom presets plus include/exclude filtering for Lorebook status, Opened/Unopened state, Followed/Not followed creators, Favorites/Not favorites, and Later/Not Later; saved presets can be renamed/deleted, up to three built-in/custom presets can be pinned for one-click access, and older preset data remains compatible.
-- Favorite/Later managers with search, saved-time/name/creator sorting, cross-list filters, Bot Organizer folder filters, local folder/tag/status/note context, and quick Favorite-history to Later actions.
-- Recommendation helpers for hiding favorites/own bots, unopened or Lorebook-only discovery, temporary session hiding, and a random visible pick.
-- Card / discovery workflow with Normal/Compact/Dense card density, optional card-body → profile navigation, Copy Bot Info quick actions, local Recently Seen history, side-by-side local comparison, quick Not Interested, and quick Unblock for dimmed ID-blocked cards.
-- Optional animated bot/avatar controls with Freeze, timed play-then-freeze, or Animate on hover and separate page scopes.
-- Optional listing refill after cards are hidden. Refill validates helper-page candidates against current bot blocks, blocked words/tags/creators, language/discovery rules, native tag filters, Smart Filters, and duplicate IDs **before** inserting survivors into the live listing; rejected pages can be skipped while refill continues toward the visible-card target. Pagination helpers are reused during one refill run to avoid repeatedly booting full SpicyChat pages.
-- Bot Organizer listing filters plus direct local folder create/rename/delete controls and bulk selection for folders, tags, Later, copying links, and creator statuses on My Creations.
-- Optional Home/Recommendations bulk block **Select mode** with a small page launcher and Mini Panel shortcut; while active, clicking bot cards selects/unselects them directly before the selection is sent through the normal QoL block path.
-- Optional Quick Dislike after blocking is off by default. If you enable it, blocking/favoriting and normal user activity restart the idle cooldown (5 minutes by default); once the queue starts, ratings use a short safety gap instead of another full idle cooldown.
-- Optional My Creations auto-load that waits for and presses SpicyChat's exact native My Chatbots Load More control for a configurable number of extra pages/batches (default 1), including React-mount/re-enable retries and real card-growth confirmation.
-- Text normalization for displayed bot-card text plus filters/search/language matching.
+- **Listing Refill tag checks:** Refill respects every included native tag (AND) and any excluded tags. OR tag search is planned separately.
+- **Bot filters:** Hide or dim cards by tags, words, creators, language, group type, saved state or exact bot ID.
+- **For You cleanup:** Optionally hide the Home For You area.
+- **Longer descriptions:** Show more of a bot's card text without opening its profile.
+- **Lorebook filters:** Find bots with Lorebooks, including a Has Lorebook toggle beside SpicyChat's own filters where supported.
+- **Card blocking:** Recognize bot and creator names across different card layouts. Test your rules in Settings; QoL Block stays off your My Creations by default.
+- **Smart Filter Presets:** Save and pin combinations of filters for Lorebooks, opened history, Favorites, Later and creators.
+- **Favorites / Later managers:** Search and organize saved bots by creator, name, folder, tags and status.
+- **Recommendation helpers:** Filter bots by saved state, creator preference or Lorebook presence, and optionally hide cards temporarily.
+- **Card quick actions:** Change card density, compare bots, copy bot info, mark Not Interested or unblock a dimmed bot.
+- **Animated image controls:** Freeze GIFs or only let them animate while visible or hovered.
+- **Listing Refill:** Fill gaps after filtering by checking later result pages. Every candidate must still pass the current block, tag, language and duplicate checks.
+- **Bot Organizer on listings:** Make folders and move several bots into folders, tags, Later or creator statuses at once.
+- **Bulk blocking:** Select multiple bots on Home or Recommendations and send them through the normal block process.
+- **Quick Dislike on Block:** Optional delayed negative feedback after blocking. It's OFF by default and waits for normal user activity to settle.
+- **My Creations auto-load:** Optionally press SpicyChat's native Load More button and wait for the next set of cards.
+- **Text normalization:** Make unusual fonts and punctuation easier to read and match in filters.
 
 ## Chat tools
-- Local Chat folders on `/chat` and `/chats` with All/Unfoldered/folder filtering, folder create/rename/delete, and a bulk **Select chats** mode for adding or removing several exact conversations at once.
-- Chat top-bar cleanup and bot shortcuts for Later, chat history, and new chats.
-- Optional Chat Nudges for up to two selected chats, with 5-hour, 8-hour, 1-day, 2-day, or 1-week inactivity delays. Reminders reuse the last real bot reply for context, can use an optional browser notification, and fall back to an in-page reminder; they never generate or send a new SpicyChat message.
-- Chat-list Saved-state filtering can narrow conversations by QoL Favorite history, Later, both, any locally saved bot, or neither.
-- Local Message Bookmarks / multiple pins with optional notes, a per-chat manager, direct jump actions, backup/restore support, and browser-style Back / Forward history for QoL search/bookmark jumps.
-- Saved-conversation quick actions for Change Title, Clone, and Remove, shown in their own small row so they do not cover SpicyChat's date/message-count line.
-- OOC presets and optional OOC composer button, including a stricter built-in no-control preset that can enforce user-agency and RP formatting rules without overwriting edited/custom presets.
-- Optional Reply Instructions with a global default, bot-specific local overrides, once-per-session/every-message/manual modes, optional OOC wrapping, and an RI composer control. Instructions influence future replies by being sent as normal visible chat text; they are not a hidden system prompt.
-- Optional **Global Memory / Baseline Notes** can add the same user-written guidance across chats once per session, every message, or manually, with optional OOC wrapping and a small GM composer control. It uses normal visible outgoing text because SpicyChat does not expose a hidden global system-memory slot to QoL.
-- Optional local Soundscapes / Ambience with reusable named scenes, up to five simultaneous local-file or direct-URL layers, per-layer volume/loop/repeat intervals, master volume, simple scene fades, configurable page scopes, a direct chat composer control, and optional Mini Panel controls. Scene/layer edits use verified local saves so names, toggles and volumes survive Settings reopen more reliably. Audio generation is not built in; local audio bytes stay in dedicated extension storage.
-- Dedicated `*` composer button and optional automatic closing-asterisk pairing; the dedicated button automatically hides when the formatting toolbar already provides the same `*` action wrapper. Dedicated asterisk/backtick shortcuts can be placed inside the typing box on the right or outside the typing box on either side.
-- Optional compact formatting toolbar for wrapping selected text in actions, bold, bold+italic (`***`), strikethrough, parentheses, quotes, backticks, square brackets, braces, or up to five user-defined literal wrapper pairs. Dedicated asterisk/backtick composer shortcuts use a stable inline slot inside the typing bubble so adjacent RP/Reply controls do not make them jump sides.
-- Optional composer-availability helper keeps the message box usable for drafting while SpicyChat is generating text or images, without force-enabling Send while the site is still busy.
-- Optional alternate-dialogue styling for AI/user backtick text used as texting, thoughts, telepathy, or comms without changing the saved message; supports both rendered inline-code and literal-backtick message variants.
-- Chat text replacements with normal text or Regex rules, AI/user scope, local display mode, or optional saved-message edits through SpicyChat's normal Edit flow; saved edits can expose an Undo button when possible.
-- Optional DeepL message translation with manual/automatic translation, local caching, protected terms, and Mini Panel controls; originals stay visible.
-- Message quick actions for Copy/Edit/Report plus optional Remove Image and safe Resend/reuse on user messages. Each action can be enabled independently; the combined Copy/Edit/Report toggle is only a shortcut. QoL replaces the native three-dot launcher only when that message has at least one applicable quick action. Copy runs directly when possible, Edit/Report/Remove Image silently invoke SpicyChat's native action, and Resend restores old user text into the composer without auto-sending or silently overwriting a current draft. Includes draft protection, failed-message helpers, and typing/scroll-position helpers.
-- Search Inside Current Chat supports Bot / You / Bookmarked scopes, exact-phrase, case-sensitive, whole-word and Regex matching, plus optional repeated older-message loading until a match is found.
-- Optional scroll-to-top and scroll-to-bottom bubbles with configurable page scopes for Home, Chats, individual chats, creator/editor pages, profiles/Lorebooks and other listings. The same controls work in desktop browsers, Firefox and the synced Android app; on individual chats the ↑ action can load one or all older message batches through SpicyChat's native Load Previous Messages control either before the jump or in the background while you keep reading.
-- Bulk Memory Manager with multi-select, Select unpinned, Pin selected, Delete selected, Keep selected for Context Keeper, manual Load all memories, JSON export/import with selective preview, optional automatic Load More Memories, an optional Copy Memory menu action, and a Reorder pinned workflow that re-pins through SpicyChat's own controls and verifies the visible result.
-- Context Keeper with automatic high-confidence durable-detail capture from small batches of settled new messages, configurable strictness/cadence/cap, Light / Recommended / Detailed presets, a direct chat three-dot-menu entry, optional manual Keep/Remember actions, saved-detail search/category/source filters, per-detail recap inclusion, use-all/remove-excluded cleanup actions, approximate recap token use, and copyable OOC recaps. Optional topic-aware recall prioritizes matching details without cloud AI; manual fact updates and multi-detail consolidation retain inactive past versions for character growth and a lightweight timeline. Review-only contradiction hints and categories for NPCs, character growth and major events help manage long roleplays. Saved details stay local and do not use chat tokens until a recap is inserted/sent. Automatic capture never auto-sends the recap or writes SpicyChat Memories by itself.
-- Generation profiles plus independently configurable timestamps, model/engine details, elapsed time, and captured generation settings where available; the combined metadata switch is only a one-click default and is no longer required for the individual detail options.
-- Optional RP context-full warning with a configurable threshold. QoL prefers prompt/context usage exposed by SpicyChat, can use a manual context-window size when auto-detection is unavailable, and otherwise uses a conservative local token estimate from captured message metadata. The warning can stay in-chat or also use the existing optional browser-notification permission.
-- Optional customizable model menus with synced favorite hearts/order across the quick picker, Available models, and Explore all models, plus hidden models and favorites-only quick views.
-- Optional stacked chat message layout aligns user and AI message boxes in one vertical column without rebuilding message DOM or removing native controls.
-- Optional CSS-driven AI/user chat bubble appearance with independent colors, borders, opacity, shapes, shadows, contrast presets, and granular reset controls. An optional My messages appearance lock can capture SpicyChat’s native background/normal-text colors and locally reapply them if a site update resets the rendered user bubble.
-- Optional RP Format Repair for AI messages that locally detects messy speech/action/narration formatting, converts bold/parenthetical action blocks, repairs stray Markdown, preserves inline emphasis/meaningful quotes/backtick dialogue, and can show clean unquoted or quoted-dialogue RP styles without silently editing the saved response.
-- Chat Export with one-click plain-text copy plus TXT, Markdown, HTML and JSON exports. Full-history API export paginates without mounting old messages into the live chat, with the native Load Previous Messages path kept as a compatibility fallback; optional bot info, OOC notes, generation details, message numbers and avatars are supported.
-- Persona saving and quick switching, plus an optional local Persona Manager with favorites, folders, private notes, duplicate-persona prefill, profile-picture copying, search, custom ordering, matching order/metadata in the in-chat picker, and a Local Persona Library with saved-text/avatar status, preview/copy, rendered-page refresh for incomplete/older copies, compressed local avatar preservation, and restore tools without bypassing SpicyChat persona limits.
-- Lorebook entry Show full text / Show less controls.
-- Auto voice for new AI replies using SpicyChat's native Listen control when available.
-- Long-chat performance controls that reduce repeated work, can pause most QoL work in background tabs, and offer Adaptive/Aggressive/Maximum modes for slower or very large chats.
-- Lazy/paged Settings managers for very large saved lists so Options startup, tab switching, searching, and Bot Status Center work stay responsive. Large Soundscapes audio-library storage is also lazy-loaded only when its Settings card is approached or enabled.
-- Optional local performance timings and counters that can be included in a copied Diagnostics report. Nothing is sent anywhere automatically.
+- **Chat folders:** Organize exact conversations into QoL folders, with filters and a bulk Select chats action.
+- **Chat top-bar shortcuts:** Hide unwanted header controls and add quick Later, chat-history and new-chat actions.
+- **Chat Nudges:** Optional reminders for up to two chats after a chosen period of inactivity. They don't generate or send a fake message.
+- **Chat-list saved-state filters:** Show chats with Favorites, Later, other saved bots or none of those states.
+- **Message bookmarks:** Bookmark important messages locally, add notes and jump back/forward between saved places.
+- **Saved-chat quick actions:** Rename, clone or remove a conversation from the chat list.
+- **OOC presets:** Save your usual RP instructions, including a stricter preset that tells the bot not to control your character.
+- **Reply Instructions:** Add global or bot-specific guidance when you send messages. This is visible OOC text, not a hidden prompt.
+- **Global Memory / Baseline Notes:** Reuse local notes across chats, manually or on a schedule. QoL adds them as visible chat text, not hidden system instructions.
+- **Soundscapes:** Save ambient sound scenes with up to five local or direct-URL layers, volume and playback controls.
+- **Asterisk/backtick shortcuts:** Put quick `*action*` and backtick buttons beside or inside the typing box.
+- **Formatting toolbar:** Wrap text in actions, bold, quotes, brackets, backticks or your own custom pairs.
+- **Keep typing while generating:** Continue drafting while SpicyChat responds without forcing the Send button.
+- **Alternate dialogue styles:** Display backtick text as thoughts, telepathy, messages or comms without changing saved replies.
+- **Text replacements:** Change how words look locally or choose a reviewed saved edit through SpicyChat's own editor. Some edits can be undone.
+- **Translation:** Translate messages with supported services while keeping the originals visible.
+- **Message quick actions:** Faster Copy, Edit, Report and optional Remove Image or safe Resend. Resend fills the composer; it never sends automatically or replaces a draft silently.
+- **Search Inside Current Chat:** Search by speaker, phrase, whole word, case or regex. You can choose to load older messages too.
+- **Scroll navigation:** Add Top/Bottom buttons on selected pages and optionally load older chat messages through SpicyChat's normal controls.
+- **Native Memory Manager tools:** Select, pin, delete, import/export or reorder native Memories using SpicyChat's own controls. Requires access to native Memories.
+- **Native Memory Improvements — experimental:** Independent read-only checks for Memory changes and possible quality problems. No native Memory text is saved in QoL reports and no automatic corrections are made.
+- **Context Keeper — experimental:** Save lasting story facts locally, review and edit them, and choose what a recap includes. Automatic capture checks small batches of finished messages. Older replaced facts remain in history and aren't recalled as current canon.
+- **Generation profiles & details:** Save model settings and optionally display message timestamps, model names and generation information when available.
+- **RP context warning & meter:** See when a long chat may be nearing its context limit. It labels estimates clearly and never claims an exact forgotten-message boundary.
+- **Model quick menu:** Favorite, reorder or hide models in QoL menus without removing them from SpicyChat.
+- **Stacked message layout:** Put user and AI messages in one column instead of separate sides.
+- **Chat bubble appearance:** Customize colors, fonts, spacing and shapes locally. Optional appearance lock can restore certain native bubble colors after site updates.
+- **RP Format Repair:** Improve how messy action/dialogue formatting looks without silently changing the saved reply.
+- **Chat Export:** Copy or download full chats as TXT, Markdown, HTML or JSON. API history keeps older messages out of the live chat page where possible.
+- **Persona Manager:** Save local persona copies and pictures, then organize them with folders, favorites, notes and custom order. Incomplete copies can be refreshed from visible editor pages.
+- **Lorebook text expansion:** Show full Lorebook entry text when you need it.
+- **Auto voice:** Use SpicyChat's own Listen button for new AI replies when available.
+- **Performance modes:** Reduce extra QoL work in large chats and background tabs. Baseline optimizations also work without a special mode.
+- **Large Settings lists:** Load big saved-data lists in smaller batches so opening Settings stays responsive.
+- **Performance diagnostics:** Collect optional timings and counters for support reports. Nothing is uploaded automatically.
 
-- Long-chat processing uses shared dirty-message batching so chat search, message quick actions, alternate dialogue, translation, text replacements, and Auto voice can update changed/new messages without repeatedly rebuilding the full loaded conversation. Older-history insertion enters a temporary low-impact batch, and display-only message transforms stay out of the native Edit/Save path until the saved message has settled.
+- **Long-chat runtime:** Shared message batching updates only changed or newly loaded messages instead of repeatedly rebuilding the whole chat. Context Keeper also works on the active conversation only.
+
+
+## Experimental Context Keeper and Lorebook integration (v0.2.58)
+- **Local keyword tester:** Preview the entries that match your message, what the context budget would leave out, and which old facts are excluded. No message is sent during testing.
+- **Standalone Context Keeper:** Does not require native Memories. Each conversation keeps its own facts, including separate chats with the same bot.
+- **Local Chat Lorebook:** Make and edit conversation-specific Name/Keywords/Content entries with pins, disable controls, backup/import and history. Optional recall adds visible OOC text; it isn't native Lorebook injection.
+- **Reviewed Lorebook suggestions:** Turn approved Context Keeper facts into reviewable local entries. Detect duplicates, old versions and conflicts rather than silently changing canon.
+- **Private Lorebook Bridge:** Only for a private bot and its attached private Lorebook that you own. Native creation/handoff is reviewed and experimental. Public and unowned Lorebooks are blocked; existing-entry updates/deletes are not automatic.
+- **Shared private Archive:** Optional storage for older conversation facts, using local storage, a private Archive Lorebook or both. QoL never attaches the Archive to a bot. Automatic uploads require permission and verification.
+- **Archive audit/recovery:** Check remote entries against local facts, recover interrupted operations and preview possible duplicate copies. Remote cleanup/deletion is still disabled.
+- **Cross-tab protection:** Local Context Keeper and Lorebook saves detect stale changes instead of overwriting another tab's edits.
+- **Context Keeper performance:** Uses cached messages, processes the active chat only and loads large review lists in smaller pages.
 
 ## Creation tools
 - `{{char}}`, `{{user}}`, CONTINUE, no-control, and custom editor snippets.
 - Optional automatic Advanced-section opening on new chatbots, saved drafts, and edit pages.
 - Optional Save & Stay and Save & Chat actions on chatbot create/edit pages, including a new-tab testing mode that keeps the editor available.
 - Chatbot and Lorebook backup controls are separately enableable from automatic saving. With the controls on and autosave off, Save / Export / History are manual-only; both master backup-tool switches remain opt-in.
-- Optional local Chatbot Editor Draft History with manual/before-save snapshots, configurable per-bot retention, a history viewer, and safe field restore that never saves or publishes automatically.
+- **Chatbot Editor Draft History:** Keep earlier drafts and restore text into the editor for review; no automatic publishing.
 - Optional own-bot backup tools on chatbot edit pages, including read-only Under Review pages. The compact **Save backup now / Export / History** strip is controlled by its own switch; automatic changed-revision saves are a separate opt-in child setting.
 - Meaningful local Bot Version History records creator-controlled content changes separately from manual checkpoints/safety revisions, shows changed-field summaries, supports compare/rename/delete, and can restore selected content back into the normal editor for review without auto-saving or publishing.
-- Optional Wiki / Web Lorebook Importer on Lorebook Entries pages. It supports Fandom and MediaWiki-style layouts plus a generic article fallback, aliases/redirects, category-member selection, duplicate Skip/Replace/Merge/Duplicate handling, retryable bulk imports, source-update checks, removed-content inspection, and pasted text/Markdown/HTML when a site blocks fetching. Imports are split to stay inside SpicyChat entry-size limits and source URL/page metadata is kept locally by QoL.
-- Optional **Lorebook response consistency** checks AI replies for newly introduced keywords from a locally backed-up attached Lorebook, shows the matched entry text for reference, and can carry those details into the next turn. It does not pretend to rewrite an already-generated SpicyChat response.
-- Lorebook workflow tools can start Edit Lorebook on Entries once without locking you there, default/remember entry sorting, protect unfinished entry edits with local autosaved drafts, add Edit Lorebook shortcuts where an attachment can be resolved, and add an entry manager whose selection checkbox, token/hidden-keyword/character/no-keyword info, Rename/Copy/Duplicate row actions, and each individual bulk action are separately configurable. Bulk actions stay collapsed behind one compact button until opened.
-- Optional Lorebook backup tools store Lorebook details and entries separately from bot JSON. Entry-list keyword subsets are retained, and opening an entry lets QoL upgrade that entry to its complete keyword list before export. The compact manual Save/Export/History strip has its own master switch; automatic capture is separate and opt-in.
-- Full Lorebook JSON export can be started from Details or Entries, collects the opposite editor tab automatically, opens entries as needed to capture the complete keyword list, and merges the result into one portable Lorebook backup.
-- Creator Tools includes a searchable chatbot/Lorebook Backup Manager for latest exports, chatbot revisions, last-backup age, stale automatic-backup warnings, and local backup deletion.
-- The **Creator Workspace** in Control Center summarizes own-bot/Lorebook backup coverage, editor draft history and known bot ↔ Lorebook relationships. Chatbot revision rows can compare changed writing fields and queue selected fields back into the normal SpicyChat editor for review before saving.
-- Optional **Remember chatbot image prompt** stores the image-generation prompt locally per chatbot edit page and restores it after refresh/revisit when the native prompt field is empty.
+- **Wiki/Web Lorebook Importer:** Prepare entries from supported wiki pages or pasted content, with previews, duplicates and retryable imports.
+- **Lorebook response consistency:** Check new AI replies against known Lorebook keywords and optionally bring relevant entries into later context, not past replies.
+- **Lorebook entry tools:** Remember sorting, protect unfinished drafts, show keyword/token info and use optional quick or bulk actions.
+- **Lorebook backups:** Keep details and entries separately from bot JSON. Manual tools and automatic saving have separate switches.
+- **Full Lorebook export:** Combine Details and Entries into one JSON file, opening entries as needed to collect all keywords.
+- **Creator backup manager:** Search previous bot/Lorebook versions, see stale backups and remove unwanted local history.
+- **Creator Workspace:** Check which bots and Lorebooks have backups, compare versions and prepare reviewed editor restores.
+- **Remember image prompt:** Keep the last chatbot image prompt in case SpicyChat clears the field.
 - Optional automatic Start New on Create Lorebook.
 - Optional default Public or Unlisted visibility for newly created chatbots.
 - Optional automatic Community Guidelines agreement.
-- Advisory Lorebook moderation-wording warnings based on community-reported trigger terms, with optional chatbot-editor coverage; the list is explicitly treated as inconsistent/community evidence rather than an official blocklist. Thread follow-ups that contradicted plain number words, second/trio and class as standalone triggers are respected, while confirmed/repeated reports such as minor, intimidation variants, lineage/bloodline and child/family-related wording remain represented. Balanced mode suppresses other broad standalone matches unless stronger context is present, All reported terms preserves maximum sensitivity, and a Settings term manager can search/filter the list, locally Ignore/Enable individual terms, and add exact-match custom local warnings with categories. Warnings never block/rewrite text and never include bypass/loophole instructions. The community-reported term list also includes **kitten** as an advisory trigger.
+- **Community wording warnings:** Optional advisory warnings for words other creators reported as moderation-sensitive. The list is not official and may be wrong; it never blocks or rewrites text.
 - Clickable chat-page bot tags with shortcuts for saved tag filters.
-- Optional exact bot-card message totals: QoL can replace rounded values such as `1.2k` with the exact public message count. It reuses observed Typesense listing data when available, batches direct public Typesense lookups for visible cards that are still missing an exact total, and skips same-state DOM writes when the correct exact value is already rendered. *(Updated in v0.2.14)*
-- Optional bot creation dates: show the public creation date on its own line below the card stats so native counts stay visible, and show the same date after Tokens on bot profile pages. This is a separate toggle from Exact Message Counts and reuses cached public bot data when available. *(Added in v0.2.14)*
-- Optional combined My Creations chatbot filter for visibility, message count, Lorebook presence, definition visibility, card-token ranges, local recent-use windows and creator workflow status. Includes one-click Recently used ordering, a Needs attention view based on local Needs work status / Creation Audit issues, and additional message/token/name sorts for loaded cards.
-- Untagged language auto-detection extends Language Filter beyond creator-supplied tags: obvious languages can be inferred from card descriptions, ambiguous cards can be checked gradually from public Greeting + Description data, and only the detected language/result is cached locally. Optional QoL language badges are local display helpers and never edit the creator's SpicyChat tags.
-- Optional bot-card token estimates for Greeting and other exposed fields prefer a packaged MAIN-world character-data bridge so requests use SpicyChat's own page origin/auth context, with the extension background worker as a fallback; bounded concurrency, short timeouts, cache reuse and copyable failure diagnostics remain in place. Successful public metadata can also feed the Local Bot Archive without another network request.
-- Optional My Creations audit with cached profile-field checks for missing/very short Greeting, Description, Personality, Scenario and Example Dialogue, missing tags, unusually small/large profile estimates, Lorebook presence and visibility. For own bots it can reuse positively captured editor/local backup fields when SpicyChat does not expose enough public profile data; unavailable fields stay unverified instead of being called missing. Creation Audit can also flag user actions pre-written into Greetings, named Greeting context mainly explained in Scenario, repeated long profile text, rules/worldbuilding inside Example Dialogue, and overly vague intelligence traits; all results remain advisory. Includes per-card status badges, filters, manual refresh, a combined Needs attention workflow with Review next, Markdown reports, and spreadsheet-friendly CSV export for the currently loaded bots.
+- **Exact bot message counts:** Replace rounded card totals with the public exact count when available, without repeatedly rewriting unchanged cards.
+- **Bot creation dates:** Show public creation dates on cards and profile pages, independent of message-count display.
+- **My Creations filters:** Sort and filter your own bots by visibility, activity, Lorebook, size or local work status, including Needs attention.
+- **Language detection:** Try to identify the language of bot cards from available public text when tags are missing, without changing native tags.
+- **Card token estimates:** Estimate tokens for exposed bot fields, using cached data and bounded requests. Hidden character fields remain hidden.
+- **Creation Audit:** Review your own creations for missing or very short fields, tag issues, unusual sizes, Lorebook problems and basic writing concerns. Unknown fields remain unverified, not automatically flagged as missing.
 
 ## Interface cleanup
-- The Settings navigation folds Mini Panel, Soundscapes, sidebar/top-bar cleanup, and premium/promo cleanup into **Appearance & Interface** so the top-level tab list stays manageable.
+- **Appearance Settings:** Mini Panel, Soundscapes and cleanup controls are grouped under Appearance & Interface.
 - Individual sidebar and top-bar cleanup switches, including separate controls for every footer link, supported social icon, and app-download target.
 - Chat composer cleanup for plus/image/voice controls and voice upsells.
 - Premium, notification, model, and advert/banner cleanup.
 - Optional browser-tab notification badge hiding and background product-update clearing.
-- Mini Panel with configurable placement, drag position, sizing, visible controls, Auto voice/Auto */translation controls, an optional current-page feature summary, and an opt-in counter for messages currently loaded in a chat.
+- **Mini Panel:** A movable toolbar for selected QoL features and optional chat message counts.
 - Optional Mini Panel one-click shortcuts for up to three pinned Smart Filter presets on bot listings.
-- Mobile/compact-aware controls with a separate opt-in settings area, Mobile Recommended preset, and compact chat top-bar QoL menu for OOC, actions/formatting, navigation, persona, model, and optional translation. Manual enable works on Firefox/Chrome desktop, Firefox Android, installed web apps, and the Android APK. Mobile Bot Organizer bulk mode uses card-tap selection/protected touch targets so nearby native Favorite controls cannot be triggered accidentally.
+- **Mobile helpers:** Compact menus and selected editing tools work on supported Android browsers, installed apps and the QoL wrapper when enabled.
 - Optional Auto-AFK cleanup for inactive SpicyChat tabs.
-- Optional independent Duplicate SpicyChat Tab Guard with chat/home/profile scopes, configurable keep-new/keep-existing behavior, pinned-tab protection, kept-tab focus, and a manual duplicate scan/status readout.
-- Tab Session Library can merge saved snapshots into one deduplicated exact-URL recovery set and clean repeated exact URL records inside saved snapshots without touching open browser tabs.
-- Manual tab cleanup/session analysis with open-tab inventory, local-profile reuse, and a single temporary rendered SpicyChat worker tab for unresolved profile metadata so discarded chat tabs stay asleep. Analysis reports rendered/local-only/no-data/verification/unavailable/failed states separately, pauses for SpicyChat verification when needed, supports Retry unresolved, stronger identity resolution, topic/cleanup previews, and local session snapshots preserving exact URLs plus original window/index positions. The Tab Session Library adds reusable multi-topic organization, snapshot review, exact-conversation selection, and safe reopening in the current window/new window/saved-window groups. Scan/analyze never closes tabs.
+- **Duplicate tab guard:** Close duplicate SpicyChat tabs based on selected rules, while protecting pinned tabs.
+- **Tab Session Library:** Combine and clean saved browser-tab lists without touching open tabs.
+- **Tab cleanup analysis:** Manually inspect and group a large set of open tabs; save and restore exact URLs. Scanning doesn't close anything, and closing selected tabs is a separate reviewed step.
 
 ## Data and backup
-- Shared cross-browser export handling for JSON/text-based QoL exports, with the browser download manager when its optional permission is available and a normal Blob/file fallback when it is not. This path is used to improve export reliability on Firefox and Opera as well as Chromium browsers.
-- Settings check focuses on actionable problems: enabled features missing required setup, invalid values, interrupted bulk actions, malformed local records, incomplete Persona copies when Persona backup is actually enabled, and unusually large storage. Harmless disabled child settings and missing recovery snapshots are not treated as problems.
-- Export grouped Settings areas and individual saved-data categories from **Data & Backup**, with `.json` and `.txt` downloads. **Active / Used** selects setting groups that differ from defaults plus data sets that currently contain saved items; **Everything** and **Clear** are also available.
-- Backup coverage includes opened/blocked/Not Interested history, Favorite/Later/creator lists, bot/chat/persona organization, Bot Status Center data, bot/Lorebook archives, chatbot ↔ Lorebook links, snippets, Context Keeper, Internal Day Tracker, RP State, Chat Nudges, OOC and generation profiles, Smart Filters, draft history, bookmarks, Recently Seen, Soundscape scenes, Creator watch history, and Tab Cleanup sessions/topics/profile metadata.
-- Large local Soundscape audio and chat-background image data is a separate opt-in **Local media** scope. DeepL API keys, creator Discord webhook URLs, diagnostics, temporary caches, and helper/refill state are excluded from normal backups.
-- Load backup files from **Data & Backup** into the normal validation/preview flow before anything changes. Backup schema v12 records grouped Settings scopes and restores them independently while remaining compatible with older all-Settings backups; newer-schema backups use version-tolerant partial restore and skip unknown/newer categories rather than blocking recognized data. Extension-capable mobile browsers can use the browser download manager when normal extension-page downloads are unreliable.
-- Merge or replace only the categories included in an imported backup.
-- Storage usage details in Settings and optionally in the popup. A single lightweight local recovery snapshot can be created manually and is also saved automatically before supported imports/cleanup actions.
-- Control Center can run a read-only full local-data health pass, show the largest stored datasets, test the current backup/migration path without writing anything, save a performance baseline for later comparison, and include those summaries in the one-click support report.
-- Checks for orphaned/duplicate local data, with cleanup only after you choose it.
+- **Exports:** Download QoL settings and saved lists as JSON/text using browser-compatible download handling.
+- **Settings check:** Flag actionable problems with enabled features or saved data, without reporting harmless disabled settings.
+- **Data & Backup:** Pick exactly which Settings and data lists to export. Active / Used selects changed settings and nonempty saved lists.
+- **Backup coverage:** Supports bot and chat lists, organization, backups, Lorebooks, Context Keeper, RP State, Storydate, bookmarks, snippets, tab sessions, Soundscapes and other local data categories.
+- **Local media backups:** Large sound and image files are a separate choice. API keys, webhook links and temporary caches stay out of normal backups.
+- **Import preview:** Review categories before merging or replacing anything. Older and newer backup versions are handled conservatively.
+- **Selective restore:** Merge or replace only the categories you selected.
+- **Storage details & recovery:** See where local storage is used and create a safety snapshot before selected risky operations.
+- **Control Center checks:** Test data health and backup/migration compatibility without writing to saved data.
+- **Local data cleanup:** Find duplicates or orphaned records; cleanup only runs when you choose it.
 - Recently Seen history is a separate selectable backup/import/storage category.
 - Chatbot Editor Draft History and pinned Smart Filter presets are separate selectable backup/import/storage categories.
 
 
 ## Planned
-- **Planned — Bot Recovery Assistant:** build a reviewable remake draft for a deleted bot from exact saved profile fields plus surviving chat history. Recovered data and AI-reconstructed Personality/Scenario stay clearly labeled and separate, and nothing is published automatically.
+- **AND/OR tag search:** Optional Any/All matching for selected search tags, keeping SpicyChat’s normal AND behavior as the default. First confirm how to combine results efficiently without opening many helper tabs.
+- **Native Memory improvement assistant:** Review the original Memory, proposed wording and overlapping details before approving a correction. Backups and approval would be required.
+- **Native Lorebook update/delete & Archive cleanup:** Verify SpicyChat's actual save and delete behavior, then add recovery and ownership checks before allowing changes to existing entries.
+- **Context Keeper follow-ups:** Improve nuanced contradiction review and integration testing, without making automatic changes to story canon.
+- **Bot Recovery Assistant:** Make a reviewable draft for a lost bot from real saved profile/chat data. Reconstructed material must be clearly labeled and never published automatically.

@@ -43,6 +43,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
     "replyInstructionOocWrapper",
     "replyInstructionShowChatButton"
   ],
+  "native-memory-probe": ["nativeMemoryQualityProbe"],
   "context-keeper": [
     "enableContextKeeper",
     "contextKeeperAutoCapture",

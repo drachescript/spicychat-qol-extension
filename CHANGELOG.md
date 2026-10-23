@@ -1,3 +1,28 @@
+## 0.2.58
+- Kept privacy-safe support and performance history across extension updates, compressed older history when needed, and added large .gz downloads plus a Clear history button.
+- Made Settings descriptions, the Simple Feature Guide and the feature list easier to understand, including clearer explanations for experimental Memory and Lorebook tools.
+- Improved experimental native Memory checks using the authenticated session already captured by QoL, with clearer check status and retry information.
+- Added an optional compact context-usage meter with source-aware estimates and clearer context-limit explanations.
+- Corrected Listing Refill to respect all selected native search tags and reduced repeated tag-filter checks.
+- Separated experimental Native Memory Improvements from Context Keeper Settings, improved Memory quality checks and added safer API retry cooldowns.
+- Improved the local Lorebook keyword tester with the same matching rules and context-budget preview used by outgoing recall.
+- Reduced default Context Keeper overhead by processing only the active conversation, paging large saved-detail lists, and reusing message text classification within mutation batches.
+- Prevented Context Keeper edits from different tabs overwriting other conversations; stale same-chat edits now require refresh. Legacy fact imports use the same protected save path.
+- Reduced Context Keeper capture and recall processing using cached message roots and only the current conversation’s saved facts, and tightened the read-only Archive cleanup preview for incomplete Lorebook entry results.
+- Improved Context Keeper and private Archive safeguards against stale facts, added a read-only Archive cleanup preview, and labeled experimental Lorebook/Archive features as still needing testing.
+- Fixed simultaneous local Lorebook edits in multiple tabs overwriting each other, with confirmed saves and stale-edit protection.
+- Fixed rapid consecutive bot blocks losing saved IDs, and changed the Block button to wait for confirmed storage before hiding a bot.
+- Improved Context Keeper-linked local Lorebook revisions so outdated fact sources no longer keep entries eligible for automatic recall.
+- Kept Context Keeper-linked Lorebook recall aligned with reviewed current facts, suppressing outdated versions until reapproved, and skipped local recall processing while disabled.
+- Improved local Lorebook proposals to follow Context Keeper fact revisions, reuse linked entries, and preserve a small recoverable edit history.
+- Added reviewed restoration of a previous local Lorebook revision as inactive, without editing native Lorebooks.
+- Reduced cached chat-message connectivity checks and loaded Context Keeper review proposals in smaller batches for lower default long-chat and mobile overhead.
+- Prevented a queued QoL guidance send from clicking Send after switching conversations or changing the prepared draft.
+- Reduced routine chat-observer work during typing by skipping page-wide mutation classification for composer-only changes.
+- Reduced repeated local Lorebook toolbar and native Memory-button scans during long chats without disabling those controls.
+- Improved the Context Keeper-to-local-Lorebook review queue by prioritizing recent suggestions and preventing duplicate entry names.
+- Improved approved private Archive synchronization by processing additional recent facts in bounded follow-up batches, while preserving explicit consent, ownership checks and no-retry safety for uncertain writes.
+
 ## 0.2.57
 - Reduced repeated chat-header and composer-control repair passes after native interface remounts, with built-in coalescing to keep mobile interactions responsive.
 - Added optional recent-message keyword matching and configurable shared QoL OOC context limits without continuous chat scanning.

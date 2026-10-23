@@ -389,8 +389,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return { include: unique(include), exclude: unique(exclude) };
   }
 
+  let cachedNativeTagUrl='',cachedNativeTagRules=null;
   function currentNativeTagRules() {
-    return nativeTagRulesFromUrl(location.href);
+    const href=location.href;
+    if(cachedNativeTagRules && cachedNativeTagUrl===href)return cachedNativeTagRules;
+    cachedNativeTagUrl=href;
+    cachedNativeTagRules=nativeTagRulesFromUrl(href);
+    return cachedNativeTagRules;
   }
 
   function metadataTagSet(meta, wrapper) {
@@ -405,6 +410,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function nativeTagRejection(meta, wrapper, rules = currentNativeTagRules()) {
+    // Most listings have no native tag refinements. Avoid examining every
+    // candidate card's buttons in that case (especially on refill pages).
+    if(!(rules?.include?.length || rules?.exclude?.length))return '';
     const tags = metadataTagSet(meta, wrapper);
     if (!tags.size) return "";
 
@@ -412,8 +420,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (excluded) return `excluded tag "${excluded}"`;
 
     const includes = rules.include || [];
-    if (includes.length && !includes.some(tag => tags.has(String(tag).toLocaleLowerCase()))) {
-      return `missing included tag (${includes.join(" / ")})`;
+    if (includes.length && !includes.every(tag => tags.has(String(tag).toLocaleLowerCase()))) {
+      return `missing required included tag (${includes.filter(tag => !tags.has(String(tag).toLocaleLowerCase())).join(" + ")})`;
     }
     return "";
   }
@@ -1177,7 +1185,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (id && (known.has(id) || rejectedIds.has(id))) {
       return { kind: "duplicate", reason: kind === "lorebook" ? "duplicate Lorebook id" : "duplicate bot id", id };
     }
-    if (kind !== "lorebook" && id && DS.state.blockedBotIdSet?.has(id)) {
+    if (kind !== "lorebook" && id && DS.state.blockedBotIdSet?.has(id) && DS.pendingBlockedBotAdds?.get(id)?.state !== "pending") {
       return { kind: "blocked", reason: `blocked bot id: ${id}`, id };
     }
 

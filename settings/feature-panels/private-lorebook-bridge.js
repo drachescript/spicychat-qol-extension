@@ -7,7 +7,10 @@
   if (!host)return;
   const section=document.createElement('section');section.className='card';
   const h=document.createElement('h2');h.textContent='Private Lorebook Bridge';section.append(h);
-  const p=document.createElement('p');p.className='hint';p.textContent='Only your own private bot and its one attached private Lorebook. The optional shared private Archive Lorebook is only for storing history and is never connected to a bot by QoL. Context Keeper remains standalone.';section.append(p);
+  const p=document.createElement('p');p.className='hint';p.textContent='Only works with a private bot you own and its attached private Lorebook. The shared private Archive stores older facts separately; QoL never attaches it to any bot. Context Keeper works without this.';section.append(p);
+  const experimental=document.createElement('p');experimental.className='hint';
+  experimental.textContent='Experimental — still needs testing. Keep backups and check changes in SpicyChat. Updating or deleting existing native entries and remote Archive cleanup are still manual.';
+  section.append(experimental);
   function checkbox(id,label) {
     const row=document.createElement('label');row.className='row';
     const input=document.createElement('input');input.id=id;input.type='checkbox';
@@ -18,15 +21,15 @@
     const input=document.createElement('select');input.id=id;
     for(const [key,description] of choices){const option=document.createElement('option');option.value=key;option.textContent=description;input.append(option);}row.append(input);section.append(row);return input;
   }
-  checkbox('enablePrivateLorebookBridge','Enable Private Lorebook Bridge (off by default)');
-  select('privateLorebookStorageMode','Archive storage backend',[['local','Browser IndexedDB'],['archive','Private Archive Lorebook (not connected to bots)'],['hybrid','Hybrid (local + private Archive Lorebook)']]);
-  const idLabel=document.createElement('label');idLabel.textContent='Shared private Archive Lorebook ID (optional; one across all conversations)';
+  checkbox('enablePrivateLorebookBridge','Enable private Lorebook connection (OFF by default)');
+  select('privateLorebookStorageMode','Where should old facts be stored?',[['local','Local browser storage'],['archive','Shared private Archive (never attached by QoL)'],['hybrid','Both local storage and private Archive']]);
+  const idLabel=document.createElement('label');idLabel.textContent='Shared Archive Lorebook ID (same Archive for all conversations)';
   const idField=document.createElement('input');idField.id='privateLorebookArchiveId';idField.placeholder='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';idField.maxLength=36;
   idLabel.append(idField);section.append(idLabel);
   const setup=document.createElement('button');setup.type='button';setup.id='dsSetupPrivateArchiveLorebook';
-  setup.textContent='Setup Private Archive Lorebook';
+  setup.textContent='Set up private Archive Lorebook';
   const setupStatus=document.createElement('p');setupStatus.className='hint';setupStatus.setAttribute('role','status');
-  setupStatus.textContent='Creates or reuses one private Archive Lorebook with the actual QoL picture. QoL never connects it to a bot.';
+  setupStatus.textContent='Creates or reuses a private Archive with the QoL picture. QoL won\'t attach it to a bot.';
   section.append(setup,setupStatus);
   const archiveSettingsKey='dsSettingV1:privateLorebookArchiveId';
   chrome.storage.onChanged.addListener((changes,area)=>{
@@ -55,17 +58,17 @@
     } catch(err) {setupStatus.textContent='Archive setup failed: '+String(err?.message||err);setup.disabled=false;}
   });
 
-  select('privateLorebookSyncMode','Synchronization',[['manual','Manual only'],['on-change','On relevant changes (requires configured archive)'],['off','No archive synchronization']]);
-  checkbox('privateLorebookAllowArchiveAutoSync','I approve automatic uploads of newly approved Context Keeper details to my configured private Archive Lorebook');
-  const cleanup=checkbox('privateLorebookArchiveCleanup','Future cleanup preference: remove redundant archived data after verified promotion (not active yet)');cleanup.disabled=true;
-  select('privateLorebookPromotionPolicy','Native promotion policy',[['shared','Shared bot canon only'],['both','Allow conversation facts with explicit warning'],['manual','Manual review only']]);
-  checkbox('privateLorebookRequireReview','Require review in the native Lorebook editor (recommended)');
-  const autoCreate=checkbox('privateLorebookAllowAutoCreate','Allow unreviewed native entry CREATION when review is off (at your own risk)');
+  select('privateLorebookSyncMode','When should Archive data sync?',[['manual','Only when I choose'],['on-change','When approved facts change (needs an Archive)'],['off','Do not sync to Archive']]);
+  checkbox('privateLorebookAllowArchiveAutoSync','Allow uploading approved Context Keeper facts to my private Archive automatically');
+  const cleanup=checkbox('privateLorebookArchiveCleanup','Remove redundant Archive copies after confirmed promotion (not available yet)');cleanup.disabled=true;
+  select('privateLorebookPromotionPolicy','Which facts can become shared bot lore?',[['shared','Only facts that apply to every chat with this bot'],['both','Allow chat-specific facts (with warning)'],['manual','Manual review only']]);
+  checkbox('privateLorebookRequireReview','Review changes in SpicyChat before saving (recommended)');
+  const autoCreate=checkbox('privateLorebookAllowAutoCreate','Allow creating new native entries without review (risky)');
   autoCreate.disabled=false;
   const previewNote=document.createElement('p');previewNote.className='hint';
-  previewNote.textContent='Reviewed entry handoff is available. Direct entry creation is experimental: it runs only with an available authenticated extension session, verifies private ownership and readback, and will not retry uncertain writes. Native existing-entry changes and deletion remain manual.';
+  previewNote.textContent='You can review entries in SpicyChat\'s editor. Direct creation is experimental and checks that the bot and Lorebook are yours. If a save is uncertain, QoL won\'t retry it blindly. Editing or deleting existing native entries is still manual.';
   section.append(previewNote);
-  const warn=document.createElement('p');warn.className='hint';warn.textContent='Unreviewed mode can introduce incorrect canon in every chat with the same bot. Private ownership, association checks, recorded local revisions and duplicate prevention remain mandatory. Existing-entry updates and deletion are NOT automated in this build.';section.append(warn);
+  const warn=document.createElement('p');warn.className='hint';warn.textContent='Without review, incorrect details could affect every chat with that bot. Ownership and duplicate checks still apply. Existing entries won\'t be edited or deleted automatically.';section.append(warn);
   const readers=window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
   const loaders=window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
   const boolKeys=['enablePrivateLorebookBridge','privateLorebookArchiveCleanup','privateLorebookRequireReview','privateLorebookAllowAutoCreate','privateLorebookAllowArchiveAutoSync'];

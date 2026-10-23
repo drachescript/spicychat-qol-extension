@@ -408,7 +408,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       };
     }
 
-    await DS.saveBlockedBots();
+    const pendingBlock = id ? DS.notePendingBotBlock?.(id, blockedBots.meta?.[id]) : null;
+    try {
+      await DS.saveBlockedBots();
+      if (id && !(await DS.confirmBotBlockStored(id))) throw new Error("Blocked bot was not found in saved storage");
+      if (id) DS.finishPendingBotBlock?.(id, pendingBlock, true);
+    } catch (error) {
+      if (id) DS.finishPendingBotBlock?.(id, pendingBlock, false);
+      // Only roll back this attempted block; never restore a stale copy of
+      // the entire list while another bot's block may be in progress.
+      if (id && !(beforeBlocked.ids || []).includes(id)) {
+        DS.state.blockedBots.ids = (DS.state.blockedBots.ids || []).filter(value => value !== id);
+        if (DS.state.blockedBots.meta) delete DS.state.blockedBots.meta[id];
+        DS.refreshFastLookupCaches?.();
+      }
+      if (name && !(beforeBlocked.names || []).includes(name)) {
+        DS.state.blockedBots.names = (DS.state.blockedBots.names || []).filter(value => value !== name);
+      }
+      DS.setQuickStatus?.("Could not save that block. Please retry.");
+      return { ok: false, error: "storage-failed", id };
+    }
     await DS.recordLocalChange?.(`Blocked bot: ${name || id || "bot"}`, { [DS.BLOCKED_BOTS_KEY]: beforeBlocked }, { [DS.BLOCKED_BOTS_KEY]: JSON.parse(JSON.stringify(DS.state.blockedBots || blockedBots)) });
 
     DS.setQuickStatus?.(
@@ -489,25 +508,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
 
     const blockedMeta = blockedBots.meta[id];
+    const pendingBlock = DS.notePendingBotBlock?.(id, blockedMeta);
     const hideTarget = DS.getBestHideTarget?.(card) || card;
 
-    // Blocking should feel instant. The old order waited for the full blocked
-    // list to serialize/write before hiding the card, which became several
-    // seconds once that list grew large.
-    DS.hideCard?.(card, "card:blocked bot");
-    DS.updateQuickPanel?.();
-
+    // Leave the card visible while the save is pending. A 100-300ms pause is
+    // preferable to making a failed block look successful.
     try {
       await DS.saveBlockedBots();
+      if (!(await DS.confirmBotBlockStored(id))) throw new Error("Blocked bot was not found in saved storage");
+      DS.finishPendingBotBlock?.(id, pendingBlock, true);
     } catch (error) {
-      DS.state.blockedBots = beforeBlocked;
-      DS.refreshFastLookupCaches?.();
-      if (hideTarget?.dataset?.dsReason === "card:blocked bot") DS.unhideElement?.(hideTarget);
+      DS.finishPendingBotBlock?.(id, pendingBlock, false);
+      // Never restore the entire old list: another rapid block may have
+      // completed while this save was pending. Undo only this ID if it was new.
+      if (!(beforeBlocked.ids || []).includes(id)) {
+        DS.state.blockedBots.ids = (DS.state.blockedBots.ids || []).filter(value => value !== id);
+        if (DS.state.blockedBots.meta) delete DS.state.blockedBots.meta[id];
+        DS.refreshFastLookupCaches?.();
+        if (hideTarget?.dataset?.dsHidden === "1" && String(hideTarget.dataset.dsReason || "").includes("blocked bot")) DS.unhideElement?.(hideTarget);
+      }
       DS.updateQuickPanel?.();
-      DS.setQuickStatus?.("Could not save that block. The card was restored.");
+      DS.setQuickStatus?.("Could not save that block. Please retry.");
       throw error;
     }
 
+    // A recycled React card must never be hidden for the previously clicked bot.
+    const liveAnchor = card?.querySelector?.("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
+    const liveId = DS.botIdFromHref?.(liveAnchor?.href || "") || DS.chatIdFromHref?.(liveAnchor?.href || "");
+    if (liveId === id && card?.isConnected) DS.hideCard?.(card, `card:blocked bot id: ${id}`);
+    DS.updateQuickPanel?.();
     try {
       await DS.recordLocalChange?.(`Blocked bot: ${blockedBots.meta?.[id]?.name || id}`, { [DS.BLOCKED_BOTS_KEY]: beforeBlocked }, { [DS.BLOCKED_BOTS_KEY]: JSON.parse(JSON.stringify(DS.state.blockedBots || blockedBots)) });
     } catch {}
@@ -592,7 +621,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
                    existingButton.disabled && existingButton.dataset.dsBlockInFlight !== "1") {
           existingButton.disabled = false;
         }
-        if (liveId && DS.state.blockedBotIdSet?.has(liveId)) {
+        if (liveId && DS.state.blockedBotIdSet?.has(liveId) && DS.pendingBlockedBotAdds?.get(liveId)?.state !== "pending") {
           DS.hideCard?.(card, `card:blocked bot id: ${liveId}`);
         }
         skipped++;
@@ -633,11 +662,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
           blockButton.disabled = true;
           blockButton.dataset.dsBlockInFlight = "1";
+          blockButton.title = "Saving block…";
+          blockButton.setAttribute("aria-label", "Saving block");
           // React can recycle an existing bot card without removing QoL's X.
           // Resolve the *current* anchor at click time, not the link captured
           // when the button was first created.
           const currentAnchor = card.querySelector?.("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
           const clickedId = DS.botIdFromHref?.(currentAnchor?.href || "") || DS.chatIdFromHref?.(currentAnchor?.href || "");
+          if (!clickedId) {
+            blockButton.disabled = false;
+            delete blockButton.dataset.dsBlockInFlight;
+            DS.setQuickStatus?.("Could not detect that bot. Try again.");
+            return;
+          }
           try {
             const result = await DS.blockBotFromCard(card, currentAnchor);
             const newestAnchor = card.querySelector?.("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']");
@@ -653,6 +690,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             DS.runtimeLog?.("warn", "card-block", String(error?.message || error));
           } finally {
             delete blockButton.dataset.dsBlockInFlight;
+            blockButton.title = "Block this bot";
+            blockButton.setAttribute("aria-label", "Block this bot");
           }
         },
         true

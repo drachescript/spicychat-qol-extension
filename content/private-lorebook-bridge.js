@@ -124,8 +124,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         'SpicyChat supplied only a partial entry list or no entries; unlisted records are NOT counted as deleted.')+
       ' Pending and mismatched records are never retried or overwritten by this check.';
   }
+  // Read-only preview for *potential* Archive cleanup. A remotely uploaded
+  // Archive record is not redundant just because a local native handoff was
+  // queued: require two concrete native entry IDs and compare both readbacks.
+  function inspectArchiveCleanup(records, archive, attached, s, factMap) {
+    const archives=new Map((Array.isArray(archive?.entries)?archive.entries:[])
+      .filter(row=>UUID.test(row?.id)).map(row=>[String(row.id).toLowerCase(),row]));
+    const natives=new Map((Array.isArray(attached?.entries)?attached.entries:[])
+      .filter(row=>UUID.test(row?.id)).map(row=>[String(row.id).toLowerCase(),row]));
+    // A partial entry page is never sufficient evidence for safe cleanup.
+    // Even a matching entry cannot certify uniqueness if the rest are hidden.
+    const complete = [archive,attached].every(book => {
+      const count=Number(book?.num_entries);
+      return Array.isArray(book?.entries) && Number.isSafeInteger(count) && count>=0 &&
+        book.entries.length>=count && new Set(book.entries.map(item=>String(item?.id||'').toLowerCase())).size>=count;
+    });
+    const result={total:records.length,eligible:[],notVerifiable:0,notPromoted:0,conflicts:0,complete};
+    for(const record of records) {
+      const remote=record?.remote,native=record?.native;
+      const fact=factMap?.get(record?.detailId);
+      if (!record?.sourceText || !fact || fact.enabled===false || fact.needsReview ||
+          fact.supersededBy || String(fact.text||'').trim()!==record.sourceText) {
+        result.notPromoted++;continue;
+      }
+      if(!UUID.test(remote?.id) || remote.status!=='confirmed' || remote.stale===true ||
+         String(remote.bookId||'').toLowerCase()!==String(archive?.id||'').toLowerCase() ||
+         !UUID.test(native?.id) || native.verifiedCreated!==true || native.stale===true ||
+         String(native.bookId||'').toLowerCase()!==String(attached?.id||'').toLowerCase()) {
+        result.notPromoted++;continue;
+      }
+      if(!complete) {result.notVerifiable++;continue;}
+      const archived=archives.get(String(remote.id).toLowerCase());
+      const saved=natives.get(String(native.id).toLowerCase());
+      if(!archived || !saved || typeof saved.content!=='string') {
+        result.notVerifiable++;continue; // May be a paginated response, not a deletion.
+      }
+      const parsed=recovery.parse(archived,s);
+      if(!parsed || parsed.detailId!==record.detailId || parsed.content!==record.content ||
+         norm(saved.content)!==norm(record.content) || norm(saved.name,50)!==norm(record.name,50)) {
+        result.conflicts++;continue;
+      }
+      result.eligible.push({detailId:record.detailId,archiveEntryId:remote.id,nativeEntryId:native.id});
+    }
+    return result;
+  }
   async function createEntry(bookId, entry, s, confirmed, accountId) {
     if (!confirmed || !sameRoute(s)) throw new Error('No longer authorized for this conversation.');
+    await requireCurrentReviewedFact(s,{id:entry.detailId,text:entry.record?.sourceText});
     // Refresh the authority before EVERY native write, not just when opening the modal.
     const check = await verifyBot(s);
     if (check.accountId !== accountId || check.bookId !== bookId) throw new Error('Bot/Lorebook association changed.');
@@ -134,10 +179,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (already || before.some(x=>x.detailId === entry.detailId && ['pending','handoff'].includes(x.native?.status))) throw new Error('This fact already has a native entry, pending review, or unresolved write. Do not create a duplicate.');
     if ((check.book?.entries||[]).some(row=>norm(row?.name,50).toLowerCase()===entry.payload.name.toLowerCase())) throw new Error('An entry with this name already exists in the attached Lorebook. Review it instead of duplicating.');
     const grant=await DS.privateLorebookAuth.prepareEntryCreate(s);
+    await requireCurrentReviewedFact(s,{id:entry.detailId,text:entry.record?.sourceText});
     await local.put({...entry.record,native:{status:'pending',bookId,requestedAt:Date.now()}},'Native entry creation pending');
     let created;
-    try {created=await DS.privateLorebookAuth.createEntry({scope:s,accountId,bookId,detailId:entry.detailId,
-      mode:'native-auto',entry:entry.payload,grant});}
+    try {
+      await requireCurrentReviewedFact(s,{id:entry.detailId,text:entry.record?.sourceText});
+      created=await DS.privateLorebookAuth.createEntry({scope:s,accountId,bookId,detailId:entry.detailId,
+        mode:'native-auto',entry:entry.payload,grant});
+    }
     catch(error) {
       if(error?.ambiguous!==true)await local.put(entry.record,'Native creation rejected before write');
       throw error;
@@ -162,6 +211,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const category = norm(detail.category || 'Fact',30);
     const phrase = text.split(/[.!?\n]/)[0].slice(0,48).trim();
     return {name:norm(`${category.charAt(0).toUpperCase()+category.slice(1)}: ${phrase}`,50),keywords:[],content:text};
+  }
+  // A modal may remain open while Context Keeper replaces a fact, or while
+  // another tab changes it. Re-read the authoritative conversation record
+  // before every handoff/write. Never promote a stale UI snapshot to canon.
+  async function requireCurrentReviewedFact(s, snapshot) {
+    if (!sameRoute(s)) throw new Error('Conversation changed. Reopen Context Keeper.');
+    const data=await new Promise((resolve,reject)=>chrome.storage.local.get(['contextKeeperData'],
+      value=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(value)));
+    const details=data?.contextKeeperData?.[`conversation:${s.conversationId}`]?.details;
+    const live=Array.isArray(details)?details.find(item=>item?.id===snapshot?.id):null;
+    if (!live || live.enabled===false || live.needsReview || live.supersededBy ||
+        !String(live.text||'').trim() || String(live.text||'').trim()!==String(snapshot?.text||'').trim()) {
+      throw new Error('This Context Keeper fact has changed, was disabled, or needs review. Reopen the manager before saving.');
+    }
+    if (!sameRoute(s)) throw new Error('Conversation changed. Reopen Context Keeper.');
+    return live;
   }
   function detailList(raw, s) {
     const key = `conversation:${s.conversationId}`;
@@ -190,8 +255,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }));
     if(!imported.length)return 0;
     if(!sameRoute(s))throw new Error('Conversation changed.');
-    data[key]={...existing,details:[...details,...imported]};
-    await new Promise((resolve,reject)=>chrome.storage.local.set({contextKeeperData:data},()=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve()));
+    if(typeof DS.saveContextKeeperConversationPatch !== 'function')
+      throw new Error("Context Keeper protected save helper is unavailable.");
+    await DS.saveContextKeeperConversationPatch(key, result.contextKeeperData?.[key] ?? null,
+      {...existing,details:[...details,...imported]});
     return imported.length;
   }
   async function collect(s) {
@@ -199,11 +266,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return detailList(data?.contextKeeperData,s);
   }
   async function archiveRecord(owner,s,detail,payload,existing) {
-    const different = !!existing && (existing.content !== payload.content || existing.name !== payload.name || JSON.stringify(existing.keywords||[]) !== JSON.stringify(payload.keywords));
+    const live=await requireCurrentReviewedFact(s,detail);
+    const sourceText=String(live.text||'').trim();
+    const different = !!existing && (existing.content !== payload.content || existing.name !== payload.name ||
+      JSON.stringify(existing.keywords||[]) !== JSON.stringify(payload.keywords) ||
+      (existing.sourceText && existing.sourceText !== sourceText));
     if (different && existing?.remote?.status === 'pending')
       throw new Error('This fact has an uncertain Archive write. Reconcile the pending entry before revising it.');
     const record = {...existing,accountId:owner,botId:s.botId,conversationId:s.conversationId,detailId:detail.id,
-      content: payload.content, name:payload.name, keywords:payload.keywords, sourceMessageId:norm(detail.messageId,120),
+      content: payload.content, name:payload.name, keywords:payload.keywords, sourceText,
+      sourceMessageId:norm(detail.messageId,120),
       source:'context-keeper', createdAt:existing?.createdAt || Date.now(), status:existing?.status || 'stored'};
     if (different && record.remote?.id) record.remote = {...record.remote,stale:true};
     if (different && record.native?.id) record.native = {...record.native,stale:true};
@@ -212,6 +284,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Archives use unguessable synthetic keywords, NOT story keywords: they are never meant to trigger native context.
   async function syncArchive(accountId, s, record, target, interactive = true) {
     if (!sameRoute(s)) throw new Error('Conversation changed.');
+    await requireCurrentReviewedFact(s,{id:record.detailId,text:record.sourceText});
     if (record.remote?.stale) throw new Error('Archive entry differs from the local fact. Existing-entry updating is not verified; review it manually.');
     if (record.remote?.id && record.remote.bookId === target.id) return record;
     if (['pending','handoff'].includes(record.remote?.status)) throw new Error('Archive write requires manual reconciliation; automatic retry blocked.');
@@ -226,10 +299,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const payload={name:`QoL Archive ${s.botId.slice(0,7)} ${slug}`.slice(0,50),keywords:[`qol-archive-${slug}`],content};
     // Acquire a usable session BEFORE leaving a pending write-ahead marker.
     const grant=await DS.privateLorebookAuth.prepareEntryCreate(s);
+    await requireCurrentReviewedFact(s,{id:record.detailId,text:record.sourceText});
     await local.put({...record,remote:{status:'pending',bookId:target.id,requestedAt:Date.now()}},'Archive write pending');
     let response;
-    try {response=await DS.privateLorebookAuth.createEntry({scope:s,accountId,bookId:target.id,
-      detailId:record.detailId,mode:interactive?'archive-manual':'archive-auto',entry:payload,grant});}
+    try {
+      await requireCurrentReviewedFact(s,{id:record.detailId,text:record.sourceText});
+      response=await DS.privateLorebookAuth.createEntry({scope:s,accountId,bookId:target.id,
+        detailId:record.detailId,mode:interactive?'archive-manual':'archive-auto',entry:payload,grant});
+    }
     catch(error) {
       // Background preflight definitively blocked the request. Only then may
       // the pending marker be cleared; unknown POST results remain pending.
@@ -245,7 +322,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const overlay = node('div',null,'ds-private-lb-overlay');overlay.id=MODAL;
     const dialog = node('div',null,'ds-private-lb-dialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
     dialog.setAttribute('aria-label','Private Lorebook Bridge');
-    dialog.append(node('h2','Context Keeper → Private Lorebook'),node('p','Only your private bot and its verified, private, attached Lorebook may be edited. Your shared Archive Lorebook is storage only.'));
+    dialog.append(node('h2','Context Keeper → Private Lorebook'),node('p','Only your private bot and its verified, private, attached Lorebook may be edited. Your shared Archive Lorebook is storage only.'),
+      node('p','Experimental — still needs testing. Review every saved fact, keep backups, and verify native Archive writes/readback before relying on this for long-term continuity. Existing-entry native updates/deletes and remote Archive cleanup are not automated.'));
     const status=node('p','Checking ownership…','ds-private-lb-status');status.setAttribute('role','status');
     const close=node('button','Close');close.type='button';close.addEventListener('click',()=>overlay.remove());dialog.append(close,status);
     overlay.append(dialog);document.body.append(overlay);
@@ -283,6 +361,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // identifiers and content, and restore link metadata after explicit review.
       // Never retry a POST, edit a native entry, or infer a deletion from a
       // partial paginated response.
+      async function previewArchiveCleanup() {
+        if(!sameRoute(s)) throw new Error('Conversation changed.');
+        const current=await verifyBot(s);
+        if(current.accountId!==context.accountId || current.bookId!==context.bookId)
+          throw new Error('Private bot or Lorebook ownership changed.');
+        const archiveId=norm(settings().privateLorebookArchiveId,36).toLowerCase();
+        if(!UUID.test(archiveId))throw new Error('Configure a shared private Archive first.');
+        const archive=await verifyArchive(context.accountId,archiveId,context.bookId);
+        const records=await local.list(context.accountId,s.botId,s.conversationId);
+        const keeper=await new Promise((resolve,reject)=>chrome.storage.local.get(['contextKeeperData'],
+          v=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(v)));
+        const facts=keeper?.contextKeeperData?.[`conversation:${s.conversationId}`]?.details;
+        const factMap=new Map((Array.isArray(facts)?facts:[]).filter(item=>item?.id).map(item=>[item.id,item]));
+        if(!sameRoute(s))throw new Error('Conversation changed.');
+        const result=inspectArchiveCleanup(records,archive,current.book,s,factMap);
+        status.textContent=`Read-only Archive cleanup preview: ${result.eligible.length} potentially redundant `+
+          `remote entry(s), ${result.notPromoted} not confirmed as promoted, `+
+          `${result.notVerifiable} not verifiable from loaded native pages, and `+
+          `${result.conflicts} content conflicts. Nothing was deleted or changed. `+
+          `Remote cleanup remains unavailable until safe deletion and restoration are verified.`;
+      }
+      function addCleanupPreview(parent) {
+        const btn=node('button','Preview Archive cleanup (read only)');btn.type='button';
+        btn.addEventListener('click',async()=>{btn.disabled=true;
+          try {await previewArchiveCleanup();}catch(error){status.textContent=String(error?.message||error);}
+          finally{btn.disabled=false;}
+        });parent.append(btn);
+      }
       async function recoverArchiveRecords() {
         const archiveId=norm(settings().privateLorebookArchiveId,36).toLowerCase();
         if(!UUID.test(archiveId)) throw new Error('Configure a private Archive Lorebook first.');
@@ -407,6 +513,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
         dialog.append(verifyButton);
         addAuditButton(dialog);
+        addCleanupPreview(dialog);
         addRecoveryButton(dialog);
         addKeeperRecoveryButton(dialog);
         dialog.append(node('p','No approved active Context Keeper facts for this conversation yet. You can still recover locally saved Archive facts above.'));
@@ -433,13 +540,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         status.textContent=detail.needsReview?'This fact needs review before native promotion.':`Source: ${detail.source || 'Context Keeper'} · ${detail.messageId || 'manual'}`;
       }
       selector.addEventListener('change',applySelected);applySelected();
-      function selectedRecord(forNative=false) {
+      async function selectedRecord(forNative=false) {
         if(forNative && !sharedCanon.checked) throw new Error('Confirm that this is shared bot canon before promoting it to the attached Lorebook.');
         const detail=details.find(x=>x.id===selector.value);
         if (!detail) throw new Error('Choose a valid source fact.');
-        if (detail.needsReview) throw new Error('This detail still needs review in Context Keeper.');
+        const current=await requireCurrentReviewedFact(s,detail);
         const payload=validateEntry({name:name.value,keywords:sortedUniqueKeywords(keywords.value),content:content.value});
-        return {detail,payload};
+        return {detail:current,payload};
       }
       const buttons=node('div',null,'ds-private-lb-buttons');dialog.append(buttons);
       function button(title,handler) {
@@ -456,16 +563,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       button('Check Archive status (read only)',checkConfiguredArchive);
       button('Verify saved Archive entries (read only)',auditConfiguredArchive);
+      addCleanupPreview(buttons);
       addRecoveryButton(buttons);
       addKeeperRecoveryButton(buttons);
       button('Save to local archive',async()=>{
-        const {detail,payload}=selectedRecord();if(!sameRoute(s))throw new Error('Conversation changed.');
+        const {detail,payload}=await selectedRecord();if(!sameRoute(s))throw new Error('Conversation changed.');
         const key=local.keyOf({accountId:context.accountId,botId:s.botId,conversationId:s.conversationId,detailId:detail.id});
         await archiveRecord(context.accountId,s,detail,payload,await local.get(key));
         status.textContent='Saved to browser IndexedDB with a revision backup.';
       });
       if (['archive','hybrid'].includes(settings().privateLorebookStorageMode)) button('Review Archive entry in native editor',async()=>{
-        const {detail,payload}=selectedRecord();
+        const {detail,payload}=await selectedRecord();
         const archiveId=norm(settings().privateLorebookArchiveId,36).toLowerCase();
         const checked=await verifyBot(s);
         if(checked.accountId!==context.accountId || checked.bookId!==context.bookId)
@@ -493,7 +601,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         status.append(document.createTextNode('. Select Review Archive entry, inspect the filled fields, then press native Save. Reconcile the saved entry afterward.'));
       });
       if (['archive','hybrid'].includes(settings().privateLorebookStorageMode) && DS.privateLorebookAuth?.entryCreateSupported===true) button('Send to private Archive Lorebook',async()=>{
-        const {detail,payload}=selectedRecord();
+        const {detail,payload}=await selectedRecord();
         const archiveId=norm(settings().privateLorebookArchiveId,36).toLowerCase();
         if (!UUID.test(archiveId)) throw new Error('Set the one shared Archive Lorebook ID in Settings first.');
         const target=await verifyArchive(context.accountId,archiveId,context.bookId);
@@ -503,14 +611,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         status.textContent='Archive entry created and linked to the local source; never attached to a bot.';
       });
       button('Review in native attached Lorebook',async()=>{
-        const {detail,payload}=selectedRecord(true);
+        const {detail,payload}=await selectedRecord(true);
         const current=await verifyBot(s);
         if(current.accountId!==context.accountId||current.bookId!==context.bookId)throw new Error('Attachment changed.');
         const record=await archiveRecord(context.accountId,s,detail,payload,
           await local.get(local.keyOf({accountId:context.accountId,botId:s.botId,conversationId:s.conversationId,detailId:detail.id})));
         if(record.native?.id || ['pending','handoff'].includes(record.native?.status))throw new Error('This source has an existing or pending native entry. Resolve or edit that entry instead of creating a duplicate.');
         const queued={schema:1,accountId:context.accountId,botId:s.botId,conversationId:s.conversationId,
-          bookId:context.bookId,detailId:detail.id,payload,queuedAt:Date.now()};
+          bookId:context.bookId,detailId:detail.id,sourceText:String(detail.text||'').trim(),payload,queuedAt:Date.now()};
         await local.put({...record,native:{status:'handoff',bookId:context.bookId,queuedAt:Date.now()}},'Native editor handoff queued');
         await new Promise((resolve,reject)=>chrome.storage.local.set({[PENDING]:queued},()=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve()));
         status.textContent='Queued for native editor review. ';
@@ -522,7 +630,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (settings().privateLorebookRequireReview === false && settings().privateLorebookAllowAutoCreate === true && settings().privateLorebookPromotionPolicy !== 'manual' && DS.privateLorebookAuth?.entryCreateSupported === true) {
         button('Create native entry without review',async()=>{
           if(!confirm('Unreviewed native Lorebook creation can add incorrect canon to EVERY chat using this bot. Continue at your own risk?'))return;
-          const {detail,payload}=selectedRecord(true);
+          const {detail,payload}=await selectedRecord(true);
           const record=await archiveRecord(context.accountId,s,detail,payload,
             await local.get(local.keyOf({accountId:context.accountId,botId:s.botId,conversationId:s.conversationId,detailId:detail.id})));
           await createEntry(context.bookId,{record,detailId:detail.id,payload},s,true,context.accountId);
@@ -558,6 +666,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if(bot?.creator_user_id!==user||!['hidden','private'].includes(bot.visibility)||firstId(bot.lorebooks)!==queued.bookId)throw new Error('Bot ownership/association changed.');
         const lb=await api(`/lorebooks/${queued.bookId}?sortBy=priority&lastSortPriority=0`);
         if(lb?.creator_user_id!==user||lb.visibility!=='private')throw new Error('Lorebook ownership/visibility changed.');
+        // The editor is a different route: validate the queued conversation
+        // directly instead of relying on the current chat URL here.
+        const keeperData=await new Promise((resolve,reject)=>chrome.storage.local.get(['contextKeeperData'],
+          v=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(v)));
+        const source=keeperData?.contextKeeperData?.[`conversation:${queued.conversationId}`]?.details;
+        const latest=Array.isArray(source)?source.find(item=>item?.id===queued.detailId):null;
+        if(!queued.sourceText || !latest || latest.enabled===false || latest.needsReview ||
+           latest.supersededBy || String(latest.text||'').trim()!==queued.sourceText) {
+          throw new Error('The queued fact has changed or needs review. Discard this draft and reopen Context Keeper.');
+        }
         const add=document.querySelector("[data-testid='EntriesCreateHeader-AddEntryButton']");if(!add)throw new Error('Add Entry missing.');add.click();
         let name,content;
         for(let i=0;i<28;i++) {
@@ -599,20 +717,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try {
       const checked=await verifyBot(s);
       const target=await verifyArchive(checked.accountId,targetId,checked.bookId);
-      const facts=(await collect(s)).filter(item=>!item.needsReview).slice(0,75);
+      const facts=(await collect(s)).filter(item=>!item.needsReview).sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0)).slice(0,75);
       const records=await local.list(checked.accountId,s.botId,s.conversationId);
       const byId=new Map(records.map(item=>[item.detailId,item]));
       let done=0;
+      let moreFresh=false;
       for(const fact of facts) {
-        if(!sameRoute(s) || done>=2) break;
+        if(!sameRoute(s)) break;
         const previous=byId.get(fact.id);
         // Only newly established facts; no resync loops or mass imports on enable.
-        if (previous?.remote?.id || previous?.remote?.status === 'pending') continue;
+        if (previous?.remote?.id || ['pending','handoff'].includes(previous?.remote?.status)) continue;
         if (Date.now()-Number(fact.createdAt||0)>5*60*1000) continue;
+        if (done>=2) {moreFresh=true;break;}
         const safe=makePayload(fact);
         // For an archive we only require content, not keyword canon triggers.
         const record=await archiveRecord(checked.accountId,s,fact,safe,previous);
-        try {await syncArchive(checked.accountId,s,record,target,false);done++;}catch {break;}
+        try {await syncArchive(checked.accountId,s,record,target,false);done++;}
+        catch {moreFresh=false;break;} // No retry after a rejected/uncertain write.
+      }
+      // A single Context Keeper save may approve multiple facts. Finish later
+      // batches without needing another unrelated chat event. Bounded to two
+      // POSTs per batch; never schedule after an error or unclear save result.
+      if (moreFresh && done===2 && sameRoute(s) && !syncTimer) {
+        syncTimer=setTimeout(()=>{
+          syncTimer=0;
+          synchronizeRecent().catch(()=>{});
+        },35000);
       }
     } catch { /* Not authorized/offline/changed: fail closed, no retry storm. */ }
     finally {syncBusy=false;}
@@ -620,13 +750,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function onKeeperChanged(changes,area) {
     if(area!=='local'||!changes?.contextKeeperData || Date.now()-lastAutoRun<30000) return;
     clearTimeout(syncTimer);
-    syncTimer=setTimeout(()=>synchronizeRecent().catch(()=>{}),8000);
+    syncTimer=setTimeout(()=>{syncTimer=0;synchronizeRecent().catch(()=>{});},8000);
   }
   function manageSyncSubscription(enabled) {
     const wanted=enabled && settings().privateLorebookAllowArchiveAutoSync===true &&
       settings().privateLorebookSyncMode==='on-change' && ['hybrid','archive'].includes(settings().privateLorebookStorageMode);
     if (wanted&&!syncSubscribed) {chrome.storage.onChanged.addListener(onKeeperChanged);syncSubscribed=true;}
-    else if(!wanted&&syncSubscribed) {chrome.storage.onChanged.removeListener(onKeeperChanged);syncSubscribed=false;clearTimeout(syncTimer);}
+    else if(!wanted&&syncSubscribed) {chrome.storage.onChanged.removeListener(onKeeperChanged);syncSubscribed=false;clearTimeout(syncTimer);syncTimer=0;}
   }
   // Never add a button to the chat header. A chat URL alone does not establish
   // ownership or the presence of an attached private Lorebook.

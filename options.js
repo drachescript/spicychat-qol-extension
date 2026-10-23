@@ -2978,6 +2978,7 @@ let optimizeStoredDataRunning = false;
 $("optimizeStoredData")?.addEventListener("click", optimizeStoredData);
 $("stopOptimizeStoredData")?.addEventListener("click", () => { optimizeStoredDataStopRequested = true; });
 $("refreshStorageUsage")?.addEventListener("click", refreshStorageUsage);
+$("checkLocalStorageSizes")?.addEventListener("click", checkLocalStorageSizes);
 $("checkOrphanedLocalData")?.addEventListener("click", () => checkOrphanedLocalData().catch(() => showSettingsToast("Local-data check failed.")));
 $("createRecoverySnapshot")?.addEventListener("click", createManualRecoverySnapshot);
 $("loadRecoverySnapshot")?.addEventListener("click", loadRecoverySnapshotIntoImport);
@@ -2990,6 +2991,8 @@ $("copyAllSupportInfo")?.addEventListener("click", copyAllSupportInfo);
 
 
 $("downloadAllSupportInfo")?.addEventListener("click", downloadAllSupportInfo);
+$("dsSupportHistoryRefresh")?.addEventListener("click", refreshSavedSupportStatus);
+$("dsSupportHistoryClear")?.addEventListener("click", clearSavedSupportHistory);
 $("copyDiagnostics")?.addEventListener("click", copyDiagnostics);
 $("downloadDiagnostics")?.addEventListener("click", downloadDiagnostics);
 $("copyPerformanceReport")?.addEventListener("click", copyPerformanceReport);
