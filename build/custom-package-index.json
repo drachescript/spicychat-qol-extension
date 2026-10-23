@@ -672,9 +672,7 @@
       "runtime": "content/creator-workspace.js",
       "settings": [],
       "styles": [],
-      "background": [
-        "background/features/background-creator-watch.js"
-      ],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1168,9 +1166,7 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "styles": [
-        "content/styles/ooc.css"
-      ],
+      "styles": [],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"

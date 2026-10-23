@@ -147,6 +147,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
     await runStep("accessibility cleanup", () => DS.applyAccessibilitySettings?.());
+    await runStep("chat width cleanup", () => DS.applyChatWidthSettings?.());
     syncNativeScrollBackToTopVisibility();
     await runStep("scroll to top cleanup", () => DS.removeScrollToTopButton?.());
     await runStep("swipe navigation cleanup", () => DS.removeSwipeNavigation?.());

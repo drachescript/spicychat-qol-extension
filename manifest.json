@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.56",
+  "version": "0.2.57",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -74,6 +74,7 @@
         "content/tab-diagnostics.js",
         "content/quick-panel.js",
         "content/ui-layout-fixes.js",
+        "content/chat-width-controls.js",
         "content/accessibility.js",
         "content/command-palette.js",
         "content/tag-aliases.js",
@@ -167,12 +168,21 @@
         "content/story-day-tracker.js",
         "content/story-reading-layout.js",
         "content/rp-state-tracker.js",
+        "content/native-memory-probe.js",
         "content/context-keeper.js",
         "content/chat-nudges.js",
         "content/selection-memory.js",
         "content/message-options.js",
         "content/memory-manager.js",
         "content/chat-lorebook-manager.js",
+        "content/chat-lorebook-suggestions.js",
+        "content/chat-lorebook-recall.js",
+        "content/private-lorebook-storage.js",
+        "content/private-lorebook-auth.js",
+        "content/private-lorebook-recovery.js",
+        "content/private-lorebook-archive-handoff.js",
+        "content/private-lorebook-bridge.js",
+        "content/private-lorebook-archive-setup.js",
         "content/text-replacements.js",
         "content/translation.js",
         "content/composer-control.js",
@@ -185,6 +195,7 @@
         "content/footer-manager.js",
         "content/chat-list.js",
         "content/chat-organizer.js",
+        "content/chat-smart-folders.js",
         "content/saved-chat-actions.js",
         "content/pagination-tools.js",
         "content/list-fill.js",
@@ -236,6 +247,8 @@
         "content/styles/ooc.css",
         "content/styles/model-quick-access.css",
         "content/styles/chat-lorebook-manager.css",
+        "content/styles/private-lorebook-bridge.css",
+        "content/styles/chat-smart-folders.css",
         "content/styles/previously-chatted-indicator.css"
       ],
       "run_at": "document_idle"
@@ -257,7 +270,9 @@
       "resources": [
         "content/generation-metadata-bridge.js",
         "content/card-token-main.js",
-        "content/exact-message-counts-bridge.js"
+        "content/exact-message-counts-bridge.js",
+        "icons/icon128.png",
+        "icons/qol-archive-cover.png"
       ],
       "matches": [
         "https://spicychat.ai/*",

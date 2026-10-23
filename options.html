@@ -408,6 +408,7 @@
 <h2>Chat list tools</h2>
 <label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable Chat List tools</span></label>
 <label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable local chat folders + multi-select organizing</span></label>
+<div id="ds-feature-panel-chat-smart-folders" data-dsq-feature-panel="chat-smart-folders"></div>
 <label>Chat folders<textarea id="chatCollections" placeholder="Favorites
 Long chats
 Testing"></textarea></label>
@@ -1064,7 +1065,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 SpicyXL 132B" spellcheck="false"></textarea></label>
 <label>Models to hide, one per line<textarea id="modelHiddenNames" placeholder="A model I never use" spellcheck="false"></textarea></label>
 <p class="hint">When enabled, model rows get a star. Favorites are moved to the top in this list order. Hidden/favorites-only only changes the quick menu; it does not remove model access from SpicyChat.</p>
-<label class="row"><input id="expandModelSelectorDescriptions" type="checkbox"/><span>Expand all model descriptions in Available models</span></label><label class="row"><input id="hideModelUpgradeButtons" type="checkbox"/><span>Hide locked-model Upgrade buttons and block locked-model upgrade prompts</span></label></section><div id="ds-feature-panel-chat-lorebook-manager" data-dsq-feature-panel="chat-lorebook-manager"></div>
+<label class="row"><input id="expandModelSelectorDescriptions" type="checkbox"/><span>Expand all model descriptions in Available models</span></label><label class="row"><input id="hideModelUpgradeButtons" type="checkbox"/><span>Hide locked-model Upgrade buttons and block locked-model upgrade prompts</span></label></section><div id="ds-feature-panel-chat-lorebook-manager" data-dsq-feature-panel="chat-lorebook-manager"></div><div id="ds-feature-panel-chat-lorebook-recall" data-dsq-feature-panel="chat-lorebook-recall"></div><div id="ds-feature-panel-private-lorebook-bridge" data-dsq-feature-panel="private-lorebook-bridge"></div>
 <div id="ds-feature-panel-translation" data-dsq-feature-panel="translation"></div><section class="card">
 <h2>Generation profiles</h2>
 <label class="row"><input id="enableGenerationProfiles" type="checkbox"/><span>Enable Generation Profiles</span></label>
@@ -1283,6 +1284,21 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <p class="hint">The Settings-size preview applies immediately here. Chat text and line spacing apply to SpicyChat after you save.</p>
+<div class="sub-card" id="chatWidthControlsCard">
+<h3>Chat stream &amp; input width</h3>
+<p class="hint">Adjust the overall width of conversation messages and the typing area on desktop. Does not change chat content or message history. Off by default; mobile layout stays native.</p>
+<label class="row"><input id="enableChatWidthControls" type="checkbox"/><span>Customize chat widths (off by default)</span></label>
+<label>Message stream width (px)
+<input id="chatStreamWidth" type="number" min="520" max="1600" step="20"/>
+</label>
+<label>Maximum individual bubble width (px)
+<input id="chatBubbleMaxWidth" type="number" min="360" max="1500" step="20"/>
+</label>
+<label>Message input area width (px)
+<input id="chatComposerWidth" type="number" min="520" max="1600" step="20"/>
+</label>
+<p class="hint">Suggested starting values: default ~800 / 650 / 800; wider ~1100 / 950 / 1100. Widths remain bounded by the available window; new and edited messages are unaffected.</p>
+</div>
 <h3>Reading support for QoL Settings</h3>
 <p class="hint">These choices affect only this Settings page, not chat messages or the rest of SpicyChat.</p>
 <div class="button-row settings-reading-presets" aria-label="Settings reading presets">
@@ -2850,7 +2866,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>
@@ -2885,6 +2901,8 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <script src="settings/features/options-settings-controls.js"></script>
 <script src="settings/feature-panels/model-quick-access.js"></script>
 <script src="settings/feature-panels/chat-lorebook-manager.js"></script>
+<script src="settings/feature-panels/chat-lorebook-recall.js"></script>
+<script src="settings/feature-panels/private-lorebook-bridge.js"></script>
 <script src="settings/feature-panels/previously-chatted-indicator.js"></script>
 <script src="settings/feature-panels/bot-status.js"></script>
 <script src="settings/feature-panels/bot-archive.js"></script>

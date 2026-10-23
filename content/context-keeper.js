@@ -54,7 +54,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function currentChatId() {
-    return DS.chatIdFromHref?.(location.href || "") || location.pathname;
+    return DS.getCurrentChatScope?.()?.key || location.pathname; // True conversation scope; legacy bot-keyed details remain untouched.
   }
 
   function normalizeCategory(category) {
@@ -542,9 +542,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return true;
   }
 
-  async function addManyDetails(values, { source = "manual" } = {}) {
+  async function addManyDetails(values, { source = "manual", expectedChatId = "" } = {}) {
+    // Explicit Archive restore callers pin the exact conversation. A route
+    // change during the asynchronous storage read must not import into a
+    // newly opened conversation, even if the bot ID happens to be identical.
+    if (expectedChatId && currentChatId() !== expectedChatId)
+      throw new Error("Conversation changed before Context Keeper import.");
     const store = await readStore();
-    const id = currentChatId();
+    const id = expectedChatId || currentChatId();
+    if (expectedChatId && currentChatId() !== expectedChatId)
+      throw new Error("Conversation changed during Context Keeper import.");
     const entry = store[id] || { details: [], lastRecapAt: 0, lastRecapMessageCount: 0 };
     let added = 0;
     let skipped = 0;
@@ -579,6 +586,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (added) {
+      if (expectedChatId && currentChatId() !== expectedChatId)
+        throw new Error("Conversation changed before saving recovered facts.");
       store[id] = entry;
       await writeStore(store);
     }
@@ -920,6 +929,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await refreshEntry();
         });
         actions.append(edit, pin);
+        if (DS.state?.settings?.enableChatLorebookManager && !detail.supersededBy) {
+          const toLocal=make("button", { type: "button" }, "To local Lorebook");
+          toLocal.title="Open this fact in the local entry editor for review. Does not write a native Lorebook.";
+          toLocal.addEventListener("click",()=>{
+            if(!DS.openChatLorebookManager?.(detail.text))status.textContent="Enable Chat Lorebook Manager in QoL Settings first.";
+          });
+          actions.append(toLocal);
+        }
         if (review) actions.append(review);
         if (jump) actions.append(jump);
         actions.append(remove);
@@ -1246,6 +1263,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     dialog.append(head, note, status, topActions, manual, savedTitle, savedFilters, savedTools, savedList, conflictList, suggestionTitle, suggestionList);
     modal.append(backdrop, dialog);
     document.documentElement.append(modal);
+    // Offered only after verified PRIVATE bot + owned, private attached Lorebook.
+    DS.offerPrivateLorebookAction?.(dialog, topActions)?.catch?.(() => {});
     renderSaved();
     renderSuggestions();
     renderStatus();

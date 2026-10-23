@@ -1,3 +1,24 @@
+## 0.2.57
+- Reduced repeated chat-header and composer-control repair passes after native interface remounts, with built-in coalescing to keep mobile interactions responsive.
+- Added optional recent-message keyword matching and configurable shared QoL OOC context limits without continuous chat scanning.
+- Added a guarded experimental private Archive entry-write path with ownership/attachment verification, duplicate checks, readback and recovery markers; manual native-editor review remains available.
+- Added an optional Context Keeper-to-local-Lorebook review queue for approved facts, with linked revisions, editable suggestions and duplicate/conflict warnings.
+- Expanded opt-in native Memory quality statistics with uncertain wording, ambiguous references and possible conflict flags, without exporting Memory content.
+- Added optional desktop chat width controls for the message stream, individual bubbles and typing area, with independent settings and no extra message scanning.
+- Reduced mobile composer and message-edit layout work while typing or opening the keyboard, and deferred nonessential QoL processing during native editing, rating actions and text selection.
+- Added optional Smart Chat Folders with manual persona/tag metadata scans, reviewable previews and configurable daily refresh without loading message histories.
+- Added an opt-in, read-only native Memory quality experiment that checks for new or changed Memories after completed chat exchanges without storing their contents.
+- Added a private bot–Lorebook bridge inside Context Keeper with verified ownership, attached-Lorebook checks and reviewed native editor handoff.
+- Added conversation-specific continuity storage and a local IndexedDB archive with independent backup and history.
+- Added optional shared private Archive Lorebook storage and configurable local, Archive or hybrid modes. QoL never connects the Archive to a bot.
+- Added reviewed recovery of conversation-specific Archive records and safe reconciliation of uncertain uploads without changing or retrying remote entries.
+- Added a reviewed native-editor workflow for saving Archive entries when direct authenticated entry uploads are unavailable.
+- Added a read-only Archive entry audit that compares saved local records with SpicyChat and distinguishes missing, changed and not-yet-verifiable entries.
+- Added one-click private Archive setup with the QoL cover, existing-Archive detection and guarded SpicyChat session verification.
+- Added configurable review, synchronization and promotion settings, with automatic native creation disabled by default.
+- Added editable local conversation Lorebooks with keyword tests, activation controls and optional keyword-triggered visible OOC recall, plus reviewed Context Keeper fact handoff.
+- Improved long-chat message control targeting and feedback history retention for large handled Dislike/Less Like lists.
+
 ## 0.2.56
 - Improved generated-reply navigation when only part of a larger swipe history is loaded, with optional cancellable loading for a chosen reply number.
 - Fixed First reply becoming unavailable while older generated replies could still be loaded.

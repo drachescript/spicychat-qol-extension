@@ -69,7 +69,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const roots = new Set();
     const textRoots = new Set();
     let candidateNodes = 0;
-    const qolMessageDecorationSelector = "#ds-qol-panel, [data-ds-owned='1'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output";
+    const qolMessageDecorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
 
     const touchesMessageText = node => {
       const element = node instanceof Element ? node : node?.parentElement;
@@ -107,6 +107,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       for (const node of mutation.removedNodes || []) addNode(node, true);
     }
 
+    const counters=DS.state.runtimePerformance||(DS.state.runtimePerformance={});
+    counters.messageMutationCandidateNodes=(counters.messageMutationCandidateNodes||0)+candidateNodes;
+    counters.messageMutationDistinctRoots=(counters.messageMutationDistinctRoots||0)+roots.size;
+    // Counts scoped to actual native message text vs QoL-owned decoration churn.
+    counters.messageMutationTextRoots=(counters.messageMutationTextRoots||0)+textRoots.size;
     return { roots, textRoots, candidateNodes };
   }
 

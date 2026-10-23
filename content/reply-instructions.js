@@ -248,6 +248,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const recall = DS.getContextKeeperSendCandidate?.(current);
       if (recall?.directive) candidates.push({ kind: "context-recall", directive: recall.directive });
     }
+    if(s.enableLocalLorebookRecall){
+      const local = DS.getLocalLorebookSendCandidate?.(current);
+      if(local?.directive){
+        // An identical OOC block must not be appended twice; avoid recursion
+        // and repeated lorebook context from a user's existing draft.
+        if(!current.includes(local.directive))candidates.push({kind:'local-lorebook',directive:local.directive});
+      }
+    }
     const queue = s.enableLorebookConsistency ? DS.getLorebookConsistencyQueue?.() : null;
     if (queue?.text) candidates.push({ kind: "lorebook", directive: String(queue.text), queueId: queue.id || "" });
 
@@ -278,12 +286,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const added = [];
     const alreadyPresent = [];
     const skipped = [];
+    // A common bounded budget protects the user's outgoing message when this
+    // new optional recall engine is enabled alongside other QoL OOC helpers.
+    // One consistent cap for Scene Notes, Context Keeper, Lorebook Recall,
+    // reply instructions, global Memory and RP-state directives. Optional for
+    // existing users; recall continues to carry its conservative default cap.
+    const sharedActive = s.enableSharedOocBudget === true || s.enableLocalLorebookRecall === true;
+    const budget = sharedActive ? Math.max(600,Math.min(5000,Number(s.sharedOocBudgetChars)||2800)) : Infinity;
+    let guidanceCharacters = 0;
     for (const candidate of candidates) {
       if (current.includes(candidate.directive)) { alreadyPresent.push(candidate); continue; }
       const separator = current.endsWith("\n") ? "\n" : "\n\n";
       const next = `${current}${separator}${candidate.directive}`;
-      if (next.length > maxLength) { skipped.push(candidate); continue; }
-      current = next; added.push(candidate);
+      if (next.length > maxLength || guidanceCharacters + candidate.directive.length > budget) { skipped.push(candidate); continue; }
+      current = next; guidanceCharacters += candidate.directive.length; added.push(candidate);
     }
 
     for (const candidate of alreadyPresent) {
@@ -293,12 +309,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (candidate.kind === "scene") DS.markChatSceneSent?.(candidate.scene);
     }
     if (!added.length) {
-      if (skipped.length) showToast("QoL guidance could not be added because the message is too close to SpicyChat's character limit.");
+      if (skipped.length) showToast("QoL guidance was skipped because the message or shared guidance budget is full.");
       return false;
     }
     if (!setTextareaValue(textarea, current)) return false;
     textarea.selectionStart = textarea.selectionEnd = current.length;
-    if (skipped.length) showToast(`${skipped.length} QoL guidance block${skipped.length === 1 ? " was" : "s were"} skipped because the message would be too long.`);
+    if (skipped.length) showToast(`${skipped.length} QoL guidance block${skipped.length === 1 ? " was" : "s were"} skipped because the message or shared guidance budget is full.`);
 
     event?.preventDefault?.(); event?.stopPropagation?.(); event?.stopImmediatePropagation?.();
     syntheticSendPending = true;

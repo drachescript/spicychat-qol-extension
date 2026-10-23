@@ -1,0 +1,32 @@
+/* Private Lorebook Bridge is independent from Context Keeper and draft-manager CSS. */
+#ds-private-lorebook-bridge.ds-private-lb-overlay {
+  position: fixed; inset: 0; z-index: 2147483635; background: rgba(0,0,0,.70);
+  display: flex; justify-content: center; align-items: center; padding: 16px;
+}
+#ds-private-lorebook-bridge .ds-private-lb-dialog {
+  width: min(740px, 96vw); max-height: 90vh; overflow: auto; border-radius: 14px;
+  padding: 22px; display: flex; flex-direction: column; gap: 10px;
+  background: #17191d; color: #f6f7fb; border: 1px solid #565a69;
+  box-shadow: 0 15px 60px rgba(0,0,0,.5); font: 14px/1.45 system-ui,sans-serif;
+}
+#ds-private-lorebook-bridge h2 {font-size: 20px; margin: 0; color: inherit;}
+#ds-private-lorebook-bridge p {margin: 4px 0;}
+#ds-private-lorebook-bridge label {display:flex;flex-direction:column;gap:6px;}
+#ds-private-lorebook-bridge input,
+#ds-private-lorebook-bridge textarea,
+#ds-private-lorebook-bridge select {box-sizing:border-box; width:100%; border-radius:7px; border:1px solid #6a6e79;
+  background:#232631; color:#fff; padding:10px; font:inherit;}
+#ds-private-lorebook-bridge .ds-private-lb-buttons {display:flex;gap:8px;flex-wrap:wrap;}
+#ds-private-lorebook-bridge button,
+#ds-private-lb-queue button,
+#ds-private-lorebook-bridge-launch {border:1px solid #777e8b;border-radius:7px;padding:6px 11px;
+  background:#262b35;color:#fff;cursor:pointer;font:inherit;}
+#ds-private-lorebook-bridge button:hover,
+#ds-private-lb-queue button:hover,
+#ds-private-lorebook-bridge-launch:hover {background:#35445a;}
+#ds-private-lorebook-bridge button:disabled {opacity:.5;cursor:wait;}
+#ds-private-lb-queue {padding:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+  border:1px solid #6a6e79;border-radius:8px;color:inherit;}
+#ds-private-lorebook-bridge .ds-private-lb-status {min-height:22px;overflow-wrap:anywhere;color:#adcfef;}
+
+.ds-private-lb-action {padding:6px 10px;border:1px solid #67778a;border-radius:8px;cursor:pointer;background:transparent;color:inherit;}

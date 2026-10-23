@@ -67,7 +67,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function configuredFolders() {
-    return unique(String(DS.state.settings?.chatCollections || "").split(/[\n,]+/g));
+    return unique([...String(DS.state.settings?.chatCollections || "").split(/[\n,]+/g), ...(DS.chatSmartFolders?.folderNames?.() || [])]);
   }
 
   async function saveConfiguredFolders(folders) {
@@ -112,7 +112,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function assignedFolders(entry) {
     const configured = new Set(configuredFolders());
-    return unique(store().meta?.[entry.key]?.collections || []).filter(name => configured.has(name));
+    return unique([...(store().meta?.[entry.key]?.collections || []), ...(DS.chatSmartFolders?.foldersFor?.(entry.key) || [])]).filter(name => configured.has(name));
   }
 
   function matchesFolder(entry) {
@@ -367,7 +367,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, bulkMode ? "ds-chat-org-primary" : "");
     toolbar.appendChild(mode);
 
-    if (folderFilter !== "all" && folderFilter !== "__unfoldered__") {
+    if (folderFilter !== "all" && folderFilter !== "__unfoldered__" && String(DS.state.settings?.chatCollections || "").split(/[\n,]+/g).includes(folderFilter)) {
       toolbar.appendChild(actionButton("Rename folder", renameCurrentFolder));
       toolbar.appendChild(actionButton("Delete folder", deleteCurrentFolder, "ds-chat-org-danger"));
     }
@@ -395,6 +395,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function removeOrganizer() {
     document.getElementById("ds-chat-organizer-toolbar")?.remove();
+    document.getElementById("ds-chat-smart-folders-tools")?.remove();
     for (const row of DS.qsa?.(".ds-chat-row-hidden-by-folder,.ds-chat-org-selected") || []) {
       row.classList.remove("ds-chat-row-hidden-by-folder", "ds-chat-org-selected");
     }
@@ -416,7 +417,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    buildToolbar(entries);
+    const toolbar = buildToolbar(entries);
+    DS.chatSmartFolders?.mount?.(toolbar);
     for (const entry of entries) {
       entry.row.classList.toggle("ds-chat-row-hidden-by-folder", !matchesFolder(entry));
     }
