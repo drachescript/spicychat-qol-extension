@@ -1208,10 +1208,10 @@
     },
     {
       "id": "chat-lorebook-recall",
-      "label": "Chat Lorebook Recall",
-      "description": "Adds the chat lorebook recall tools.",
-      "section": "Chat Tools",
-      "group": "chat",
+      "label": "Local Lorebook Recall",
+      "description": "Use optional keyword-based local Lorebook context in chats without writing to native Lorebooks.",
+      "section": "Lorebooks",
+      "group": "lorebook",
       "requiredFeatures": [
         "chat-lorebook-manager"
       ],
@@ -1242,10 +1242,10 @@
     },
     {
       "id": "chat-lorebook-suggestions",
-      "label": "Chat Lorebook Suggestions",
-      "description": "Adds the chat lorebook suggestions tools.",
-      "section": "Chat Tools",
-      "group": "chat",
+      "label": "Context Keeper Lorebook Suggestions",
+      "description": "Review approved Context Keeper facts before adding them to a local Lorebook.",
+      "section": "Lorebooks",
+      "group": "lorebook",
       "requiredFeatures": [
         "context-keeper",
         "chat-lorebook-manager"
@@ -1445,9 +1445,9 @@
     },
     {
       "id": "chat-smart-folders",
-      "label": "Chat Smart Folders",
-      "description": "Adds the chat smart folders tools.",
-      "section": "Chat List",
+      "label": "Smart Chat Folders",
+      "description": "Preview and organize conversations using their existing persona/tag metadata.",
+      "section": "Organization",
       "group": "chatList",
       "requiredFeatures": [
         "chat-organizer"
@@ -1607,7 +1607,7 @@
     {
       "id": "chat-width-controls",
       "label": "Chat Width Controls",
-      "description": "Adds the chat width controls tools.",
+      "description": "Adjust chat, message bubble and typing-area widths on desktop.",
       "section": "Interface",
       "group": "interface",
       "requiredFeatures": [],
@@ -3020,8 +3020,8 @@
     },
     {
       "id": "native-memory-probe",
-      "label": "Native Memory Probe",
-      "description": "Adds the native memory probe tools.",
+      "label": "Native Memory Quality Probe",
+      "description": "Opt-in read-only checks for native Memory quality. Memory contents are not exported.",
       "section": "Chat Tools",
       "group": "chat",
       "requiredFeatures": [
@@ -3428,9 +3428,9 @@
     {
       "id": "private-lorebook-bridge",
       "label": "Private Lorebook Bridge",
-      "description": "Adds the private lorebook bridge tools.",
-      "section": "Chat Tools",
-      "group": "chat",
+      "description": "Review private bot/Lorebook transfers and optionally store history in a private Archive that is never attached to a bot.",
+      "section": "Lorebooks",
+      "group": "lorebook",
       "requiredFeatures": [
         "context-keeper",
         "chat-lorebook-manager"
