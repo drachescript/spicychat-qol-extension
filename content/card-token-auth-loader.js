@@ -57,6 +57,7 @@ if (!(() => { try {
       return /^\/lorebook\/create\/?$/i.test(location.pathname) &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
           new URLSearchParams(location.search).get('dsQolArchiveSetup') ||
+          new URLSearchParams(location.search).get('dsQolLorebookClone') ||
           sessionStorage.getItem('dsQolArchiveSetupTokenV1') || '');
     } catch { return false; }
   }

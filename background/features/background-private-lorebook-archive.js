@@ -78,6 +78,56 @@
     safe.finally(()=>{if(queues.get(key)===safe)queues.delete(key);});
     return task;
   }
+  // Import is add-only and conversation-scoped. A restored backup must NEVER
+  // overwrite a record from this device, even if another tab writes during
+  // import. IndexedDB serializes readwrite transactions on the records store.
+  async function importMissing(raw, entries) {
+    const owner=validate({...raw,detailId:'_scope_only_'});
+    if(!Array.isArray(entries)||entries.length<1||entries.length>50)
+      throw new Error('Restore accepts 1–50 records at a time.');
+    const seen=new Set(),prepared=[];
+    for(const incoming of entries){
+      if(!incoming||typeof incoming!=='object'||Array.isArray(incoming))throw new Error('Invalid backup record.');
+      const identity=validate(incoming),key=keyOf(identity);
+      if(identity.accountId!==owner.accountId || identity.botId!==owner.botId ||
+         identity.conversationId!==owner.conversationId||seen.has(key))
+        throw new Error('Backup record belongs to another account, conversation or is duplicated.');
+      if(typeof incoming.content!=='string'||!incoming.content.trim()||incoming.content.length>2000||
+         typeof incoming.name!=='string'||incoming.name.length>50||
+         (incoming.keywords!=null&&(!Array.isArray(incoming.keywords)||incoming.keywords.length>12||
+           incoming.keywords.some(x=>typeof x!=='string'||x.length>80))))
+        throw new Error('Invalid backup record content.');
+      // Unverified native links must not be reused for automatic operations.
+      // Preserve the IDs for manual reconciliation; never issue remote writes.
+      const record={...incoming,accountId:owner.accountId,botId:owner.botId,
+        conversationId:owner.conversationId,detailId:identity.detailId,key,
+        conversationKey:JSON.stringify([owner.accountId,owner.botId,owner.conversationId]),
+        status:'restored-needs-review',needsReview:true,updatedAt:Date.now()};
+      if(record.remote?.id)record.remote={...record.remote,stale:true,status:'restored-unverified'};
+      if(record.native?.id)record.native={...record.native,stale:true,verifiedCreated:false};
+      if(JSON.stringify(record).length>20000)throw new Error('Backup record exceeds size limit.');
+      seen.add(key);prepared.push(record);
+    }
+    const db=await database();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction([STORE,AUDIT],'readwrite');
+      const records=tx.objectStore(STORE),audit=tx.objectStore(AUDIT);
+      let inserted=0,skipped=0;
+      for(const row of prepared){
+        const lookup=records.get(row.key);
+        lookup.onsuccess=()=>{
+          if(lookup.result){skipped++;return;}
+          records.add(row);inserted++;
+          audit.add({id:`${Date.now()}-${crypto.randomUUID()}`,key:row.key,
+            reason:'Restored missing local Archive record (review required)',at:Date.now(),
+            before:null,after:row});
+        };
+      }
+      tx.oncomplete=()=>resolve({inserted,skipped});
+      tx.onerror=()=>reject(tx.error||new Error('Archive restore failed'));
+      tx.onabort=()=>reject(tx.error||new Error('Archive restore aborted'));
+    });
+  }
   async function revisions(key) {
     const db=await database();
     return new Promise((resolve,reject)=>{
@@ -97,6 +147,15 @@
       else if(op==='list')result=await list(message?.identity);
       else if(op==='put')result=await put(message?.record,message?.reason);
       else if(op==='revisions')result=await revisions(keyOf(message?.identity));
+      else if(op==='importMissing') {
+        const identity=validate({...message?.identity,detailId:'_scope_only_'});
+        const page=new URL(String(sender?.url||sender?.tab?.url||''));
+        const path=/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\/|$)/i.exec(page.pathname);
+        if(!sender?.tab?.id || page.protocol!=='https:' || !['spicychat.ai','www.spicychat.ai'].includes(page.hostname) ||
+           !path || path[1].toLowerCase()!==identity.botId || path[2].toLowerCase()!==identity.conversationId)
+          throw new Error('Restore requires the matching open SpicyChat conversation.');
+        result=await importMissing(identity,message?.records);
+      }
       else throw new Error('Unsupported archive operation.');
       respond({ok:true,result});
     })().catch(error=>respond({ok:false,error:String(error?.message||error)}));

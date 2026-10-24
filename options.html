@@ -1969,12 +1969,26 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint">Visibility/review state is recorded separately for context. Compare shows field-level differences; Restore and bot imports fill selected normal editor fields for review and never press Save or publish anything. Bot import supports JSON, labeled TXT replacements and ZIP files on Create/Edit pages. Lorebook association is version metadata only and Restore does not automatically attach or detach a Lorebook.</p>
 <p class="hint">With automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too.</p>
 </div>
-<div class="sub-card">
-<strong>Lorebook download / import / backups</strong>
-<label class="row"><input id="lorebookBackupToolsEnabled" type="checkbox"/><span>Show Download / Import / Save / History controls on Lorebook editors</span></label>
-<label class="row"><input id="lorebookBackupsEnabled" type="checkbox"/><span>Automatically save Lorebook changes while I view or edit them</span></label>
-<p class="hint"><strong>Just want to move a private Lorebook?</strong> Turn on the first option, open the Lorebook, then click <strong>Download Lorebook (.json)</strong>. On the destination Lorebook, use <strong>Import Lorebook (.json)</strong>. Automatic backups are optional.</p>
-<p class="hint">Imports use SpicyChat's normal entry editor and skip entries with the same name by default, so nothing is silently overwritten. Lorebook backups stay separate from chatbot JSON.</p>
+<div class="sub-card ds-lorebook-settings">
+<strong>Lorebook backups &amp; JSON import</strong>
+<p class="hint">Download a Lorebook as JSON, create a private copy, or import entries into an existing Lorebook. Nothing is published automatically.</p>
+<fieldset class="ds-lorebook-settings-group"><legend>Backup tools</legend>
+<label class="row"><input id="lorebookBackupToolsEnabled" type="checkbox"/><span>Show Lorebook download, import and history controls</span></label>
+<label class="row"><input id="lorebookBackupsEnabled" type="checkbox"/><span>Save a local backup when viewing or editing a Lorebook</span></label>
+</fieldset>
+<fieldset class="ds-lorebook-settings-group"><legend>New private copies</legend>
+<label class="row"><input id="lorebookJsonPrivateAutoCreate" type="checkbox" checked/><span>Create the private Lorebook after I approve the JSON import</span></label>
+<label class="row"><input id="lorebookJsonCopyTags" type="checkbox" checked/><span>Include the original tags</span></label>
+<label class="row"><input id="lorebookJsonAutoImportEntries" type="checkbox" checked/><span>Continue importing entries after the Lorebook is created</span></label>
+<p class="hint">QoL checks ownership and existing entries before writing. If a save is uncertain, importing stops instead of creating a duplicate.</p>
+</fieldset>
+<fieldset class="ds-lorebook-settings-group"><legend>Cover picture</legend>
+<label class="row"><input id="lorebookJsonCopyCover" type="checkbox" checked/><span>Transfer the original cover from the JSON backup</span></label>
+<label class="row"><input id="lorebookJsonPreferSelectedCover" type="checkbox"/><span>Pause before creating a copy so I can choose a different picture</span></label>
+<label class="row"><input id="lorebookJsonAllowPlaceholderCover" type="checkbox"/><span>Use a temporary “Change Me” cover if the original isn't available</span></label>
+<p class="hint">The last two options are off by default. A selected picture replaces the JSON cover; the placeholder is only used if no usable cover is available. Replace it later in SpicyChat.</p>
+</fieldset>
+<p class="hint">Existing Lorebooks can import entries only, or use the reviewed merge workflow. Private-copy creation won't change the original Lorebook.</p>
 </div>
 <p class="hint">Backup tools remain opt-in. Once chatbot backup tools are enabled, automatic chatbot backups start On by default unless you turn them off. The Backup manager can still review or delete backups you already created after the editor controls are disabled.</p>
 </section>
@@ -2711,7 +2725,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div class="tab-page" data-page="help"><p class="page-intro">Quick explanations, support links, diagnostics, credits, and the info that helps when something breaks.</p>
 <section class="card help-card" id="aboutCard"><h2>About SpicyChat QoL</h2>
 <div class="about-project-head">
-<img alt="SpicyChat QoL icon" class="about-project-icon" src="https://spicychatqol.drache.uk/assets/icons/full_icon.jpg" onerror="this.onerror=null;this.src='icons/icon128.png';"/>
+<img alt="SpicyChat QoL icon" class="about-project-icon" src="https://spicychatqol.drache.uk/assets/icons/full_icon.jpg"/>
 <div><strong>SpicyChat QoL</strong><p class="hint">Developed under DragonScript by DragonGRaf.</p></div>
 </div>
 <p>An independent quality-of-life project for SpicyChat focused on optional tools, local-first data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>

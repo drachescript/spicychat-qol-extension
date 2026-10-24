@@ -3362,6 +3362,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 setupTabs();
 setupMaximumPerformancePreset();
 setupSettingsAutosave();
+
+
+const aboutProjectIcon = document.querySelector('.about-project-icon');
+if (aboutProjectIcon) {
+  const handleAboutProjectIconError = () => {
+    aboutProjectIcon.removeEventListener('error', handleAboutProjectIconError);
+    aboutProjectIcon.src = 'icons/icon128.png';
+  };
+  aboutProjectIcon.addEventListener('error', handleAboutProjectIconError, { once: true });
+}
+
 load();
 
 $("refreshPersonalUsage")?.addEventListener("click", refreshPersonalUsageSummary);

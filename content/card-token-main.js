@@ -679,13 +679,27 @@ if (!(() => { try {
     const requestId = clean(detail.requestId);
     const requestToken = clean(detail.setupToken);
     const path = clean(detail.path);
-    if (!active || location.pathname !== '/lorebook/create' ||
+    let scopeOk = false;
+    if (location.pathname === '/lorebook/create') {
+      scopeOk = requestToken === (new URLSearchParams(location.search).get('dsQolArchiveSetup') ||
+        new URLSearchParams(location.search).get('dsQolLorebookClone')) &&
+        ['/save-image', '/lorebooks'].includes(path);
+    } else {
+      // The new-copy creation has already been approved. Restrict subsequent
+      // entry requests to its exact newly-created private Lorebook route.
+      const m=/^\/lorebook\/edit\/([0-9a-f-]{36})\/entries$/i.exec(location.pathname);
+      try {
+        const rec=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+        scopeOk=!!m && rec?.targetId?.toLowerCase()===m[1].toLowerCase() &&
+          rec.token===requestToken && !!rec.submittedAt && Date.now()-Number(rec.submittedAt)<7*24*60*60*1000 &&
+          path===`/lorebooks/${m[1]}/entries`;
+      } catch {}
+    }
+    if (!active || !scopeOk ||
         !/^[a-z0-9-]{12,90}$/i.test(requestId) ||
         !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestToken) ||
-        requestToken !== new URLSearchParams(location.search).get('dsQolArchiveSetup') ||
-        !['/save-image', '/lorebooks'].includes(path) ||
         privateArchiveAuthServed.has(requestId) ||
-        privateArchiveAuthServed.size >= 4 || !isJwt(capturedToken)) return;
+        privateArchiveAuthServed.size >= (location.pathname === '/lorebook/create' ? 4 : 64) || !isJwt(capturedToken)) return;
     privateArchiveAuthServed.add(requestId);
     try {window.dispatchEvent(new CustomEvent(PRIVATE_ARCHIVE_AUTH_RESPONSE, {
       detail: {requestId, token:capturedToken, capturedAt}

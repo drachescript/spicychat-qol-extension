@@ -85,9 +85,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // This does not clear pending markers or mutate either storage backend.
   function inspectArchiveRecords(records, archive, s) {
     const entries = Array.isArray(archive?.entries) ? archive.entries : null;
-    const expectedCount = Number(archive?.num_entries);
+    const expectedCount = archive?.num_entries;
     const complete = entries !== null && Number.isSafeInteger(expectedCount) && expectedCount >= 0 &&
-      entries.length >= expectedCount;
+      entries.length === expectedCount && new Set(entries.map(item=>String(item?.id||'').toLowerCase())).size === expectedCount;
     const byId = new Map((entries || []).filter(item=>UUID.test(item?.id)).map(item=>[String(item.id).toLowerCase(),item]));
     const result = {total: records.length, verified:0, changed:0, missing:0, incomplete:0,
       pending:0, localOnly:0, otherBook:0, unreadable:0, complete, remoteCount:entries?.length ?? null,
@@ -135,9 +135,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // A partial entry page is never sufficient evidence for safe cleanup.
     // Even a matching entry cannot certify uniqueness if the rest are hidden.
     const complete = [archive,attached].every(book => {
-      const count=Number(book?.num_entries);
+      const count=book?.num_entries;
       return Array.isArray(book?.entries) && Number.isSafeInteger(count) && count>=0 &&
-        book.entries.length>=count && new Set(book.entries.map(item=>String(item?.id||'').toLowerCase())).size>=count;
+        book.entries.length===count && new Set(book.entries.map(item=>String(item?.id||'').toLowerCase())).size===count;
     });
     const result={total:records.length,eligible:[],notVerifiable:0,notPromoted:0,conflicts:0,complete};
     for(const record of records) {
@@ -168,6 +168,65 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     return result;
   }
+  // Native writes can succeed even if the response/readback is interrupted.
+  // Check pending/handoff records against the CURRENT attached private Lorebook
+  // without updating local links or assuming a matching row was created by QoL.
+  function inspectPendingNativeRecords(records, book, factMap) {
+    const entries=Array.isArray(book?.entries)?book.entries:null;
+    const count=book?.num_entries;
+    const uniqueIds=entries?new Set(entries.filter(e=>UUID.test(e?.id))
+      .map(e=>String(e.id).toLowerCase())):new Set();
+    const complete=!!entries && Number.isSafeInteger(count) && count>=0 &&
+      entries.length===count && uniqueIds.size===count;
+    const result={pending:0,exactCandidates:0,unverifiedPage:0,unreadableKeywords:0,
+      conflicts:0,ambiguous:0,notFound:0,sourceChanged:0,otherBook:0,complete};
+    const normalizeKeywords=value=>{
+      if(!Array.isArray(value) || value.some(v=>typeof v!=='string'))return null;
+      const normalized=value.map(v=>norm(v,80).toLowerCase()).filter(Boolean);
+      return [...new Set(normalized)].sort();
+    };
+    const sameKeywords=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+    const matchingByEntry=new Map();
+    const pending=[];
+    for(const record of records){
+      if(!['pending','handoff'].includes(record?.native?.status) || record.native.id)continue;
+      result.pending++;
+      if(String(record.native.bookId||'').toLowerCase()!==String(book?.id||'').toLowerCase()){
+        result.otherBook++;continue;
+      }
+      const fact=factMap?.get(record.detailId);
+      if(!record.sourceText || !fact || fact.enabled===false || fact.needsReview ||
+         fact.supersededBy || String(fact.text||'').trim()!==record.sourceText ||
+         record.status==='restored-needs-review'){
+        result.sourceChanged++;continue;
+      }
+      if(!complete){result.unverifiedPage++;continue;}
+      const name=norm(record.name,50),content=String(record.content||'').trim();
+      const names=entries.filter(e=>typeof e?.name==='string' && norm(e.name,50)===name);
+      if(!names.length){result.notFound++;continue;}
+      const sameText=names.filter(e=>typeof e.content==='string' && e.content.trim()===content);
+      if(!sameText.length){result.conflicts++;continue;}
+      const localKeywords=normalizeKeywords(record.keywords);
+      const comparable=sameText.map(e=>({entry:e,keywords:normalizeKeywords(e.keywords)}));
+      if(!localKeywords || comparable.some(x=>!x.keywords)){
+        result.unreadableKeywords++;continue;
+      }
+      const matches=comparable.filter(x=>sameKeywords(localKeywords,x.keywords));
+      if(!matches.length){result.conflicts++;continue;}
+      if(matches.length!==1){result.ambiguous++;continue;}
+      const id=String(matches[0].entry.id).toLowerCase();
+      if(!UUID.test(id)){result.unverifiedPage++;continue;}
+      pending.push(id);
+      matchingByEntry.set(id,(matchingByEntry.get(id)||0)+1);
+    }
+    for(const id of pending){
+      if(matchingByEntry.get(id)>1)result.ambiguous++;
+      else result.exactCandidates++;
+    }
+    // Even an exact match is only a candidate: ownership of the Lorebook is
+    // verified elsewhere, but this cannot prove which POST created the row.
+    return result;
+  }
   async function createEntry(bookId, entry, s, confirmed, accountId) {
     if (!confirmed || !sameRoute(s)) throw new Error('No longer authorized for this conversation.');
     await requireCurrentReviewedFact(s,{id:entry.detailId,text:entry.record?.sourceText});
@@ -194,8 +253,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!UUID.test(created?.id) || String(created.lorebookId).toLowerCase() !== bookId) {
       throw new Error('SpicyChat did not return a verifiable created entry ID. Do not retry until checked manually.');
     }
-    // A second read checks the owned Lorebook remains the active attachment.
-    await verifyBot(s);
+    // A second read must confirm the SAME owned attached Lorebook. If it
+    // changed after POST, leave the pending marker for manual reconciliation.
+    const after=await verifyBot(s);
+    if(after.accountId!==accountId || after.bookId!==bookId)
+      throw new Error('The attached Lorebook changed after saving. Check the entry manually; do not retry.');
     const record = await local.put({...entry.record,native:{id:created.id,bookId,version:created.version || 1,verifiedCreated:true}},'Native entry created (save response verified)');
     return record;
   }
@@ -293,7 +355,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (interactive && !confirm('Save this record to your private Archive Lorebook? QoL will not connect it to any bot.')) return record;
     const rechecked = await verifyBot(s);
     if (rechecked.accountId !== accountId) throw new Error('Account changed.');
-    await verifyArchive(accountId,target.id,rechecked.bookId);
+    const freshArchive=await verifyArchive(accountId,target.id,rechecked.bookId);
+    // A paginated Archive response cannot exclude another tab's previous save.
+    // Require a complete, uniquely identified entry list before any new POST.
+    const remoteRows=freshArchive.entries;
+    if(!Array.isArray(remoteRows) || !Number.isSafeInteger(freshArchive.num_entries) ||
+       remoteRows.length!==freshArchive.num_entries ||
+       new Set(remoteRows.map(row=>String(row?.id||'').toLowerCase())).size!==freshArchive.num_entries)
+      throw new Error('Archive entry list is incomplete. No new entry was posted; retry the read-only audit later.');
+    if(remoteRows.some(row=>recovery.parse(row,s)?.detailId===record.detailId))
+      throw new Error('This fact already appears in the private Archive. Recover/reconcile the existing entry instead of creating a duplicate.');
     const content = recovery.packageEntry(record,s);
     const slug=record.detailId.replace(/[^a-z0-9]/gi,'').slice(-12);
     const payload={name:`QoL Archive ${s.botId.slice(0,7)} ${slug}`.slice(0,50),keywords:[`qol-archive-${slug}`],content};
@@ -357,6 +428,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!sameRoute(s)) throw new Error('Conversation changed during Archive audit.');
         status.textContent=archiveAuditSummary(inspectArchiveRecords(records,archive,s));
       }
+      async function auditPendingNativeEntries() {
+        if(!sameRoute(s))throw new Error('Conversation changed.');
+        // verifyBot fetches the current owner, attached book, and visibility.
+        const current=await verifyBot(s);
+        if(current.accountId!==context.accountId || current.bookId!==context.bookId)
+          throw new Error('Ownership or attached Lorebook changed.');
+        const records=await local.list(context.accountId,s.botId,s.conversationId);
+        const keeper=await new Promise((resolve,reject)=>chrome.storage.local.get(['contextKeeperData'],
+          v=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(v)));
+        const facts=keeper?.contextKeeperData?.[`conversation:${s.conversationId}`]?.details;
+        const factMap=new Map((Array.isArray(facts)?facts:[]).filter(f=>f?.id).map(f=>[f.id,f]));
+        if(!sameRoute(s))throw new Error('Conversation changed.');
+        const result=inspectPendingNativeRecords(records,current.book,factMap);
+        status.textContent=`Read-only native entry check: ${result.pending} pending/handoff records; `+
+          `${result.exactCandidates} exact possible matches, ${result.ambiguous} ambiguous, `+
+          `${result.conflicts} conflicts, ${result.notFound} not found, `+
+          `${result.unreadableKeywords} without comparable keyword data, `+
+          `${result.sourceChanged} changed or unapproved sources, `+
+          `${result.otherBook} pointing at a different attached Lorebook, `+
+          `${result.unverifiedPage} not verifiable from a partial entry list. `+
+          (result.complete?'Complete entry list received. ':'The native entries returned were incomplete. ')+
+          'No pending marker was cleared, and no native entry was created, edited, or deleted. ' +
+          'Even an exact match must be checked manually before assuming a save succeeded.';
+      }
+      function addNativeAuditButton(parent) {
+        const button=node('button','Check pending native entries (read only)');button.type='button';
+        button.addEventListener('click',async()=>{
+          button.disabled=true;status.textContent='Checking the attached private Lorebook for pending entries…';
+          try{await auditPendingNativeEntries();}catch(error){status.textContent=String(error?.message||error);}
+          finally{button.disabled=false;}
+        });parent.append(button);
+      }
       // Reconciliation is local only: read remote entries, match exact source
       // identifiers and content, and restore link metadata after explicit review.
       // Never retry a POST, edit a native entry, or infer a deletion from a
@@ -400,6 +503,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if(!sameRoute(s)) throw new Error('Conversation changed during recovery.');
         const planned=recovery.plan(archive,before,s);
         const {stats,actions}=planned;
+        if(!stats.complete){
+          status.textContent=`Archive recovery paused: SpicyChat did not return a complete, uniquely identified entry list. `+
+            `${stats.scanned} entries returned; ${stats.matched} matching facts seen. `+
+            'No local links were changed and no remote entries were retried or deleted.';
+          return;
+        }
         if(!actions.length){
           status.textContent=`Archive scan: ${stats.matched} matching records, ${stats.alreadyLinked} already linked, ${stats.conflicts} content conflicts, ${stats.duplicates} duplicate remote IDs. `+
             (stats.complete?'Full Archive entry list returned.':'Only the currently returned Archive entries were checked.');
@@ -415,6 +524,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           throw new Error('Ownership or attached Lorebook changed during recovery.');
         const recent=await verifyArchive(context.accountId,archiveId,context.bookId);
         const newest=recovery.plan(recent,await local.list(context.accountId,s.botId,s.conversationId),s);
+        if(!newest.stats.complete)
+          throw new Error('Archive entry list became incomplete after confirmation. Nothing reconciled.');
         const approved=new Map(actions.map(x=>[x.kind+'|'+x.entry.id+'|'+x.entry.detailId,x.entry]));
         let saved=0,skipped=0;
         for(const action of newest.actions.slice(0,limit)) {
@@ -496,6 +607,66 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           finally {button.disabled=false;}
         });host.append(button);
       }
+      // Portable backup of the private LOCAL Archive (extension IndexedDB).
+      // This contains private continuity text, so export only on direct click.
+      // No native Lorebook is changed by either action.
+      const BACKUP_FORMAT='dsq-private-archive-local-backup/v1';
+      const restoreInput=document.createElement('input');
+      restoreInput.type='file';restoreInput.accept='.json,application/json';restoreInput.hidden=true;
+      dialog.append(restoreInput);
+      const backupButton=node('button','Download local Archive backup');
+      backupButton.type='button';backupButton.addEventListener('click',async()=>{
+        backupButton.disabled=true;
+        try {
+          const fresh=await verifyBot(s);
+          if(!sameRoute(s)||fresh.accountId!==context.accountId||fresh.bookId!==context.bookId)
+            throw new Error('Account, bot or attached Lorebook changed.');
+          const rows=await local.list(context.accountId,s.botId,s.conversationId);
+          if(rows.length>2000)throw new Error('Too many records for one backup. Contact support before proceeding.');
+          const payload={format:BACKUP_FORMAT,exportedAt:new Date().toISOString(),
+            scope:{accountId:context.accountId,botId:s.botId,conversationId:s.conversationId},
+            // Revision history is still held in original IndexedDB; this
+            // portable backup includes current records, not past revisions.
+            records:rows.map(({key,conversationKey,...rest})=>rest)};
+          if(!sameRoute(s))throw new Error('Conversation changed.');
+          const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+          const url=URL.createObjectURL(blob),link=document.createElement('a');
+          link.href=url;link.download=`spicychat-qol-local-archive-${s.conversationId.slice(0,8)}-${new Date().toISOString().slice(0,10)}.json`;
+          document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+          status.textContent=`Prepared backup of ${rows.length} local record(s). Keep it private. This backup does not include earlier revision history or prove a file reached disk.`;
+        }catch(error){status.textContent=String(error?.message||error);}
+        finally{backupButton.disabled=false;}
+      });
+      const restoreButton=node('button','Restore missing local Archive records');
+      restoreButton.type='button';restoreButton.addEventListener('click',()=>{restoreInput.value='';restoreInput.click();});
+      restoreInput.addEventListener('change',async()=>{
+        const file=restoreInput.files?.[0];if(!file)return;
+        restoreButton.disabled=true;
+        try{
+          if(file.size>8*1024*1024)throw new Error('Backup is over 8 MB. Restore smaller conversation backups.');
+          const data=JSON.parse(await file.text());
+          const rows=data?.records,old=data?.scope;
+          if(data?.format!==BACKUP_FORMAT||!Array.isArray(rows)||rows.length>2000||
+             old?.accountId!==context.accountId||old?.botId!==s.botId||old?.conversationId!==s.conversationId)
+            throw new Error('Backup does not match this signed-in private conversation. Nothing restored.');
+          const verified=await verifyBot(s);
+          if(!sameRoute(s)||verified.accountId!==context.accountId||verified.bookId!==context.bookId)
+            throw new Error('Account or private bot changed. Nothing restored.');
+          if(!confirm(`Restore missing LOCAL Archive records from this backup (${rows.length} entries)? Existing records will never be overwritten. Restored links need review before remote use. No native Lorebook will be changed.`))return;
+          let added=0,skipped=0;
+          for(let offset=0;offset<rows.length;offset+=50){
+            if(!sameRoute(s))throw new Error('Conversation changed. Restore stopped.');
+            const subset=rows.slice(offset,offset+50);
+            const outcome=await local.importMissing({accountId:context.accountId,
+              botId:s.botId,conversationId:s.conversationId},subset);
+            added+=Number(outcome?.inserted||0);skipped+=Number(outcome?.skipped||0);
+          }
+          status.textContent=`Local restore: ${added} missing record(s) added, ${skipped} existing left untouched. Restored native/Archive links require fresh verification before use.`;
+        }catch(error){status.textContent=`Restore stopped: ${String(error?.message||error)}. Earlier batches, if any, remain saved.`;}
+        finally{restoreInput.value='';restoreButton.disabled=false;}
+      });
+      const backupNote=node('p','Local Archive backup: exports current records for this conversation only (not revision history). Files contain private text. Restoring never overwrites existing records and never writes to SpicyChat.');
+      dialog.append(backupButton,restoreButton,backupNote);
       const details=await collect(s);
       const legacy=await legacyFacts(s);
       if (legacy.length) {
@@ -513,6 +684,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
         dialog.append(verifyButton);
         addAuditButton(dialog);
+        addNativeAuditButton(dialog);
         addCleanupPreview(dialog);
         addRecoveryButton(dialog);
         addKeeperRecoveryButton(dialog);
@@ -563,6 +735,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       button('Check Archive status (read only)',checkConfiguredArchive);
       button('Verify saved Archive entries (read only)',auditConfiguredArchive);
+      addNativeAuditButton(buttons);
       addCleanupPreview(buttons);
       addRecoveryButton(buttons);
       addKeeperRecoveryButton(buttons);

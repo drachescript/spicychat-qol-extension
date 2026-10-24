@@ -27,9 +27,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function plan(archive, records, scope) {
     const entries=Array.isArray(archive?.entries)?archive.entries:[];
-    const expectedCount=Number(archive?.num_entries);
+    const expectedCount=archive?.num_entries;
     const complete=Array.isArray(archive?.entries) && Number.isSafeInteger(expectedCount) &&
-      expectedCount>=0 && entries.length>=expectedCount;
+      expectedCount>=0 && entries.length===expectedCount &&
+      new Set(entries.map(entry=>String(entry?.id||'').toLowerCase())).size===expectedCount;
     const current = new Map((records || []).filter(r=>r?.detailId).map(r=>[r.detailId,r]));
     const grouped=new Map();
     for(const entry of entries.slice(0,2000)) {

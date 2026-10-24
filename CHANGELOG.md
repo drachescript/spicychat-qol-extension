@@ -1,3 +1,12 @@
+## 0.2.60
+- Expanded Lorebook JSON imports beyond entries: create complete private copies with names, descriptions, tags, cover pictures and entries, or review and merge a JSON into a private Lorebook you own.
+- Improved Lorebook downloads with fresh, verified entry collection, optional embedded cover pictures and a quick download of the last saved copy.
+- Added optional cover choices for private-copy imports: select another picture or use a temporary “Change Me” cover when the original is unavailable. Both start off.
+- Improved importing into newly created Lorebooks with automatic entry continuation, progress recovery and refreshed entries after completion. Existing matching entries are kept unless you choose otherwise.
+- Added manual local Archive backups and recovery for missing conversation records, without modifying an attached Lorebook or automatically reusing old remote links.
+- Added read-only checks for uncertain native Lorebook saves and Archive entries, with clearer conflict and incomplete-data results.
+- Expanded Custom Lite background feature separation for Context Keeper, local Lorebook tools and native Memory checks.
+
 ## 0.2.59
 - Reduced optional chat processing and message decoration while Android is rendering, scrolling or streaming replies.
 - Avoided repeated listing cleanup scans during chat updates and reduced Android performance-monitor polling.

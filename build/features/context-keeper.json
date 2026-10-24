@@ -17,11 +17,10 @@
     "contextKeeperRecallMaxChars"
   ],
   "requiredHelpers": [],
+  "settingsFiles": ["settings/feature-panels/context-keeper.js"],
+  "backgroundFiles": ["background/features/background-context-keeper-storage.js"],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false,
-  "settingsFiles": [
-    "settings/feature-panels/context-keeper.js"
-  ]
+  "browserVerified": false
 }
