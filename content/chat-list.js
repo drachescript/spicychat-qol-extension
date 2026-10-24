@@ -187,6 +187,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.collectChatRows = function collectChatRows() {
     const rows = [];
     const seen = new Set();
+    const tested = new WeakMap(); // Per-pass cache, never reused after React mutations.
 
     DS.qsa("a[href*='/chat/']").forEach(anchor => {
       const id = DS.chatIdFromHref(anchor.href);
@@ -197,17 +198,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       for (let i = 0; el && i < 12; i++, el = el.parentElement) {
         if (el === document.body || el.id === "root") break;
 
-        const cls = classText(el);
-        const textLen = DS.normalize(el.textContent).length;
-        const chatLinks = DS.qsa("a[href*='/chat/']", el).filter(link => DS.chatIdFromHref(link.href));
-
-        const looksLikeRow =
-          cls.includes("rounded") &&
-          cls.includes("relative") &&
-          chatLinks.length >= 1 &&
-          chatLinks.length <= 3 &&
-          textLen > 10 &&
-          textLen < 2600;
+        let looksLikeRow = tested.get(el);
+        if (looksLikeRow === undefined) {
+          const cls = classText(el);
+          looksLikeRow = false;
+          if (cls.includes("rounded") && cls.includes("relative")) {
+            // Most ancestors are not rows. Avoid querying descendants and
+            // reading large text trees until they pass cheap class checks.
+            const chatLinks = DS.qsa("a[href*='/chat/']", el);
+            const validLinks = chatLinks.filter(link => DS.chatIdFromHref(link.href)).length;
+            if (validLinks >= 1 && validLinks <= 3) {
+              const textLen = DS.normalize(el.textContent).length;
+              looksLikeRow = textLen > 10 && textLen < 2600;
+            }
+          }
+          tested.set(el, looksLikeRow);
+        }
 
         if (looksLikeRow) {
           if (!seen.has(el)) {

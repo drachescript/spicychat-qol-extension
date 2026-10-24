@@ -1,3 +1,12 @@
+## 0.2.61
+- Reduced performance-monitoring overhead by sharing long-task measurements between Adaptive Performance and detailed diagnostics, sampling large-page DOM size less often, and enabling input-delay monitoring only when requested.
+- Improved shared chat scheduling around typing, scrolling, editing, streaming and native reply actions, with more spacing between optional processing passes.
+- Reduced repeated listing scans when page structure has not changed, unnecessary composer layout checks during typing, and unchanged Settings writes.
+- Expanded privacy-safe scheduling and monitoring counters to help compare desktop, installed-app and Android behavior.
+- Improved mobile support exports and delayed nonessential opened-chat scanning during initial Android chat-list rendering.
+- Made Dislike use SpicyChat’s native rating control and verify the selection instead of treating recommendation feedback as a confirmed Dislike.
+- Made bulk Less Like feedback more cautious when SpicyChat rejects authentication or a rating result is uncertain, with separate recommendation and native-rating confirmation states.
+
 ## 0.2.60
 - Expanded Lorebook JSON imports beyond entries: create complete private copies with names, descriptions, tags, cover pictures and entries, or review and merge a JSON into a private Lorebook you own.
 - Improved Lorebook downloads with fresh, verified entry collection, optional embedded cover pictures and a quick download of the last saved copy.

@@ -102,6 +102,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // leave the textarea at 0px while the surrounding composer remains mounted,
     // making the whole input bar look like a thin line. Only repair clearly
     // collapsed, visible main composers; normal autosizing remains native.
+    if (textarea.style.height === `${wantedHeight}px`) return false;
     textarea.style.height = `${wantedHeight}px`;
 
     DS.diagEvent?.("composer-control", "collapsed-height-repaired", {
@@ -114,7 +115,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function scheduleComposerHeightRepair(textarea) {
-    if (!composerHeightLooksCollapsed(textarea)) return;
+    if (!isPrimaryComposerTextarea(textarea)) return;
+    // Textarea autosize uses inline styles on every input. No geometry reads
+    // or style writes until one coalesced animation frame checks it.
     if (state.pendingComposerHeightRepairs.has(textarea)) return;
     state.pendingComposerHeightRepairs.add(textarea);
 
@@ -248,7 +251,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           const textarea = mutation.target;
           if (!isMessageTextarea(textarea)) continue;
           forceEnableTextarea(textarea);
-          if (mutation.attributeName === "style") scheduleComposerHeightRepair(textarea);
+          // forceEnableTextarea already coalesces style repairs. Avoid
+          // scheduling the same geometry check twice for one mutation.
         }
       });
     }

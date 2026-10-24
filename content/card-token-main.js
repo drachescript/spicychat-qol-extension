@@ -1895,6 +1895,30 @@ if (!(() => { try {
         lastReason = responseText.slice(0, 300);
         const retryAfterMs = responseRetryAfterMs(response);
 
+        // A 401/403 is an authentication or signed-context failure, not a
+        // signal to try more guessed public tokens against the same account.
+        // A failed preflight may not reach the POST; either way, stop this job
+        // and require a fresh worker/session check before any next attempt.
+        if (lastStatus === 401 || lastStatus === 403) {
+          if (token === recombeePublicToken) {
+            recombeePublicTokenValidated = false;
+          }
+          return {
+            ok: false,
+            status: "recombee-auth-rejected",
+            stage: "rating-auth",
+            reason: `The recommendation rating was rejected by the current signed context (HTTP ${lastStatus}). No other token was tried.`,
+            characterId: botId,
+            httpStatus: lastStatus,
+            attempts,
+            networkAttempts,
+            requestSent: true,
+            ratingConfirmed: false,
+            retryable: false,
+            authRejected: true
+          };
+        }
+
         if (lastStatus === 429) {
           return {
             ok: false,

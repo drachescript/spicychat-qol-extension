@@ -147,7 +147,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return finish({ ok: true, status: "already-rated-or-unavailable" });
     }
     if (dislikeAlreadySelected(dislike)) {
-      return finish({ ok: true, status: "already-disliked" });
+      return finish({ ok: true, status: "already-disliked", nativeUiConfirmed: true, requestSent: false });
     }
 
     try { dislike.click(); } catch { DS.realClick?.(dislike); }
@@ -161,8 +161,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try { done.click(); } catch { DS.realClick?.(done); }
     const closed = await waitForElement(() => !ratingModal(), 4000).catch?.(() => null);
-    if (!closed) return finish({ ok: false, status: "submit-not-confirmed" });
-    return finish({ ok: true, status: "disliked" });
+    if (!closed) return finish({ ok: false, status: "submit-not-confirmed", requestSent: true });
+    // Reopen the actual native control to confirm the persisted selection.
+    // A closed dialog or an HTTP 200 on /event is not proof of a Dislike.
+    const freshOpenButton = document.querySelector("button[aria-label='ThumbsUp-button']");
+    if (!visibleElement(freshOpenButton)) {
+      return finish({ ok: false, status: "native-rating-unverified", requestSent: true });
+    }
+    try { freshOpenButton.click(); } catch { DS.realClick?.(freshOpenButton); }
+    const selected = await waitForElement(() => {
+      const checkModal = ratingModal();
+      const selectedButton = [...(checkModal?.querySelectorAll("button") || [])].find(button =>
+        !!button.querySelector("svg.lucide-thumbs-down, svg[class*='lucide-thumbs-down']"));
+      return selectedButton && dislikeAlreadySelected(selectedButton) ? checkModal : null;
+    }, 4000);
+    if (!selected) return finish({ ok: false, status: "native-rating-unverified", requestSent: true });
+    const closeButton = selected.querySelector("button[aria-label='Close'], button[aria-label='close']");
+    try { closeButton?.click(); } catch {}
+    return finish({ ok: true, status: "disliked", nativeUiConfirmed: true, requestSent: true });
   }
 
   function workerCardForBotId(botId) {

@@ -744,6 +744,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const names = Object.keys(clean).filter(name => String(name || "").trim());
     if (!names.length) return Promise.resolve(true);
     if (DS.state?.settings) Object.assign(DS.state.settings, clean);
+    // Only skip a genuinely unchanged setting after the first storage read.
+    // Never suppress a newer value if an older write for the same key is
+    // queued or in-flight; that would allow a delayed write to undo it.
+    if (DS.state?.persistedSettingsReady) {
+      let skipped = 0;
+      for (const name of names) {
+        if (pendingWriteTouches(DS.settingStorageKey(name))) continue;
+        if (settingStorageValueMatches(DS.state.persistedSettings?.[name], clean[name])) {
+          delete clean[name];
+          skipped++;
+        }
+      }
+      if (skipped) {
+        const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+        perf.unchangedSettingsWritesAvoided = Number(perf.unchangedSettingsWritesAvoided || 0) + skipped;
+      }
+    }
+    if (!Object.keys(clean).length) return Promise.resolve(true);
     return DS.storageSet({ settingsPatch: clean }, options);
   };
 
@@ -1710,6 +1728,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     // v0.2.25 applies device compatibility only to the runtime copy: Android
     // keeps desktop-only preferences saved, but does not activate them.
     DS.state.persistedSettings = { ...settings };
+    DS.state.persistedSettingsReady = true;
     const runtimeSettings = DS.applyPlatformCompatibility(settings);
     DS.applyQolTabEnabledOverride?.(runtimeSettings);
     DS.state.settings = runtimeSettings;

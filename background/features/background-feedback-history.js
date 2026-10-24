@@ -16,10 +16,11 @@ function normalizeQuickDislikeHistory(raw) {
       name: String(value?.name || "").slice(0, 160),
       handledAt: Number(value?.handledAt || value?.at || 0) || Date.now(),
       crossHandledBy: value?.crossHandledBy === "less-like" ? "less-like" : "",
-      ratingSource: ["dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
+      ratingSource: ["native-ui", "dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
       ratingAt: Number(value?.ratingAt || 0) || 0,
       requestSent: value?.requestSent === true,
-      nativeEventConfirmed: value?.nativeEventConfirmed === true
+      nativeEventConfirmed: value?.nativeEventConfirmed === true,
+      nativeUiConfirmed: value?.nativeUiConfirmed === true
     };
   }
   return { version: 1, bots: normalized };
@@ -40,10 +41,11 @@ async function rememberQuickDislike(botId, botName, status, origin = {}) {
     name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
     handledAt: Date.now(),
     crossHandledBy: origin.crossHandledBy === "less-like" ? "less-like" : "",
-    ratingSource: origin.ratingSource === "less-like" ? "less-like" : (status === "disliked" ? "dislike" : ""),
+    ratingSource: origin.nativeUiConfirmed === true ? "native-ui" : (origin.ratingSource === "less-like" ? "less-like" : (status === "disliked" ? "dislike" : "")),
     ratingAt: Number(origin.ratingAt || 0) || (status === "disliked" ? Date.now() : 0),
     requestSent: (status === "disliked" || status === "dislike-event-pending") && origin.requestSent === true,
-    nativeEventConfirmed: status === "disliked" && origin.nativeEventConfirmed === true
+    nativeEventConfirmed: status === "disliked" && origin.nativeEventConfirmed === true,
+    nativeUiConfirmed: ["disliked", "already-disliked"].includes(status) && origin.nativeUiConfirmed === true
   };
 
   // Retain 12,000 handled IDs (not 5,000); preserve existing dedupe across large queues.
@@ -74,7 +76,9 @@ function normalizeQuickLessLikeHistory(raw) {
       handledAt: Number(value?.handledAt || value?.at || 0) || Date.now(),
       stage: String(value?.stage || "").slice(0, 80),
       reason: String(value?.reason || "").slice(0, 300),
-      httpStatus: Number(value?.httpStatus || 0) || 0
+      httpStatus: Number(value?.httpStatus || 0) || 0,
+      ratingConfirmed: value?.ratingConfirmed === true,
+      nativeEventConfirmed: false
     };
   }
   return { version: 1, bots: normalized };
@@ -183,7 +187,10 @@ async function rememberQuickLessLike(botId, botName, options = {}) {
   return rememberQuickLessLikeEntry(botId, {
     status: "less-liked",
     name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
-    handledAt: Date.now()
+    handledAt: Date.now(),
+    httpStatus: Number(options?.ratingHttpStatus || 0) || 0,
+    ratingConfirmed: options?.ratingConfirmed === true,
+    nativeEventConfirmed: false
   }, options);
 }
 
@@ -395,64 +402,98 @@ async function initializeHelperLifecycleRecovery() {
   return helperLifecycleInitPromise;
 }
 
+// Dislike must use SpicyChat's actual chat-rating UI. Recombee's -1 rating is
+// only the separate "Less Like This" recommendation preference. A successful
+// Recombee POST and /event POST do not establish a saved native chat rating.
+async function submitQuickDislikeUsingNativeUi(message, botId) {
+  let url;
+  try { url = new URL(String(message?.chatUrl || `https://spicychat.ai/chat/${botId}`)); }
+  catch { return { ok: false, status: "invalid-chat-url" }; }
+  if (!isSpicyChatUrl(url.href) || !/^\/chat\/[^/]+(?:\/|$)/i.test(url.pathname) ||
+      String(url.pathname.split("/")[2] || "").toLowerCase() !== botId) {
+    return { ok: false, status: "invalid-chat-url" };
+  }
+  // The helper is a separate SpicyChat tab and receives the native event
+  // handlers, rather than trying to recreate rating API traffic.
+  const runId = String(message?.bulkRunId || "").trim();
+  const jobId = String(message?.quickDislikeJobId || `native-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const prepared = await prepareQuickDislikeWorkerTab(url, runId, {
+    jobId, botId, botName: String(message?.botName || ""), startedAt: Date.now()
+  });
+  if (!prepared?.ok || !prepared.tabId) {
+    return { ok: false, status: "native-rating-worker-unavailable", requestSent: false };
+  }
+  const tabId = Number(prepared.tabId);
+  let ready = false;
+  // Read-only readiness checks may be repeated. The mutating RUN is sent just
+  // once, even if a reply is lost; no blind retries or duplicate votes.
+  for (let attempt = 0; attempt < 24; attempt++) {
+    if (runId && isQuickDislikeBulkRunCanceled(runId)) return { ok: false, status: "bulk-canceled" };
+    const tab = await tabsGet(tabId);
+    if (!tab) return { ok: false, status: "native-rating-worker-closed" };
+    const info = await tabsSendMessageWithTimeout(tabId, { type: "DS_GET_PAGE_INFO" }, 1200);
+    if (info?.ok && info?.isSingleChatPage &&
+        String(info.botId || "").toLowerCase() === botId) {
+      ready = true;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 450));
+  }
+  if (!ready) return { ok: false, status: "native-rating-page-not-ready", requestSent: false };
+  const response = await tabsSendMessageWithTimeout(tabId, { type: "DS_QUICK_DISLIKE_RUN" }, 25000);
+  if (!response || response.__dsTimeout) {
+    return { ok: false, status: "native-rating-result-unknown", requestSent: true,
+      networkAmbiguous: true, retryable: false };
+  }
+  return { ...response, nativeUiConfirmed: response.nativeUiConfirmed === true };
+}
+
 async function runQuickDislikeBot(message) {
   const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
   const botName = String(message?.botName || "").trim().slice(0, 160);
-  if (!/^[0-9a-f-]{20,}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
   if (message?.bulkRunId && isQuickDislikeBulkRunCanceled(message.bulkRunId)) return { ok: false, status: "bulk-canceled" };
 
-  if (message?.force !== true) {
-    const history = await getQuickDislikeHistory();
-    const remembered = history.bots[botId];
-    if (remembered && (remembered.status === "dislike-event-pending" ||
-        (["disliked", "already-disliked"].includes(remembered.status) && remembered.nativeEventConfirmed !== true))) {
-      // Older QoL releases labeled a Recombee-only Less Like POST as Dislike.
-      // Keep the history for audit, but don't allow it to block the real action.
-    } else if (remembered && !(remembered.status === "unavailable-private-or-deleted" &&
-        await feedbackUnavailableSuperseded(botId, remembered.handledAt))) return {
-      ok: true, status: "already-handled", rememberedStatus: remembered.status,
-      handledAt: remembered.handledAt || 0, ratingAt: remembered.ratingAt || 0,
-      crossHandledBy: remembered.crossHandledBy || "",
-      ratingSource: remembered.ratingSource || "", nativeEventConfirmed: remembered.nativeEventConfirmed === true,
-      requestSent: false, networkAttempts: 0
-    };
-
-  }
-
-  // Dislike reuses the signed feedback transport but must also confirm the
-  // separate native characterRating event. Less Like cannot complete Dislike.
-  let result;
-  try {
-    result = await runDirectCharacterFeedback({ ...message, eventOnly: (await getQuickDislikeHistory()).bots[botId]?.status === "dislike-event-pending" }, "dislike");
-  } finally {
-    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
-  }
-
-  if (result?.ok && result.status === "disliked" && result.nativeEventConfirmed === true) {
-    const remembered = await rememberQuickDislike(botId, botName, "disliked", { requestSent: result.requestSent === true, nativeEventConfirmed: result.nativeEventConfirmed === true });
-    if (remembered) {
-      result.handledAt = remembered.handledAt || Date.now();
-      result.ratingAt = remembered.ratingAt || 0;
-      result.ratingSource = "dislike";
+  const history = await getQuickDislikeHistory();
+  const remembered = history.bots[botId];
+  if (message?.force !== true && remembered) {
+    // Earlier builds marked two successful API requests as "disliked" even
+    // when SpicyChat's native rating was unchanged. Require native UI evidence.
+    if ((["disliked", "already-disliked"].includes(remembered.status) && remembered.nativeUiConfirmed === true) ||
+        (["unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(remembered.status) &&
+         !(await feedbackUnavailableSuperseded(botId, remembered.handledAt)))) {
+      return { ok: true, status: "already-handled", rememberedStatus: remembered.status,
+        handledAt: remembered.handledAt || 0, nativeUiConfirmed: remembered.nativeUiConfirmed === true,
+        requestSent: false, networkAttempts: 0 };
     }
-  } else if (result?.status === "dislike-event-pending" && result.ratingSubmitted === true) {
-    await rememberQuickDislike(botId, botName, "dislike-event-pending", { requestSent: true });
-  } else if (result?.status === "bot-not-found") {
-    const remembered = await rememberQuickDislike(botId, botName, "unavailable-private-or-deleted");
-    result = { ...result, ok: true, status: "unavailable-private-or-deleted", rememberedStatus: "unavailable-private-or-deleted", handledAt: remembered?.handledAt || Date.now() };
-  } else if (result?.status === "character-restricted") {
-    const remembered = await rememberQuickDislike(botId, botName, "unavailable-private-or-deleted");
-    result = { ...result, ok: true, status: "unavailable-private-or-deleted", rememberedStatus: "unavailable-private-or-deleted", handledAt: remembered?.handledAt || Date.now() };
   }
 
+  // Avoid a second recommendation API request; only the native UI path can
+  // complete a Dislike. Inconclusive results are never remembered as success.
+  let result = await submitQuickDislikeUsingNativeUi(message, botId);
+  if (result?.ok && result.nativeUiConfirmed === true && ["disliked", "already-disliked"].includes(result.status)) {
+    const rememberedNew = await rememberQuickDislike(botId, botName, result.status, {
+      requestSent: result.requestSent === true, nativeEventConfirmed: false, nativeUiConfirmed: true
+    });
+    if (rememberedNew) {
+      result.handledAt = rememberedNew.handledAt || Date.now();
+      result.ratingAt = rememberedNew.ratingAt || 0;
+      result.ratingSource = "native-ui";
+    }
+  } else if (result?.ok && !result?.nativeUiConfirmed) {
+    result = { ...result, ok: false, status: "native-rating-unverified",
+      reason: "Native UI did not confirm that the dislike was saved." };
+  } else if (["unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(result?.status)) {
+    const stored = await rememberQuickDislike(botId, botName, result.status);
+    result = { ...result, ok: true, handledAt: stored?.handledAt || Date.now() };
+  }
   await recordHelperLifecycle(result?.ok ? "quickDislikeCompleted" : "quickDislikeFailed", {
-    botId,
-    status: result?.status || "unknown",
-    executor: "persistent-recommendation-worker",
+    botId, status: result?.status || "unknown", executor: "native-chat-rating-worker",
     elapsedMs: Date.now() - totalStartedAt
   });
-  return { ...result, totalMs: Date.now() - totalStartedAt, executor: "persistent-recommendation-worker" };
+  return { ...result, totalMs: Date.now() - totalStartedAt,
+    executor: "native-chat-rating-worker" };
 }
 
 // Optional alarm handler owned by bot-blocking. Omitted modules do not register a handler.
