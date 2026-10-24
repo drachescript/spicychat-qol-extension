@@ -321,11 +321,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     const status = clean(response?.rememberedStatus || response?.status || "failed");
     if (response?.ok) {
-      DS.setQuickStatus?.(status === "already-handled" ? `Dislike already handled for ${snapshot.name || snapshot.id}.` : `Dislike result for ${snapshot.name || snapshot.id}: ${status}.`);
+      DS.setQuickStatus?.(status === "already-handled" ? `Verified native Dislike was already handled for ${snapshot.name || snapshot.id}.` : `Native Dislike verified for ${snapshot.name || snapshot.id}.`);
       finishDiag("ok", 0);
       return true;
     }
-    DS.setQuickStatus?.(`Dislike failed for ${snapshot.name || snapshot.id}: ${status}.`);
+    DS.setQuickStatus?.(`Dislike not confirmed for ${snapshot.name || snapshot.id}: ${status}. Open its chat and rate manually if needed.`);
     finishDiag(status || "failed", 1);
     return false;
   }

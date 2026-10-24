@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
   const defaultsText = fs.readFileSync(path.join(root, 'settings/options-settings-defaults.js'), 'utf8');
   const contentDefaults = fs.readFileSync(path.join(root, 'content/core-settings-defaults.js'), 'utf8');
   const html = fs.readFileSync(path.join(root, 'options.html'), 'utf8');
-  const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8').split('## 0.2.59')[0];
+  const changelog = (fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8').split('## 0.2.60')[1] || '').split('## 0.2.59')[0];
   const enabled = ['lorebookJsonPrivateAutoCreate','lorebookJsonAutoImportEntries','lorebookJsonCopyCover','lorebookJsonCopyTags'];
   const disabled = ['lorebookJsonPreferSelectedCover','lorebookJsonAllowPlaceholderCover'];
   for (const key of enabled) {

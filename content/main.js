@@ -1318,6 +1318,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (laneToken) DS.diagOperationEnd?.(laneToken, { outcome: "ok", meta: { durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 } });
       DS.diagScheduler?.("finished", { lane: "message", source: String(DS.state?.diagMessageLaneSource || ""), durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 });
       DS.state.messageLaneRoots = null;
+      DS.state.lastMessageLaneFinishedAt = Date.now();
       DS.state.diagMessageLaneOperationId = "";
       messageLaneRunning = false;
       if (messageLanePending) {
@@ -1393,6 +1394,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     armMessageLaneTimer();
   };
 
+  let androidChatListQuietRoute = "";
+  let androidChatListQuietUntil = 0;
+  function deferAndroidChatListWorkForFirstPaint() {
+    if (!androidWebViewPerformanceGuardActive()) return false;
+    const route = location.pathname;
+    if (androidChatListQuietRoute !== route) {
+      androidChatListQuietRoute = route;
+      androidChatListQuietUntil = Date.now() + 1500;
+    }
+    const remaining = androidChatListQuietUntil - Date.now();
+    if (remaining <= 0) return false;
+    runtimeCounters().androidChatListFirstPaintDeferrals = Number(runtimeCounters().androidChatListFirstPaintDeferrals || 0) + 1;
+    scheduleSavedOpenedLane("android-chat-list-first-paint", remaining + 80);
+    return true;
+  }
+
   async function runSavedOpenedLane(source = "saved-opened") {
     if (savedOpenedLaneRunning) {
       savedOpenedLanePending = true;
@@ -1404,7 +1421,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const singleChat = !!DS.isSingleChatPage?.();
     const chatList = !!DS.isChatListPage?.();
+    if (!chatList) androidChatListQuietRoute = "";
     if (!singleChat && !chatList) return;
+    // Android /chats is React-heavy during its first paint. Keep user-visible
+    // native rendering ahead of the optional opened-history scan, then run it.
+    if (chatList && deferAndroidChatListWorkForFirstPaint()) return;
 
     savedOpenedLaneRunning = true;
     const counters = runtimeCounters();
@@ -1810,6 +1831,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function optionalUiQuietDeadline() {
+    if (!DS.isSingleChatPage?.()) return 0;
+    const state = DS.state || {};
+    return Math.max(Number(state.userTypingUntil || 0),
+      Number(state.nativeActionQuietUntil || 0),
+      Number(state.chatEnhancerQuietUntil || 0),
+      Number(state.chatReplyRenderQuietUntil || 0),
+      Number(state.userScrollingUntil || 0),
+      Number(state.chatHistoryBatchUntil || 0));
+  }
+
   DS.runSlow = async function runSlow(options = {}) {
     if (DS.isQolPausedForTab?.()) return;
     if (slowRunning) {
@@ -1825,20 +1857,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Hidden tabs do not need cosmetic DOM work. Critical tracking/filtering has
     // its own lane and the slow lane is refreshed immediately when the tab is shown.
     if (document.hidden && !options.force) return;
-    // Defer the cosmetic lane while the user is pressing native Send/Regenerate.
-    // Crucial tracking remains on its own lane and is not suppressed.
-    if (!options.force && Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
-      DS.scheduleRun?.({ priority: "slow", source: "native-action-quiet" });
-      runtimeCounters().nativeActionQuietDeferrals = Number(runtimeCounters().nativeActionQuietDeferrals || 0) + 1;
-      return;
-    }
-    if (!options.force && DS.isSingleChatPage?.() &&
-        (window.innerWidth <= 760 || !!DS.getRuntimeEnvironment?.()?.android) &&
-        Date.now() < Number(DS.state.userTypingUntil || 0)) {
-      // On phones the software keyboard and native React composer share the
-      // main thread. Hold nonessential QoL cosmetic work until typing settles.
-      DS.scheduleRun?.({ priority: "slow", source: "mobile-typing-quiet" });
-      runtimeCounters().mobileTypingSlowDeferrals = Number(runtimeCounters().mobileTypingSlowDeferrals || 0) + 1;
+    // Optional work waits for all native interaction windows (including
+    // streaming and editing); critical tracking is never held here.
+    if (!options.force && Date.now() < optionalUiQuietDeadline()) {
+      DS.scheduleRun?.({ priority: "slow", source: "native-interaction-quiet" });
+      const perf = runtimeCounters();
+      perf.sharedQuietDeferrals = Number(perf.sharedQuietDeferrals || 0) + 1;
       return;
     }
 
@@ -2128,7 +2152,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Keep the debounce for performance, but cap how long it may be postponed.
     if (!slowScheduledAt) slowScheduledAt = now;
 
-    const desiredAt = now + Math.max(0, Number(delay) || 0);
+    let desiredAt = now + Math.max(0, Number(delay) || 0);
+    const quietUntil = optionalUiQuietDeadline();
+    if (quietUntil > now) {
+      desiredAt = Math.max(desiredAt, quietUntil + 260);
+      const perf = runtimeCounters();
+      perf.sharedQuietScheduleDeferrals = Number(perf.sharedQuietScheduleDeferrals || 0) + 1;
+    }
+    // Avoid triggering the message-enhancement and cosmetic lanes on the same
+    // frame immediately after a quiet spell; critical work is unaffected.
+    if (messageLaneDueAt > now && Math.abs(desiredAt - messageLaneDueAt) < 240) {
+      desiredAt = messageLaneDueAt + 240;
+      const perf = runtimeCounters();
+      perf.optionalLaneStaggers = Number(perf.optionalLaneStaggers || 0) + 1;
+    }
     const latestAt = slowScheduledAt + maxWait;
     const runAt = Math.min(desiredAt, latestAt);
     const wait = Math.max(0, runAt - now);
@@ -2842,15 +2879,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (mobileEditOrRating) counters.mobileNativeActionQuietStarts = Number(counters.mobileNativeActionQuietStarts || 0) + 1;
     }, { capture: true, passive: true });
 
-    // Event Timing reveals actual input delay. Keep only aggregate timings; do
-    // not collect text, full selectors, message IDs, or raw event records.
-    try {
-      if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("event")) {
+    // Event Timing is optional. Never install this browser-level observer when
+    // detailed diagnostics are off; enabling diagnostics later activates it.
+    DS.syncNativeInputTimingObserver = () => {
+      const wantsInputTiming = !!DS.state?.settings?.performanceDiagnostics;
+      if (!wantsInputTiming) {
+        DS.state.nativeInputObserver?.disconnect?.();
+        DS.state.nativeInputObserver = null;
+        return;
+      }
+      if (DS.state.nativeInputObserver) return;
+      try {
+        if (typeof PerformanceObserver !== "function" ||
+            !PerformanceObserver.supportedEntryTypes?.includes?.("event")) return;
         const inputObserver = new PerformanceObserver(list => {
-          if (!DS.state?.settings?.performanceDiagnostics || document.hidden) return;
+          if (!DS.state?.settings?.performanceDiagnostics || document.hidden || !DS.isSingleChatPage?.()) return;
           const counters = runtimeCounters();
           for (const entry of list.getEntries()) {
-            if (entry.name !== "click" || !DS.isSingleChatPage?.()) continue;
+            if (entry.name !== "click") continue;
             const delay = Math.max(0, Number(entry.processingStart || 0) - Number(entry.startTime || 0));
             const duration = Math.max(0, Number(entry.duration || 0));
             const target = entry.target?.closest?.("button");
@@ -2864,41 +2910,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
         inputObserver.observe({ type: "event", durationThreshold: 64 });
         DS.state.nativeInputObserver = inputObserver;
-      }
-    } catch {}
+      } catch {}
+    };
+    DS.syncNativeInputTimingObserver();
 
-    try {
-      if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
-        const observer = new PerformanceObserver(list => {
-          const entries = list.getEntries();
-          if (entries.length && DS.isSingleChatPage?.()) {
-            DS.state = DS.state || {};
-            DS.state.chatStartupLastLongTaskAt = Date.now();
-          }
-          if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticTraceActive?.("normal")) return;
-          const counters = runtimeCounters();
-          for (const entry of entries) {
-            const ms = Number(entry.duration || 0);
-            const rounded = Math.round(ms * 10) / 10;
-            const start = Number(entry.startTime || 0);
-            const overlaps = longTaskOverlapNames(start, start + ms);
-            counters.longTasks = Number(counters.longTasks || 0) + 1;
-            counters.lastLongTaskMs = rounded;
-            counters.maxLongTaskMs = Math.max(Number(counters.maxLongTaskMs || 0), rounded);
-            counters.lastLongTaskOverlap = overlaps.join(", ") || "none";
-            if (overlaps.length) {
-              counters.longTasksWithQolOverlap = Number(counters.longTasksWithQolOverlap || 0) + 1;
-              counters.maxLongTaskWithQolOverlapMs = Math.max(Number(counters.maxLongTaskWithQolOverlapMs || 0), rounded);
-            } else {
-              counters.longTasksWithoutQolOverlap = Number(counters.longTasksWithoutQolOverlap || 0) + 1;
-              counters.maxLongTaskWithoutQolOverlapMs = Math.max(Number(counters.maxLongTaskWithoutQolOverlapMs || 0), rounded);
-            }
-          }
-        });
-        observer.observe({ entryTypes: ["longtask"] });
-        DS.state.longTaskObserver = observer;
+    // Runtime Improvements owns the shared long-task observer when installed.
+    // A Custom Lite package without that module keeps the local fallback.
+    const consumeLongTasks = entries => {
+      if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticTraceActive?.("normal")) return;
+      const counters = runtimeCounters();
+      for (const entry of entries) {
+        const ms = Number(entry.duration || 0);
+        const rounded = Math.round(ms * 10) / 10;
+        const start = Number(entry.startTime || 0);
+        const overlaps = longTaskOverlapNames(start, start + ms);
+        counters.longTasks = Number(counters.longTasks || 0) + 1;
+        counters.lastLongTaskMs = rounded;
+        counters.maxLongTaskMs = Math.max(Number(counters.maxLongTaskMs || 0), rounded);
+        counters.lastLongTaskOverlap = overlaps.join(", ") || "none";
+        // Overlap is correlation only: third-party and native rendering may run
+        // in the same browser task. Avoid attributing the full task to QoL.
+        if (overlaps.length) {
+          counters.longTasksWithQolOverlap = Number(counters.longTasksWithQolOverlap || 0) + 1;
+          counters.maxLongTaskWithQolOverlapMs = Math.max(Number(counters.maxLongTaskWithQolOverlapMs || 0), rounded);
+        } else {
+          counters.longTasksWithoutQolOverlap = Number(counters.longTasksWithoutQolOverlap || 0) + 1;
+          counters.maxLongTaskWithoutQolOverlapMs = Math.max(Number(counters.maxLongTaskWithoutQolOverlapMs || 0), rounded);
+        }
       }
-    } catch {}
+    };
+    if (typeof DS.subscribeRuntimeLongTasks === "function") {
+      DS.state.longTaskSubscription = DS.subscribeRuntimeLongTasks(consumeLongTasks);
+      runtimeCounters().sharedLongTaskObserverReuses = Number(runtimeCounters().sharedLongTaskObserverReuses || 0) + 1;
+    } else {
+      try {
+        if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
+          const observer = new PerformanceObserver(list => {
+            const entries = list.getEntries();
+            if (entries.length && DS.isSingleChatPage?.()) {
+              DS.state.chatStartupLastLongTaskAt = Date.now();
+            }
+            consumeLongTasks(entries);
+          });
+          observer.observe({ type: "longtask" });
+          DS.state.longTaskObserver = observer;
+        }
+      } catch {}
+    }
   }
 
   function changedSettingNames(changes = {}) {
@@ -2969,6 +3027,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           // Do not run unrelated feature scans or change saved settings.
           if (settingsChanged) {
             await DS.featureLifecycle?.reconcileSettings?.(changedSettingNames(changes), DS.state?.settings);
+            DS.syncNativeInputTimingObserver?.();
           }
           if (settingsChanged && document.hidden && DS.state?.settings?.autoReadNotifications) {
             setTimeout(() => DS.maybeAutoReadNotifications?.("settings-change"), 0);

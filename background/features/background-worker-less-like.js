@@ -3,6 +3,11 @@
 // Feature-owned background helpers: worker-less-like. Full QoL and Custom use the same source.
 // Shared storage/settings state remains in the core controller for now.
 
+// A bulk run that hits a rejected or ambiguous rating request must not
+// continue issuing POSTs through the same worker. The user can explicitly
+// start a new run after checking auth; this map is intentionally ephemeral.
+const quickLessLikePausedBulkRuns = new Map();
+
 function quickLessLikeWorkerUrlInfo(url) {
   try {
     const parsed = new URL(String(url || ""));
@@ -396,6 +401,7 @@ async function releaseQuickLessLikeBulkWorker(runId) {
   }
   quickLessLikeDirectBulkTabs.delete(id);
   quickLessLikeClosedBulkRuns.delete(id);
+  quickLessLikePausedBulkRuns.delete(id);
   const tabIds = new Set();
   const mapped = Number(quickLessLikeBulkWorkerTabs.get(id));
   if (Number.isFinite(mapped)) tabIds.add(mapped);
@@ -688,6 +694,7 @@ async function prepareQuickLessLikeBulkWorker(message) {
   const runId = String(message?.bulkRunId || "").trim();
   if (!runId) return { ok: false, status: "invalid-run" };
   quickLessLikeClosedBulkRuns.delete(runId);
+  quickLessLikePausedBulkRuns.delete(runId);
   return ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
 }
 
@@ -711,6 +718,12 @@ async function runDirectCharacterFeedback(message, mode) {
   const runId = String(message?.bulkRunId || "").trim();
   if (runId && quickLessLikeClosedBulkRuns.has(runId)) {
     return { ok: false, status: "recommendation-worker-closed", feedbackTabsTried: 0, requestSent: false, networkAttempts: 0 };
+  }
+  const paused = runId ? quickLessLikePausedBulkRuns.get(runId) : null;
+  if (paused) {
+    return { ok: false, status: "recommendation-feedback-paused", reason: paused.reason,
+      originalStatus: paused.status, feedbackTabsTried: 0, requestSent: false,
+      networkAttempts: 0, retryable: false, bulkPaused: true };
   }
 
   const workerStartedAt = Date.now();
@@ -754,13 +767,15 @@ async function runDirectCharacterFeedback(message, mode) {
   }
 
   result = response?.status ? { ...response, feedbackTabId: tabId, feedbackTabsTried: 1 } : {
-    ok: false, status: "direct-feedback-unavailable", feedbackTabId: tabId, feedbackTabsTried: 1,
-    requestSent: false, networkAttempts: 0
+    // The helper may have submitted the POST before its response channel died.
+    // Do not reboot and blindly resend a possible successful rating.
+    ok: false, status: "direct-feedback-result-unknown", feedbackTabId: tabId, feedbackTabsTried: 1,
+    requestSent: true, networkAttempts: 0, networkAmbiguous: true, retryable: false
   };
   const mayHaveSentRating = !!result?.requestSent || Number(result?.networkAttempts || 0) > 0;
   const recoverableBeforeSend = new Set([
-    "direct-feedback-unavailable", "recombee-token-not-found", "recombee-user-not-found",
-    "character-auth-not-ready", "character-auth-rejected", "not-worker"
+    "recombee-token-not-found", "recombee-user-not-found",
+    "character-auth-not-ready", "not-worker"
   ]);
   if (!result?.ok && !mayHaveSentRating && recoverableBeforeSend.has(String(result?.status || ""))) {
     quickLessLikeReadyWorkerTabs.delete(tabId);
@@ -783,6 +798,21 @@ async function runDirectCharacterFeedback(message, mode) {
     } else if (!(await tabsGet(tabId)) || (runId && quickLessLikeClosedBulkRuns.has(runId))) {
       result = { ok: false, status: "recommendation-worker-closed", feedbackTabId: tabId, feedbackTabsTried: 1, requestSent: false, networkAttempts: 0 };
     }
+  }
+  // Never replay an ambiguous POST, nor let the remaining bots in this run
+  // repeat requests using an auth context that just failed. Read-only status
+  // and the original per-bot HTTP result stay available to diagnostics.
+  if (runId && (result?.authRejected === true || String(result?.status || "") === "character-auth-rejected" ||
+      Number(result?.httpStatus || 0) === 401 ||
+      Number(result?.httpStatus || 0) === 403 || result?.networkAmbiguous === true)) {
+    quickLessLikePausedBulkRuns.set(runId, {
+      status: String(result?.status || "feedback-unverified"),
+      reason: result?.networkAmbiguous === true
+        ? "A rating request may have reached SpicyChat, but its result is unknown. Check before retrying."
+        : "The recommendation worker's authentication was rejected. Start a fresh run after authentication is ready."
+    });
+    quickLessLikeReadyWorkerTabs.delete(tabId);
+    result = { ...result, bulkPaused: true, retryable: false };
   }
   if (result?.ok && ["less-liked", "disliked"].includes(result?.status)) quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
   return {
@@ -821,7 +851,13 @@ async function runQuickLessLikeBot(message) {
 
   const historyStartedAt = Date.now();
   if (result?.ok && result.status === "less-liked") {
-    const remembered = await rememberQuickLessLike(botId, botName, { immediate: !String(message?.bulkRunId || "").trim(), runId: String(message?.bulkRunId || "").trim() });
+    const remembered = await rememberQuickLessLike(botId, botName, {
+      immediate: !String(message?.bulkRunId || "").trim(),
+      runId: String(message?.bulkRunId || "").trim(),
+      ratingHttpStatus: Number(result?.ratingHttpStatus || result?.httpStatus || 0),
+      ratingConfirmed: Number(result?.ratingHttpStatus || result?.httpStatus || 0) >= 200 &&
+        Number(result?.ratingHttpStatus || result?.httpStatus || 0) < 300
+    });
     if (remembered) result.handledAt = remembered.handledAt || Date.now();
   } else if (result?.status === "bot-not-found" && (result?.availabilityConfirmed || Number(message?.retryAttempt || 0) >= 1)) {
     const remembered = await rememberQuickLessLikeUnavailable(botId, botName, result, { immediate: !String(message?.bulkRunId || "").trim(), runId: String(message?.bulkRunId || "").trim() });

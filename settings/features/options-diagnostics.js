@@ -154,10 +154,15 @@ function setupControlCenterControls() {
     const status = $("controlSupportStatus");
     if (status) status.textContent = "Building full support check for download…";
     const downloaded = await downloadAllSupportInfo();
-    const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
     if (status) status.textContent = downloaded
-      ? (androidWebView ? "Full support check copied instead of downloaded on Android. Paste it into your report." : "Full support check downloaded. It includes no chat text or saved private content.")
-      : (androidWebView ? "Android export could not be verified. Open Data & Backup to copy the generated report." : "Could not download the full support check; review Quick diagnostics for details.");
+      ? (isAndroidSupportWebView()
+          ? (lastAndroidSupportExportState === "native"
+              ? "Android accepted the support export request. Check Downloads; completion isn't verified and history was kept."
+              : "Android couldn't save a file. The report was copied instead, and saved history was kept.")
+          : "Support download requested. Check Downloads; support history was kept unless completion was confirmed.")
+      : (isAndroidSupportWebView()
+          ? "Android could not export this report. Check the selectable copy in Data & Backup; support history was kept."
+          : "Could not download the full support check; review Quick diagnostics for details.");
   });
 }
 
@@ -170,6 +175,70 @@ function supportReportFilename(kind = "support-info") {
   return `spicychat-qol-${safeKind}-v${version}-${stamp}.txt`;
 }
 
+let lastAndroidSupportExportState = "";
+
+function isAndroidSupportWebView() {
+  return !!(window.flutter_inappwebview?.callHandler || window._dsRequestExport ||
+    /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || ""));
+}
+
+// File saving is a native Android action, not a web anchor download. The
+// bridge may acknowledge the request without confirming that a file exists.
+// Never clear history on the strength of this acknowledgement alone.
+async function requestAndroidSupportFile(text, filename) {
+  const body = String(text || "");
+  if (!body) return false;
+  const bridge = window.flutter_inappwebview;
+  if (bridge?.callHandler) {
+    for (const handler of ["exportChat", "saveFile"]) {
+      try {
+        const payload = handler === "exportChat"
+          ? { text: body, filename }
+          : { text: body, content: body, filename, fileName: filename, mimeType: "text/plain;charset=utf-8" };
+        // Do not leave Options stuck forever if a WebView handler has stalled.
+        // An uncertain request must not be retried through a second handler:
+        // the first one might still finish and create a duplicate download.
+        let timer;
+        const response = await Promise.race([
+          Promise.resolve().then(() => bridge.callHandler(handler, JSON.stringify(payload)))
+            .then(value => ({ value }), error => ({ error })),
+          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 25000); })
+        ]);
+        clearTimeout(timer);
+        if (response.timedOut) return false;
+        if (response.error) continue;
+        const result = response.value;
+        if (result === false || result?.success === false || result?.ok === false || result?.error) continue;
+        return true; // Accepted, NOT a confirmed file write.
+      } catch {}
+    }
+  }
+  if (typeof window._dsRequestExport === "function") {
+    try {
+      const result = await window._dsRequestExport(body, filename);
+      return result !== false && result?.success !== false && result?.ok !== false;
+    } catch {}
+  }
+  return false;
+}
+
+async function preserveAndroidSupportFallback(text) {
+  const box = $("settingsJson");
+  if (box) box.value = String(text || "");
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(String(text || ""));
+      return { copied: true, selectable: !!box };
+    }
+  } catch {}
+  if (box) {
+    setActiveTab("data");
+    box.focus();
+    box.select();
+  }
+  return { copied: false, selectable: !!box };
+}
+
 async function downloadSupportText(text, filename, successMessage = "Support report downloaded.") {
   const status = $("diagnosticsStatus");
   const body = String(text || "");
@@ -179,21 +248,16 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
   }
 
   const mime = "text/plain;charset=utf-8";
-  const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
-  // Some Android wrapper revisions report success while producing an empty
-  // exported .txt. Keep a copyable fallback instead of claiming a real file.
-  if (androidWebView) {
-    const box = $("settingsJson");
-    if (box) box.value = body;
-    try {
-      await navigator.clipboard.writeText(body);
-      if (status) status.textContent = "Report copied. Android app log export may produce an empty file; paste this report instead.";
-      return true;
-    } catch {
-      if (box) { setActiveTab("data"); box.focus(); box.select(); }
-      if (status) status.textContent = "Android file export is unverified. Report placed in Data / Backup for copying.";
-      return false;
-    }
+  if (isAndroidSupportWebView()) {
+    const accepted = await requestAndroidSupportFile(body, filename);
+    const fallback = await preserveAndroidSupportFallback(body);
+    lastAndroidSupportExportState = accepted ? "native" : fallback.copied ? "copied" : "manual";
+    if (status) status.textContent = accepted
+      ? `Sent ${filename} to Android's file exporter. Check Downloads; the app cannot confirm the file was written.${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
+      : (fallback.copied
+          ? "Android file export was unavailable. Report copied instead; no file has been verified."
+          : "Android file export and clipboard are unavailable. Report left in Data & Backup for manual copying.");
+    return accepted || fallback.copied;
   }
   try {
     if (await tryNativeBackupSave(body, filename, mime)) {
@@ -723,7 +787,9 @@ async function buildFastSupportSnapshot() {
 // Saved support history is a small, privacy-safe timeline kept across normal
 // updates. This is not a copy of chat messages or the full Settings database.
 async function readSavedSupportHistory({ summaryOnly = false } = {}) {
-  const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, summaryOnly ? 12000 : 45000).catch(() => null);
+  const timeoutMs = summaryOnly ? (isAndroidSupportWebView() ? 5500 : 12000)
+    : (isAndroidSupportWebView() ? 12000 : 45000);
+  const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, timeoutMs).catch(() => null);
   return result?.ok ? result : { ok: false, text: result?.error || "Support history is currently unavailable.", count: 0, through: 0 };
 }
 async function refreshSavedSupportStatus() {
@@ -757,9 +823,10 @@ async function downloadSupportVerified(text, compressed) {
   const isGzip = compressed && raw.type !== "text/plain;charset=utf-8";
   if (!raw.size) throw new Error("The generated support file was empty.");
   const filename = isGzip ? supportReportFilename("support-info").replace(/\.txt$/, ".txt.gz") : supportReportFilename("support-info");
-  const androidWebView = /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || "");
-  if (androidWebView) {
-    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Report copied to clipboard.");
+  if (isAndroidSupportWebView()) {
+    // Do not send compressed blobs to text-only Android export handlers.
+    // The report remains available for copying even if the APK cannot save it.
+    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
     return { started, verified: false, isGzip: false };
   }
   let permission = false;
@@ -910,11 +977,9 @@ async function downloadAllSupportInfo() {
   if (status) status.textContent = "Building full support report for download...";
   try {
     // Capture the checkpoint before building. A later sample must survive.
+    // A slow/corrupt history archive must not prevent a new current report.
+    // Its error is written into the report, and no history is deleted.
     const history = await readSavedSupportHistory();
-    if (!history.ok) {
-      if (status) status.textContent = `Could not read saved support history: ${history.text}. Nothing was cleared.`;
-      return false;
-    }
     const text = await buildAllSupportInfo({ history });
     const compressed = new TextEncoder().encode(text).byteLength > 256 * 1024;
     const saved = await downloadSupportVerified(text, compressed);
@@ -923,8 +988,16 @@ async function downloadAllSupportInfo() {
       return false;
     }
     if (!saved.verified) {
-      if (status) status.textContent = "Report download started (or copied on Android), but saving the file could not be verified. Saved history was kept. Once you have the file, you can clear history yourself.";
+      if (status) status.textContent = isAndroidSupportWebView()
+        ? (lastAndroidSupportExportState === "native"
+            ? "Android accepted the file export request. Check Downloads; file completion could not be verified. Support history was kept."
+            : "Android file export was unavailable, so the report was copied instead. No file was verified; support history was kept.")
+        : "Report download started, but saving the file could not be verified. Support history was kept.";
       await refreshSavedSupportStatus();
+      return true;
+    }
+    if (!history?.ok || !history.through) {
+      if (status) status.textContent = "Report saved. Saved support history could not be verified and was kept.";
       return true;
     }
     const cleared = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR", through: history.through }, 45000).catch(() => null);

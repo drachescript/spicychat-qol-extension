@@ -184,6 +184,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const row of rows.slice(2500)) delete meta[row.id];
     await storageSetLocal({ [BROWSE_STATUS_KEY]: { meta } });
   }
+  let lastBrowseScan = { route: "", revision: -1, at: 0 };
   function discoverVisibleCards() {
     if (DS.isQolPausedForTab?.() || DS.state?.settings?.enabled === false) return;
     // Chat message headers are not listings. Never crawl their DOM every 5s.
@@ -192,6 +193,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const isWorker = document.documentElement.hasAttribute("data-ds-qol-background-worker") ||
       [...params.keys()].some(key => /^ds(?:Qol)?(?:ListingRefill|Quick|BotStatus|Recommendation|LessLike)/i.test(key));
     if (document.hidden || isWorker || DS.state?.quickLessLikeWorker || DS.state?.quickDislikeWorker || DS.state?.botStatusWorker) return;
+    const route = `${location.pathname}${location.search}`;
+    const revision = Number(DS.state?.domRevision || 0);
+    const now = Date.now();
+    if (lastBrowseScan.route === route && lastBrowseScan.revision === revision &&
+        now - lastBrowseScan.at < 30000) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.unchangedListingScanSkips = Number(perf.unchangedListingScanSkips || 0) + 1;
+      return;
+    }
+    lastBrowseScan = { route, revision, at: now };
     const cards = DS.collectCards?.() || [];
     for (const item of cards.slice(0, 160)) {
       const snapshot = browseCardSnapshot(item.card, item.anchor);
@@ -218,6 +229,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let performanceRouteKey = "";
   let escalatedRouteKey = "";
   const longTasks = [];
+  const longTaskSubscribers = new Set();
+  DS.subscribeRuntimeLongTasks = function subscribeRuntimeLongTasks(listener) {
+    if (typeof listener !== "function") return () => {};
+    longTaskSubscribers.add(listener);
+    return () => longTaskSubscribers.delete(listener);
+  };
+  let lastPressureDomSample = { at: 0, route: "", nodes: 0 };
 
   function routeKey() {
     return `${location.pathname || ""}${location.search || ""}`;
@@ -312,6 +330,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.state.performanceModeRevision = -1;
     }
     longTasks.length = 0;
+    lastPressureDomSample = { at: 0, route: "", nodes: 0 };
     clearPasses = 0;
     performanceRouteKey = nextRoute;
     document.documentElement.removeAttribute("data-ds-qol-severe-chat-lag");
@@ -319,24 +338,55 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   try {
-    new PerformanceObserver(list => {
-      const now = performance.now();
-      for (const entry of list.getEntries()) {
-        longTasks.push({ at: now, duration: Number(entry.duration || 0) });
-        if (DS.isSingleChatPage?.()) {
-          DS.state = DS.state || {};
-          DS.state.chatStartupLastLongTaskAt = Date.now();
+    if (typeof PerformanceObserver === "function" &&
+        PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
+      const observer = new PerformanceObserver(list => {
+        const entries = list.getEntries();
+        if (!entries.length) return;
+        const settings = DS.state?.settings || {};
+        const pressureEnabled = !!(settings.enabled && settings.chatPerformanceMode && DS.isSingleChatPage?.());
+        const detailEnabled = !!settings.performanceDiagnostics || !!DS.isDiagnosticTraceActive?.("normal");
+        if (!pressureEnabled && !detailEnabled) return;
+        const now = performance.now();
+        if (pressureEnabled) {
+          for (const entry of entries) {
+            longTasks.push({ at: now, duration: Number(entry.duration || 0) });
+          }
+          if (longTasks.length > 160) longTasks.splice(0, longTasks.length - 160);
+          while (longTasks.length && now - longTasks[0].at > 30000) longTasks.shift();
         }
-      }
-      while (longTasks.length && now - longTasks[0].at > 30000) longTasks.shift();
-    }).observe({ type: "longtask", buffered: true });
+        if (DS.isSingleChatPage?.()) DS.state.chatStartupLastLongTaskAt = Date.now();
+        // Other consumers receive the same browser measurements; no second observer.
+        if (detailEnabled) for (const listener of longTaskSubscribers) {
+          try { listener(entries); } catch {}
+        }
+      });
+      observer.observe({ type: "longtask" });
+      DS.state.sharedLongTaskObserver = observer;
+    }
   } catch {}
 
   function metricSnapshot() {
-    const mounted = document.querySelectorAll("[id^='message-']").length;
-    const dom = document.getElementsByTagName("*").length;
-    const heap = Number(performance?.memory?.usedJSHeapSize || 0);
+    // Reuse the scheduler's incremental mounted-message count, not a fresh
+    // document-wide selector query every time adaptive pressure is evaluated.
+    const mounted = typeof DS.getLoadedChatMessageCount === "function"
+      ? DS.getLoadedChatMessageCount() : (DS.getLoadedMessageRoots?.() || []).length;
     const now = performance.now();
+    const route = routeKey();
+    const sampleInterval = DS.getRuntimeEnvironment?.()?.android ? 36000 : 25000;
+    if (lastPressureDomSample.route !== route || !lastPressureDomSample.at ||
+        now - lastPressureDomSample.at >= sampleInterval) {
+      lastPressureDomSample = {
+        at: now, route, nodes: document.getElementsByTagName("*").length
+      };
+      const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.pressureDomSamples = Number(counters.pressureDomSamples || 0) + 1;
+    } else {
+      const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      counters.pressureDomSampleReuses = Number(counters.pressureDomSampleReuses || 0) + 1;
+    }
+    const dom = lastPressureDomSample.nodes;
+    const heap = Number(performance?.memory?.usedJSHeapSize || 0);
     const recent30 = longTasks.filter(item => now - item.at <= 30000);
     const recent10 = recent30.filter(item => now - item.at <= 10000);
     const longTaskMs30 = recent30.reduce((sum, item) => sum + item.duration, 0);
@@ -393,6 +443,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (document.hidden && !DS.state?.qolBackgroundWorker) {
       const perf = DS.state?.runtimePerformance;
       if (perf) perf.hiddenPressureCheckSkips = Number(perf.hiddenPressureCheckSkips || 0) + 1;
+      return;
+    }
+    // Never do page-wide pressure sampling when the feature is disabled or
+    // the phone's keyboard / an active native interaction owns the main thread.
+    const now = Date.now();
+    const interactiveUntil = Math.max(Number(DS.state?.userTypingUntil || 0),
+      Number(DS.state?.nativeActionQuietUntil || 0), Number(DS.state?.userScrollingUntil || 0));
+    if (DS.isSingleChatPage?.() && now < interactiveUntil) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.interactivePressureCheckSkips = Number(perf.interactivePressureCheckSkips || 0) + 1;
       return;
     }
     const currentRoute = routeKey();

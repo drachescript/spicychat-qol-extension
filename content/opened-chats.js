@@ -528,12 +528,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let added = 0;
     let visible = 0;
     let metadataChanged = false;
-    const entries = typeof DS.collectCards === "function"
-      ? DS.collectCards()
-      : DS.qsa("a[href*='/chat/']").map(anchor => ({
-          card: DS.getCardFromChatLink?.(anchor),
-          anchor
-        }));
+    // On /chats, use the existing chat-row collector rather than the
+    // general discovery-card crawler. Fall back if React's current layout
+    // has no recognizable rows so opened history still works on new layouts.
+    const chatRows = typeof DS.collectChatRows === "function" ? DS.collectChatRows() : [];
+    const entries = chatRows.length
+      ? chatRows.map(({ row, anchor }) => ({ card: row, anchor }))
+      : (typeof DS.collectCards === "function"
+          ? DS.collectCards()
+          : DS.qsa("a[href*='/chat/']").map(anchor => ({
+              card: DS.getCardFromChatLink?.(anchor),
+              anchor
+            })));
 
     for (const { card, anchor } of entries) {
       const id = DS.chatIdFromHref(anchor?.href || "");
