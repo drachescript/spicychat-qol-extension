@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.58",
+  "version": "0.2.60",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 129,
@@ -1189,7 +1189,9 @@
       "settingsScripts": [
         "settings/feature-panels/chat-lorebook-manager.js"
       ],
-      "backgroundFiles": [],
+      "backgroundFiles": [
+        "background/features/background-chat-lorebook-local.js"
+      ],
       "backgroundServices": [],
       "settingKeys": [
         "enableChatLorebookManager"
@@ -1711,7 +1713,9 @@
       "settingsScripts": [
         "settings/feature-panels/context-keeper.js"
       ],
-      "backgroundFiles": [],
+      "backgroundFiles": [
+        "background/features/background-context-keeper-storage.js"
+      ],
       "backgroundServices": [],
       "settingKeys": [
         "enableContextKeeper",

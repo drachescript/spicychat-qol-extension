@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.58",
+  "sourceVersion": "0.2.60",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -438,7 +438,9 @@
       "styles": [
         "content/styles/chat-lorebook-manager.css"
       ],
-      "background": [],
+      "background": [
+        "background/features/background-chat-lorebook-local.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -659,7 +661,9 @@
         "settings/feature-panels/context-keeper.js"
       ],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-context-keeper-storage.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
