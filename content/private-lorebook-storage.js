@@ -38,6 +38,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const [accountId,botId,conversationId,detailId]=values;
     return send('revisions',{identity:{accountId,botId,conversationId,detailId}});
   };
-  DS.privateLorebookStorage=Object.freeze({get,list,put,revisions,keyOf});
+  const importMissing=(identity,records)=>send('importMissing',{identity,records});
+  DS.privateLorebookStorage=Object.freeze({get,list,put,revisions,importMissing,keyOf});
 })();
 }

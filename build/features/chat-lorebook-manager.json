@@ -3,17 +3,11 @@
   "primary": "content/chat-lorebook-manager.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [
-    "enableChatLorebookManager"
-  ],
+  "settingsKeys": ["enableChatLorebookManager"],
   "requiredHelpers": [],
-  "settingsFiles": [
-    "settings/feature-panels/chat-lorebook-manager.js"
-  ],
-  "styleFiles": [
-    "content/styles/chat-lorebook-manager.css"
-  ],
-  "backgroundFiles": [],
+  "settingsFiles": ["settings/feature-panels/chat-lorebook-manager.js"],
+  "styleFiles": ["content/styles/chat-lorebook-manager.css"],
+  "backgroundFiles": ["background/features/background-chat-lorebook-local.js"],
   "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,

@@ -728,6 +728,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return !!(settings.enabled && settings.desktopAppPerformanceGuard !== false && env.installedApp && !env.android && runtimeProfile() !== "normal");
   }
 
+  function androidWebViewPerformanceGuardActive() {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || DS.isQolWorkerTab?.()) return false;
+    const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
+    return !!env.android;
+  }
+
   DS.isDesktopAppPerformanceGuardActive = desktopAppPerformanceGuardActive;
 
   function runtimeCounters() {
@@ -1341,9 +1348,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       delay = Math.max(delay, profile === "maximum" ? (huge ? 1900 : 1500) : (profile === "aggressive" ? (huge ? 1250 : 950) : (huge ? 950 : 700)));
       counters.desktopAppGuardDelays = Number(counters.desktopAppGuardDelays || 0) + 1;
     }
+    // Android WebView shares its renderer with native SpicyChat. Let native
+    // message mounting, touch/scroll and streaming settle before optional
+    // per-message decoration. Event-driven toolbar repair still runs promptly.
+    if (androidWebViewPerformanceGuardActive()) {
+      delay = Math.max(delay, profile === "maximum" ? (huge ? 1800 : 1350) : (huge ? 1250 : 950));
+      counters.androidMessageLaneDeferrals = Number(counters.androidMessageLaneDeferrals || 0) + 1;
+    }
 
     if (Date.now() < Number(DS.state.userScrollingUntil || 0)) {
-      delay = Math.max(delay, desktopAppPerformanceGuardActive() ? (profile === "maximum" ? 2200 : (profile === "aggressive" ? 1500 : 1100)) : (profile === "maximum" ? 1100 : (profile === "aggressive" ? 700 : 460)));
+      delay = Math.max(delay, androidWebViewPerformanceGuardActive() ? (profile === "maximum" ? 2500 : 1700) : desktopAppPerformanceGuardActive() ? (profile === "maximum" ? 2200 : (profile === "aggressive" ? 1500 : 1100)) : (profile === "maximum" ? 1100 : (profile === "aggressive" ? 700 : 460)));
       counters.deferredWhileScrolling = Number(counters.deferredWhileScrolling || 0) + 1;
     }
     if (Date.now() < Number(DS.state.nativeActionQuietUntil || 0)) {
@@ -2099,8 +2113,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const profile = runtimeProfile();
     const messageCount = loadedChatMessageCount();
     const appGuard = desktopAppPerformanceGuardActive();
+    const androidGuard = androidWebViewPerformanceGuardActive();
     const maxWait = DS.isSingleChatPage?.()
-      ? (appGuard
+      ? (androidGuard
+          ? (profile === "maximum" ? (messageCount >= 250 ? 12000 : 10000) : 8000)
+          : appGuard
           ? (profile === "maximum" ? (messageCount >= 250 ? 12000 : 10000) : profile === "aggressive" ? (messageCount >= 250 ? 10000 : 8000) : (messageCount >= 250 ? 8000 : 6000))
           : (profile === "maximum" ? (messageCount >= 250 ? 7000 : 5600) : profile === "aggressive" ? (messageCount >= 250 ? 5200 : 4000) : profile === "adaptive" ? (messageCount >= 250 ? 4200 : 3200) : 2400))
       : (profile === "maximum" ? 4400 : profile === "aggressive" ? 3200 : 2200);
@@ -2137,7 +2154,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       };
 
       if (typeof requestIdleCallback === "function") {
-        idleHandle = requestIdleCallback(run, { timeout: appGuard ? 2400 : 900 });
+        idleHandle = requestIdleCallback(run, { timeout: androidGuard ? 3200 : appGuard ? 2400 : 900 });
       } else {
         run();
       }
@@ -2184,10 +2201,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         counters.desktopAppGuardDelays = Number(counters.desktopAppGuardDelays || 0) + 1;
       }
 
+      // WebView can freeze when optional decoration competes with native React
+      // updates. Keep explicit/immediate actions unaffected; debounce only
+      // background maintenance and retain a bounded slow-lane deadline.
+      if (!immediate && androidWebViewPerformanceGuardActive()) {
+        criticalDelay = Math.max(criticalDelay, profile === "maximum" ? (huge ? 1100 : 850) : (huge ? 850 : 650));
+        slowDelay = Math.max(slowDelay, profile === "maximum" ? (huge ? 6500 : 4500) : (huge ? 4800 : 3300));
+        counters.androidRuntimeDeferrals = Number(counters.androidRuntimeDeferrals || 0) + 1;
+      }
+
       // Avoid scheduling cosmetic repair work against wheel/touch rendering.
       if (!immediate && Date.now() < Number(DS.state.userScrollingUntil || 0)) {
         criticalDelay = Math.max(criticalDelay, desktopAppPerformanceGuardActive() ? (profile === "maximum" ? 1600 : profile === "aggressive" ? 1300 : 950) : (profile === "maximum" ? 950 : profile === "aggressive" ? 760 : 520));
         slowDelay = Math.max(slowDelay, desktopAppPerformanceGuardActive() ? (profile === "maximum" ? 7500 : profile === "aggressive" ? 6000 : 4500) : (profile === "maximum" ? 3800 : profile === "aggressive" ? 3000 : 1900));
+        if (androidWebViewPerformanceGuardActive()) {
+          criticalDelay = Math.max(criticalDelay, profile === "maximum" ? 1450 : 1000);
+          slowDelay = Math.max(slowDelay, profile === "maximum" ? 7800 : 5400);
+        }
         counters.deferredWhileScrolling++;
       }
     } else if (settings.chatPerformanceMode && DS.isSingleChatPage?.()) {

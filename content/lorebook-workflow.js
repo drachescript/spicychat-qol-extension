@@ -1345,15 +1345,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!route?.id || route.page !== "entries") throw new Error("Open the Lorebook Entries page to collect full entry data.");
     const rows = findEntryRows();
     if (!rows.length) throw new Error("No Lorebook entries are loaded yet.");
+    // The native editor may show only one page of a large Lorebook. When it
+    // provides an explicit total, require that all rows are available before
+    // reporting a complete backup instead of exporting the current page only.
+    const headerText = String(document.querySelector("[data-testid='EntriesListServer-Header']")?.textContent || "").trim();
+    const totalMatch = /(?:entries\s*\(\s*(\d+)\s*\)|(?:entries\s*:?\s*(\d+))|(?:(\d+)\s*entries))/i.exec(headerText);
+    const statedTotal = totalMatch ? Number(totalMatch[1] || totalMatch[2] || totalMatch[3]) : null;
+    if (statedTotal !== null && Number.isSafeInteger(statedTotal) && statedTotal > rows.length) {
+      throw new Error(`SpicyChat shows ${statedTotal} entries but only ${rows.length} are mounted. Refusing a partial full backup.`);
+    }
     const entries = [];
     const wasBusy = bulkBusy;
     bulkBusy = true;
     try {
       for (let index = 0; index < rows.length; index += 1) {
         progress?.({ current: index + 1, total: rows.length, message: `Reading entry ${index + 1}/${rows.length}…` });
-        const data = await captureRow(rows[index]);
+        // A backup must reflect today's editor, not a previous in-memory
+        // keyword analysis. Reopen every row and read its current native form.
+        const liveRows = findEntryRows();
+        if (liveRows.length !== rows.length) throw new Error("Lorebook entry list changed while exporting. Nothing was marked complete.");
+        const expectedName = clean(rowInfo(liveRows[index])?.name, 50);
+        const modal = await openRow(liveRows[index]);
+        let data;
+        try { data = modalData(modal); }
+        finally { await closeModal(modal); }
         const name = clean(data?.name, 50);
-        if (!name) continue;
+        if (!name || name !== expectedName) throw new Error("Lorebook entry editor changed during collection. No partial export was accepted.");
+        analyzedEntries.set(name, data);
         entries.push({
           key: name.toLowerCase(),
           name,

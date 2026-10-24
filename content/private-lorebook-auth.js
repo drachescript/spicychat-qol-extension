@@ -115,8 +115,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // localStorage/IndexedDB. A one-shot, user-initiated handoff supplies the
   // background-only Archive writer without storing the token persistently.
   async function capturedSetupToken(path){
-    const setupToken=new URLSearchParams(location.search).get('dsQolArchiveSetup')||'';
-    if(!UUID.test(setupToken) || !['/save-image','/lorebooks'].includes(path))return '';
+    const params=new URLSearchParams(location.search);
+    let setupToken=params.get('dsQolArchiveSetup')||params.get('dsQolLorebookClone')||'';
+          if (!setupToken && /\/entries$/i.test(path)) {
+            try {
+              const rec=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const id=path.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries$/i)?.[1];
+              if (rec?.targetId?.toLowerCase()===id?.toLowerCase() &&
+                  location.pathname.toLowerCase()===`/lorebook/edit/${id.toLowerCase()}/entries`) setupToken=rec.token||'';
+            } catch {}
+          }
+    if(!UUID.test(setupToken) || !(['/save-image','/lorebooks'].includes(path)||/^\/lorebooks\/[0-9a-f-]{36}\/entries$/i.test(path)))return '';
     if(!mainAuthReady())return '';
     return new Promise(resolve=>{
       const requestId='dspl-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
@@ -169,20 +178,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // The background worker has explicit prod.nd-api.com host permission.
       // Do not retry a failed site XHR: an ambiguous write might already exist.
       // Instead, make exactly one background-origin POST for this user action.
-      if(method==='POST' && (path==='/save-image'||path==='/lorebooks')){
+      if(method==='POST' && (path==='/save-image'||path==='/lorebooks'||/^\/lorebooks\/[0-9a-f-]{36}\/entries$/i.test(path))){
         // The session SpicyChat used is the source of truth. Browser storage
         // may be empty or contain a still-valid token for a different login.
-        token=mainAuthReady()?await capturedSetupToken(path):'';
+        token=cache&&validToken(cache.token)&&Date.now()-cache.at<20000?cache.token:(mainAuthReady()?await capturedSetupToken(path):'');
+        if(token&&validToken(token))cache={token,at:Date.now()};
         if(!token)token=await availableToken();
         if(token){
-          const setupToken=new URLSearchParams(location.search).get('dsQolArchiveSetup')||'';
+          const params=new URLSearchParams(location.search);
+          let setupToken=params.get('dsQolArchiveSetup')||params.get('dsQolLorebookClone')||'';
+          if (!setupToken && /\/entries$/i.test(path)) {
+            try {
+              const rec=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const id=path.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries$/i)?.[1];
+              if (rec?.targetId?.toLowerCase()===id?.toLowerCase() &&
+                  location.pathname.toLowerCase()===`/lorebook/edit/${id.toLowerCase()}/entries`) setupToken=rec.token||'';
+            } catch {}
+          }
           const result=await new Promise(resolve=>chrome.runtime.sendMessage({
             type:'DS_PRIVATE_ARCHIVE_SETUP_WRITE',method,path,payload,setupToken,
             authToken:token,appVersion:document.querySelector('meta[name="app-version"]')?.content||''
           },response=>resolve(chrome.runtime.lastError?{ok:false,status:'background-message-failed'}:response||{ok:false,status:'no-response'})));
           if(result?.ok)return result.data;
           if(result?.httpStatus===401){cache=null;throw Error('SpicyChat authentication rejected the Archive request (HTTP 401). No retry attempted.');}
-          throw Error('SpicyChat '+(path==='/save-image'?'cover-upload authorization':'Archive creation')+
+          throw Error('SpicyChat '+(path==='/save-image'?'cover-upload authorization':(/\/entries$/i.test(path)?'entry creation':'Lorebook creation'))+
             ' failed via extension background ('+(result?.status||'unknown')+
             (result?.httpStatus?' HTTP '+result.httpStatus:'')+'). No automatic retry.');
         }
@@ -202,7 +221,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if(!token)throw new Error(mainAuthReady()
       ? 'SpicyChat is signed in, but QoL could not transfer the captured session to Archive setup. No write was sent.'
       : 'SpicyChat login authentication was not captured on this page. No write was sent.');
-    if(method==='POST')throw new Error('Archive setup write was not sent. No authenticated extension session was available.');
+    if(method==='POST')throw new Error('Private Lorebook write was not sent. No authenticated extension session was available.');
     const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),12500);
     try{
       const headers={Accept:'application/json, text/plain, */*',Authorization:'Bearer '+token,

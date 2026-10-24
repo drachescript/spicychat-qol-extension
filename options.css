@@ -2020,3 +2020,9 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 .tab-cleanup-review-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
 .tab-cleanup-review-actions button { font-size: .8rem; padding: .3rem .45rem; }
 .tab-cleanup-review-reason { overflow-wrap: anywhere; margin-top: .35rem; }
+
+/* Lorebook import choices: keep the related settings together without extra cards. */
+.ds-lorebook-settings-group { min-width:0; margin:12px 0 0; padding:10px 12px 8px; border:1px solid rgba(148,163,184,.25); border-radius:8px; }
+.ds-lorebook-settings-group legend { padding:0 5px; font-weight:650; }
+.ds-lorebook-settings-group .row { margin:4px 0 6px; }
+.ds-lorebook-settings-group .hint { margin:5px 0 3px; }

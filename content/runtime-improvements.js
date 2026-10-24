@@ -501,7 +501,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     });
   } catch {}
-  setInterval(evaluatePerformance, 5000);
+  // Android WebView has a smaller main-thread budget. A PerformanceObserver
+  // still records long tasks as they happen; sample DOM size less often while
+  // native chat is busy rather than walking the entire document every 5s.
+  const pressureSampleInterval = (DS.getRuntimeEnvironment?.()?.android || /Android/i.test(navigator.userAgent || "")) ? 12000 : 5000;
+  setInterval(evaluatePerformance, pressureSampleInterval);
   setTimeout(evaluatePerformance, 2500);
 })();
 

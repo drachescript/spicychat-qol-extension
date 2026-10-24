@@ -2,20 +2,12 @@
   "id": "native-memory-probe",
   "primary": "content/native-memory-probe.js",
   "type": "content",
-  "dependencies": [
-    "generation-metadata"
-  ],
+  "dependencies": ["generation-metadata"],
+  "settingsKeys": ["nativeMemoryQualityProbe"],
   "requiredHelpers": [],
-  "settingsKeys": [
-    "nativeMemoryQualityProbe"
-  ],
-  "settingsFiles": [
-    "settings/feature-panels/native-memory-probe.js"
-  ],
-  "styleFiles": [],
-  "backgroundFiles": [
-    "background/features/background-native-memory-probe.js"
-  ],
+  "settingsFiles": ["settings/feature-panels/native-memory-probe.js"],
+  "backgroundFiles": ["background/features/background-native-memory-probe.js"],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
