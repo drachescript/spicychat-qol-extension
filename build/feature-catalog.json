@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.61",
+  "version": "0.2.62",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 129,
@@ -99,6 +99,7 @@
     "content/chat-bubbles.js",
     "content/chat-export.js",
     "content/chat-format-compatibility.js",
+    "content/chat-history-navigator.js",
     "content/chat-index.js",
     "content/chat-list.js",
     "content/chat-lorebook-manager.js",
@@ -1001,7 +1002,9 @@
       "runtimeScripts": [
         "content/chat-bookmarks.js"
       ],
-      "requiredHelpers": [],
+      "requiredHelpers": [
+        "content/chat-history-navigator.js"
+      ],
       "cssFiles": [],
       "settingsScripts": [
         "settings/feature-panels/chat-bookmarks.js"
@@ -1010,7 +1013,8 @@
       "backgroundServices": [],
       "settingKeys": [
         "enableMessageBookmarks",
-        "messageBookmarkButtons"
+        "messageBookmarkButtons",
+        "enableChatHistoryNavigator"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
