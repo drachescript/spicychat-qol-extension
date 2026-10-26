@@ -100,6 +100,7 @@
         "content/character-qol-profiles.js",
         "content/chat-backgrounds.js",
         "content/chat-bookmarks.js",
+        "content/chat-history-navigator.js",
         "content/chat-bubbles.js",
         "content/chat-export.js",
         "content/chat-nudges.js",
@@ -334,7 +335,14 @@
         "background/events/sync-bootstrap.js",
         "background/background-events.js",
         "background/bot-status-storage-cleanup.js",
-        "shared/sync-service.js"
+        "shared/sync-service.js",
+        "background/features/background-chat-lorebook-local.js",
+        "background/features/background-context-keeper-storage.js",
+        "background/features/background-lorebook-cover.js",
+        "background/features/background-private-lorebook-archive.js",
+        "background/features/background-private-archive-setup-write.js",
+        "background/features/background-private-lorebook-entry-create.js",
+        "background/features/background-native-memory-probe.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -382,7 +390,14 @@
         "background/features/background-update-recovery.js",
         "background/features/background-discovery.js",
         "background/features/background-lorebook-export.js",
-        "background/features/background-bot-export.js"
+        "background/features/background-bot-export.js",
+        "background/features/background-chat-lorebook-local.js",
+        "background/features/background-context-keeper-storage.js",
+        "background/features/background-lorebook-cover.js",
+        "background/features/background-private-lorebook-archive.js",
+        "background/features/background-private-archive-setup-write.js",
+        "background/features/background-private-lorebook-entry-create.js",
+        "background/features/background-native-memory-probe.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",

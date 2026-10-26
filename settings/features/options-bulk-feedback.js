@@ -53,10 +53,12 @@ function applyQuickDislikeResponseToLocalHistory(id, name, response) {
     name: String(name || previous.name || "").slice(0, 160),
     handledAt: Number(response.handledAt || 0) || Number(previous.handledAt || 0) || Date.now(),
     crossHandledBy: response.crossHandledBy === "less-like" ? "less-like" : (repeated ? previous.crossHandledBy || "" : ""),
-    ratingSource: ["less-like", "dislike"].includes(response.ratingSource) ? response.ratingSource : (repeated ? previous.ratingSource || "" : (status === "disliked" ? "dislike" : "")),
+    ratingSource: ["native-ui", "less-like", "dislike"].includes(response.ratingSource) ? response.ratingSource : (repeated ? previous.ratingSource || "" : (response.nativeUiConfirmed === true ? "native-ui" : "")),
     ratingAt: Number(response.ratingAt || 0) || (repeated ? Number(previous.ratingAt || 0) : 0),
     requestSent: status === "disliked" && (response.requestSent === true || (repeated && previous.requestSent === true)),
-    nativeEventConfirmed: status === "disliked" && (response.nativeEventConfirmed === true || (repeated && previous.nativeEventConfirmed === true))
+    nativeEventConfirmed: status === "disliked" && (response.nativeEventConfirmed === true || (repeated && previous.nativeEventConfirmed === true)),
+    nativeUiConfirmed: ["disliked", "already-disliked"].includes(status) &&
+      (response.nativeUiConfirmed === true || (repeated && previous.nativeUiConfirmed === true))
   };
   return true;
 }
@@ -131,7 +133,9 @@ async function runBlockedBulkDislike(mode = "remaining") {
   let disliked = 0;
   let alreadySet = 0;
   let alreadyDisliked = 0;
-    let sentRequests = 0;
+  let sentRequests = 0;
+  let previouslyVerified = 0;
+  const failureStatuses = new Map();
   let creatorBlocked = 0;
   let unavailable = 0;
   let failed = 0;
@@ -247,16 +251,25 @@ async function runBlockedBulkDislike(mode = "remaining") {
 
       const remembered = applyQuickDislikeResponseToLocalHistory(id, name, response);
       const status = response?.status === "already-handled" ? response?.rememberedStatus : response?.status;
-      if (remembered && status === "disliked" && response?.nativeEventConfirmed === true) {
-        disliked += 1;
-        if (response?.nativeEventConfirmed === true) sentRequests += 1;
-      } else if (remembered && status === "already-disliked") {
+      const nativeVerified = response?.nativeUiConfirmed === true;
+      if (remembered && status === "disliked" && nativeVerified) {
+        if (response?.status === "already-handled" || response?.requestSent !== true) {
+          previouslyVerified += 1;
+        } else {
+          disliked += 1;
+          sentRequests += 1;
+        }
+      } else if (remembered && status === "already-disliked" && nativeVerified) {
         alreadyDisliked += 1;
-      }
-      else if (remembered && status === "already-rated-or-unavailable") alreadySet += 1;
+      } else if (remembered && status === "already-rated-or-unavailable") alreadySet += 1;
       else if (remembered && status === "unavailable-creator-blocked") creatorBlocked += 1;
       else if (remembered && status === "unavailable-private-or-deleted") unavailable += 1;
-      else { failed += 1; failedIds.push(id); }
+      else {
+        failed += 1;
+        failedIds.push(id);
+        const reason = String(response?.status || "no-response").replace(/[^a-z0-9-]/gi, "").slice(0, 60) || "unknown";
+        failureStatuses.set(reason, (failureStatuses.get(reason) || 0) + 1);
+      }
 
       if (remembered) {
         consecutiveWorkerFailures = 0;
@@ -281,7 +294,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
       });
 
       const counts = blockedQuickDislikeCounts();
-      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} Dislikes confirmed · ${alreadyDisliked} already disliked/legacy · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${counts.remaining} remaining`);
+      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} native Dislikes verified · ${alreadyDisliked + previouslyVerified} previously disliked · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${counts.remaining} remaining`);
 
       if (blockedBulkDislikeStopRequested) break;
       if (index < candidates.length - 1) {
@@ -322,11 +335,15 @@ async function runBlockedBulkDislike(mode = "remaining") {
     updateBlockedDislikeStatus();
 
     if (candidates.length) {
+      const failedReasonSummary = [...failureStatuses.entries()]
+        .map(([reason, count]) => `${reason}${count > 1 ? ` ×${count}` : ""}`)
+        .slice(0, 3).join(", ");
+      const failedSuffix = failedReasonSummary ? ` Reasons: ${failedReasonSummary}.` : "";
       showSettingsToast(autoPausedAfterFailures
         ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive failures (including 401/CORS). Remaining bots were kept for Resume.`
         : stopped || hasPending
-          ? `Bulk Dislike ${stopped ? "stopped" : "finished this batch"}. ${sentRequests} Dislikes confirmed, ${unavailable} unavailable, ${failed} failed; ${unfinished.length} still eligible. The remaining IDs are saved for Resume.`
-          : `Bulk Dislike completed all currently eligible blocked bots. ${sentRequests} Dislikes confirmed, ${alreadyDisliked} already disliked/legacy, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.`);
+          ? `Bulk Dislike ${stopped ? "stopped" : "finished this batch"}. ${sentRequests} new native Dislikes confirmed, ${alreadyDisliked + previouslyVerified} previously verified, ${unavailable} unavailable, ${failed} failed; ${unfinished.length} still eligible. Remaining IDs saved for Resume.${failedSuffix}`
+          : `Bulk Dislike completed all currently eligible blocked bots. ${sentRequests} new native Dislikes confirmed, ${alreadyDisliked + previouslyVerified} previously verified, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.${failedSuffix}`);
     }
   }
 }

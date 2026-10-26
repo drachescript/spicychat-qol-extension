@@ -91,7 +91,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
     }catch{}
     return '';
   }
+  let activeAttemptAt = 0;
+  function traceProbe(event, result = {}) {
+    const DS = window.DragonScriptQoL;
+    if (!DS?.isDiagnosticTraceActive?.("normal")) return;
+    // Explicit whitelist: never serialize response objects, raw memory data,
+    // conversation identifiers, tokens, stored hashes, or request URLs.
+    const allowedStatuses = new Set([
+      "auth-not-ready", "auth-rejected", "invalid-chat-or-auth", "access-denied",
+      "cooldown", "already-checking", "rate-limited", "server-unavailable",
+      "http-failed", "unknown-response-shape", "memory-list-too-large",
+      "baseline-storage-error", "extension-error", "timeout", "request-error",
+      "unexpected-error", "attempted", "succeeded", "unchanged", "baseline"
+    ]);
+    const status = result.ok ? (result.baseline ? "baseline" : (result.changed ? "succeeded" : "unchanged")) :
+      (allowedStatuses.has(result.status) ? result.status : "request-error");
+    DS.diagEvent?.("native-memory-probe", event, {
+      status, ok: !!result.ok, httpStatus: Number(result.httpStatus || 0),
+      durationMs: Math.max(0, Date.now() - activeAttemptAt),
+      baseline: !!result.baseline, unchanged: !!result.ok && !result.baseline && !result.changed,
+      added: Number(result.added || 0), removed: Number(result.removed || 0),
+      updated: Number(result.updated || 0)
+    });
+  }
   function publish(result){
+    traceProbe(result.ok ? "check-succeeded" : "check-failed", result);
     // Only numeric counts and diagnostic status, never Memory text or IDs.
     const metadata={checkedAt:Date.now(),...result};
     window.DragonScriptQoL ||= {};
@@ -99,7 +123,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
     chrome.storage.local.set({'dsNativeMemoryProbeLastResultV1':metadata},()=>{void chrome.runtime.lastError;});
   }
   async function check(id){
-    const signal=++sequence;busy=true;lastCheck=Date.now();
+    const signal=++sequence;busy=true;lastCheck=Date.now();activeAttemptAt=lastCheck;
+    traceProbe("check-attempted", {status:"attempted"});
     try{
       // Prefer SpicyChat's live captured login (also used by the Archive
       // bridge); browser storage is only a fallback for older site sessions.

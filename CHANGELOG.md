@@ -1,3 +1,14 @@
+## 0.2.62
+- Improved experimental chat history navigation with an optional bounded jump into the live conversation and a clearer reader layout.
+- Added receive-only, upload-only and two-way blocked-bot sync shortcuts for mobile devices.
+- Improved Android support-report fallback and clarified blocked-bot-only device sync directions.
+- Added privacy-safe background Memory Probe result reporting to the existing Inspector diagnostics bridge.
+- Expanded message bookmarks with a visible manager, on-demand jumping to older saved messages, stable message-toolbar controls, and optional full read-only history navigation with resumable indexing and message-number jumping without loading the full chat.
+- Made performance reports clearer about hidden tabs, individual feature dispatches, and work prevented by throttling, while avoiding private page details.
+- Improved Support History access checks for browser Settings pages without allowing ordinary SpicyChat tabs to read saved diagnostics.
+- Improved blocked-bot Bulk Dislike progress, native-rating confirmation and recovery of previously verified results, while retaining retryable failures for review.
+- Made the existing Context Keeper Keep action show clearer, longer-lasting confirmation, distinguish already-saved details, and report unsuccessful saves without duplicating them.
+
 ## 0.2.61
 - Reduced performance-monitoring overhead by sharing long-task measurements between Adaptive Performance and detailed diagnostics, sampling large-page DOM size less often, and enabling input-delay monitoring only when requested.
 - Improved shared chat scheduling around typing, scrolling, editing, streaming and native reply actions, with more spacing between optional processing passes.

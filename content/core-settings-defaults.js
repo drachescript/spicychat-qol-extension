@@ -190,6 +190,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     chatSearchRegex: false,
     chatSearchLoadUntilMatch: false,
     enableMessageBookmarks: false,
+    enableChatHistoryNavigator: false,
     messageBookmarkButtons: true,
     enableFocusMode: false,
   focusHideSidebar: true,

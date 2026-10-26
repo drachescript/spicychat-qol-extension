@@ -162,6 +162,7 @@ const DEFAULT_SETTINGS = {
   chatSearchRegex: false,
   chatSearchLoadUntilMatch: false,
   enableMessageBookmarks: false,
+  enableChatHistoryNavigator: false,
   messageBookmarkButtons: true,
   enableFocusMode: false,
   focusHideSidebar: true,

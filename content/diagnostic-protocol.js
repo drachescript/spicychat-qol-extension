@@ -727,7 +727,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         "routeFeatureStepSkips", "routeFeatureGroupSkips", "buildBundleStepSkips"
       ]),
       listing: pick([
-        "listingNonCardCriticalSkips", "listingScheduleDeferrals", "slowStepThrottleSkips",
+        "listingNonCardCriticalSkips", "listingScheduleDeferrals", "slowStepThrottleSkips", "throttledStepRuns",
         "cardHidingStablePassSkips", "blockedBotMutationSkips", "blockedBotRefreshDeferrals", "blockedBotRefreshFlushes",
         "cardTokenBackgroundAuthSkips", "cardTokenHiddenQueuePauses"
       ]),
@@ -735,6 +735,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         "historyBatches", "historyBatchDeferrals", "messageCountIncrementalUpdates", "messageCountIncrementalRoots",
         "loadedMessageRootCacheHits", "loadedMessageRootCacheMisses", "messageLaneDirtyRoots",
         "messageLaneChunkedPasses", "messageLaneChunkedRoots", "messageLaneDeferredRoots",
+        "bookmarkStarChecks", "bookmarkStarsCreated", "bookmarkStarsReused",
+        "bookmarkStarsRepaired", "bookmarkStarOrphansRemoved", "bookmarkStarsWaitingForNativeToolbar",
+        "bookmarkStarProcessingMs", "bookmarkStarSlowestMs", "nativeMessageRemountsDetected",
+        "messageRootBatchCacheHits", "essentialControlBacklogsTrimmed",
+        "nativeHistoryJumpAttempts", "nativeHistoryJumpPagesLoaded", "nativeHistoryJumpCompleted", "nativeHistoryJumpPartial",
         "messageEnhancerIncrementalLanePasses", "messageEnhancerIncrementalLaneRoots",
         "rpFormatHistoryDeferrals", "rpFormatChunkPasses", "rpFormatChunkMessages",
         "generationMetadataScopedPasses", "generationMetadataScopedMessages", "generationMetadataHistoryDeferrals",

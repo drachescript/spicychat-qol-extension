@@ -527,7 +527,10 @@ function blockedQuickDislikeCounts() {
     const entry = quickDislikeHistoryEntry(id);
     if (!entry) return;
     handled++;
-    if (entry.nativeEventConfirmed === true) sent++;
+    // Event/recommendation acknowledgments from earlier builds are not proof
+    // of a saved native thumbs-down. Keep them handled for dedupe, but show
+    // only reread native UI selections under the confirmed counter.
+    if (entry.nativeUiConfirmed === true) sent++;
     else if (entry.fromBotStatus || entry.status === "unavailable-private-or-deleted") unavailable++;
     else legacyUnknown++;
   });
@@ -539,7 +542,7 @@ function updateBlockedDislikeStatus(text = "") {
   const status = $("blockedBotDislikeStatus");
   if (!status) return;
   const counts = blockedQuickDislikeCounts();
-  const next = text || `${counts.handled} handled · ${counts.sent} Dislikes confirmed · ${counts.unavailable} unavailable/skipped · ${counts.legacyUnknown} other/legacy · ${counts.remaining} remaining`;
+  const next = text || `${counts.handled} handled · ${counts.sent} native Dislikes verified · ${counts.unavailable} unavailable/skipped · ${counts.legacyUnknown} legacy/other (not UI-verified) · ${counts.remaining} remaining`;
   if (status.textContent !== next) status.textContent = next;
   const shared = $("blockedBotNameOnlyStatus");
   if (shared) {

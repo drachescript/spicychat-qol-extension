@@ -5,9 +5,12 @@
   "dependencies": [],
   "settingsKeys": [
     "enableMessageBookmarks",
-    "messageBookmarkButtons"
+    "messageBookmarkButtons",
+    "enableChatHistoryNavigator"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/chat-history-navigator.js"
+  ],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
