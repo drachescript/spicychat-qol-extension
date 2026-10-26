@@ -122,6 +122,7 @@ async function setupControlCenterView() {
 }
 
 function setupControlCenterControls() {
+  setupSupportReportFallbackButtons();
   setupSupportFeaturePrivacyControls();
   $("openCommandPaletteFromOptions")?.addEventListener("click", async () => {
     await flushSettingsAutosave({ force: true });
@@ -148,7 +149,9 @@ function setupControlCenterControls() {
     const copied = await copyAllSupportInfo();
     if (status) status.textContent = copied
       ? "Full support check copied. It includes no chat text or saved private content."
-      : "Clipboard access failed; the full support check was placed in Data & Backup instead.";
+      : isAndroidSupportWebView()
+        ? "Clipboard unavailable; use Support report text in Quick diagnostics."
+        : "Clipboard access failed; the full support check was placed in Data & Backup instead.";
   });
   $("controlDownloadSupport")?.addEventListener("click", async () => {
     const status = $("controlSupportStatus");
@@ -161,7 +164,7 @@ function setupControlCenterControls() {
               : "Android couldn't save a file. The report was copied instead, and saved history was kept.")
           : "Support download requested. Check Downloads; support history was kept unless completion was confirmed.")
       : (isAndroidSupportWebView()
-          ? "Android could not export this report. Check the selectable copy in Data & Backup; support history was kept."
+          ? "Android could not export this report. The text remains in Quick diagnostics under Support report text; support history was kept."
           : "Could not download the full support check; review Quick diagnostics for details.");
   });
 }
@@ -176,6 +179,37 @@ function supportReportFilename(kind = "support-info") {
 }
 
 let lastAndroidSupportExportState = "";
+// Android fallback has its own report area. Never repurpose the settings
+// import/backup editor for a diagnostic text export.
+function showSupportReportFallback(text) {
+  const box = $("dsSupportFallbackText");
+  const host = $("dsSupportTextFallback");
+  if (!box || !host) return false;
+  box.value = String(text || "");
+  host.hidden = false;
+  return true;
+}
+function setupSupportReportFallbackButtons() {
+  $("dsSupportFallbackCopy")?.addEventListener("click", async () => {
+    const body = $("dsSupportFallbackText")?.value || "";
+    try {
+      await navigator.clipboard.writeText(body);
+      const status = $("diagnosticsStatus");
+      if (status) status.textContent = "Support report text copied.";
+    } catch {
+      $("dsSupportFallbackText")?.focus();
+      $("dsSupportFallbackText")?.select();
+      const status = $("diagnosticsStatus");
+      if (status) status.textContent = "Clipboard unavailable. Report selected for manual copying.";
+    }
+  });
+  $("dsSupportFallbackSelect")?.addEventListener("click", () => {
+    const box = $("dsSupportFallbackText");
+    box?.focus();
+    box?.select();
+  });
+}
+
 
 function isAndroidSupportWebView() {
   return !!(window.flutter_inappwebview?.callHandler || window._dsRequestExport ||
@@ -190,11 +224,10 @@ async function requestAndroidSupportFile(text, filename) {
   if (!body) return false;
   const bridge = window.flutter_inappwebview;
   if (bridge?.callHandler) {
+    const payload = { text: body, content: body, filename, fileName: filename,
+      mimeType: "text/plain;charset=utf-8", byteLength: new TextEncoder().encode(body).byteLength };
     for (const handler of ["exportChat", "saveFile"]) {
       try {
-        const payload = handler === "exportChat"
-          ? { text: body, filename }
-          : { text: body, content: body, filename, fileName: filename, mimeType: "text/plain;charset=utf-8" };
         // Do not leave Options stuck forever if a WebView handler has stalled.
         // An uncertain request must not be retried through a second handler:
         // the first one might still finish and create a duplicate download.
@@ -207,8 +240,17 @@ async function requestAndroidSupportFile(text, filename) {
         clearTimeout(timer);
         if (response.timedOut) return false;
         if (response.error) continue;
-        const result = response.value;
+        let result = response.value;
+        // Some Flutter handlers return JSON strings, others objects/booleans.
+        if (typeof result === "string" && result.trim().startsWith("{")) {
+          try { result = JSON.parse(result); } catch {}
+        }
         if (result === false || result?.success === false || result?.ok === false || result?.error) continue;
+        const reportedBytes = result && typeof result === "object"
+          ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN)
+          : NaN;
+        // An explicit zero-byte result is a failed export, not a success.
+        if (Number.isFinite(reportedBytes) && reportedBytes <= 0) continue;
         return true; // Accepted, NOT a confirmed file write.
       } catch {}
     }
@@ -223,12 +265,13 @@ async function requestAndroidSupportFile(text, filename) {
 }
 
 async function preserveAndroidSupportFallback(text) {
-  const box = $("settingsJson");
+  const hasReportArea = showSupportReportFallback(text);
+  const box = hasReportArea ? null : $("settingsJson");
   if (box) box.value = String(text || "");
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(String(text || ""));
-      return { copied: true, selectable: !!box };
+      return { copied: true, selectable: hasReportArea || !!box };
     }
   } catch {}
   if (box) {
@@ -236,7 +279,7 @@ async function preserveAndroidSupportFallback(text) {
     box.focus();
     box.select();
   }
-  return { copied: false, selectable: !!box };
+  return { copied: false, selectable: hasReportArea || !!box };
 }
 
 async function downloadSupportText(text, filename, successMessage = "Support report downloaded.") {
@@ -256,8 +299,9 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
       ? `Sent ${filename} to Android's file exporter. Check Downloads; the app cannot confirm the file was written.${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
       : (fallback.copied
           ? "Android file export was unavailable. Report copied instead; no file has been verified."
-          : "Android file export and clipboard are unavailable. Report left in Data & Backup for manual copying.");
-    return accepted || fallback.copied;
+          : "Android file export and clipboard are unavailable. Report is available in Support report text for manual copying.");
+    // Copying text is NOT evidence that a file download started.
+    return accepted;
   }
   try {
     if (await tryNativeBackupSave(body, filename, mime)) {
@@ -501,7 +545,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     const perf = context.pageDiagnostics.performance.slice(0, 15);
     diagnosticLines.push(`QoL performance mode: ${context?.pageDiagnostics?.runtimePerformance?.mode || settings.runtimePerformanceMode || "adaptive"}`);
     const runtime = context?.pageDiagnostics?.runtimePerformance || {};
-    diagnosticLines.push(`QoL scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneRuns || 0)} message-lane runs; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate lane schedules coalesced; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots processed; last lane ${Number(runtime.lastMessageLaneDirtyRoots || 0)} roots; ${Number(runtime.historyBatches || 0)} history batches; ${Number(runtime.slowLaneQuietDeferrals || 0)} quiet-gap deferrals; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.mutations || 0)} mutations; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.qolOnlyMutations || 0)} QoL-only ignored; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} desktop-app guard delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced; ${Number(runtime.loadedChatMessages || 0)} loaded messages; history low-impact ${runtime.historyBatchActive ? "active" : "inactive"}`);
+    diagnosticLines.push(`QoL scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneRuns || 0)} message-lane runs; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate lane schedules coalesced; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots processed; last lane ${Number(runtime.lastMessageLaneDirtyRoots || 0)} roots; ${Number(runtime.historyBatches || 0)} history batches; ${Number(runtime.slowLaneQuietDeferrals || 0)} quiet-gap deferrals; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} individual feature dispatches (several per pass); ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.mutations || 0)} mutations; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.qolOnlyMutations || 0)} QoL-only ignored; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} desktop-app guard delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced; ${Number(runtime.loadedChatMessages || 0)} loaded messages; history low-impact ${runtime.historyBatchActive ? "active" : "inactive"}`);
     diagnosticLines.push(`Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes moved to the incremental lane; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`);
     diagnosticLines.push(`Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`);
     diagnosticLines.push(`Message edit guard: ${Number(runtime.messageEditGuardsStarted || 0)} started; ${Number(runtime.messageEditGuardsSettled || 0)} settled; ${Number(runtime.messageEditMutationSkips || 0)} edit mutations skipped; ${Number(runtime.messageEditLaneSkips || 0)} lane runs skipped; ${Number(runtime.messageEditCriticalSkips || 0)} critical runs skipped`);
@@ -626,6 +670,14 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   const env = context?.pageDiagnostics?.androidEnvironment || detectSettingsEnvironment();
   const warnings = runtimeAvailable ? performanceWarningLines(context, settings)
     : ["No SpicyChat QoL runtime replied. Page performance counters below are unavailable, not zero measurements; reload the affected tab after updating QoL."];
+  const sampleContext = context?.pageDiagnostics?.runtimeContext || {};
+  const backgroundSample = runtimeAvailable && sampleContext.visibilityState === "hidden";
+  const sampledPath = String(context?.url || "").replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/, 1)[0];
+  const offChatSample = runtimeAvailable && !/^\/chat\//.test(sampledPath);
+  const sampleScope = !runtimeAvailable ? "No content runtime available; only Settings measurements were collected."
+    : backgroundSample ? "Background tab: current activity and zero Long Task samples cannot describe responsiveness in a visible chat."
+    : offChatSample ? "Not a chat page: message counters and chat latency were not measured here."
+    : "Visible chat or page sample; measurements reflect this tab, not all open SpicyChat tabs.";
   const readAvg = OPTIONS_PERFORMANCE.storageReads ? OPTIONS_PERFORMANCE.storageReadTotalMs / OPTIONS_PERFORMANCE.storageReads : 0;
   const writeAvg = OPTIONS_PERFORMANCE.storageWrites ? OPTIONS_PERFORMANCE.storageWriteTotalMs / OPTIONS_PERFORMANCE.storageWrites : 0;
   let lines = [
@@ -637,6 +689,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     `Runtime data: ${runtimeAvailable ? "available" : "unavailable — no open SpicyChat tab responded; Options-page measurements below are still valid"}`,
+    `Sample scope: ${sampleScope}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}; operation markers ${Number(p.counters?.operationsStarted || 0)}/${Number(p.counters?.operationsEnded || 0)}; network markers ${Number(p.counters?.networkStarted || 0)}/${Number(p.counters?.networkEnded || 0)}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable"; })(),
     `Environment: Android ${env.android ? "yes" : "no"}; WebView ${env.webview ? "yes" : "no"}; installed/standalone ${env.installedApp ? `yes (${env.displayMode || "standalone"})` : "no"}; Firefox-family ${env.firefox || env.waterfox ? "yes" : "no"}; Opera ${env.opera ? "yes" : "no"}`,
     (() => { const d = stored.cardTokenFetchDiagnosticsV1 || {}; return `Card token fetch: background ${Number(d.requests || 0)}/${Number(d.successes || 0)} success; MAIN ${Number(d.mainWorldRequests || 0)}/${Number(d.mainWorldSuccesses || 0)} success / ${Number(d.mainWorldFailures || 0)} failed, captured-auth ${Number(d.mainWorldCapturedAuth || 0)}; timeouts ${Number(d.timeouts || 0)}; 401 ${Number(d.http401 || 0)}; 403 ${Number(d.http403 || 0)}; 429 ${Number(d.http429 || 0)}; network ${Number(d.networkFailures || 0)}; auth missing ${Number(d.authMissing || 0)}; IndexedDB auth ${Number(d.indexedDbAuth || 0)}; last ${d.lastStatus || "none"} ${Number(d.lastElapsedMs || 0)} ms`; })(),
@@ -651,7 +704,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     ...((settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.slowFeatureSamples))
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)
       : []),
-    `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} schedules; ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
+    `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} scheduling requests (not completed passes); ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
     `Android QoL pacing: ${env.android ? "active" : "not Android"}; ${Number(runtime.androidMessageLaneDeferrals || 0)} delayed message updates; ${Number(runtime.androidRuntimeDeferrals || 0)} delayed maintenance passes. These counts are scheduling changes, not measured UI lag.`,
     `Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots processed in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes deferred; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`,
     `Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`,
@@ -667,7 +720,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Disabled-feature deep sleep: always on; ${Number(runtime.disabledFeatureStepSkips || 0)} scheduler steps skipped`,
     `Saved/opened lane: ${Number(runtime.savedOpenedLaneSchedules || 0)} schedules; ${Number(runtime.savedOpenedLaneRuns || 0)} runs; last source ${runtime.lastSavedOpenedLaneSource || "none"}`,
     `Blocked-bot refresh batching: ${Number(runtime.blockedBotRefreshDeferrals || 0)} deferred single-block changes; ${Number(runtime.blockedBotRefreshFlushes || 0)} settled refreshes; ${Number(runtime.blockedBotMutationSkips || 0)} immediate listing mutations skipped; ${runtime.blockedBotRefreshPending ? `pending (${Math.max(0, Math.ceil((Number(runtime.blockedBotRefreshSettleAt || 0) - Date.now()) / 1000))}s remaining)` : "idle"}`,
-    `Listing workload guard: ${Number(runtime.listingNonCardCriticalSkips || 0)} non-card critical passes skipped; ${Number(runtime.listingScheduleDeferrals || 0)} mutation bursts coalesced; ${Number(runtime.slowStepThrottleSkips || 0)} repeated slow scans throttled; ${Number(runtime.listingDuplicateRefillCardsRemoved || 0)} duplicate refill cards removed; ${Number(runtime.cardTokenHiddenQueuePauses || 0)} hidden-tab token queue pauses`,
+    `Slow-step throttle: ${Number(runtime.throttledStepRuns || 0)} permitted checks; ${Number(runtime.slowStepThrottleSkips || 0)} repeated checks prevented (not completed scans); by group ${Object.entries(runtime.slowStepThrottleCategories || {}).filter(([k]) => ["layout", "listing", "profile", "other"].includes(k)).map(([k,v]) => `${k} ${Number(v) || 0}`).join(", ") || "none"}`,
+    `Listing workload guard: ${Number(runtime.listingNonCardCriticalSkips || 0)} non-card critical passes skipped; ${Number(runtime.listingScheduleDeferrals || 0)} mutation bursts coalesced; ${Number(runtime.listingDuplicateRefillCardsRemoved || 0)} duplicate refill cards removed; ${Number(runtime.cardTokenHiddenQueuePauses || 0)} hidden-tab token queue pauses`,
     `Listing name sort: ${runtime.listingSortMode || "native"}; ${Number(runtime.listingSortLoadedCards || 0)} loaded cards; ${Number(runtime.listingSortReorders || 0)} DOM reorders; ${Number(runtime.listingSortNoopSkips || 0)} identical passes skipped; ${Number(runtime.listingSortAlreadyOrdered || 0)} first-pass no-ops`,
     `Notification auto-read: ${Number(runtime.notificationAutoReadAttempts || 0)} attempts; ${Number(runtime.notificationAutoReadClicks || 0)} native clicks; ${Number(runtime.notificationAutoReadSuccesses || 0)} cleared; ${Number(runtime.notificationAutoReadUncleared || 0)} still unread; ${Number(runtime.notificationAutoReadMissingButtons || 0)} missing-button checks; ${Number(runtime.notificationAutoReadFailures || 0)} failures; last source ${runtime.notificationAutoReadLastSource || "none"}`,
     `Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicates avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped; observer collapsed ${Number(runtime.messageCacheMutationCandidateNodes || 0)} changed nodes to ${Number(runtime.messageCacheMutationRoots || 0)} message-root targets (${Number(runtime.messageCacheMutationNodesCollapsed || 0)} node walks avoided)`,
@@ -790,7 +844,8 @@ async function readSavedSupportHistory({ summaryOnly = false } = {}) {
   const timeoutMs = summaryOnly ? (isAndroidSupportWebView() ? 5500 : 12000)
     : (isAndroidSupportWebView() ? 12000 : 45000);
   const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, timeoutMs).catch(() => null);
-  return result?.ok ? result : { ok: false, text: result?.error || "Support history is currently unavailable.", count: 0, through: 0 };
+  const error = String(result?.error || (result?.__dsTimeout ? "The history lookup timed out." : "Support history could not be checked.")).slice(0, 180);
+  return result?.ok ? result : { ok: false, text: error, count: 0, through: 0 };
 }
 async function refreshSavedSupportStatus() {
   const label = $("dsSupportHistoryStatus");
@@ -954,20 +1009,27 @@ async function copyAllSupportInfo() {
   const status = $("diagnosticsStatus");
   if (status) status.textContent = "Building full support report...";
   const text = await buildAllSupportInfo();
+  if (isAndroidSupportWebView()) showSupportReportFallback(text);
 
   try {
     await navigator.clipboard.writeText(text);
     if (status) status.textContent = "Full support report copied. Paste it into Discord, GitHub, or wherever you were asked to send it.";
     return true;
   } catch {
-    const box = $("settingsJson");
-    if (box) {
-      box.value = text;
-      setActiveTab("data");
-      box.focus();
-      box.select();
+    if (isAndroidSupportWebView() && showSupportReportFallback(text)) {
+      $("dsSupportFallbackText")?.focus();
+      $("dsSupportFallbackText")?.select();
+      if (status) status.textContent = "Clipboard access failed. Support report text is selected below for manual copying.";
+    } else {
+      const box = $("settingsJson");
+      if (box) {
+        box.value = text;
+        setActiveTab("data");
+        box.focus();
+        box.select();
+      }
+      if (status) status.textContent = "Clipboard access failed; the full report was placed in Data / Backup for manual copying.";
     }
-    if (status) status.textContent = "Clipboard access failed, so the full support report was placed in Data / Backup instead.";
     return false;
   }
 }
@@ -984,14 +1046,16 @@ async function downloadAllSupportInfo() {
     const compressed = new TextEncoder().encode(text).byteLength > 256 * 1024;
     const saved = await downloadSupportVerified(text, compressed);
     if (!saved.started) {
-      if (status) status.textContent = "Could not start the support download. Saved history was kept.";
+      if (status) status.textContent = isAndroidSupportWebView()
+        ? "Android did not accept the support file export. The report is in Support report text below; saved history was kept."
+        : "Could not start the support download. Saved history was kept.";
       return false;
     }
     if (!saved.verified) {
       if (status) status.textContent = isAndroidSupportWebView()
         ? (lastAndroidSupportExportState === "native"
             ? "Android accepted the file export request. Check Downloads; file completion could not be verified. Support history was kept."
-            : "Android file export was unavailable, so the report was copied instead. No file was verified; support history was kept.")
+            : "Android file export was unavailable. The report remains in Support report text below; support history was kept.")
         : "Report download started, but saving the file could not be verified. Support history was kept.";
       await refreshSavedSupportStatus();
       return true;

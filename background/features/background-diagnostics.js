@@ -472,7 +472,14 @@ async function dsqSupportClear(through = null) {
 }
 function dsqSupportHistoryRequest(message, sender, sendResponse) {
   const action = String(message?.type || "");
-  const isOptions = String(sender?.url || "").startsWith(chrome.runtime.getURL("")) && !sender?.tab;
+  // Browsers may omit sender.url for a same-extension Settings request.
+  // Never let a web/content-script tab read or clear this private history.
+  const senderUrl = String(sender?.url || sender?.documentUrl || "");
+  const sameExtension = sender?.id === chrome.runtime.id;
+  const optionsSource = senderUrl
+    ? senderUrl.split(/[?#]/, 1)[0] === chrome.runtime.getURL("options.html")
+    : sameExtension; // Only a verified no-tab extension sender may omit its URL.
+  const isOptions = !sender?.tab && sameExtension && optionsSource;
   if (action !== "DS_SUPPORT_HISTORY_APPEND" && !isOptions) {
     sendResponse({ ok: false, error: "Support history is available only from QoL Settings." }); return false;
   }

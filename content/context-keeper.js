@@ -171,8 +171,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
     })).then(async response => {
       if (recordChange && response.before && response.after) {
-        // Undo history remains local and is recorded only for a confirmed save.
-        await DS.recordLocalChange?.(label, { [KEY]: response.before }, { [KEY]: response.after });
+        // A confirmed storage write must not be reported as a failed save just
+        // because the optional local Undo entry could not be recorded.
+        try {
+          await DS.recordLocalChange?.(label, { [KEY]: response.before }, { [KEY]: response.after });
+        } catch (error) {
+          DS.runtimeLog?.("warn", "context-keeper", "Saved fact, but Undo history could not be updated", error);
+        }
       }
       if (currentChatId() === originChat) rememberActive(after);
       return true;
@@ -568,11 +573,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return el;
   }
 
-  async function addDetail(text, { category = "", source = "manual", score = 0, enabled = true, messageId = "", role = "" } = {}) {
+  async function addDetail(text, { category = "", source = "manual", score = 0, enabled = true, messageId = "", role = "", expectedChatId = "" } = {}) {
     const value = clean(text).slice(0, MAX_DETAIL);
     if (!value) return false;
+    if (expectedChatId && currentChatId() !== expectedChatId)
+      throw new Error("Conversation changed before this message could be kept.");
     const store = await readStore();
     const id = currentChatId();
+    if (expectedChatId && id !== expectedChatId)
+      throw new Error("Conversation changed while preparing to keep this message.");
     const entry = store[id] || { details: [], lastRecapAt: 0, lastRecapMessageCount: 0 };
     if (entry.details.some(detail => isSimilarText(detail.text, value))) return false;
     entry.details.push({
@@ -586,6 +595,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       role: clean(role).slice(0, 40),
       createdAt: Date.now()
     });
+    if (expectedChatId && currentChatId() !== expectedChatId)
+      throw new Error("Conversation changed before saving this message.");
     store[id] = entry;
     await writeStore(store);
     return true;
@@ -1368,6 +1379,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // React frequently replaces native message toolbars before the background
+  // save responds. Keep feedback OUTSIDE those transient nodes so users can
+  // distinguish a confirmed save, an existing similar fact and a failed save.
+  let keepNoticeTimer = 0;
+  function showKeepNotice(message, isError = false) {
+    const host = document.body || document.documentElement;
+    if (!host) return;
+    let notice = document.getElementById("ds-context-keep-notice");
+    if (!notice) {
+      notice = make("div", { id: "ds-context-keep-notice", role: "status", "aria-live": "polite" });
+      host.append(notice);
+    }
+    notice.textContent = message;
+    notice.classList.toggle("ds-context-keep-error", isError);
+    DS.setQuickStatus?.(message);
+    clearTimeout(keepNoticeTimer);
+    keepNoticeTimer = window.setTimeout(() => {
+      notice.remove();
+      keepNoticeTimer = 0;
+    }, 4300);
+  }
+
   function ensureMessageButtonForRoot(root) {
     if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
     if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons !== true || !DS.isSingleChatPage?.()) return false;
@@ -1383,20 +1416,56 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const text = messageText(root);
       if (!text) return false;
       button = make("button", { type: "button", className: BUTTON_CLASS, title: "Remember this message for Context Keeper" }, "Keep");
+      let resultTimer = 0;
       button.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
+        if (button.dataset.dsKeepSaving === "1") return;
+        clearTimeout(resultTimer);
+        resultTimer = 0;
+        const chatId = currentChatId();
         const current = messageText(root);
-        const added = await addDetail(current, {
-          category: categoryFor(current),
-          source: "message",
-          score: Math.max(6, scoreSentence(current)),
-          messageId: messageIdForRoot(root),
-          role: messageRoleForRoot(root)
-        });
-        button.textContent = added ? "Kept" : "Saved/similar";
-        button.classList.add("ds-context-kept");
-        setTimeout(() => { if (document.contains(button)) button.textContent = "Keep"; }, 1600);
+        if (!current) {
+          showKeepNotice("Context Keeper couldn't read this message. Nothing was saved.", true);
+          return;
+        }
+        button.dataset.dsKeepSaving = "1";
+        button.disabled = true;
+        button.textContent = "Saving…";
+        button.classList.remove("ds-context-kept");
+        try {
+          const added = await addDetail(current, {
+            category: categoryFor(current),
+            source: "message",
+            score: Math.max(6, scoreSentence(current)),
+            messageId: messageIdForRoot(root),
+            role: messageRoleForRoot(root),
+            expectedChatId: chatId
+          });
+          if (currentChatId() !== chatId) return;
+          button.textContent = added ? "Kept ✓" : "Already kept";
+          button.classList.add("ds-context-kept");
+          showKeepNotice(added
+            ? "Message saved to Context Keeper."
+            : "This message or a similar detail is already in Context Keeper.");
+        } catch (error) {
+          if (currentChatId() !== chatId) return;
+          button.textContent = "Not saved";
+          showKeepNotice("Context Keeper couldn't confirm this save. Try again or check Context Keeper.", true);
+          DS.runtimeLog?.("warn", "context-keeper", "Message Keep save not confirmed", error);
+        } finally {
+          button.disabled = false;
+          delete button.dataset.dsKeepSaving;
+          // Do not reset the label immediately. A short-lived stable result
+          // remains visible even when the quick-action toolbar is rebuilt.
+          resultTimer = window.setTimeout(() => {
+            resultTimer = 0;
+            if (button.isConnected && button.dataset.dsKeepSaving !== "1") {
+              button.textContent = "Keep";
+              button.classList.remove("ds-context-kept");
+            }
+          }, 4200);
+        }
       });
     }
 
@@ -1524,6 +1593,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     messageButtonWatchdog = 0;
     clearTimeout(messageButtonRepairTimer);
     messageButtonRepairTimer = 0;
+    clearTimeout(keepNoticeTimer);
+    keepNoticeTimer = 0;
+    document.getElementById("ds-context-keep-notice")?.remove();
     if (!DS.state.contextKeeperWasActive && !document.getElementById(MODAL_ID)) return;
     document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => button.remove());
     document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-context-keeper-ready]`).forEach(root => delete root.dataset.dsContextKeeperReady);

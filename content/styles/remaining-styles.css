@@ -115,6 +115,27 @@
 }
 .ds-context-keep-button:hover,
 .ds-context-keep-button.ds-context-kept { color: #fff !important; background: rgba(80,80,90,.82) !important; }
+.ds-context-keep-button:disabled { cursor: wait; opacity: .8; }
+#ds-context-keep-notice {
+  position: fixed !important;
+  z-index: 2147483600 !important;
+  bottom: max(24px, env(safe-area-inset-bottom, 0px)) !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  max-width: min(90vw, 440px);
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid rgba(255,255,255,.19);
+  border-radius: 10px;
+  background: #24252d;
+  color: #fff;
+  box-shadow: 0 5px 18px rgba(0,0,0,.4);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+}
+#ds-context-keep-notice.ds-context-keep-error { border-color: #e59090; }
 @media (max-width: 640px) {
   .ds-tool-modal-dialog {
     top: 12px;
@@ -1899,3 +1920,202 @@ html.ds-chat-bubble-alpha [id^="message-"] :is(.bg-gray-3,.bg-gray-4,.bg-gray-5)
 .ds-qol-imported-chat-list { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; }
 .ds-qol-imported-chat-link { display: block; padding: 5px 7px; border-radius: 5px; background: #35353f; color: #fafafa; text-decoration: none; overflow-wrap: anywhere; }
 .ds-qol-imported-chat-link:hover,.ds-qol-imported-chat-link:focus-visible { background: #4a4a58; text-decoration: underline; }
+
+/* Read-only chat history navigator (opt-in). */
+.ds-chat-bookmarks-header-button, .ds-qol-history-launcher {
+  border: 1px solid rgba(150,160,190,.5); border-radius: 7px; color: inherit;
+  background: rgba(100,110,140,.12); padding: 5px 9px; font-size: 12px;
+  cursor: pointer; margin: 3px 5px 3px 0;
+}
+.ds-qol-history-viewer { width: min(840px, 96vw); max-height: min(92vh, 960px); display: flex;
+  flex-direction: column; gap: 9px; overflow: hidden; }
+.ds-qol-history-summary, .ds-qol-history-location, .ds-qol-history-status { font-size: 12px; margin: 1px 0; opacity: .85; }
+.ds-qol-history-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ds-qol-history-controls button { border: 1px solid rgba(150,160,190,.45); border-radius: 7px;
+  color: inherit; background: rgba(100,110,140,.16); padding: 6px 10px; cursor: pointer; }
+.ds-qol-history-controls button:disabled { opacity: .4; cursor: default; }
+.ds-qol-history-controls input { min-width: 160px; max-width: 260px; flex: 1; border-radius: 7px;
+  border: 1px solid rgba(150,160,190,.5); background: transparent; color: inherit; padding: 7px; }
+.ds-qol-history-messages { overflow-y: auto; overscroll-behavior: contain; min-height: 120px; flex: 1;
+  border: 1px solid rgba(150,160,190,.22); border-radius: 9px; padding: 8px; }
+.ds-qol-history-item { margin: 5px 0 12px; padding: 10px; border-radius: 8px;
+  background: rgba(120,130,160,.09); }
+.ds-qol-history-highlight { outline: 2px solid #679def; }
+.ds-qol-history-item-head { display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.ds-qol-history-item-head button { background: transparent; border: 0; color: inherit; cursor: pointer; }
+.ds-qol-history-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; }
+
+/* History Navigator is a standalone overlay, not a .ds-tool-modal-dialog.
+   Give it a proper backdrop/dialog so the chat does not show through it. */
+#ds-qol-history-navigator.ds-tool-modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483500 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+  background: #0b0d12 !important;
+  backdrop-filter: none !important;
+  color: #f1f3fa;
+}
+#ds-qol-history-navigator .ds-qol-history-dialog {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  inset: auto !important;
+  box-sizing: border-box !important;
+  width: min(860px, 100%) !important;
+  max-width: 100% !important;
+  height: min(84vh, 860px) !important;
+  max-height: calc(100dvh - 32px) !important;
+  min-height: 380px;
+  padding: 18px !important;
+  overflow: hidden !important;
+  border: 1px solid #454b5c !important;
+  border-radius: 14px !important;
+  background: #1b1e29 !important;
+  color: #f1f3fa !important;
+  box-shadow: 0 22px 70px rgba(0,0,0,.72) !important;
+  line-height: 1.45;
+}
+#ds-qol-history-navigator .ds-tool-modal-head { flex-shrink: 0; margin: 0; }
+#ds-qol-history-navigator .ds-tool-modal-head h3 { margin: 0; font-size: 19px; font-weight: 650; color: #fff; }
+#ds-qol-history-navigator .ds-tool-modal-head button { min-width: 36px; min-height: 36px; border-radius: 8px; font-size: 23px; background: #2c3040; color: #fff; cursor: pointer; }
+#ds-qol-history-navigator .ds-qol-history-controls { flex-shrink: 0; gap: 8px; }
+#ds-qol-history-navigator .ds-qol-history-controls button { min-height: 35px; font-size: 13px; font-weight: 550; background: #303546; border-color: #626d86; color: #fff; }
+#ds-qol-history-navigator .ds-qol-history-controls button:hover:not(:disabled) { background: #404e6a; }
+#ds-qol-history-navigator .ds-qol-history-controls button:disabled { opacity: .42; }
+#ds-qol-history-navigator .ds-qol-history-controls input { min-height: 35px; background: #11131b; border-color: #647089; color: #fff; font-size: 14px; }
+#ds-qol-history-navigator .ds-qol-history-number-note { margin: -2px 0 0; font-size: 12px; color: #adb9d0; }
+#ds-qol-history-navigator .ds-qol-history-summary,
+#ds-qol-history-navigator .ds-qol-history-location { margin: 0; opacity: 1; font-size: 13px; color: #cdd5e7; }
+#ds-qol-history-navigator .ds-qol-history-messages { flex: 1 1 0; min-height: 80px; overflow-y: auto; background: #13161e; border-color: #3d465b; }
+#ds-qol-history-navigator .ds-qol-history-item { background: #232834; border: 1px solid #323b4d; }
+#ds-qol-history-navigator .ds-qol-history-item-head { font-size: 13px; }
+#ds-qol-history-navigator .ds-qol-history-body { font-size: 14px; color: #eef0f7; }
+#ds-qol-history-navigator .ds-qol-history-status { flex-shrink: 0; opacity: 1; margin: 0; font-size: 13px; line-height: 1.45; color: #e4eafb; padding: 9px 11px; border: 1px solid #424e67; border-radius: 8px; background: #272e3e; max-height: 100px; overflow-y: auto; }
+@media (max-width: 640px) {
+  #ds-qol-history-navigator.ds-tool-modal-overlay { padding: 8px !important; }
+  #ds-qol-history-navigator .ds-qol-history-dialog { height: calc(100dvh - 16px) !important; max-height: calc(100dvh - 16px) !important; padding: 11px !important; gap: 7px; }
+  #ds-qol-history-navigator .ds-qol-history-controls button { min-height: 38px; }
+  #ds-qol-history-navigator .ds-qol-history-controls input { min-width: 120px; }
+}
+
+/* Message bookmark manager shares the history viewer's opaque, accessible layout.
+   Neither dialog inherits the unrelated full-viewport .ds-tool-modal layout. */
+#ds-chat-bookmarks-modal.ds-tool-modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483500 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+  background: #0b0d12 !important;
+  color: #f1f3fa !important;
+}
+#ds-chat-bookmarks-modal .ds-chat-bookmarks-modal {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px;
+  width: min(720px, 100%) !important;
+  height: min(82vh, 750px);
+  max-height: calc(100dvh - 32px) !important;
+  min-height: 240px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid #454b5c;
+  border-radius: 14px;
+  background: #1b1e29 !important;
+  box-shadow: 0 22px 70px rgba(0,0,0,.7);
+  color: #f1f3fa;
+  padding: 18px;
+  line-height: 1.5;
+}
+#ds-chat-bookmarks-modal .ds-tool-modal-head { flex-shrink: 0; margin-bottom: 0; }
+#ds-chat-bookmarks-modal .ds-tool-modal-head h3 { margin: 0; font-size: 19px; }
+#ds-chat-bookmarks-modal .ds-tool-modal-head button,
+#ds-chat-bookmarks-modal .ds-tool-actions button {
+  cursor: pointer;
+  padding: 7px 11px;
+  border: 1px solid #626d86;
+  border-radius: 8px;
+  background: #303546;
+  color: #fff;
+}
+#ds-chat-bookmarks-modal .ds-tool-list { min-height: 0; overflow-y: auto; gap: 8px; }
+#ds-chat-bookmarks-modal .ds-chat-bookmark-item {
+  padding: 12px;
+  border: 1px solid #3d465b;
+  border-radius: 9px;
+  background: #232834;
+}
+#ds-chat-bookmarks-modal .ds-tool-actions { flex-wrap: wrap; }
+#ds-chat-bookmarks-modal .ds-chat-bookmark-item p { overflow-wrap: anywhere; max-height: 100px; overflow: auto; }
+@media (max-width: 640px) {
+  #ds-chat-bookmarks-modal.ds-tool-modal-overlay { padding: 8px !important; }
+  #ds-chat-bookmarks-modal .ds-chat-bookmarks-modal { height: calc(100dvh - 16px); max-height: calc(100dvh - 16px) !important; padding: 11px; }
+  #ds-chat-bookmarks-modal .ds-chat-bookmark-item { display: flex; flex-direction: column; }
+}
+
+/* Bookmark jumps report an actionable in-dialog error instead of closing silently. */
+#ds-chat-bookmarks-modal .ds-chat-bookmark-feedback:not([hidden]) {
+  margin: 0; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid #806343; background: #33291f; color: #ffe3b8;
+}
+
+
+/* Compact v0.2.62 experimental chat navigation. Rest of SpicyChat stays visible. */
+#ds-qol-history-navigator.ds-tool-modal-overlay,
+#ds-chat-bookmarks-modal.ds-tool-modal-overlay {
+  background: rgba(4, 6, 12, .78) !important;
+  backdrop-filter: blur(3px) !important;
+}
+#ds-qol-history-navigator .ds-qol-history-dialog {
+  width: min(740px, 100%) !important;
+  height: min(82vh, 750px) !important;
+  background: #17191f !important;
+  border-color: #363b47 !important;
+  gap: 8px !important;
+  padding: 16px !important;
+}
+#ds-qol-history-navigator .ds-tool-modal-head { display:flex; align-items:center; gap: 8px; }
+#ds-qol-history-navigator .ds-tool-modal-head button { margin-left: auto; }
+#ds-qol-history-navigator .ds-qol-history-beta {
+  display: inline-flex; align-items: center; font-size: 11px; padding: 3px 8px;
+  background: #403421; border: 1px solid #79643d; border-radius: 6px; color: #ffe2a9;
+}
+#ds-qol-history-navigator .ds-qol-history-summary { color: #a5b3c7; font-size: 12px; }
+#ds-qol-history-navigator .ds-qol-history-controls { gap: 6px !important; }
+#ds-qol-history-navigator .ds-qol-history-controls button {
+  min-height: 32px; padding: 5px 10px; border-radius: 7px;
+  background: #292e3a; border: 1px solid #484f60;
+}
+#ds-qol-history-navigator .ds-qol-history-controls input { max-width: 190px; min-height: 32px; }
+#ds-qol-history-navigator .ds-qol-history-messages { padding: 10px; border-color: #343c4a; background: #111318; }
+#ds-qol-history-navigator .ds-qol-history-item { padding: 10px 12px; margin: 4px 0 10px;
+  border: 1px solid #343a47; background: #202329; cursor: pointer;
+}
+#ds-qol-history-navigator .ds-qol-history-item:focus-visible { outline: 2px solid #7aa5ec; }
+#ds-qol-history-navigator .ds-qol-history-item[aria-selected='true'] { border-color: #689cec; background: #242f40; }
+#ds-qol-history-navigator .ds-qol-history-item-head strong { color: #c7d6ee; }
+#ds-qol-history-navigator .ds-qol-history-status { max-height: 72px; padding: 7px 9px; font-size: 12px; }
+#ds-qol-history-navigator .ds-qol-history-native-actions { display:flex; flex-wrap:wrap; align-items:center; gap: 9px;
+  padding: 4px 0; font-size: 11px; color: #b8c4d7;
+}
+#ds-qol-history-navigator .ds-qol-history-native-actions button {
+  background: #2c4562; border: 1px solid #6087b1; border-radius: 7px;
+  padding: 7px 10px; color: #fff; cursor: pointer;
+}
+#ds-qol-history-navigator .ds-qol-history-native-actions button:disabled { opacity: .5; cursor: default; }
+#ds-qol-history-navigator .ds-qol-history-native-actions span { flex: 1; min-width: 190px; }
+@media (max-width: 640px) {
+  #ds-qol-history-navigator .ds-qol-history-dialog { height: calc(100dvh - 16px) !important; }
+  #ds-qol-history-navigator .ds-qol-history-native-actions span { min-width: 0; }
+}

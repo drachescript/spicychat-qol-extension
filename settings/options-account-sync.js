@@ -131,7 +131,7 @@ function renderSyncDevicePrefs(prefs) {
   if (limited) limited.checked = Array.isArray(prefs.allowedKeys);
   const selection = $("accountSyncSettingSelection");
   if (selection) selection.hidden = !Array.isArray(prefs.allowedKeys);
-  if (Array.isArray(prefs.allowedKeys)) setupSyncSettingsChecklist(prefs);
+  if (Array.isArray(prefs.allowedKeys) && prefs.allowedKeys.length && prefs.mode !== "off") setupSyncSettingsChecklist(prefs);
   else $("accountSyncSettingsChecklist")?.replaceChildren();
   for (const name of ACCOUNT_SYNC_LIST_NAMES) {
     const element = document.querySelector(`[data-sync-list="${name}"]`);
@@ -418,11 +418,42 @@ function setupAccountSyncFoundation() {
     if (el) el.textContent = `Unsaved preview · Settings: ${settingsLabel} (${settingCount} keys). Lists: ${lists.join("; ") || "none"}. ${uploadCount ? "This selection allows uploading data from this device." : "No automatic upload directions selected."} Pictures, memories, drafts and chat text are not uploaded by this sync service.`;
   };
   $("accountSyncPreviewChoices")?.addEventListener("click", describeSyncPlan);
+  // One-click *device-local* list presets. No other scopes/settings are synced.
+  // List removals are handled by the existing per-device tombstone journal.
+  const saveBlockedOnlyPreset = async direction => {
+    if (!["download-only", "upload-only", "two-way"].includes(direction)) return;
+    const map = { "download-only": "Receive", "upload-only": "Upload", "two-way": "Two-way" };
+    const status = $("accountSyncActionStatus");
+    const buttons = ["accountSyncAndroidBlockedReceive", "accountSyncAndroidBlockedUpload", "accountSyncAndroidBlockedTwoWay"]
+      .map(id => $(id)).filter(Boolean);
+    for (const btn of buttons) btn.disabled = true;
+    if (status) status.textContent = `Saving ${map[direction].toLowerCase()} blocked-bot sync on this device…`;
+    const listModes = Object.fromEntries(ACCOUNT_SYNC_LIST_NAMES.map(name => [name, name === "blockedBots" ? direction : "off"]));
+    const prefs = { mode: "off", allowedKeys: [], scopes: [], listModes };
+    try {
+      const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_DEVICE_PREFS", prefs }, 30000);
+      if (!result?.ok) {
+        if (status) status.textContent = `Could not save blocked-bot sync: ${result?.message || result?.error || "unknown error"}`;
+        return;
+      }
+      accountSyncUserEditing = false;
+      accountSyncSelectedPrefs = result.prefs;
+      await refreshAccountSyncUi({ refreshDevices: false });
+      if (status) status.textContent = `${map[direction]} blocked-bot IDs/names only. Other lists, settings, archives and chat text stay excluded. Link the account if needed, then Sync now.`;
+    } catch (error) {
+      if (status) status.textContent = `Could not save blocked-bot sync: ${error?.message || String(error)}`;
+    } finally { for (const btn of buttons) btn.disabled = false; }
+  };
+  for (const [id, direction] of [
+    ["accountSyncAndroidBlockedReceive", "download-only"],
+    ["accountSyncAndroidBlockedUpload", "upload-only"],
+    ["accountSyncAndroidBlockedTwoWay", "two-way"]
+  ]) $(id)?.addEventListener("click", () => void saveBlockedOnlyPreset(direction));
   $("accountSyncQuickModes")?.addEventListener("click", event => {
     const preset = event.target?.closest?.("[data-sync-preset]")?.dataset?.syncPreset;
-    if (!["all-off", "blocked-only", "desktop-upload"].includes(preset)) return;
+    if (!["all-off", "blocked-only", "desktop-upload", "all-two-way"].includes(preset)) return;
     const mode = $("accountSyncSettingsMode");
-    if (mode) mode.value = preset === "desktop-upload" ? "upload-only" : "off";
+    if (mode) mode.value = preset === "desktop-upload" ? "upload-only" : preset === "all-two-way" ? "two-way" : "off";
     const limit = $("accountSyncLimitSettings");
     if (limit) {
       limit.checked = false;
@@ -430,7 +461,7 @@ function setupAccountSyncFoundation() {
     }
     for (const name of ACCOUNT_SYNC_LIST_NAMES) {
       const select = document.querySelector(`[data-sync-list="${name}"]`);
-      if (select) select.value = preset === "blocked-only" && name === "blockedBots" ? "two-way" : "off";
+      if (select) select.value = preset === "all-two-way" ? "two-way" : preset === "blocked-only" && name === "blockedBots" ? "two-way" : "off";
     }
     accountSyncUserEditing = true;
     describeSyncPlan();
@@ -500,7 +531,8 @@ function setupAccountSyncFoundation() {
       return;
     }
     const initialChoice = $("accountSyncLinkChoice")?.value || "choose";
-    const initialOptions = initialChoice === "blocked" ? { mode: "off", blockedOnly: true } :
+    const initialOptions = initialChoice === "blocked" ? { mode: "off", blockedOnly: true,
+      blockedListMode: (PLATFORM_API?.detectEnvironment?.()?.android || detectSettingsEnvironment()?.android) ? "download-only" : "two-way" } :
       initialChoice === "settings" ? { mode: "download-only" } : { mode: "off" };
     setAccountSyncBusy(true, "Linking this device with the selected sync options…");
     const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_LINK_ACCOUNT", code, meta: syncDeviceMeta(), initialOptions }, 120000);

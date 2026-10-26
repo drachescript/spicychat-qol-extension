@@ -10,6 +10,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const {runtimeCounters, checkRouteChange, scheduleEssentialChatControls, messageRootMutationSets, scheduleChatStartupQuietResume, mutationsMayAffectChatListRows, scheduleSavedOpenedLane, shouldPauseHiddenTab, syncMessageEditGuards, mutationRemovedPersistentChatShortcut, mutationRemovedPersistentChatHeaderControl, mutationAddedNativeChatHeader, mutationIsOnlyQolUi, mutationsAddOrRemoveMessageRoots, mutationIsMessageScoped, mutationTouchesNativeChatHeader, mutationsAreComposerOnly, collectMessageCacheMutationTargets, nodeInsidePendingMessageEdit, updateLoadedChatMessageCountFromMutations, addedMessageRootCount, runtimeProfile, isLikelyHistoryInsertionBurst, scheduleChatHistoryBatchRefresh, loadedChatMessageCount, isCardListingContext, mutationsMayAffectCards, mutationsAreChatLocal, mutationsAddBotCards} = dependencies;
     DS.observePage = function observePage() {
     if (DS.isQolPausedForTab?.()) return;
+    // A second bootstrap on the same document must not attach a second deep
+    // MutationObserver, route interval or native-control repair listener.
+    const pageState = DS.state || (DS.state = {});
+    if (pageState.mainPageObserverInstalled) return;
+    pageState.mainPageObserverInstalled = true;
     let lastNonCardListingScheduleAt = 0;
     // This is baseline protection, not a user-selectable performance mode.
     // SpicyChat sometimes remounts the title/header many times in one render

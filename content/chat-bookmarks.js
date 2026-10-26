@@ -11,6 +11,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const BUTTON_CLASS = "ds-message-bookmark-button";
   const MESSAGE_SELECTOR = "div[id^='message-']";
   const NAV_LIMIT = 80;
+  const counters = () => DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+  function tally(name, count = 1) {
+    const perf = counters();
+    perf[name] = Number(perf[name] || 0) + count;
+  }
+  let lastManagerCount = -1;
+  let lastManagerChat = "";
+  let lastOrphanSweepChat = "";
+  const traceActive = () => !!(DS.isDiagnosticTraceActive?.("normal") || settings().performanceDiagnostics);
+  function traceStar(event, meta = {}) {
+    if (DS.isDiagnosticTraceActive?.("normal")) DS.diagEvent?.("message-bookmarks", event, meta);
+  }
 
   let store = {};
   let loaded = false;
@@ -83,6 +95,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const id = chatId();
     if (nav.chatId === id) return;
     nav.chatId = id;
+    lastManagerCount = -1;
+    lastManagerChat = "";
+    // A React route swap can leave buttons from a removed message outside
+    // their original root in older builds. Remove only those orphans, once
+    // per route, never by shifting a still-mounted message's controls.
+    if (lastOrphanSweepChat !== id) {
+      lastOrphanSweepChat = id;
+      document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => {
+        if (button.closest(MESSAGE_SELECTOR)) return;
+        button.remove();
+        tally("bookmarkStarOrphansRemoved");
+      });
+    }
     nav.entries = [];
     nav.index = -1;
     updateNavControls();
@@ -199,15 +224,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.textContent = isBookmarked(root) ? "★" : "☆";
     button.addEventListener("click", async event => {
       event.preventDefault(); event.stopPropagation();
-      await toggle(root);
+      // React may have replaced the node between click and storage loading.
+      const current = document.getElementById(root.id);
+      if (!current?.isConnected || current !== root || !button.isConnected ||
+          button.closest(MESSAGE_SELECTOR) !== current) return;
+      await toggle(current);
     });
     return button;
   }
   function placementTarget(root) {
+    if (!root?.isConnected || DS.isMessageEditPending?.(root)) return null;
+    // Never attach to a message ancestor or the page as a fallback. While
+    // SpicyChat streams a new reply, its native dropdown often mounts AFTER
+    // the message root. The old fallback inserted the star outside the bubble.
     const dropdown = root.querySelector("button[aria-label='message-dropdown']");
-    const holder = dropdown?.closest(".relative") || dropdown?.parentElement || null;
-    const host = holder?.parentElement || root.firstElementChild || root;
-    return { host, before: holder && holder.parentElement === host ? holder : null };
+    if (!dropdown || dropdown.closest(MESSAGE_SELECTOR) !== root) return null;
+    const holder = dropdown.closest(".relative") || dropdown.parentElement;
+    const host = holder?.parentElement;
+    if (!host || !root.contains(host) || !host.contains(dropdown) ||
+        host.closest(MESSAGE_SELECTOR) !== root || !holder || holder.parentElement !== host) return null;
+    return { host, before: holder };
+  }
+  function attachedToTarget(button, root, target) {
+    return !!button?.isConnected && button.closest(MESSAGE_SELECTOR) === root &&
+      button.parentElement === target.host;
   }
   async function toggle(root) {
     await ensureLoaded();
@@ -250,33 +290,82 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
-  function applyButtons() {
+  function applyButtons(priorityRoots = null) {
     if (!enabled() || settings().messageBookmarkButtons === false) {
       document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(el => el.remove());
       document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-bookmark-ready]`).forEach(root => delete root.dataset.dsBookmarkReady);
       return;
     }
-    const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-bookmark-ready", readyValue: "1", newest: 24, margin: 1400 })
-      || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-bookmark-ready='1'])`);
+    const started = traceActive() ? performance.now() : 0;
+    // The explicit dirty roots must be checked even if a previous toolbar
+    // was marked ready: React can replace the native dropdown in-place.
+    const roots = priorityRoots ? new Set(priorityRoots) :
+      new Set(DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-bookmark-ready", readyValue: "1", newest: 24, margin: 1400 })
+        || document.querySelectorAll(`${MESSAGE_SELECTOR}:not([data-ds-bookmark-ready='1'])`));
+    if (!priorityRoots) for (const root of DS.getCurrentMessageLaneRoots?.() || []) roots.add(root);
+    let created = 0, repaired = 0, reused = 0, waiting = 0;
     for (const root of roots) {
-      const existing = root.querySelector(`.${BUTTON_CLASS}`);
-      if (existing) { root.dataset.dsBookmarkReady = "1"; continue; }
+      if (!root?.isConnected || !root.id?.startsWith("message-")) continue;
+      // This is a cheap local check; there are no document-wide lookups or
+      // layout measurements during the generation's message lane.
+      const existing = [...root.querySelectorAll(`.${BUTTON_CLASS}`)];
       const target = placementTarget(root);
-      if (!target.host) continue;
+      if (!target) {
+        for (const star of existing) { star.remove(); repaired++; }
+        if (root.dataset.dsBookmarkReady) delete root.dataset.dsBookmarkReady;
+        waiting++;
+        continue;
+      }
+      const correct = existing.find(button => attachedToTarget(button, root, target));
+      for (const star of existing) if (star !== correct) { star.remove(); repaired++; }
+      if (correct) {
+        if (root.dataset.dsBookmarkReady !== "1") root.dataset.dsBookmarkReady = "1";
+        reused++;
+        continue;
+      }
       const button = makeButton(root);
       button.classList.add("ds-message-header-action");
-      target.host.insertBefore(button, target.before || target.host.firstChild);
+      DS.markQolOwned?.(button, "message-bookmarks");
+      target.host.insertBefore(button, target.before);
       root.dataset.dsBookmarkReady = "1";
+      created++;
+    }
+    tally("bookmarkStarChecks", roots.size);
+    if (created) tally("bookmarkStarsCreated", created);
+    if (reused) tally("bookmarkStarsReused", reused);
+    if (repaired) tally("bookmarkStarsRepaired", repaired);
+    if (waiting) tally("bookmarkStarsWaitingForNativeToolbar", waiting);
+    if (created || repaired) traceStar("star-reconciled", { created, repaired, reused, waiting });
+    if (started) {
+      const elapsed = performance.now() - started;
+      const perf = counters();
+      perf.bookmarkStarProcessingMs = Math.round((Number(perf.bookmarkStarProcessingMs || 0) + elapsed) * 10) / 10;
+      perf.bookmarkStarSlowestMs = Math.max(Number(perf.bookmarkStarSlowestMs || 0), Math.round(elapsed * 10) / 10);
+      if (elapsed > 24) traceStar("slow-star-pass", { durationMs: Math.round(elapsed), examined: roots.size });
     }
   }
 
   function updateManagerButton() {
     const count = currentChatStore(false)?.entries?.length || 0;
+    const id = chatId();
+    if (lastManagerChat === id && lastManagerCount === count) return;
+    lastManagerChat = id; lastManagerCount = count;
     document.querySelectorAll(".ds-chat-bookmarks-manager-button").forEach(button => {
       button.textContent = `Bookmarks${count ? ` (${count})` : ""}`;
     });
   }
   function ensureManagerButton() {
+    const header = document.querySelector('.ds-chat-title-actions-host') ||
+      document.querySelector('a[aria-label="chatbot-profile"]')?.parentElement;
+    if (header && !header.querySelector('.ds-chat-bookmarks-header-button')) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ds-chat-bookmarks-header-button ds-chat-bookmarks-manager-button';
+      button.title = 'Open saved message bookmarks';
+      button.addEventListener('click', () => void openManager());
+      header.append(button);
+      lastManagerCount = -1;
+    }
     const panel = document.getElementById("ds-qol-panel");
     const anchor = document.getElementById("ds-qol-context-keeper-row") || document.getElementById("ds-qol-current-chat-search-tools");
     if (!panel || !anchor || panel.querySelector(".ds-chat-bookmarks-row")) return;
@@ -286,6 +375,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.type = "button"; button.className = "ds-chat-bookmarks-manager-button"; button.addEventListener("click", openManager);
     row.appendChild(button);
     anchor.insertAdjacentElement("afterend", row);
+    lastManagerCount = -1;
     updateManagerButton();
   }
 
@@ -303,11 +393,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (refresh) closeManager();
     if (document.getElementById(MODAL_ID)) return;
     const overlay = document.createElement("div"); overlay.id = MODAL_ID; overlay.className = "ds-tool-modal-overlay";
-    const dialog = document.createElement("div"); dialog.className = "ds-tool-modal ds-chat-bookmarks-modal";
+    const dialog = document.createElement("div"); dialog.className = "ds-chat-bookmarks-modal";
     const head = document.createElement("div"); head.className = "ds-tool-modal-head";
     const title = document.createElement("h3"); title.textContent = "Message bookmarks";
     const close = document.createElement("button"); close.type = "button"; close.textContent = "×"; close.addEventListener("click", closeManager);
     head.append(title, close);
+    const feedback = document.createElement("p");
+    feedback.className = "ds-chat-bookmark-feedback";
+    feedback.setAttribute("role", "status");
+    feedback.hidden = true;
     const list = document.createElement("div"); list.className = "ds-tool-list";
     const entries = [...(currentChatStore(false)?.entries || [])].sort((a,b) => (a.createdAt||0)-(b.createdAt||0));
     if (!entries.length) {
@@ -322,7 +416,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const actions = document.createElement("div"); actions.className = "ds-tool-actions";
       const jump = document.createElement("button"); jump.type = "button"; jump.textContent = "Jump"; jump.addEventListener("click", () => {
         const root = findMessageById(entry.messageId);
-        if (!root) return DS.setQuickStatus?.("That bookmarked message is not loaded. Load older messages first.");
+        if (!root?.isConnected) {
+          // Jump must work for older bookmarks even with the separate History
+          // Navigator setting off. An explicit click opens a temporary,
+          // read-only viewer without enabling background indexing.
+          if (DS.openChatHistoryBookmark?.(entry) === true) { closeManager(); return; }
+          feedback.textContent = 'This message is not currently loaded. The history reader is unavailable; reload the chat and try again.';
+          feedback.hidden = false;
+          return;
+        }
         closeManager(); scrollToRoot(root, { reason: "bookmark" });
       });
       const note = document.createElement("button"); note.type = "button"; note.textContent = entry.note ? "Edit note" : "Add note"; note.addEventListener("click", () => updateNote(entry));
@@ -333,12 +435,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       actions.append(jump, note, remove); card.append(meta, actions); list.appendChild(card);
     }
-    dialog.append(head, list); overlay.appendChild(dialog); document.documentElement.appendChild(overlay);
+    dialog.append(head, feedback, list); overlay.appendChild(dialog); document.body.appendChild(overlay);
     overlay.addEventListener("click", e => { if (e.target === overlay) closeManager(); });
   }
 
   function removeAll() {
-    document.querySelectorAll(`.${BUTTON_CLASS}, .ds-chat-bookmarks-row, .ds-chat-navigation-row`).forEach(el => el.remove());
+    document.querySelectorAll(`.${BUTTON_CLASS}, .ds-chat-bookmarks-row, .ds-chat-bookmarks-header-button, .ds-chat-navigation-row`).forEach(el => el.remove());
+    DS.removeChatHistoryNavigator?.();
+    lastManagerCount = -1;
     document.querySelectorAll(`${MESSAGE_SELECTOR}[data-ds-bookmark-ready]`).forEach(root => delete root.dataset.dsBookmarkReady);
     closeManager();
   }
@@ -351,11 +455,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     DS.state.chatBookmarksWasActive = true;
     await ensureLoaded(); resetNavIfNeeded(); ensureManagerButton(); ensureNavControls(); applyButtons(); updateManagerButton();
+    DS.applyChatHistoryNavigator?.();
   };
   DS.removeChatBookmarks = function removeChatBookmarks() {
     if (!DS.state.chatBookmarksWasActive) return;
     removeAll();
     DS.state.chatBookmarksWasActive = false;
+  };
+  // The history reader reuses this existing bookmark store; navigation remains
+  // per-chat, and saved message text is limited to the same short preview.
+  DS.listChatBookmarks = async id => {
+    await ensureLoaded();
+    return (store[String(id || chatId())]?.entries || []).map(entry => ({ ...entry }));
+  };
+  DS.toggleHistoryMessageBookmark = async ({ messageId, role: messageRole, preview }) => {
+    await ensureLoaded();
+    const id = String(messageId || '');
+    if (!/^message-[0-9a-f-]{36}$/i.test(id)) throw Error('Invalid message ID');
+    const before = JSON.parse(JSON.stringify(store));
+    const chat = currentChatStore(true);
+    const at = chat.entries.findIndex(entry => entry?.messageId === id);
+    if (at >= 0) chat.entries.splice(at, 1);
+    else chat.entries.push({ id: `bookmark-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      messageId: id, role: messageRole === 'user' ? 'user' : 'bot',
+      preview: clean(preview).slice(0, 220), note: '', createdAt: Date.now() });
+    await save('Updated message bookmark', before);
+    refreshBookmarkButtonStates(); updateManagerButton(); updateNavControls();
+    DS.refreshChatSearch?.();
+    return at < 0;
+  };
+  // Called only for the native toolbar roots mounted this animation frame.
+  // Never runs an extra observer or delays controls behind cosmetic chat work.
+  DS.reconcileChatBookmarkStars = roots => {
+    if (!enabled() || !loaded || settings().messageBookmarkButtons === false) return;
+    if (!Array.isArray(roots) || !roots.length) return;
+    applyButtons(roots);
   };
   DS.openChatBookmarks = openManager;
   DS.isChatMessageBookmarked = isBookmarked;

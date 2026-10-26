@@ -947,8 +947,8 @@
         [AUTH_KEY]: { token: String(result.deviceToken || "") },
         [DEVICE_PREFS_KEY]: normalizeDevicePrefs({
           mode: initialOptions?.mode === "download-only" ? "download-only" : "off",
-          allowedKeys: null,
-          listModes: initialOptions?.blockedOnly ? { blockedBots: "two-way" } : {},
+          allowedKeys: initialOptions?.blockedOnly ? [] : null,
+          listModes: initialOptions?.blockedOnly ? { blockedBots: initialOptions?.blockedListMode === "download-only" ? "download-only" : "two-way" } : {},
           fullDownloadNeeded: initialOptions?.mode === "download-only", fullUploadNeeded: false
         })
       });

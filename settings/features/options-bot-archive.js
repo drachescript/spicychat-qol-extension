@@ -24,10 +24,11 @@ function normalizeQuickDislikeHistory(raw) {
       name: String(value?.name || "").slice(0, 160),
       handledAt: Number(value?.handledAt || value?.at || 0) || 0,
       crossHandledBy: value?.crossHandledBy === "less-like" ? "less-like" : "",
-      ratingSource: ["dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
+      ratingSource: ["native-ui", "dislike", "less-like"].includes(value?.ratingSource) ? value.ratingSource : "",
       ratingAt: Number(value?.ratingAt || 0) || 0,
       requestSent: value?.requestSent === true,
-      nativeEventConfirmed: value?.nativeEventConfirmed === true
+      nativeEventConfirmed: value?.nativeEventConfirmed === true,
+      nativeUiConfirmed: value?.nativeUiConfirmed === true
     };
   });
   return { version: 1, bots: normalized };
@@ -67,17 +68,22 @@ function quickDislikeHistoryEntry(id) {
     return unavailable ? { status: "unavailable-private-or-deleted", fromBotStatus: true,
       handledAt: Number(unavailable.checkedAt || 0), name: String(unavailable.name || "") } : null;
   }
-  // Legacy "disliked" and "already-disliked" entries only prove a Recombee
-  // rating. Do not count them as completed native chat Dislikes without the event.
-  if (["disliked", "already-disliked"].includes(entry.status) && entry.nativeEventConfirmed !== true) return null;
+  // Native SpicyChat Dislikes are confirmed by reopening the rating dialog
+  // and checking its selected thumbs-down state. Recombee ratings and legacy
+  // event-only records must not be silently promoted to native UI success.
+  if (["disliked", "already-disliked"].includes(entry.status) &&
+      entry.nativeUiConfirmed !== true && entry.nativeEventConfirmed !== true) return null;
   if (entry.status === "dislike-event-pending") return null;
   return entry;
 }
 
 function quickDislikeHistoryLabel(entry) {
   if (!entry) return "";
-  if (entry.status === "disliked") return entry.nativeEventConfirmed ? "Dislike confirmed (rating + event)" : "Legacy rating only (Dislike unverified)";
-  if (entry.status === "already-disliked") return "Already disliked (source not recorded)";
+  if (entry.status === "disliked") return entry.nativeUiConfirmed
+    ? "Native Dislike confirmed" : entry.nativeEventConfirmed
+      ? "Legacy rating event recorded (native UI not verified)" : "Legacy recommendation rating only (native Dislike unverified)";
+  if (entry.status === "already-disliked") return entry.nativeUiConfirmed
+    ? "Already disliked (verified in native chat)" : "Already disliked (not yet verified)";
   if (entry.status === "already-rated-or-unavailable") return "Rating already set / unavailable";
   if (entry.status === "unavailable-private-or-deleted") return entry.fromBotStatus
     ? "Confirmed unavailable in Bot Status · no rating needed"

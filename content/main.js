@@ -877,10 +877,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return runStep(name, fn);
   }
 
+  function listingSafeStepGroup(name) {
+    // Aggregate by known work class, not by bot names, URLs or user data.
+    if (/sidebar|banner|premium/i.test(name)) return "layout";
+    if (/card|listing|recommendation/i.test(name)) return "listing";
+    return "other";
+  }
+
   async function runThrottledFeatureStep(name, wanted, minIntervalMs, fn, force = false) {
     const resolvedWanted = typeof wanted === "function" ? !!wanted() : !!wanted;
     const settings = DS.state?.settings || {};
     if (deepSleepEnabled(settings) && !resolvedWanted) {
+      // Not an attempted scan. Keep disabled features asleep and out of the
+      // slow-step throttle counters even when a route is repeatedly updated.
       return runFeatureStep(name, false, fn);
     }
 
@@ -891,10 +900,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!force && previous?.route === route && now - Number(previous.at || 0) < interval) {
       const counters = runtimeCounters();
       counters.slowStepThrottleSkips = Number(counters.slowStepThrottleSkips || 0) + 1;
+      // Bounded category counters distinguish throttled profile checks from
+      // actual expensive listing scans without recording private page data.
+      const group = name.includes("profile") || name.includes("creator moderation")
+        ? "profile" : listingSafeStepGroup(name);
+      const buckets = counters.slowStepThrottleCategories || (counters.slowStepThrottleCategories = {});
+      buckets[group] = Number(buckets[group] || 0) + 1;
       return null;
     }
 
     slowStepThrottle.set(name, { route, at: now });
+    const counters = runtimeCounters();
+    counters.throttledStepRuns = Number(counters.throttledStepRuns || 0) + 1;
     return runFeatureStep(name, resolvedWanted, fn);
   }
 
@@ -948,7 +965,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     chatMessageCountCache.dirty = true;
   }
 
+  // One observer delivery is inspected by multiple shared performance lanes.
+  // Cache structural roots for that specific immutable MutationRecord[] batch
+  // rather than traversing each added/removed subtree again. Weak keys do
+  // not retain old messages or conversation content.
+  const messageRootMutationBatchCache = new WeakMap();
   function messageRootMutationSets(mutations) {
+    if (Array.isArray(mutations)) {
+      const cached = messageRootMutationBatchCache.get(mutations);
+      if (cached) {
+        const perf = runtimeCounters();
+        perf.messageRootBatchCacheHits = Number(perf.messageRootBatchCacheHits || 0) + 1;
+        return cached;
+      }
+    }
     const added = new Set();
     const removed = new Set();
     const collect = (node, target) => {
@@ -968,7 +998,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         removed.delete(root);
       }
     }
-    return { added, removed };
+    const result = { added, removed };
+    if (Array.isArray(mutations)) messageRootMutationBatchCache.set(mutations, result);
+    return result;
   }
 
   function updateLoadedChatMessageCountFromMutations(mutations) {
@@ -981,6 +1013,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (chatMessageCountCache.dirty) return;
     const { added, removed } = messageRootMutationSets(mutations);
     if (!added.size && !removed.size) return;
+    // Same message ID, different element: React replaced the native node.
+    // Count remounts without recording IDs, message text or extra observers.
+    if (added.size && removed.size) {
+      const oldById = new Map([...removed].filter(root => root?.id).map(root => [root.id, root]));
+      let remounts = 0;
+      for (const root of added) if (root?.id && oldById.has(root.id) && oldById.get(root.id) !== root) remounts++;
+      if (remounts) {
+        const perf = runtimeCounters();
+        perf.nativeMessageRemountsDetected = Number(perf.nativeMessageRemountsDetected || 0) + remounts;
+      }
+    }
     chatMessageCountCache.count = Math.max(0, Number(chatMessageCountCache.count || 0) + added.size - removed.size);
     const counters = runtimeCounters();
     counters.messageCountIncrementalUpdates = Number(counters.messageCountIncrementalUpdates || 0) + 1;
@@ -2644,6 +2687,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // The cached newest roots are used only for the first startup pass.
       const roots = newRoots.length ? newRoots.slice(-8) : (DS.getLoadedMessageRoots?.() || []).slice(-8);
       for (const root of roots) DS.repairMessageToolbarForRoot?.(root);
+      if (settings.enableMessageBookmarks && roots.length) DS.reconcileChatBookmarkStars?.(roots);
       DS.diagPerformance?.("essential-controls", { source, inspected: Math.min(8, roots.length) });
     } catch (error) {
       DS.runtimeLog?.("warn", "essential-controls", String(error?.message || error));
@@ -2651,6 +2695,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   function scheduleEssentialChatControls(source = "mount", roots = []) {
     for (const root of roots) if (root?.isConnected) essentialChatDirtyRoots.add(root);
+    // A large history insertion can mount hundreds of native messages before
+    // the frame callback runs. Only the latest controls need urgent repair;
+    // older roots remain eligible for the normal incremental message lane.
+    if (essentialChatDirtyRoots.size > 24) {
+      const latest = [...essentialChatDirtyRoots].slice(-16);
+      essentialChatDirtyRoots.clear();
+      for (const root of latest) essentialChatDirtyRoots.add(root);
+      const perf = runtimeCounters();
+      perf.essentialControlBacklogsTrimmed = Number(perf.essentialControlBacklogsTrimmed || 0) + 1;
+    }
     if (essentialChatControlsPending || DS.isQolPausedForTab?.()) return;
     essentialChatControlsPending = true;
     // Targeted once per animation frame; never a full-message scan.
