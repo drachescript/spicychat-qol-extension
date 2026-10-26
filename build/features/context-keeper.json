@@ -17,8 +17,15 @@
     "contextKeeperRecallMaxChars"
   ],
   "requiredHelpers": [],
-  "settingsFiles": ["settings/feature-panels/context-keeper.js"],
-  "backgroundFiles": ["background/features/background-context-keeper-storage.js"],
+  "settingsFiles": [
+    "settings/feature-panels/context-keeper.js"
+  ],
+  "backgroundFiles": [
+    "background/features/background-context-keeper-storage.js"
+  ],
+  "styleFiles": [
+    "content/styles/private-lorebook-bridge.css"
+  ],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
