@@ -545,7 +545,7 @@ function sortBotStatusRefreshQueue(entries, availability, archives) {
 function isBotStatusAccessFailure(result) {
   if (!result || result.status !== "unknown") return false;
   const http = Number(result.httpStatus || 0);
-  if (http === 401) return true;
+  if (http === 401 || http === 429) return true;
   const reason = String(result.reason || "");
   return /\b(?:cors|unauthori[sz]ed|expired token|invalid token|401|login required|authentication was not ready|failed to fetch|networkerror|network error|network request failed|ERR_BLOCKED_BY_CLIENT)\b/i.test(reason);
 }
@@ -878,7 +878,10 @@ async function runBotAvailabilityScan(options = {}) {
         // confirmed Available/Unavailable result with an Unknown check.
         deferredAccessIds.push(entry.id);
         nextScanIndex = scanIndex + 1;
-        consecutiveAccessFailures += 1;
+        // Do not run more checks through a 429 cooldown. Save the queue and
+        // let the user explicitly Resume after SpicyChat accepts requests.
+        consecutiveAccessFailures = Number(rawResult?.httpStatus) === 429
+          ? BOT_STATUS_ACCESS_FAILURE_PAUSE_AT : consecutiveAccessFailures + 1;
         if (consecutiveAccessFailures < BOT_STATUS_ACCESS_FAILURE_PAUSE_AT && !(await saveScanProgress(nextScanIndex))) {
           terminalMessage = "Paused because Bot Status progress could not be saved. Previously saved results and the last checkpoint remain available.";
           break;
@@ -896,7 +899,9 @@ async function runBotAvailabilityScan(options = {}) {
           if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
           accessPauseTriggered = !!pausedSaved;
           terminalMessage = pausedSaved
-            ? `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`
+            ? (Number(rawResult?.httpStatus) === 429
+                ? `Paused after SpicyChat rate-limited the scan (HTTP 429). ${remaining.length} bots saved for Resume; existing results were preserved.`
+                : `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`)
             : "Paused after authentication/network failures. Could not replace the saved resume queue; try resuming the earlier checkpoint.";
           if (status) status.textContent = terminalMessage;
           break;
@@ -2379,6 +2384,26 @@ async function clearBotArchive() {
 }
 
 function setupBotAvailabilityControls() {
+  // On-demand worker counters (no bot IDs or private card text). Existing
+  // scan pacing/stop/resume controls remain unchanged.
+  const scanStatus = $("botAvailabilityScanStatus");
+  if (scanStatus && !document.getElementById("ds-bot-status-worker-stats")) {
+    const workerStats = document.createElement("button");
+    workerStats.type = "button";
+    workerStats.id = "ds-bot-status-worker-stats";
+    workerStats.textContent = "Worker stats";
+    workerStats.title = "Show local request, cached and rate-limit totals for this worker session";
+    workerStats.style.marginInlineStart = "8px";
+    workerStats.addEventListener("click", async () => {
+      const result = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
+      if (!result?.ok) { showSettingsToast("Bot Status worker statistics aren't available."); return; }
+      const label = `Requests ${result.requested || 0} · checked ${result.checked || 0} · cached ${result.cached || 0} · deduplicated ${result.coalesced || 0} · failed ${result.failed || 0}` +
+        (result.rateLimited ? ` · rate limits ${result.rateLimited}` : "") +
+        (result.cooldownMs > 0 ? ` · cooldown ${Math.ceil(result.cooldownMs / 1000)}s` : "");
+      showSettingsToast(label);
+    });
+    scanStatus.insertAdjacentElement("afterend", workerStats);
+  }
   const maintenanceCard = document.querySelector(".bot-status-maintenance-card");
   maintenanceCard?.addEventListener("toggle", () => {
     if (maintenanceCard.open) refreshBlockedArchiveCleanupStatus().catch(() => {});

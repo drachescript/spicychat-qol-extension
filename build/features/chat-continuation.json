@@ -1,0 +1,23 @@
+{
+  "id": "chat-continuation",
+  "primary": "content/chat-continuation.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableChatContinuationAssistant"
+  ],
+  "requiredHelpers": [
+    "content/card-token-info.js"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/chat-continuation.js"
+  ],
+  "styleFiles": [
+    "content/styles/chat-continuation.css"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false
+}

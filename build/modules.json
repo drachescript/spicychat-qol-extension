@@ -101,6 +101,7 @@
         "content/chat-backgrounds.js",
         "content/chat-bookmarks.js",
         "content/chat-history-navigator.js",
+        "content/chat-continuation.js",
         "content/chat-bubbles.js",
         "content/chat-export.js",
         "content/chat-nudges.js",
@@ -202,6 +203,7 @@
         "content/exact-message-counts-loader.js",
         "content/exact-message-counts.js",
         "content/favorite-bots.js",
+        "content/favorites-recovery.js",
         "content/language-filter.js",
         "content/later-bots.js",
         "content/pagination-tools.js",
@@ -494,7 +496,8 @@
         "content/styles/story-reading-layout.css",
         "content/styles/story-day-tracker.css",
         "content/styles/rp-state-tracker.css",
-        "content/styles/private-lorebook-bridge.css"
+        "content/styles/private-lorebook-bridge.css",
+        "content/styles/chat-continuation.css"
       ],
       "listings": [
         "content/styles/bot-organizer.css",

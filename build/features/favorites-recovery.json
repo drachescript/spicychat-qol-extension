@@ -1,0 +1,17 @@
+{
+  "id": "favorites-recovery",
+  "primary": "content/favorites-recovery.js",
+  "type": "content",
+  "dependencies": [
+    "favorite-bots",
+    "later-bots"
+  ],
+  "settingsKeys": [
+    "enableFavoritesRecovery"
+  ],
+  "requiredHelpers": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": true,
+  "browserVerified": false
+}

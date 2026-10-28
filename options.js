@@ -804,7 +804,10 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableCreatorBotNotifications",
   "creatorBotBrowserNotifications",
   "trackFavoriteBots",
+  "showFavoritesBulkSelect",
+  "showFavoritesScanButton",
   "showFavoriteHistoryButton",
+  "enableFavoritesRecovery",
   "enableBotOrganizer",
   "botOrganizerExplorerFolders",
   "showLaterBotButtons",
@@ -816,6 +819,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "showExactMessageCounts",
   "showBotCreationDates",
   "hideGroupChats",
+  "publicPersonalityOnly",
   "showLorebookFilters",
   "showRulebookFilters",
   "enableSmartFilterPresets",
@@ -923,6 +927,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "chatSearchLoadUntilMatch",
   "enableMessageBookmarks",
   "enableChatHistoryNavigator",
+  "enableChatContinuationAssistant",
   "messageBookmarkButtons",
   "enableFocusMode",
   "messageQuickActionCopy",
@@ -2778,6 +2783,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableChatTextReplacements", name: "Chat text replacements", children: ["chatTextReplacementPreview", "chatTextReplacementShowChatPresetControl"] },
   { parent: "showChatSearch", name: "Search Inside Current Chat", children: ["chatSearchShowPanel", "chatSearchShowFindButton", "chatSearchExactPhrase", "chatSearchCaseSensitive", "chatSearchWholeWord", "chatSearchRegex", "chatSearchLoadUntilMatch"] },
   { parent: "enableMessageBookmarks", name: "Message bookmarks", children: ["messageBookmarkButtons", "enableChatHistoryNavigator"] },
+  { parent: "enableChatContinuationAssistant", name: "Chat Continuation / Transfer", children: [] },
   { parent: "enableFocusMode", name: "Focus / Immersive Mode", children: ["focusHideSidebar", "focusHideTopBar", "focusHideChatHeader", "focusHideQolPanel"] },
   { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember", "contextKeeperAutoRecall", "contextKeeperRelevantRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
   { parent: "enableStoryDayTracker", name: "Internal Day Tracker", children: ["storyDayTrackerMode", "storyDayTrackerIncludeInContext", "storyDayTrackerShowQuickPanel"] },
@@ -3359,6 +3365,67 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     scheduleBlockedManagerRefresh();
   }
 });
+
+// Favorites → Later uses only verified local writes here. Native Favorites
+// are changed later, from the real SpicyChat page, never through an assumed API.
+const FAVORITES_COMPLETE_SCAN_KEY = "dsFavoritesScanStateV1";
+const FAVORITES_LATER_CLEANUP_KEY = "dsFavoritesLaterCleanupV1";
+function laterFavoritesActionStatus(text) {
+  const el = $("laterFavoriteActionStatus");
+  if (el) el.textContent = text;
+}
+async function prepareLaterFavoritesCleanup({ moveAll = false } = {}) {
+  const buttons = [$("laterMoveCurrentFavorites"), $("laterUnfavoriteOverlap")].filter(Boolean);
+  buttons.forEach(button => button.disabled = true);
+  try {
+    const stored = await storageGet([FAVORITE_BOTS_KEY, LATER_BOTS_KEY, FAVORITES_COMPLETE_SCAN_KEY, FAVORITES_LATER_CLEANUP_KEY]);
+    const scan = stored[FAVORITES_COMPLETE_SCAN_KEY];
+    if (!scan?.lastCompleteAt || !scan?.count) throw Error("Run a complete Scan Favorites first.");
+    const favorites = normalizeBotStore(stored[FAVORITE_BOTS_KEY]);
+    const later = normalizeBotStore(stored[LATER_BOTS_KEY]);
+    // New scans save the exact IDs. Older v0.2.63 complete scans had only
+    // counts; retain compatibility with those already completed scans.
+    const completeIds = Array.isArray(scan.ids) && scan.ids.length === scan.count
+      ? scan.ids : (favorites.ids || []).filter(id => favorites.meta?.[id]?.favoriteMembership === 'current');
+    if (!completeIds.length) throw Error("No confirmed current Favorites saved. Scan Favorites again.");
+    if (!Array.isArray(scan.ids) && completeIds.length !== scan.count) {
+      throw Error(`Favorite History has ${completeIds.length} current entries, but the complete scan reported ${scan.count}. Run Scan Favorites once more for an exact list.`);
+    }
+    const laterSet = new Set(later.ids || []);
+    const targets = completeIds.filter(id => moveAll || laterSet.has(id));
+    const missingFromLater = targets.filter(id => !laterSet.has(id));
+    if (!targets.length) { laterFavoritesActionStatus("No current Favorites overlap Later."); return; }
+    const intro = moveAll ? `Save ${missingFromLater.length} new bots to Later and prepare to unfavorite ${targets.length} current Favorites?` : `Prepare to unfavorite ${targets.length} current Favorites that are already in Later?`;
+    if (!window.confirm(`${intro}\n\nNo SpicyChat favorites will be changed until you start the native cleanup on the Favorites page.`)) return;
+    if (moveAll && missingFromLater.length) {
+      // Don't overwrite existing Later dates, notes, or metadata.
+      for (const id of missingFromLater) {
+        const meta = favorites.meta?.[id] || {};
+        later.ids.push(id);
+        later.meta[id] = { ...meta, savedAt: Date.now() };
+      }
+      await storageSet({ [LATER_BOTS_KEY]: later });
+      const verified = await storageGet([LATER_BOTS_KEY]);
+      const savedIds = new Set(verified[LATER_BOTS_KEY]?.ids || []);
+      if (targets.some(id => !savedIds.has(id))) throw Error("Could not verify every Later save. No unfavorite job was started.");
+      laterBotState = normalizeBotStore(verified[LATER_BOTS_KEY]);
+      renderBotManager("later");
+    }
+    const prior = stored[FAVORITES_LATER_CLEANUP_KEY];
+    const stillActive = prior?.version === 1 && prior.ids?.length &&
+      new Set([...(prior.confirmed || []), ...(prior.pending || []), ...(prior.skipped || [])]).size < prior.ids.length;
+    if (stillActive && !window.confirm("Replace the existing unfinished Favorites cleanup queue? Previously confirmed removals stay in Favorite History.")) return;
+    const job = { version: 1, ids: targets, confirmed: [], pending: [], skipped: [], createdAt: Date.now(), updatedAt: Date.now(), source: moveAll ? 'move-favorites-to-later' : 'later-overlap' };
+    await storageSet({ [FAVORITES_LATER_CLEANUP_KEY]: job });
+    const savedJob = await storageGet([FAVORITES_LATER_CLEANUP_KEY]);
+    if (savedJob[FAVORITES_LATER_CLEANUP_KEY]?.ids?.length !== targets.length) throw Error("Could not verify cleanup queue. No favorites were changed.");
+    laterFavoritesActionStatus(`${moveAll ? `Saved ${missingFromLater.length} new bots to Later. ` : ''}Prepared ${targets.length} native unfavorites. Open/refresh Favorites and press Unfavorite Later overlap. You can stop or resume it there.`);
+  } catch (error) {
+    laterFavoritesActionStatus(`Favorites → Later: ${error?.message || error}`);
+  } finally { buttons.forEach(button => button.disabled = false); }
+}
+$("laterMoveCurrentFavorites")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: true }); });
+$("laterUnfavoriteOverlap")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: false }); });
 
 setupTabs();
 setupMaximumPerformancePreset();

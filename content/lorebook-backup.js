@@ -116,6 +116,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         firstSavedAt: Number(itemValue.firstSavedAt) || 0,
         lastSavedAt: Number(itemValue.lastSavedAt) || 0,
         source: clean(itemValue.source, 120),
+        lastFullBackupAt: Number(itemValue.lastFullBackupAt) || 0,
+        lastFullBackupCount: Math.max(0, Number(itemValue.lastFullBackupCount) || 0),
+        lastFullBackupValid: itemValue.lastFullBackupValid === true,
         entries
       };
     }
@@ -161,6 +164,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (image) return clean(image.getAttribute("src"), 3000);
     }
     return "";
+  }
+
+  function nativeLorebookEntryCount() {
+    const header = document.querySelector("[data-testid='EntriesListServer-Header']");
+    if (!header) return null;
+    // The editor has two different numbers: its helper text says "up to
+    // 5,000 entries", while the actual count says "250/5,000 entries".
+    // Only read the real count element. The latter can mount *after* the
+    // header, so treating the capacity as the count races React startup.
+    const counter = header.querySelector('[data-translate-key="lorebook:entries.count"]') ||
+      header.querySelector("[data-testid='EntriesList-SortDropdown']")?.parentElement?.querySelector("p");
+    const text = String(counter?.textContent || "").replace(/\u00a0/g, " ").trim();
+    const fraction = /^([\d,]+)\s*\/\s*([\d,]+)\s+entries\s*$/i.exec(text);
+    const simple = !fraction && /^(?:([\d,]+)\s+entries|entries\s*\(\s*([\d,]+)\s*\))$/i.exec(text);
+    const raw = fraction?.[1] || simple?.[1] || simple?.[2] || "";
+    const count = raw ? Number(raw.replace(/,/g, "")) : null;
+    return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
   }
 
   function currentLorebookDisplayName() {
@@ -312,6 +332,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function saveCapture(reason = "Lorebook editor") {
+    // The full-export helper must be read-only. Its first React batch may
+    // contain just 100 entries; never let an automatic snapshot commit that
+    // partial state while a user-requested full save is running.
+    if (manualFullSaveRunning || new URLSearchParams(location.search || "").get("dsQolLorebookBackupWorker") === "1") {
+      return Promise.resolve(false);
+    }
     // Capture synchronously: the editor/modal can disappear before storage is ready.
     const capture = currentCapture();
     if (!capture?.info?.id) return Promise.resolve(false);
@@ -362,6 +388,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           outcome = "unchanged";
           return false;
         }
+        // Changes captured by automatic/visible-only snapshots invalidate the
+        // complete-copy label without throwing away the previous entries.
+        next.lastFullBackupValid = false;
         const writeStartedAt = performance.now();
         const ok = !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [capture.info.id]: next } }) }));
         writeMs = performance.now() - writeStartedAt;
@@ -415,7 +444,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           next.entries[incoming.key] = mergeEntry(next.entries[incoming.key], incoming);
         }
         if (!next.name) next.name = id;
-        if (store.meta[id] && meaningfulLorebook(previous) === meaningfulLorebook(next)) {
+        if (options.replace === true) {
+          next.lastFullBackupAt = Date.now();
+          next.lastFullBackupCount = entries.length;
+          next.lastFullBackupValid = true;
+        }
+        if (store.meta[id] && meaningfulLorebook(previous) === meaningfulLorebook(next) &&
+            previous.lastFullBackupValid === next.lastFullBackupValid) {
           outcome = "unchanged";
           return true;
         }
@@ -434,7 +469,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
-  async function captureFullEntriesHere(exportToken = "") {
+  async function captureFullEntriesHere(exportToken = "", { persist = true } = {}) {
     const info = routeInfo();
     if (!info?.id || info.page !== "entries") return false;
     const op = DS.diagOperationStart?.("lorebook-backup", "capture-full-entries", { lorebookId: info.id, exportJob: !!exportToken });
@@ -494,10 +529,105 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (result?.complete !== true || !Array.isArray(result.entries)) {
       throw new Error("Lorebook editor did not confirm a complete current entry list.");
     }
-    const ok = await updateStoredEntries(info.id, result.entries, "Full Lorebook export", { replace: true });
-    DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries.length });
-    if (!ok) throw new Error("Failed to save captured Lorebook entries.");
-    return exportToken ? result : true;
+    // Independent guard before the destructive replace:true write. An editor
+    // crawler bug must never turn a 100/109 page snapshot into a full backup.
+    const displayedTotal = nativeLorebookEntryCount();
+    if (displayedTotal !== null && displayedTotal !== result.entries.length) {
+      throw new Error(`Only ${result.entries.length}/${displayedTotal} Lorebook entries were read. The last saved backup was kept unchanged.`);
+    }
+    if (displayedTotal === null && result.entries.length > 0) {
+      throw new Error("Could not verify Lorebook entry count before replacing the local backup. Nothing was overwritten.");
+    }
+    // Helper tabs only collect data. The calling tab commits details + all
+    // entries together after both editor captures have been verified.
+    if (persist) {
+      const ok = await updateStoredEntries(info.id, result.entries, "Full Lorebook export", { replace: true });
+      DS.diagOperationEnd?.(op, { outcome: ok ? "ok" : "failed", entryCount: result.entries.length });
+      if (!ok) throw new Error("Failed to save captured Lorebook entries.");
+    } else {
+      DS.diagOperationEnd?.(op, { outcome: "verified", entryCount: result.entries.length });
+    }
+    return exportToken || !persist ? result : true;
+  }
+
+  // Manual Save is a verified full backup on either editor tab. Unlike the
+  // automatic snapshots, it must never silently stop at the first 100 rows.
+  let manualFullSaveRunning = false;
+  async function saveCompleteLorebookNow(reason = "Manual Lorebook backup") {
+    const info = routeInfo();
+    if (!info?.id) throw new Error("Open a Lorebook editor to save its backup.");
+    if (manualFullSaveRunning) throw new Error("A full Lorebook backup is already running.");
+    manualFullSaveRunning = true;
+    const op = DS.diagOperationStart?.("lorebook-backup", "save-complete", { lorebookId: info.id, page: info.page });
+    try {
+      if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+        throw new Error("The full Lorebook reader is unavailable.");
+      }
+      setStatus("Collecting current Lorebook details and all entries…");
+      // API-first; the existing editor fallback opens the two native tabs and
+      // loads every additional 100-entry batch if the API is incomplete.
+      const full = await DS.getCurrentOwnLorebookBackupData(info.id);
+      if (!full?.lorebook || !Array.isArray(full.entries) ||
+          full.completeness?.details !== true || full.completeness?.entries !== true ||
+          full.completeness?.entryCountVerified !== true ||
+          String(full.lorebook.id || "").toLowerCase() !== info.id.toLowerCase()) {
+        throw new Error("SpicyChat did not verify complete details and entries. Your previous backup was kept.");
+      }
+      const expected = Number(full.lorebook.entryCount);
+      if (!Number.isSafeInteger(expected) || expected < 0 || expected > 5000 || expected !== full.entries.length) {
+        throw new Error(`SpicyChat returned ${full.entries.length} entries but reported ${full.lorebook.entryCount}. Previous backup kept.`);
+      }
+      const live = routeInfo();
+      if (!live || live.id.toLowerCase() !== info.id.toLowerCase()) {
+        throw new Error("Lorebook changed while saving. Previous backup kept.");
+      }
+      const nativeCount = live.page === "entries" ? nativeLorebookEntryCount() : null;
+      if (nativeCount !== null && nativeCount !== expected) {
+        throw new Error(`SpicyChat shows ${nativeCount} entries, but the full capture has ${expected}. Previous backup kept.`);
+      }
+      const entries = {};
+      for (const row of full.entries) {
+        const name = clean(row?.name, 500);
+        if (!name) throw new Error("An entry had no name. Previous backup kept.");
+        const key = entryKey(name);
+        if (entries[key]) throw new Error(`Duplicate entry name: ${name}. Previous backup kept.`);
+        entries[key] = {
+          key, name, keywords: unique(row.keywords || [], 12),
+          keywordsComplete: true, hiddenKeywordCount: 0,
+          content: clean(row.content, 24000), capturedAt: Date.now()
+        };
+      }
+      if (Object.keys(entries).length !== expected) throw new Error("Entry count changed while collecting. Previous backup kept.");
+      setStatus(`Saving ${expected} verified Lorebook entries locally…`);
+      const saved = await queueLorebookWrite(async () => {
+        const raw = await DS.storageGet?.([KEY]) || {};
+        const store = normalizeStore(raw[KEY]);
+        const previous = store.meta[info.id] || {};
+        const now = Date.now();
+        const next = {
+          ...previous, id: info.id, name: clean(full.lorebook.name, 500) || previous.name || info.id,
+          description: clean(full.lorebook.description, 4000),
+          tags: unique(full.lorebook.tags || [], 12),
+          visibility: clean(full.lorebook.visibility, 40),
+          image: clean(full.lorebook.image || full.lorebook.avatar_url || "", 3000),
+          firstSavedAt: Number(previous.firstSavedAt) || now, lastSavedAt: now,
+          source: reason, entries,
+          lastFullBackupAt: now, lastFullBackupCount: expected, lastFullBackupValid: true
+        };
+        return !!(await DS.storageSet?.({ [KEY]: normalizeStore({ version: 1, meta: { ...store.meta, [info.id]: next } }) }));
+      });
+      if (!saved) throw new Error("Browser storage did not confirm the complete backup. Previous backup may still be available.");
+      lastSignature = ""; // let the normal editor snapshot resume independently
+      setStatus(`Saved full Lorebook backup: ${expected}/${expected} entries, including details and keywords.`);
+      DS.diagOperationEnd?.(op, { outcome: "ok", entryCount: expected });
+      return true;
+    } catch (error) {
+      DS.diagOperationEnd?.(op, { outcome: "failed" });
+      setStatus(`Full backup failed: ${error?.message || String(error)}`);
+      throw error;
+    } finally {
+      manualFullSaveRunning = false;
+    }
   }
 
   function jobKey(token) { return `${EXPORT_JOB_PREFIX}${clean(token, 140)}`; }
@@ -542,11 +672,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await removeExportJob(token);
       throw new Error(opened?.error || "Could not open the Lorebook export helper tab.");
     }
-    const deadline = Date.now() + 100_000;
+    // Full editor exports must load all native pages, then open each entry to
+    // collect complete keywords. A fixed 100-second timeout cut off even
+    // healthy large Lorebooks. Keep a generous absolute ceiling but fail a
+    // genuinely stalled helper after two minutes without fresh progress.
+    const deadline = Date.now() + 30 * 60_000;
     let lastMessage = "";
+    let lastUpdatedAt = 0;
+    let lastActivityAt = Date.now();
     while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 250));
+      await new Promise(resolve => setTimeout(resolve, 600));
       const job = await getExportJob(token);
+      const updatedAt = Number(job?.updatedAt || job?.startedAt || 0);
+      if (updatedAt > lastUpdatedAt) { lastUpdatedAt = updatedAt; lastActivityAt = Date.now(); }
       if (job?.message && job.message !== lastMessage) {
         lastMessage = job.message;
         setStatus(`${statusPrefix}${job.message}`);
@@ -562,9 +700,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await removeExportJob(token);
         throw new Error(job.error || "Lorebook export helper failed.");
       }
+      if (Date.now() - lastActivityAt > 120_000) {
+        await removeExportJob(token);
+        throw new Error(`Lorebook ${target} helper stopped reporting progress; the last saved backup was kept.`);
+      }
     }
     await removeExportJob(token);
-    throw new Error(`Timed out while collecting Lorebook ${target}.`);
+    throw new Error(`Timed out while collecting Lorebook ${target}; the last saved backup was kept.`);
   }
 
   async function requestOppositePageCapture(info) {
@@ -573,10 +715,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return requestEditorPageCapture(info.id, target);
   }
 
+  // Release the dedicated helper once both editor captures have finished.
+  // The background service serializes this with any pending helper requests,
+  // and retains the existing idle timeout as a fallback if delivery fails.
+  async function releaseEditorCaptureHelper(id) {
+    try {
+      return await new Promise(resolve => {
+        chrome.runtime.sendMessage({ type: "DS_LOREBOOK_EXPORT_HELPER_RELEASE", id }, response => {
+          void chrome.runtime.lastError;
+          resolve(response?.ok === true);
+        });
+      });
+    } catch { return false; }
+  }
+
+  // Shared only while a verified live capture is in progress; never reuse a
+  // historical backup or a previous complete result as if it were current.
+  const liveLorebookCapturesInFlight = new Map();
   async function captureCurrentLorebookThroughEditors(lorebookId) {
     const id = clean(lorebookId, 200).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
+    if (liveLorebookCapturesInFlight.has(id)) return liveLorebookCapturesInFlight.get(id);
     const task = async () => {
+      try {
       // This fallback used to read from the persistent Lorebook backup store,
       // accidentally merging an older entry into a supposedly fresh export.
       // Explicitly capture both pages now and assemble ONLY those results.
@@ -617,10 +778,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           caseSensitive: false, probability: null, depth: null, role: "", isNsfw: false
         }))
       };
+      } finally {
+        // The background worker is no longer needed after the two verified
+        // captures, including when a failed operation must be cleaned up.
+        // Cleanup is best effort and never changes backup completeness.
+        await releaseEditorCaptureHelper(id);
+      }
     };
     const queued = currentEditorFallbackQueue.then(task, task);
+    liveLorebookCapturesInFlight.set(id, queued);
     currentEditorFallbackQueue = queued.catch(() => {});
-    return queued;
+    try { return await queued; }
+    finally { if (liveLorebookCapturesInFlight.get(id) === queued) liveLorebookCapturesInFlight.delete(id); }
   }
 
   DS.getCurrentOwnLorebookBackupDataFromEditor = captureCurrentLorebookThroughEditors;
@@ -669,8 +838,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (target === "details" && !detailsCapture?.name) {
         throw new Error("The Lorebook Details editor has no current name; cannot verify the capture.");
       }
-      await saveCapture("Lorebook full export helper");
-      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token) : null;
+      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token, { persist: false }) : null;
       const finalInfo = routeInfo();
       if (!finalInfo || finalInfo.page !== target || finalInfo.id.toLowerCase() !== info.id.toLowerCase()) {
         throw new Error("Lorebook page changed during export; the result was not marked complete.");
@@ -721,8 +889,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (target === "details" && !detailsCapture?.name) {
         throw new Error("The Lorebook Details editor has no current name; cannot verify the capture.");
       }
-      await saveCapture("Lorebook full export helper");
-      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token) : null;
+      const entriesCapture = target === "entries" ? await captureFullEntriesHere(token, { persist: false }) : null;
       const capture = target === "entries"
         ? { id: info.id, page: "entries", complete: entriesCapture?.complete === true, data: entriesCapture?.entries || [] }
         : { id: info.id, page: "details", data: detailsCapture };
@@ -1753,12 +1920,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (!count) { setStatus("This file has no entries; nothing to import into this Lorebook."); return true; }
     importRunning = true;
+    let cancelImportButton = document.getElementById("ds-lorebook-cancel-import");
+    if (!cancelImportButton) {
+      cancelImportButton = document.createElement("button");
+      cancelImportButton.id = "ds-lorebook-cancel-import";
+      cancelImportButton.type = "button";
+      cancelImportButton.textContent = "Stop after current entry";
+      cancelImportButton.title = "Stops before the next entry; an in-flight native save is allowed to finish.";
+      cancelImportButton.addEventListener("click", () => {
+        if (DS.cancelLorebookEntryImport?.()) {
+          cancelImportButton.disabled = true;
+          setStatus("Stopping import after the current entry…");
+        }
+      });
+      document.querySelector(`#${PANEL_ID} .ds-lorebook-backup-actions`)?.appendChild(cancelImportButton);
+    }
     try {
       setStatus(`Importing 0 / ${count} entries…`);
       const result = await DS.importLorebookEntryBatch(payload.entries, {
         duplicatePolicy: ["skip","merge","replace"].includes(duplicatePolicy) ? duplicatePolicy : "skip",
         onProgress(progress) {
-          setStatus(`Importing ${progress.completed} / ${progress.total} entries…`);
+          if (progress.stopped) {
+            setStatus(progress.stopReason || "Import stopped. Confirm the last entry before resuming.");
+          } else {
+            setStatus(`Importing ${progress.completed} / ${progress.total} entries…`);
+          }
         }
       });
       await saveCapture("Imported Lorebook JSON").catch(() => false);
@@ -1768,8 +1954,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (result.failed) parts.push(`${result.failed} failed`);
       if (result.replaced) parts.push(`${result.replaced} replaced`);
       if (result.merged) parts.push(`${result.merged} merged`);
-      setStatus(`Import finished: ${parts.join(" · ") || "no changes"}.`);
-      if (!result.failed && Number(result.created || result.replaced || result.merged || 0) > 0) {
+      if (result.paused || result.cancelled) {
+        setStatus(`${result.stopReason || "Import stopped."} ${result.completed}/${count} completed. Re-import with Skip existing to review and continue; uncertain writes must not be blindly retried.`);
+      } else {
+        setStatus(`Import finished: ${parts.join(" · ") || "no changes"}.`);
+      }
+      if (!result.paused && !result.cancelled && !result.failed && Number(result.created || result.replaced || result.merged || 0) > 0) {
         setStatus(`Import finished: ${parts.join(" · ")}. Refreshing the entries list…`);
         setTimeout(() => {
           try {
@@ -1783,8 +1973,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } else {
         setTimeout(() => refreshPanelStatus().catch(() => {}), 3500);
       }
-      return !result.failed;
+      return !result.failed && !result.paused && !result.cancelled;
     } finally {
+      document.getElementById("ds-lorebook-cancel-import")?.remove();
       importRunning = false;
     }
   }
@@ -1850,11 +2041,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const item = normalizeStore(stored[KEY]).meta[info.id];
     if (!item) throw new Error("There is no saved local copy yet. Use Save backup now or try the live download.");
     const entries = Object.values(item.entries || {});
+    const fullySaved = item.lastFullBackupValid === true && item.lastFullBackupCount === entries.length;
     const response = await downloadJson({
       format: "spicychat-qol-lorebook-backup", version: 2,
       exportedAt: new Date().toISOString(), source: "last-local-copy",
-      completeness: { details: false, entries: false, keywords: entries.every(entry => entry.keywordsComplete), liveVerified: false },
-      warning: "This is the last locally recorded copy, not a fresh complete live Lorebook export.",
+      completeness: { details: fullySaved, entries: fullySaved, keywords: entries.every(entry => entry.keywordsComplete), entryCountVerified: fullySaved, liveVerified: false },
+      warning: fullySaved
+        ? "This complete local copy was verified when saved, but is not a fresh live export."
+        : "This local copy may be incomplete or changed since the last verified full backup.",
       lorebook: item
     }, `${safeFilename(item.name)}-last-saved-lorebook.json`);
     if (!response?.ok) throw new Error(response?.error || "Could not start the saved-copy download.");
@@ -1994,6 +2188,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (Number.isSafeInteger(expected) && expected >= 0 && expected !== full.entries.length) {
         throw new Error(`Only ${full.entries.length} / ${expected} entries returned; refusing an incomplete export.`);
       }
+      // The live API may omit its total or report only the first page. When
+      // we're on this Lorebook's Entries editor, cross-check the native count.
+      const displayedTotal = routeInfo()?.id === info.id && routeInfo()?.page === "entries"
+        ? nativeLorebookEntryCount() : null;
+      if (displayedTotal !== null && displayedTotal !== full.entries.length) {
+        throw new Error(`SpicyChat shows ${displayedTotal} entries but the export contains ${full.entries.length}. No incomplete JSON was downloaded.`);
+      }
       const item = {
         ...full.lorebook,
         image: full.lorebook.image || full.lorebook.avatar_url || "",
@@ -2064,16 +2265,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const result = await DS.storageGet?.([KEY]) || {};
     const item = normalizeStore(result[KEY]).meta[info.id] || null;
     const entryCount = Object.keys(item?.entries || {}).length;
-    // A page snapshot is not necessarily a complete native backup. In particular,
-    // Details-only captures can have zero entries while SpicyChat has many.
-    const nativeHeader = info.page === "entries" ?
-      document.querySelector('[data-testid="EntriesListServer-Header"]') : null;
-    const nativeText = String(nativeHeader?.textContent || "");
-    const nativeMatch = /\b([\d,]+)\s*\/\s*5,000\s+entries\b/i.exec(nativeText);
-    const nativeCount = nativeMatch ? Number(nativeMatch[1].replace(/,/g, "")) : null;
-    const entryLabel = Number.isSafeInteger(nativeCount) && nativeCount > entryCount
-      ? `${entryCount}/${nativeCount} entries captured locally (partial)`
-      : `${entryCount} entr${entryCount === 1 ? "y" : "ies"} captured locally`;
+    const nativeCount = info.page === "entries" ? nativeLorebookEntryCount() : null;
+    const verified = item?.lastFullBackupValid === true && item.lastFullBackupCount === entryCount;
+    const entryLabel = verified
+      ? `${entryCount} entries saved locally (full copy verified ${relativeAge(item.lastFullBackupAt)})`
+      : Number.isSafeInteger(nativeCount) && nativeCount > entryCount
+        ? `${entryCount}/${nativeCount} entries saved locally (partial snapshot)`
+        : `${entryCount} entr${entryCount === 1 ? "y" : "ies"} saved locally (not verified complete)`;
     setStatus([
       `Automatic backup: ${automatic ? "On" : "Off"}`,
       `Last backup: ${relativeAge(item?.lastSavedAt)}`,
@@ -2104,13 +2302,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const save = document.createElement("button");
     save.type = "button";
     save.textContent = "Save backup now";
+    save.title = "Save a verified local copy of the current Lorebook, including its details and ALL entries. Loads additional batches as needed.";
     save.addEventListener("click", async () => {
       save.disabled = true;
-      setStatus("Saving Lorebook backup…");
-      const ok = await saveCapture("Manual Lorebook backup");
-      if (ok) await refreshPanelStatus();
-      else setStatus("Nothing changed; the latest local copy is already current.");
-      save.disabled = false;
+      try {
+        await saveCompleteLorebookNow("Manual Lorebook backup");
+      } catch (error) {
+        console.error("[SpicyChat QoL] Full Lorebook save failed", error);
+        // saveCompleteLorebookNow shows the detailed error in the panel.
+      } finally {
+        save.disabled = false;
+      }
     });
     const exp = document.createElement("button");
     exp.type = "button";
@@ -2331,7 +2533,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (lastPanelAutoState !== !!cfg.lorebookBackupsEnabled) refreshPanelStatus().catch(() => {});
   };
 
-  DS.saveLorebookBackupNow = (reason = "Manual Lorebook backup") => saveCapture(reason);
+  DS.saveLorebookBackupNow = (reason = "Manual Lorebook backup") => saveCompleteLorebookNow(reason);
   DS.removeLorebookBackup = cleanup;
 })();
 

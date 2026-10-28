@@ -379,12 +379,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // SpicyChat moved the legal/footer links into a regular sidebar group.
+  // Scope to the cluster containing Terms, not the separate Help button which
+  // happens to use the same Support URL.
+  function sidebarFooterLinks(nav) {
+    const terms = nav?.querySelector?.('a#navigation-link-terms,a[aria-label="Terms"],a[href$="/terms"]');
+    const cluster = terms?.parentElement;
+    if (cluster && cluster.querySelectorAll('a[href]').length >= 3) {
+      return DS.qsa('a[href]', cluster);
+    }
+    // Compatibility with older SpicyChat sidebar markup.
+    return DS.qsa('footer a', nav);
+  }
+
   function hideFooterLink(kind) {
     const nav = getNav();
     const matcher = FOOTER_LINK_MATCHERS[kind];
     if (!nav || typeof matcher !== "function") return;
 
-    DS.qsa("footer a", nav).forEach(link => {
+    sidebarFooterLinks(nav).forEach(link => {
       if (matcher(link)) hideSidebarElement(link, `sidebar:footer-${kind}`);
     });
   }

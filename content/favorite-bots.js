@@ -378,6 +378,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.applyFavoriteHistoryButton = function applyFavoriteHistoryButton() {
+    DS.applyFavoritesRecovery?.();
+    DS.refreshFavoritesBulkManager?.();
     applyFavoritePageExtras();
     const settings = DS.state.settings || {};
     const existing = document.getElementById("ds-favorite-history-open");
@@ -441,6 +443,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.removeFavoriteHistoryButton = function removeFavoriteHistoryButton() {
+    document.getElementById("ds-favorites-recovery-open")?.remove();
+    document.getElementById("ds-favorites-recovery-dialog")?.remove();
     document.getElementById("ds-favorite-history-open")?.remove();
     document.getElementById("ds-favorite-history-button-wrap")?.remove();
     document.getElementById("ds-favorite-history-modal")?.remove();
@@ -454,7 +458,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (
       !settings.enabled ||
-      !settings.trackFavoriteBots ||
+      !(settings.trackFavoriteBots || settings.enableFavoritesRecovery) ||
       !DS.isFavoriteBotsPage?.()
     ) {
       return 0;
@@ -496,4 +500,765 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 })();
 
+}
+
+// Favorites-page bulk tools and scan/history extensions.
+// Uses the same selector markup as the existing Recommendations/Home selector.
+if (!window.__DSQ_TAB_GATE__?.paused) {
+(() => {
+  'use strict';
+  const DS = window.DragonScriptQoL;
+  if (!DS || DS.__favoritesBulkManagerLoaded) return;
+  DS.__favoritesBulkManagerLoaded = true;
+
+  const LAUNCHER = 'ds-favorites-bulk-launcher';
+  const BAR = 'ds-favorites-bulk-toolbar';
+  const HOST = 'ds-listing-qol-controls';
+  const STYLE = 'ds-favorite-bulk-style';
+  const SCAN_STATE_KEY = 'dsFavoritesScanStateV1';
+  const CLEANUP_KEY = 'dsFavoritesLaterCleanupV1';
+  const LINK_RE = /\/(?:chat|chatbot)\/([a-f0-9-]{20,})(?:[/?#]|$)/i;
+  const selected = new Map();
+  const state = { active: false, busy: false, scanning: false, cancelScan: false, observer: null, refreshTimer: null, status: '', visibleSignature: '', autoSyncing: false, cleanupJob: null, cleanupLoaded: false, cleanupLoading: false, cleanupRunning: false, cleanupStop: false, cleanupStatus: '' };
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const isPage = () => /^\/favorite-bots(?:\/|$)/i.test(location.pathname) && DS.state?.settings?.enabled !== false;
+  // Favorites have their own actions and must not depend on Bulk Card Blocking.
+  const isEnabled = () => isPage() && setting('showFavoritesBulkSelect') !== false;
+  const scanEnabled = () => isPage() && setting('showFavoritesScanButton') !== false;
+  const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const idFrom = href => (String(href || '').match(LINK_RE)?.[1] || '').toLowerCase();
+  const safeId = s => /^[0-9a-f-]{20,}$/i.test(String(s || ''));
+  const unique = values => [...new Set(values.filter(Boolean))];
+  const setting = k => DS.state?.settings?.[k];
+
+  function css() {
+    if (document.getElementById(STYLE)) return;
+    const style = document.createElement('style');
+    style.id = STYLE;
+    style.textContent = `
+      #${BAR}{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:10020;display:flex;align-items:center;gap:7px;flex-wrap:wrap;max-width:calc(100vw - 30px);padding:7px 9px;border:1px solid rgba(148,163,184,.32);border-radius:10px;background:rgba(17,24,39,.96);color:#fff;box-shadow:0 8px 28px rgba(0,0,0,.28);backdrop-filter:blur(8px);font:500 12px/1.2 system-ui,sans-serif}
+      #${BAR} button{appearance:none;border:1px solid rgba(148,163,184,.32);border-radius:7px;background:rgba(55,65,81,.88);color:inherit;padding:6px 9px;cursor:pointer;font:inherit}
+      #${BAR} button[data-primary="1"]{background:rgba(126,34,206,.95);border-color:rgba(168,85,247,.7)}
+      #${BAR} button:disabled{opacity:.45;cursor:default}
+      #${LAUNCHER}{appearance:none;border:1px solid rgba(148,163,184,.35);border-radius:7px;background:rgba(55,65,81,.72);color:inherit;padding:8px 10px;cursor:pointer;font:600 12px/1.2 system-ui,sans-serif}
+      #${LAUNCHER}[aria-pressed="true"]{background:rgba(126,34,206,.96);border-color:rgba(216,180,254,.72);color:#fff}
+      .ds-favorites-bulk-select{position:absolute!important;top:7px!important;left:7px!important;z-index:80!important;width:28px!important;height:28px!important;border:1px solid rgba(216,180,254,.9)!important;border-radius:8px!important;background:rgba(126,34,206,.96)!important;color:#fff!important;display:flex!important;align-items:center!important;justify-content:center!important;pointer-events:none!important}
+      .ds-favorites-bulk-selected{outline:2px solid rgba(168,85,247,.92)!important;outline-offset:2px!important;cursor:pointer!important}
+      #ds-favorites-cleanup-start,#ds-favorites-cleanup-clear,#ds-favorites-cleanup-retry{appearance:none;cursor:pointer;border:1px solid rgba(148,163,184,.36);border-radius:8px;background:rgba(55,65,81,.65);color:inherit;padding:7px 11px;font:500 12px system-ui,sans-serif}
+      #ds-favorites-cleanup-status{font:500 12px system-ui,sans-serif;opacity:.82}
+      #ds-favorites-scan{appearance:none;cursor:pointer;border:1px solid rgba(148,163,184,.36);border-radius:8px;background:rgba(55,65,81,.65);color:inherit;padding:7px 11px;font:500 12px system-ui,sans-serif}
+      #ds-favorites-scan:disabled{opacity:.5;cursor:default}
+      #ds-favorites-scan-status{font:500 12px system-ui,sans-serif;opacity:.78}
+      @media(max-width:650px){#${BAR}{bottom:7px;justify-content:center}}
+    `;
+    document.head?.appendChild(style);
+  }
+
+  function cards() {
+    const found = new Map();
+    const candidates = document.querySelectorAll('[data-testid="CharacterCard"], [data-testid="ChatbotCard"]');
+    for (const card of candidates) {
+      const id = cardId(card);
+      if (id && !found.has(id)) found.set(id, card);
+    }
+    if (found.size) return found;
+    for (const anchor of document.querySelectorAll('a[href*="/chat/"],a[href*="/chatbot/"]')) {
+      const id = idFrom(anchor.href);
+      if (!id || found.has(id)) continue;
+      const card = anchor.closest('article,[data-testid*="Card"],div.relative.group');
+      if (card) found.set(id, card);
+    }
+    return found;
+  }
+  function cardId(card) {
+    return idFrom(card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]')?.href);
+  }
+  function cardMeta(card, id = cardId(card)) {
+    if (!safeId(id)) return null;
+    const anchor = card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]');
+    const name = clean(card?.querySelector?.('[data-testid="CharacterCardHeader-TitleLink"],a[title][href*="/chat/"]')?.getAttribute('title') || card?.querySelector?.('img[alt]')?.getAttribute('alt') || id);
+    const creator = clean(card?.querySelector?.('a[href*="/creator/"]')?.textContent);
+    const image = card?.querySelector?.('img[alt]')?.src || '';
+    const description = clean(DS.getCardDescriptionText?.(card) || card?.querySelector?.('[data-testid="CharacterCardBody"] p')?.textContent || '');
+    return { id, name, creator, image, description, chatUrl: `https://spicychat.ai/chat/${id}`, profileUrl: `https://spicychat.ai/chatbot/${id}`, cardMetaCaptured: true };
+  }
+  function selectionCards() {
+    const found = cards();
+    for (const [id, card] of found) {
+      card.dataset.dsFavBulkSelected = state.active && selected.has(id) ? '1' : '0';
+      card.classList.toggle('ds-favorites-bulk-selected', state.active && selected.has(id));
+      let badge = card.querySelector('.ds-favorites-bulk-select');
+      if (state.active && selected.has(id)) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'ds-favorites-bulk-select';
+          badge.textContent = '✓';
+          badge.setAttribute('aria-hidden', 'true');
+          card.append(badge);
+        }
+      } else badge?.remove();
+    }
+  }
+  function clearSelectionUi() {
+    document.querySelectorAll('[data-ds-fav-bulk-selected]').forEach(x => { x.classList.remove('ds-favorites-bulk-selected'); delete x.dataset.dsFavBulkSelected; x.querySelector('.ds-favorites-bulk-select')?.remove(); });
+  }
+  function setSelecting(next) {
+    state.active = !!next;
+    if (!state.active) { selected.clear(); clearSelectionUi(); if (document.getElementById(BAR)?.dataset.dsFavBulk === '1') document.getElementById(BAR)?.remove(); }
+    else { css(); renderBar(); selectionCards(); }
+    renderLauncher();
+  }
+  function button(label, action, handler, primary = false) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.dataset.action = action;
+    if (primary) b.dataset.primary = '1';
+    b.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (!state.busy) handler(); });
+    return b;
+  }
+  function renderBar() {
+    if (!state.active) return;
+    let bar = document.getElementById(BAR);
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = BAR;
+      bar.dataset.dsOwned = '1';
+      bar.dataset.dsFavBulk = '1';
+      const count = document.createElement('span'); count.dataset.action = 'count';
+      bar.append(count,
+        button('Select loaded', 'all', () => { for (const [id, card] of cards()) { const meta = cardMeta(card, id); if (meta) selected.set(id, meta); } selectionCards(); renderBar(); }),
+        button('Clear', 'clear', () => { selected.clear(); selectionCards(); renderBar(); }),
+        button('Unfavorite', 'unfavorite', () => runBulk('unfavorite'), true),
+        button('Unfavorite + Later', 'move', () => runBulk('move')),
+        button('Add to Later', 'later', () => runBulk('later')),
+        button('Done', 'done', () => setSelecting(false)));
+      document.body.appendChild(bar);
+    }
+    const count = selected.size;
+    bar.querySelector('[data-action="count"]').textContent = `${count} selected`;
+    for (const b of bar.querySelectorAll('button')) b.disabled = state.busy || (!count && !['all','done'].includes(b.dataset.action));
+    renderLauncher();
+  }
+
+  // The existing selector anchors itself between the native search controls and NSFW.
+  function headerHost() {
+    const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.querySelector('main') || document.body;
+    const nsfw = root.querySelector('[data-testid="NsfwToggle"]') ||
+      [...root.querySelectorAll('label')].find(label => /\bNSFW\b/i.test(clean(label.textContent)) && label.querySelector('input[type="checkbox"]'));
+    const search = root.querySelector('input[placeholder*="Dive into" i],input[placeholder*="start searching" i],input[placeholder*="search" i],input[type="search"]');
+    let row = null;
+    if (nsfw && search) {
+      const ancestors = new Set();
+      for (let n = search; n && n !== root; n = n.parentElement) ancestors.add(n);
+      for (let n = nsfw; n && n !== root; n = n.parentElement) {
+        if (ancestors.has(n)) { row = n; break; }
+      }
+    }
+    if (!row || row === root) row = nsfw?.parentElement?.parentElement || null;
+    let right = nsfw || null;
+    if (!row) {
+      const heading = [...document.querySelectorAll('h1,h2,h3')]
+        .find(e => /^(?:favorites|favorite bots|favorite chatbots)$/i.test(clean(e.textContent)));
+      row = heading?.parentElement || null;
+      right = null;
+    }
+    if (!(row instanceof HTMLElement)) return null;
+    while (right?.parentElement && right.parentElement !== row) right = right.parentElement;
+    let host = document.getElementById(HOST);
+    if (!(host instanceof HTMLElement)) {
+      host = document.createElement('div'); host.id = HOST;
+      host.className = 'ds-listing-header-controls'; host.dataset.dsOwned = '1';
+    }
+    if (right && right !== host) {
+      if (host.parentElement !== row || host.nextElementSibling !== right) right.before(host);
+    } else if (host.parentElement !== row) row.append(host);
+    return host;
+  }
+  function renderLauncher() {
+    if (!isEnabled()) {
+      const old = document.getElementById(LAUNCHER);
+      if (old?.dataset.dsFavBulk === '1') old.remove();
+      return;
+    }
+    const host = headerHost();
+    if (!host) return;
+    css();
+    let b = document.getElementById(LAUNCHER);
+    if (b && b.dataset.dsFavBulk !== '1') { b.remove(); b = null; }
+    if (!b) {
+      b = button('Select bots', 'select', () => setSelecting(!state.active));
+      b.id = LAUNCHER;
+      b.dataset.dsOwned = '1';
+      b.dataset.dsFavBulk = '1';
+      b.className = 'ds-listing-header-action';
+    }
+    if (b.parentElement !== host) host.append(b);
+    b.setAttribute('aria-pressed', String(state.active));
+    b.textContent = state.active ? `Selecting (${selected.size})` : 'Select bots';
+    b.disabled = state.busy;
+  }
+
+  async function getStored(key) {
+    const data = await DS.storageGet?.([key]);
+    return data?.[key];
+  }
+  // Native Favorites cleanup is an explicitly started, resumable job. Never
+  // interpret locally stored Favorite History as permission to unfavorite bots.
+  function cleanupCounts(job = state.cleanupJob) {
+    const ids = unique((job?.ids || []).filter(safeId));
+    const done = new Set(job?.confirmed || []), pending = new Set(job?.pending || []), skipped = new Set(job?.skipped || []);
+    return { total: ids.length, confirmed: done.size, pending: pending.size, skipped: skipped.size,
+      remaining: ids.filter(id => !done.has(id) && !pending.has(id) && !skipped.has(id)).length };
+  }
+  async function storeCleanupJob() {
+    if (!state.cleanupJob) return;
+    state.cleanupJob.updatedAt = Date.now();
+    const job = state.cleanupJob;
+    const saved = await DS.storageSet?.({ [CLEANUP_KEY]: job }, { immediate: true });
+    if (saved === false) throw new Error('Cleanup progress could not be saved');
+    const check = await getStored(CLEANUP_KEY);
+    if (check?.updatedAt !== job.updatedAt || check?.ids?.length !== job.ids.length) throw new Error('Cleanup progress could not be verified');
+  }
+  async function loadCleanupJob() {
+    if (state.cleanupLoaded || state.cleanupLoading || !isPage()) return;
+    state.cleanupLoading = true;
+    try {
+      const stored = await getStored(CLEANUP_KEY);
+      state.cleanupJob = stored?.version === 1 && Array.isArray(stored.ids) ? stored : null;
+      state.cleanupLoaded = true;
+      historyControls();
+    } catch (error) {
+      console.warn('[SpicyChat QoL] Could not load Favorites cleanup queue', error);
+      cleanupFeedback('Could not load cleanup queue; refresh the page to retry.');
+    } finally { state.cleanupLoading = false; }
+  }
+  function cleanupFeedback(text) {
+    state.cleanupStatus = text;
+    const label = document.getElementById('ds-favorites-cleanup-status');
+    if (label) label.textContent = text;
+  }
+  async function clearCleanupJob() {
+    if (state.cleanupRunning) return;
+    const count = cleanupCounts();
+    const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped;
+    if (!finished && !confirm('Clear the prepared Favorites cleanup queue? Your Favorite History and Later list will be kept.')) return;
+    await DS.storageSet?.({ [CLEANUP_KEY]: null }, { immediate: true });
+    state.cleanupJob = null;
+    state.cleanupStatus = '';
+    historyControls();
+  }
+  async function rewindFavorites() {
+    let paginator = nativePagination();
+    if (!paginator) throw new Error('Native Favorites pagination not available');
+    for (let i = 0; paginator.page > 1 && i < 240; i++) {
+      const page = paginator.page, signature = pageSignature();
+      const back = paginator.first && !paginator.first.disabled ? paginator.first : paginator.previous;
+      if (!back || back.disabled) throw new Error('Could not return to page 1');
+      back.click();
+      const changed = await waitForPageChange(page, signature);
+      if (!changed || changed >= page) throw new Error('Could not return to page 1');
+      paginator = nativePagination();
+      if (!paginator) throw new Error('Native pagination disappeared');
+    }
+    if (paginator?.page !== 1) throw new Error('Could not verify page 1');
+  }
+  async function runCleanupJob() {
+    const job = state.cleanupJob;
+    if (!job || state.busy || state.scanning || state.cleanupRunning || !isPage()) return;
+    if (document.visibilityState === 'hidden') { cleanupFeedback('Open the Favorites tab before starting native cleanup.'); return; }
+    if (!unfilteredFavorites()) { cleanupFeedback('Clear native filters and turn on NSFW before starting.'); return; }
+    const counts = cleanupCounts(job);
+    if (!counts.remaining) { cleanupFeedback('No unattempted bots left. Scan Favorites to verify pending removals.'); return; }
+    const later = await getStored(DS.LATER_BOTS_KEY || 'laterBots');
+    const laterIds = new Set(later?.ids || []);
+    const invalid = job.ids.filter(id => !laterIds.has(id));
+    if (invalid.length) { cleanupFeedback(`${invalid.length} queued bots are missing from Later. No favorites were changed.`); return; }
+    if (!confirm(`Unfavorite up to ${counts.remaining} bots that are already safely saved in Later? QoL will use SpicyChat's native Favorite buttons across its pages. You can stop and resume. Nothing is deleted from Favorite History.`)) return;
+    state.cleanupRunning = true;
+    state.cleanupStop = false;
+    state.busy = true;
+    if (state.active) setSelecting(false);
+    historyControls();
+    const done = new Set(job.confirmed || []), pending = new Set(job.pending || []), skipped = new Set(job.skipped || []);
+    // Stop as soon as every requested bot has either been handled or queued
+    // for verification. Otherwise the previous pass logic revisits all pages
+    // even after the counter reaches 0 (the unnecessary "victory lap").
+    const hasUnattempted = () => job.ids.some(id => !done.has(id) && !pending.has(id) && !skipped.has(id));
+    let stopReason = '', operations = 0;
+    try {
+      // Deletions can shift bots between pagination pages. Multiple passes
+      // from page 1 ensure that shifting doesn't silently skip targets.
+      for (let pass = 0; pass < 3 && !state.cleanupStop && isPage() && hasUnattempted(); pass++) {
+        if (document.visibilityState === 'hidden') { stopReason = 'tab went into background'; break; }
+        await rewindFavorites();
+        const visited = new Set();
+        let thisPass = 0, loadingSince = 0;
+        for (let step = 0; step < 500 && !state.cleanupStop && isPage() && hasUnattempted(); step++) {
+          const pagination = nativePagination();
+          if (!pagination?.page || visited.has(pagination.page)) { stopReason = 'pagination stopped or repeated'; break; }
+          if (document.visibilityState === 'hidden') { state.cleanupStop = true; stopReason = 'tab went into background'; break; }
+          if (loading()) {
+            if (!loadingSince) loadingSince = Date.now();
+            if (Date.now() - loadingSince > 12000) { stopReason = 'page did not finish loading'; break; }
+            await sleep(180); step--; continue;
+          }
+          loadingSince = 0;
+          const page = pagination.page;
+          visited.add(page);
+          const matches = [...cards().entries()].filter(([id]) => job.ids.includes(id) && !done.has(id) && !pending.has(id) && !skipped.has(id));
+          // Re-check Later membership at every page, so a changed Later list
+          // cannot cause an unsafe unfavorite action.
+          if (matches.length) {
+            const currentLater = new Set((await getStored(DS.LATER_BOTS_KEY || 'laterBots'))?.ids || []);
+            for (const [id] of matches) {
+              if (state.cleanupStop || !isPage() || document.visibilityState === 'hidden') { state.cleanupStop = true; break; }
+              if (!currentLater.has(id)) { stopReason = `Bot ${id} was removed from Later`; state.cleanupStop = true; break; }
+              if (currentPage() !== page) break;
+              const result = await nativeUnfavorite(id);
+              if (result.ok) {
+                if (result.tentative) pending.add(id);
+                else { done.add(id); await markFormer([id], 'later-cleanup'); }
+                operations++; thisPass++;
+              } else {
+                skipped.add(id);
+              }
+              job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped];
+              // Persist each mutation to make even a browser shutdown safely resumable.
+              await storeCleanupJob();
+              const current = cleanupCounts(job);
+              cleanupFeedback(`Removing favorites: ${current.confirmed} verified, ${current.pending} awaiting scan, ${current.remaining} left · page ${page}`);
+              if (!hasUnattempted()) break;
+              await sleep(140);
+            }
+          }
+          if (state.cleanupStop || !hasUnattempted()) break;
+          const next = nativePagination();
+          if (!next?.page) { stopReason = 'pagination disappeared'; break; }
+          if (next.page !== page) continue; // SpicyChat changed page after removal.
+          if (!next.next || next.next.disabled) break;
+          const signature = pageSignature();
+          next.next.click();
+          if (!await waitForPageChange(page, signature)) { stopReason = `page after ${page} did not load`; break; }
+        }
+        if (!hasUnattempted() || thisPass === 0) break;
+      }
+    } catch (error) {
+      stopReason = error?.message || String(error);
+      console.warn('[SpicyChat QoL] Later overlap cleanup stopped', error);
+    } finally {
+      state.cleanupRunning = false; state.busy = false;
+      job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped];
+      try { await storeCleanupJob(); } catch (error) { stopReason = `Could not verify final checkpoint: ${error.message}`; }
+      const count = cleanupCounts(job);
+      if (count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped) {
+        cleanupFeedback(`Complete: ${count.confirmed}/${count.total} favorites unfavorited. All bots remain in Later and Favorite History.`);
+      } else if (!count.remaining && count.pending && !count.skipped) {
+        cleanupFeedback(`${count.confirmed} verified, ${count.pending} awaiting a complete Favorites scan. No further unfavorite pass needed.`);
+      } else {
+        cleanupFeedback(`${state.cleanupStop ? 'Stopped' : 'Paused'}: ${count.confirmed} verified, ${count.pending} awaiting scan, ${count.remaining} not attempted, ${count.skipped} failed.${stopReason ? ` ${stopReason}` : ''}`);
+      }
+      historyControls();
+    }
+  }
+
+  function snapshot(store) {
+    return { ids: unique([...(store?.ids || [])]), meta: { ...(store?.meta || {}) } };
+  }
+  async function saveAndVerify(key, store, ids) {
+    const result = await DS.storageSet?.({ [key]: store }, { immediate: true });
+    if (result === false) throw new Error(`${key} could not be saved`);
+    const saved = await getStored(key);
+    if (!Array.isArray(saved?.ids) || ids.some(id => !saved.ids.includes(id))) throw new Error(`${key} save could not be verified`);
+    return saved;
+  }
+  async function rememberFavorites(entries) {
+    const key = DS.FAVORITE_BOTS_KEY || 'favoriteBots';
+    const store = snapshot(await getStored(key) || DS.state.favoriteBots);
+    const now = Date.now();
+    for (const meta of entries) {
+      if (!meta?.id) continue;
+      if (!store.ids.includes(meta.id)) store.ids.push(meta.id);
+      const previous = store.meta[meta.id] || {};
+      store.meta[meta.id] = { ...previous, ...meta, savedAt: previous.savedAt || now,
+        lastConfirmedFavoriteAt: now, favoriteMembership: 'current', removedAt: 0, removedReason: '' };
+    }
+    const saved = await saveAndVerify(key, store, entries.map(e => e.id));
+    DS.state.favoriteBots = saved;
+    DS.refreshFastLookupCaches?.();
+  }
+  async function syncVisibleFavorites() {
+    if (state.autoSyncing || state.busy || state.scanning || !isPage() || setting('trackFavoriteBots') === false) return;
+    const visible = [...cards()].filter(([,card]) => !unfilled(heartButton(card))).map(([id, card]) => cardMeta(card, id)).filter(Boolean);
+    const signature = visible.map(e => e.id).sort().join(',');
+    if (!signature || signature === state.visibleSignature) return;
+    state.visibleSignature = signature;
+    const store = DS.state.favoriteBots || { ids: [], meta: {} };
+    const missing = visible.filter(e => !store.ids?.includes(e.id) || store.meta?.[e.id]?.favoriteMembership !== 'current');
+    if (!missing.length) return;
+    state.autoSyncing = true;
+    try { await rememberFavorites(missing); }
+    catch (error) { state.visibleSignature = ''; console.warn('[SpicyChat QoL] Favorites page sync failed', error); }
+    finally { state.autoSyncing = false; }
+  }
+  async function markFormer(ids, reason) {
+    if (!ids.length) return;
+    const key = DS.FAVORITE_BOTS_KEY || 'favoriteBots';
+    const store = snapshot(await getStored(key) || DS.state.favoriteBots);
+    for (const id of ids) {
+      const old = store.meta[id] || {};
+      if (!store.ids.includes(id)) store.ids.push(id);
+      store.meta[id] = { ...old, id, favoriteMembership: 'former', removedAt: Date.now(), removedReason: reason, lastConfirmedFavoriteAt: old.lastConfirmedFavoriteAt || Date.now() };
+    }
+    const saved = await saveAndVerify(key, store, ids);
+    DS.state.favoriteBots = saved;
+    DS.refreshFastLookupCaches?.();
+  }
+  async function saveLater(entries) {
+    if (!entries.length) return;
+    const key = DS.LATER_BOTS_KEY || 'laterBots';
+    const previous = snapshot(await getStored(key) || DS.state.laterBots);
+    const next = snapshot(previous);
+    for (const entry of entries) {
+      if (!next.ids.includes(entry.id)) next.ids.push(entry.id);
+      next.meta[entry.id] = { ...(next.meta[entry.id] || {}), ...entry, savedAt: next.meta[entry.id]?.savedAt || Date.now() };
+    }
+    const saved = await saveAndVerify(key, next, entries.map(e => e.id));
+    DS.state.laterBots = saved;
+    DS.refreshFastLookupCaches?.();
+    DS.updateLaterBotButtons?.();
+  }
+  function heartButton(card) {
+    return card?.querySelector?.('[data-testid="CharacterCardOverlayActions-Favorite"] button, button[aria-label="unfavorite" i], button[aria-label="favorite" i]') || null;
+  }
+  function unfilled(button) {
+    if (!button) return false;
+    const aria = (button.getAttribute('aria-label') || '').toLowerCase();
+    if (aria === 'favorite' || aria === 'like') {
+      const svg = button.querySelector('svg');
+      if (svg?.classList.contains('fill-transparent')) return true;
+    }
+    return button.getAttribute('aria-pressed') === 'false' || button.querySelector('svg.fill-transparent') != null;
+  }
+  async function nativeUnfavorite(id) {
+    // Use native React control. Never guess an undocumented SpicyChat API endpoint.
+    const card = cards().get(id);
+    const heart = heartButton(card);
+    if (!heart || heart.disabled || !heart.isConnected) return { ok: false, reason: 'native Favorite button not available' };
+    if (unfilled(heart)) return { ok: false, reason: 'favorite state needs checking' };
+    heart.click();
+    for (let n = 0; n < 14; n++) {
+      await sleep(180);
+      const current = cards().get(id);
+      const currentHeart = heartButton(current);
+      if (currentHeart && unfilled(currentHeart)) return { ok: true };
+      if (!current && n >= 3) {
+        // Favorites pages typically remove cards immediately; this is evidence,
+        // but not an API confirmation. The next complete scan will verify it.
+        return { ok: true, tentative: true };
+      }
+    }
+    return { ok: false, reason: 'native unfavorite did not visibly complete' };
+  }
+  async function runBulk(mode) {
+    if (!selected.size || state.busy || !isPage()) return;
+    const entries = [...selected.values()];
+    const action = mode === 'move' ? 'Add to Later and unfavorite' : mode === 'later' ? 'Add to Later' : 'Unfavorite';
+    if (!confirm(`${action} ${entries.length} selected bot${entries.length === 1 ? '' : 's'}?`)) return;
+    state.busy = true;
+    renderBar();
+    let added = 0, removed = 0, pending = 0, failed = 0;
+    try {
+      // Preserve local history before any native mutation.
+      await rememberFavorites(entries);
+      if (mode === 'later' || mode === 'move') {
+        try { await saveLater(entries); added = entries.length; }
+        catch (error) { DS.setQuickStatus?.(`Could not verify Later save: ${error.message}`, true); failed = entries.length; return; }
+      }
+      if (mode !== 'later') {
+        const confirmed = [];
+        for (const entry of entries) {
+          if (!isPage()) break;
+          const result = await nativeUnfavorite(entry.id);
+          if (result.ok) {
+            if (result.tentative) pending++;
+            else { confirmed.push(entry.id); removed++; }
+            selected.delete(entry.id);
+          } else failed++;
+          await sleep(120);
+        }
+        if (confirmed.length) await markFormer(confirmed, 'bulk-unfavorite');
+        // Tentative removals remain Current until a complete scan confirms.
+      } else entries.forEach(entry => selected.delete(entry.id));
+      DS.setQuickStatus?.(`Later: ${added}; unfavorited: ${removed}; awaiting scan: ${pending}; failed: ${failed}.`, true);
+    } catch (error) {
+      console.warn('[SpicyChat QoL] Favorites bulk action failed', error);
+      DS.setQuickStatus?.(`Favorites action failed: ${error.message || error}`, true);
+    } finally {
+      state.busy = false;
+      if (!selected.size) setSelecting(false);
+      else { selectionCards(); renderBar(); }
+      DS.bumpDomRevision?.();
+      DS.updateQuickPanel?.();
+    }
+  }
+
+  function nativeCount() {
+    // This is the result count for the selected native Chatbots tab, not the
+    // number of cards currently mounted. Never use it to guess favorite status
+    // after a filtered or incomplete scan.
+    const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document;
+    for (const el of root.querySelectorAll('[data-testid="AppliedFiltersBarView-ResultCount"], [data-testid*="ResultCount"], .ais-Stats-text')) {
+      const match = clean(el.textContent).match(/([\d,]+)\s+(?:results?|favorites?|bots?)\b/i);
+      if (match) return Number(match[1].replaceAll(',', ''));
+    }
+    return null;
+  }
+  function unfilteredFavorites() {
+    const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document;
+    const search = root.querySelector('input[placeholder*="Dive into" i],input[placeholder*="start searching" i],input[type="search"]');
+    if (search?.value?.trim()) return false;
+    if (root.querySelector('[data-testid="NsfwToggle-Input"]')?.checked === false) return false;
+    if (root.querySelector('[data-testid^="AppliedFilterChipItem-"]')) return false;
+    if (root.querySelector('[data-testid^="TagsCapabilityGate-Option-"] input:checked')) return false;
+    if (root.querySelector('[data-testid="tab-chatbots"]')?.getAttribute('aria-selected') === 'false') return false;
+    return true;
+  }
+  function loading() {
+    const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document;
+    return !!root.querySelector('[aria-busy="true"], [data-testid*="Loading"], [data-testid*="Spinner"]');
+  }
+  // QoL may add its own numbered page buttons. Use SpicyChat's native
+  // pagination only, since the QoL clones can reload the whole tab.
+  function nativePagination() {
+    const next = document.querySelector('button[aria-label="next-page"]');
+    const parent = next?.parentElement;
+    if (!parent || !parent.querySelector('button[aria-label="previous-page"]')) return null;
+    const numbered = [...parent.querySelectorAll('button[aria-label^="page-"]:not([data-ds-pagination-qol="1"])')];
+    const current = numbered.find(b => /^page-\d+$/.test(b.getAttribute('aria-label') || '') &&
+      (b.getAttribute('aria-current') === 'page' || b.classList.contains('bg-blue-10')));
+    const page = Number(current?.getAttribute('aria-label')?.slice(5)) || 0;
+    return { next, parent, page, first: numbered.find(b => b.getAttribute('aria-label') === 'page-1'), previous: parent.querySelector('button[aria-label="previous-page"]') };
+  }
+  function currentPage() { return nativePagination()?.page || 0; }
+  function pageSignature() {
+    return [...cards().keys()].sort().join(',');
+  }
+  async function waitForPageChange(previousPage, previousSignature) {
+    // Wait until both the native paginator AND the data have changed.
+    // A page-number change alone can precede the React card update.
+    const deadline = Date.now() + 12000;
+    let stable = 0;
+    while (Date.now() < deadline && !state.cancelScan && isPage()) {
+      const page = currentPage();
+      const signature = pageSignature();
+      if (page && page !== previousPage && signature && signature !== previousSignature && !loading()) {
+        if (++stable >= 2) return page;
+      } else stable = 0;
+      await sleep(120);
+    }
+    return 0;
+  }
+  function setScanStatus(message, announce = false) {
+    state.status = message;
+    const label = document.getElementById('ds-favorites-scan-status');
+    if (label) label.textContent = message;
+    if (announce) DS.setQuickStatus?.(message, true);
+  }
+  async function scanFavorites() {
+    if (state.scanning || state.cleanupRunning || !scanEnabled() || document.visibilityState === 'hidden') return;
+    state.scanning = true;
+    state.cancelScan = false;
+    const button = document.getElementById('ds-favorites-scan');
+    if (button) button.textContent = 'Cancel scan';
+    const entries = new Map();
+    const visited = new Set();
+    let complete = false, expected = null, stopReason = '';
+    try {
+      if (!unfilteredFavorites()) {
+        throw new Error('Clear native filters and turn on NSFW before scanning all favorites.');
+      }
+      let paginator = nativePagination();
+      if (!paginator) throw new Error('Native Favorites pagination was not found. No scan was saved.');
+      // Always start from the beginning so scanning from page 2+ cannot
+      // accidentally omit the first page.
+      for (let rewind = 0; paginator.page > 1 && rewind < 240; rewind++) {
+        const prevPage = paginator.page;
+        const signature = pageSignature();
+        const toFirst = paginator.first && !paginator.first.disabled ? paginator.first : paginator.previous;
+        if (!toFirst || toFirst.disabled) throw new Error('Could not return to the first page.');
+        toFirst.click();
+        const now = await waitForPageChange(prevPage, signature);
+        if (!now || now >= prevPage) throw new Error('Favorites did not switch to an earlier page.');
+        paginator = nativePagination();
+        if (!paginator) throw new Error('Native page controls disappeared.');
+      }
+      if (paginator.page !== 1) throw new Error('Could not confirm page 1.');
+      // A scan can span many page switches. Never classify missing IDs as
+      // former when filters, backend page caps, or interrupted loading exist.
+      for (let step = 0; step < 1000 && !state.cancelScan && isPage(); step++) {
+        paginator = nativePagination();
+        if (!paginator?.page) { stopReason = 'pagination disappeared'; break; }
+        const page = paginator.page;
+        if (visited.has(page)) { stopReason = `page ${page} repeated`; break; }
+        if (loading()) { await sleep(180); step--; continue; }
+        const currentCards = cards();
+        if (!currentCards.size && nativeCount() !== 0) { stopReason = `page ${page} had no cards`; break; }
+        const newlySeen = [];
+        for (const [id, card] of currentCards) {
+          if (unfilled(heartButton(card))) continue;
+          const meta = cardMeta(card, id);
+          if (!meta) continue;
+          if (!entries.has(id)) newlySeen.push(meta);
+          entries.set(id, meta);
+        }
+        visited.add(page);
+        const count = nativeCount();
+        if (count !== null && (expected === null || count > expected)) expected = count;
+        setScanStatus(`Scanning page ${page} · ${entries.size}${expected === null ? '' : ` / ${expected}`} favorites`);
+        // Save every complete page. Unexpected navigation/errors will still
+        // leave confirmed discoveries in Favorite History.
+        if (newlySeen.length) await rememberFavorites(newlySeen);
+        if (expected !== null && entries.size >= expected && unfilteredFavorites()) { complete = true; break; }
+        if (state.cancelScan) break;
+        if (!paginator.next || paginator.next.disabled) {
+          stopReason = `native pagination ended at page ${page}`;
+          break;
+        }
+        const signature = pageSignature();
+        paginator.next.click();
+        const changed = await waitForPageChange(page, signature);
+        if (!changed) { stopReason = `page ${page + 1} did not finish loading`; break; }
+        if (changed <= page) { stopReason = 'pagination did not advance'; break; }
+      }
+      // Every confirmed page was saved as it arrived. Don't re-save the
+      // entire collection again at completion.
+      // Complete means all native result IDs were collected on an unfiltered
+      // page. Missing IDs must STILL NOT be treated as deleted/unfavorited:
+      // the result count can be scoped or restricted by SpicyChat.
+      if (complete && !state.cancelScan) {
+        await DS.storageSet?.({ [SCAN_STATE_KEY]: { lastCompleteAt: Date.now(), count: entries.size, pages: visited.size, ids: [...entries.keys()] } }, { immediate: true });
+        // Only reconcile native unfavorite actions explicitly requested by
+        // the user. Never infer that other missing favorites were removed.
+        if (state.cleanupJob?.pending?.length) {
+          const stillCurrent = new Set(entries.keys());
+          const confirmed = state.cleanupJob.pending.filter(id => !stillCurrent.has(id));
+          if (confirmed.length) await markFormer(confirmed, 'later-cleanup-verified');
+          state.cleanupJob.confirmed = unique([...(state.cleanupJob.confirmed || []), ...confirmed]);
+          // Any attempted bot still present after a verified complete scan
+          // remains eligible for a later native retry.
+          state.cleanupJob.pending = [];
+          await storeCleanupJob();
+        }
+      }
+      const description = complete ? 'Complete' : state.cancelScan ? 'Stopped' : 'Partial';
+      const detail = complete ? '' : ` · ${stopReason || 'not all pages were verified'}`;
+      setScanStatus(`${description} scan: ${entries.size}${expected === null ? '' : ` / ${expected}`} favorites saved across ${visited.size} page${visited.size === 1 ? '' : 's'}${detail}.`, true);
+    } catch (error) {
+      setScanStatus(`Favorites scan stopped: ${error?.message || error}`, true);
+    } finally {
+      state.scanning = false;
+      if (button) button.textContent = 'Scan Favorites';
+      // Preserve the user's current scroll position; don't force scrolling.
+    }
+  }
+  function historyControls() {
+    if (!isPage()) {
+      document.getElementById('ds-favorites-manager-tools')?.remove();
+      return;
+    }
+    if (!scanEnabled() && !state.cleanupJob) {
+      document.getElementById('ds-favorites-manager-tools')?.remove();
+      return;
+    }
+    const heading = [...document.querySelectorAll('h1,h2,h3')]
+      .find(el => /^(?:favorites|favorite bots|favorite chatbots)$/i.test(clean(el.textContent)));
+    const target = heading || document.getElementById('ds-favorite-history-button-wrap');
+    if (!target?.parentElement) return;
+    let host = document.getElementById('ds-favorites-manager-tools');
+    if (!host) {
+      host = document.createElement('div'); host.id = 'ds-favorites-manager-tools'; host.dataset.dsOwned = '1';
+      host.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;';
+    }
+    let scan = document.getElementById('ds-favorites-scan');
+    let scanStatus = document.getElementById('ds-favorites-scan-status');
+    if (scanEnabled()) {
+      if (!scan) { scan = button('Scan Favorites','scan',() => state.scanning ? (state.cancelScan = true) : scanFavorites()); scan.id = 'ds-favorites-scan'; host.append(scan); }
+      if (!scanStatus) { scanStatus = document.createElement('span'); scanStatus.id = 'ds-favorites-scan-status'; host.append(scanStatus); }
+      scanStatus.textContent = state.status;
+    } else { scan?.remove(); scanStatus?.remove(); }
+    let start = document.getElementById('ds-favorites-cleanup-start');
+    let clear = document.getElementById('ds-favorites-cleanup-clear');
+    let retry = document.getElementById('ds-favorites-cleanup-retry');
+    let status = document.getElementById('ds-favorites-cleanup-status');
+    if (state.cleanupJob?.ids?.length) {
+      if (!start) { start = document.createElement('button'); start.type = 'button'; start.dataset.action = 'cleanup'; start.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (state.cleanupRunning) state.cleanupStop = true; else void runCleanupJob(); }); start.id = 'ds-favorites-cleanup-start'; host.append(start); }
+      if (!clear) { clear = button('Clear cleanup queue', 'clear-cleanup', clearCleanupJob); clear.id = 'ds-favorites-cleanup-clear'; host.append(clear); }
+      if (!retry) { retry = button('Retry failed', 'retry-cleanup', async () => { if (state.cleanupRunning || !state.cleanupJob) return; state.cleanupJob.skipped = []; await storeCleanupJob(); state.cleanupStatus = ''; historyControls(); }); retry.id = 'ds-favorites-cleanup-retry'; host.append(retry); }
+      if (!status) { status = document.createElement('span'); status.id = 'ds-favorites-cleanup-status'; host.append(status); }
+      const count = cleanupCounts();
+      const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped;
+      start.textContent = state.cleanupRunning ? 'Stop after current bot' : finished ? 'Cleanup complete' : count.remaining ? `Unfavorite Later overlap (${count.remaining})` : 'Awaiting verification';
+      start.disabled = !state.cleanupRunning && !count.remaining;
+      clear.textContent = finished ? 'Dismiss finished queue' : 'Clear cleanup queue';
+      clear.disabled = state.cleanupRunning;
+      retry.disabled = state.cleanupRunning || !count.skipped;
+      status.textContent = state.cleanupStatus || (finished
+        ? `Complete: ${count.confirmed}/${count.total} favorites unfavorited.`
+        : `${count.confirmed} verified · ${count.pending} awaiting scan · ${count.remaining} to process`);
+    } else { start?.remove(); clear?.remove(); retry?.remove(); status?.remove(); }
+    if (target.nextElementSibling !== host) target.after(host);
+  }
+  function handleCardClick(event) {
+    if (!state.active || !isPage() || state.busy || !(event.target instanceof Element)) return;
+    if (event.target.closest(`#${BAR},#${LAUNCHER},#ds-favorites-manager-tools,#ds-qol-panel`)) return;
+    const card = event.target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],div.relative.group');
+    if (!card) return;
+    const meta = cardMeta(card);
+    if (!meta) return;
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+    if (selected.has(meta.id)) selected.delete(meta.id);
+    else selected.set(meta.id, meta);
+    selectionCards(); renderBar();
+  }
+  function cleanup() {
+    setSelecting(false);
+    if (document.getElementById(LAUNCHER)?.dataset.dsFavBulk === '1') document.getElementById(LAUNCHER)?.remove();
+    document.getElementById('ds-favorites-manager-tools')?.remove();
+    const host = document.getElementById(HOST);
+    if (host && !host.childElementCount) host.remove();
+    state.visibleSignature = '';
+    state.cleanupStop = true;
+    state.cleanupLoaded = false;
+    if (!state.cleanupRunning) state.cleanupJob = null;
+    state.observer?.disconnect(); state.observer = null;
+    clearTimeout(state.refreshTimer); state.refreshTimer = null;
+  }
+  function refresh() {
+    if (!isPage()) { if (state.observer || state.active || document.getElementById(LAUNCHER)) cleanup(); return; }
+    css();
+    if (isEnabled()) { renderLauncher(); if (state.active) { selectionCards(); renderBar(); } }
+    else { if (state.active) setSelecting(false); renderLauncher(); }
+    historyControls();
+    void loadCleanupJob();
+    void syncVisibleFavorites();
+    if (!state.observer) {
+      const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.body;
+      if (!root) return;
+      state.observer = new MutationObserver(mutations => {
+        if (!mutations.some(m => [...m.addedNodes].some(n => n instanceof Element && !n.closest?.('[data-ds-owned="1"]')))) return;
+        if (state.refreshTimer) return;
+        state.refreshTimer = setTimeout(() => { state.refreshTimer = null; if (isPage()) { renderLauncher(); historyControls(); if (state.active) selectionCards(); void syncVisibleFavorites(); } }, 300);
+      });
+      state.observer.observe(root, { childList: true, subtree: true });
+    }
+  }
+  document.addEventListener('click', handleCardClick, true);
+  window.addEventListener('popstate', () => setTimeout(refresh, 150));
+  document.addEventListener('click', e => { if (e.target.closest?.('a[href]')) setTimeout(refresh, 200); }, true);
+  // Called by the existing Favorites lifecycle (no permanent polling on other pages).
+  DS.refreshFavoritesBulkManager = refresh;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh, { once: true });
+  else refresh();
+})();
 }

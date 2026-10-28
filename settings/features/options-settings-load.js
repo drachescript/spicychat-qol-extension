@@ -456,7 +456,10 @@ async function load() {
   setChecked("creatorBotDiscordWebhookEnabled", !!creatorBotWebhookState.enabled);
   setValue("creatorBotDiscordWebhookUrl", creatorBotWebhookState.url || "");
   setChecked("trackFavoriteBots", !!settings.trackFavoriteBots);
+  setChecked("showFavoritesBulkSelect", settings.showFavoritesBulkSelect !== false);
+  setChecked("showFavoritesScanButton", settings.showFavoritesScanButton !== false);
   setChecked("showFavoriteHistoryButton", !!settings.showFavoriteHistoryButton);
+  setChecked("enableFavoritesRecovery", !!settings.enableFavoritesRecovery);
   setValue("favoriteBotSortMode", settings.favoriteBotSortMode || "newest");
   setValue("favoriteBotRelationFilter", settings.favoriteBotRelationFilter || "all");
   setValue("favoriteBotFolderFilter", settings.favoriteBotFolderFilter || "all");
@@ -750,6 +753,7 @@ async function load() {
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
   setChecked("autoBlockTagMatches", !!settings.autoBlockTagMatches);
   setChecked("hideGroupChats", settings.hideGroupChats);
+  setChecked("publicPersonalityOnly", !!settings.publicPersonalityOnly);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
   setChecked("showRulebookFilters", !!settings.showRulebookFilters);
   setChecked("enableSmartFilterPresets", !!settings.enableSmartFilterPresets);
