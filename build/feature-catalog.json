@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.62",
+  "version": "0.2.63",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 129,
+  "featureCount": 131,
   "sections": [
     "Blocking",
     "Chat List",
@@ -97,6 +97,7 @@
     "content/chat-backgrounds.js",
     "content/chat-bookmarks.js",
     "content/chat-bubbles.js",
+    "content/chat-continuation.js",
     "content/chat-export.js",
     "content/chat-format-compatibility.js",
     "content/chat-history-navigator.js",
@@ -142,6 +143,7 @@
     "content/exact-message-counts.js",
     "content/failed-message-helper.js",
     "content/favorite-bots.js",
+    "content/favorites-recovery.js",
     "content/feature-build-map.js",
     "content/feature-lifecycle.js",
     "content/focus-mode.js",
@@ -1057,6 +1059,42 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "chat-continuation",
+      "label": "Chat Continuation",
+      "description": "Adds the chat continuation tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/chat-continuation.js"
+      ],
+      "requiredHelpers": [
+        "content/card-token-info.js"
+      ],
+      "cssFiles": [
+        "content/styles/chat-continuation.css"
+      ],
+      "settingsScripts": [
+        "settings/feature-panels/chat-continuation.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableChatContinuationAssistant"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
@@ -2066,6 +2104,39 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "favorites-recovery",
+      "label": "Favorites Recovery",
+      "description": "Adds the favorites recovery tools.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [
+        "favorite-bots",
+        "later-bots"
+      ],
+      "runtimeScripts": [
+        "content/favorites-recovery.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableFavoritesRecovery"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": true,
         "browserVerified": false
       }
     },

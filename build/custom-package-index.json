@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.62",
+  "sourceVersion": "0.2.63",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -376,6 +376,24 @@
       ],
       "background": [],
       "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-continuation",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-continuation.js",
+      "settings": [
+        "settings/feature-panels/chat-continuation.js"
+      ],
+      "styles": [
+        "content/styles/chat-continuation.css"
+      ],
+      "background": [],
+      "helpers": [
+        "content/card-token-info.js"
+      ],
       "fullyIndependent": false
     },
     {
@@ -801,6 +819,21 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/favorite-bots.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "favorites-recovery",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "favorite-bots",
+        "later-bots"
+      ],
+      "runtime": "content/favorites-recovery.js",
       "settings": [],
       "styles": [],
       "background": [],
