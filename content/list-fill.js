@@ -871,6 +871,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return frame;
   }
 
+  function nativeFavoriteRequestError(doc) {
+    // Only inspect native error toasts. Never infer success from HTTP 200 or
+    // from the card's optimistic React state when an error is visible.
+    const nodes = doc?.querySelectorAll?.('[role="alert"], [data-sonner-toast], [data-testid*="toast"], [class*="Toastify__toast"]') || [];
+    for (const node of nodes) {
+      const message = String(node?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 500);
+      if (/character favorite limit exceeded|favorite limit exceeded|maximum (?:number of )?favorites/i.test(message)) return "favorite-limit-exceeded";
+      if (/too many requests|rate limit exceeded/i.test(message)) return "rate-limited";
+    }
+    return "";
+  }
+
   async function syncRefillFavoriteInFrame({ sourceUrl, botId, active }) {
     const frame = await ensureRefillFavoriteFrame(sourceUrl);
     const started = Date.now();
@@ -898,6 +910,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await DS.sleep?.(140);
       let doc = null;
       try { doc = frame.contentDocument; } catch {}
+      const requestError = nativeFavoriteRequestError(doc);
+      if (requestError) return { ok: false, status: requestError };
       const currentCard = refillFavoriteCardInDocument(doc, botId) || card;
       const currentButton = findFavoriteActionButton(currentCard) || button;
       if (favoriteButtonLooksActive(currentButton) === !!active) {
@@ -951,7 +965,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         } else {
           setRefillFavoriteVisual(button, previousActive, `Could not ${targetActive ? "favorite" : "unfavorite"}: ${response?.status || "helper failed"}`);
           const label = kind === "lorebook" ? "Lorebook" : "bot";
-          DS.setQuickStatus?.(`Could not ${targetActive ? "favorite" : "unfavorite"} filled ${label}: ${response?.status || "helper failed"}`);
+          const friendlyError = response?.status === "favorite-limit-exceeded"
+            ? "SpicyChat's favorite limit was reached. Remove a favorite before adding another."
+            : response?.status === "rate-limited" ? "SpicyChat is rate-limiting favorite actions. Try again later."
+            : `Could not ${targetActive ? "favorite" : "unfavorite"} filled ${label}: ${response?.status || "helper failed"}`;
+          DS.setQuickStatus?.(friendlyError);
         }
       } catch (error) {
         setRefillFavoriteVisual(button, previousActive, `Could not ${targetActive ? "favorite" : "unfavorite"}: ${error?.message || "helper failed"}`);
@@ -977,6 +995,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const started = Date.now();
     while (Date.now() - started < 9000) {
       await DS.sleep?.(180);
+      const error = nativeFavoriteRequestError(document);
+      if (error) return { ok: false, status: error };
       const currentCard = workerCardForBotId(botId) || card;
       const currentButton = findFavoriteActionButton(currentCard) || button;
       if (favoriteButtonLooksActive(currentButton)) return { ok: true, status: "favorited" };

@@ -326,7 +326,66 @@ async function waitForBotStatusApiCheck(tabId, botId, timeoutMs = 12000) {
   return response || { ok: false, ready: true, status: "worker-timeout", httpStatus: 0, reason: "Bot Status helper timed out before returning a result." };
 }
 
+// Reuse only recent affirmative ad-hoc checks. Explicit/full scans always
+// bypass this cache; private, missing and ambiguous results are never reused.
+const botStatusRecentAnswers = new Map();
+const botStatusPendingAnswers = new Map();
+const BOT_STATUS_RECENT_TTL_MS = 3 * 60_000;
+const botStatusCheckStats = { requested: 0, cached: 0, coalesced: 0, checked: 0,
+  available: 0, restricted: 0, unavailable: 0, failed: 0, rateLimited: 0 };
+let botStatusApiCooldownUntil = 0;
+
 async function runBotStatusHelperCheck(message) {
+  const id = String(message?.botId || "").trim().toLowerCase();
+  botStatusCheckStats.requested++;
+  const explicit = !!message?.forceOwnHelper || !!message?.forceRefresh || !!message?.bulkScan || !!message?.keepHelper;
+  if (Date.now() < botStatusApiCooldownUntil) {
+    return { ok: false, ready: true, status: "rate-limited", httpStatus: 429,
+      retryAfterMs: botStatusApiCooldownUntil - Date.now(), reason: "Bot Status checks paused after HTTP 429. Retry after the cooldown." };
+  }
+  if (!explicit) {
+    const cached = botStatusRecentAnswers.get(id);
+    if (cached && Date.now() - cached.savedAt <= BOT_STATUS_RECENT_TTL_MS) {
+      botStatusCheckStats.cached++;
+      return { ...cached.response, cacheHit: true, cachedAt: cached.savedAt };
+    }
+  }
+  const key = `${id}:${explicit ? "fresh" : "ordinary"}`;
+  const pending = botStatusPendingAnswers.get(key);
+  if (pending) { botStatusCheckStats.coalesced++; return pending; }
+  const task = (async () => {
+    const result = await runUncachedBotStatusHelperCheck(message);
+    botStatusCheckStats.checked++;
+    const status = String(result?.status || "unknown");
+    if (Object.prototype.hasOwnProperty.call(botStatusCheckStats, status)) botStatusCheckStats[status]++;
+    else if (!result?.ok) botStatusCheckStats.failed++;
+    if (Number(result?.httpStatus) === 429 || status === "rate-limited") {
+      botStatusCheckStats.rateLimited++;
+      botStatusApiCooldownUntil = Date.now() + Math.max(30_000, Math.min(5 * 60_000, Number(result?.retryAfterMs || 60_000)));
+    }
+    if (!explicit && status === "available" && result?.ok && result?.archiveSnapshot) {
+      botStatusRecentAnswers.set(id, { savedAt: Date.now(), response: result });
+      if (botStatusRecentAnswers.size > 800) {
+        for (const key of botStatusRecentAnswers.keys()) {
+          botStatusRecentAnswers.delete(key);
+          if (botStatusRecentAnswers.size <= 600) break;
+        }
+      }
+    }
+    return result;
+  })();
+  botStatusPendingAnswers.set(key, task);
+  try { return await task; }
+  finally { if (botStatusPendingAnswers.get(key) === task) botStatusPendingAnswers.delete(key); }
+}
+
+function currentBotStatusCheckStats() {
+  return { ...botStatusCheckStats, cacheEntries: botStatusRecentAnswers.size,
+    inFlight: botStatusPendingAnswers.size,
+    cooldownMs: Math.max(0, botStatusApiCooldownUntil - Date.now()) };
+}
+
+async function runUncachedBotStatusHelperCheck(message) {
   const botId = String(message?.botId || "").trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
 

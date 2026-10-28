@@ -546,7 +546,12 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <label class="row"><input id="favoritePageFoldersEnabled" type="checkbox"/><span>Show private QoL folder filter directly on Favorites</span></label>
 <label class="row"><input id="favoritePageSortEnabled" type="checkbox"/><span>Show oldest/newest Favorites sorting for loaded cards</span></label>
 <p class="hint">Folders come from Bot Organizer. Sorting works on bots SpicyChat has loaded so far; older favorite dates may be approximate.</p>
+<label class="row"><input id="showFavoritesBulkSelect" type="checkbox"/><span>Show Select bots on Favorites (bulk Unfavorite / Later)</span></label>
+<label class="row"><input id="showFavoritesScanButton" type="checkbox"/><span>Show Scan Favorites button</span></label>
+<p class="hint">Scan Favorites checks the native Chatbots pages and saves the bots found to Favorite History. If SpicyChat limits pages, the scan reports a partial result and doesn't mark missing favorites as removed.</p>
 <label class="row"><input id="showFavoriteHistoryButton" type="checkbox"/><span>Show the Favorite history button on the Favorites page</span></label>
+<label class="row"><input id="enableFavoritesRecovery" type="checkbox"/><span>Favorites → Later recovery and bulk move</span></label>
+<p class="hint">Opt-in, review-first tool on the native Favorites page. Can copy previously remembered Favorite History to Later, including bots removed by SpicyChat. Moving loaded favorites first verifies the Later save and then uses the native unfavorite control in small, cancellable batches. Never removes Favorite History.</p>
 <p class="hint">Favorite tracking can stay enabled without adding the extra page button. You can still manage remembered favorites here in Settings.</p>
 <div class="bot-manager-toolbar">
 <input id="favoriteBotSearch" placeholder="Search favorite bots — comma = multiple terms" type="search"/>
@@ -736,6 +741,12 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="laterBotApplyBulk" type="button">Apply</button>
 </div>
 <p class="hint ds-bulk-selection-hint">Selections stay active after Apply so you can run another bulk action on the same bots. Use Clear selection when you are finished.</p>
+<div class="bot-manager-bulkbar" id="laterFavoriteActions">
+<button id="laterMoveCurrentFavorites" type="button">Move current Favorites to Later</button>
+<button id="laterUnfavoriteOverlap" type="button">Unfavorite bots already in Later</button>
+<a href="https://spicychat.ai/favorite-bots" target="_blank" rel="noopener noreferrer">Open Favorites</a>
+<span class="hint" id="laterFavoriteActionStatus">Moves use your last complete Favorites scan. Unfavoriting runs on SpicyChat's Favorites page and can be stopped or resumed.</span>
+</div>
 <div class="bot-manager-list" id="laterBotManager"></div>
 <div class="bot-manager-pager">
 <button id="laterBotShowMore" type="button">Show 10 more</button>
@@ -1864,6 +1875,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 
 <div id="ds-feature-panel-chat-search" data-dsq-feature-panel="chat-search"></div>
 <div id="ds-feature-panel-chat-bookmarks" data-dsq-feature-panel="chat-bookmarks"></div>
+<div id="ds-feature-panel-chat-continuation" data-dsq-feature-panel="chat-continuation"></div>
 <div id="ds-feature-panel-focus-mode" data-dsq-feature-panel="focus-mode"></div>
 
 
@@ -2194,6 +2206,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="cardTokenShowExamples" type="checkbox"/><span>Example dialogue</span></label>
 </div>
 <label class="row"><input id="hideGroupChats" type="checkbox"/><span>Hide group chats / multiple participant bots</span></label>
+<label class="row"><input id="publicPersonalityOnly" type="checkbox"/><span>Only show bots with a publicly visible Personality on listing pages</span></label>
+<p class="hint">Uses SpicyChat's existing “definition visible” marker on loaded cards. Does not request private definitions or scan bot profiles. Also available in Narrow by Features. Unknown markers are left visible.</p>
 <label class="row"><input id="showLorebookFilters" type="checkbox"/><span>Add Lorebook filter/sort tools to bot listings (including Has Lorebook search)</span></label>
 <label class="row"><input id="showRulebookFilters" type="checkbox"/><span>Add Rulebook Has / confirmed No / Unknown filter to My Creations (no profile requests)</span></label>
 <label class="row"><input id="lorebookUnknownSafeFilter" type="checkbox"/><span>Separate unknown Lorebook status from confirmed No Lorebook when filtering</span></label>
@@ -2888,7 +2902,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

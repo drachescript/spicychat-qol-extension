@@ -847,13 +847,51 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // React updates are observable without repeatedly waking a throttled helper
+  // tab. One observer + one absolute deadline replaces 60/150ms polling loops.
+  // This is only attached during an explicit editor/export operation.
+  function awaitNativeCondition(check, { timeout = 5000, root = document.body, route = null } = {}) {
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      let checking = false;
+      let observer;
+      let timer;
+      const finish = (value, error) => {
+        if (finished) return;
+        finished = true;
+        try { observer?.disconnect(); } catch {}
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve(value);
+      };
+      const inspect = () => {
+        if (finished || checking) return;
+        checking = true;
+        try {
+          if (route) {
+            const current = lorebookRoute();
+            if (!current || current.id !== route.id || current.page !== route.page) {
+              finish(null, new Error("Lorebook page changed while collecting entries. No backup was replaced."));
+              return;
+            }
+          }
+          const value = check();
+          if (value !== null && value !== undefined && value !== false) finish(value);
+        } catch (error) { finish(null, error); }
+        finally { checking = false; }
+      };
+      timer = setTimeout(() => finish(null, new Error("SpicyChat did not finish loading the Lorebook editor before the deadline.")), timeout);
+      const target = root || document.body || document.documentElement;
+      if (target) {
+        observer = new MutationObserver(inspect);
+        observer.observe(target, { childList: true, subtree: true, characterData: true, attributes: false });
+      }
+      inspect();
+    });
+  }
+
   async function waitFor(check, timeout = 5000) {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      try { const value = check(); if (value) return value; } catch {}
-      await sleep(60);
-    }
-    throw new Error("SpicyChat did not open the Lorebook entry editor in time.");
+    return awaitNativeCondition(check, { timeout });
   }
 
   async function openRow(row) {
@@ -865,7 +903,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   async function closeModal(parts) {
     const cancel = parts?.root?.querySelector("button[aria-label='Cancel']") || [...(parts?.root?.querySelectorAll("button")||[])].find(b => /^cancel$/i.test(textOf(b,30)));
-    if (cancel) { suppressDraftGuard = true; cancel.click(); suppressDraftGuard = false; await sleep(100); }
+    if (cancel) {
+      suppressDraftGuard = true;
+      try { cancel.click(); } finally { suppressDraftGuard = false; }
+      // Visibility changes no longer turn a 100ms delay into a multi-second wait.
+      await awaitNativeCondition(() => !entryModalParts(), { timeout: 4000 }).catch(() => {});
+    }
   }
 
   async function captureRow(row) {
@@ -1340,37 +1383,208 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.querySelectorAll(".ds-lb-row-tools,.ds-lb-edit-page-shortcut,[data-ds-edit-lorebook-menu],.ds-lb-draft-banner").forEach(n=>n.remove());
   };
 
+  function nativeEntryCountFromCounter() {
+    const header = document.querySelector("[data-testid='EntriesListServer-Header']");
+    if (!header) return null;
+    // Never scan the whole header's text: its "up to 5,000 entries" hint
+    // can appear before the actual count and cause a false 5000-entry total.
+    const counter = header.querySelector('[data-translate-key="lorebook:entries.count"]') ||
+      header.querySelector("[data-testid='EntriesList-SortDropdown']")?.parentElement?.querySelector("p");
+    const text = String(counter?.textContent || "").replace(/\u00a0/g, " ").trim();
+    const fraction = /^([\d,]+)\s*\/\s*([\d,]+)\s+entries\s*$/i.exec(text);
+    const simple = !fraction && /^(?:([\d,]+)\s+entries|entries\s*\(\s*([\d,]+)\s*\))$/i.exec(text);
+    const raw = fraction?.[1] || simple?.[1] || simple?.[2] || "";
+    const count = raw ? Number(raw.replace(/,/g, "")) : null;
+    return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
+  }
+
+  // The native Entries editor initially mounts only 100 cards. Its Load More
+  // button appends the next batch (100 -> 200 -> 250 in the captured test).
+  // Only a user-requested full export runs this; normal snapshots stay cheap.
+  function nativeLoadMoreEntriesButton() {
+    const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
+    return [...(root?.querySelectorAll("button[type='button']") || [])].find(button =>
+      button.offsetParent !== null &&
+      !button.closest(`#${TOOLBAR_ID},.ds-lb-row-tools`) &&
+      /^load more(?: entries)?$/i.test(textOf(button, 80))
+    ) || null;
+  }
+
+  async function waitForNativeEntryIncrease(previousCount, route, timeout = 20000) {
+    const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement || document.body;
+    try {
+      return await awaitNativeCondition(() => {
+        const mounted = findEntryRows();
+        return mounted.length > previousCount ? mounted : null;
+      }, { timeout, route, root });
+    } catch (error) {
+      if (/deadline/i.test(String(error?.message || ""))) {
+        throw new Error(`SpicyChat did not load any more entries after ${previousCount}. No partial backup was accepted.`);
+      }
+      throw error;
+    }
+  }
+
+  async function loadAllNativeEntries(route, statedTotal, progress) {
+    // A conservative upper bound protects against a stuck or looping page.
+    // SpicyChat currently serves batches of 100, but don't assume this size.
+    const maxLoads = Math.min(502, Math.ceil(statedTotal / 10) + 2);
+    let rows = findEntryRows();
+    for (let step = 0; rows.length < statedTotal && step < maxLoads; step += 1) {
+      if (rows.length > 5000) throw new Error("Lorebook editor returned over 5,000 entries; refusing the export.");
+      let more = nativeLoadMoreEntriesButton();
+      if (!more) {
+        throw new Error(`SpicyChat shows ${statedTotal} entries but only ${rows.length} are loaded, and Load More is unavailable. No backup was replaced.`);
+      }
+      // React disables its button while a batch is already in flight.
+      // Don't force a second click until it is ready again.
+      if (more.disabled) {
+        rows = await waitForNativeEntryIncrease(rows.length, route);
+        continue;
+      }
+      const before = rows.length;
+      progress?.({ current: before, total: statedTotal, message: `Loading Lorebook entries ${before}/${statedTotal}…` });
+      more.click();
+      rows = await waitForNativeEntryIncrease(before, route);
+      progress?.({ current: rows.length, total: statedTotal, message: `Loaded ${rows.length}/${statedTotal} Lorebook entries.` });
+    }
+    if (rows.length !== statedTotal) {
+      throw new Error(`Only ${rows.length}/${statedTotal} Lorebook entries loaded. No partial backup was accepted.`);
+    }
+    return rows;
+  }
+
+  // SpicyChat renders full entry content in the list's text node even when
+  // CSS visually clamps it to two lines. Only the keyword list is sometimes
+  // reduced to a visible subset with a +N marker. Avoid opening a native
+  // React modal for every ordinary entry during a manual full backup.
+  function readCompleteNativeListRow(row) {
+    if (!row) return null;
+    const nameElement = row.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1");
+    const name = clean(nameElement?.textContent, 50);
+    const fullName = clean(nameElement?.parentElement?.getAttribute("data-tooltip-content"), 50);
+    if (!name || (fullName && fullName !== name)) return null;
+
+    const keywordWrap = [...row.querySelectorAll("div.flex.items-center")].find(node =>
+      node.classList.contains("gap-1") && node.querySelector("p.text-label-sm")
+    );
+    const keywordNodes = keywordWrap ? [...keywordWrap.querySelectorAll("p.text-label-sm")] : [];
+    if (!keywordNodes.length) return null;
+    // A +N chip means the list omits keywords. The native editor is required.
+    if (keywordNodes.some(p => /^\+\d+$/.test(clean(p.textContent, 20)))) return null;
+    const keywordsText = clean(keywordNodes[0]?.textContent, 2400);
+    if (!keywordsText || /\+\d+\s*$/.test(keywordsText)) return null;
+    const keywords = unique(keywordsText.split(/\s*,\s*/g), 12);
+    if (!keywords.length) return null;
+
+    const contentNodes = row.querySelectorAll("div.w-full.text-left > p");
+    if (contentNodes.length !== 1) return null;
+    const contentNode = contentNodes[0];
+    // Only trust the expected CSS-clamped full-text element, not a synopsis
+    // or another future native card component with shortened plain text.
+    const inlineStyle = String(contentNode.getAttribute("style") || "");
+    if (!inlineStyle.includes("-webkit-line-clamp") || !inlineStyle.includes("overflow")) return null;
+    const content = clean(contentNode.textContent, 24000);
+    if (!content || /(?:\.\.\.|…)\s*$/.test(content)) return null;
+    return { name, keywords, content };
+  }
+
   DS.captureLorebookEntriesFully = async function captureLorebookEntriesFully({ progress } = {}) {
     const route = lorebookRoute();
     if (!route?.id || route.page !== "entries") throw new Error("Open the Lorebook Entries page to collect full entry data.");
-    const rows = findEntryRows();
+    let rows = findEntryRows();
     if (!rows.length) throw new Error("No Lorebook entries are loaded yet.");
     // The native editor may show only one page of a large Lorebook. When it
     // provides an explicit total, require that all rows are available before
     // reporting a complete backup instead of exporting the current page only.
-    const headerText = String(document.querySelector("[data-testid='EntriesListServer-Header']")?.textContent || "").trim();
-    const totalMatch = /(?:entries\s*\(\s*(\d+)\s*\)|(?:entries\s*:?\s*(\d+))|(?:(\d+)\s*entries))/i.exec(headerText);
-    const statedTotal = totalMatch ? Number(totalMatch[1] || totalMatch[2] || totalMatch[3]) : null;
-    if (statedTotal !== null && Number.isSafeInteger(statedTotal) && statedTotal > rows.length) {
-      throw new Error(`SpicyChat shows ${statedTotal} entries but only ${rows.length} are mounted. Refusing a partial full backup.`);
+    // The header can mount before its count element. Wait for the precise
+    // current/maximum counter instead of misreading the 5,000-entry capacity.
+    // Rows may already have loaded (including all 250) while that React
+    // counter is still mounting, especially in a hidden helper tab.
+    let statedTotal = nativeEntryCountFromCounter();
+    if (statedTotal === null) {
+      const root = document.querySelector("[data-testid='EntriesListServer-Header']") || document.body;
+      statedTotal = await awaitNativeCondition(nativeEntryCountFromCounter, {
+        timeout: 20000, root, route
+      }).catch(error => {
+        if (/deadline/i.test(String(error?.message || ""))) return null;
+        throw error;
+      });
     }
+    if (statedTotal === null) {
+      throw new Error("SpicyChat did not show its current Lorebook entry count. No full backup was accepted.");
+    }
+    if (rows.length > statedTotal) {
+      throw new Error(`SpicyChat shows ${statedTotal} entries but ${rows.length} are loaded; the page changed during export.`);
+    }
+    if (rows.length !== statedTotal) rows = await loadAllNativeEntries(route, statedTotal, progress);
     const entries = [];
     const wasBusy = bulkBusy;
     bulkBusy = true;
     try {
-      for (let index = 0; index < rows.length; index += 1) {
-        progress?.({ current: index + 1, total: rows.length, message: `Reading entry ${index + 1}/${rows.length}…` });
-        // A backup must reflect today's editor, not a previous in-memory
-        // keyword analysis. Reopen every row and read its current native form.
+      const expectedNames = rows.map(row => clean(rowInfo(row)?.name, 50));
+      if (expectedNames.some(name => !name)) throw new Error("Lorebook contains an unreadable entry name. No backup was replaced.");
+      const quickRows = rows.map(readCompleteNativeListRow);
+      const quickIndices = quickRows.map((item, index) => item ? index : -1).filter(index => index !== -1);
+      let trustNativeList = quickIndices.length > 0;
+
+      async function readEditorRow(index) {
         const liveRows = findEntryRows();
-        if (liveRows.length !== rows.length) throw new Error("Lorebook entry list changed while exporting. Nothing was marked complete.");
-        const expectedName = clean(rowInfo(liveRows[index])?.name, 50);
+        if (liveRows.length !== rows.length || clean(rowInfo(liveRows[index])?.name, 50) !== expectedNames[index]) {
+          throw new Error("Lorebook entry list changed while exporting. No incomplete backup was accepted.");
+        }
         const modal = await openRow(liveRows[index]);
         let data;
         try { data = modalData(modal); }
         finally { await closeModal(modal); }
+        if (clean(data?.name, 50) !== expectedNames[index]) {
+          throw new Error("Lorebook entry editor changed during collection. No partial export was accepted.");
+        }
+        return data;
+      }
+
+      if (trustNativeList) {
+        // Spot-check the native full-text list before using it as a fast read.
+        // If SpicyChat changes how it renders summaries, fall back to reading
+        // all the entry editors rather than silently losing any content.
+        const sample = [...new Set([
+          quickIndices[0],
+          quickIndices[Math.floor(quickIndices.length / 2)],
+          quickIndices[quickIndices.length - 1],
+          quickIndices.reduce((best, idx) => quickRows[idx].content.length > quickRows[best].content.length ? idx : best, quickIndices[0])
+        ])];
+        progress?.({ current: 0, total: rows.length, message: `Checking ${sample.length} Lorebook entries against the editor…` });
+        for (const index of sample) {
+          const actual = await readEditorRow(index);
+          const summary = quickRows[index];
+          const normalized = unique(actual?.keywords || [], 12);
+          if (clean(actual?.content, 24000) !== summary.content ||
+              normalized.length !== summary.keywords.length ||
+              normalized.some((keyword, i) => keyword !== summary.keywords[i])) {
+            trustNativeList = false;
+            break;
+          }
+        }
+      }
+
+      if (!trustNativeList) {
+        progress?.({ current: 0, total: rows.length, message: "Native list needs full editor verification; reading entries individually…" });
+      } else {
+        progress?.({ current: 0, total: rows.length, message: `Using verified list data for ${quickIndices.length}/${rows.length} Lorebook entries…` });
+      }
+
+      for (let index = 0; index < rows.length; index += 1) {
+        // The editor is only needed where native cards omit keywords/content,
+        // or where the spot-check found that summaries aren't complete.
+        const summary = trustNativeList ? quickRows[index] : null;
+        const data = summary || await readEditorRow(index);
         const name = clean(data?.name, 50);
-        if (!name || name !== expectedName) throw new Error("Lorebook entry editor changed during collection. No partial export was accepted.");
+        if (!name || name !== expectedNames[index]) {
+          throw new Error("Lorebook entry editor changed during collection. No partial export was accepted.");
+        }
+        if (!summary || index % 25 === 0 || index === rows.length - 1) {
+          progress?.({ current: index + 1, total: rows.length, message: `Reading entry ${index + 1}/${rows.length}…` });
+        }
         analyzedEntries.set(name, data);
         entries.push({
           key: name.toLowerCase(),
@@ -1382,8 +1596,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           capturedAt: Date.now()
         });
       }
+      // A total that is still correct does not rule out cards changing order.
+      // Compare row identities once more before marking the capture complete.
+      const closingRows = findEntryRows();
+      if (closingRows.length !== expectedNames.length || closingRows.some((row, index) =>
+        clean(rowInfo(row)?.name, 50) !== expectedNames[index])) {
+        throw new Error("Lorebook entry list changed during collection. No backup was replaced.");
+      }
       if (entries.length !== rows.length) {
         throw new Error(`Only ${entries.length} of ${rows.length} Lorebook editor entries were captured; refusing an incomplete export.`);
+      }
+      // The entry count can change while each native entry editor is opened.
+      // Revalidate the header before allowing a replacement backup.
+      const finalCount = nativeEntryCountFromCounter();
+      if (finalCount !== statedTotal || findEntryRows().length !== statedTotal) {
+        throw new Error("Lorebook entry list changed during export. No partial backup was accepted.");
       }
       progress?.({ current: rows.length, total: rows.length, message: `Read ${entries.length} entr${entries.length === 1 ? "y" : "ies"} with complete keywords.` });
       return { id: route.id, entries, complete: true };

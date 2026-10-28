@@ -13,6 +13,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MAX_DETAIL = 1200;
   let activeRecall = { chatId: "", details: [], ready: false };
   let recallReadPending = false;
+  // Expiry applies to QoL recaps/recall, never to SpicyChat native pins.
+  // The total comes from a read-only API response, not mounted DOM counts.
+  let countSnapshot = { chatId: '', total: 0, checkedAt: 0, pending: false };
+  function activeMessageTotal(chatId = currentChatId()) {
+    return countSnapshot.chatId === chatId ? countSnapshot.total : 0;
+  }
+  function isExpired(detail, chatId = currentChatId()) {
+    const threshold = Number(detail?.expiresAtMessageCount || 0);
+    const total = activeMessageTotal(chatId);
+    return threshold > 0 && (!total || total >= threshold);
+  }
+  async function refreshExpiryCount({ force = false } = {}) {
+    const chatId = currentChatId();
+    const route = location.pathname.match(/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})/i);
+    const reader = DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage;
+    if (!route || typeof reader !== 'function' || document.hidden) return 0;
+    if (countSnapshot.chatId !== chatId) countSnapshot = { chatId, total: 0, checkedAt: 0, pending: false };
+    if (countSnapshot.pending || (!force && Date.now() - countSnapshot.checkedAt < 60000)) return countSnapshot.total;
+    countSnapshot.pending = true;
+    try {
+      const result = await reader(route[1], route[2], { limit: 50 });
+      const total = Math.max(0, Number((result?.data || {}).num_messages || 0));
+      if (chatId === currentChatId() && total) {
+        countSnapshot.total = total;
+        countSnapshot.checkedAt = Date.now();
+      }
+      return total;
+    } finally { countSnapshot.pending = false; }
+  }
+
 
   const STOP_WORDS = new Set([
     "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "at", "for", "with", "from", "as", "is", "was",
@@ -83,6 +113,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           score: Number(item?.score) || 0,
           enabled: item?.enabled !== false,
           pinned: item?.pinned === true,
+          expiresAtMessageCount: Math.max(0, Math.floor(Number(item?.expiresAtMessageCount) || 0)),
+          expireAfterMessages: Math.max(0, Math.floor(Number(item?.expireAfterMessages) || 0)),
           needsReview: item?.needsReview === true,
           supersededBy: clean(item?.supersededBy || "").slice(0, 120),
           supersedes: (Array.isArray(item?.supersedes) ? item.supersedes : [item?.supersedes]).filter(Boolean).slice(0, 20).map(value => clean(value).slice(0, 120)),
@@ -143,6 +175,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (currentChatId() !== id) return;
       const entry = normalize({[id]:data?.[KEY]?.[id]})[id];
       activeRecall = { chatId:id, details:[...(entry?.details || [])], ready:true };
+      if (activeRecall.details.some(d => d.expiresAtMessageCount > 0))
+        refreshExpiryCount().catch(() => {});
     }).catch(() => {}).finally(() => { recallReadPending = false; });
   }
 
@@ -634,6 +668,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         score: Number(item.score) || (itemSource === "memory" ? Math.max(8, scoreSentence(text)) : scoreSentence(text)),
         enabled: item.enabled !== false,
         pinned: item.pinned === true,
+        expiresAtMessageCount: Math.max(0, Number(item.expiresAtMessageCount) || 0),
+        expireAfterMessages: Math.max(0, Number(item.expireAfterMessages) || 0),
         needsReview: item.needsReview === true,
         messageId: clean(item.messageId || item.message_id || "").slice(0, 160),
         role: clean(item.role || item.speaker || "").slice(0, 40),
@@ -684,7 +720,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function detailsForRecap(details) {
-    const enabled = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy);
+    const enabled = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy && !isExpired(detail));
     const mode = recapMode();
     const limits = {
       compact: { count: 6, chars: 1700 },
@@ -736,7 +772,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!cfg.enabled || !cfg.enableContextKeeper || !cfg.contextKeeperAutoRecall || !DS.isSingleChatPage?.()) return null;
     const id = currentChatId();
     if (activeRecall.chatId !== id || !activeRecall.ready) { prepareRecall(); return null; }
-    const enabled = activeRecall.details.filter(x => x.enabled !== false && !x.needsReview && !x.supersededBy);
+    if (activeRecall.details.some(d => d.expiresAtMessageCount > 0))
+      refreshExpiryCount().catch(() => {}); // At most one lightweight check per minute while needed.
+    const enabled = activeRecall.details.filter(x => x.enabled !== false && !x.needsReview && !x.supersededBy && !isExpired(x));
     if (!enabled.length) return null;
     const selected = [];
     const relevantRecall = cfg.contextKeeperRelevantRecall === true;
@@ -769,7 +807,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   async function insertRecap(details) {
-    const active = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy);
+    const active = (details || []).filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy && !isExpired(detail));
     const timelineOnly = DS.getStoryDayContextLine?.({ includeNotes: true }) || "";
     if (!active.length && !timelineOnly) {
       DS.setQuickStatus?.("Context Keeper has no recap-enabled details or Storydate timeline for this chat yet.");
@@ -891,7 +929,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     function renderStatus() {
       const nowCount = roots().length;
       const since = entry.lastRecapAt ? Math.max(0, nowCount - (entry.lastRecapMessageCount || 0)) : 0;
-      const enabled = entry.details.filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy).length;
+      const enabled = entry.details.filter(detail => detail.enabled !== false && !detail.needsReview && !detail.supersededBy && !isExpired(detail)).length;
       const review = entry.details.filter(detail => detail.needsReview).length;
       const past = entry.details.filter(detail => detail.supersededBy).length;
       const automatic = entry.details.filter(detail => detail.source === "auto").length;
@@ -945,12 +983,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         selectLabel.append(checked, document.createTextNode("Select"));
         checked.addEventListener("change", () => { if (checked.checked) selectedDetails.add(detail.id); else selectedDetails.delete(detail.id); });
         const includeLabel = make("label", { className: "ds-context-include" });
-        const include = make("input", { type: "checkbox", checked: detail.enabled !== false && !detail.needsReview && !detail.supersededBy });
-        include.disabled = !!detail.supersededBy;
+        const include = make("input", { type: "checkbox", checked: detail.enabled !== false && !detail.needsReview && !detail.supersededBy && !isExpired(detail) });
+        include.disabled = !!detail.supersededBy || isExpired(detail);
         includeLabel.append(include, document.createTextNode("Use in recap"));
         meta.append(selectLabel, badge, sourceBadge, includeLabel);
         if (detail.supersededBy) meta.append(make("span", { className: "ds-context-category" }, "Past version — kept for history"));
         if (detail.pinned) meta.append(make("span", { className: "ds-context-category" }, "Pinned"));
+        if (detail.expiresAtMessageCount > 0) {
+          const remaining = activeMessageTotal() ? Math.max(0, detail.expiresAtMessageCount - activeMessageTotal()) : null;
+          meta.append(make("span", { className: "ds-context-category" }, remaining === null
+            ? `Expiry pending verification · ${detail.expireAfterMessages || '?'} messages`
+            : remaining ? `Expires in ~${remaining} messages` : 'Expired · not included in recap'));
+        }
         if (detail.needsReview) meta.append(make("span", { className: "ds-context-category" }, "Needs review — excluded from recall"));
         const value = make("div", { className: "ds-tool-item-text" }, detail.text);
         const actions = make("div", { className: "ds-tool-actions" });
@@ -963,6 +1007,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (!found) return;
           found.pinned = !found.pinned;
           await writeStore(latest); await refreshEntry();
+        });
+        const expiry = make('button', { type:'button' }, detail.expiresAtMessageCount > 0 ? 'Change expiry' : 'Set expiry');
+        expiry.disabled = !!detail.supersededBy;
+        expiry.title = 'Optional QoL-only expiry by total chat message count. 0 keeps this detail indefinitely.';
+        expiry.addEventListener('click', async () => {
+          const choice = window.prompt('Expire this detail after how many NEW chat messages? 0 = never. (QoL recaps/recall only)', String(detail.expireAfterMessages || 0));
+          if (choice === null) return;
+          if (!/^\d{1,5}$/.test(choice.trim()) || Number(choice) > 5000) {
+            DS.setQuickStatus?.('Enter a whole number from 0 to 5000.'); return;
+          }
+          const requested = Number(choice);
+          let total = 0;
+          if (requested > 0) {
+            try { total = await refreshExpiryCount({ force:true }); }
+            catch { total = 0; }
+            if (!total) { DS.setQuickStatus?.('Cannot verify message count yet. Expiry was not changed.'); return; }
+          }
+          const latest = await readStore();
+          const found = latest[id]?.details?.find(item => item.id === detail.id);
+          if (!found) return;
+          found.expireAfterMessages = requested;
+          found.expiresAtMessageCount = requested ? total + requested : 0;
+          await writeStore(latest, 'Changed Context Keeper expiry');
+          await refreshEntry();
         });
         const review = detail.needsReview ? make("button", { type: "button" }, "Confirm and include") : null;
         review?.addEventListener("click", async () => {
@@ -1003,7 +1071,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await writeStore(latest);
           await refreshEntry();
         });
-        actions.append(edit, pin);
+        actions.append(edit, pin, expiry);
         if (DS.state?.settings?.enableChatLorebookManager && !detail.supersededBy) {
           const toLocal=make("button", { type: "button" }, "To local Lorebook");
           toLocal.title="Open this fact in the local entry editor for review. Does not write a native Lorebook.";

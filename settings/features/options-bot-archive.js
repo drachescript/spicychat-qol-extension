@@ -1420,7 +1420,9 @@ async function hydrateBotStatusWithHelper(id, entry = {}, { keepHelper = false, 
       botId: id,
       botName: String(entry?.name || "").slice(0, 160),
       keepHelper: !!keepHelper,
-      forceOwnHelper: !!forceOwnHelper
+      forceOwnHelper: !!forceOwnHelper,
+      forceRefresh: !!forceOwnHelper || !!keepHelper,
+      bulkScan: !!keepHelper
     }, timeoutMs);
     if (result?.__dsTimeout) {
       return { ok: false, status: "worker-timeout", httpStatus: 0, reason: "Bot Status worker did not answer this bot check in time." };

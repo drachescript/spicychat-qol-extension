@@ -1182,29 +1182,67 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     })).filter(item => item.name && item.content);
     if (!items.length) throw new Error("That file does not contain any usable Lorebook entries.");
 
-    const counts = { total: items.length, created: 0, skipped: 0, replaced: 0, merged: 0, duplicated: 0, failed: 0 };
+    const counts = { total: items.length, created: 0, skipped: 0, replaced: 0, merged: 0, duplicated: 0,
+      failed: 0, completed: 0, cancelled: false, paused: false, nextIndex: 0, stopReason: "" };
+    const startIndex = Math.max(0, Math.min(items.length, Math.trunc(Number(options.startIndex) || 0)));
+    const operation = { cancelled: false, id: route.id };
+    DS.activeLorebookEntryImport = operation;
     busy = true;
     try {
-      for (let index = 0; index < items.length; index += 1) {
+      for (let index = startIndex; index < items.length; index += 1) {
+        counts.nextIndex = index;
+        if (operation.cancelled || options.signal?.aborted) {
+          counts.cancelled = true;
+          counts.stopReason = "Cancelled before the next entry.";
+          break;
+        }
+        if (routeInfo()?.id !== operation.id || routeInfo()?.page !== "entries") {
+          counts.paused = true;
+          counts.stopReason = "Lorebook changed; import paused before another write.";
+          break;
+        }
         const item = items[index];
         try {
           const result = await importOne(item, duplicatePolicy);
           const action = String(result?.action || "");
           if (Object.prototype.hasOwnProperty.call(counts, action)) counts[action] += 1;
+          counts.completed++;
+          counts.nextIndex = index + 1;
         } catch (error) {
           counts.failed += 1;
           if (typeof options.onError === "function") {
             try { options.onError(error, item, index); } catch {}
           }
+          const detail = String(error?.message || error || "");
+          const status = Number(error?.httpStatus || error?.status || 0);
+          if ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500 ||
+              /rate.limit|too many requests|auth|token|ambiguous|unverified|cannot confirm|timed out|network/i.test(detail)) {
+            counts.paused = true;
+            counts.stopReason = status === 429 ? "SpicyChat rate limited this import (HTTP 429)." :
+              `Uncertain entry result; review before resuming: ${detail.slice(0, 150)}`;
+            break;
+          }
+          // The previously attempted entry may still have been saved.
+          // Do not automatically retry it or mark it completed.
         }
         if (typeof options.onProgress === "function") {
-          try { options.onProgress({ ...counts, completed: index + 1, current: item.name }); } catch {}
+          try { options.onProgress({ ...counts, current: item.name }); } catch {}
         }
       }
+      if ((counts.paused || counts.cancelled) && typeof options.onProgress === "function") {
+        try { options.onProgress({ ...counts, current: "", stopped: true }); } catch {}
+      }
     } finally {
+      if (DS.activeLorebookEntryImport === operation) DS.activeLorebookEntryImport = null;
       busy = false;
     }
     return counts;
+  };
+
+  DS.cancelLorebookEntryImport = function cancelLorebookEntryImport() {
+    if (!DS.activeLorebookEntryImport) return false;
+    DS.activeLorebookEntryImport.cancelled = true;
+    return true;
   };
 
   DS.removeWikiLorebookImporter = function removeWikiLorebookImporter() {

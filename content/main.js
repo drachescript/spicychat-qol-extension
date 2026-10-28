@@ -811,10 +811,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function cardFilteringWanted(settings) {
     // Saved explicit bot IDs must remain hidden even when optional word/tag
     // filters are off. The dirty-card cache keeps repeated passes inexpensive.
-    if (DS.state?.blockedBotIdSet?.size) return true;
+    if (DS.state?.blockedBotIdSet?.size || document.querySelector('[data-ds-reason*="personality not public"]')) return true;
     return anySetting(settings, [
       "blockCards", "hideOpenedChats", "hideLaterBotsFromListings", "hideHomeForYouCards",
-      "hideGroupChats", "enableLanguageFilter"
+      "hideGroupChats", "enableLanguageFilter", "publicPersonalityOnly"
     ]);
   }
 
@@ -1314,6 +1314,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (messageQuickActionsEnabled(settings) || DS.state.messageOptionsWasActive) await runStep("message options", () => DS.applyMessageOptions?.());
       if (generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning")) await runStep("generation metadata", () => DS.applyGenerationMetadata?.());
       if (settings.enableMessageBookmarks || DS.state.chatBookmarksWasActive) await runStep("chat bookmarks", () => DS.applyChatBookmarks?.());
+      if (settings.enableChatContinuationAssistant || DS.state.chatContinuationWasActive) await runStep("chat continuation", () => DS.applyChatContinuationAssistant?.());
       if (settings.showChatSearch || DS.state.chatSearchWasActive) await runStep("chat search", () => DS.applyChatSearch?.());
       if (DS.isRpFormatRepairEnabledForCurrentCharacter?.() || settings.enableRpFormatRepair || DS.state.rpFormatRepairWasActive) await runStep("RP format repair", () => DS.applyRpFormatRepair?.());
       if (settings.styleAlternateDialogue || DS.state.alternateDialogueWasActive) await runStep("alternate dialogue", () => DS.applyAlternateDialogueStyling?.());
@@ -1694,6 +1695,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("chat background button placement", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
         await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());
         if (settings.enableMessageBookmarks || DS.state.chatBookmarksWasActive) await runStep("chat bookmarks", () => DS.applyChatBookmarks?.());
+        if (settings.enableChatContinuationAssistant || DS.state.chatContinuationWasActive) await runStep("chat continuation", () => DS.applyChatContinuationAssistant?.());
         if (settings.showChatSearch || DS.state.chatSearchWasActive) await runStep("chat search", () => DS.applyChatSearch?.());
         await runFeatureStep("focus mode", !!settings.enableFocusMode || document.documentElement.classList.contains("ds-focus-mode"), () => DS.applyFocusMode?.());
         await runFeatureStep("character QoL profile", !!settings.enableCharacterQolProfiles, () => DS.applyCharacterQolProfile?.());
@@ -2003,9 +2005,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
 
-      const favoriteDataWanted = anySetting(settings, ["trackFavoriteBots", "neverHideFavorites", "protectFavoritesFromBlocking", "showFavoriteHistoryButton", "recommendationHideFavoriteBots"]);
+      const favoriteDataWanted = anySetting(settings, ["trackFavoriteBots", "neverHideFavorites", "protectFavoritesFromBlocking", "showFavoriteHistoryButton", "recommendationHideFavoriteBots", "enableFavoritesRecovery"]);
       await runRoutedFeatureStep(plan, "listings", "favorite bots import", favoriteDataWanted, () => DS.importVisibleFavoriteBots?.());
-      await runRoutedFeatureStep(plan, "listings", "favorite history", () => !!settings.showFavoriteHistoryButton || !!settings.favoritePageFoldersEnabled || !!settings.favoritePageSortEnabled || !!document.querySelector("[data-ds-favorite-history],#ds-favorite-history,#ds-favorite-qol-controls"), () => DS.applyFavoriteHistoryButton?.());
+      // The Favorites selector uses separate IDs and actions from bulk blocking.
+      // Repair only while its launcher is missing to avoid repeat list work.
+      await runRoutedFeatureStep(plan, "listings", "favorites bulk actions", () =>
+        !!DS.isFavoriteBotsPage?.() && !document.getElementById("ds-favorites-bulk-launcher"),
+        () => DS.refreshFavoritesBulkManager?.());
+      await runRoutedFeatureStep(plan, "listings", "public personality control", () => !!document.querySelector('[data-testid="FeaturesCapabilityGate-Header"]'), () => DS.syncPublicPersonalityControl?.());
+      await runRoutedFeatureStep(plan, "listings", "favorite history", () => !!settings.showFavoriteHistoryButton || !!settings.enableFavoritesRecovery || !!settings.favoritePageFoldersEnabled || !!settings.favoritePageSortEnabled || !!document.querySelector("[data-ds-favorite-history],#ds-favorite-history,#ds-favorite-qol-controls"), () => DS.applyFavoriteHistoryButton?.());
       await runRoutedFeatureStep(plan, "listings", "NSFW toggle", String(settings.globalNsfwMode || "ignore") !== "ignore", () => DS.setGlobalNsfwSwitch?.());
       await runRoutedFeatureStep(plan, "listings", "tag template", !!settings.autoTags, () => DS.applyAutoTags?.());
       await runRoutedFeatureStep(plan, "listings", "tag template button", () => !!settings.showTagTemplateButton || !!document.querySelector(".ds-tag-template-button"), () => DS.addTagTemplateButton?.());

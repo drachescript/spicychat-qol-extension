@@ -117,6 +117,46 @@ async function ensureLorebookExportHelper(rawUrl) {
   return { ok: true, tabId, reused: true };
 }
 
+// A full editor capture uses the helper twice (Details, then Entries).
+// The 30-second idle timeout is useful between operations, but should not
+// keep the finished helper around after the caller has the verified result.
+// Serialize release with the normal helper queue so a running capture cannot
+// be interrupted. Only remove a tab still marked as our dedicated worker.
+function releaseLorebookExportHelperAfterCapture(rawId) {
+  const id = String(rawId || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) {
+    return Promise.resolve({ ok: false, error: "Invalid Lorebook ID." });
+  }
+  const release = async () => {
+    const tabId = Number(lorebookExportHelperTabId || 0);
+    if (!tabId) return { ok: true, closed: false };
+    const tab = await tabsGet(tabId);
+    if (!tab) {
+      clearLorebookExportHelperIdleTimer();
+      lorebookExportHelperTabId = 0;
+      return { ok: true, closed: false };
+    }
+    const url = String(tab.pendingUrl || tab.url || "");
+    let matches = false;
+    try {
+      const parsed = new URL(url);
+      const match = parsed.pathname.match(/^\/lorebook\/edit\/([^/]+)(?:\/entries)?\/?$/i);
+      matches = isLorebookExportWorkerUrl(url) &&
+        String(match?.[1] || "").toLowerCase() === id;
+    } catch {}
+    if (!matches) {
+      // The tab was navigated away from our worker or belongs to another job.
+      // Never close a normal tab or a worker for another Lorebook.
+      return { ok: false, closed: false, error: "Helper is no longer at the requested Lorebook." };
+    }
+    const closed = await closeLorebookExportHelper("capture-finished");
+    return { ok: closed, closed };
+  };
+  const queued = lorebookExportHelperQueue.then(release, release);
+  lorebookExportHelperQueue = queued.catch(() => {});
+  return queued;
+}
+
 // chrome.tabs.update resolves before the old document is necessarily unloaded.
 // A message sent at that point can reach the previous Lorebook editor, which
 // must never be allowed to complete an export for the next requested ID.

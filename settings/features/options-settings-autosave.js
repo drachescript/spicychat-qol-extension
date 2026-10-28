@@ -250,7 +250,10 @@ function readSettingsFromPage() {
     creatorBotCheckMinutes: CREATOR_BOT_WATCH_INTERVALS.includes(Number(value("creatorBotCheckMinutes", "60"))) ? Number(value("creatorBotCheckMinutes", "60")) : 60,
     creatorBotBrowserNotifications: checked("creatorBotBrowserNotifications"),
     trackFavoriteBots: checked("trackFavoriteBots"),
+    showFavoritesBulkSelect: checked("showFavoritesBulkSelect", true),
+    showFavoritesScanButton: checked("showFavoritesScanButton", true),
     showFavoriteHistoryButton: checked("showFavoriteHistoryButton"),
+    enableFavoritesRecovery: checked("enableFavoritesRecovery"),
     favoriteBotSortMode: value("favoriteBotSortMode", "newest"),
     favoriteBotRelationFilter: value("favoriteBotRelationFilter", "all"),
     favoriteBotFolderFilter: value("favoriteBotFolderFilter", "all"),
@@ -551,6 +554,7 @@ function readSettingsFromPage() {
     cardTokenShowExamples: checked("cardTokenShowExamples"),
     cardTokenShowCombined: false,
     hideGroupChats: checked("hideGroupChats"),
+    publicPersonalityOnly: checked("publicPersonalityOnly"),
     showLorebookFilters: checked("showLorebookFilters"),
     showRulebookFilters: checked("showRulebookFilters"),
     enableSmartFilterPresets: checked("enableSmartFilterPresets"),
@@ -887,7 +891,10 @@ function readSingleSettingFromPage(settingKey) {
     case "creatorBotCheckMinutes": return (CREATOR_BOT_WATCH_INTERVALS.includes(Number(value("creatorBotCheckMinutes", "60"))) ? Number(value("creatorBotCheckMinutes", "60")) : 60);
     case "creatorBotBrowserNotifications": return (checked("creatorBotBrowserNotifications"));
     case "trackFavoriteBots": return (checked("trackFavoriteBots"));
+    case "showFavoritesBulkSelect": return (checked("showFavoritesBulkSelect", true));
+    case "showFavoritesScanButton": return (checked("showFavoritesScanButton", true));
     case "showFavoriteHistoryButton": return (checked("showFavoriteHistoryButton"));
+    case "enableFavoritesRecovery": return (checked("enableFavoritesRecovery"));
     case "favoriteBotSortMode": return (value("favoriteBotSortMode", "newest"));
     case "favoriteBotRelationFilter": return (value("favoriteBotRelationFilter", "all"));
     case "favoriteBotFolderFilter": return (value("favoriteBotFolderFilter", "all"));
@@ -1169,6 +1176,7 @@ function readSingleSettingFromPage(settingKey) {
     case "cardTokenShowExamples": return (checked("cardTokenShowExamples"));
     case "cardTokenShowCombined": return (false);
     case "hideGroupChats": return (checked("hideGroupChats"));
+    case "publicPersonalityOnly": return (checked("publicPersonalityOnly"));
     case "showLorebookFilters": return (checked("showLorebookFilters"));
     case "showRulebookFilters": return (checked("showRulebookFilters"));
     case "enableSmartFilterPresets": return (checked("enableSmartFilterPresets"));

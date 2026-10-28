@@ -549,6 +549,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   };
 
+  // Native card markup distinguishes a publicly visible definition from a
+  // normal profile. An absent profile marker is UNKNOWN, not proof of privacy.
+  function publicPersonalitySignal(card) {
+    const anchor = card?.querySelector?.("a[aria-label='character-info'], a[data-testid='CharacterCardOverlayActions-InfoLink']");
+    const tooltip = anchor?.closest?.('[data-tooltip-content]')?.getAttribute('data-tooltip-content') || '';
+    if (/definition visible/i.test(tooltip)) return 'public';
+    if (/^chatbot profile$/i.test(tooltip.trim())) return 'not-public';
+    return 'unknown';
+  }
+
+  function syncPublicPersonalityControl() {
+    const header = document.querySelector('[data-testid="FeaturesCapabilityGate-Header"]');
+    const body = header?.parentElement?.querySelector('[data-testid="FeaturesCapabilityGate-Body"]');
+    if (!body) { document.getElementById('ds-public-personality-filter')?.remove(); return; }
+    let label = body.querySelector('#ds-public-personality-filter');
+    if (!label) {
+      label = document.createElement('label'); label.id = 'ds-public-personality-filter';
+      label.style.cssText = 'display:flex;gap:8px;align-items:center;margin:8px 10px;padding:8px;border-radius:6px;border:1px solid rgba(148,163,184,.24);font:12px system-ui;cursor:pointer';
+      const input = document.createElement('input');input.type='checkbox';input.style.accentColor='#a855f7';
+      const span = document.createElement('span');span.textContent='Public Personality only (QoL)';
+      label.title='Filters currently loaded bots using SpicyChat’s public-definition marker. Unknown markers remain visible.';
+      label.append(input,span);body.prepend(label);
+      input.addEventListener('change', async () => {
+        const settings = DS.state?.settings;
+        if (!settings) return;
+        settings.publicPersonalityOnly = input.checked;
+        try { await DS.saveSettingsPatch?.({ publicPersonalityOnly: input.checked }); }
+        catch { DS.setQuickStatus?.('Could not save the Personality filter.'); }
+        DS.state.cardHidingHasFullPass=false;
+        DS.scheduleRun?.({ priority: 'normal', source: 'public-personality-filter' });
+      });
+    }
+    const input=label.querySelector('input');
+    if (input && input.checked !== !!DS.state?.settings?.publicPersonalityOnly)
+      input.checked=!!DS.state?.settings?.publicPersonalityOnly;
+  }
+
+  DS.syncPublicPersonalityControl = syncPublicPersonalityControl;
+
   DS.shouldHideCard = function shouldHideCard(card, anchor, context = {}) {
     // The dedicated Less Like helper must be able to see the exact blocked bot
     // it is processing. It runs in a hidden SpicyChat tab and does not affect
@@ -567,7 +606,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return null;
     }
 
-    if (!discoveryContext && DS.isFavoriteBotsPage() && settings.neverHideFavorites !== false) {
+    if (!discoveryContext && DS.isFavoriteBotsPage() && settings.neverHideFavorites !== false && !settings.publicPersonalityOnly) {
       return null;
     }
 
@@ -644,6 +683,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     ) {
       return "home For You badge";
     }
+
+    if (settings.publicPersonalityOnly && publicPersonalitySignal(card) === "not-public") return "personality not public";
 
     if (settings.hideGroupChats && DS.isGroupChatCard(card)) {
       return "group chat / multiple participants";
@@ -1289,6 +1330,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return [
       Number(DS.state?.cardFilterStateRevision || 0),
       DS.state?.settings?.hiddenCardMode || "hide",
+      DS.state?.settings?.publicPersonalityOnly ? 1 : 0,
       DS.smartFilterWantsOpened?.() ? 1 : 0,
       DS.smartFilterWantsFavorites?.() ? 1 : 0,
       DS.smartFilterWantsLater?.() ? 1 : 0
@@ -1394,6 +1436,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyCardHiding = async function applyCardHiding(options = {}) {
     if (!DS.state.settings.enabled) return;
+    syncPublicPersonalityControl();
 
     DS.recoverAccidentalCardPageHide?.();
 
@@ -1441,7 +1484,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let filterYieldMs = 0;
     DS.applyCardDisplayNormalization?.(cards);
 
-    if (DS.isFavoriteBotsPage() && DS.state.settings.neverHideFavorites !== false) {
+    if (DS.isFavoriteBotsPage() && DS.state.settings.neverHideFavorites !== false && !DS.state.settings.publicPersonalityOnly) {
       DS.state.cardHidingLastFilterKey = filterKey;
       DS.state.cardHidingLastRouteKey = routeKey;
       DS.state.cardHidingHasFullPass = true;
