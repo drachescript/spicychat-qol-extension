@@ -1,3 +1,14 @@
+## 0.2.64
+- Expanded Chat Continuation / Transfer with reviewed Memory Manager JSON exports and target-chat local Lorebook drafts, imported inactive for review.
+- Added a word censor with whole-word/phrase matching, custom masks, AI/user scope, reveal controls, and per-chat exclusions. Censoring changes only displayed text.
+- Added a choice to export censored chat text while keeping original chat exports as the default.
+- Added a duplicate-handling choice to the Lorebook JSON import confirmation, with Skip existing selected for re-imports.
+- Made Merge and Replace imports verify the private Lorebook and download a full safety backup before changing matching entries.
+- Fixed Lorebook imports checking only the first 100 loaded names, which could create duplicates when re-importing larger Lorebooks.
+- Clarified the paused-import message so the Skip existing choice is easier to find.
+- Fixed Memory Manager tools not appearing when opening the Memories window for the first time, including after opening it in another chat.
+- Added a Default/Compact view switch to the Memories window, with the layout choice saved locally.
+
 ## 0.2.63
 - Added a Public Personality filter to Narrow by Features and Settings, using SpicyChat's existing public-definition marker on loaded cards without scanning private profiles.
 - Added Favorites → Later recovery with selections from current favorites and preserved Favorite History, verified Later saves, bulk copy, and a cancellable native-unfavorite action for loaded cards.

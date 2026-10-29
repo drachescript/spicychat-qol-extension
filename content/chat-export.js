@@ -284,7 +284,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function extractNodeText(node, { allowHiddenDirectives = false } = {}) {
     if (!node) return "";
 
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType === Node.TEXT_NODE) return DS.getOriginalChatDisplayNodeText?.(node) ?? node.nodeValue ?? "";
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
     const el = node;
@@ -450,7 +450,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function extractNodeTextFast(node) {
     if (!node) return "";
-    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
+    if (node.nodeType === Node.TEXT_NODE) return DS.getOriginalChatDisplayNodeText?.(node) ?? node.nodeValue ?? "";
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
     const el = node;
@@ -1114,6 +1114,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function renderFormat(data, opts) {
+    // Only transform an in-memory export copy. Never touch API history or native messages.
+    if (opts.censored && typeof DS.censorChatExportText === "function") {
+      data = { ...data, messages: (data.messages || []).map(message => ({ ...message,
+        text: DS.censorChatExportText(message.text, message.role || message.speaker) })) };
+    }
     if (opts.format === "markdown") return { text: makeMarkdown(data, opts), mime: "text/markdown;charset=utf-8", ext: "md" };
     if (opts.format === "json") return { text: jsonData(data, opts), mime: "application/json;charset=utf-8", ext: "json" };
     if (opts.format === "html") return { text: makeHtml(data, opts), mime: "text/html;charset=utf-8", ext: "html" };
@@ -2293,6 +2298,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const generationControl = makeExportCheckbox("ds-export-generation", "Captured timestamps/model details");
     const numbersControl = makeExportCheckbox("ds-export-numbers", "Message numbers");
     const avatarsControl = makeExportCheckbox("ds-export-avatars", "Avatars in HTML/JSON");
+    const censoredControl = makeExportCheckbox("ds-export-censor", "Export censored copy (original by default)");
     controls.append(
       formatControl.label,
       layoutControl.label,
@@ -2302,6 +2308,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       generationControl.label,
       numbersControl.label,
       avatarsControl.label,
+      censoredControl.label,
     );
 
     const textarea = document.createElement("textarea");
@@ -2347,6 +2354,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const generation = generationControl.input;
     const numbers = numbersControl.input;
     const avatars = avatarsControl.input;
+    const censored = censoredControl.input;
 
     format.value = settings.chatExportDefaultFormat || "text";
     layout.value = settings.chatExportHtmlLayout || "bubbles";
@@ -2356,6 +2364,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     generation.checked = settings.chatExportIncludeGenerationDetails !== false;
     numbers.checked = settings.chatExportNumberMessages !== false;
     avatars.checked = settings.chatExportIncludeAvatars !== false;
+    censored.checked = false; // Never turn this on without a fresh explicit choice.
+    censored.disabled = !settings.enableChatWordCensor || !String(settings.chatWordCensorList || "").trim();
+    censored.title = "Masks only message text. The original source remains unchanged.";
 
     let workingData = data;
     let activeLoadLock = null;
@@ -2364,7 +2375,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let activeCapture = data.captureStatus?.source === "dom" ? nativeCapture : apiCapture;
     let largePreviewSkipped = false;
     const LARGE_PREVIEW_MESSAGE_THRESHOLD = 3000;
-    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeRulebook: rulebook.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked });
+    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeRulebook: rulebook.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked, censored: censored.checked });
     const exportExt = () => format.value === "markdown" ? "md" : format.value === "json" ? "json" : format.value === "html" ? "html" : "txt";
     const refresh = () => {
       // The user can enable the option inside Export even when the saved
@@ -2423,7 +2434,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (largePreviewSkipped) count.textContent += " Large-chat preview disabled; export is built once on action.";
     };
 
-    for (const control of [format, layout, botInfo, rulebook, generation, numbers, avatars]) control.addEventListener("change", refresh);
+    for (const control of [format, layout, botInfo, rulebook, generation, numbers, avatars, censored]) control.addEventListener("change", refresh);
     ooc.addEventListener("change", async () => {
       const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked, chatExportIncludeRulebook: rulebook.checked };
       activeCapture.settings = nextSettings;
@@ -2571,7 +2582,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     printButton.addEventListener("click", async () => {
       if (largePreviewSkipped) count.textContent = `Building ${workingData.messages.length}-message HTML for Print / Save PDF…`;
       await DS.sleep?.(0);
-      printHtml(makeHtml(workingData, { ...opts(), format: "html" }));
+      const options = { ...opts(), format: "html" };
+      const printData = options.censored && typeof DS.censorChatExportText === "function"
+        ? { ...workingData, messages: workingData.messages.map(m => ({ ...m, text: DS.censorChatExportText(m.text, m.role || m.speaker) })) }
+        : workingData;
+      printHtml(makeHtml(printData, options));
       refresh();
     });
     refresh();

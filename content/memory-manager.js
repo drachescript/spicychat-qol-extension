@@ -15,6 +15,76 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let importingMemories = false;
   let vaultBusy = false;
   const MEMORY_VAULT_KEY = "dsMemoryVaultV1";
+  const MEMORY_LAYOUT_STORAGE_KEY = "dsMemoryCompactLayoutV1";
+  let memoryCompactView = false;
+  try {
+    chrome.storage.local.get({ [MEMORY_LAYOUT_STORAGE_KEY]: false }, saved => {
+      memoryCompactView = !!saved?.[MEMORY_LAYOUT_STORAGE_KEY];
+      const manager = getManager();
+      if (manager) applyMemoryLayout(manager);
+    });
+  } catch {}
+
+  function applyMemoryLayout(manager) {
+    if (!manager?.isConnected) return;
+    if (!document.getElementById("ds-qol-memory-layout-style")) {
+      const sheet = document.createElement("style");
+      sheet.id = "ds-qol-memory-layout-style";
+      sheet.dataset.dsOwned = "1";
+      sheet.textContent = `
+        [data-testid="ChatMemoryManagerCapabilityGate"] .ds-memory-layout-toggle {
+          position: absolute; right: 52px; top: 17px; z-index: 11;
+          border: 1px solid rgba(148,163,184,.35); border-radius: 7px;
+          background: rgba(65,65,75,.25); color: inherit;
+          padding: 4px 6px; font: 500 11px/1.3 system-ui,sans-serif;
+          cursor: pointer; white-space: nowrap;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact {
+          gap: .55rem !important;
+          max-height: min(730px, 94vh) !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact > [class*="px-lg"] {
+          padding-left: .8rem !important; padding-right: .8rem !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact > .overflow-y-auto {
+          gap: .5rem !important;
+          padding-left: .8rem !important; padding-right: .8rem !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact > .overflow-y-auto > div:not(#ds-memory-bulk-toolbar) {
+          gap: .3rem !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact .ds-memory-bulk-toolbar {
+          padding: 6px !important; gap: 5px !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact .ds-memory-bulk-actions {
+          gap: 4px !important;
+        }
+        [data-testid="ChatMemoryManagerCapabilityGate"].ds-memory-qol-compact .ds-memory-bulk-actions button {
+          padding: 4px 6px !important;
+        }
+      `;
+      document.head?.appendChild(sheet);
+    }
+    manager.classList.toggle("ds-memory-qol-compact", memoryCompactView);
+    let button = manager.querySelector(":scope > .ds-memory-layout-toggle");
+    if (!button && manager.matches('[data-testid="ChatMemoryManagerCapabilityGate"]')) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "ds-memory-layout-toggle";
+      button.dataset.dsOwned = "1";
+      button.title = "Switch between SpicyChat's default layout and a tighter QoL layout";
+      button.addEventListener("click", () => {
+        memoryCompactView = !memoryCompactView;
+        applyMemoryLayout(manager);
+        try { chrome.storage.local.set({ [MEMORY_LAYOUT_STORAGE_KEY]: memoryCompactView }); } catch {}
+      });
+      manager.appendChild(button);
+    }
+    if (button) {
+      button.textContent = memoryCompactView ? "Default view" : "Compact view";
+      button.setAttribute("aria-pressed", String(memoryCompactView));
+    }
+  }
   let pinnedOrderDraft = [];
   const autoLoadedManagers = new WeakSet();
   let lastManager = null;
@@ -36,7 +106,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function getManager() {
     const exactMatches = [...document.querySelectorAll('[data-testid="ChatMemoryManagerCapabilityGate"]')];
-    const exact = exactMatches.find(isVisible) || exactMatches[exactMatches.length - 1] || null;
+    const exact = exactMatches.find(isVisible) || null;
     if (exact) return exact;
 
     // Compatibility fallback: SpicyChat has changed the Memories wrapper more
@@ -1811,6 +1881,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nativeToolbar = scrollArea.firstElementChild;
     if (nativeToolbar) nativeToolbar.insertAdjacentElement("afterend", toolbar);
     else scrollArea.prepend(toolbar);
+    applyMemoryLayout(manager);
 
     return toolbar;
   }
@@ -1981,6 +2052,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyMemoryManagerTools = function applyMemoryManagerTools() {
     const settings = DS.state?.settings || {};
     const manager = getManager();
+    if (manager && settings.enabled) applyMemoryLayout(manager);
     const bulkEnabled = !!(settings.enabled && settings.enableBulkMemoryManager && manager);
     if (manager?.querySelector("#ds-memory-bulk-toolbar") && !!manager.querySelector("#ds-memory-vault-panel") !== !!settings.enableMemoryVault) manager.querySelector("#ds-memory-bulk-toolbar")?.remove();
     const copyEnabled = !!(settings.enabled && settings.showCopyMemoryAction && manager);
@@ -2040,6 +2112,57 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (copyEnabled) decorateCopyMemoryAction();
   };
+
+  // The general chat observer sometimes classifies the new Memories portal as
+  // chat-local work. Attach its QoL controls directly on modal mount instead of
+  // waiting for another chat refresh or navigation.
+  let memoryUiWakeScheduled = false;
+  function wakeMemoryManagerUi() {
+    if (memoryUiWakeScheduled) return;
+    memoryUiWakeScheduled = true;
+    requestAnimationFrame(() => {
+      memoryUiWakeScheduled = false;
+      if (window.__DSQ_TAB_GATE__?.paused || DS.isQolPausedForTab?.()) return;
+      if (!DS.state?.settings?.enabled) return;
+      try { DS.applyMemoryManagerTools?.(); }
+      catch (error) { console.warn("[SpicyChat QoL] Memory Manager UI refresh failed", error); }
+    });
+  }
+
+  function relevantMemoryMutation(mutations) {
+    const gateSelector = '[data-testid="ChatMemoryManagerCapabilityGate"]';
+    const rowsSelector = 'button[data-slot="trigger"][aria-haspopup="true"], [data-testid="ModalConversationMemories-LoadMoreButton"]';
+    for (const mutation of mutations) {
+      if (mutation.type !== "childList") continue;
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      const inGate = target?.closest?.(gateSelector);
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.id === "ds-memory-bulk-toolbar" || node.closest?.("#ds-memory-bulk-toolbar")) continue;
+        // Ignore the chat-message subtree entirely. A message mount can be huge,
+        // and the Memories portal is a separate node outside those messages.
+        if (node.matches?.('div[id^="message-"]') || node.closest?.('div[id^="message-"]')) continue;
+        if (node.matches(gateSelector) ||
+            (!inGate && node.childElementCount <= 24 && node.querySelector?.(gateSelector))) return true;
+        if (inGate &&
+            (node.matches(rowsSelector) || node.querySelector?.(rowsSelector))) return true;
+      }
+      for (const node of mutation.removedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches?.('#ds-memory-bulk-toolbar, .ds-memory-layout-toggle, [data-testid="ChatMemoryManagerCapabilityGate"]') ||
+            (!inGate && node.childElementCount <= 24 && node.querySelector?.(gateSelector))) return true;
+      }
+    }
+    return false;
+  }
+
+  try {
+    const observer = new MutationObserver(mutations => {
+      if (relevantMemoryMutation(mutations)) wakeMemoryManagerUi();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    if (document.querySelector('[data-testid="ChatMemoryManagerCapabilityGate"]')) wakeMemoryManagerUi();
+  } catch {}
 })();
 
 }

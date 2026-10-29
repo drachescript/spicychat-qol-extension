@@ -1907,18 +1907,139 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
+  // Unlike window.confirm, this confirmation makes the duplicate policy visible.
+  // Skip is deliberately the default, including when retrying an interrupted import.
+  function chooseLorebookEntryImportPolicy(payload) {
+    return new Promise(resolve => {
+      const old = document.getElementById("ds-qol-lorebook-import-confirm");
+      old?.remove();
+      const backdrop = document.createElement("div");
+      backdrop.id = "ds-qol-lorebook-import-confirm";
+      backdrop.setAttribute("role", "presentation");
+      backdrop.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.76);padding:16px;box-sizing:border-box";
+      const dialog = document.createElement("section");
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-labelledby", "ds-qol-lb-import-title");
+      dialog.style.cssText = "width:min(490px,100%);padding:18px;background:#1b1d24;color:#f5f5f5;border:1px solid #616979;border-radius:12px;box-shadow:0 14px 60px #0009;font:13px/1.5 system-ui,-apple-system,sans-serif";
+      const title = document.createElement("h2");
+      title.id = "ds-qol-lb-import-title";
+      title.textContent = "Import Lorebook entries";
+      title.style.cssText = "margin:0 0 9px;font-size:17px";
+      const summary = document.createElement("p");
+      summary.style.cssText = "margin:0 0 14px";
+      summary.textContent = `Import ${payload.entries.length} entries from “${payload.name || "Lorebook JSON"}” into this Lorebook?`;
+      const label = document.createElement("label");
+      label.textContent = "If an entry with the same name already exists";
+      label.style.cssText = "display:block;margin-bottom:6px;font-weight:600";
+      label.htmlFor = "ds-qol-lb-import-policy";
+      const choice = document.createElement("select");
+      choice.id = "ds-qol-lb-import-policy";
+      choice.style.cssText = "display:block;width:100%;box-sizing:border-box;padding:10px;background:#272b35;border:1px solid #747b8a;border-radius:7px;color:inherit;font:inherit";
+      for (const [value, text] of [
+        ["skip", "Skip existing (recommended for re-import)"],
+        ["merge", "Merge matching entries"],
+        ["replace", "Replace matching entries"]
+      ]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        choice.append(option);
+      }
+      const hint = document.createElement("p");
+      hint.style.cssText = "margin:9px 0 14px;color:#c8cedb";
+      const updateHint = () => {
+        hint.textContent = choice.value === "skip"
+          ? "Existing entries stay unchanged. Use this when continuing after a paused import. If a save was uncertain, check that entry first."
+          : "This changes existing entries. QoL will first verify the destination and download a complete safety backup, then ask you to confirm again.";
+      };
+      choice.addEventListener("change", updateHint);
+      updateHint();
+      const note = document.createElement("p");
+      note.style.cssText = "margin:0 0 14px;color:#aeb8c7";
+      note.textContent = "Only entries are imported here. For a new Lorebook with its details and cover, use Create private copy (.json).";
+      const buttons = document.createElement("div");
+      buttons.style.cssText = "display:flex;justify-content:flex-end;flex-wrap:wrap;gap:9px";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      const proceed = document.createElement("button");
+      proceed.type = "button";
+      proceed.textContent = "Import entries";
+      for (const button of [cancel, proceed]) {
+        button.style.cssText = "padding:8px 12px;border:1px solid #737c8c;border-radius:7px;background:#32394a;color:#fff;font:600 12px system-ui;cursor:pointer";
+      }
+      proceed.style.background = "#4d3f8d";
+      let settled = false;
+      const previouslyFocused = document.activeElement;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        document.removeEventListener("keydown", onKey, true);
+        backdrop.remove();
+        if (previouslyFocused?.isConnected && typeof previouslyFocused.focus === "function") previouslyFocused.focus();
+        resolve(value);
+      };
+      const onKey = event => {
+        if (event.key === "Escape") { event.preventDefault(); finish(null); }
+        if (event.key === "Tab") {
+          const controls = [choice, cancel, proceed];
+          const current = controls.indexOf(document.activeElement);
+          if (event.shiftKey && current === 0) { event.preventDefault(); proceed.focus(); }
+          else if (!event.shiftKey && current === 2) { event.preventDefault(); choice.focus(); }
+        }
+      };
+      cancel.addEventListener("click", () => finish(null));
+      proceed.addEventListener("click", () => finish(choice.value));
+      backdrop.addEventListener("click", event => { if (event.target === backdrop) finish(null); });
+      buttons.append(cancel, proceed);
+      dialog.append(title, summary, label, choice, hint, note, buttons);
+      backdrop.append(dialog);
+      document.body.append(backdrop);
+      document.addEventListener("keydown", onKey, true);
+      choice.focus();
+    });
+  }
+
+  async function verifyBeforeImportingOverExisting(info) {
+    // This is the same pre-write safety standard as Merge full JSON.
+    await verifyPrivateImportTarget(info.id);
+    if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+      throw new Error("Current Lorebook backup reader unavailable. Nothing imported.");
+    }
+    setStatus("Verifying the destination and downloading a safety backup…");
+    const original = await DS.getCurrentOwnLorebookBackupData(info.id);
+    if (!original?.completeness?.entries || original.completeness.entryCountVerified !== true || !Array.isArray(original.entries)) {
+      throw new Error("Cannot verify a full current backup. Existing entries have not been changed.");
+    }
+    const response = await downloadJson({
+      format: "spicychat-qol-lorebook-before-import", version: 2,
+      exportedAt: new Date().toISOString(), source: "verified-before-json-entry-import",
+      lorebook: original.lorebook, entries: original.entries, completeness: original.completeness
+    }, `${safeFilename(original.lorebook?.name || "lorebook")}-before-json-import.json`);
+    if (!response?.ok) throw new Error("Could not download the safety backup. Nothing imported.");
+    if (!confirm("A verified safety backup download was started. Check the JSON file saved successfully before changing existing entries. Continue?")) {
+      setStatus("Import cancelled; existing entries were not changed.");
+      return false;
+    }
+    return true;
+  }
+
   async function runLorebookImport(payload, info, { confirmed = false, duplicatePolicy = "skip" } = {}) {
     if (importRunning) return false;
     if (info?.page !== "entries") throw new Error("Open the Lorebook Entries tab before importing.");
     if (typeof DS.importLorebookEntryBatch !== "function") throw new Error("The Lorebook entry importer is not available on this page.");
     const count = payload.entries.length;
-    const sourceName = payload.name || "this Lorebook";
-    if (!confirmed && !confirm(`Import ${count} entr${count === 1 ? "y" : "ies"} from “${sourceName}” into this Lorebook?\n\nOnly the entries will be imported here. For a complete NEW Lorebook with details and cover, use “Create private copy”. Existing entries with the same name will be skipped.`)) {
-      setStatus("Lorebook import cancelled.");
-      return false;
+    if (!count) { setStatus("This file has no entries; nothing to import into this Lorebook."); return true; }
+    if (!confirmed) {
+      const selected = await chooseLorebookEntryImportPolicy(payload);
+      if (!selected) { setStatus("Lorebook import cancelled."); return false; }
+      duplicatePolicy = selected;
+      if (duplicatePolicy !== "skip") {
+        if (!await verifyBeforeImportingOverExisting(info)) return false;
+      }
     }
 
-    if (!count) { setStatus("This file has no entries; nothing to import into this Lorebook."); return true; }
     importRunning = true;
     let cancelImportButton = document.getElementById("ds-lorebook-cancel-import");
     if (!cancelImportButton) {
@@ -1940,7 +2061,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const result = await DS.importLorebookEntryBatch(payload.entries, {
         duplicatePolicy: ["skip","merge","replace"].includes(duplicatePolicy) ? duplicatePolicy : "skip",
         onProgress(progress) {
-          if (progress.stopped) {
+          if (progress.loadingExisting) {
+            setStatus(`Checking existing Lorebook entries ${progress.current}/${progress.totalExisting} before importing…`);
+          } else if (progress.stopped) {
             setStatus(progress.stopReason || "Import stopped. Confirm the last entry before resuming.");
           } else {
             setStatus(`Importing ${progress.completed} / ${progress.total} entries…`);
@@ -1955,7 +2078,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (result.replaced) parts.push(`${result.replaced} replaced`);
       if (result.merged) parts.push(`${result.merged} merged`);
       if (result.paused || result.cancelled) {
-        setStatus(`${result.stopReason || "Import stopped."} ${result.completed}/${count} completed. Re-import with Skip existing to review and continue; uncertain writes must not be blindly retried.`);
+        setStatus(`${result.stopReason || "Import stopped."} ${result.completed}/${count} completed. Use Import entries (.json) and select “Skip existing (recommended)” to continue after reviewing uncertain saves.`);
       } else {
         setStatus(`Import finished: ${parts.join(" · ") || "no changes"}.`);
       }
@@ -2018,7 +2141,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     banner.id = "ds-qol-lorebook-entries-only-pending";
     banner.style.cssText = "padding:9px;border:1px solid #8192ac;border-radius:8px;margin:9px 0;font:13px/1.5 system-ui";
     const msg = document.createElement("span");
-    msg.textContent = `Entries-only import ready: ${record.payload.entries.length} entries. Existing names will be skipped.`;
+    msg.textContent = `Entries-only import ready: ${record.payload.entries.length} entries. Choose how to handle existing entries when you start.`;
     const start = document.createElement("button");start.type="button";start.textContent="Import entries";
     start.addEventListener("click",async()=>{
       start.disabled=true;

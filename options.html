@@ -1851,6 +1851,17 @@ Testing" spellcheck="false"></textarea></label>
 cash =&gt; Bingo Coins
 /dollars?|bucks?/gi =&gt; Bingo Coins" spellcheck="false"></textarea></label>
 <p class="hint">Use one rule per line as <code>find =&gt; replacement</code>. Normal text is case-insensitive; Regex is supported too.</p>
+<div class="sub-card"><h3>Word censor (display only)</h3>
+<label class="row"><input id="enableChatWordCensor" type="checkbox"/><span>Censor selected words and phrases in chat messages</span></label>
+<label>Words or phrases, one per line<textarea id="chatWordCensorList" placeholder="example word
+phrase to hide" spellcheck="false"></textarea></label>
+<label>Replace with <select id="chatWordCensorMask"><option value="hash">###</option><option value="stars">***</option><option value="bracket">[censored]</option><option value="custom">Custom text</option></select></label>
+<label>Custom replacement text<input id="chatWordCensorCustom" type="text" maxlength="60" placeholder="[censored]"/></label>
+<label>Apply to <select id="chatWordCensorScope"><option value="ai">AI messages</option><option value="user">My messages</option><option value="both">Both</option></select></label>
+<label class="row"><input id="chatWordCensorReveal" type="checkbox"/><span>Show a Reveal/Hide button on censored messages</span></label>
+<label class="row"><input id="chatWordCensorShowChatToggle" type="checkbox"/><span>Show a per-chat censor on/off button</span></label>
+<p class="hint">Whole words and phrases only, ignoring case. Only changes displayed text; the original messages are not edited. Exclude individual chats using the button in their header. Chat exports use original history by default, with a separate censored export option. As with muted words, native Save replacement mode is suspended while censoring is active.</p>
+</div>
 <div class="sub-card"><h3>Muted words (optional, local display only)</h3>
 <label class="row"><input id="enableChatMutedWords" type="checkbox"/><span>Hide muted words / phrases from displayed chat messages</span></label>
 <label>Muted words / phrases, one per line<textarea id="chatMutedWords" placeholder="mark you as mine

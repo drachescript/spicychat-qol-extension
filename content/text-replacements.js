@@ -19,6 +19,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const PROFILE_SELECTION_KEY = "dsChatReplacementSelectedPresetsV1";
   let profileSelection = null;
   let profileLoading = null;
+  const revealedMessageIds = new Set();
+  let censorToggleRoute = "";
+  function censorExclusions(settings) {
+    try { const obj = JSON.parse(settings.chatWordCensorExcludedChats || "{}"); return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {}; }
+    catch { return {}; }
+  }
+  function isCensorEnabled(settings) {
+    return settings.enableChatWordCensor === true && !censorExclusions(settings)[location.pathname];
+  }
+  function censorScopeAllows(root, settings) {
+    const scope = settings.chatWordCensorScope || "ai";
+    return scope === "both" || (scope === "ai" ? messageIsAi(root) : !messageIsAi(root));
+  }
+  function ensureCensorToggle(settings) {
+    let toggle = document.getElementById("ds-chat-censor-toggle");
+    if (!settings.enabled || !DS.isSingleChatPage?.() || !settings.enableChatWordCensor || settings.chatWordCensorShowChatToggle === false) {
+      toggle?.remove(); return;
+    }
+    const host = document.querySelector(".ds-chat-title-actions-host") || document.querySelector("a[aria-label='chatbot-profile']")?.parentElement;
+    if (!host) return;
+    if (!toggle) {
+      toggle = document.createElement("button"); toggle.type = "button"; toggle.id = "ds-chat-censor-toggle";
+      toggle.className = "ds-chat-censor-toggle"; toggle.dataset.dsOwned = "1";
+      toggle.style.cssText = "border:1px solid #64748b;border-radius:7px;padding:5px 8px;background:#222;color:inherit;cursor:pointer;font:12px system-ui";
+      toggle.addEventListener("click", async () => {
+        const settingsNow = DS.state?.settings || {};
+        const path = location.pathname;
+        const excluded = censorExclusions(settingsNow);
+        if (excluded[path]) delete excluded[path]; else excluded[path] = true;
+        const value = JSON.stringify(Object.fromEntries(Object.entries(excluded).slice(-300)));
+        try {
+          if (DS.saveSettingsPatch) await DS.saveSettingsPatch({ chatWordCensorExcludedChats: value });
+          else { DS.state.settings.chatWordCensorExcludedChats = value; await DS.storageSet?.({ settings: DS.state.settings }); }
+          DS.state.settings.chatWordCensorExcludedChats = value;
+          restoreDisplayChanges(); lastSignature = "";
+          DS.applyChatTextReplacements?.();
+        } catch (error) { DS.setQuickStatus?.("Could not save censor choice: " + (error?.message || error)); }
+      });
+    }
+    if (toggle.parentElement !== host) host.append(toggle);
+    const disabled = !!censorExclusions(settings)[location.pathname];
+    toggle.textContent = disabled ? "Censor off" : "Censor on";
+    toggle.title = disabled ? "Enable the word censor in this chat" : "Exclude this chat from word censoring";
+    toggle.setAttribute("aria-pressed", disabled ? "false" : "true");
+    censorToggleRoute = location.pathname;
+  }
+
   async function loadProfileSelections() {
     if (profileSelection !== null) return;
     if (profileLoading) return profileLoading;
@@ -168,12 +215,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return parsed;
   }
 
+  let cachedCensorKey = "";
+  let cachedCensorRules = [];
+  function parseCensorRules(settings, { ignoreChatExclusion = false } = {}) {
+    if (!settings.enableChatWordCensor || (!ignoreChatExclusion && !isCensorEnabled(settings))) return [];
+    const signature = [settings.chatWordCensorList, settings.chatWordCensorMask, settings.chatWordCensorCustom].join("\u0000");
+    if (signature === cachedCensorKey) return cachedCensorRules;
+    const names = [...new Set(String(settings.chatWordCensorList || "").split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith("#") && s.length <= 120))].slice(0,200);
+    const kind = settings.chatWordCensorMask || "hash";
+    const replacement = kind === "stars" ? "***" : kind === "bracket" ? "[censored]" : kind === "custom" ? String(settings.chatWordCensorCustom || "[censored]").slice(0,60) : "###";
+    cachedCensorKey = signature;
+    return cachedCensorRules = names.map(word => {
+      const literal = escapeRegExp(word).replace(/\s+/g, "\\s+");
+      try { return { regex: new RegExp(`(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])`, "giu"), replacement, isCensor: true }; }
+      catch { return null; }
+    }).filter(Boolean);
+  }
+  function hasCensorMatch(text, rules) {
+    return rules.some(rule => { rule.regex.lastIndex = 0; return rule.regex.test(text); });
+  }
+  DS.censorChatExportText = (text, speaker, settings = DS.state?.settings || {}) => {
+    const rules = parseCensorRules(settings, { ignoreChatExclusion: true });
+    const scope = settings.chatWordCensorScope || "ai";
+    const isUser = /^(user|you|human)$/i.test(String(speaker || ""));
+    if (!rules.length || (scope === "ai" && isUser) || (scope === "user" && !isUser)) return text;
+    return applyRules(text, rules);
+  };
   function applyRules(text, rules) {
     let output = String(text || "");
     for (const rule of rules) {
       try {
         rule.regex.lastIndex = 0;
-        output = output.replace(rule.regex, rule.replacement);
+        output = output.replace(rule.regex, rule.isCensor ? () => rule.replacement : rule.replacement);
       } catch {}
     }
     return output;
@@ -187,7 +260,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       String(settings.chatTextReplacementPresets || ""), selectedPresetRules(settings),
       String(settings.chatTextReplacementScope || "ai"),
       String(settings.chatTextReplacementMode || "display"),
-      !!settings.chatTextReplacementPreview
+      !!settings.chatTextReplacementPreview,
+      !!settings.enableChatWordCensor, settings.chatWordCensorList || "", settings.chatWordCensorMask || "hash",
+      settings.chatWordCensorCustom || "", settings.chatWordCensorScope || "ai",
+      settings.chatWordCensorExcludedChats || "", settings.chatWordCensorReveal !== false
     ]);
   }
 
@@ -250,6 +326,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return nodes;
   }
 
+  DS.getOriginalChatDisplayNodeText = node => {
+    const prior = nodeState.get(node);
+    return prior && node?.nodeValue === prior.applied ? prior.original : node?.nodeValue || "";
+  };
   function restoreNode(node) {
     const saved = nodeState.get(node);
     if (!saved) return;
@@ -273,6 +353,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
+  function updateCensorReveal(root, censorRules, settings) {
+    if (!root?.id) return;
+    let b = root.querySelector(".ds-chat-censor-reveal");
+    const key = location.pathname + ":" + root.id;
+    const shouldShow = settings.chatWordCensorReveal !== false && censorRules.length &&
+      textNodesIn(getMessageTextContainer(root)).some(node => hasCensorMatch(nodeState.get(node)?.original ?? node.nodeValue ?? "", censorRules));
+    if (!shouldShow) { b?.remove(); return; }
+    if (!b) {
+      b = document.createElement("button"); b.type="button"; b.className="ds-chat-censor-reveal"; b.dataset.dsOwned="1";
+      b.style.cssText="font:11px system-ui;color:inherit;opacity:.75;background:transparent;border:1px solid #64748b;border-radius:5px;padding:2px 6px;cursor:pointer;margin:3px";
+      b.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        if (revealedMessageIds.has(key)) revealedMessageIds.delete(key); else revealedMessageIds.add(key);
+        dirtyRoots.add(root); delete root.dataset.dsTextReplacementReady;
+        DS.applyChatTextReplacements?.();
+      });
+      const target = root.querySelector(".ds-message-quick-actions")?.parentElement || root.querySelector("button[aria-label='message-dropdown']")?.parentElement || root;
+      target.append(b);
+    }
+    b.textContent = revealedMessageIds.has(key) ? "Hide censored words" : "Reveal censored words";
+  }
   function applyDisplayMode(root, rules, signatureChanged) {
     const container = getMessageTextContainer(root);
     if (!container) return;
@@ -532,6 +633,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     restoreDisplayChanges();
     document.querySelectorAll(".ds-replacement-undo").forEach(button => button.remove());
     document.getElementById("ds-chat-replacement-preset")?.remove();
+    document.getElementById("ds-chat-censor-toggle")?.remove();
+    document.querySelectorAll(".ds-chat-censor-reveal").forEach(b => b.remove());
+    revealedMessageIds.clear();
     clearTimeout(savedModeTimer);
     savedModeTimer = null;
     lastSignature = "";
@@ -544,16 +648,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyChatTextReplacements = async function applyChatTextReplacements() {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !DS.isSingleChatPage?.() || (!settings.enableChatTextReplacements && !settings.enableChatMutedWords)) {
+    if (!settings.enabled || !DS.isSingleChatPage?.() || (!settings.enableChatTextReplacements && !settings.enableChatMutedWords && !settings.enableChatWordCensor)) {
       if (DS.state.chatTextReplacementsWasActive) cleanup();
       return;
     }
 
     await loadProfileSelections();
     ensurePresetSelector(settings);
+    ensureCensorToggle(settings);
     const rules = parseRules(combinedDisplayRules(settings));
-    if (!rules.length) {
+    const censorRules = parseCensorRules(settings);
+    if (!rules.length && !censorRules.length) {
       if (DS.state.chatTextReplacementsWasActive) cleanup();
+      ensureCensorToggle(settings); // Still allow re-enabling censor after excluding this chat.
       return;
     }
 
@@ -567,7 +674,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const signatureChanged = signature !== lastSignature || initializedRoute !== route;
     lastSignature = signature;
     initializedRoute = route;
-    const mode = settings.enableChatMutedWords || !!selectedPresetRules(settings)
+    const mode = settings.enableChatMutedWords || censorRules.length > 0 || !!selectedPresetRules(settings)
       ? "display" : (settings.chatTextReplacementMode === "save" ? "save" : "display");
 
     if (mode === "save" && signatureChanged) restoreDisplayChanges();
@@ -589,15 +696,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     for (const root of roots) {
       if (DS.isMessageEditPending?.(root)) continue;
-      if (!scopeAllows(root, settings)) {
+      const normalAllowed = scopeAllows(root, settings);
+      const scopedCensor = censorScopeAllows(root, settings) ? censorRules : [];
+      if (!normalAllowed && !scopedCensor.length) {
+        root.querySelector(".ds-chat-censor-reveal")?.remove();
         const container = getMessageTextContainer(root);
         for (const node of textNodesIn(container)) restoreNode(node);
         root.dataset.dsTextReplacementReady = "1";
         continue;
       }
 
-      if (mode === "display") applyDisplayMode(root, rules, signatureChanged);
+      const key = location.pathname + ":" + root.id;
+      const visibleRules = [...(normalAllowed ? rules : []), ...(revealedMessageIds.has(key) ? [] : scopedCensor)];
+      if (mode === "display") applyDisplayMode(root, visibleRules, signatureChanged);
       else queueSavedReplacement(root, rules, settings);
+      updateCensorReveal(root, scopedCensor, settings);
 
       if (savedState.has(root.id)) updateUndoButton(root.id);
       root.dataset.dsTextReplacementReady = "1";
@@ -610,7 +723,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let replacementObserverActive = false;
   const replacementObserver = new MutationObserver(mutations => {
     const settings = DS.state?.settings || {};
-    if (!settings.enabled || !settings.enableChatTextReplacements || !DS.isSingleChatPage?.()) return;
+    if (!settings.enabled || (!settings.enableChatTextReplacements && !settings.enableChatMutedWords && !settings.enableChatWordCensor) || !DS.isSingleChatPage?.()) return;
 
     let affectsMessage = false;
     for (const mutation of mutations) {
