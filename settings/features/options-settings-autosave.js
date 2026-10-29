@@ -150,6 +150,13 @@ function readSettingsFromPage() {
     memoryAutoLoadAll: checked("memoryAutoLoadAll"),
     enableChatTextReplacements: checked("enableChatTextReplacements"),
     chatTextReplacementRules: value("chatTextReplacementRules", ""),
+    enableChatWordCensor: checked("enableChatWordCensor"),
+    chatWordCensorList: value("chatWordCensorList", ""),
+    chatWordCensorMask: value("chatWordCensorMask", "hash"),
+    chatWordCensorCustom: value("chatWordCensorCustom", "[censored]"),
+    chatWordCensorScope: value("chatWordCensorScope", "ai"),
+    chatWordCensorReveal: checked("chatWordCensorReveal"),
+    chatWordCensorShowChatToggle: checked("chatWordCensorShowChatToggle"),
     enableChatMutedWords: checked("enableChatMutedWords"),
     chatMutedWords: value("chatMutedWords", ""),
     chatTextReplacementPresets: value("chatTextReplacementPresets", ""),
@@ -793,6 +800,13 @@ function readSingleSettingFromPage(settingKey) {
     case "memoryAutoLoadAll": return (checked("memoryAutoLoadAll"));
     case "enableChatTextReplacements": return (checked("enableChatTextReplacements"));
     case "chatTextReplacementRules": return (value("chatTextReplacementRules", ""));
+    case "enableChatWordCensor": return checked("enableChatWordCensor");
+    case "chatWordCensorList": return value("chatWordCensorList", "");
+    case "chatWordCensorMask": return value("chatWordCensorMask", "hash");
+    case "chatWordCensorCustom": return value("chatWordCensorCustom", "[censored]");
+    case "chatWordCensorScope": return value("chatWordCensorScope", "ai");
+    case "chatWordCensorReveal": return checked("chatWordCensorReveal");
+    case "chatWordCensorShowChatToggle": return checked("chatWordCensorShowChatToggle");
     case "enableChatMutedWords": return (checked("enableChatMutedWords"));
     case "chatMutedWords": return (value("chatMutedWords", ""));
     case "chatTextReplacementPresets": return (value("chatTextReplacementPresets", ""));

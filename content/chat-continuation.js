@@ -163,6 +163,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     ctx.data.contextSources=[...new Set(ctx.data.contextSources)];
     preview(ctx);updateStatus(ctx,`${additions.length} nonduplicate, enabled saved entries added for review. Existing source data unchanged.`);
   }
+  function downloadPayload(ctx, name, payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob), a = make('a');
+    a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  function exportMemoryNotes(ctx) {
+    saveInputs(ctx);
+    const lines = ctx.data.fields.memories.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    if (!lines.length) return updateStatus(ctx, 'Add reviewed memory lines before exporting a Memory Manager JSON.');
+    if (!window.confirm(`Export ${lines.length} reviewed memory lines? Importing into a different chat later may add these to its native memories. Review the target chat and duplicate checks before doing so.`)) return;
+    if (lines.length > 200 || lines.some(text => text.length > 1200))
+      return updateStatus(ctx, 'Too many or overly long memory lines. Maximum 200 lines of 1,200 characters each; edit before export.');
+    const memories = lines.map((text,order)=>({text,order,pinned:false}));
+    downloadPayload(ctx, `spicychat-transfer-memories-${ctx.route.chat.slice(0,8)}.json`, {
+      format:'spicychat-qol-memories',version:1,exportedAt:new Date().toISOString(),
+      source:{ conversationId:ctx.route.chat,botId:ctx.route.bot },count:memories.length,memories
+    });
+    updateStatus(ctx,`${memories.length} reviewed memories exported. Import in target chat's Memory Manager only after checking the preview.`);
+  }
+  function exportLorebookDrafts(ctx) {
+    saveInputs(ctx);
+    const path = (ctx.targetChat?.value||'').trim();
+    let url; try { url = new URL(path); } catch {}
+    const found = url?.hostname === 'spicychat.ai' && url.pathname.match(/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/?$/i);
+    if (!found || !UUID.test(found[1]) || !UUID.test(found[2])) return updateStatus(ctx,'Paste a full SpicyChat target chat URL (both IDs) before exporting Lorebook drafts.');
+    const id=found[2].toLowerCase();
+    const entries=FIELDS.filter(([key])=>key!=='instructions').flatMap(([key,label])=>{
+      const content=ctx.data.fields[key].trim();if(!content)return[];
+      const chunks=content.match(/[\s\S]{1,2000}/g)||[];
+      return chunks.map((piece,i)=>({name:`Transfer ${label}`.slice(0,45)+(chunks.length>1?` ${i+1}`:''),content:piece,keywords:[],disabled:true,source:'chat-continuation-transfer',schema:1,chatId:id}));
+    });
+    if(!entries.length)return updateStatus(ctx,'Enter reviewed story context before exporting Lorebook drafts.');
+    if(entries.length>200)return updateStatus(ctx,'Too many Lorebook entries for the 200-entry local limit. Shorten your brief.');
+    downloadPayload(ctx,`spicychat-transfer-lorebook-${id.slice(0,8)}.json`,{schema:'dsq-chat-lorebook-drafts/v1',chatId:id,entries});
+    updateStatus(ctx,`${entries.length} inactive local Lorebook drafts exported for the target chat. Import through QoL's local chat Lorebook tools; review keywords and enable entries manually.`);
+  }
   function file(ctx, ext) {
     saveInputs(ctx);const data=ext==='json'?JSON.stringify(safePackage(ctx.data),null,2):assembled(ctx).text;
     const blob=new Blob([data],{type:ext==='json'?'application/json;charset=utf-8':'text/plain;charset=utf-8'});
@@ -177,7 +214,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const overlay=make('div','ds-continuation-overlay');overlay.id=MODAL;
     const panel=make('section','ds-continuation-panel');panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Chat Continuation Assistant');ctx.dialog=overlay;
     const head=make('header','ds-continuation-head');head.append(make('h2','','Chat Continuation / Transfer'),button('×',close));panel.append(head);
-    panel.append(make('p','ds-continuation-muted','Experimental · Read-only source chat. No messages or memories are imported into native group-chat history. No external AI summary is generated. Review everything before copying.'));
+    panel.append(make('p','ds-continuation-muted','Review-first transfer: scan old history, edit context, then copy a brief or export Memory Manager JSON and inactive local Lorebook drafts for another chat. The source chat is read-only. No external AI summary is generated; nothing is automatically imported.'));
     const settings=make('div','ds-continuation-controls');
     const select=(label,values,chosen,cb)=>{const l=make('label');l.append(make('span','',label));const s=make('select');for(const [v,t] of values){const o=make('option','',t);o.value=v;s.append(o);}s.value=chosen;s.addEventListener('change',cb);l.append(s);settings.append(l);return s;};
     ctx.kind=select('Target',[['group','Group chat'],['solo','New solo chat'],['other','Different bot']],ctx.data.kind,()=>preview(ctx));
@@ -221,6 +258,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         preview(ctx);updateStatus(ctx,`${added} nonduplicate Memory entries loaded for manual review. Nothing written to SpicyChat.`);
       }catch(e){updateStatus(ctx,`Memory import rejected: ${e.message||e}`);}
     });
+    const target=make('label','ds-continuation-target');target.append(make('span','','Target chat URL (for local Lorebook draft export only)'));
+    ctx.targetChat=make('input');ctx.targetChat.type='url';ctx.targetChat.placeholder='https://spicychat.ai/chat/<bot-id>/<conversation-id>';target.append(ctx.targetChat);panel.append(target);
+    actions.append(button('Export Memory JSON',()=>exportMemoryNotes(ctx)),button('Export target Lorebook drafts',()=>exportLorebookDrafts(ctx)));
     actions.append(button('Import Memory JSON',()=>memoryFile.click()),memoryFile,ctx.importer);panel.append(actions);
     panel.append(make('p','ds-continuation-muted','Native Clone Conversation duplicates a conversation via SpicyChat’s own action. QoL cannot confirm a supported way to insert historic messages into a new group chat. This assistant only prepares a user-reviewed context brief. Native memories are not read automatically; add them manually in Approved memories if available.'));
     overlay.append(panel);overlay.addEventListener('click',e=>{if(e.target===overlay)close();});document.body.append(overlay);drawCandidates(ctx);preview(ctx);

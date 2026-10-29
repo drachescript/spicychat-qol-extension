@@ -351,6 +351,13 @@ async function load() {
   setChecked("memoryAutoLoadAll", !!settings.memoryAutoLoadAll);
   setChecked("enableChatTextReplacements", !!settings.enableChatTextReplacements);
   setValue("chatTextReplacementRules", settings.chatTextReplacementRules || "");
+  setChecked("enableChatWordCensor", !!settings.enableChatWordCensor);
+  setValue("chatWordCensorList", settings.chatWordCensorList || "");
+  setValue("chatWordCensorMask", settings.chatWordCensorMask || "hash");
+  setValue("chatWordCensorCustom", settings.chatWordCensorCustom ?? "[censored]");
+  setValue("chatWordCensorScope", settings.chatWordCensorScope || "ai");
+  setChecked("chatWordCensorReveal", settings.chatWordCensorReveal !== false);
+  setChecked("chatWordCensorShowChatToggle", settings.chatWordCensorShowChatToggle !== false);
   setChecked("enableChatMutedWords", !!settings.enableChatMutedWords);
   setValue("chatMutedWords", settings.chatMutedWords || "");
   setValue("chatTextReplacementPresets", settings.chatTextReplacementPresets || "");

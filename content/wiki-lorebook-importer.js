@@ -660,13 +660,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
+  function nativeExistingEntryTotal() {
+    const header = document.querySelector("[data-testid='EntriesListServer-Header']");
+    const counter = header?.querySelector('[data-translate-key="lorebook:entries.count"]');
+    // Read the CURRENT value, never SpicyChat's separate "up to 5,000" hint.
+    const match = /^([\d,]+)\s*\/\s*[\d,]+/.exec(String(counter?.textContent || "").trim());
+    const count = match ? Number(match[1].replace(/,/g, "")) : null;
+    return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
+  }
+
+  async function ensureAllExistingEntriesLoaded(operation, onProgress) {
+    // Without this, Skip existing only checks the first 100 loaded rows and
+    // a re-import into a larger Lorebook can accidentally create duplicates.
+    const started = Date.now();
+    while (nativeExistingEntryTotal() === null) {
+      if (operation.cancelled) return false;
+      if (Date.now() - started > 12000) throw new Error("Could not read SpicyChat's current entry count; import stopped before any write.");
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    const maxBatches = 55;
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const expected = nativeExistingEntryTotal();
+      const rows = existingEntryRows();
+      if (operation.cancelled) return false;
+      if (routeInfo()?.id !== operation.id || routeInfo()?.page !== "entries") return false;
+      if (expected === null) throw new Error("SpicyChat's entry count disappeared; no import started.");
+      if (rows.length >= expected) return true;
+      const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
+      const load = [...(root?.querySelectorAll("button[type='button']") || [])].find(button =>
+        /^load more(?: entries)?$/i.test(textOf(button, 80)) && button.offsetParent !== null
+      );
+      if (!load) throw new Error(`Only ${rows.length}/${expected} existing entries are loaded. No import started to avoid duplicates.`);
+      const previous = rows.length;
+      onProgress?.({ loadingExisting: true, current: previous, totalExisting: expected, completed: 0 });
+      if (!load.disabled) load.click();
+      const deadline = Date.now() + 20000;
+      while (existingEntryRows().length <= previous) {
+        if (operation.cancelled) return false;
+        if (routeInfo()?.id !== operation.id || routeInfo()?.page !== "entries") return false;
+        if (Date.now() > deadline) throw new Error(`SpicyChat did not load more existing entries after ${previous}; nothing imported.`);
+        await new Promise(resolve => setTimeout(resolve, 160));
+      }
+    }
+    throw new Error("Too many existing-entry pages to verify; no import started.");
+  }
+
   function existingEntryRows() {
     const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
     if (!root) return [];
     return [...root.querySelectorAll("button[type='button']")].filter(button => {
       if (button.closest(`#${MODAL_ID},#ds-qol-panel,.ds-lorebook-entry-toggle-wrap,.ds-lb-row-tools`)) return false;
-      const ps = [...button.querySelectorAll("p")];
-      return ps.some(p => clean(p.textContent, 80)) && ps.some(p => clean(p.textContent, 5000).length > 30);
+      // Native entry cards can have very short content; never infer rows from content length.
+      if (!button.classList.contains("w-full") || !button.classList.contains("items-start") ||
+          !button.classList.contains("justify-between") || button.dataset.testid) return false;
+      return !!button.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1");
     });
   }
 
@@ -1189,6 +1236,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.activeLorebookEntryImport = operation;
     busy = true;
     try {
+      // Load/verify every existing name before choosing Skip/Merge/Replace.
+      // This also makes interrupted imports safe to re-import when there are
+      // more than 100 current entries.
+      if (!await ensureAllExistingEntriesLoaded(operation, options.onProgress)) {
+        counts.cancelled = !!operation.cancelled;
+        counts.paused = !operation.cancelled;
+        counts.stopReason = operation.cancelled ? "Cancelled before entry import." : "Lorebook changed before the import could start.";
+        options.onProgress?.({ ...counts, stopped: true });
+        return counts;
+      }
+      // Keep a complete, stable name set. React may reset its mounted cards
+      // to the first page after a Create, so consulting the DOM alone for each
+      // subsequent item could miss pre-existing names that were loaded earlier.
+      const knownNames = new Set(existingEntryRows().map(existingEntryName).filter(Boolean).map(name => name.toLowerCase()));
       for (let index = startIndex; index < items.length; index += 1) {
         counts.nextIndex = index;
         if (operation.cancelled || options.signal?.aborted) {
@@ -1203,8 +1264,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         const item = items[index];
         try {
-          const result = await importOne(item, duplicatePolicy);
+          const key = item.name.toLowerCase();
+          let result;
+          if (knownNames.has(key) && duplicatePolicy === "skip") {
+            result = { action: "skipped", item };
+          } else {
+            // If a matching card disappeared after a React refresh, never
+            // mistake it for a new entry under Merge/Replace/Duplicate.
+            if (knownNames.has(key) && !findExistingRowByName(item.name)) {
+              throw new Error(`Matching entry “${item.name}” is no longer loaded. Refresh and review before continuing.`);
+            }
+            result = await importOne(item, duplicatePolicy);
+          }
           const action = String(result?.action || "");
+          if (action === "created") knownNames.add(key);
           if (Object.prototype.hasOwnProperty.call(counts, action)) counts[action] += 1;
           counts.completed++;
           counts.nextIndex = index + 1;
@@ -1216,7 +1289,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           const detail = String(error?.message || error || "");
           const status = Number(error?.httpStatus || error?.status || 0);
           if ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500 ||
-              /rate.limit|too many requests|auth|token|ambiguous|unverified|cannot confirm|timed out|network/i.test(detail)) {
+              /rate.limit|too many requests|auth|token|ambiguous|unverified|cannot confirm|timed out|network|no longer loaded/i.test(detail)) {
             counts.paused = true;
             counts.stopReason = status === 429 ? "SpicyChat rate limited this import (HTTP 429)." :
               `Uncertain entry result; review before resuming: ${detail.slice(0, 150)}`;
