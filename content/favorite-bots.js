@@ -61,6 +61,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       image: base.image || DS.getCardImageUrl?.(card) || "",
       creator: base.creator || cardCreator(card),
       description: cardDescription(card),
+      tags: [...new Set([...(Array.isArray(base.tags) ? base.tags : []),
+        ...[...(card?.querySelectorAll?.('[data-testid="CharacterCardTagRow"] button[aria-label]') || [])]
+          .map(node => node.getAttribute('aria-label'))]
+        .map(value => String(value || '').trim())
+        .filter(value => value && value.length <= 70 && value.toLowerCase() !== 'image-gen'))],
       chatUrl: base.chatUrl || anchor?.href || `${location.origin}/chat/${id}`,
       profileUrl: base.profileUrl || `${location.origin}/chatbot/${id}`,
       savedAt: base.savedAt || Date.now(),
@@ -172,7 +177,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <div class="ds-favorite-history-controls">
           <input class="ds-favorite-history-search" type="search" placeholder="Search favorite history">
           <select class="ds-favorite-history-sort" aria-label="Sort favorite history">
-            <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A-Z</option><option value="creator">Creator A-Z</option>
+            <option value="newest">Recently saved in QoL history (may be first seen)</option><option value="oldest">Oldest in QoL history (may be first seen)</option><option value="name">Name A-Z</option><option value="creator">Creator A-Z</option>
           </select>
           <select class="ds-favorite-history-later" aria-label="Filter favorite history by Later">
             <option value="all">All history</option><option value="later">Also in Later</option><option value="not-later">Not in Later</option>
@@ -231,6 +236,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   let favoritePageFolderFilter = "all";
   let favoritePageSort = "native";
+  let observedAdditions = DS.state?.favoriteObservedAdditions || {};
+  const ADDITIONS_KEY='dsFavoritesObservedAdditionsV1';
+  void Promise.resolve(DS.storageGet?.([ADDITIONS_KEY])).then(values=>{
+    observedAdditions=values?.[ADDITIONS_KEY]?.at||{};
+    if(DS.state)DS.state.favoriteObservedAdditions=observedAdditions;
+    if(favoritePageSort.startsWith('added-'))applyFavoritePageExtras();
+  }).catch(()=>{});
+  window.addEventListener('ds-qol-favorites-additions-updated',()=>{
+    observedAdditions=DS.state?.favoriteObservedAdditions||{};
+    if(favoritePageSort.startsWith('added-'))applyFavoritePageExtras();
+  });
 
   function favoriteFolderNames() {
     const stored = DS.state?.botOrganization || {};
@@ -320,7 +336,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (sorting) {
         const sortSelect = document.createElement("select");
         sortSelect.setAttribute("aria-label", "Sort loaded Favorites");
-        for (const [id,label] of [["native","SpicyChat order"],["newest","QoL newest first"],["oldest","QoL oldest first"]]) {
+        for (const [id,label] of [["native","SpicyChat order"],["added-new","Recently added to Favorites (observed)"],["added-old","Oldest observed additions"],["newest","QoL newest first (first-seen estimate)"],["oldest","QoL oldest first (first-seen estimate)"]]) {
           const opt = document.createElement("option");opt.value=id;opt.textContent=label;sortSelect.appendChild(opt);
         }
         sortSelect.value = favoritePageSort;
@@ -328,7 +344,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         controls.appendChild(sortSelect);
       }
       const help = document.createElement("small");
-      help.textContent = "Only loaded cards · QoL saved dates may be first-seen dates";
+      help.textContent = "Only loaded cards. Observed additions are recorded when a bot appears between account snapshots; older dates are unknown.";
       controls.appendChild(help);
     }
     const orgMeta = DS.state?.botOrganization?.meta || {};
@@ -336,7 +352,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const entries = (DS.collectCards?.() || []).map((item,i) => {
       const id = DS.botIdFromHref?.(item.anchor?.href || "") || DS.chatIdFromHref?.(item.anchor?.href || "");
       const target = DS.getBestHideTarget?.(item.card) || item.card;
-      return { ...item, id, target, index: i, savedAt: Number(favoriteMeta[id]?.savedAt || 0) || 0 };
+      return { ...item, id, target, index: i, savedAt: Number(favoriteMeta[id]?.savedAt || 0) || 0, observedAt:Number(observedAdditions[id]||0)||0 };
     }).filter(entry => !!entry.id && !!entry.target?.isConnected);
     // CSS order only: never reparent React-owned cards or change SpicyChat favorites.
     const groups = new Map();
@@ -369,9 +385,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (favoritePageSort === "native" || !sorting) {
         for (const item of group) item.target.style.order = item.target.dataset.dsFavOldOrder || "";
       } else {
-        group.sort((a,b) => favoritePageSort === "oldest"
-          ? (a.savedAt || Number.MAX_SAFE_INTEGER) - (b.savedAt || Number.MAX_SAFE_INTEGER) || a.index-b.index
-          : (b.savedAt || 0) - (a.savedAt || 0) || a.index-b.index);
+        group.sort((a,b) => {
+          if(favoritePageSort==='added-new'||favoritePageSort==='added-old'){
+            const av=a.observedAt,bv=b.observedAt;
+            if(!av||!bv)return (bv?1:0)-(av?1:0)||a.index-b.index;
+            return (favoritePageSort==='added-old'?av-bv:bv-av)||a.index-b.index;
+          }
+          return favoritePageSort === "oldest"
+            ? (a.savedAt || Number.MAX_SAFE_INTEGER) - (b.savedAt || Number.MAX_SAFE_INTEGER) || a.index-b.index
+            : (b.savedAt || 0) - (a.savedAt || 0) || a.index-b.index;
+        });
         group.forEach((item, i) => { item.target.style.order = String(i); });
       }
     }
@@ -523,8 +546,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const isPage = () => /^\/favorite-bots(?:\/|$)/i.test(location.pathname) && DS.state?.settings?.enabled !== false;
   // Favorites have their own actions and must not depend on Bulk Card Blocking.
-  const isEnabled = () => isPage() && setting('showFavoritesBulkSelect') !== false;
-  const scanEnabled = () => isPage() && setting('showFavoritesScanButton') !== false;
+  const isEnabled = () => isPage() && !DS.isLaterFavoritesTabActive?.() && setting('showFavoritesBulkSelect') !== false;
+  const scanEnabled = () => isPage() && !DS.isLaterFavoritesTabActive?.() && setting('showFavoritesScanButton') !== false;
   const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
   const idFrom = href => (String(href || '').match(LINK_RE)?.[1] || '').toLowerCase();
   const safeId = s => /^[0-9a-f-]{20,}$/i.test(String(s || ''));
@@ -548,7 +571,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       #ds-favorites-cleanup-status{font:500 12px system-ui,sans-serif;opacity:.82}
       #ds-favorites-scan{appearance:none;cursor:pointer;border:1px solid rgba(148,163,184,.36);border-radius:8px;background:rgba(55,65,81,.65);color:inherit;padding:7px 11px;font:500 12px system-ui,sans-serif}
       #ds-favorites-scan:disabled{opacity:.5;cursor:default}
-      #ds-favorites-scan-status{font:500 12px system-ui,sans-serif;opacity:.78}
+      #ds-favorites-scan-status{font:400 12px/1.35 system-ui,sans-serif;opacity:.72;max-width:min(100%,650px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       @media(max-width:650px){#${BAR}{bottom:7px;justify-content:center}}
     `;
     document.head?.appendChild(style);
@@ -707,9 +730,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // interpret locally stored Favorite History as permission to unfavorite bots.
   function cleanupCounts(job = state.cleanupJob) {
     const ids = unique((job?.ids || []).filter(safeId));
-    const done = new Set(job?.confirmed || []), pending = new Set(job?.pending || []), skipped = new Set(job?.skipped || []);
-    return { total: ids.length, confirmed: done.size, pending: pending.size, skipped: skipped.size,
-      remaining: ids.filter(id => !done.has(id) && !pending.has(id) && !skipped.has(id)).length };
+    const done = new Set(job?.confirmed || []), pending = new Set(job?.pending || []), skipped = new Set(job?.skipped || []), notFound = new Set(job?.notFound || []);
+    return { total: ids.length, confirmed: done.size, pending: pending.size, skipped: skipped.size, notFound: notFound.size,
+      remaining: ids.filter(id => !done.has(id) && !pending.has(id) && !skipped.has(id) && !notFound.has(id)).length };
   }
   async function storeCleanupJob() {
     if (!state.cleanupJob) return;
@@ -741,7 +764,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function clearCleanupJob() {
     if (state.cleanupRunning) return;
     const count = cleanupCounts();
-    const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped;
+    const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped && !count.notFound;
     if (!finished && !confirm('Clear the prepared Favorites cleanup queue? Your Favorite History and Later list will be kept.')) return;
     await DS.storageSet?.({ [CLEANUP_KEY]: null }, { immediate: true });
     state.cleanupJob = null;
@@ -766,10 +789,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function runCleanupJob() {
     const job = state.cleanupJob;
     if (!job || state.busy || state.scanning || state.cleanupRunning || !isPage()) return;
+    // Recovered account favorites may have no native card. The same persisted
+    // cleanup queue delegates these only to the account-verified action path.
+    if (job.mode === 'api') {
+      if (typeof DS.runFavoriteApiCleanupJob !== 'function') {
+        cleanupFeedback('Enable Favorites recovery to run this verified cleanup queue.');return;
+      }
+      state.cleanupRunning = true;
+      historyControls();
+      try { await DS.runFavoriteApiCleanupJob(job); }
+      finally { state.cleanupRunning = false;state.cleanupLoaded = false;await loadCleanupJob();historyControls(); }
+      return;
+    }
     if (document.visibilityState === 'hidden') { cleanupFeedback('Open the Favorites tab before starting native cleanup.'); return; }
     if (!unfilteredFavorites()) { cleanupFeedback('Clear native filters and turn on NSFW before starting.'); return; }
     const counts = cleanupCounts(job);
-    if (!counts.remaining) { cleanupFeedback('No unattempted bots left. Scan Favorites to verify pending removals.'); return; }
+    if (!counts.remaining) {
+      cleanupFeedback(counts.notFound ? `${counts.notFound} bots were not found in the native listing. They may still be account favorites; use Retry unresolved or Full Favorites for an account check.` : 'No unattempted bots left. Scan Favorites to verify pending removals.');
+      return;
+    }
     const later = await getStored(DS.LATER_BOTS_KEY || 'laterBots');
     const laterIds = new Set(later?.ids || []);
     const invalid = job.ids.filter(id => !laterIds.has(id));
@@ -780,12 +818,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     state.busy = true;
     if (state.active) setSelecting(false);
     historyControls();
-    const done = new Set(job.confirmed || []), pending = new Set(job.pending || []), skipped = new Set(job.skipped || []);
+    const done = new Set(job.confirmed || []), pending = new Set(job.pending || []), skipped = new Set(job.skipped || []), notFound = new Set(job.notFound || []);
     // Stop as soon as every requested bot has either been handled or queued
     // for verification. Otherwise the previous pass logic revisits all pages
     // even after the counter reaches 0 (the unnecessary "victory lap").
-    const hasUnattempted = () => job.ids.some(id => !done.has(id) && !pending.has(id) && !skipped.has(id));
-    let stopReason = '', operations = 0;
+    const hasUnattempted = () => job.ids.some(id => !done.has(id) && !pending.has(id) && !skipped.has(id) && !notFound.has(id));
+    let stopReason = '', operations = 0, allPagesChecked = false;
     try {
       // Deletions can shift bots between pagination pages. Multiple passes
       // from page 1 ensure that shifting doesn't silently skip targets.
@@ -793,7 +831,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (document.visibilityState === 'hidden') { stopReason = 'tab went into background'; break; }
         await rewindFavorites();
         const visited = new Set();
-        let thisPass = 0, loadingSince = 0;
+        let thisPass = 0, loadingSince = 0, reachedLastPage = false;
         for (let step = 0; step < 500 && !state.cleanupStop && isPage() && hasUnattempted(); step++) {
           const pagination = nativePagination();
           if (!pagination?.page || visited.has(pagination.page)) { stopReason = 'pagination stopped or repeated'; break; }
@@ -806,7 +844,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           loadingSince = 0;
           const page = pagination.page;
           visited.add(page);
-          const matches = [...cards().entries()].filter(([id]) => job.ids.includes(id) && !done.has(id) && !pending.has(id) && !skipped.has(id));
+          const matches = [...cards().entries()].filter(([id]) => job.ids.includes(id) && !done.has(id) && !pending.has(id) && !skipped.has(id) && !notFound.has(id));
           // Re-check Later membership at every page, so a changed Later list
           // cannot cause an unsafe unfavorite action.
           if (matches.length) {
@@ -820,14 +858,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
                 if (result.tentative) pending.add(id);
                 else { done.add(id); await markFormer([id], 'later-cleanup'); }
                 operations++; thisPass++;
+              } else if (/favorite state needs checking/i.test(result.reason || '')) {
+                // This is not a confirmed API failure. The card may have been
+                // unfavorited already, or its control may have been rebuilt.
+                notFound.add(id);
               } else {
                 skipped.add(id);
               }
-              job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped];
+              job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped]; job.notFound = [...notFound];
               // Persist each mutation to make even a browser shutdown safely resumable.
               await storeCleanupJob();
               const current = cleanupCounts(job);
-              cleanupFeedback(`Removing favorites: ${current.confirmed} verified, ${current.pending} awaiting scan, ${current.remaining} left · page ${page}`);
+              cleanupFeedback(`Checking page ${page}: ${current.confirmed} verified, ${current.pending} awaiting scan, ${current.notFound} not found, ${current.remaining} left`);
               if (!hasUnattempted()) break;
               await sleep(140);
             }
@@ -836,10 +878,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           const next = nativePagination();
           if (!next?.page) { stopReason = 'pagination disappeared'; break; }
           if (next.page !== page) continue; // SpicyChat changed page after removal.
-          if (!next.next || next.next.disabled) break;
+          if (!next.next || next.next.disabled) { reachedLastPage = true; break; }
           const signature = pageSignature();
           next.next.click();
           if (!await waitForPageChange(page, signature)) { stopReason = `page after ${page} did not load`; break; }
+        }
+        // Only report an unseen bot as 'not found in the native listing'
+        // after a clean, page-1-to-last-page traversal with no shifts. This
+        // NEVER means the account no longer has that favorite.
+        if(reachedLastPage && visited.has(1) && !state.cleanupStop && !stopReason){
+          allPagesChecked = true;
+          if(thisPass === 0){
+            for(const id of job.ids)if(!done.has(id) && !pending.has(id) && !skipped.has(id))notFound.add(id);
+          }
         }
         if (!hasUnattempted() || thisPass === 0) break;
       }
@@ -848,7 +899,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       console.warn('[SpicyChat QoL] Later overlap cleanup stopped', error);
     } finally {
       state.cleanupRunning = false; state.busy = false;
-      job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped];
+      job.confirmed = [...done]; job.pending = [...pending]; job.skipped = [...skipped]; job.notFound = [...notFound];
       try { await storeCleanupJob(); } catch (error) { stopReason = `Could not verify final checkpoint: ${error.message}`; }
       const count = cleanupCounts(job);
       if (count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped) {
@@ -856,7 +907,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } else if (!count.remaining && count.pending && !count.skipped) {
         cleanupFeedback(`${count.confirmed} verified, ${count.pending} awaiting a complete Favorites scan. No further unfavorite pass needed.`);
       } else {
-        cleanupFeedback(`${state.cleanupStop ? 'Stopped' : 'Paused'}: ${count.confirmed} verified, ${count.pending} awaiting scan, ${count.remaining} not attempted, ${count.skipped} failed.${stopReason ? ` ${stopReason}` : ''}`);
+        cleanupFeedback(`${state.cleanupStop ? 'Stopped' : 'Paused'}: ${count.confirmed} verified, ${count.pending} awaiting scan, ${count.notFound} not found in native listing, ${count.remaining} not attempted, ${count.skipped} failed.${allPagesChecked?' Checked through the final page.':''}${stopReason ? ` ${stopReason}` : ''}`);
       }
       historyControls();
     }
@@ -1014,6 +1065,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     return null;
   }
+  function accountFavoriteCount() {
+    // Account-wide count is not the same as the searchable Chatbots results.
+    // SpicyChat exposes both, and private/unavailable bots can make them differ.
+    const element = document.querySelector('[data-testid="FavoriteCharactersCount-Total"]');
+    const text = clean(element?.textContent || '');
+    const match = text.match(/([\d,]+)\s*\/\s*([\d,]+)\s*favorites?\b/i);
+    if (!match) return null;
+    const count = Number(match[1].replace(/,/g, ''));
+    const limit = Number(match[2].replace(/,/g, ''));
+    return Number.isSafeInteger(count) && Number.isSafeInteger(limit) ? { count, limit } : null;
+  }
+  function countComparison(listing, account) {
+    if (!account) return '';
+    if (listing === null) return ` · Account ${account.count}/${account.limit} (listing count unavailable)`;
+    const hidden = account.count - listing;
+    return ` · Account ${account.count}/${account.limit}` +
+      (hidden > 0 ? ` · ${hidden} not returned by the Chatbots listing` :
+       hidden < 0 ? ' · listing count exceeds account counter' : ' · account count agrees');
+  }
   function unfilteredFavorites() {
     const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document;
     const search = root.querySelector('input[placeholder*="Dive into" i],input[placeholder*="start searching" i],input[type="search"]');
@@ -1059,10 +1129,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     return 0;
   }
+  function scanStatusLabel(message) {
+    const value = String(message || '');
+    const seen = value.match(/^Listing verified: ([\d,]+)\s*\/\s*([\d,]+)/i);
+    const missing = value.match(/ · ([\d,]+) not returned by the Chatbots listing/i);
+    if (seen) return `Listing checked ${seen[1]}/${seen[2]}` +
+      (missing ? ` · ${missing[1]} account favorites not listed` : ' · account total not verified');
+    return value;
+  }
   function setScanStatus(message, announce = false) {
     state.status = message;
     const label = document.getElementById('ds-favorites-scan-status');
-    if (label) label.textContent = message;
+    if (label) { label.textContent = scanStatusLabel(message); label.title = message; }
     if (announce) DS.setQuickStatus?.(message, true);
   }
   async function scanFavorites() {
@@ -1074,6 +1152,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const entries = new Map();
     const visited = new Set();
     let complete = false, expected = null, stopReason = '';
+    let initialResultCount = null, initialAccount = null;
     try {
       if (!unfilteredFavorites()) {
         throw new Error('Clear native filters and turn on NSFW before scanning all favorites.');
@@ -1094,6 +1173,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!paginator) throw new Error('Native page controls disappeared.');
       }
       if (paginator.page !== 1) throw new Error('Could not confirm page 1.');
+      initialResultCount = nativeCount();
+      initialAccount = accountFavoriteCount();
       // A scan can span many page switches. Never classify missing IDs as
       // former when filters, backend page caps, or interrupted loading exist.
       for (let step = 0; step < 1000 && !state.cancelScan && isPage(); step++) {
@@ -1115,11 +1196,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         visited.add(page);
         const count = nativeCount();
         if (count !== null && (expected === null || count > expected)) expected = count;
-        setScanStatus(`Scanning page ${page} · ${entries.size}${expected === null ? '' : ` / ${expected}`} favorites`);
+        setScanStatus(`Scanning page ${page} · ${entries.size}${expected === null ? '' : ` / ${expected}`} listed${initialAccount ? ` · account ${initialAccount.count}` : ''}`);
         // Save every complete page. Unexpected navigation/errors will still
         // leave confirmed discoveries in Favorite History.
         if (newlySeen.length) await rememberFavorites(newlySeen);
-        if (expected !== null && entries.size >= expected && unfilteredFavorites()) { complete = true; break; }
+        if (expected !== null && entries.size === expected && unfilteredFavorites()) { complete = true; break; }
+        if (expected !== null && entries.size > expected) { stopReason = 'more unique cards than the reported result count'; break; }
         if (state.cancelScan) break;
         if (!paginator.next || paginator.next.disabled) {
           stopReason = `native pagination ended at page ${page}`;
@@ -1131,16 +1213,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!changed) { stopReason = `page ${page + 1} did not finish loading`; break; }
         if (changed <= page) { stopReason = 'pagination did not advance'; break; }
       }
-      // Every confirmed page was saved as it arrived. Don't re-save the
-      // entire collection again at completion.
-      // Complete means all native result IDs were collected on an unfiltered
-      // page. Missing IDs must STILL NOT be treated as deleted/unfavorited:
-      // the result count can be scoped or restricted by SpicyChat.
-      if (complete && !state.cancelScan) {
-        await DS.storageSet?.({ [SCAN_STATE_KEY]: { lastCompleteAt: Date.now(), count: entries.size, pages: visited.size, ids: [...entries.keys()] } }, { immediate: true });
-        // Only reconcile native unfavorite actions explicitly requested by
-        // the user. Never infer that other missing favorites were removed.
-        if (state.cleanupJob?.pending?.length) {
+      // Listing completeness and account completeness are separate checks.
+      // A successful listing scan can contain fewer bots than the account-wide
+      // counter. Do not classify the difference as removed or unavailable.
+      const finalResultCount = nativeCount();
+      const finalAccount = accountFavoriteCount();
+      const listingStable = expected !== null && finalResultCount === expected &&
+        (initialResultCount === null || initialResultCount === expected);
+      const accountStable = !!initialAccount && !!finalAccount &&
+        initialAccount.count === finalAccount.count && initialAccount.limit === finalAccount.limit;
+      if (!listingStable || (initialAccount && !accountStable)) {
+        complete = false;
+        stopReason = !listingStable ? 'SpicyChat listing count changed during scan' : 'account Favorites counter changed during scan';
+      }
+      const listingVerified = complete && !state.cancelScan && entries.size === expected;
+      const accountVerified = listingVerified && accountStable && finalAccount.count === entries.size;
+      // A verified searchable listing is useful for Later actions, but it is
+      // NOT proof that absent account-wide favorites were removed.
+      if (listingVerified) {
+        await DS.storageSet?.({ [SCAN_STATE_KEY]: {
+          lastCompleteAt: Date.now(), count: entries.size, pages: visited.size,
+          ids: [...entries.keys()], listingCount: expected, listingVerified: true,
+          accountCount: finalAccount?.count ?? null, accountLimit: finalAccount?.limit ?? null,
+          accountVerified
+        } }, { immediate: true });
+        // Reconcile pending native unfavorites only when the full ACCOUNT is
+        // verified. Missing entries in a restricted listing are ambiguous.
+        if (accountVerified && state.cleanupJob?.pending?.length) {
           const stillCurrent = new Set(entries.keys());
           const confirmed = state.cleanupJob.pending.filter(id => !stillCurrent.has(id));
           if (confirmed.length) await markFormer(confirmed, 'later-cleanup-verified');
@@ -1151,9 +1250,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await storeCleanupJob();
         }
       }
-      const description = complete ? 'Complete' : state.cancelScan ? 'Stopped' : 'Partial';
-      const detail = complete ? '' : ` · ${stopReason || 'not all pages were verified'}`;
-      setScanStatus(`${description} scan: ${entries.size}${expected === null ? '' : ` / ${expected}`} favorites saved across ${visited.size} page${visited.size === 1 ? '' : 's'}${detail}.`, true);
+      const description = listingVerified ? (accountVerified ? 'Verified account' : 'Listing verified') : state.cancelScan ? 'Stopped' : 'Partial';
+      const detail = listingVerified ? (finalAccount && !accountVerified ? ' · Account-wide scan not verified; missing bots kept in history' : '') :
+        ` · ${stopReason || 'not all pages were verified'}`;
+      setScanStatus(`${description}: ${entries.size}${expected === null ? '' : ` / ${expected}`} visible favorites across ${visited.size} page${visited.size === 1 ? '' : 's'}${countComparison(expected, finalAccount)}${detail}.`, true);
     } catch (error) {
       setScanStatus(`Favorites scan stopped: ${error?.message || error}`, true);
     } finally {
@@ -1185,27 +1285,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (scanEnabled()) {
       if (!scan) { scan = button('Scan Favorites','scan',() => state.scanning ? (state.cancelScan = true) : scanFavorites()); scan.id = 'ds-favorites-scan'; host.append(scan); }
       if (!scanStatus) { scanStatus = document.createElement('span'); scanStatus.id = 'ds-favorites-scan-status'; host.append(scanStatus); }
-      scanStatus.textContent = state.status;
+      scanStatus.textContent = scanStatusLabel(state.status);
+      scanStatus.title = state.status;
     } else { scan?.remove(); scanStatus?.remove(); }
     let start = document.getElementById('ds-favorites-cleanup-start');
     let clear = document.getElementById('ds-favorites-cleanup-clear');
     let retry = document.getElementById('ds-favorites-cleanup-retry');
     let status = document.getElementById('ds-favorites-cleanup-status');
     if (state.cleanupJob?.ids?.length) {
-      if (!start) { start = document.createElement('button'); start.type = 'button'; start.dataset.action = 'cleanup'; start.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (state.cleanupRunning) state.cleanupStop = true; else void runCleanupJob(); }); start.id = 'ds-favorites-cleanup-start'; host.append(start); }
+      if (!start) { start = document.createElement('button'); start.type = 'button'; start.dataset.action = 'cleanup'; start.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (state.cleanupRunning) { state.cleanupStop = true; DS.stopFavoriteApiCleanupJob?.(); } else void runCleanupJob(); }); start.id = 'ds-favorites-cleanup-start'; host.append(start); }
       if (!clear) { clear = button('Clear cleanup queue', 'clear-cleanup', clearCleanupJob); clear.id = 'ds-favorites-cleanup-clear'; host.append(clear); }
-      if (!retry) { retry = button('Retry failed', 'retry-cleanup', async () => { if (state.cleanupRunning || !state.cleanupJob) return; state.cleanupJob.skipped = []; await storeCleanupJob(); state.cleanupStatus = ''; historyControls(); }); retry.id = 'ds-favorites-cleanup-retry'; host.append(retry); }
+      if (!retry) { retry = button('Retry unresolved', 'retry-cleanup', async () => { if (state.cleanupRunning || !state.cleanupJob) return; state.cleanupJob.skipped = []; state.cleanupJob.notFound = []; await storeCleanupJob(); state.cleanupStatus = ''; historyControls(); }); retry.id = 'ds-favorites-cleanup-retry'; host.append(retry); }
       if (!status) { status = document.createElement('span'); status.id = 'ds-favorites-cleanup-status'; host.append(status); }
       const count = cleanupCounts();
-      const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped;
+      const finished = count.total > 0 && count.confirmed === count.total && !count.pending && !count.skipped && !count.notFound;
       start.textContent = state.cleanupRunning ? 'Stop after current bot' : finished ? 'Cleanup complete' : count.remaining ? `Unfavorite Later overlap (${count.remaining})` : 'Awaiting verification';
       start.disabled = !state.cleanupRunning && !count.remaining;
       clear.textContent = finished ? 'Dismiss finished queue' : 'Clear cleanup queue';
       clear.disabled = state.cleanupRunning;
-      retry.disabled = state.cleanupRunning || !count.skipped;
+      retry.textContent = `Retry unresolved (${count.skipped + count.notFound})`;
+      retry.disabled = state.cleanupRunning || !(count.skipped + count.notFound);
       status.textContent = state.cleanupStatus || (finished
         ? `Complete: ${count.confirmed}/${count.total} favorites unfavorited.`
-        : `${count.confirmed} verified · ${count.pending} awaiting scan · ${count.remaining} to process`);
+        : `${count.confirmed} verified · ${count.pending} awaiting scan · ${count.notFound} not found · ${count.remaining} to process · ${count.skipped} failed`);
     } else { start?.remove(); clear?.remove(); retry?.remove(); status?.remove(); }
     if (target.nextElementSibling !== host) target.after(host);
   }
@@ -1240,8 +1342,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (isEnabled()) { renderLauncher(); if (state.active) { selectionCards(); renderBar(); } }
     else { if (state.active) setSelecting(false); renderLauncher(); }
     historyControls();
+    DS.refreshFavoritesLaterTab?.();
     void loadCleanupJob();
-    void syncVisibleFavorites();
+    if (!DS.isLaterFavoritesTabActive?.()) void syncVisibleFavorites();
     if (!state.observer) {
       const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.body;
       if (!root) return;

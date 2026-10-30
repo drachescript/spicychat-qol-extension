@@ -184,7 +184,7 @@ async function runLorebookExportHelperTab(tabId, message) {
   const id = String(message?.id || "").trim().slice(0, 200);
   if (!Number.isFinite(Number(tabId)) || !token || !["details", "entries"].includes(target)) return false;
 
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 180_000;
   let response = null;
   let readySince = 0;
   try {

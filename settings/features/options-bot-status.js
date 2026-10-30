@@ -567,9 +567,16 @@ function botStatusPendingIds(entries, nextIndex, deferredIds = [], omittedIds = 
   return pending;
 }
 
-async function botStatusPausedQueue() {
+// Stale-refresh work has its own durable queue. A user can stop an ordinary
+// scan, refresh stale results, and still resume the original pending IDs later.
+const BOT_STATUS_STALE_PAUSED_QUEUE_KEY = "botStatusPausedStaleQueueV1";
+function botStatusQueueKey(kind = "main") {
+  return kind === "stale" ? BOT_STATUS_STALE_PAUSED_QUEUE_KEY : BOT_STATUS_PAUSED_QUEUE_KEY;
+}
+async function botStatusPausedQueue(kind = "main") {
+  const key = botStatusQueueKey(kind);
   try {
-    const value = (await storageGet([BOT_STATUS_PAUSED_QUEUE_KEY]))?.[BOT_STATUS_PAUSED_QUEUE_KEY];
+    const value = (await storageGet([key]))?.[key];
     return value && Array.isArray(value.ids) ? value : null;
   } catch { return null; }
 }
@@ -604,9 +611,20 @@ async function refreshBotStatusLastRunFeedback() {
 }
 
 async function refreshBotStatusPauseButton() {
-  const state = await botStatusPausedQueue();
-  botStatusPendingReviewIds = new Set((state?.ids || []).filter(validBotId));
-  const count = botStatusPendingReviewIds.size;
+  const [state, staleState] = await Promise.all([botStatusPausedQueue(), botStatusPausedQueue("stale")]);
+  const normalIds = (state?.ids || []).filter(validBotId);
+  const staleIds = (staleState?.ids || []).filter(validBotId);
+  botStatusPendingReviewIds = new Set([...normalIds, ...staleIds]);
+  const count = normalIds.length;
+  const staleCount = staleIds.length;
+  const staleButton = $("resumePausedStaleBotAvailability");
+  if (staleButton) {
+    staleButton.disabled = botAvailabilityScanRunning || !staleCount;
+    staleButton.hidden = !staleCount;
+    staleButton.textContent = staleCount
+      ? `Resume stale refresh (${staleCount})`
+      : "Resume stale refresh";
+  }
   const button = $("resumePausedBotAvailability");
   if (button) {
     button.disabled = botAvailabilityScanRunning || !count;
@@ -616,23 +634,35 @@ async function refreshBotStatusPauseButton() {
       : "Resume pending rechecks";
   }
   const hint = $("botStatusPendingQueueSummary");
-  if (hint) hint.textContent = count
-    ? `${count} IDs still queued. These are pending rechecks, not necessarily never-checked bots. Their previous status remains intact. New scans won't overwrite this queue.`
-    : "No pending rechecks. Unchecked means no completed historical check.";
+  if (hint) hint.textContent = [
+    count ? `${count} regular pending rechecks saved for Resume.` : "No regular scan pending.",
+    staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
+    "These queues are independent; running Refresh stale bots does not resume unchecked bots or clear pending rechecks."
+  ].join(" ");
 }
 
 async function runBotAvailabilityScan(options = {}) {
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
   if (botAvailabilityScanRunning) return;
-  const pausedQueue = options?.resume ? await botStatusPausedQueue() : null;
+  // Only resume a queue when its own Resume control was clicked (or the user
+  // explicitly agrees to resume that same scan type). Stale refreshes must
+  // never consume or overwrite the stopped normal/unchecked queue.
+  const requestedMode = String(options?.mode || (options?.uncheckedOnly === true ? "unchecked" : "all"));
+  const queueKind = options?.resume
+    ? (options?.queue === "stale" ? "stale" : "main")
+    : (requestedMode === "stale" ? "stale" : "main");
+  const queueKey = botStatusQueueKey(queueKind);
+  const pausedQueue = options?.resume ? await botStatusPausedQueue(queueKind) : null;
   if (!options?.resume) {
-    const unfinished = await botStatusPausedQueue();
+    const unfinished = await botStatusPausedQueue(queueKind);
     if (unfinished?.ids?.length) {
-      // Never let a new scan overwrite a partially completed queue. Those
-      // IDs can have valid previous statuses, so don't zero checkedAt either.
-      const resumeNow = confirm(`${unfinished.ids.length} Bot Status rechecks are still pending.\n\nOK: Resume those IDs first.\nCancel: Keep the queue untouched and don't start a new scan.\n\nExisting availability results remain intact.`);
-      if (resumeNow) await runBotAvailabilityScan({ resume: true });
+      // Save the existing queue, and offer to resume only this scan type.
+      const isStale = queueKind === "stale";
+      const resumeNow = confirm(isStale
+        ? `${unfinished.ids.length} stale refresh checks are pending.\n\nOK: Resume this stale refresh.\nCancel: Leave the stale queue untouched.\n\nYour other paused Bot Status scan will not run.`
+        : `${unfinished.ids.length} Bot Status rechecks are still pending.\n\nOK: Resume those IDs first.\nCancel: Keep the queue untouched and don't start a new scan.\n\nUse Refresh stale bots separately without resuming this queue.`);
+      if (resumeNow) await runBotAvailabilityScan({ resume: true, queue: queueKind });
       else await refreshBotStatusPauseButton();
       return;
     }
@@ -807,7 +837,7 @@ async function runBotAvailabilityScan(options = {}) {
     const pending = botStatusPendingIds(entries, nextIndex, deferredAccessIds, omittedByBotLimit, true);
     // Keep the last completed ID until final persistence has succeeded.
     try {
-      const queueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: {
+      const queueSaved = await storageSet({ [queueKey]: {
         version: 1, mode, scope, ids: pending, phase: "running",
         updatedAt: now, startedAt: runStartedAt,
         completed, total: entries.length, reason: "Saved progress"
@@ -895,7 +925,7 @@ async function runBotAvailabilityScan(options = {}) {
           }
           const remaining = botStatusPendingIds(entries, scanIndex + 1, deferredAccessIds, omittedByBotLimit);
           const payload = { version: 1, mode, scope, ids: remaining, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
-          const pausedSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: payload });
+          const pausedSaved = await storageSet({ [queueKey]: payload });
           if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
           accessPauseTriggered = !!pausedSaved;
           terminalMessage = pausedSaved
@@ -1038,7 +1068,7 @@ async function runBotAvailabilityScan(options = {}) {
     if (!accessPauseTriggered && finalResultsSaved) {
       const outstanding = new Set(botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit));
       try {
-        const finalQueueSaved = await storageSet({ [BOT_STATUS_PAUSED_QUEUE_KEY]: outstanding.size ? {
+        const finalQueueSaved = await storageSet({ [queueKey]: outstanding.size ? {
           version: 1, mode, scope, ids: [...outstanding], phase: "paused",
           updatedAt: Date.now(), startedAt: runStartedAt,
           completed, total: entries.length,
@@ -1097,7 +1127,7 @@ async function runBotAvailabilityScan(options = {}) {
     await refreshBotStatusPauseButton();
     // The persisted resume queue remains authoritative; never use a guessed
     // value to label an interrupted or limited scan as complete.
-    const pauseState = await botStatusPausedQueue();
+    const pauseState = await botStatusPausedQueue(queueKind);
     const pendingCount = Array.isArray(pauseState?.ids) ? pauseState.ids.length : 0;
     const feedback = {
       at: Date.now(), mode, checked: completed,
@@ -2411,7 +2441,8 @@ function setupBotAvailabilityControls() {
   $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
   $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
   $("scanUnknownBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unknown" }));
-  $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true }));
+  $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "main" }));
+  $("resumePausedStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "stale" }));
   void refreshBotStatusPauseButton().then(() => renderBotAvailability({ skipRecoveryRerender: true })).catch(() => {});
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));

@@ -741,8 +741,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // This fallback used to read from the persistent Lorebook backup store,
       // accidentally merging an older entry into a supposedly fresh export.
       // Explicitly capture both pages now and assemble ONLY those results.
-      const details = await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
-      const entries = await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
+      // When the user is already on the requested Lorebook editor, use its
+      // LIVE mounted page directly rather than opening an unnecessary helper.
+      // The captured route and full entry count are still verified below.
+      const here = routeInfo();
+      const sameBook = here?.id?.toLowerCase() === id;
+      const localDetails = sameBook && here.page === "details" ? currentCapture()?.details : null;
+      const details = localDetails?.name
+        ? { id, page: "details", data: localDetails }
+        : await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
+      const localEntries = sameBook && here.page === "entries"
+        ? await captureFullEntriesHere("", { persist: false }) : null;
+      const entries = localEntries?.complete === true
+        ? { id, page: "entries", complete: true, data: localEntries.entries }
+        : await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
       if (!details || details.page !== "details" || details.id !== id || !details.data?.name) {
         throw new Error("Lorebook editor did not confirm fresh details; refusing historical data.");
       }
@@ -794,7 +806,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getCurrentOwnLorebookBackupDataFromEditor = captureCurrentLorebookThroughEditors;
 
-  async function waitForExportHelperReady(target, expectedId = "", timeout = 30_000) {
+  async function waitForExportHelperReady(target, expectedId = "", timeout = 75_000) {
     const startedAt = Date.now();
     const wantedId = clean(expectedId, 200).toLowerCase();
     while (Date.now() - startedAt < timeout) {

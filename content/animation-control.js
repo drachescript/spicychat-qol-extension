@@ -138,8 +138,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function drawFrame(img, canvas) {
     if (!img?.naturalWidth || !img?.naturalHeight || !canvas) return false;
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    // Saved-for-Later thumbnails are small: do not allocate multi-megapixel
+    // frozen WebP canvases just to display a ~175px card image.
+    const laterThumb = !!img.closest?.('#ds-favorites-later-panel');
+    const scale = laterThumb ? Math.min(1, 384 / Math.max(img.naturalWidth, img.naturalHeight)) : 1;
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
     try {
       canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
       return true;

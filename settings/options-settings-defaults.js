@@ -280,6 +280,7 @@ const DEFAULT_SETTINGS = {
   creatorBotBrowserNotifications: false,
   trackFavoriteBots: false,
   enableFavoritesRecovery: false,
+  passiveFavoritesIdBackup: false,
   showFavoritesBulkSelect: true,
   showFavoritesScanButton: true,
   showFavoriteHistoryButton: false,

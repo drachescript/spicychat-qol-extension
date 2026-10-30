@@ -370,7 +370,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       let added = 0;
       for (const entry of copy.entries || []) {
-        const key = clean(entry.id || `${entry.name}:${entry.priority}:${entry.content.length}`, 900).toLowerCase();
+        // Generated index:0...index:99 IDs repeat on each API page. Those
+        // are not real entry UUIDs and must never suppress later pages.
+        const realId = String(entry.id || '').startsWith('index:') ? '' : entry.id;
+        const key = clean(realId || `${entry.name}:${entry.priority}:${entry.content}:${entry.keywords.join('|')}`, 900).toLowerCase();
         if (!key || seen.has(key)) continue;
         seen.add(key);
         entries.push(entry);
@@ -380,7 +383,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!expected || entries.length >= expected) break;
       if (!copy.entries.length || !added) break;
       const tail = copy.entries[copy.entries.length - 1];
-      const nextCursor = Number(tail?.priority);
+      const rawCursor = tail?.priority;
+      const nextCursor = rawCursor === '' || rawCursor == null ? NaN : Number(rawCursor);
       if (!Number.isFinite(nextCursor) || nextCursor === cursor) break;
       cursor = nextCursor;
       await new Promise(resolve => setTimeout(resolve, 80));

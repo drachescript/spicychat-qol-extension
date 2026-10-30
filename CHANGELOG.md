@@ -1,3 +1,43 @@
+## 0.2.65
+- Clarified recently added sorting for Later and Favorite History; added observed Favorites-addition sorting from consecutive ID snapshots without guessing older favorite dates.
+- Let Recovered card titles wrap in full above tags; avoid rewriting unchanged Favorite History and offer a no-scan retry when its independent storage verification fails.
+- Reduced Recovered search keystroke card rebuilds and duplicate title-load refreshes; added read-only unresolved-ID rechecks and a manual retry for failed public-title lookups.
+- Fixed the Recovered view toggle looking like a navigation link; switching to native+recovered keeps controls in view and Back restores native Favorites without a reload.
+- Recovered can now fill missing public titles from the profile reader on the viewed page (up to 12 per page, capped at 36 per tab session); added a toggle and a manual next-batch action.
+- Added a small on-demand public-title lookup for recovered bots that Typesense lists without a title, using the existing profile reader.
+- Fixed Lorebook API entry deduplication across pages without native IDs and gave slow editor export helpers more time to load; incomplete backups remain rejected.
+- Restored Recovered card listing titles from current search metadata, kept descriptions when available, and made tag/Opened labels smaller without redundant Recovered badges.
+- Made Later and Recovered real deep links with normal new-tab behavior; recovered-only is now the default, and native views restore when changing tabs.
+- Fixed a stuck/empty Favorites view after switching Recovered and Later: native tabs remain usable, view flags recover after remounts, and unchanged tab labels no longer trigger repeated DOM updates.
+- Made Recovered Favorites (QoL) show only bots missing from a verified native Favorites scan by default, moved its shortcut beside native tabs, and simplified the recovery/cleanup controls.
+- Fixed Full Favorites coverage saving by splitting large metadata into verified batches, without losing a completed lookup when storage verification fails.
+- Added an opt-in lightweight Favorites ID backup (16-byte packed IDs, latest plus two snapshots) from observed native settings, with a JSON export.
+- Fixed early Favorites bridge switching off when recovery was enabled through per-setting storage, and added a narrow read-only fallback for SpicyChat’s own parsed account settings response.
+- Fixed Full Favorites 403 on account reads by preferring SpicyChat’s observed authenticated settings response and never retrying an anonymous settings GET.
+- Added one-shot native page reload for read-only Favorites recovery when account observation was missed; kept fresh cleanup verification and writes authenticated.
+- Fixed Full Favorites reading account IDs from SpicyChat's observed native settings response when auth capture is unavailable; uncertain writes stay disabled.
+- Added separate Full Favorites and supplement-native recovered-card display modes.
+- Distinguished native cleanup bots not found after a complete page traversal from failed removals, keeping them retryable.
+- Moved Later view settings into Later bots without changing their saved values.
+- Added optional Full Favorites (QoL) using the current account Favorites IDs and small read-only searches for bots omitted by the native listing.
+- Added paged Full Favorites cards, current/recovered counts, tags, search, filters, confirmed chat signals, and reviewable cleanup suggestions.
+- Extended the existing Favorites cleanup queue to verify user-confirmed API unfavorites against fresh account membership, including recovered bots without loaded native cards.
+- Kept Later saves verified before moves, preserved Favorite History and existing metadata, and made stopped or failed account cleanup resumable.
+- Hid SpicyChat’s separate Favorites pager while viewing Later, spaced its tab from the native result count, and moved the Opened badge beside card actions.
+- Improved Later tags using saved card metadata and existing local archive data, with a bounded on-demand lookup for missing public tags.
+- Reduced full-resolution animation frame copies on small Later cards and reattached the Later view after Favorites React remounts.
+- Added phone sync presets for Blocked + Later in receive, upload, and two-way modes, without syncing unrelated data.
+- Changed automatic cloud-sync checks to every 6 hours and delayed list sync until 90 seconds after the last edit; manual Sync now remains available.
+- Separated Later into its own QoL page view while keeping the native Favorites listing intact, with numbered pagination, saved tags, more description, search, and content filters.
+- Added separate Later-page opened/blocked visibility controls; regular listing filters no longer remove cards from the Later view.
+- Improved initial Later image loading and prevented normal listing card scans from processing QoL Later cards.
+- Updated the advert-banner matcher for the new Halloween Contest carousel artwork.
+- Matched the Later cards more closely to the native Favorites layout, added a sidebar Later shortcut, and reduced repeated Later rerenders.
+- Fixed sidebar footer and social-link controls on SpicyChat’s current navigation markup, including links returning after rerenders.
+- Fixed Refresh stale bots resuming stopped unchecked/pending rechecks by keeping stale refresh and regular Bot Status scan queues separate.
+- Updated Scan Favorites to compare the account Favorites counter against the searchable Chatbots result count and report differences without marking unlisted bots as removed.
+- Added a Later tab to the Favorites page with QoL-saved bot cards, search, folders, sorting, pagination, and removal from Later.
+
 ## 0.2.64
 - Expanded Chat Continuation / Transfer with reviewed Memory Manager JSON exports and target-chat local Lorebook drafts, imported inactive for review.
 - Added a word censor with whole-word/phrase matching, custom masks, AI/user scope, reveal controls, and per-chat exclusions. Censoring changes only displayed text.

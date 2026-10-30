@@ -10,7 +10,10 @@
   const MIGRATION_KEY = "dsGranularSettingsV1";
   const REVISION_KEY = "dsSettingsRevisionV1";
   const ALARM_NAME = "ds-qol-account-sync-v1";
-  const SYNC_INTERVAL_MINUTES = 5;
+  const LIST_SETTLED_ALARM = "ds-qol-list-sync-settled-v1";
+  const LIST_QUIET_UNTIL_KEY = "qolSyncListQuietUntilV1";
+  const SYNC_INTERVAL_MINUTES = 360;
+  const LIST_EDIT_SETTLE_MS = 90000; // Let long-running list imports/cleanups finish before publishing.
   const REQUEST_TIMEOUT_MS = 30000;
   const MAX_PUSH_KEYS = 20;
   const LIST_LEDGER_KEY = "qolSyncListLedgerV1";
@@ -25,8 +28,6 @@
   });
   const LIST_NAMES = Object.keys(LIST_SOURCES);
   const VALID_LIST_MODES = new Set(["off", "two-way", "upload-only", "download-only"]);
-  const pendingListSources = new Set();
-  let listSyncTimer = null;
   const expectedListWrites = new Map();
 
 
@@ -652,9 +653,13 @@
     }
     await writeListLedger(ledger);
     if (listMayUpload(prefs, scope)) {
-      pendingListSources.add(scope);
-      clearTimeout(listSyncTimer);
-      listSyncTimer = setTimeout(() => queued(() => syncListData()).catch(() => {}), 1600);
+      // MV3 service workers can be suspended before a 90-second timeout.
+      // Persist the deadline and use alarms instead of an in-memory timer.
+      const quietUntil = now() + LIST_EDIT_SETTLE_MS;
+      if (!await storageSet({ [LIST_QUIET_UNTIL_KEY]: quietUntil })) {
+        throw new Error("Could not save the pending list-sync deadline");
+      }
+      chrome.alarms.create(LIST_SETTLED_ALARM, { when: quietUntil });
     }
   }
 
@@ -764,7 +769,7 @@
       }
     }
     await saveStatePatch({ lastRevision: revision, lastStatus: applied ? `Synced ${applied} saved-list part${applied === 1 ? "" : "s"}` : "Saved lists up to date" });
-    pendingListSources.clear();
+    await storageRemove([LIST_QUIET_UNTIL_KEY]);
     return { ok: true, lists: applied, revision };
   }
 
@@ -809,6 +814,16 @@
   }
 
   async function syncNowInternal({ forceFullRecovery = false, explicit = false } = {}) {
+    // A bulk update can write lists repeatedly for minutes. Wait for its
+    // quiet period rather than merging partially updated lists mid-operation.
+    if (!explicit) {
+      const snapshot = await storageGet([LIST_QUIET_UNTIL_KEY]);
+      const quietUntil = Number(snapshot[LIST_QUIET_UNTIL_KEY] || 0);
+      if (quietUntil > now()) {
+        chrome.alarms.create(LIST_SETTLED_ALARM, { when: quietUntil });
+        return { ok: true, skipped: true, reason: "list_update_in_progress" };
+      }
+    }
     const { state, auth, prefs } = await getSyncContext();
     if (!state.accountId || !auth.token) return { ok: false, error: "not_linked", message: "This device is not linked to a QoL account." };
     if (state.paused && !explicit) return { ok: false, error: "paused", message: "Automatic sync is paused on this device." };
@@ -1167,7 +1182,7 @@
   });
 
   chrome.alarms.onAlarm.addListener(alarm => {
-    if (alarm?.name !== ALARM_NAME) return;
+    if (alarm?.name !== ALARM_NAME && alarm?.name !== LIST_SETTLED_ALARM) return;
     queued(() => syncNowInternal()).catch(() => {});
   });
 
@@ -1205,7 +1220,10 @@
     return true;
   });
 
-  ensureSyncAlarm().then(() => {
+  ensureSyncAlarm().then(async () => {
+    const saved = await storageGet([LIST_QUIET_UNTIL_KEY]);
+    const quietUntil = Number(saved[LIST_QUIET_UNTIL_KEY] || 0);
+    if (quietUntil > now()) chrome.alarms.create(LIST_SETTLED_ALARM, { when: quietUntil });
     setTimeout(() => queued(() => syncNowInternal()).catch(() => {}), 1800);
   }).catch(() => {});
 })();
