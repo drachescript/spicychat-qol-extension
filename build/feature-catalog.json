@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.64",
+  "version": "0.2.65",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 131,
