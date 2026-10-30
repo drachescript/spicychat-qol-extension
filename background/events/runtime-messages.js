@@ -11,6 +11,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (["DS_SUPPORT_HISTORY_APPEND", "DS_SUPPORT_HISTORY_GET", "DS_SUPPORT_HISTORY_CLEAR"].includes(message?.type)) {
     return dsqSupportHistoryRequest(message, sender, sendResponse);
   }
+  if(message?.type==='DS_FAVORITES_RECOVERY_SEARCH'){
+    (async()=>{
+      const senderUrl=String(sender?.url||sender?.tab?.url||'');
+      const ids=[...new Set(Array.isArray(message.ids)?message.ids:[])];
+      const uuid=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+      if(!/^https:\/\/(?:www\.)?spicychat\.ai\/favorite-bots(?:[?#]|$)/i.test(senderUrl) ||
+         !ids.length||ids.length>40||ids.some(x=>typeof x!=='string'||!uuid.test(x)))
+        return {ok:false,error:'Invalid Favorites recovery batch.'};
+      const filter=`application_ids:spicychat && character_id:[${ids.map(id=>"'"+id.toLowerCase()+"'").join(',')}] && type:STANDARD`;
+      const result=await typesenseMultiSearch([{
+        collection:'public_characters_alias',q:'*',query_by:'name',filter_by:filter,
+        per_page:40,page:1,highlight_fields:'none'
+      }],12500,EXACT_MESSAGE_TYPESENSE_KEY,'favorites-recovery');
+      if(!result?.ok)return {ok:false,error:result?.error||'Search failed',status:result?.status};
+      const data=result.data?.results?.[0];
+      if(!data||data.error)return {ok:false,error:'Search returned an invalid result.'};
+      const allowed=new Set(ids.map(x=>x.toLowerCase()));
+      const bots=(data.hits||[]).map(x=>x.document||{}).filter(x=>allowed.has(String(x.character_id||'').toLowerCase()))
+        .map(x=>({id:x.character_id.toLowerCase(),name:String(x.name||x.title||'').slice(0,250),
+          // The search document can have both a character name and a separate
+          // listing title. Keep both; name is not a substitute for the title.
+          title:String(x.title||'').slice(0,1200),
+          creator:String(x.creator_username||'').slice(0,150),
+          description:String(x.description||x.tagline||x.short_description||x.shortDescription||'').slice(0,1800),
+          tags:Array.isArray(x.tags)?x.tags.filter(z=>typeof z==='string').slice(0,45):[],
+          image:String(x.avatar_url||'').slice(0,1000),visibility:String(x.visibility||'').slice(0,60),
+          isNSFW:x.is_nsfw===true}) );
+      return {ok:true,bots};
+    })().then(sendResponse).catch(e=>sendResponse({ok:false,error:String(e?.message||e)}));
+    return true;
+  }
   if (message?.type === "DS_QOL_DIAGNOSTIC_SUBSCRIBE") {
     sendResponse(qolDiagnosticSubscribe(sender, message));
     return false;
@@ -124,29 +155,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     queueFreshBotEditor({ id }).then(sendResponse).catch(error => {
       sendResponse({ ok: false, error: error?.message || String(error) });
     });
-    return true;
-  }
-
-  if (message?.type === "DS_LOREBOOK_EXPORT_HELPER_RELEASE") {
-    // Only a Lorebook editor content script may release its own completed
-    // capture. It does not authorize closing an arbitrary browser tab.
-    const id = String(message?.id || "").trim().toLowerCase();
-    const senderUrl = String(sender?.url || sender?.tab?.url || "");
-    let authorized = false;
-    try {
-      const page = new URL(senderUrl);
-      authorized = page.protocol === "https:" &&
-        /^(?:www\.)?spicychat\.ai$/i.test(page.hostname) &&
-        new RegExp(`^/lorebook/edit/${id}(?:/entries)?/?$`, "i").test(decodeURIComponent(page.pathname)) &&
-        /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id);
-    } catch {}
-    if (!authorized) {
-      sendResponse({ ok: false, error: "Lorebook helper release was not requested from its editor." });
-      return false;
-    }
-    releaseLorebookExportHelperAfterCapture(id)
-      .then(sendResponse)
-      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 
@@ -363,11 +371,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }))
       .catch(error => sendResponse({ ok: false, ready: false, status: "worker-error", error: error?.message || String(error) }));
     return true;
-  }
-
-  if (message?.type === "DS_BOT_STATUS_HELPER_STATS") {
-    sendResponse({ ok: true, ...currentBotStatusCheckStats() });
-    return false;
   }
 
   if (message?.type === "DS_BOT_STATUS_HELPER_CHECK") {

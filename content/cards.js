@@ -815,6 +815,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const seen = new Set();
 
     DS.qsa("a[href*='/chat/'], a[href*='/chatbot/']").forEach(anchor => {
+      if (anchor.closest('#ds-favorites-later-panel')) return; // Not a native listing card.
       const id = DS.botIdFromHref?.(anchor.href) || DS.chatIdFromHref(anchor.href);
       if (!id) return;
 
@@ -1435,7 +1436,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.applyCardHiding = async function applyCardHiding(options = {}) {
-    if (!DS.state.settings.enabled) return;
+    if (!DS.state.settings.enabled || DS.isLaterFavoritesTabActive?.()) return;
     syncPublicPersonalityControl();
 
     DS.recoverAccidentalCardPageHide?.();

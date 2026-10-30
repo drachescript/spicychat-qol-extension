@@ -420,35 +420,43 @@ function setupAccountSyncFoundation() {
   $("accountSyncPreviewChoices")?.addEventListener("click", describeSyncPlan);
   // One-click *device-local* list presets. No other scopes/settings are synced.
   // List removals are handled by the existing per-device tombstone journal.
-  const saveBlockedOnlyPreset = async direction => {
+  const phoneListPresets = [
+    ["accountSyncAndroidBlockedReceive", "download-only", false],
+    ["accountSyncAndroidBlockedUpload", "upload-only", false],
+    ["accountSyncAndroidBlockedTwoWay", "two-way", false],
+    ["accountSyncAndroidBlockedLaterReceive", "download-only", true],
+    ["accountSyncAndroidBlockedLaterUpload", "upload-only", true],
+    ["accountSyncAndroidBlockedLaterTwoWay", "two-way", true]
+  ];
+  // Presets affect only saved lists on this device, not preferences or chats.
+  const savePhoneListsPreset = async (direction, includeLater) => {
     if (!["download-only", "upload-only", "two-way"].includes(direction)) return;
     const map = { "download-only": "Receive", "upload-only": "Upload", "two-way": "Two-way" };
+    const label = includeLater ? "Blocked + Later" : "Blocked";
     const status = $("accountSyncActionStatus");
-    const buttons = ["accountSyncAndroidBlockedReceive", "accountSyncAndroidBlockedUpload", "accountSyncAndroidBlockedTwoWay"]
-      .map(id => $(id)).filter(Boolean);
+    const buttons = phoneListPresets.map(([id]) => $(id)).filter(Boolean);
     for (const btn of buttons) btn.disabled = true;
-    if (status) status.textContent = `Saving ${map[direction].toLowerCase()} blocked-bot sync on this device…`;
-    const listModes = Object.fromEntries(ACCOUNT_SYNC_LIST_NAMES.map(name => [name, name === "blockedBots" ? direction : "off"]));
+    if (status) status.textContent = `Saving ${map[direction].toLowerCase()} ${label} sync on this device…`;
+    const listModes = Object.fromEntries(ACCOUNT_SYNC_LIST_NAMES.map(name =>
+      [name, name === "blockedBots" || (includeLater && name === "laterBots") ? direction : "off"]));
     const prefs = { mode: "off", allowedKeys: [], scopes: [], listModes };
     try {
       const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_DEVICE_PREFS", prefs }, 30000);
       if (!result?.ok) {
-        if (status) status.textContent = `Could not save blocked-bot sync: ${result?.message || result?.error || "unknown error"}`;
+        if (status) status.textContent = `Could not save ${label} sync: ${result?.message || result?.error || "unknown error"}`;
         return;
       }
       accountSyncUserEditing = false;
       accountSyncSelectedPrefs = result.prefs;
       await refreshAccountSyncUi({ refreshDevices: false });
-      if (status) status.textContent = `${map[direction]} blocked-bot IDs/names only. Other lists, settings, archives and chat text stay excluded. Link the account if needed, then Sync now.`;
+      if (status) status.textContent = `${map[direction]} ${label} bot IDs${includeLater ? "" : "/names"} only. Other lists, settings and chat text stay excluded. Link if necessary, then Sync now. Automatic checks run every 6 hours or after edits settle.`;
     } catch (error) {
-      if (status) status.textContent = `Could not save blocked-bot sync: ${error?.message || String(error)}`;
+      if (status) status.textContent = `Could not save ${label} sync: ${error?.message || String(error)}`;
     } finally { for (const btn of buttons) btn.disabled = false; }
   };
-  for (const [id, direction] of [
-    ["accountSyncAndroidBlockedReceive", "download-only"],
-    ["accountSyncAndroidBlockedUpload", "upload-only"],
-    ["accountSyncAndroidBlockedTwoWay", "two-way"]
-  ]) $(id)?.addEventListener("click", () => void saveBlockedOnlyPreset(direction));
+  for (const [id, direction, includeLater] of phoneListPresets) {
+    $(id)?.addEventListener("click", () => void savePhoneListsPreset(direction, includeLater));
+  }
   $("accountSyncQuickModes")?.addEventListener("click", event => {
     const preset = event.target?.closest?.("[data-sync-preset]")?.dataset?.syncPreset;
     if (!["all-off", "blocked-only", "desktop-upload", "all-two-way"].includes(preset)) return;

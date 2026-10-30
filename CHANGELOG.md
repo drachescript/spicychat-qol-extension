@@ -1,3 +1,25 @@
+## 0.2.65
+- Added a dedicated Later view on Favorites and in the sidebar, with its own cards, numbered pagination, search, folders, sorting, content filters, and removal from Later while keeping native Favorites available.
+- Expanded Later cards with saved tags, longer descriptions and metadata recovery from QoL's existing archive; added a bounded manual lookup for missing public tags.
+- Gave Later separate hide-opened and hide-blocked settings, moved those controls under Later bots, and kept native Favorites filters and pagination from interfering with the custom view.
+- Improved Later image loading and animation handling, reduced repeated card processing, and restored the view after SpicyChat remounts.
+- Added Full Favorites (QoL) recovery using current account favorite IDs and small read-only searches to find bots omitted from SpicyChat's native Favorites results; Favorite History remains separate.
+- Added a recovered-only tab with paged cards, pictures, creators, tags, search, sorting, filters and cleanup review; kept a separate full-account/combined-native view for advanced use.
+- Made Later and Recovered direct links with normal new-tab navigation; fixed empty/stuck native listings, tab switching, page controls and view restoration after React updates.
+- Improved Recovered titles and descriptions using current search metadata and bounded public-profile lookups, with automatic/manual batches, missing-title retries and a full-length title layout above compact tags and the Opened label.
+- Fixed Recovered mode switching and Back to Favorites navigation; reduced unnecessary search/card redraws and added read-only rechecks of unresolved bots without rescanning the full account.
+- Improved native Favorites account-response capture for read-only recovery, including missed startup responses and anonymous-request 403s; authenticated writes and fresh verification remain required.
+- Split large Favorites coverage saves into verified batches and protected completed results from failed writes; added an opt-in compact Favorites ID backup with three snapshots and JSON export.
+- Added reviewable Favorites cleanup suggestions using Later membership, confirmed chats and opened history without treating opened or first-seen dates as proof of a chat or original favorite date.
+- Extended Favorites cleanup to verified Later saves and user-confirmed native unfavorites for recovered IDs, with fresh account-membership checks, cancellation, resume/retry and separate not-found versus failed states.
+- Reduced unnecessary Favorite History rewrites, kept recovery results when independent history verification fails, and added a no-scan history sync retry.
+- Added observed recently-added sorting for Favorites and Recovered from changes between account snapshots; clarified Later's saved-date sorting and Favorite History's recorded dates without inventing original favorite timestamps.
+- Updated Scan Favorites to compare the native searchable listing with SpicyChat's account count, reporting omitted IDs without marking them removed.
+- Added mobile sync presets for Blocked + Later (receive, upload and two-way); changed regular sync checks to every six hours and delayed post-edit sync until 90 seconds of inactivity.
+- Fixed Bot Status Refresh stale bots resuming the wrong pending scan queue.
+- Improved full Lorebook backups beyond 100 entries by handling page-local duplicate IDs and slow editor loading without accepting incomplete exports.
+- Updated SpicyChat sidebar footer/social-link handling and support for the Halloween Contest banner.
+
 ## 0.2.64
 - Expanded Chat Continuation / Transfer with reviewed Memory Manager JSON exports and target-chat local Lorebook drafts, imported inactive for review.
 - Added a word censor with whole-word/phrase matching, custom masks, AI/user scope, reveal controls, and per-chat exclusions. Censoring changes only displayed text.

@@ -809,8 +809,12 @@ const OPTIONAL_FEATURE_KEYS = [
   "trackFavoriteBots",
   "showFavoritesBulkSelect",
   "showFavoritesScanButton",
+  "showLaterFavoritesTab",
+  "laterPageHideOpenedBots",
+  "laterPageHideBlockedBots",
   "showFavoriteHistoryButton",
   "enableFavoritesRecovery",
+  "passiveFavoritesIdBackup",
   "enableBotOrganizer",
   "botOrganizerExplorerFolders",
   "showLaterBotButtons",
@@ -3398,8 +3402,10 @@ async function prepareLaterFavoritesCleanup({ moveAll = false } = {}) {
     const targets = completeIds.filter(id => moveAll || laterSet.has(id));
     const missingFromLater = targets.filter(id => !laterSet.has(id));
     if (!targets.length) { laterFavoritesActionStatus("No current Favorites overlap Later."); return; }
-    const intro = moveAll ? `Save ${missingFromLater.length} new bots to Later and prepare to unfavorite ${targets.length} current Favorites?` : `Prepare to unfavorite ${targets.length} current Favorites that are already in Later?`;
-    if (!window.confirm(`${intro}\n\nNo SpicyChat favorites will be changed until you start the native cleanup on the Favorites page.`)) return;
+    const intro = moveAll ? `Save ${missingFromLater.length} new bots to Later and prepare to unfavorite ${targets.length} scanned Favorites?` : `Prepare to unfavorite ${targets.length} scanned Favorites that are already in Later?`;
+    const accountWarning = Number.isSafeInteger(scan.accountCount) && scan.accountCount > completeIds.length
+      ? `\n\nNote: SpicyChat shows ${scan.accountCount} account Favorites, but only ${completeIds.length} were returned by the Chatbots listing. The ${scan.accountCount - completeIds.length} unlisted bots are NOT included or treated as removed.` : '';
+    if (!window.confirm(`${intro}${accountWarning}\n\nNo SpicyChat favorites will be changed until you start the native cleanup on the Favorites page.`)) return;
     if (moveAll && missingFromLater.length) {
       // Don't overwrite existing Later dates, notes, or metadata.
       for (const id of missingFromLater) {
@@ -3427,6 +3433,24 @@ async function prepareLaterFavoritesCleanup({ moveAll = false } = {}) {
     laterFavoritesActionStatus(`Favorites → Later: ${error?.message || error}`);
   } finally { buttons.forEach(button => button.disabled = false); }
 }
+$("exportFavoritesIdBackup")?.addEventListener("click", async () => {
+  const status = $("favoritesIdBackupStatus");
+  try {
+    const result = await storageGet(["dsFavoritesIdBackupV1"]);
+    const backup = result?.dsFavoritesIdBackupV1;
+    const latest = backup?.latest;
+    if (!latest || latest.encoding !== "uuid16/base64" || !Number.isSafeInteger(latest.count) || latest.count < 1 ||
+        typeof latest.data !== "string" || atob(latest.data).length !== latest.count * 16) {
+      if (status) status.textContent = "No valid saved Favorites ID backup yet. Enable the passive setting and visit Favorites first.";
+      return;
+    }
+    const exportData = { format: "spicychat-qol-favorite-ids", version: 1, ...backup };
+    downloadJsonFile(exportData, `spicychat-favorite-ids-${new Date(latest.observedAt || Date.now()).toISOString().slice(0, 10)}.json`);
+    if (status) status.textContent = `Downloaded ${latest.count} saved IDs, with up to two earlier snapshots. No account changes made.`;
+  } catch (error) {
+    if (status) status.textContent = `Could not export Favorites backup: ${error?.message || error}`;
+  }
+});
 $("laterMoveCurrentFavorites")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: true }); });
 $("laterUnfavoriteOverlap")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: false }); });
 

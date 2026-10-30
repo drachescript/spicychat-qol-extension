@@ -1324,7 +1324,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (settings.enableContextKeeper || DS.state.contextKeeperWasActive) await runStep("context keeper", () => DS.applyContextKeeper?.());
       if (settings.enableChatNudges || DS.state.chatNudgesWasActive) await runStep("chat nudges", () => DS.applyChatNudges?.());
       if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
-      if (settings.enableChatTextReplacements || settings.enableChatMutedWords || settings.enableChatWordCensor || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
+      if (settings.enableChatTextReplacements || settings.enableChatMutedWords || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
       if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
       await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
       await runStep("auto images", () => DS.applyAutoImage?.());
@@ -1578,10 +1578,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       syncNativeScrollBackToTopVisibility();
 
+      if (/^\/favorite-bots\/?$/i.test(location.pathname)) DS.refreshFavoritesLaterTab?.();
       const page = DS.getPageState?.() || {};
       const singleChat = !!page.isSingleChatPage;
       const chatList = !!page.isChatListPage;
-      const listing = isCardListingContext();
+      const listing = isCardListingContext() && !DS.isLaterFavoritesTabActive?.();
       const plan = DS.getRuntimePlan?.(page, { listing }) || runtimePlan(listing);
       runtimeCounters().currentRuntimePlan = plan.key || page.routeType || "other";
       await DS.featureLifecycle?.reconcileRoute?.(plan, DS.runtimeKernel?.canRunRouteGroup);
@@ -1725,7 +1726,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (settings.enableSelectionRemember || DS.state.selectionRememberWasActive) await runStep("selection remember", () => DS.applySelectionRemember?.());
           await runFeatureStep("auto voice", !!DS.isAutoVoiceEnabled?.(), () => DS.applyAutoVoice?.());
           await runStep("auto images", () => DS.applyAutoImage?.());
-          if (settings.enableChatTextReplacements || settings.enableChatMutedWords || settings.enableChatWordCensor || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
+          if (settings.enableChatTextReplacements || DS.state.chatTextReplacementsWasActive) await runStep("chat text replacements", () => DS.applyChatTextReplacements?.());
           if (settings.enableTranslation || DS.state.translationWasActive) await runStep("translation", () => DS.applyTranslationTools?.());
           DS.markMessageEnhancerVisited?.(DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || []);
         } else {
@@ -1836,8 +1837,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (slowDirtyHas(dirty, "interface")) {
       await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
-      const sidebarWanted = !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
-      await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), () => DS.applySidebarCleanup?.());
+      const sidebarWanted = !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn,#ds-qol-sidebar-later"), () => DS.applySidebarCleanup?.());
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
       await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
     }
@@ -1948,7 +1949,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const page = DS.getPageState?.() || {};
       const singleChat = !!page.isSingleChatPage;
       const chatList = !!page.isChatListPage;
-      const listing = isCardListingContext();
+      const listing = isCardListingContext() && !DS.isLaterFavoritesTabActive?.();
       const plan = DS.getRuntimePlan?.(page, { listing }) || runtimePlan(listing);
       runtimeCounters().currentRuntimePlan = plan.key || page.routeType || "other";
       const profile = runtimeProfile();
@@ -1997,21 +1998,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // listing/banner work so a busy chat cannot leave SpicyChat UI elements
       // visible just because the cosmetic lane was delayed.
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
-      const sidebarWanted = !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
+      const sidebarWanted = !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       if (listing) {
-        await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);
+        await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn,#ds-qol-sidebar-later"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);
       } else {
-        await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn"), () => DS.applySidebarCleanup?.());
+        await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn,#ds-qol-sidebar-later"), () => DS.applySidebarCleanup?.());
       }
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
 
       const favoriteDataWanted = anySetting(settings, ["trackFavoriteBots", "neverHideFavorites", "protectFavoritesFromBlocking", "showFavoriteHistoryButton", "recommendationHideFavoriteBots", "enableFavoritesRecovery"]);
       await runRoutedFeatureStep(plan, "listings", "favorite bots import", favoriteDataWanted, () => DS.importVisibleFavoriteBots?.());
-      // The Favorites selector uses separate IDs and actions from bulk blocking.
-      // Repair only while its launcher is missing to avoid repeat list work.
-      await runRoutedFeatureStep(plan, "listings", "favorites bulk actions", () =>
-        !!DS.isFavoriteBotsPage?.() && !document.getElementById("ds-favorites-bulk-launcher"),
-        () => DS.refreshFavoritesBulkManager?.());
       await runRoutedFeatureStep(plan, "listings", "public personality control", () => !!document.querySelector('[data-testid="FeaturesCapabilityGate-Header"]'), () => DS.syncPublicPersonalityControl?.());
       await runRoutedFeatureStep(plan, "listings", "favorite history", () => !!settings.showFavoriteHistoryButton || !!settings.enableFavoritesRecovery || !!settings.favoritePageFoldersEnabled || !!settings.favoritePageSortEnabled || !!document.querySelector("[data-ds-favorite-history],#ds-favorite-history,#ds-favorite-qol-controls"), () => DS.applyFavoriteHistoryButton?.());
       await runRoutedFeatureStep(plan, "listings", "NSFW toggle", String(settings.globalNsfwMode || "ignore") !== "ignore", () => DS.setGlobalNsfwSwitch?.());

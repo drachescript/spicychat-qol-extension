@@ -58,7 +58,81 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .sort()
       .map(key => `${key}:${settings[key] ? 1 : 0}`)
       .join("|");
-    return `${cleanup}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
+    return `${cleanup}|later:${settings.showLaterFavoritesTab === false ? 0 : 1}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
+  }
+
+  // CSS persists across SpicyChat's React link replacements and avoids a
+  // hide/unhide flash when a footer or social item remounts.
+  let persistentFooterCss = '';
+  function applyPersistentFooterCss(settings) {
+    const styleId = 'ds-qol-sidebar-links-persistent';
+    const enabled = settings.enabled !== false;
+    const selectors = [];
+    const add = (wanted, selector) => { if (enabled && wanted) selectors.push(selector); };
+    const nav = 'nav[data-testid="Navigation"]';
+    const social = `${nav} [data-testid="NavigationSocialLinks"]`;
+    const footer = `${nav} [data-testid="NavigationListFooter"]`;
+    add(settings.hideSidebarSocialLinks || settings.hideSidebarSocialDiscord,
+        `${social} a[aria-label="discord"]`);
+    add(settings.hideSidebarSocialLinks || settings.hideSidebarSocialX,
+        `${social} a[aria-label="x"], ${social} a[aria-label="twitter"], ${social} a[href*="twitter.com"], ${social} a[href*="x.com"]`);
+    add(settings.hideSidebarSocialLinks || settings.hideSidebarSocialReddit,
+        `${social} a[aria-label="reddit"], ${social} a[href*="reddit.com"]`);
+    for (const [key, match] of [
+      ['Terms','a[href*="/terms"]'], ['Privacy','a[href*="/privacy"]'],
+      ['Refunds','a[href*="/refund"]'], ['Reporting','a[href*="/report"]'],
+      ['Guidelines','a[href*="community-guidelines"]'], ['Support','a[href*="docs.spicychat.ai/support"]'],
+      ['Affiliates','a[href*="promote.spicychat.ai"]']
+    ]) {
+      add(settings.hideSidebarFooterLinks || settings[`hideSidebarFooter${key}`], `${footer} ${match}`);
+    }
+    const css = selectors.length ? `${selectors.join(',\n')} {display:none!important}` : '';
+    if (persistentFooterCss === css && (css === '' || document.getElementById(styleId))) return;
+    persistentFooterCss = css;
+    let style = document.getElementById(styleId);
+    if (!css) { style?.remove(); return; }
+    if (!style) { style = document.createElement('style'); style.id = styleId; (document.head || document.documentElement).append(style); }
+    if (style.textContent !== css) style.textContent = css;
+  }
+
+  // Native-styled shortcut below Favorites; the destination uses the existing
+  // QoL Later tab, not another saved list or remote account endpoint.
+  function ensureLaterSidebarLink(settings) {
+    const nav = getNav();
+    const existing = nav?.querySelector('#ds-qol-sidebar-later');
+    if (!nav || settings.enabled === false || settings.showLaterFavoritesTab === false || settings.hideSidebarFavorites) {
+      existing?.closest('[data-ds-qol-later-sidebar]')?.remove();
+      return;
+    }
+    const favorite = [...nav.querySelectorAll('a[href]')].find(el => {
+      try { return new URL(el.href,location.origin).pathname.replace(/\/$/,'') === '/favorite-bots' && !el.id.startsWith('ds-'); }
+      catch { return false; }
+    });
+    if (!favorite) { existing?.closest('[data-ds-qol-later-sidebar]')?.remove(); return; }
+    const nativeRow = nativeSidebarRow(favorite, nav);
+    if (!nativeRow?.parentElement) return;
+    let link = existing;
+    let row = link?.closest('[data-ds-qol-later-sidebar]');
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.dsQolLaterSidebar = '1';
+      row.className = 'w-full';
+      link = document.createElement('a');
+      link.id = 'ds-qol-sidebar-later';
+      link.href = '/favorite-bots#later';
+      link.setAttribute('aria-label','Saved for Later');
+      link.style.cssText = 'display:flex;align-items:center;min-height:36px;padding:0 10px 0 45px;gap:8px;color:inherit;text-decoration:none;border-radius:6px;font-size:14px;line-height:1.3;font-weight:400;';
+      link.textContent = 'Later';
+      link.addEventListener('click', event => {
+        if (/^\/favorite-bots\/?$/i.test(location.pathname) && typeof DS.openLaterFavoritesTab === 'function') {
+          event.preventDefault(); DS.openLaterFavoritesTab();
+        }
+      });
+      row.append(link);
+    }
+    if (nativeRow.nextElementSibling !== row || nativeRow.parentElement !== row.parentElement) nativeRow.after(row);
+    const wantedBackground = /^\/favorite-bots\/?$/i.test(location.pathname) && location.hash === '#later' ? 'rgba(127,127,127,.12)' : '';
+    if (link.style.backgroundColor !== wantedBackground) link.style.backgroundColor = wantedBackground;
   }
 
   function ensureSidebarObserver() {
@@ -85,6 +159,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         ) {
           continue;
         }
+        if (mutation.type === 'attributes' && mutation.target?.closest?.('[data-ds-qol-later-sidebar]')) continue;
+        if (mutation.type === 'childList' && [...mutation.addedNodes, ...mutation.removedNodes].length &&
+            [...mutation.addedNodes, ...mutation.removedNodes].every(node =>
+              node.nodeType === 1 && (node.hasAttribute?.('data-ds-qol-later-sidebar') || node.closest?.('[data-ds-qol-later-sidebar]')))) continue;
         if (DS.mutationIsQolOnly?.(mutation)) continue;
         sidebarDirty = true;
         return;
@@ -379,25 +457,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
-  // SpicyChat moved the legal/footer links into a regular sidebar group.
-  // Scope to the cluster containing Terms, not the separate Help button which
-  // happens to use the same Support URL.
-  function sidebarFooterLinks(nav) {
-    const terms = nav?.querySelector?.('a#navigation-link-terms,a[aria-label="Terms"],a[href$="/terms"]');
-    const cluster = terms?.parentElement;
-    if (cluster && cluster.querySelectorAll('a[href]').length >= 3) {
-      return DS.qsa('a[href]', cluster);
-    }
-    // Compatibility with older SpicyChat sidebar markup.
-    return DS.qsa('footer a', nav);
-  }
-
   function hideFooterLink(kind) {
     const nav = getNav();
     const matcher = FOOTER_LINK_MATCHERS[kind];
     if (!nav || typeof matcher !== "function") return;
 
-    sidebarFooterLinks(nav).forEach(link => {
+    DS.qsa('[data-testid="NavigationListFooter"] a, footer a', nav).forEach(link => {
       if (matcher(link)) hideSidebarElement(link, `sidebar:footer-${kind}`);
     });
   }
@@ -453,7 +518,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const matcher = SOCIAL_LINK_MATCHERS[kind];
     if (!nav || typeof matcher !== "function") return;
 
-    DS.qsa("a", nav).forEach(link => {
+    DS.qsa('[data-testid="NavigationSocialLinks"] a, footer a', nav).forEach(link => {
       if (matcher(link)) hideSidebarElement(link, `sidebar:social-${kind}`);
     });
 
@@ -519,8 +584,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nav = getNav();
     if (!nav) return;
 
-    const controls = new Set(DS.qsa("footer a, footer button", nav));
-    DS.qsa("footer img", nav).forEach(img => {
+    const controls = new Set(DS.qsa('[data-testid="NavigationListFooter"] a, [data-testid="NavigationListFooter"] button, footer a, footer button', nav));
+    DS.qsa('[data-testid="NavigationListFooter"] img, footer img', nav).forEach(img => {
       if (!img.closest("a, button")) controls.add(img);
     });
 
@@ -538,7 +603,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nav = getNav();
     if (!nav) return;
 
-    DS.qsa("footer p, footer span", nav).forEach(el => {
+    DS.qsa('[data-testid="NavigationListFooter"] p, [data-testid="NavigationListFooter"] span, footer p, footer span', nav).forEach(el => {
       if (textOf(el).includes("web version")) {
         hideSidebarElement(el, "sidebar:web-version");
       }
@@ -549,7 +614,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nav = getNav();
     if (!nav) return;
 
-    DS.qsa("footer button, footer a, button", nav).forEach(el => {
+    DS.qsa('[data-testid="NavigationPinnedFooter"] button, footer button, footer a, button', nav).forEach(el => {
       if (isSignOutElement(el)) {
         hideSidebarElement(el.closest("a") || el, "sidebar:sign-out");
       }
@@ -694,6 +759,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const { settings } = DS.state;
 
     ensureSidebarObserver();
+    applyPersistentFooterCss(settings);
     const settingsSignature = sidebarSettingsSignature(settings);
     // A native React sidebar update can move Personas back to the lower group
     // without replacing nav itself. Check only the two relevant links when
@@ -723,6 +789,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     keepSignInVisible();
     keepNativeNavigationToggleVisible();
     placeQolSidebarButton(settings);
+    ensureLaterSidebarLink(settings);
     applyPersonasPlacement(settings);
 
     if (!settings.enabled) return;

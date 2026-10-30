@@ -74,6 +74,10 @@ if (!(() => { try {
     return /^\/(?:[a-z]{2}\/)?chats?\/?$/i.test(String(location.pathname || ""));
   }
 
+  function isFavoritesRoute() {
+    return /^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i.test(String(location.pathname || ""));
+  }
+
   function isMyChatbotsRoute() {
     return /^\/(?:[a-z]{2}\/)?my-creations\/chatbots\/?$/i.test(String(location.pathname || ""));
   }
@@ -148,6 +152,7 @@ if (!(() => { try {
       publicArchiveNeedsProfileBridge ||
       chatExportNeedsAuthBridge ||
       chatListImportNeedsAuthBridge ||
+      (isFavoritesRoute() && (!!settings.enableFavoritesRecovery || !!settings.passiveFavoritesIdBackup)) ||
       myCreationsBackupNeedsAuthBridge ||
       lorebookEditorNeedsAuthBridge ||
       isArchiveSetupRoute() ||
@@ -163,13 +168,13 @@ if (!(() => { try {
   // SpicyChat performs the useful authenticated requests very early during page
   // boot. Start the lightweight MAIN-world bridge immediately on routes that can
   // later need that auth, before waiting for extension settings to hydrate.
-  if (isArchiveSetupRoute() || isChatRoute() || isChatListRoute() || isMyCreationsBackupRoute() || isLorebookEditorRoute() || isLorebookBackupWorkerRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
+  if (isArchiveSetupRoute() || isChatRoute() || isChatListRoute() || isFavoritesRoute() || isMyCreationsBackupRoute() || isLorebookEditorRoute() || isLorebookBackupWorkerRoute() || isRecommendationWorkerRoute() || isBotStatusWorkerRoute()) {
     bridgeWanted = true;
     inject();
   }
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
-  const watchedSettingNames = ["enabled", "showCardGreetingTokenInfo", "deepSleepDisabledFeatures", "botArchiveRememberSeenPublic", "enableMyCreationsBulkBackup"];
+  const watchedSettingNames = ["enabled", "showCardGreetingTokenInfo", "deepSleepDisabledFeatures", "botArchiveRememberSeenPublic", "enableMyCreationsBulkBackup", "enableFavoritesRecovery", "passiveFavoritesIdBackup"];
   const watchedSettings = {};
 
   function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }

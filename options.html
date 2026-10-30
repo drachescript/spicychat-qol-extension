@@ -544,14 +544,14 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <p class="hint">This list is saved by QoL. It doesn't create a separate Later list in your SpicyChat account.</p>
 <label class="row"><input id="trackFavoriteBots" type="checkbox"/><span>Remember favorite bots seen on the Favorites page</span></label>
 <label class="row"><input id="favoritePageFoldersEnabled" type="checkbox"/><span>Show private QoL folder filter directly on Favorites</span></label>
-<label class="row"><input id="favoritePageSortEnabled" type="checkbox"/><span>Show oldest/newest Favorites sorting for loaded cards</span></label>
-<p class="hint">Folders come from Bot Organizer. Sorting works on bots SpicyChat has loaded so far; older favorite dates may be approximate.</p>
+<label class="row"><input id="favoritePageSortEnabled" type="checkbox"/><span>Show Favorites sorting for loaded cards (observed additions + first-seen)</span></label>
+<p class="hint">Folders come from Bot Organizer. Sorting affects only loaded native cards. Observed additions are tracked from changes between account snapshots; older favorites have no confirmed added date. QoL first-seen dates are estimates.</p>
 <label class="row"><input id="showFavoritesBulkSelect" type="checkbox"/><span>Show Select bots on Favorites (bulk Unfavorite / Later)</span></label>
 <label class="row"><input id="showFavoritesScanButton" type="checkbox"/><span>Show Scan Favorites button</span></label>
-<p class="hint">Scan Favorites checks the native Chatbots pages and saves the bots found to Favorite History. If SpicyChat limits pages, the scan reports a partial result and doesn't mark missing favorites as removed.</p>
+<p class="hint">Scan Favorites checks the searchable Chatbots results against SpicyChat’s account Favorites counter. Some account favorites may not be available in the listing; QoL keeps those records and does not mark them as removed.</p>
 <label class="row"><input id="showFavoriteHistoryButton" type="checkbox"/><span>Show the Favorite history button on the Favorites page</span></label>
-<label class="row"><input id="enableFavoritesRecovery" type="checkbox"/><span>Favorites → Later recovery and bulk move</span></label>
-<p class="hint">Opt-in, review-first tool on the native Favorites page. Can copy previously remembered Favorite History to Later, including bots removed by SpicyChat. Moving loaded favorites first verifies the Later save and then uses the native unfavorite control in small, cancellable batches. Never removes Favorite History.</p>
+<label class="row"><input id="enableFavoritesRecovery" type="checkbox"/><span>Full Favorites (QoL) · account recovery and cleanup assistant</span></label>
+<p class="hint">Off by default. Full Favorites reads current favorite IDs from SpicyChat account settings when you ask, then looks up missing bot details in small read-only batches. It has its own cards, search, filters and pages. Cleanup suggestions are review-only; Add to Later is verified before a requested move, and unfavorites are checked against a fresh account response. Your Favorite History is kept.</p>
 <p class="hint">Favorite tracking can stay enabled without adding the extra page button. You can still manage remembered favorites here in Settings.</p>
 <div class="bot-manager-toolbar">
 <input id="favoriteBotSearch" placeholder="Search favorite bots — comma = multiple terms" type="search"/>
@@ -692,6 +692,10 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <section class="card">
 <h2>Later bots</h2>
 <p class="hint">Save bots you might want to try later without opening the chat.</p>
+<label class="row"><input id="showLaterFavoritesTab" type="checkbox"/><span>Show the separate Later view on SpicyChat (sidebar + Favorites shortcut)</span></label>
+<label class="row"><input id="laterPageHideOpenedBots" type="checkbox"/><span>Hide already-opened bots on the Later page only</span></label>
+<label class="row"><input id="laterPageHideBlockedBots" type="checkbox"/><span>Hide blocked bots on the Later page only</span></label>
+<p class="hint">These Later-page filters are separate from regular listing filters. The dedicated Later view keeps saved bots visible by default. The page has its own search, tags, folders, SFW/NSFW and numbered navigation.</p>
 <label class="row"><input id="showLaterBotButtons" type="checkbox"/><span>Show Later button beside card favorite buttons</span></label>
 <label class="row"><input id="protectLaterBotsFromFiltering" type="checkbox"/><span>Keep Later bots visible when other filters match</span></label>
 <label class="row"><input id="hideLaterBotsFromListings" type="checkbox"/><span>Hide bots after saving them for Later</span></label>
@@ -854,6 +858,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
 <button id="scanUnknownBotAvailability" type="button">Recheck unresolved results</button>
 <button id="resumePausedBotAvailability" type="button" hidden>Resume paused Bot Status scan</button>
+<button id="resumePausedStaleBotAvailability" type="button" hidden>Resume paused stale refresh</button>
 <button id="scanUnmonitoredBotAvailability" type="button" title="Manual one-time check of previously seen bots outside routine monitoring; blocked bots are excluded">Check outside routine scope</button>
 <button id="scanStaleBotAvailability" type="button">Refresh stale bots</button>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
@@ -2563,11 +2568,12 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label>Not Interested bots <select data-sync-list="notInterestedBots"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 <label>Opened bot IDs <select data-sync-list="openedChats"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 </div>
-<div class="button-row" id="accountSyncQuickModes"><button type="button" data-sync-preset="all-off">Turn all off</button><button type="button" data-sync-preset="blocked-only">Blocked bots (two-way)</button><button type="button" data-sync-preset="desktop-upload">Desktop upload settings</button><button type="button" id="accountSyncAndroidBlockedReceive" title="Save this device as receive-only for blocked bots, without syncing general settings or other lists">Phone: receive blocked bots only</button><button type="button" id="accountSyncAndroidBlockedTwoWay" title="Save blocked-bot ID/name sync in both directions, without other settings">Phone: blocked bots two-way</button><button type="button" id="accountSyncAndroidBlockedUpload" title="Send this phone’s blocked bot IDs/names to linked devices">Phone: upload blocked bots only</button><button type="button" data-sync-preset="all-two-way">All supported data (two-way)</button></div>
+<div class="button-row" id="accountSyncQuickModes"><button type="button" data-sync-preset="all-off">Turn all off</button><button type="button" data-sync-preset="blocked-only">Blocked bots (two-way)</button><button type="button" data-sync-preset="desktop-upload">Desktop upload settings</button><button type="button" id="accountSyncAndroidBlockedReceive" title="Save this device as receive-only for blocked bots, without syncing general settings or other lists">Phone: receive blocked bots only</button><button type="button" id="accountSyncAndroidBlockedTwoWay" title="Save blocked-bot ID/name sync in both directions, without other settings">Phone: blocked bots two-way</button><button type="button" id="accountSyncAndroidBlockedUpload" title="Send this phone’s blocked bot IDs/names to linked devices">Phone: upload blocked bots only</button><button type="button" id="accountSyncAndroidBlockedLaterReceive" title="Download blocked-bot and Later-bot IDs into this phone, preserving existing local metadata">Phone: receive Blocked + Later</button><button type="button" id="accountSyncAndroidBlockedLaterTwoWay" title="Sync blocked-bot and Later-bot IDs in both directions">Phone: Blocked + Later two-way</button><button type="button" id="accountSyncAndroidBlockedLaterUpload" title="Upload blocked-bot and Later-bot IDs from this phone">Phone: upload Blocked + Later</button><button type="button" data-sync-preset="all-two-way">All supported data (two-way)</button></div>
 <p class="hint">Quick modes change the form until you save. The three phone blocked-bot buttons save immediately; use Sync now after linking. All supported data includes settings and saved lists, but not private chat text, pictures or archives. Two-way sync shares manual unblocks too; a deleted/unavailable bot is not automatically unblocked. Blocked-word/tag rules are separate settings.</p>
 <div class="button-row"><button id="accountSyncPreviewChoices" type="button">Preview directions</button><button id="accountSyncSavePreferences" type="button">Save device sync choices</button></div>
 <p id="accountSyncDirectionPreview" class="hint" role="status"></p>
 <p id="accountSyncSelectionSummary" class="hint"></p>
+<p class="hint">Phone list presets sync bot IDs (and blocked names), not chat content, images or full bot descriptions. Downloaded Later entries retain metadata already saved on the receiving device. Sync runs after list edits settle, and checks every 6 hours while linked. You can always use Sync now.</p>
 <p class="hint">Cloud revisions are change counters, not proof that entire copies are stored. Historical revisions and cloud cleanup depend on the sync backend. ID-only lists use compact, deduplicated per-device updates; they do not upload unchanged lists on every check.</p>
 </div>
 <div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>
