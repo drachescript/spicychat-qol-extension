@@ -2130,6 +2130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         settings.enableBotComparison ||
         settings.showQuickNotInterestedButtons ||
         settings.showQuickLessLikeButtons ||
+        settings.showQuickMoreLikeButtons ||
         settings.showQuickDislikeButtons ||
         settings.showQuickUnblockButtons ||
         DS.state.cardWorkflowWasActive

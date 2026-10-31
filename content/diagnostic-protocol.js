@@ -128,7 +128,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       let worker = String(DS.state?.qolBackgroundWorker || html?.getAttribute("data-ds-qol-background-worker") || "").slice(0, 80);
       let helperSession = String(DS.state?.qolBackgroundWorkerSessionId || html?.getAttribute("data-ds-qol-background-worker-session") || url.searchParams.get("dsHelperSession") || "").slice(0, 120);
       if (!worker) {
-        if (url.searchParams.get("dsQolBotStatusWorker") === "1") worker = "bot-status";
+        if (url.searchParams.get("dsQolBotBackupWorker") === "1") worker = "bot-backup";
+        else if (url.searchParams.get("dsQolBotStatusWorker") === "1") worker = "bot-status";
         else if (url.searchParams.get("dsQolRecommendationWorker") === "1" || url.searchParams.get("dsQuickLessLike") === "1") worker = "less-like";
         else if (url.searchParams.get("dsQuickDislike") === "1") worker = "quick-dislike";
         else if (url.searchParams.get("dsListingRefill") === "1" || url.searchParams.get("dsListFill") === "1") worker = "listing-refill";

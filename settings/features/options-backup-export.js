@@ -249,33 +249,32 @@ function utf8ToBase64(text) {
 }
 
 async function tryNativeBackupSave(text, filename, mimeType) {
+  const bytes = new TextEncoder().encode(String(text || "")).byteLength;
+  if (!bytes) return false;
+  // A native bridge acknowledgement is not evidence of a nonempty file.
+  const verified = raw => {
+    let value = raw;
+    if (typeof value === "string" && value.trim().startsWith("{")) {
+      try { value = JSON.parse(value); } catch {}
+    }
+    if (value === false || value?.ok === false || value?.success === false || value?.error) return false;
+    const written = value && typeof value === "object"
+      ? Number(value.bytesWritten ?? value.savedBytes ?? value.fileSize ?? value.byteCount ?? NaN)
+      : NaN;
+    return Number.isFinite(written) && written >= bytes;
+  };
   try {
     if (typeof window._dsRequestExport === "function") {
-      window._dsRequestExport(text, filename);
-      return true;
+      return verified(await window._dsRequestExport(text, filename));
     }
-  } catch {}
+  } catch { return false; }
   const bridge = window.flutter_inappwebview;
   if (!bridge?.callHandler) return false;
   try {
-    // v0.0.8 already exposes the same exportChat handler used by the injected
-    // chat exporter. It is text/filename based, so it also works for backups.
-    await bridge.callHandler("exportChat", JSON.stringify({ text, filename }));
-    return true;
-  } catch {}
-  try {
-    // Newer wrappers may expose the more generic saveFile handler instead.
-    await bridge.callHandler("saveFile", JSON.stringify({
-      text,
-      content: text,
-      filename,
-      fileName: filename,
-      mimeType,
-      base64: utf8ToBase64(text)
-    }));
-    return true;
-  } catch {}
-  return false;
+    return verified(await bridge.callHandler("exportChat", JSON.stringify({
+      text, content: text, filename, fileName: filename, mimeType, byteLength: bytes
+    })));
+  } catch { return false; }
 }
 
 function decodeNativePickedFile(result) {
@@ -490,8 +489,16 @@ async function downloadBackupFile(ext = "json") {
   const normalizedExt = ext === "txt" ? "txt" : "json";
   const filename = backupFilename(normalizedExt);
   const mime = normalizedExt === "json" ? "application/json;charset=utf-8" : "text/plain;charset=utf-8";
-  if (await tryNativeBackupSave(text, filename, mime)) {
-    showSettingsToast(`Backup sent to the file saver as .${normalizedExt}.`);
+  const androidBridgePresent = !!(window._dsRequestExport || window.flutter_inappwebview?.callHandler);
+  if (androidBridgePresent) {
+    const saved = await tryNativeBackupSave(text, filename, mime);
+    showSettingsToast(saved
+      ? `Android saved the backup (${bytes} bytes).`
+      : "Android did not confirm the backup was saved. Use Copy JSON instead; no second download was started.");
+    if (!saved) {
+      const box = $("settingsJson");
+      if (box) box.value = text;
+    }
     return;
   }
   if (managerAllowed && bytes <= 12_000_000 && await browserManagerDownload(text, filename, mime, true)) {

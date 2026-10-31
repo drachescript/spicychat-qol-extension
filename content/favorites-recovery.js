@@ -652,6 +652,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function render(){
     const el=document.getElementById(PANEL);if(!el||!active||!enabled())return;
+    const renderStartedAt=performance.now();
+    const renderToken=DS.diagOperationStart?.('favorites-recovery','render-panel',{mode:viewMode});
+    const finishRender=(cards=0,phase='complete')=>{
+      DS.diagOperationEnd?.(renderToken,{
+        outcome:phase,counts:{scanned:cards,changed:cards,skipped:0,errors:0},
+        extra:{mode:viewMode,cardCount:cards,elapsedMs:Math.round((performance.now()-renderStartedAt)*100)/100}
+      });
+    };
     lastRenderedLater=DS.state?.laterBots;lastRenderedHistory=DS.state?.favoriteBots;
     el.replaceChildren();
     const head=make('div');head.className='ds-full-tools';const h=make('h2','Recovered Favorites (QoL)');h.style.cssText='font-size:23px;margin:0 auto 0 0';
@@ -708,8 +716,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     autoLabel.append(autoCheck,make('span','Load up to 12 missing titles on each Recovered page'));extra.append(autoLabel);
     const summary=make('span',coverage?`Native listing ${coverage.listingVerified?coverage.listingCount:'unverified'} · Found outside listing ${coverage.ids.filter(id=>coverage.meta[id]?.recovered&&coverage.meta[id]?.found).length} · Not returned by search ${coverage.ids.filter(id=>coverage.meta[id]?.recovered&&coverage.meta[id]?.found===false).length} · Account ${coverage.ids.length}${coverage.partial?' · partial scan':''}`:'Scan to find bots missing from native Favorites');toolbar.append(summary);el.append(toolbar,more);
     const stat=make('p',status);stat.id='ds-full-status';stat.style.opacity='.8';el.append(stat);
-    if(!coverage)return;
-    if(coverage.listingVerified!==true){el.append(make('p','Native listing has not been fully verified yet. Run Scan Favorites first so QoL does not accidentally label every account favorite as recovered.'));return;}
+    if(!coverage){finishRender(0,'no-coverage');return;}
+    if(coverage.listingVerified!==true){el.append(make('p','Native listing has not been fully verified yet. Run Scan Favorites first so QoL does not accidentally label every account favorite as recovered.'));finishRender(0,'unverified-listing');return;}
     const controls=make('div');controls.className='ds-full-tools';
     const field=(kind,value,placeholder,cb)=>{const x=make(kind);if(kind==='input'){x.type='search';x.placeholder=placeholder;x.value=value;x.style.minWidth='170px';x.addEventListener('input',()=>{
           cb(x.value);selected.clear();page=1;
@@ -739,6 +747,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const shown=result.slice((page-1)*48,page*48);
     const actions=make('div');actions.className='ds-full-tools';
     actions.append(button(`Select page (${shown.length})`,()=>{shown.forEach(m=>selected.add(m.id));render();}),button('Clear selection',()=>{selected.clear();render();}));
+    const selectedLabel=make('span',String(selected.size));selectedLabel.dataset.dsRecoveredSelectedCount='1';selectedLabel.title='Selected recovered bots';actions.append(make('span','Selected: '),selectedLabel);
     const limit=make('select');for(const n of [100,300,500]){const o=make('option',`Review ${n} bots`);o.value=n;limit.append(o);}limit.value=String(target);limit.addEventListener('change',()=>{target=+limit.value;});actions.append(limit);
     actions.append(button('Select suggested up to target',()=>{
       const all=matches().filter(m=>!m.excluded),seen=new Set();
@@ -791,7 +800,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const grid=make('div');grid.className='ds-full-grid';
     for(const m of shown){const card=make('article');card.className='ds-full-card';card.dataset.dsBotId=m.id;
       const imgLink=make('a');imgLink.href=m.chatUrl;if(m.image){const img=make('img');img.src=m.image;img.alt='';img.loading='lazy';img.decoding='async';imgLink.append(img);}else {imgLink.style.cssText='aspect-ratio:1/1;display:grid;place-items:center;background:#292929';imgLink.textContent='Image unavailable';}card.append(imgLink);
-      const body=make('div');body.className='ds-full-card-main';const top=make('label');top.style.cssText='display:flex;gap:6px;align-items:center';const check=make('input');check.type='checkbox';check.checked=selected.has(m.id);check.addEventListener('change',()=>{check.checked?selected.add(m.id):selected.delete(m.id);render();});const name=make('strong',m.name);top.append(check,name);body.append(top);
+      const body=make('div');body.className='ds-full-card-main';const top=make('label');top.style.cssText='display:flex;gap:6px;align-items:center';const check=make('input');check.type='checkbox';check.checked=selected.has(m.id);check.addEventListener('change',()=>{check.checked?selected.add(m.id):selected.delete(m.id);const label=el.querySelector('[data-ds-recovered-selected-count]');if(label)label.textContent=String(selected.size);});const name=make('strong',m.name);top.append(check,name);body.append(top);
       if(m.creator)body.append(make('small','@'+m.creator));
       if(m.title){const subtitle=make('p',m.title,'ds-full-card-subtitle');subtitle.title=m.title;body.append(subtitle);}
       if(m.description && m.description.trim().toLowerCase()!==String(m.title||'').trim().toLowerCase()){
@@ -810,6 +819,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }el.append(grid);
     const paging=make('div');paging.className='ds-full-pager';const go=n=>{page=Math.max(1,Math.min(count,n));render();el.scrollIntoView({block:'start',behavior:'instant'});};
     paging.append(button('‹',()=>go(page-1)));for(let n=1;n<=count;n++)if(n===1||n===count||Math.abs(n-page)<=4){const b=button(String(n),()=>go(n));b.dataset.current=n===page?'1':'0';paging.append(b);}else if(n===2&&page>6||n===page+5&&page<count-5)paging.append(make('span','…'));paging.append(button('›',()=>go(page+1)));el.append(paging);
+    finishRender(shown.length);
     if(autoTitles && !busy && active && viewMode==='separate' && autoTitleRequests<TITLE_AUTO_LIMIT){
       const key=[page,filter,sort,search,tag].join('~');
       if(!scheduledTitlePages.has(key) && shown.some(m=>m.found&&!m.title&&!attemptedTitles.has(m.id))){

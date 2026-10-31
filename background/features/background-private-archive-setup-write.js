@@ -53,8 +53,14 @@
       return {ok:false,status:'entry-list-incomplete'};
     const same=book.entries.find(item=>String(item?.name||'').toLowerCase()===payload.name.toLowerCase());
     if(same){
-      if(same.content!==payload.content || !Array.isArray(same.keywords) ||
-        JSON.stringify(same.keywords)!==JSON.stringify(payload.keywords))return {ok:false,status:'entry-name-conflict'};
+      // Skip existing means keep the native entry unchanged, even if the JSON
+      // has different text or keywords. Clone and ordinary import use the
+      // same name-bound verification, but only the explicitly selected Skip
+      // policy permits an unequal existing entry.
+      if(job.entryDuplicatePolicy!=='skip' && (same.content!==payload.content ||
+        !Array.isArray(same.keywords) ||
+        JSON.stringify(same.keywords)!==JSON.stringify(payload.keywords)))
+        return {ok:false,status:'entry-name-conflict'};
       const next={...job,entryProgress:{...progress,[hash]:'verified'}};
       await putJob(next);
       return {ok:true,status:'already-exists',verified:true,data:{verified:true,status:'already-exists'}};
@@ -70,7 +76,15 @@
       if(/^[\w.\-]{1,32}$/.test(version)) headers['x-app-version']=version;
       const resp=await fetch(`${base}${path}`,{method:'POST',headers,credentials:'include',cache:'no-store',
         body:JSON.stringify(payload),signal:ctl.signal});
-      if(!resp.ok)return {ok:false,status:'entry-post-http',httpStatus:resp.status,ambiguous:resp.status===408||resp.status===429||resp.status>=500};
+      if(!resp.ok){
+        const ambiguous=resp.status===408||resp.status===429||resp.status>=500;
+        // A definite 4xx rejection (for example validation or moderation)
+        // cannot have created an entry. Do not strand future user-approved
+        // retries under the 'submitting' uncertainty marker. 408/429/5xx
+        // remain uncertain and must NEVER be retried automatically.
+        if(!ambiguous)await putJob({...job,entryProgress:{...progress,[hash]:'rejected'}});
+        return {ok:false,status:'entry-post-http',httpStatus:resp.status,ambiguous};
+      }
       result=await resp.json().catch(()=>null);
     }catch{return {ok:false,status:'entry-post-unconfirmed',ambiguous:true};}
     finally{clearTimeout(timeout);}

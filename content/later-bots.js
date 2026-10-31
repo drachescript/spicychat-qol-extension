@@ -398,7 +398,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     lastStore: null, lastRevision: '', applying: false, searchTimer: null,
     archiveTags: new Map(), archiveRequested: new Set(), tagAttempted: new Set(), fetchingTags: false, tagStatus: ''};
   const enabled = () => /^\/favorite-bots\/?$/i.test(location.pathname) &&
-    DS.state?.settings?.enabled !== false && DS.state?.settings?.showLaterFavoritesTab !== false;
+    DS.state?.settings?.enabled !== false && DS.state?.settings?.showLaterFavoritesTab === true;
   DS.isLaterFavoritesTabActive = () => ui.active && enabled();
   const text = value => String(value ?? '').replace(/\s+/g,' ').trim();
   const tokens = value => [...new Set(String(value||'').split(/[,\n]/).map(t=>t.trim().toLowerCase()).filter(Boolean))];

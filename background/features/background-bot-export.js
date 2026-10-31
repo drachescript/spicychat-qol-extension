@@ -56,15 +56,18 @@ async function requestFreshBotEditor(message) {
     botExportHelperTabId = tab?.id || 0;
   }
   if (!tab) {
+    qolBackgroundTrace?.("worker", "bot-backup", { action: "helper-created", source: "editor", routeType: "bot-editor" });
     const created = await tabsCreate({ url, active: false });
     if (!created.ok || !created.tab?.id) return { ok: false, error: created.error || "Could not open owner editor helper." };
     tab = created.tab;
     botExportHelperTabId = tab.id;
   } else if (!validBotExportTab(tab, id)) {
+    qolBackgroundTrace?.("worker", "bot-backup", { action: "helper-navigation", source: "editor", routeType: "bot-editor" });
     const moved = await tabsUpdate(tab.id, { url, active: false });
     if (!moved.ok) return { ok: false, error: moved.error || "Could not navigate owner editor helper." };
   }
   const tabId = botExportHelperTabId;
+  const jobStartedAt = Date.now();
   const deadline = Date.now() + 75000;
   let readyAt = 0;
   while (Date.now() < deadline) {
@@ -81,12 +84,16 @@ async function requestFreshBotEditor(message) {
       continue;
     }
     const response = await tabsSendMessageWithTimeout(tabId, { type: "DS_BOT_EXPORT_RUN", id }, 33000);
-    if (response?.ok && response.id === id && response.fields) return response;
+    if (response?.ok && response.id === id && response.fields) {
+      qolBackgroundTrace?.("worker", "bot-backup", { action: "verified-editor-fields", durationMs: Date.now() - jobStartedAt, status: "verified" });
+      return response;
+    }
     if (response && response.retryable === false) return response;
     if (response?.error && !response.retryable) return response;
     readyAt = 0;
     await new Promise(resolve => setTimeout(resolve, 400));
   }
+  qolBackgroundTrace?.("worker", "bot-backup", { action: "editor-verification-timeout", durationMs: Date.now() - jobStartedAt, status: "timeout" });
   return { ok: false, error: "Owner editor helper could not verify current fields before timeout." };
 }
 function queueFreshBotEditor(message) {

@@ -158,6 +158,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_LOREBOOK_EXPORT_HELPER_RELEASE") {
+    // Only a Lorebook editor content script may release its own completed
+    // capture. It does not authorize closing an arbitrary browser tab.
+    const id = String(message?.id || "").trim().toLowerCase();
+    const senderUrl = String(sender?.url || sender?.tab?.url || "");
+    let authorized = false;
+    try {
+      const page = new URL(senderUrl);
+      authorized = page.protocol === "https:" &&
+        /^(?:www\.)?spicychat\.ai$/i.test(page.hostname) &&
+        new RegExp(`^/lorebook/edit/${id}(?:/entries)?/?$`, "i").test(decodeURIComponent(page.pathname)) &&
+        /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id);
+    } catch {}
+    if (!authorized) {
+      sendResponse({ ok: false, error: "Lorebook helper release was not requested from its editor." });
+      return false;
+    }
+    releaseLorebookExportHelperAfterCapture(id)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+
   if (message?.type === "DS_LOREBOOK_EXPORT_HELPER") {
     const url = String(message.url || "");
     const token = String(message.token || "").trim().slice(0, 140);
@@ -373,6 +396,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "DS_BOT_STATUS_HELPER_STATS") {
+    sendResponse({ ok: true, ...currentBotStatusCheckStats() });
+    return false;
+  }
+
   if (message?.type === "DS_BOT_STATUS_HELPER_CHECK") {
     runBotStatusHelperCheck(message)
       .then(sendResponse)
@@ -446,6 +474,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     prepareQuickLessLikeBulkWorker(message)
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "recommendation-worker-error", error: error?.message || String(error) }));
+    return true;
+  }
+
+  if (message?.type === "DS_QUICK_MORE_LIKE_BOT") {
+    runQuickMoreLikeBot({ ...message, sourceTabId: tabId })
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, status: "more-like-worker-error", error: error?.message || String(error) }));
     return true;
   }
 

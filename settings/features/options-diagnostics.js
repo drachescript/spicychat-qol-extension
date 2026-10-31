@@ -245,20 +245,23 @@ async function requestAndroidSupportFile(text, filename) {
         if (typeof result === "string" && result.trim().startsWith("{")) {
           try { result = JSON.parse(result); } catch {}
         }
-        if (result === false || result?.success === false || result?.ok === false || result?.error) continue;
+        if (result === false || result?.success === false || result?.ok === false || result?.error) return false;
         const reportedBytes = result && typeof result === "object"
           ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN)
           : NaN;
-        // An explicit zero-byte result is a failed export, not a success.
-        if (Number.isFinite(reportedBytes) && reportedBytes <= 0) continue;
-        return true; // Accepted, NOT a confirmed file write.
+        // Do not call an acknowledgement a saved file. Retry through another
+        // handler could create a duplicate if the first finishes late.
+        return Number.isFinite(reportedBytes) && reportedBytes >= payload.byteLength;
       } catch {}
     }
   }
   if (typeof window._dsRequestExport === "function") {
     try {
       const result = await window._dsRequestExport(body, filename);
-      return result !== false && result?.success !== false && result?.ok !== false;
+      const bytes = result && typeof result === "object"
+        ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN) : NaN;
+      return result !== false && result?.success !== false && result?.ok !== false &&
+        Number.isFinite(bytes) && bytes >= new TextEncoder().encode(body).byteLength;
     } catch {}
   }
   return false;

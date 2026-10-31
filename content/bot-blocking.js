@@ -839,7 +839,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function runDirectCharacterFeedback(message) {
     const botId = String(message?.botId || "").trim().toLowerCase();
     const mode = String(message?.mode || "").trim().toLowerCase();
-    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike", "more-like"].includes(mode)) {
       return { ok: false, status: "invalid-feedback-request" };
     }
 
@@ -848,7 +848,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (existing) return existing;
 
     const diagKind = mode === "dislike" ? "quick-dislike" : "quick-less-like";
-    const successStatus = mode === "dislike" ? "disliked" : "less-liked";
+    const successStatus = mode === "dislike" ? "disliked" : mode === "more-like" ? "more-liked" : "less-liked";
     const operation = DS.diagOperationStart?.(diagKind, "direct-api", { botId, mode });
     const availabilityNetwork = DS.diagNetworkStart?.(diagKind, "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { phase: "availability-preflight", botId });
     const ratingNetwork = message?.eventOnly === true ? null : DS.diagNetworkStart?.(diagKind, "POST", "https://client-rapi-ca-east.recombee.com/spicychat-prod/ratings/", { phase: "rating", botId });

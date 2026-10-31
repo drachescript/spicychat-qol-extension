@@ -120,6 +120,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     botEditorSnippets: [],
 
     enableGenerationProfiles: false,
+    dailyMessageLimitTrackerEnabled: false,
     showGenerationMetadata: false,
     showMessageTimestamps: false,
     messageTimestamp24Hour: false,
@@ -292,11 +293,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     creatorBotCheckMinutes: 60,
     creatorBotBrowserNotifications: false,
     trackFavoriteBots: false,
-    showLaterFavoritesTab: true,
+    showLaterFavoritesTab: false,
     laterPageHideOpenedBots: false,
     laterPageHideBlockedBots: false,
     enableFavoritesRecovery: false,
-    passiveFavoritesIdBackup: false,
     showFavoriteHistoryButton: false,
     favoriteBotSortMode: "newest",
     favoriteBotCreatorFilter: "",
@@ -381,6 +381,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     enableBotComparison: false,
     showQuickNotInterestedButtons: false,
     showQuickLessLikeButtons: false,
+    showQuickMoreLikeButtons: false,
     showQuickDislikeButtons: false,
     showQuickUnblockButtons: false,
 

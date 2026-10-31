@@ -714,7 +714,7 @@ async function releaseQuickLessLikeStandaloneWorker() {
 async function runDirectCharacterFeedback(message, mode) {
   const totalStartedAt = Date.now();
   const botId = String(message?.botId || "").trim().toLowerCase();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) return { ok: false, status: "invalid-bot" };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId) || !["less-like", "dislike", "more-like"].includes(mode)) return { ok: false, status: "invalid-bot" };
   const runId = String(message?.bulkRunId || "").trim();
   if (runId && quickLessLikeClosedBulkRuns.has(runId)) {
     return { ok: false, status: "recommendation-worker-closed", feedbackTabsTried: 0, requestSent: false, networkAttempts: 0 };
@@ -814,7 +814,7 @@ async function runDirectCharacterFeedback(message, mode) {
     quickLessLikeReadyWorkerTabs.delete(tabId);
     result = { ...result, bulkPaused: true, retryable: false };
   }
-  if (result?.ok && ["less-liked", "disliked"].includes(result?.status)) quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
+  if (result?.ok && ["less-liked", "disliked", "more-liked"].includes(result?.status)) quickLessLikeReadyWorkerTabs.set(tabId, Date.now());
   return {
     ...result,
     workerReadyMs,
@@ -903,3 +903,41 @@ async function runQuickLessLikeBot(message) {
   owner: "list-fill",
   run: () => { cleanupStaleListingRefillWorkers({ closeLegacy: true }); }
 };
+
+// A positive recommendation preference is separate from native bot-rating
+// history and from Less Like/Dislike. Only a confirmed 2xx is remembered.
+const MORE_LIKE_HISTORY_KEY = "dsQolMoreLikeHistoryV1";
+const moreLikeRunning = new Map();
+async function runQuickMoreLikeBot(message) {
+  const botId = String(message?.botId || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(botId)) return { ok: false, status: "invalid-bot" };
+  if (moreLikeRunning.has(botId)) return moreLikeRunning.get(botId);
+  const job = (async () => {
+    const existing = await storageGet([MORE_LIKE_HISTORY_KEY]);
+    const history = existing[MORE_LIKE_HISTORY_KEY]?.bots || {};
+    if (history[botId]?.confirmed === true) return { ok: true, status: "already-handled", handledAt: history[botId].at };
+    let result;
+    try {
+      result = await runDirectCharacterFeedback(message, "more-like");
+    } finally {
+      // Never replace a known positive response with a helper-tab cleanup error.
+      await releaseQuickLessLikeStandaloneWorker().catch(() => {});
+    }
+    if (result?.ok && result.status === "more-liked" && Number(result.ratingHttpStatus || result.httpStatus || 0) >= 200 && Number(result.ratingHttpStatus || result.httpStatus || 0) < 300) {
+      const current = await storageGet([MORE_LIKE_HISTORY_KEY]);
+      const bots = { ...(current[MORE_LIKE_HISTORY_KEY]?.bots || {}) };
+      bots[botId] = { confirmed: true, at: Date.now(), name: String(message?.botName || "").slice(0, 140), httpStatus: Number(result.ratingHttpStatus || result.httpStatus || 0) };
+      const entries = Object.entries(bots).sort((a, b) => Number(b[1]?.at || 0) - Number(a[1]?.at || 0)).slice(0, 2500);
+      try {
+        const saved = await storageSet({ [MORE_LIKE_HISTORY_KEY]: { version: 1, bots: Object.fromEntries(entries) } });
+        if (!saved) throw new Error("Local history write failed");
+      } catch (error) {
+        return { ...result, historySaved: false, reason: "Positive feedback was accepted, but the local history could not be saved. Do not retry blindly." };
+      }
+      return { ...result, historySaved: true, handledAt: bots[botId].at };
+    }
+    return result;
+  })();
+  moreLikeRunning.set(botId, job);
+  try { return await job; } finally { if (moreLikeRunning.get(botId) === job) moreLikeRunning.delete(botId); }
+}

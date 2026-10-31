@@ -1050,9 +1050,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function nativeTagField() {
     const root = document.querySelector('[data-field-name="tags"]') || fieldContainerByLabel("Tags");
-    const input = root && [...root.querySelectorAll("input")].find(node =>
-      /add tags?/i.test(node.placeholder || "") || /tags?/i.test(node.getAttribute("aria-label") || ""));
-    return root && input ? { root, input } : null;
+    if (!root) return null;
+    const candidates = [...root.querySelectorAll('input:not([type="hidden"])')].filter(node =>
+      !node.disabled && !node.readOnly && node.type !== 'checkbox' && node.type !== 'radio');
+    // SpicyChat 4.8.7 uses an unlabeled input for this field. The parent
+    // data-field-name="tags" is the reliable identifier; requiring an input
+    // placeholder mistakenly disabled import after the first tag.
+    const named = candidates.filter(node =>
+      /add tags?/i.test(node.placeholder || '') || /tags?/i.test(node.getAttribute('aria-label') || ''));
+    const input = named.length === 1 ? named[0] : candidates.length === 1 ? candidates[0] : null;
+    return input ? { root, input } : null;
   }
 
   function selectedNativeTags() {
@@ -1876,11 +1883,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           // clone into another Lorebook after a failed or interrupted run.
           sessionStorage.setItem(CLONE_KEY, JSON.stringify({...record, targetId: info.id}));
         }
+        // Native creation may not carry over the source JSON tags. Put them
+        // into the real Details form before proceeding to entry creation.
+        if (await queueMissingLorebookTags(payload, info)) return;
         const grant=await getCloneGrant(record.token);
-        if(record.targetId===info.id || (grant?.token===record.token&&grant?.status==='complete')) {
-          await importVerifiedCloneEntries({...record,targetId:info.id},info,msg=>{title.textContent=msg;},{allowRecovery:true});
-        } else if (await runLorebookImport(payload, info, { confirmed: true })) clearClone();
-        else { title.textContent = "Some entries could not be imported; the JSON remains queued for review."; add.disabled = false; }
+        // The first approved import must use the same verified writer as a
+        // resumed import. The old fallback silently failed on empty Lorebooks.
+        await importVerifiedCloneEntries({...record,targetId:info.id},info,msg=>{title.textContent=msg;},{allowRecovery:true});
       } catch(error) { title.textContent = `Import stopped: ${error.message}. The JSON is still queued.`; add.disabled = false; }
     });
     const cancel = document.createElement("button");
@@ -2037,6 +2046,112 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return true;
   }
 
+  // Entries imports always run FIRST. Only after the imported entries have
+  // been verified may this separate tag-restoration step navigate to Details.
+  // A failed tag selector must never prevent an Entries import.
+  let pendingTagRepairRunning = false;
+  let pendingTagRepairAttempt = '';
+  async function queueMissingLorebookTags(payload, info) {
+    if (!payload.tags?.length || settings().lorebookJsonCopyTags === false) return false;
+    const api = DS.privateLorebookAuth?.request;
+    if (typeof api !== 'function') throw Error('Cannot check current Lorebook tags. No entries imported.');
+    const me = await api('/v2/users');
+    const book = await api(`/lorebooks/${info.id}?sortBy=priority&lastSortPriority=0`);
+    if (!me?.user?.id || book?.creator_user_id !== me.user.id ||
+        book?.id?.toLowerCase() !== info.id.toLowerCase() || book.visibility !== 'private')
+      throw Error('Only your own private Lorebook can be updated from this JSON.');
+    if (!Array.isArray(book.tags)) throw Error('SpicyChat did not return its saved Lorebook tags. Nothing imported.');
+    const existing = new Set(book.tags.map(tag => String(tag).toLowerCase()));
+    const missing = payload.tags.filter(tag => !existing.has(String(tag).toLowerCase()));
+    if (!missing.length) return false;
+    if (book.tags.length + missing.length > 12)
+      throw Error('Adding the JSON tags would exceed SpicyChat’s 12-tag limit. Nothing imported.');
+    let record = null;
+    try { record = JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY) || 'null'); } catch {}
+    if (record?.targetId !== info.id || JSON.stringify(record.payload?.entries||[]) !== JSON.stringify(payload.entries)) {
+      record = { version: 2, targetId: info.id, queuedAt: Date.now(), payload };
+    }
+    record.tagsPending = true;
+    record.entriesImported = true;
+    record.autoTried = true;
+    record.approved = true;
+    record.queuedAt = Date.now();
+    sessionStorage.setItem(IMPORT_SESSION_KEY, JSON.stringify(record));
+    setStatus(`All ${payload.entries.length} entries imported. Adding ${missing.length} remaining tags…`);
+    location.href = `/lorebook/edit/${encodeURIComponent(info.id)}`;
+    return true;
+  }
+
+  function offerPendingTagRestore(info) {
+    if (info?.page !== 'details') return;
+    let record = null;
+    try { record = JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY) || 'null'); } catch {}
+    if (!record?.tagsPending || !record.entriesImported || !record.approved || record.targetId !== info.id) return;
+    if (Date.now() - Number(record.queuedAt || 0) > 15 * 60_000) return;
+    const form = document.querySelector('form input[name="name"]')?.closest('form');
+    if (!form || !nativeTagField()) return;
+    let box = document.getElementById('ds-qol-lorebook-tag-restore');
+    if (!box) {
+      box = document.createElement('section'); box.id='ds-qol-lorebook-tag-restore';
+      box.style.cssText='padding:10px;margin:10px 0;border:1px solid #8192ac;border-radius:8px;font:13px/1.5 system-ui';
+      const infoText=document.createElement('span');infoText.dataset.role='status';
+      infoText.textContent='The entries were imported. QoL is adding the remaining tags…';
+      const retry=document.createElement('button'); retry.type='button'; retry.textContent='Retry adding tags';
+      retry.style.marginLeft='10px';
+      retry.addEventListener('click',()=>startRestore(true));
+      box.append(infoText,retry);
+      form.parentElement.insertBefore(box,form);
+    }
+    const status=box.querySelector('[data-role="status"]');
+    async function startRestore(manual=false) {
+      if (pendingTagRepairRunning || (!manual && pendingTagRepairAttempt === info.id)) return;
+      pendingTagRepairAttempt=info.id;
+      pendingTagRepairRunning=true;
+      try {
+        const api=DS.privateLorebookAuth?.request;
+        const me=await api('/v2/users');
+        const before=await api(`/lorebooks/${info.id}?sortBy=priority&lastSortPriority=0`);
+        if (!me?.user?.id || before?.creator_user_id!==me.user.id || before?.visibility!=='private' ||
+            before?.id?.toLowerCase()!==info.id.toLowerCase() )
+          throw Error('The Lorebook ownership or name changed. Nothing was saved.');
+        const tags=record.payload.tags||[];
+        const present=new Set((before.tags||[]).map(tag=>String(tag).toLowerCase()));
+        const missing=tags.filter(tag=>!present.has(String(tag).toLowerCase()));
+        if(missing.length){
+          status.textContent=`Selecting ${missing.length} missing tags…`;
+          const result=await applyNativeLorebookTags(missing);
+          if(result.missing.length || result.unverified.length)
+            throw Error(`SpicyChat did not select ${[...result.missing,...result.unverified].join(', ')}. You can retry.`);
+          const save=form.querySelector('[data-testid="LorebookForm-DetailsTabSubmitButton"]');
+          if(!save || save.disabled || save.getAttribute('aria-disabled')==='true')
+            throw Error('Could not find SpicyChat’s enabled Save button. No save was sent.');
+          // Check ownership again; this click is equivalent to native Save.
+          save.click();
+          status.textContent='Saving the JSON tags in SpicyChat…';
+        }
+        // Wait for server read-back; React may navigate to Entries meanwhile.
+        for(let attempt=0;attempt<12;attempt++){
+          await new Promise(resolve=>setTimeout(resolve,500));
+          let current=null;
+          try {current=await api(`/lorebooks/${info.id}?sortBy=priority&lastSortPriority=0`);} catch {}
+          if(current?.creator_user_id===me.user.id && Array.isArray(current.tags) &&
+              tags.every(tag=>current.tags.some(saved=>String(saved).toLowerCase()===String(tag).toLowerCase()))) {
+            const queued=JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY)||'null');
+            if(queued?.targetId===info.id && queued.entriesImported===true){
+              sessionStorage.removeItem(IMPORT_SESSION_KEY);
+            }
+            status.textContent='All entries and JSON tags saved. Opening Entries…';
+            if(routeInfo()?.page==='details') location.href=`/lorebook/edit/${encodeURIComponent(info.id)}/entries`;
+            return;
+          }
+        }
+        throw Error('SpicyChat has not confirmed the tags were saved. The entries were already imported; only the tags need retrying.');
+      } catch(error) {status.textContent=`Tag import stopped: ${error?.message||error}`;}
+      finally {pendingTagRepairRunning=false;}
+    }
+    queueMicrotask(()=>startRestore());
+  }
+
   async function runLorebookImport(payload, info, { confirmed = false, duplicatePolicy = "skip" } = {}) {
     if (importRunning) return false;
     if (info?.page !== "entries") throw new Error("Open the Lorebook Entries tab before importing.");
@@ -2052,65 +2167,126 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
+    // An Entries-tab import must use the existing native entry importer.
+    // The private-copy background writer is ONLY for a separately approved
+    // automatic clone. It is not suitable for ordinary Skip existing imports.
+
+    // A stuck native form must not leave the status at "Importing 1/5" forever.
+    // All timeouts stop further entries; uncertain saves are never resent.
     importRunning = true;
-    let cancelImportButton = document.getElementById("ds-lorebook-cancel-import");
+    const controller = new AbortController();
+    let timer;
+    let lastFailure = '';
+    let timedOut = false;
+    let cancelImportButton = document.getElementById('ds-lorebook-cancel-import');
     if (!cancelImportButton) {
-      cancelImportButton = document.createElement("button");
-      cancelImportButton.id = "ds-lorebook-cancel-import";
-      cancelImportButton.type = "button";
-      cancelImportButton.textContent = "Stop after current entry";
-      cancelImportButton.title = "Stops before the next entry; an in-flight native save is allowed to finish.";
-      cancelImportButton.addEventListener("click", () => {
-        if (DS.cancelLorebookEntryImport?.()) {
-          cancelImportButton.disabled = true;
-          setStatus("Stopping import after the current entry…");
-        }
+      cancelImportButton = document.createElement('button');
+      cancelImportButton.id = 'ds-lorebook-cancel-import';
+      cancelImportButton.type = 'button';
+      cancelImportButton.textContent = 'Stop after current entry';
+      cancelImportButton.title = 'Stops before another entry is submitted.';
+      cancelImportButton.addEventListener('click', () => {
+        controller.abort();
+        DS.cancelLorebookEntryImport?.();
+        cancelImportButton.disabled = true;
+        setStatus('Stopping import after the current entry…');
       });
       document.querySelector(`#${PANEL_ID} .ds-lorebook-backup-actions`)?.appendChild(cancelImportButton);
     }
     try {
-      setStatus(`Importing 0 / ${count} entries…`);
-      const result = await DS.importLorebookEntryBatch(payload.entries, {
-        duplicatePolicy: ["skip","merge","replace"].includes(duplicatePolicy) ? duplicatePolicy : "skip",
-        onProgress(progress) {
-          if (progress.loadingExisting) {
-            setStatus(`Checking existing Lorebook entries ${progress.current}/${progress.totalExisting} before importing…`);
-          } else if (progress.stopped) {
-            setStatus(progress.stopReason || "Import stopped. Confirm the last entry before resuming.");
-          } else {
-            setStatus(`Importing ${progress.completed} / ${progress.total} entries…`);
+      setStatus(`Preparing ${count} Lorebook entries…`);
+      const maximumWait = Math.max(45000, Math.min(240000, count * 14000 + 15000));
+      const result = await Promise.race([
+        DS.importLorebookEntryBatch(payload.entries, {
+          duplicatePolicy,
+          signal: controller.signal,
+          onError(error, item, index) {
+            lastFailure = `Entry ${index + 1}/${count} (“${item?.name || 'unnamed'}”): ${error?.message || error}`;
+          },
+          onProgress(progress) {
+            if (progress.loadingExisting) {
+              setStatus(`Checking existing entries ${progress.current}/${progress.totalExisting}…`);
+            } else if (progress.stopped) {
+              setStatus(progress.stopReason || 'Import stopped; check the last entry before retrying.');
+            } else {
+              setStatus(`Importing ${Math.min(progress.completed, count)}/${count} entries…`);
+            }
           }
-        }
-      });
-      await saveCapture("Imported Lorebook JSON").catch(() => false);
+        }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+            DS.cancelLorebookEntryImport?.();
+            reject(new Error('The importer did not finish. The last save may still be processing; check the Entries list before retrying.'));
+          }, maximumWait);
+        })
+      ]);
       const parts = [];
       if (result.created) parts.push(`${result.created} added`);
       if (result.skipped) parts.push(`${result.skipped} already existed`);
       if (result.failed) parts.push(`${result.failed} failed`);
       if (result.replaced) parts.push(`${result.replaced} replaced`);
       if (result.merged) parts.push(`${result.merged} merged`);
-      if (result.paused || result.cancelled) {
-        setStatus(`${result.stopReason || "Import stopped."} ${result.completed}/${count} completed. Use Import entries (.json) and select “Skip existing (recommended)” to continue after reviewing uncertain saves.`);
-      } else {
-        setStatus(`Import finished: ${parts.join(" · ") || "no changes"}.`);
+      const counts = parts.join(' · ') || 'no changes';
+      if (result.paused || result.cancelled || result.failed || result.completed !== count) {
+        const reason = lastFailure || result.stopReason || `Only ${result.completed}/${count} entries finished.`;
+        setStatus(`Import stopped: ${reason} (${counts}). Your JSON is still available to retry after checking SpicyChat.`);
+        return false;
       }
-      if (!result.paused && !result.cancelled && !result.failed && Number(result.created || result.replaced || result.merged || 0) > 0) {
-        setStatus(`Import finished: ${parts.join(" · ")}. Refreshing the entries list…`);
-        setTimeout(() => {
-          try {
-            if (routeInfo()?.id === info.id && routeInfo()?.page === 'entries' &&
-                !document.querySelector('[role="dialog"][open], [data-state="open"][role="dialog"]') &&
-                !document.querySelector('form input:focus, form textarea:focus, [contenteditable="true"]:focus')) {
-              location.reload();
-            }
-          } catch {}
-        }, 900);
-      } else {
-        setTimeout(() => refreshPanelStatus().catch(() => {}), 3500);
+      // Refresh from SpicyChat rather than treating a closed modal as proof
+      // that the server saved all entries. This performs reads only.
+      if (typeof DS.getCurrentOwnLorebookBackupData !== 'function') {
+        setStatus(`Import submitted (${counts}), but server verification is unavailable. Refresh the Entries tab to confirm before retrying.`);
+        return false;
       }
-      return !result.failed && !result.paused && !result.cancelled;
+      setStatus(`Checking SpicyChat saved all ${count} entries…`);
+      let verifyTimer;
+      let current;
+      try {
+        current = await Promise.race([
+          DS.getCurrentOwnLorebookBackupData(info.id),
+          new Promise((_,reject) => {verifyTimer=setTimeout(()=>reject(new Error('SpicyChat did not finish checking the entries.')),15000);})
+        ]);
+      } catch (error) {
+        setStatus(`Import submitted (${counts}), but the saved entries could not be checked: ${error?.message || error}. Review the Entries list before retrying.`);
+        return false;
+      } finally {clearTimeout(verifyTimer);}
+      const saved = Array.isArray(current?.entries) ? current.entries : [];
+      const names = new Set(saved.map(entry=>String(entry?.name||'').trim().toLowerCase()));
+      const missing = payload.entries.filter(entry=>!names.has(String(entry.name||'').trim().toLowerCase()));
+      if (String(current?.lorebook?.id||'').toLowerCase() !== info.id.toLowerCase() ||
+          current?.completeness?.entries !== true ||
+          current?.completeness?.entryCountVerified !== true || missing.length) {
+        setStatus(`Import submitted (${counts}), but SpicyChat has not confirmed ${missing.length || 'all'} entries. Refresh the Entries tab and check before retrying.`);
+        return false;
+      }
+      const clone=cloneRecord();
+      if (clone?.targetId===info.id && JSON.stringify(clone.payload?.entries||[])===JSON.stringify(payload.entries)) clearClone();
+      // Entries are verified before touching tags; failed tag changes do not
+      // affect any saved entry and can be retried separately.
+      let tagsQueued=false, tagWarning='';
+      try {tagsQueued = await queueMissingLorebookTags(payload, info);}
+      catch (error) {tagWarning=String(error?.message||error);}
+      if (tagsQueued) return true;
+      try {
+        const pending=JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY)||'null');
+        if(pending?.targetId===info.id && JSON.stringify(pending.payload?.entries||[])===JSON.stringify(payload.entries))
+          sessionStorage.removeItem(IMPORT_SESSION_KEY);
+      } catch {}
+      setStatus(`Import complete: ${counts}.${tagWarning ? ` Tags could not be checked: ${tagWarning}` : ' Refreshing the Lorebook…'}`);
+      if (!tagWarning) setTimeout(() => {
+        if (routeInfo()?.id === info.id && routeInfo()?.page === 'entries' &&
+            !document.querySelector('[role="dialog"][open], [data-state="open"][role="dialog"]')) location.reload();
+      }, 1000);
+      return true;
+    } catch (error) {
+      setStatus(`Import stopped: ${lastFailure || error?.message || error}. Check SpicyChat before retrying. Your JSON is unchanged.`);
+      return false;
     } finally {
-      document.getElementById("ds-lorebook-cancel-import")?.remove();
+      clearTimeout(timer);
+      if (timedOut) controller.abort();
+      document.getElementById('ds-lorebook-cancel-import')?.remove();
       importRunning = false;
     }
   }
@@ -2142,6 +2318,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let record = null;
     try { record = JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY) || "null"); } catch {}
     if (!record || record.targetId !== info.id || !record.payload) return;
+    // This checkpoint is only for finishing tags; don't offer to import the
+    // same entries again once their writes have been verified.
+    if (record.entriesImported === true) return;
     if (Date.now() - Number(record.queuedAt || 0) > 15 * 60_000) {
       try { sessionStorage.removeItem(IMPORT_SESSION_KEY); } catch {}
       return;
@@ -2161,9 +2340,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (routeInfo()?.id !== record.targetId) throw new Error("Destination Lorebook changed.");
         const ok = await runLorebookImport(record.payload, info);
         if (ok) {sessionStorage.removeItem(IMPORT_SESSION_KEY);banner.remove();}
-        else {msg.textContent="Import not completed. Check existing entries before trying again.";start.disabled=false;}
+        else {msg.textContent="Import stopped. Check the reason shown above before retrying.";start.disabled=false;}
       } catch(error) { msg.textContent=`Import stopped: ${error?.message||String(error)}. JSON is still queued.`;start.disabled=false; }
     });
+    if (record.approved === true && record.tagsPending === false && record.autoTried !== true) {
+      const next = {...record, autoTried:true};
+      sessionStorage.setItem(IMPORT_SESSION_KEY,JSON.stringify(next));
+      queueMicrotask(()=>start.click());
+    }
     const cancel=document.createElement("button");cancel.type="button";cancel.textContent="Discard";
     cancel.addEventListener("click",()=>{sessionStorage.removeItem(IMPORT_SESSION_KEY);banner.remove();});
     banner.append(msg,start,cancel);panel.insertAdjacentElement("afterend",banner);
@@ -2660,6 +2844,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     if (!document.getElementById(PANEL_ID)) buildPanel();
     if (info.page === "details") renderExistingLorebookMerge(info);
+    if (info.page === "details") offerPendingTagRestore(info);
     if (info.page === "entries") {
       offerQueuedEntryImport(info);
       offerCloneEntries(info);

@@ -232,12 +232,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         child.querySelector?.('button[aria-label="Plus-button"], button[aria-label="generate-image"], button[data-testid="ImageGenerationButton"], button[aria-label="autogenerate"]')
       );
       const fallbackControls = children.find(child => child.matches?.(".ds-chat-ooc-controls-fallback"));
+      const isMobileComposer = shell.classList.contains("items-end") && shell.classList.contains("w-full");
+      const onMobile = !!window.matchMedia?.("(max-width: 760px), (pointer: coarse)")?.matches;
+      if (isMobileComposer && onMobile) {
+        // Keep OOC in a dedicated, fixed left slot. Native Plus/Image/Suggest
+        // move or vanish while typing; following their moving row placed OOC
+        // under Send and changed the textbox width after several lines.
+        return { shell, fieldBranch, controls: fallbackControls || null };
+      }
       const controls = nativeControls || fallbackControls || null;
       if (controls) return { shell, fieldBranch, controls };
-      // The native left controls can be entirely unmounted while typing.
-      if (shell.classList.contains("items-end") && shell.classList.contains("w-full")) {
-        return { shell, fieldBranch, controls: null };
-      }
+      if (isMobileComposer) return { shell, fieldBranch, controls: null };
     }
     return null;
   }
@@ -249,6 +254,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!placement || placement.shell.closest("#ds-qol-panel")) return;
 
     let { shell, fieldBranch, controls } = placement;
+    if (window.matchMedia?.("(max-width: 760px), (pointer: coarse)")?.matches &&
+        shell.classList.contains("items-end") && shell.classList.contains("w-full")) {
+      shell.dataset.dsMobileComposerRow = "1";
+      fieldBranch.dataset.dsMobileComposerField = "1";
+    }
     if (!controls) {
       // No native left-side controls remain during typing. Create a small
       // standalone lane immediately to the left of the message field.
