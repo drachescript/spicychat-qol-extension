@@ -128,6 +128,7 @@
         "content/performance-mode.js",
         "content/core-message-cache.js",
         "content/chat-stability.js",
+        "content/daily-message-limit.js",
         "content/reply-instructions.js",
         "content/rp-format-repair.js",
         "content/rp-state-tracker.js",
