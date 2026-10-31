@@ -55,7 +55,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const path = normalizedPath();
     const match = path.match(/^\/lorebook\/edit\/([^/]+)\/entries$/i) || path.match(/^\/lorebook\/([^/]+)\/edit\/entries$/i);
     if (!match) return null;
-    return { id: clean(decodeURIComponent(match[1]), 200) };
+    // Route detection already proves this is the Entries tab. The importer
+    // also checks routeInfo().page before writing; omitting it made every
+    // legitimate Entries-tab import falsely report that the page changed.
+    return { id: clean(decodeURIComponent(match[1]), 200), page: "entries" };
   }
 
   function enabled() {

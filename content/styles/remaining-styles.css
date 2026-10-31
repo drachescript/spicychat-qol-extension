@@ -1847,6 +1847,40 @@ html[data-ds-chat-exporting="1"] #ds-qol-export-chat {
 }
 
 @media (max-width: 760px), (pointer: coarse) {
+  /* The native text branch is w-full even with Send/attachment controls in
+     the same flex row. It must shrink when the composer grows to 4+ lines. */
+  [data-ds-mobile-composer-row="1"] {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  [data-ds-mobile-composer-field="1"] {
+    flex: 1 1 0% !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  [data-ds-mobile-composer-field="1"] > div,
+  [data-ds-mobile-composer-field="1"] textarea {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  /* OOC is an independent left-hand slot even if native controls remount on
+     the right. Do not make the text area or Send change position with it. */
+  [data-ds-mobile-composer-row="1"] > .ds-chat-ooc-controls-fallback {
+    display: flex !important;
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    align-self: flex-end !important;
+    overflow: visible !important;
+  }
+  [data-ds-mobile-composer-row="1"] > .ds-chat-ooc-controls-fallback .ds-chat-ooc-shortcut-wrapper {
+    width: 36px !important;
+    min-width: 36px !important;
+    flex: 0 0 36px !important;
+  }
   .ds-mobile-chat-send-wrapper {
     width: fit-content !important;
     min-width: 0 !important;

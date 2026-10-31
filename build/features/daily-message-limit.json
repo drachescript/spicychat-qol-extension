@@ -1,0 +1,18 @@
+{
+  "id": "daily-message-limit",
+  "primary": "content/daily-message-limit.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "dailyMessageLimitTrackerEnabled"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/daily-message-limit.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false
+}

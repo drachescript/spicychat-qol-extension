@@ -111,6 +111,7 @@ const DEFAULT_SETTINGS = {
   botEditorSnippets: [],
 
   enableGenerationProfiles: false,
+  dailyMessageLimitTrackerEnabled: false,
   showGenerationMetadata: false,
   showMessageTimestamps: false,
   messageTimestamp24Hour: false,
@@ -280,7 +281,6 @@ const DEFAULT_SETTINGS = {
   creatorBotBrowserNotifications: false,
   trackFavoriteBots: false,
   enableFavoritesRecovery: false,
-  passiveFavoritesIdBackup: false,
   showFavoritesBulkSelect: true,
   showFavoritesScanButton: true,
   showFavoriteHistoryButton: false,
@@ -288,6 +288,7 @@ const DEFAULT_SETTINGS = {
   favoriteBotRelationFilter: "all",
   favoriteBotFolderFilter: "all",
   favoriteBotCreatorFilter: "",
+  showLaterFavoritesTab: false,
   favoriteBotStateFilter: "all",
   showLaterBotButtons: false,
   enableSavedListsOverlay: false,
@@ -383,6 +384,7 @@ const DEFAULT_SETTINGS = {
   enableBotComparison: false,
   showQuickNotInterestedButtons: false,
   showQuickLessLikeButtons: false,
+  showQuickMoreLikeButtons: false,
   showQuickDislikeButtons: false,
   showQuickUnblockButtons: false,
 

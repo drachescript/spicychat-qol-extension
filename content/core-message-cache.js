@@ -93,8 +93,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
+  let lastSelectionDiagnosticAt = 0;
   DS.getMessageEnhancerRoots = function getMessageEnhancerRoots(options = {}) {
     if (!DS.isSingleChatPage?.()) return [];
+    const selectionStartedAt = performance.now();
     const loaded = DS.getLoadedMessageRoots?.() || [];
     const lane = DS.getCurrentMessageLaneRoots?.() || [];
     const threshold = Math.max(60, Number(options.threshold || 120));
@@ -147,6 +149,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.messageEnhancerLazyPasses = Number(counters.messageEnhancerLazyPasses || 0) + 1;
       counters.messageEnhancerLazyRoots = Number(counters.messageEnhancerLazyRoots || 0) + chosen.size;
       counters.messageEnhancerLazySkipped = Number(counters.messageEnhancerLazySkipped || 0) + Math.max(0, loaded.length - chosen.size);
+    }
+    // Sample the selector cost and work scope without message content. This
+    // describes QoL's selected roots; it is not proof of a rendered paint or a
+    // native SpicyChat stall. Do not emit on every streaming mutation.
+    if (chosen.size && Date.now() - lastSelectionDiagnosticAt >= 3000) {
+      lastSelectionDiagnosticAt = Date.now();
+      DS.diagEvent?.("message-cache", "enhancer-root-selection", {
+        loadedRoots: loaded.length, laneRoots: lane.length,
+        chosenRoots: chosen.size, laneOnly, lazy,
+        selectionMs: Math.round((performance.now() - selectionStartedAt) * 10) / 10
+      });
     }
     return [...chosen];
   };

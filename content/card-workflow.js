@@ -11,6 +11,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const RECENT_MODAL_ID = "ds-recently-seen-modal";
   const COMPARE_MODAL_ID = "ds-bot-compare-modal";
   const selectedCompare = new Map();
+  const positivelyRatedThisTab = new Set();
   let lastTrackedRoute = "";
 
   const clean = value => String(value || "").replace(/\s+/g, " ").trim();
@@ -297,6 +298,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return false;
   }
 
+  async function directMoreLikeCard(button, snapshot) {
+    if (!snapshot?.id || button.disabled) return false;
+    button.disabled = true;
+    const diag = DS.diagOperationStart?.("card-workflow", "direct-more-like-this", { botId: snapshot.id });
+    DS.setQuickStatus?.(`Sending positive recommendation feedback for ${snapshot.name || snapshot.id}…`, true);
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: "DS_QUICK_MORE_LIKE_BOT", botId: snapshot.id, botName: snapshot.name || ""
+      });
+      const status = clean(result?.status || "unknown");
+      if (result?.ok && ["more-liked", "already-handled"].includes(status)) {
+        positivelyRatedThisTab.add(snapshot.id);
+        button.title = `Positive recommendation preference recorded for ${snapshot.name || snapshot.id}`;
+        button.textContent = "✓";
+        DS.setQuickStatus?.(status === "already-handled"
+          ? `More Like This was already confirmed for ${snapshot.name || snapshot.id}.`
+          : `Positive recommendation feedback accepted for ${snapshot.name || snapshot.id}. This doesn't guarantee similar recommendations.`);
+        DS.diagOperationEnd?.(diag, { outcome: "ok", counts: { scanned: 1, changed: 1, skipped: 0, errors: 0 }, extra: { botId: snapshot.id, httpStatus: Number(result?.httpStatus || 0) } });
+        return true;
+      }
+      DS.setQuickStatus?.(`More Like This was not confirmed for ${snapshot.name || snapshot.id}: ${status}.`);
+      DS.diagOperationEnd?.(diag, { outcome: status, counts: { scanned: 1, changed: 0, skipped: 1, errors: 1 } });
+      return false;
+    } catch(error) {
+      DS.setQuickStatus?.(`More Like This could not be verified: ${clean(error?.message || error)}`);
+      DS.diagOperationEnd?.(diag, { outcome: "unknown", counts: { scanned: 1, changed: 0, skipped: 1, errors: 1 } });
+      return false;
+    } finally { button.disabled = false; }
+  }
+
   async function quickDislikeCard(snapshot) {
     if (!snapshot?.id) return false;
     const diagToken = DS.diagOperationStart?.("card-workflow", "quick-dislike", { botId: snapshot.id });
@@ -347,6 +378,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.enableBotComparison ||
       settings.showQuickNotInterestedButtons ||
       settings.showQuickLessLikeButtons ||
+      settings.showQuickMoreLikeButtons ||
       settings.showQuickDislikeButtons ||
       (settings.showQuickUnblockButtons && snapshot.blocked)
     );
@@ -399,6 +431,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       host.appendChild(makeActionButton("↓", `Stop recommending me this: ${snapshot.name}`, () => {
         directLessLikeCard(card, snapshot).catch(() => DS.setQuickStatus?.("Could not update SpicyChat recommendations."));
       }));
+    }
+
+    if (settings.showQuickMoreLikeButtons) {
+      const button = makeActionButton(positivelyRatedThisTab.has(snapshot.id) ? "✓" : "↑", `More Like This: ${snapshot.name} (positive recommendation preference; no public rating)`, () => {
+        directMoreLikeCard(button, snapshot).catch(() => DS.setQuickStatus?.("Could not verify More Like This."));
+      });
+      host.appendChild(button);
     }
 
     if (settings.showQuickDislikeButtons) {
@@ -795,6 +834,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.enableBotComparison ||
       settings.showQuickNotInterestedButtons ||
       settings.showQuickLessLikeButtons ||
+      settings.showQuickMoreLikeButtons ||
       settings.showQuickDislikeButtons ||
       settings.showQuickUnblockButtons
     );

@@ -343,6 +343,17 @@ button:hover { background: #2e333a; }
   object-fit: cover;
   border-radius: 9px;
 }
+.piper-help-avatar-fallback {
+  display: inline-flex !important;
+  justify-content: center;
+  align-items: center;
+  background: #30333a;
+  border: 1px solid #4b5563;
+  color: #f1f5f9;
+  font-weight: 700;
+  font-size: 22px;
+  flex: 0 0 44px;
+}
 .piper-help-link span:first-of-type { min-width: 0; }
 
 .help-link span:first-child { display: flex; flex-direction: column; gap: 4px; }

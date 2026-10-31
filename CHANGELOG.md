@@ -1,3 +1,10 @@
+## 0.2.66
+- Added More Like This to bot cards without changing public bot ratings.
+- Improved performance diagnostics for Favorites, chat messages, and creator backups.
+- Fixed Lorebook imports stopping before the first entry with a false “Lorebook changed” warning; restored the regular entry importer for Skip existing.
+- Fixed Later appearing in the sidebar when its setting is disabled.
+- Added a daily message-limit notice and estimated reset countdown.
+
 ## 0.2.65
 - Added a dedicated Later view on Favorites and in the sidebar, with its own cards, numbered pagination, search, folders, sorting, content filters, and removal from Later while keeping native Favorites available.
 - Expanded Later cards with saved tags, longer descriptions and metadata recovery from QoL's existing archive; added a bounded manual lookup for missing public tags.
@@ -9,7 +16,7 @@
 - Improved Recovered titles and descriptions using current search metadata and bounded public-profile lookups, with automatic/manual batches, missing-title retries and a full-length title layout above compact tags and the Opened label.
 - Fixed Recovered mode switching and Back to Favorites navigation; reduced unnecessary search/card redraws and added read-only rechecks of unresolved bots without rescanning the full account.
 - Improved native Favorites account-response capture for read-only recovery, including missed startup responses and anonymous-request 403s; authenticated writes and fresh verification remain required.
-- Split large Favorites coverage saves into verified batches and protected completed results from failed writes; added an opt-in compact Favorites ID backup with three snapshots and JSON export.
+- Split large Favorites saves into verified batches and protected saved results from failed writes; added a compact Favorites ID backup with three snapshots and JSON export.
 - Added reviewable Favorites cleanup suggestions using Later membership, confirmed chats and opened history without treating opened or first-seen dates as proof of a chat or original favorite date.
 - Extended Favorites cleanup to verified Later saves and user-confirmed native unfavorites for recovered IDs, with fresh account-membership checks, cancellation, resume/retry and separate not-found versus failed states.
 - Reduced unnecessary Favorite History rewrites, kept recovery results when independent history verification fails, and added a no-scan history sync retry.
@@ -68,7 +75,7 @@
 ## 0.2.60
 - Expanded Lorebook JSON imports beyond entries: create complete private copies with names, descriptions, tags, cover pictures and entries, or review and merge a JSON into a private Lorebook you own.
 - Improved Lorebook downloads with fresh, verified entry collection, embedded cover pictures and a quick download of the last saved copy.
-- Added cover choices for private-copy imports: select another picture or use a temporary “Change Me” cover when the original is unavailable. Both start off.
+- Added cover choices for private-copy imports: select another picture or use a temporary “Change Me” cover when the original is unavailable.
 - Improved importing into newly created Lorebooks with automatic entry continuation, progress recovery and refreshed entries after completion. Existing matching entries are kept unless you choose otherwise.
 - Added manual local Archive backups and recovery for missing conversation records, without modifying an attached Lorebook or automatically reusing old remote links.
 - Added read-only checks for uncertain native Lorebook saves and Archive entries, with clearer conflict and incomplete-data results.
@@ -122,7 +129,7 @@
 - Added a reviewed native-editor workflow for saving Archive entries when direct authenticated entry uploads are unavailable.
 - Added a read-only Archive entry audit that compares saved local records with SpicyChat and distinguishes missing, changed and not-yet-verifiable entries.
 - Added one-click private Archive setup with the QoL cover, existing-Archive detection and guarded SpicyChat session verification.
-- Added configurable review, synchronization and promotion settings, with automatic native creation disabled by default.
+- Added configurable review, synchronization and promotion settings for native Lorebook creation.
 - Added editable local conversation Lorebooks with keyword tests, activation controls and keyword-triggered visible OOC recall, plus reviewed Context Keeper fact handoff.
 - Improved long-chat message control targeting and feedback history retention for large handled Dislike/Less Like lists.
 
@@ -213,7 +220,7 @@
 - Added manual refresh for older saved message samples and clearer warnings when only part of a conversation has been indexed.
 - Creator Trigger Preview now highlights duplicate Lorebook keywords, missing keywords and unusually long entries.
 - Improved non-English Lorebook keyword matching and cleared outdated match badges after edits, regeneration and conversation changes.
-- Reduced extra Lorebook backup work while entries are being saved. Automatic Lorebook continuity messages now start OFF.
+- Reduced extra Lorebook backup work while entries are being saved.
 - Added backup presets for Settings, saved lists, creator content and pictures.
 - Fixed Backup/Restore for Character Pictures, Persona Pictures, Picture Library, background positioning and saved Scene Notes.
 - Added per-device cloud-sync presets and clearer upload/download choices. Restoring sync settings pauses existing sync until explicitly resumed.
@@ -224,9 +231,9 @@
 - Improved chat navigation by reducing unnecessary OOC and Mini Panel work, and restoring the Mini Panel after supported page changes.
 - Fixed Context Keeper carrying automatic findings into the wrong chat and added a review filter so uncertain memories stay out of recall until approved.
 - Added slow-feature timing summaries to local diagnostics for investigating lag.
-- The extra IMG button and new automatic capture options now start OFF. Existing saved user choices are preserved.
+- Preserved existing picture settings when adding the extra IMG button and automatic capture controls.
 - Mini Panel shortcuts hide when their feature is disabled or absent from a Lite build.
-- Added independent per-chat Scene Notes with manual draft insertion and visible OOC inclusion, both off by default.
+- Added independent per-chat Scene Notes with manual draft insertion and visible OOC inclusion.
 - Added an Apply & Save action for owned Private or Unlisted bots. It backs up the old Scenario, uses SpicyChat's native Save button, and does not report success until the saved value can be verified.
 - Separated Auto Voice and automatic conversation images into independent features, keeping their existing settings.
 - Split Character Pictures, Persona Pictures, Backgrounds and Picture Library into separate feature modules; Picture Library now has its own OFF-by-default option.
@@ -243,7 +250,7 @@
 - Added Mini Panel shortcuts for Custom Pictures, Context Keeper, creator keyword preview, native image controls, Rulebook troubleshooting, and additional chat tools.
 - Mini Panel shortcuts default off except Options, and hide when their underlying feature is disabled, omitted from a Custom Lite build, or unavailable on the current page.
 - Made Context Keeper a standalone local memory alternative that works without native Memory Manager, with visible OOC recall added to outgoing messages at a selected interval.
-- Added independent per-chat Auto Images controls that use SpicyChat's native conversation image button after a chosen number of new AI replies. No composer editing or automatic message sending; disabled by default.
+- Added per-chat Auto Images controls using SpicyChat's native image button after a chosen number of AI replies, without changing typed messages or sending chat text.
 - Added bulk selection, pinning, category changes, recap inclusion, and JSON import/export to the Context Keeper manager.
 - Context Keeper now flags automatic continuity captured from changed or regenerated messages for review, instead of silently leaving outdated facts active.
 - Added a manual, cancellable chat-history scan in Context Keeper that finds reviewable suggestions through SpicyChat's authenticated history reader without loading older chat cards.
@@ -292,8 +299,8 @@
 - Fixed sideways mobile listing overflow on Home and Search: a compact Show filters toggle keeps native filters available when their fixed-width sidebar would push results off-screen; desktop and already-responsive layouts remain unchanged.
 - Made the mobile Bot Organizer start as a compact Organize bots launcher instead of covering listing controls. Its full toolbar remains available on demand.
 - Avoided duplicating SpicyChat's native Narrow by Features → Lorebook filter: QoL's local Has Lorebook checkbox is hidden when the native equivalent is present, without modifying saved preferences.
-- Added Rulebook-aware chat exports for TXT, Markdown, JSON and HTML. Exports can include a passive snapshot of visible Rulebook meters and any available Rulebook name; no hidden rules are fetched and historic meter states are not inferred. Off by default.
-- Added a Rulebook filter in My Creations with All / Has Rulebook / Confirmed No Rulebook / Unknown. Missing badges and unlisted Rulebooks are not assumed absent. No per-bot scan requests; off by default.
+- Added Rulebook-aware chat exports for TXT, Markdown, JSON and HTML. Exports can include a passive snapshot of visible Rulebook meters and any available Rulebook name; no hidden rules are fetched and historic meter states are not inferred.
+- Added a Rulebook filter in My Creations with All / Has Rulebook / Confirmed No Rulebook / Unknown. Missing badges and unlisted Rulebooks are not assumed absent. No per-bot scan requests.
 - **Modularization — Stage 3:** Reorganized OOC Settings, other Settings tools, chat helpers, and background features into smaller modules, and improved the Custom Lite build planning. Full QoL keeps its existing functionality; customizable Lite builds are still in development.
 
 ## 0.2.46
@@ -326,13 +333,13 @@
 - Improved Portuguese detection for short descriptions, including sentences using “mãe”, “agora”, “quer”, and “você”.
 - Normalized mixed Greek/Cyrillic lookalike text in stylized Latin titles while leaving ordinary single-script Greek/Cyrillic descriptions unchanged.
 - Fixed Bot Status controls squeezing the known-bot summary into the scan filters. Counts now have a full-width row.
-- Moved the Chat Index into Chat List tools with a larger, scrollable index window. It remains disabled by default.
+- Moved Chat Index into Chat List tools with a larger, scrollable index window.
 - Improved per-device sync Settings layout by keeping the individual setting list collapsed until needed.
 - Bot Status scans now pause and preserve unfinished work after repeated authorization or connectivity failures instead of replacing confirmed results with Unknown.
 - Improved bulk Less Like and Dislike pause messages for repeated authentication or network failures.
 - Fixed mobile Settings getting stuck on General when the Sections menu did not initialize. Section navigation now starts independently and stays accessible if later Settings setup fails.
 - Reduced repeated OOC button class updates and unnecessary Copy/Edit toolbar checks while preserving early controls and repairs after chat rerenders.
-- Added Chat Index for chat-list pages, with manual API refresh, full rescans, search and confirmed unavailable/restricted/unknown filters. It starts off and is opened from Chat List tools.
+- Added Chat Index for chat-list pages, with manual refresh, full rescans, search and unavailable/restricted/unknown filters, accessible from Chat List tools.
 - Added local favorites for individual conversations, alongside existing QoL bot favorites. Exact chat links and message counts are saved without loading extra chat cards.
 - Chat index imports use the existing API importer only when the feature is enabled, save progress in batches, and do not treat missing chats or temporary errors as deletions. Previously indexed data stays saved when disabled.
 - Added a separate option to automatically add bots with blocked tags to Blocked bots; matched tags must be recognized on the card.
@@ -367,7 +374,6 @@
 - Fixed folders containing only one bot leaving large empty spaces in the bot list.
 - Added Memory Vault. Save a copy of a chat memory before removing it from SpicyChat's active memories, then restore it later. Stored memories can be included in QoL backups.
 - Fixed My Personas sometimes moving back to the wrong place in the sidebar when the option to keep it under Chats is enabled.
-- New options are disabled by default.
 
 ## 0.2.42
 - Added more translation choices: on-device browser translation where supported, DeepL, LibreTranslate, and a manual Google Translate option. Automatic translation only uses a remote service when the user allows it.
@@ -381,7 +387,6 @@
 - Improved per-tab pause so paused tabs stop more QoL background work, while dedicated Bot Status and recommendation helpers can continue.
 - Reduced unnecessary bot discovery and other chat work during pause. Improved how Copy, Edit, and OOC controls reappear after SpicyChat rebuilds them.
 - Fixed a background startup error caused by a missing file in an earlier package.
-- New options are disabled by default.
 
 ## 0.2.41
 - Made Bot Status counts easier to understand by separating routinely monitored bots from bots outside the normal scan.
@@ -706,7 +711,7 @@ First v0.2 release after the long 0.1.x development/testing cycle.
 
 ### Discovery, saved bots & blocking
 - Added Saved Bots Hub, Bot Organizer, Recently Seen, Favorite/Later/Opened tools, Smart Filters, language filtering, exact message counts and more listing controls.
-- Blocking and dislike tools were expanded, with dislike-on-block disabled by default.
+- Expanded blocking and dislike tools.
 
 ### Performance, compatibility & backup
 - Reduced repeated DOM/listing/chat work, especially on large pages and long chats.

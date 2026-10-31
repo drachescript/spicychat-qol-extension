@@ -108,6 +108,7 @@
         "content/chat-search.js",
         "content/chat-topbar.js",
         "content/chat-ui.js",
+        "content/daily-message-limit.js",
         "content/composer-control.js",
         "content/context-keeper.js",
         "content/delete-guard.js",

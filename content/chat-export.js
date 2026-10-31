@@ -2169,11 +2169,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return copied;
   }
 
-  function downloadText(text, mime, filename) {
-    if (typeof DS.downloadTextFile === "function") {
-      DS.downloadTextFile(text, filename, mime, { requestPermission: true });
-      return;
-    }
+  async function downloadText(text, mime, filename) {
+    if (typeof DS.downloadTextFile !== "function") return { ok: false, error: "Download helper unavailable." };
+    try { return await DS.downloadTextFile(text, filename, mime, { requestPermission: true }); }
+    catch (error) { return { ok: false, error: String(error?.message || error) }; }
   }
 
   function printHtml(html) {
@@ -2576,8 +2575,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (largePreviewSkipped) count.textContent = `Building ${workingData.messages.length}-message export for download…`;
       await DS.sleep?.(0);
       const rendered = renderFormat(workingData, opts());
-      downloadText(rendered.text, rendered.mime, `${safeBaseName(workingData.botInfo?.name)}-chat-export.${rendered.ext}`);
-      refresh();
+      const result = await downloadText(rendered.text, rendered.mime, `${safeBaseName(workingData.botInfo?.name)}-chat-export.${rendered.ext}`);
+      if (!result?.ok) {
+        const copied = await copyTextValue(rendered.text);
+        DS.setQuickStatus?.(copied
+          ? "Android did not confirm the file save. Export copied instead."
+          : "File save could not be confirmed. Copy the export from this window.");
+        count.textContent = copied
+          ? "File not verified; export copied to clipboard."
+          : "File not verified; use Copy instead.";
+      } else {
+        DS.setQuickStatus?.("Chat export sent to downloads.");
+        refresh();
+      }
     });
     printButton.addEventListener("click", async () => {
       if (largePreviewSkipped) count.textContent = `Building ${workingData.messages.length}-message HTML for Print / Save PDF…`;

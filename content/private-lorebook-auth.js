@@ -119,8 +119,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let setupToken=params.get('dsQolArchiveSetup')||params.get('dsQolLorebookClone')||'';
           if (!setupToken && /\/entries$/i.test(path)) {
             try {
-              const rec=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const cloned=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const imported=JSON.parse(sessionStorage.getItem('dsQolPendingLorebookImportV1')||'null');
               const id=path.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries$/i)?.[1];
+              const rec=imported?.approved===true && imported.targetId?.toLowerCase()===id?.toLowerCase()?imported:cloned;
               if (rec?.targetId?.toLowerCase()===id?.toLowerCase() &&
                   location.pathname.toLowerCase()===`/lorebook/edit/${id.toLowerCase()}/entries`) setupToken=rec.token||'';
             } catch {}
@@ -189,16 +191,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           let setupToken=params.get('dsQolArchiveSetup')||params.get('dsQolLorebookClone')||'';
           if (!setupToken && /\/entries$/i.test(path)) {
             try {
-              const rec=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const cloned=JSON.parse(sessionStorage.getItem('dsQolPendingPrivateLorebookCloneV1')||'null');
+              const imported=JSON.parse(sessionStorage.getItem('dsQolPendingLorebookImportV1')||'null');
               const id=path.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries$/i)?.[1];
+              const rec=imported?.approved===true && imported.targetId?.toLowerCase()===id?.toLowerCase()?imported:cloned;
               if (rec?.targetId?.toLowerCase()===id?.toLowerCase() &&
                   location.pathname.toLowerCase()===`/lorebook/edit/${id.toLowerCase()}/entries`) setupToken=rec.token||'';
             } catch {}
           }
-          const result=await new Promise(resolve=>chrome.runtime.sendMessage({
-            type:'DS_PRIVATE_ARCHIVE_SETUP_WRITE',method,path,payload,setupToken,
-            authToken:token,appVersion:document.querySelector('meta[name="app-version"]')?.content||''
-          },response=>resolve(chrome.runtime.lastError?{ok:false,status:'background-message-failed'}:response||{ok:false,status:'no-response'})));
+          // A lost extension-worker callback must never freeze a Lorebook
+          // import indefinitely. The worker may still finish an in-flight
+          // write, so an expired response is UNKNOWN, never safe to retry.
+          const result=await new Promise(resolve=>{
+            let done=false;
+            const finish=value=>{if(done)return;done=true;clearTimeout(timer);resolve(value);};
+            const timer=setTimeout(()=>finish({ok:false,status:'background-response-timeout',ambiguous:true}),45000);
+            try {chrome.runtime.sendMessage({
+              type:'DS_PRIVATE_ARCHIVE_SETUP_WRITE',method,path,payload,setupToken,
+              authToken:token,appVersion:document.querySelector('meta[name="app-version"]')?.content||''
+            },response=>finish(chrome.runtime.lastError?{ok:false,status:'background-message-failed',ambiguous:true}:response||{ok:false,status:'no-response',ambiguous:true}));}
+            catch{finish({ok:false,status:'background-message-failed',ambiguous:true});}
+          });
           if(result?.ok)return result.data;
           if(result?.httpStatus===401){cache=null;throw Error('SpicyChat authentication rejected the Archive request (HTTP 401). No retry attempted.');}
           throw Error('SpicyChat '+(path==='/save-image'?'cover-upload authorization':(/\/entries$/i.test(path)?'entry creation':'Lorebook creation'))+

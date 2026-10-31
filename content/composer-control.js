@@ -306,11 +306,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const label = String(button.getAttribute("aria-label") || button.title || "").toLowerCase();
       return button.type === "submit" || label.includes("send");
     });
+    // SpicyChat's flex message-field branch has w-full even though the
+    // composer also contains control columns. It must shrink as typing wraps;
+    // otherwise the final 1-4 characters are hidden behind Send on Android.
+    for (let row = textarea.parentElement; row && row !== document.body; row = row.parentElement) {
+      if (!row.classList?.contains("items-end") || !row.classList?.contains("w-full")) continue;
+      const branch = Array.from(row.children).find(child => child.contains(textarea));
+      if (!branch || branch === row) continue;
+      row.dataset.dsMobileComposerRow = "1";
+      branch.dataset.dsMobileComposerField = "1";
+      break;
+    }
     if (!send) return;
-
     DS.setClassState?.(send, "ds-mobile-chat-send-button", true);
     const wrapper = send.parentElement;
-    if (wrapper && wrapper !== scope) DS.setClassState?.(wrapper, "ds-mobile-chat-send-wrapper", true);
+    // Never stamp Send-only styles onto an attachment/OOC control column.
+    // Such a column can grow vertically after several lines of typing.
+    const soloWrapper = wrapper && wrapper !== scope &&
+      wrapper.querySelectorAll("button").length === 1 &&
+      !wrapper.querySelector("textarea, [contenteditable='true']");
+    document.querySelectorAll(".ds-mobile-chat-send-wrapper").forEach(node => {
+      if (node !== wrapper || !soloWrapper) node.classList.remove("ds-mobile-chat-send-wrapper");
+    });
+    if (soloWrapper) DS.setClassState?.(wrapper, "ds-mobile-chat-send-wrapper", true);
   }
 
   function buttonLabels(node) {
@@ -570,10 +588,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : 0;
     const measuredGap = Math.max(buttonGap, counterGap);
 
-    // Measure the actual Save/Cancel positions instead of trusting their outer
-    // wrapper. SpicyChat can leave the counter nearby while pushing the buttons
-    // hundreds of pixels farther down.
-    const gapIsHuge = measuredGap > 56;
+    // Keep Save/Cancel near the textarea, not at the bottom of a tall native
+    // flex container. Also repair when a soft keyboard pushes either control
+    // outside the visible part of the page, even if the measured gap is small.
+    const viewportBottom = Number(window.visualViewport?.height || window.innerHeight || 0);
+    const controlsBelowViewport = viewportBottom > 0 && [saveRect, cancelRect]
+      .some(rect => rect && rect.bottom > viewportBottom - 6);
+    const gapIsHuge = measuredGap > 28 || controlsBelowViewport;
     const layoutReady = textarea.dataset.dsMobileMessageEditLayoutReady === "1";
 
     // Once a stable edit layout has been repaired, normal typing only needs the
@@ -667,7 +688,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const minHeight = 96;
     // Grow enough to make editing comfortable, then stop. Long edits scroll
     // inside the textarea so Save/Cancel stay reachable above the keyboard.
-    const maxHeight = Math.max(200, Math.min(360, viewportHeight * 0.46));
+    const maxHeight = Math.max(152, Math.min(260, viewportHeight * 0.38));
     const previousScrollTop = Number(textarea.scrollTop || 0);
     const selectionEnd = Number(textarea.selectionEnd ?? textarea.value.length);
     const editingAtEnd = selectionEnd >= Math.max(0, textarea.value.length - 1);

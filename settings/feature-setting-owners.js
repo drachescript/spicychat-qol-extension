@@ -158,6 +158,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
     "enableBotComparison",
     "showQuickNotInterestedButtons",
     "showQuickLessLikeButtons",
+    "showQuickMoreLikeButtons",
     "showQuickDislikeButtons"
   ],
   "model-quick-access": [

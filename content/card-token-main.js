@@ -33,8 +33,6 @@ if (!(() => { try {
   const CONVERSATION_LIST_RESPONSE_EVENT = "ds-qol-conversation-list-response-v1";
   const LOREBOOK_REQUEST_EVENT = "ds-qol-lorebook-request-v1";
   const LOREBOOK_RESPONSE_EVENT = "ds-qol-lorebook-response-v1";
-  const FAVORITES_REQUEST = "ds-qol-favorites-account-request-v1";
-  const FAVORITES_RESPONSE = "ds-qol-favorites-account-response-v1";
   const PRIVATE_READ_REQUEST = "ds-qol-private-lorebook-read-request-v1";
   const PRIVATE_READ_RESPONSE = "ds-qol-private-lorebook-read-response-v1";
   const PRIVATE_ARCHIVE_WRITE_REQUEST = "ds-qol-private-archive-write-request-v1";
@@ -82,29 +80,6 @@ if (!(() => { try {
   const RECOMBEE_SIGNED_SAMPLE_LIMIT = 24;
   const recommendationWorkerBootAt = Date.now();
   const RECOMBEE_DISCOVERY_FALLBACK_MS = 7000;
-  // Current account Favorites observed from SpicyChat's own /users/settings XHR.
-  // Kept in MAIN-world memory only. Never store or publish the response itself.
-  let observedFavorites = null;
-  const FAVORITES_OBSERVED_MAX_AGE = 120000;
-  const favoriteUuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-  function rememberNativeFavoritesPayload(data, source = 'native-xhr') {
-    const ids = data?.liked_bots;
-    if (!Array.isArray(ids) || ids.some(x => typeof x !== 'string' || !favoriteUuid.test(x))) return;
-    observedFavorites = { ids: [...new Set(ids.map(x => x.toLowerCase()))], at: Date.now() };
-    // Only non-sensitive count/readiness is exposed until a user asks for recovery.
-    try {
-      setRootAttribute('data-ds-favorites-native-observed', String(observedFavorites.ids.length));
-      setRootAttribute('data-ds-favorites-native-source', source);
-      window.dispatchEvent(new CustomEvent('ds-qol-favorites-native-observed-v1', {
-        detail: { count: observedFavorites.ids.length, observedAt: observedFavorites.at }
-      }));
-    } catch {}
-  }
-  function observedFavoritesSnapshot() {
-    return observedFavorites && Date.now() - observedFavorites.at < FAVORITES_OBSERVED_MAX_AGE
-      ? observedFavorites : null;
-  }
-
   let nativeHistoryRequestSeq = 0;
   let nativeHistoryResponseSeq = 0;
   let nativeHistorySuccesses = 0;
@@ -419,45 +394,13 @@ if (!(() => { try {
   const nativeOpen = XHR?.prototype?.open || null;
   const nativeSetRequestHeader = XHR?.prototype?.setRequestHeader || null;
   const nativeSend = XHR?.prototype?.send || null;
-  const originalJsonParse = JSON.parse;
-  let jsonParseHookInstalled = false;
-  const onFavoritesRoute = /^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i.test(location.pathname);
-  // Some site builds parse the authenticated /users/settings response after an
-  // XHR wrapper has already replaced our transport hook (other extensions can
-  // also wrap XHR). Observe ONLY the exact settings-shaped JSON on Favorites.
-  // This read-only fallback does not capture session headers or issue requests.
-  function observedJsonParse(...args) {
-    const parsed = originalJsonParse.apply(this, args);
-    if (active && onFavoritesRoute && typeof args[0] === 'string' &&
-        args[0].length >= 50 && args[0].length <= 512000 &&
-        args[0].includes('"liked_bots"') &&
-        parsed && !Array.isArray(parsed) &&
-        typeof parsed.version === 'number' && typeof parsed.show_nsfw === 'boolean') {
-      try { rememberNativeFavoritesPayload(parsed, 'page-json'); } catch {}
-    }
-    return parsed;
-  }
-  function installFavoritesJsonObserver() {
-    if (!onFavoritesRoute || jsonParseHookInstalled || JSON.parse !== originalJsonParse) return;
-    JSON.parse = observedJsonParse;
-    jsonParseHookInstalled = true;
-  }
-  function uninstallFavoritesJsonObserver() {
-    if (jsonParseHookInstalled && JSON.parse === observedJsonParse) JSON.parse = originalJsonParse;
-    jsonParseHookInstalled = false;
-  }
   let active = true;
   let hooksInstalled = false;
 
   function observedFetch(input, init) {
     let historySeq = 0;
     let historyStartedAt = 0;
-    let nativeFavoriteRead = false;
     try {
-      const reqUrl = parseApiUrl(input);
-      const verb = String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
-      nativeFavoriteRead = active && verb === 'GET' &&
-        reqUrl?.hostname === API_HOST && reqUrl.pathname === '/users/settings';
       if (active) rememberRecombeeSignedRequest(input instanceof Request ? input.url : input);
       if (active && urlIsApi(input)) {
         scanHeaders(input instanceof Request ? input.headers : null);
@@ -470,23 +413,14 @@ if (!(() => { try {
     } catch {}
 
     const pending = nativeFetch(input, init);
-    if (!historySeq && !nativeFavoriteRead) return pending;
+    if (!historySeq) return pending;
     return pending.then(
       response => {
-        if (historySeq) {
-          try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
-        }
-        // Inspect only a clone of SpicyChat's own successful settings fetch.
-        // Never consume or alter its response, and never persist its payload.
-        if (nativeFavoriteRead && response?.ok && response.status === 200) {
-          try { void response.clone().json().then(rememberNativeFavoritesPayload).catch(() => {}); } catch {}
-        }
+        try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
         return response;
       },
       error => {
-        if (historySeq) {
-          try { noteNativeHistoryResponse(historySeq, 0, input, "fetch", historyStartedAt); } catch {}
-        }
+        try { noteNativeHistoryResponse(historySeq, 0, input, "fetch", historyStartedAt); } catch {}
         throw error;
       }
     );
@@ -498,14 +432,10 @@ if (!(() => { try {
       this.__dsCardTokenApi = active && urlIsApi(url);
       this.__dsCardTokenUrl = this.__dsCardTokenApi ? String(url || "") : "";
       this.__dsCardTokenHistoryApi = this.__dsCardTokenApi && urlIsNativeHistoryApi(url);
-      const parsedApiUrl = parseApiUrl(url);
-      this.__dsFavoritesSettingsRead = active && this.__dsCardTokenApi && String(method || '').toUpperCase() === 'GET' &&
-        parsedApiUrl?.pathname === '/users/settings';
     } catch {
       this.__dsCardTokenApi = false;
       this.__dsCardTokenUrl = "";
       this.__dsCardTokenHistoryApi = false;
-      this.__dsFavoritesSettingsRead = false;
     }
     return nativeOpen.call(this, method, url, ...rest);
   }
@@ -517,18 +447,6 @@ if (!(() => { try {
 
   function observedSend(...args) {
     try {
-      // The native settings XHR is authoritative even when this bridge missed
-      // the site's bearer header. Retain only its favorite IDs in memory.
-      if (active && this.__dsFavoritesSettingsRead && typeof this.addEventListener === 'function') {
-        this.addEventListener('loadend', () => {
-          try {
-            if (this.status !== 200) return;
-            const payload = this.responseType === 'json' ? this.response :
-              JSON.parse(this.responseType === '' || this.responseType === 'text' ? this.responseText : '{}');
-            rememberNativeFavoritesPayload(payload);
-          } catch {}
-        }, {once:true});
-      }
       if (active && this.__dsCardTokenHistoryApi) {
         const historyStartedAt = Date.now();
         const historySeq = noteNativeHistoryRequest(this.__dsCardTokenUrl, "xhr");
@@ -545,7 +463,6 @@ if (!(() => { try {
 
   function installHooks() {
     if (hooksInstalled || !active) return;
-    installFavoritesJsonObserver();
     if (nativeFetch && window.fetch === nativeFetchRaw) window.fetch = observedFetch;
     if (XHR?.prototype && nativeOpen && nativeSetRequestHeader && nativeSend) {
       if (XHR.prototype.open === nativeOpen) XHR.prototype.open = observedOpen;
@@ -556,7 +473,6 @@ if (!(() => { try {
   }
 
   function uninstallHooks() {
-    uninstallFavoritesJsonObserver();
     if (!hooksInstalled) return;
     if (window.fetch === observedFetch && nativeFetchRaw) window.fetch = nativeFetchRaw;
     if (XHR?.prototype) {
@@ -750,70 +666,6 @@ if (!(() => { try {
     } catch (error) {
       sendRead({ok:false,status:error?.name==='AbortError'?'timeout':'network-failure'});
     } finally {clearTimeout(timer);}
-  });
-
-  // Narrow Favorites membership read and user-confirmed unfavorite action.
-  // Auth never leaves MAIN world; callers receive only UUIDs and result status.
-  window.addEventListener(FAVORITES_REQUEST, async event => {
-    const req = event?.detail || {};
-    const requestId = clean(req.requestId);
-    const method = req.action === 'unfavorite' ? 'PATCH' : (req.action === 'read' || req.action === 'read-fresh') ? 'GET' : '';
-    const id = clean(req.id).toLowerCase();
-    if (!active || !nativeFetch || !/^dsfav-[a-z0-9-]{12,90}$/i.test(requestId) ||
-        !/^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i.test(location.pathname) ||
-        !method || (method === 'PATCH' && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id))) return;
-    const respond = details => { try { window.dispatchEvent(new CustomEvent(FAVORITES_RESPONSE, {detail:{requestId,...details}})); }catch{} };
-    // Account reads may reuse SpicyChat's own recently observed successful XHR.
-    // This is read-only and avoids pretending we captured a token we don't have.
-    // Explicit fresh reads (cleanup verification) MUST go to the server.
-    if (method === 'GET' && req.action === 'read') {
-      const observed = observedFavoritesSnapshot();
-      if (observed) { respond({ok:true,status:'native-observed-read',ids:[...observed.ids],observedAt:observed.at});return; }
-      // A cookie-only duplicate GET has produced HTTP 403 even while SpicyChat's
-      // own authenticated XHR succeeds. Don't send that unauthenticated request.
-      if (!isJwt(capturedToken)) { respond({ok:false,status:'native-observation-needed'});return; }
-    }
-    if (method === 'GET' && !isJwt(capturedToken)) {
-      respond({ok:false,status:'verification-auth-not-ready'});return;
-    }
-    if (!isJwt(capturedToken) && method === 'PATCH') {
-      respond({ok:false,status:'write-auth-not-ready'});return;
-    }
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),14000);
-    try {
-      const headers={Accept:'application/json',
-        'x-app-id':'spicychat','x-platform':'WEB','x-platform-os':'DESKTOP'};
-      if (isJwt(capturedToken)) headers.Authorization='Bearer '+capturedToken;
-      const version=clean(capturedAppVersion||document.querySelector('meta[name="app-version"]')?.content||'');
-      if(version&&version.length<80)headers['x-app-version']=version;
-      if(capturedCountry)headers['x-country']=capturedCountry;
-      if(isGuest(capturedGuest))headers['x-guest-userid']=capturedGuest;
-      if(method==='PATCH')headers['Content-Type']='application/json';
-      const path=method==='PATCH'?'/v2/users/settings':'/users/settings';
-      const response=await nativeFetch('https://prod.nd-api.com'+path,{
-        method,credentials:'include',cache:'no-store',signal:controller.signal,headers,
-        ...(method==='PATCH'?{body:JSON.stringify({unlikedBot:id})}:{})
-      });
-      if(response.status===401){capturedToken='';capturedAt=0;exposeCapturedAuthState();}
-      if(!response.ok){
-        if (method === 'GET' && req.action === 'read') {
-          const observed = observedFavoritesSnapshot();
-          if (observed) { respond({ok:true,status:'native-observed-read',ids:[...observed.ids],observedAt:observed.at});return; }
-        }
-        respond({ok:false,status:'http',httpStatus:response.status});return;
-      }
-      if(method==='PATCH'){respond({ok:true,status:'request-accepted',httpStatus:response.status});return;}
-      const payload=await response.json().catch(()=>null);
-      const ids=payload?.liked_bots;
-      if(!Array.isArray(ids) || ids.some(x=>typeof x!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(x))){
-        respond({ok:false,status:'invalid-membership-response'});return;
-      }
-      // For cookie-backed sessions this follows the site's normal authenticated
-      // GET. It never sends or persists a secret and isn't accepted as a PATCH.
-      rememberNativeFavoritesPayload(payload);
-      respond({ok:true,status:'verified-read',ids:[...new Set(ids.map(x=>x.toLowerCase()))]});
-    }catch(error){respond({ok:false,status:error?.name==='AbortError'?'timeout':'network-error'});}
-    finally{clearTimeout(timer);}
   });
 
   // The MAIN-world interceptor sees SpicyChat's Authorization header during
@@ -1894,7 +1746,10 @@ if (!(() => { try {
     };
   }
 
-  async function postRecombeeLessLike(botId, userId, preferredToken = "") {
+  async function postRecombeeFeedback(botId, userId, mode, preferredToken = "") {
+    // Only explicit recommendation preferences may reach this write endpoint.
+    if (mode !== "more-like" && mode !== "less-like" && mode !== "dislike") return { ok: false, status: "invalid-feedback-mode", requestSent: false };
+    const ratingValue = mode === "more-like" ? 1 : -1;
     const preferred = plausibleRecombeeToken(preferredToken);
     collectPerformanceRecombeeSamples();
     const hasNativeSignature = recombeeSignedRequestSamples.length > 0;
@@ -2014,7 +1869,7 @@ if (!(() => { try {
         const response = await nativeFetch(url, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, itemId: botId, rating: -1, cascadeCreate: true })
+          body: JSON.stringify({ userId, itemId: botId, rating: ratingValue, cascadeCreate: true })
         });
         lastStatus = Number(response.status || 0);
 
@@ -2025,7 +1880,7 @@ if (!(() => { try {
           recombeeTokenCandidatesCachedAt = Date.now();
           return {
             ok: true,
-            status: "less-liked",
+            status: mode === "more-like" ? "more-liked" : "less-liked",
             stage: "response",
             reason: "Matching Recombee rating request returned 2xx.",
             characterId: botId,
@@ -2214,7 +2069,7 @@ if (!(() => { try {
     const requestId = clean(detail.requestId);
     const botId = clean(detail.botId).toLowerCase();
     const mode = clean(detail.mode).toLowerCase();
-    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike"].includes(mode)) return;
+    if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(botId) || !["less-like", "dislike", "more-like"].includes(mode)) return;
 
     const started = Date.now();
     let coalesced = false;
@@ -2259,7 +2114,7 @@ if (!(() => { try {
         }
         const ratingStartedAt = Date.now();
         let result = eventOnly ? { ok: true, status: "less-liked", requestSent: false, networkAttempts: 0, httpStatus: 0 }
-          : await postRecombeeLessLike(botId, userId, detail.preferredRecombeeToken);
+          : await postRecombeeFeedback(botId, userId, mode, detail.preferredRecombeeToken);
         const ratingHttpStatus = Number(result?.httpStatus || 0);
         if (mode === "dislike" && result?.ok && result?.status === "less-liked") {
           const eventResult = await postNativeCharacterRatingEvent(botId);

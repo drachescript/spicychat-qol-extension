@@ -752,6 +752,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "creatorModerationWarningsChatbots",
   "autoAgreeCreationGuidelines",
   "enableGenerationProfiles",
+  "dailyMessageLimitTrackerEnabled",
   "showGenerationMetadata",
   "showMessageTimestamps",
   "showGenerationModel",
@@ -814,7 +815,6 @@ const OPTIONAL_FEATURE_KEYS = [
   "laterPageHideBlockedBots",
   "showFavoriteHistoryButton",
   "enableFavoritesRecovery",
-  "passiveFavoritesIdBackup",
   "enableBotOrganizer",
   "botOrganizerExplorerFolders",
   "showLaterBotButtons",
@@ -849,6 +849,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableBotComparison",
   "showQuickNotInterestedButtons",
   "showQuickLessLikeButtons",
+  "showQuickMoreLikeButtons",
   "showQuickDislikeButtons",
   "showQuickUnblockButtons",
   "reduceAnimatedBotImages",
@@ -3433,24 +3434,6 @@ async function prepareLaterFavoritesCleanup({ moveAll = false } = {}) {
     laterFavoritesActionStatus(`Favorites → Later: ${error?.message || error}`);
   } finally { buttons.forEach(button => button.disabled = false); }
 }
-$("exportFavoritesIdBackup")?.addEventListener("click", async () => {
-  const status = $("favoritesIdBackupStatus");
-  try {
-    const result = await storageGet(["dsFavoritesIdBackupV1"]);
-    const backup = result?.dsFavoritesIdBackupV1;
-    const latest = backup?.latest;
-    if (!latest || latest.encoding !== "uuid16/base64" || !Number.isSafeInteger(latest.count) || latest.count < 1 ||
-        typeof latest.data !== "string" || atob(latest.data).length !== latest.count * 16) {
-      if (status) status.textContent = "No valid saved Favorites ID backup yet. Enable the passive setting and visit Favorites first.";
-      return;
-    }
-    const exportData = { format: "spicychat-qol-favorite-ids", version: 1, ...backup };
-    downloadJsonFile(exportData, `spicychat-favorite-ids-${new Date(latest.observedAt || Date.now()).toISOString().slice(0, 10)}.json`);
-    if (status) status.textContent = `Downloaded ${latest.count} saved IDs, with up to two earlier snapshots. No account changes made.`;
-  } catch (error) {
-    if (status) status.textContent = `Could not export Favorites backup: ${error?.message || error}`;
-  }
-});
 $("laterMoveCurrentFavorites")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: true }); });
 $("laterUnfavoriteOverlap")?.addEventListener("click", () => { void prepareLaterFavoritesCleanup({ moveAll: false }); });
 

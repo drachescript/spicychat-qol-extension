@@ -257,28 +257,58 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const safeMime = String(mimeType || "application/octet-stream").slice(0, 120);
     if (!value) return { ok: false, error: "Export payload is empty." };
 
-    // Android wrappers should keep using the native/system saver when exposed.
-    try {
-      if (typeof window._dsRequestExport === "function") {
-        window._dsRequestExport(value, safeName);
-        return { ok: true, method: "android" };
+    // Android saver responses are not proof of an actual file write. In
+    // particular, older wrappers acknowledge requests that become 0-byte
+    // downloads. Preserve single-attempt behavior to avoid double downloads.
+    const expectedBytes = new TextEncoder().encode(value).byteLength;
+    const androidResult = raw => {
+      let result = raw;
+      if (typeof result === "string" && result.trim().startsWith("{")) {
+        try { result = JSON.parse(result); } catch {}
       }
-    } catch {}
-    try {
-      const bridge = window.flutter_inappwebview;
-      if (bridge?.callHandler) {
-        try {
-          await bridge.callHandler("saveFile", JSON.stringify({
-            text: value,
-            content: value,
-            filename: safeName,
-            fileName: safeName,
-            mimeType: safeMime
-          }));
-          return { ok: true, method: "android" };
-        } catch {}
+      const written = result && typeof result === "object"
+        ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN)
+        : NaN;
+      if (result === false || result?.success === false || result?.ok === false || result?.error || written === 0) {
+        return { ok: false, method: "android", error: String(result?.error || "Android file export failed or wrote 0 bytes."), bytesWritten: Number.isFinite(written) ? written : null };
       }
-    } catch {}
+      if (Number.isFinite(written) && written >= expectedBytes) {
+        return { ok: true, method: "android", bytesWritten: written };
+      }
+      return { ok: false, method: "android", accepted: true,
+        error: "Android accepted the export but did not confirm the saved byte count." };
+    };
+    const androidPayload = {
+      text: value, content: value, filename: safeName, fileName: safeName,
+      mimeType: safeMime, byteLength: expectedBytes
+    };
+    const timedNativeCall = async promise => {
+      let timer;
+      try {
+        return await Promise.race([
+          Promise.resolve(promise),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Android file saver timed out; save not verified.")), 25000); })
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    if (typeof window._dsRequestExport === "function") {
+      try {
+        const response = await timedNativeCall(window._dsRequestExport(value, safeName));
+        return androidResult(response);
+      } catch (error) {
+        return { ok: false, method: "android", error: String(error?.message || error) };
+      }
+    }
+    if (window.flutter_inappwebview?.callHandler) {
+      try {
+        const response = await timedNativeCall(window.flutter_inappwebview.callHandler("exportChat", JSON.stringify(androidPayload)));
+        return androidResult(response);
+      } catch (error) {
+        // A rejected operation may still have reached native code; never
+        // silently retry via another handler and create duplicate downloads.
+        return { ok: false, method: "android", error: String(error?.message || error) };
+      }
+    }
 
     // Ask for the optional downloads permission while the initiating click is
     // still fresh. Firefox/Opera can be stricter about downloads started after

@@ -58,7 +58,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .sort()
       .map(key => `${key}:${settings[key] ? 1 : 0}`)
       .join("|");
-    return `${cleanup}|later:${settings.showLaterFavoritesTab === false ? 0 : 1}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
+    return `${cleanup}|later:${settings.showLaterFavoritesTab === true ? 1 : 0}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
   }
 
   // CSS persists across SpicyChat's React link replacements and avoids a
@@ -100,7 +100,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function ensureLaterSidebarLink(settings) {
     const nav = getNav();
     const existing = nav?.querySelector('#ds-qol-sidebar-later');
-    if (!nav || settings.enabled === false || settings.showLaterFavoritesTab === false || settings.hideSidebarFavorites) {
+    if (!nav || settings.enabled === false || settings.showLaterFavoritesTab !== true || settings.hideSidebarFavorites) {
       existing?.closest('[data-ds-qol-later-sidebar]')?.remove();
       return;
     }
