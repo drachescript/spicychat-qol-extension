@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.65",
+  "sourceVersion": "0.2.66",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -771,6 +771,20 @@
       "runtime": "content/creator-writing-assistant.js",
       "settings": [
         "settings/feature-panels/creator-writing-assistant.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "daily-message-limit",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/daily-message-limit.js",
+      "settings": [
+        "settings/feature-panels/daily-message-limit.js"
       ],
       "styles": [],
       "background": [],

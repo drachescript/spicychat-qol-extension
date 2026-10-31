@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.65",
+  "version": "0.2.66",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 131,
+  "featureCount": 132,
   "sections": [
     "Blocking",
     "Chat List",
@@ -136,6 +136,7 @@
     "content/creator-workspace.js",
     "content/creator-writing-assistant.js",
     "content/custom-pictures-menu.js",
+    "content/daily-message-limit.js",
     "content/delete-guard.js",
     "content/diagnostic-protocol.js",
     "content/dom.js",
@@ -1990,6 +1991,38 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "daily-message-limit",
+      "label": "Daily Message Limit",
+      "description": "Adds the daily message limit tools.",
+      "section": "Chat Tools",
+      "group": "chat",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/daily-message-limit.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/daily-message-limit.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "dailyMessageLimitTrackerEnabled"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
