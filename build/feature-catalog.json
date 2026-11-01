@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.67",
+  "version": "0.2.68",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 132,
@@ -3429,10 +3429,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/personas.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "showPersonaLimitIndicator"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3967,10 +3971,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/selection-memory.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "enableSelectionRemember"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4295,7 +4303,9 @@
         "translationProvider",
         "translationShowMessageButtons",
         "translationTargetLanguage",
-        "translationUnderstoodLanguages"
+        "translationUnderstoodLanguages",
+        "translationGreetingButton",
+        "translationAutoGreeting"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
