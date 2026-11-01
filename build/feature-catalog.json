@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.66",
+  "version": "0.2.67",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 132,
@@ -164,6 +164,7 @@
     "content/lorebook-consistency.js",
     "content/lorebook-entries.js",
     "content/lorebook-filter.js",
+    "content/lorebook-moderation-review.js",
     "content/lorebook-public-qol.js",
     "content/lorebook-search-filter.js",
     "content/lorebook-tags.js",
@@ -175,6 +176,7 @@
     "content/main-startup.js",
     "content/main.js",
     "content/memory-manager.js",
+    "content/memory-packs.js",
     "content/message-options.js",
     "content/mobile-bot-organizer.js",
     "content/mobile-listing-overflow.js",
@@ -2776,7 +2778,9 @@
       "runtimeScripts": [
         "content/memory-manager.js"
       ],
-      "requiredHelpers": [],
+      "requiredHelpers": [
+        "content/memory-packs.js"
+      ],
       "cssFiles": [
         "content/styles/memory-vault.css"
       ],
@@ -2957,7 +2961,9 @@
       "runtimeScripts": [
         "content/moderation-warnings.js"
       ],
-      "requiredHelpers": [],
+      "requiredHelpers": [
+        "content/lorebook-moderation-review.js"
+      ],
       "cssFiles": [],
       "settingsScripts": [],
       "backgroundFiles": [],

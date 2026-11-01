@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.66",
+  "sourceVersion": "0.2.67",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -1113,7 +1113,9 @@
         "content/styles/memory-vault.css"
       ],
       "background": [],
-      "helpers": [],
+      "helpers": [
+        "content/memory-packs.js"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1191,7 +1193,9 @@
       "settings": [],
       "styles": [],
       "background": [],
-      "helpers": [],
+      "helpers": [
+        "content/lorebook-moderation-review.js"
+      ],
       "fullyIndependent": false
     },
     {
