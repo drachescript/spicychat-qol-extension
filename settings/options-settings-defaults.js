@@ -373,6 +373,7 @@ const DEFAULT_SETTINGS = {
   recommendationPreferFavoriteCreators: false,
   recommendationPreferredTags: "",
   recommendationAvoidTags: "",
+  recommendationAvoidWords: "",
   recommendationShowReasonBadges: false,
 
   cardDensityMode: "normal",

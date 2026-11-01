@@ -252,6 +252,19 @@ async function closeQuickDislikeTab(tabId, event = "quickDislikeOrphanClosed", d
   return !!result?.ok;
 }
 
+// Only close a tab that is still marked as QoL's own Dislike helper.
+// A user may navigate a reused tab away while an operation is finishing.
+async function closeFinishedQuickDislikeAttempt(tabId, botId, status = "") {
+  const id = Number(tabId || 0);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  const tab = await tabsGet(id);
+  const info = quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
+  if (!info || (info.botId && info.botId !== String(botId || "").toLowerCase())) return false;
+  return closeQuickDislikeTab(id, "quickDislikeAttemptClosed", {
+    botId: String(botId || "").toLowerCase(), status: String(status || "")
+  });
+}
+
 async function cleanupStaleQuickDislikeWorkers() {
   const runtimeSession = await getHelperRuntimeSession();
   const active = await getActiveQuickDislikeJobs();
@@ -424,28 +437,40 @@ async function submitQuickDislikeUsingNativeUi(message, botId) {
     return { ok: false, status: "native-rating-worker-unavailable", requestSent: false };
   }
   const tabId = Number(prepared.tabId);
-  let ready = false;
-  // Read-only readiness checks may be repeated. The mutating RUN is sent just
-  // once, even if a reply is lost; no blind retries or duplicate votes.
-  for (let attempt = 0; attempt < 24; attempt++) {
-    if (runId && isQuickDislikeBulkRunCanceled(runId)) return { ok: false, status: "bulk-canceled" };
-    const tab = await tabsGet(tabId);
-    if (!tab) return { ok: false, status: "native-rating-worker-closed" };
-    const info = await tabsSendMessageWithTimeout(tabId, { type: "DS_GET_PAGE_INFO" }, 1200);
-    if (info?.ok && info?.isSingleChatPage &&
-        String(info.botId || "").toLowerCase() === botId) {
-      ready = true;
-      break;
+  let result = { ok: false, status: "native-rating-incomplete" };
+  try {
+    let ready = false;
+    // Read-only readiness checks may be repeated. The mutating RUN is sent
+    // only once: a lost response must never trigger another rating.
+    for (let attempt = 0; attempt < 24; attempt++) {
+      if (runId && isQuickDislikeBulkRunCanceled(runId)) {
+        return (result = { ok: false, status: "bulk-canceled", requestSent: false });
+      }
+      const tab = await tabsGet(tabId);
+      if (!tab) return (result = { ok: false, status: "native-rating-worker-closed", requestSent: false });
+      const info = await tabsSendMessageWithTimeout(tabId, { type: "DS_GET_PAGE_INFO" }, 1200);
+      if (info?.ok && info?.isSingleChatPage &&
+          String(info.botId || "").toLowerCase() === botId) {
+        ready = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 450));
     }
-    await new Promise(resolve => setTimeout(resolve, 450));
+    if (!ready) return (result = { ok: false, status: "native-rating-page-not-ready", requestSent: false });
+    const response = await tabsSendMessageWithTimeout(tabId, { type: "DS_QUICK_DISLIKE_RUN" }, 25000);
+    if (!response || response.__dsTimeout) {
+      return (result = { ok: false, status: "native-rating-result-unknown", requestSent: true,
+        networkAmbiguous: true, retryable: false });
+    }
+    return (result = { ...response, nativeUiConfirmed: response.nativeUiConfirmed === true });
+  } finally {
+    // Single-card attempts never need a retained helper. Bulk runs can keep
+    // a verified helper; any failed, canceled or unknown outcome releases it.
+    // Cleanup must not replace the original result or resend an uncertain vote.
+    if (!runId || !(result?.ok && result.nativeUiConfirmed === true)) {
+      try { await closeFinishedQuickDislikeAttempt(tabId, botId, result?.status || "worker-error"); } catch {}
+    }
   }
-  if (!ready) return { ok: false, status: "native-rating-page-not-ready", requestSent: false };
-  const response = await tabsSendMessageWithTimeout(tabId, { type: "DS_QUICK_DISLIKE_RUN" }, 25000);
-  if (!response || response.__dsTimeout) {
-    return { ok: false, status: "native-rating-result-unknown", requestSent: true,
-      networkAmbiguous: true, retryable: false };
-  }
-  return { ...response, nativeUiConfirmed: response.nativeUiConfirmed === true };
 }
 
 async function runQuickDislikeBot(message) {
@@ -481,12 +506,15 @@ async function runQuickDislikeBot(message) {
       result.ratingAt = rememberedNew.ratingAt || 0;
       result.ratingSource = "native-ui";
     }
+  } else if (result?.ok && ["unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(result.status)) {
+    // An unavailable chat is a confirmed skip, not a failed rating. It has no
+    // native thumbs-down to verify. This must precede the unverified-rating
+    // fallback or every genuine private/deleted page becomes a bulk failure.
+    const stored = await rememberQuickDislike(botId, botName, result.status);
+    result = { ...result, handledAt: stored?.handledAt || Date.now(), requestSent: false };
   } else if (result?.ok && !result?.nativeUiConfirmed) {
     result = { ...result, ok: false, status: "native-rating-unverified",
       reason: "Native UI did not confirm that the dislike was saved." };
-  } else if (["unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(result?.status)) {
-    const stored = await rememberQuickDislike(botId, botName, result.status);
-    result = { ...result, ok: true, handledAt: stored?.handledAt || Date.now() };
   }
   await recordHelperLifecycle(result?.ok ? "quickDislikeCompleted" : "quickDislikeFailed", {
     botId, status: result?.status || "unknown", executor: "native-chat-rating-worker",

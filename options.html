@@ -760,6 +760,23 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </section>
 <section class="card" id="botAvailabilityCard">
 <h2>Bot Status Center</h2>
+<fieldset id="botAvatarLookupCard">
+<legend>Avatar link from ID</legend>
+<p class="hint">Paste a bot ID, SpicyChat bot/chat link, or an existing avatar CDN link. QoL checks already saved bot details first, including older snapshots, then builds a clearly marked guess if no real image URL is known. A bot ID may differ from its avatar file ID; guessed links may return AccessDenied. No images are downloaded or stored.</p>
+<div class="button-row" style="flex-wrap:wrap; align-items:center">
+<input id="botAvatarLookupInput" type="text" spellcheck="false" autocomplete="off" placeholder="Character ID or bot URL" aria-label="Character ID or bot URL" style="flex:1 1 300px; min-width:170px"/>
+<select id="botAvatarLookupFormat" aria-label="Avatar image file format">
+<option value="gif">GIF</option>
+<option value="png">PNG</option>
+<option value="webp">WebP</option>
+<option value="jpg">JPG</option>
+</select>
+<button id="botAvatarLookupOpen" type="button">Open avatar link</button>
+<button id="botAvatarLookupCopy" type="button">Copy avatar link</button>
+</div>
+<p class="hint" id="botAvatarLookupStatus" role="status"></p>
+<a id="botAvatarLookupResult" target="_blank" rel="noopener noreferrer" hidden></a>
+</fieldset>
 <p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data. Large scans keep new results in memory and save them when you press Stop or when the scan finishes, so leave Settings open while a scan is running.</p>
 <fieldset class="bot-status-opened-tracking">
 <legend>Opened history tracking</legend>
@@ -1892,7 +1909,6 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <div id="ds-feature-panel-chat-search" data-dsq-feature-panel="chat-search"></div>
 <div id="ds-feature-panel-chat-bookmarks" data-dsq-feature-panel="chat-bookmarks"></div>
 <div id="ds-feature-panel-chat-continuation" data-dsq-feature-panel="chat-continuation"></div>
-<div id="ds-feature-panel-daily-message-limit" data-dsq-feature-panel="daily-message-limit"></div>
 <div id="ds-feature-panel-focus-mode" data-dsq-feature-panel="focus-mode"></div>
 
 
@@ -2406,6 +2422,10 @@ Fantasy" spellcheck="false"></textarea></label>
 Multiple Characters"></textarea></label>
 <label>Avoid these tags<textarea id="recommendationAvoidTags" rows="3" spellcheck="false" placeholder="Cheating
 NTR"></textarea></label>
+<label>Hide recommendations containing these words or names<textarea id="recommendationAvoidWords" rows="3" spellcheck="false" placeholder="Simon Ghost Riley
+MILF
+DILF"></textarea></label>
+<p class="hint">One word or phrase per line. Checks names and visible descriptions on Recommendations and Home’s For You cards. This is a private QoL filter: it does not block, dislike, or change tags. Remove a line to show matching recommendations again.</p>
 </div>
 <p class="hint">These filters apply to Recommendations and Home's For You cards. “Hide my own bots” learns your creator handle when you visit My Creations. Temporary hides last only until that tab is closed.</p>
 </section>
@@ -2920,7 +2940,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

@@ -70,6 +70,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return cardTags(card).some(tag => wanted.has(String(tag).toLowerCase()));
   }
 
+  // These are private hide-only rules. They do not write to blocked-bot IDs,
+  // ratings, the native Not Interested list, or any server-side API.
+  function normalizeWordText(value) {
+    let text = String(value || "").slice(0, 3000);
+    try { text = text.normalize("NFKC"); } catch {}
+    return text.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+  }
+  let cachedAvoidWordsSource = null;
+  let cachedAvoidWords = [];
+  function avoidedWord(card, value) {
+    const source = String(value || "");
+    if (source !== cachedAvoidWordsSource) {
+      cachedAvoidWordsSource = source;
+      cachedAvoidWords = [...new Set(source.split(/[\r\n]+/).slice(0, 200)
+        .map(raw => normalizeWordText(raw.slice(0, 120))).filter(Boolean))];
+    }
+    if (!cachedAvoidWords.length) return "";
+    const fields = [DS.getCardTitle?.(card) || "", DS.getCardDescriptionText?.(card) || ""]
+      .map(normalizeWordText).filter(Boolean);
+    for (const word of cachedAvoidWords) {
+      if (fields.some(text => (` ${text} `).includes(` ${word} `))) return word;
+    }
+    return "";
+  }
+
   function isNotInterested(id) {
     const src = DS.state?.notInterestedBots || {};
     return !!(id && (src.ids?.includes?.(id) || src.meta?.[id]));
@@ -93,6 +118,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!context.ignoreLater && settings.recommendationHideLaterBots && id && DS.state.laterBotIdSet?.has(id)) return "recommendation: already in Later";
     if (settings.recommendationHideNotInterested && isNotInterested(id)) return "recommendation: Not Interested";
     if (settings.recommendationAvoidTags && hasConfiguredTag(card, settings.recommendationAvoidTags)) return "recommendation: avoided tag";
+    if (settings.recommendationAvoidWords && avoidedWord(card, settings.recommendationAvoidWords)) return "recommendation: avoided word";
     if (!context.ignoreOpened && settings.recommendationOnlyUnopened && id && DS.state.openedChats?.has(id)) return "recommendation: already opened";
     if (settings.recommendationOnlyLorebook && !DS.cardHasLorebook?.(card)) return "recommendation: no Lorebook";
     if (settings.recommendationHideOwnBots) {

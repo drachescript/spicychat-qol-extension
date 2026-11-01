@@ -2153,3 +2153,26 @@ html.ds-chat-bubble-alpha [id^="message-"] :is(.bg-gray-3,.bg-gray-4,.bg-gray-5)
   #ds-qol-history-navigator .ds-qol-history-dialog { height: calc(100dvh - 16px) !important; }
   #ds-qol-history-navigator .ds-qol-history-native-actions span { min-width: 0; }
 }
+
+/* v0.2.67: local memory packs and Lorebook save-review helpers */
+.ds-memory-pack-screen{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2147483005;display:grid;place-items:center;padding:14px;box-sizing:border-box}
+.ds-memory-pack-panel{width:min(900px,100%);max-height:min(90vh,900px);overflow:auto;display:flex;flex-direction:column;gap:10px;background:#131820;color:#f4f4f5;border:1px solid #475569;border-radius:11px;padding:15px;box-shadow:0 15px 45px #0008;font:13px/1.4 system-ui,sans-serif}
+.ds-memory-pack-head,.ds-memory-pack-actions,.ds-memory-pack-entry-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ds-memory-pack-head strong{font-size:16px;margin-right:auto}
+.ds-memory-pack-panel button,.ds-mod-review-panel button{border:1px solid #64748b;border-radius:6px;background:rgba(71,85,105,.4);color:inherit;padding:5px 9px;cursor:pointer}
+.ds-memory-pack-hint{opacity:.8;margin:3px 0}
+.ds-memory-pack-content,.ds-memory-pack-entries{display:grid;gap:8px;min-height:0}
+.ds-memory-pack-entries{max-height:52vh;overflow:auto}
+.ds-memory-pack-card,.ds-memory-pack-entry{border:1px solid #475569;border-radius:8px;padding:9px;display:grid;gap:8px}
+.ds-memory-pack-card{grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.ds-memory-pack-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:7px}
+.ds-pack-field{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.ds-memory-pack-panel input:not([type='checkbox']),.ds-memory-pack-panel textarea,.ds-memory-pack-panel select{width:100%;box-sizing:border-box;min-width:0;border-radius:6px;border:1px solid #64748b;background:#0d1117;color:#f4f4f5;padding:6px;resize:vertical}
+.ds-memory-pack-count{margin-left:auto;font-variant-numeric:tabular-nums}
+.ds-memory-pack-count[data-error='1'],.ds-memory-pack-status[data-error='1']{color:#fca5a5}
+.ds-memory-pack-split{display:grid;gap:8px}
+.ds-mod-review-panel{border:1px solid rgba(96,165,250,.45);border-radius:8px;padding:9px;display:grid;gap:7px;background:rgba(60,75,100,.14);font:12px/1.4 system-ui,sans-serif;color:inherit}
+.ds-mod-review-panel p{margin:0}.ds-mod-review-panel .ds-mod-review-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ds-mod-review-panel .ds-mod-review-diff{white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow:auto;margin:0}
+.ds-mod-review-status[data-tone='error'],.ds-mod-review-status[data-error='1']{color:#fca5a5}
+@media(max-width:660px){.ds-memory-pack-card{grid-template-columns:1fr}.ds-memory-pack-panel{max-height:92vh;padding:10px}}

@@ -6,7 +6,9 @@
   "settingsKeys": [
     "creatorModerationWarnings"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/lorebook-moderation-review.js"
+  ],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

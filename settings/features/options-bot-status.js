@@ -11,6 +11,133 @@ function shortBotCharacterId(value) {
   return `${id.slice(0, 8)}…${id.slice(-6)}`;
 }
 
+// A bot's UUID is not generally the same as its avatar file UUID. Keep source
+// provenance explicit: saved/observed URL, supplied CDN URL, or an unverified guess.
+function botAvatarLookupId(raw) {
+  const input = String(raw || "").trim();
+  const match = input.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  const id = match ? match[0].toLowerCase() : "";
+  return id && BOT_ID_RE.test(id) ? id : "";
+}
+
+function botAvatarDirectCdnUrl(input) {
+  try {
+    const url = new URL(String(input || "").trim());
+    if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "cdn.nd-api.com" ||
+        !/^\/avatars\/[0-9a-f-]{36}\.(?:gif|png|webp|jpe?g)$/i.test(url.pathname)) return "";
+    if (!BOT_ID_RE.test(url.pathname.match(/[0-9a-f-]{36}/i)?.[0] || "")) return "";
+    return url.href;
+  } catch { return ""; }
+}
+
+function botAvatarObservedUrl(value) {
+  const url = canonicalBotImage(value);
+  if (!/^https:\/\//i.test(url) || /(?:fallback[-_]?avatar|default[-_]?avatar|placeholder|no[-_]?avatar)/i.test(url)) return "";
+  return url;
+}
+
+// Consult only data that QoL already holds. No requests, image downloads,
+// storage writes or bot scans are started by the lookup.
+function botAvatarKnownSource(id) {
+  const archive = normalizeBotArchive(botArchiveState).meta[id] || {};
+  const status = normalizeBotAvailability(botAvailabilityState).meta[id] || {};
+  const recovered = normalizeBotUnavailableRecovery(botUnavailableRecoveryState).meta[id] || {};
+  const savedStores = [
+    ["Favorites", favoriteBotState?.meta?.[id]?.image],
+    ["Later", laterBotState?.meta?.[id]?.image],
+    ["Blocked", blockedState?.meta?.[id]?.image],
+    ["Not Interested", notInterestedState?.meta?.[id]?.image],
+    ["Opened", openedChatMetaState?.[id]?.image],
+    ["Bot Organizer", botOrganizationState?.meta?.[id]?.image],
+    ["Recently Seen", recentlySeenBotState?.entries?.find(item => item?.id === id)?.image],
+    ["Creator Watch", creatorBotWatchState?.recent?.find(item => item?.id === id)?.image]
+  ];
+  const candidates = [
+    ["Saved bot copy", archive.fields?.image],
+    ["Saved bot copy", archive.image],
+    ["Bot Status", status.image],
+    ["Unavailable bot details", recovered.image],
+    ...savedStores,
+    ...[...(Array.isArray(archive.revisions) ? archive.revisions : [])].reverse()
+      .map(item => ["Older saved bot copy", item?.fields?.image || item?.image])
+  ];
+  for (const [source, raw] of candidates) {
+    const url = botAvatarObservedUrl(raw);
+    if (url) return { url, saved: true, source, type: "known" };
+  }
+  return null;
+}
+
+function botAvatarLookupUrl(id, extension = "gif") {
+  if (!BOT_ID_RE.test(String(id || ""))) return { url: "", saved: false, source: "", type: "invalid" };
+  const known = botAvatarKnownSource(id);
+  if (known) return known;
+  const ext = ["gif", "png", "webp", "jpg"].includes(extension) ? extension : "gif";
+  return {
+    url: `https://cdn.nd-api.com/avatars/${id}.${ext}?class=avatar256x256`,
+    saved: false, source: "Generated from bot ID", type: "guess"
+  };
+}
+
+function botAvatarResolveInput(input, extension = "gif") {
+  const direct = botAvatarDirectCdnUrl(input);
+  if (direct) return { url: direct, saved: false, source: "Pasted CDN link", type: "provided" };
+  return botAvatarLookupUrl(botAvatarLookupId(input), extension);
+}
+
+function setupBotAvatarLookup() {
+  const input = $("botAvatarLookupInput");
+  const format = $("botAvatarLookupFormat");
+  const output = $("botAvatarLookupResult");
+  const status = $("botAvatarLookupStatus");
+  if (!input || !format || !output || !status) return;
+  const update = () => {
+    const result = botAvatarResolveInput(input.value, format.value);
+    format.disabled = result.type === "known" || result.type === "provided";
+    if (!result.url) {
+      output.hidden = true;
+      output.removeAttribute("href");
+      output.textContent = "";
+      status.textContent = input.value.trim() ? "Enter a valid bot UUID, bot URL or CDN avatar URL." : "";
+      return "";
+    }
+    output.href = result.url;
+    output.textContent = result.url;
+    output.hidden = false;
+    if (result.type === "known") {
+      status.textContent = `Known avatar URL from ${result.source}. The original file may no longer be accessible; QoL has not checked it live.`;
+    } else if (result.type === "provided") {
+      status.textContent = "Original CDN URL supplied by you. QoL has not checked whether it is still accessible.";
+    } else {
+      status.textContent = "Guessed URL from bot ID — NOT a recovered image. Avatar file IDs can differ, and the CDN may return AccessDenied. Try another format if needed.";
+    }
+    return result.url;
+  };
+  input.addEventListener("input", update);
+  format.addEventListener("change", update);
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const url = update();
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    }
+  });
+  $("botAvatarLookupOpen")?.addEventListener("click", () => {
+    const url = update();
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  });
+  $("botAvatarLookupCopy")?.addEventListener("click", async () => {
+    const url = update();
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      showSettingsToast("Avatar link copied.");
+    } catch {
+      status.textContent = "Could not copy the link automatically; select and copy the link below.";
+    }
+  });
+}
+
 function botIdentityDisplay(idValue, creatorValue = "") {
   const id = String(idValue || "").trim();
   const creator = displayNormalizedSavedText(String(creatorValue || "").trim());
@@ -193,6 +320,17 @@ function botAvailabilityCard(entry) {
 
   const actions = makeElement("div", { className: "bot-manager-actions" });
   actions.appendChild(makeElement("a", { text: "Open profile", attrs: { href: entry.profileUrl || `https://spicychat.ai/chatbot/${entry.id}`, target: "_blank", rel: "noopener noreferrer" } }));
+  if (cardImage) {
+    actions.appendChild(makeElement("a", { text: "Open avatar", attrs: { href: cardImage, target: "_blank", rel: "noopener noreferrer", title: "Open the last known avatar URL (no image is saved by QoL)" } }));
+    const copyAvatar = makeElement("button", { text: "Copy avatar link", attrs: { type: "button", title: "Copy this saved avatar URL without downloading the image" } });
+    copyAvatar.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(cardImage);
+        showSettingsToast("Avatar link copied.");
+      } catch { showSettingsToast("Could not copy avatar link automatically; open the link to copy it."); }
+    });
+    actions.appendChild(copyAvatar);
+  }
   actions.appendChild(makeElement("button", { className: "bot-availability-recheck", text: entry.checkedAt ? "Recheck" : "Check now", attrs: { type: "button" } }));
   if (entry.archive) {
     actions.appendChild(makeElement("button", { className: "bot-archive-copy", text: "Copy saved bot", attrs: { type: "button" } }));
@@ -2414,6 +2552,7 @@ async function clearBotArchive() {
 }
 
 function setupBotAvailabilityControls() {
+  setupBotAvatarLookup();
   // On-demand worker counters (no bot IDs or private card text). Existing
   // scan pacing/stop/resume controls remain unchanged.
   const scanStatus = $("botAvailabilityScanStatus");

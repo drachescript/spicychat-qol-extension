@@ -116,10 +116,8 @@ const BULK_DISLIKE_TRANSIENT_STATUSES = new Set([
   "worker-timeout",
   "worker-tab-failed",
   "worker-closed",
-  "rating-button-not-found",
   "rating-modal-not-found",
   "done-button-not-ready",
-  "submit-not-confirmed",
   "worker-error",
   "failed"
 ]);
@@ -2780,7 +2778,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "replaceCardProfileWithBlockButton", name: "QoL card block button", children: ["quickDislikeOnBlock", "showBlockButtonOnMyCreations"] },
   { parent: "enableBulkCardBlocking", name: "Bulk card selection", children: ["bulkCardBlockingSidebarLauncher"] },
   { parent: "quickDislikeOnBlock", name: "Quick Dislike on QoL Block", children: ["quickDislikeIdleMinutes"] },
-  { parent: "enableRecommendationHelpers", name: "Recommendation helpers", children: ["recommendationHideFavoriteBots", "recommendationHideOwnBots", "recommendationOnlyUnopened", "recommendationOnlyLorebook", "recommendationSessionHideButtons", "recommendationRandomButton", "recommendationHideLaterBots", "recommendationHideNotInterested", "recommendationPreferFavoriteCreators", "recommendationPreferredTags", "recommendationAvoidTags", "recommendationShowReasonBadges"] },
+  { parent: "enableRecommendationHelpers", name: "Recommendation helpers", children: ["recommendationHideFavoriteBots", "recommendationHideOwnBots", "recommendationOnlyUnopened", "recommendationOnlyLorebook", "recommendationSessionHideButtons", "recommendationRandomButton", "recommendationHideLaterBots", "recommendationHideNotInterested", "recommendationPreferFavoriteCreators", "recommendationPreferredTags", "recommendationAvoidTags", "recommendationAvoidWords", "recommendationShowReasonBadges"] },
   { parent: "reduceAnimatedBotImages", name: "Animated bot images", children: ["animatedImagesListings", "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"] },
   { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols"] },
   { parent: "autoFillListings", name: "Listing refill", children: ["showListingRefillButton"] },

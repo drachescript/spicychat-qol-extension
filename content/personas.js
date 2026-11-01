@@ -314,7 +314,116 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   };
 
+  // My Personas: live account-card count with a user-selected documented plan limit.
+  // Do not use DS.state.savedPersonas: it may include locally archived/deleted Personas.
+  const PERSONA_LIMIT_CHOICE_KEY = "dsPersonaLimitChoiceV1";
+  const PERSONA_LIMIT_OPTIONS = [
+    ["auto", "Choose plan"],
+    ["3", "Free (3)"],
+    ["10", "Get A Taste (10)"],
+    ["50", "True Supporter (50)"],
+    ["100", "I'm All In (100)"]
+  ];
+  let personaLimitChoice = "auto";
+  let personaLimitChoiceRead = null;
+
+  function livePersonaCount() {
+    const ids = new Set();
+    for (const link of document.querySelectorAll("a[aria-label='edit-persona'][href*='/personas/edit/']")) {
+      const id = String(link.getAttribute("href") || "").match(/\/personas\/edit\/([^/?#]+)/i)?.[1];
+      if (id) ids.add(id.toLowerCase());
+    }
+    return ids.size;
+  }
+
+  // Some site builds show a native count near Create. Only read small, native
+  // leaf labels in that header, never user-written Persona descriptions.
+  function nativePersonaLimit(create) {
+    const header = create?.closest("header") || create?.parentElement?.parentElement;
+    if (!header || header.querySelector("a[aria-label='edit-persona']")) return 0;
+    for (const el of header.querySelectorAll("span,small,p")) {
+      if (el.closest("#ds-persona-limit-indicator") || el.children.length) continue;
+      const label = String(el.textContent || "").trim();
+      if (label.length > 70) continue;
+      const match = label.match(/(?:^|\b)(\d{1,3})\s*\/\s*(3|10|50|100)(?:\s*personas?\b|$)/i);
+      if (match) return Number(match[2]);
+    }
+    return 0;
+  }
+
+  async function readPersonaLimitChoice() {
+    if (!personaLimitChoiceRead) {
+      personaLimitChoiceRead = (async () => {
+        try {
+          const stored = await DS.storageGet?.([PERSONA_LIMIT_CHOICE_KEY]);
+          const value = String(stored?.[PERSONA_LIMIT_CHOICE_KEY] || "auto");
+          personaLimitChoice = PERSONA_LIMIT_OPTIONS.some(([id]) => id === value) ? value : "auto";
+        } catch { personaLimitChoice = "auto"; }
+      })();
+    }
+    await personaLimitChoiceRead;
+  }
+
+  DS.applyPersonaLimitIndicator = async function applyPersonaLimitIndicator() {
+    const indicatorId = "ds-persona-limit-indicator";
+    const current = document.getElementById(indicatorId);
+    if (!DS.state?.settings?.enabled || !isPersonasListPage()) {
+      current?.remove();
+      return;
+    }
+    const create = document.querySelector("a[href$='/personas/create'],a[href*='/personas/create?']");
+    if (!create?.parentElement) { current?.remove(); return; }
+    await readPersonaLimitChoice();
+    // The site may replace the header during navigation. Reinsert if needed.
+    let bar = current;
+    if (!bar || bar.parentElement !== create.parentElement) {
+      bar?.remove();
+      bar = document.createElement("span");
+      bar.id = indicatorId;
+      bar.dataset.dsOwned = "1";
+      bar.style.cssText = "display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid rgba(148,163,184,.48);border-radius:10px;font:600 12px/1.4 system-ui,sans-serif;color:inherit;white-space:normal;";
+      const countLabel = document.createElement("span");
+      countLabel.dataset.dsPersonaLimitCount = "1";
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", "Persona subscription limit");
+      select.title = "Choose your SpicyChat plan to show your Persona limit. QoL does not change your plan.";
+      select.style.cssText = "background:transparent;color:inherit;font:inherit;border:1px solid rgba(148,163,184,.45);border-radius:6px;padding:3px;max-width:160px;";
+      for (const [value, title] of PERSONA_LIMIT_OPTIONS) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = title;
+        option.style.color = "initial";
+        select.appendChild(option);
+      }
+      select.addEventListener("change", async () => {
+        const value = select.value;
+        if (!PERSONA_LIMIT_OPTIONS.some(([id]) => id === value)) return;
+        personaLimitChoice = value;
+        try {
+          await DS.storageSet?.({ [PERSONA_LIMIT_CHOICE_KEY]: value });
+        } catch { select.title = "Could not save plan choice. It may reset next visit."; }
+        DS.applyPersonaLimitIndicator?.();
+      });
+      bar.append(countLabel, select);
+      create.parentElement.insertBefore(bar, create);
+    }
+    const count = livePersonaCount();
+    const nativeLimit = nativePersonaLimit(create);
+    const limit = personaLimitChoice === "auto" ? nativeLimit : Number(personaLimitChoice);
+    const label = bar.querySelector("[data-ds-persona-limit-count]");
+    const select = bar.querySelector("select");
+    if (select && select.value !== personaLimitChoice) select.value = personaLimitChoice;
+    const shown = String(count);
+    const next = limit ? `${shown}/${limit} Personas` : `${shown} Personas`;
+    if (label && label.textContent !== next) label.textContent = next;
+    const note = limit
+      ? (personaLimitChoice === "auto" ? "Using the limit shown on SpicyChat." : "Plan limit selected locally; it is not verified against your subscription.")
+      : "Choose your plan to show its Persona limit.";
+    if (bar.title !== note) bar.title = note;
+  };
+
   DS.applyPersonaPageTools = async function applyPersonaPageTools() {
+    await DS.applyPersonaLimitIndicator?.();
     DS.applyPersonaDescriptionExpansion?.();
 
     if (isPersonasListPage()) {

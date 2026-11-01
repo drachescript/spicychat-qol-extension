@@ -6,7 +6,9 @@
   "settingsKeys": [
     "enableBulkMemoryManager"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/memory-packs.js"
+  ],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

@@ -8,6 +8,11 @@
 // start a new run after checking auth; this map is intentionally ephemeral.
 const quickLessLikePausedBulkRuns = new Map();
 
+// React does not always respond to synthetic popstate navigation on chat pages.
+// Once SPA navigation fails in a bulk run, use a normal tab navigation for the
+// remaining bots rather than spending the same wait on each one.
+const quickDislikeSpaFallbackBulkRuns = new Set();
+
 function quickLessLikeWorkerUrlInfo(url) {
   try {
     const parsed = new URL(String(url || ""));
@@ -216,19 +221,22 @@ async function releaseQuickDislikeBulkWorker(runId) {
   const mapped = Number(quickDislikeBulkWorkerTabs.get(id));
   if (Number.isFinite(mapped)) tabIds.add(mapped);
   quickDislikeBulkWorkerTabs.delete(id);
+  quickDislikeSpaFallbackBulkRuns.delete(id);
   for (const tab of await tabsQuery({})) {
     const info = quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
     if (info?.bulkRunId === id && tab?.id) tabIds.add(Number(tab.id));
   }
   let released = false;
   for (const tabId of tabIds) {
-    if (Number(tabId) === Number(quickDislikePersistentWorkerTabId)) {
+    // Keep a shared tab only if another live bulk run still owns it.
+    // A completed run must not leave its last helper open indefinitely.
+    const inOtherRun = [...quickDislikeBulkWorkerTabs.values()].some(value => Number(value) === tabId);
+    if (inOtherRun) { released = true; continue; }
+    const tab = await tabsGet(tabId);
+    if (quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "")) {
+      await closeQuickDislikeTab(tabId, "quickDislikeBulkReleased", { runId: id });
       released = true;
-      continue;
     }
-    quickDislikeWorkerTabIds.delete(tabId);
-    await tabsRemove(tabId);
-    released = true;
   }
   return released;
 }
@@ -261,12 +269,14 @@ async function findPersistentQuickDislikeWorker(sessionId = "") {
 }
 
 async function navigateQuickDislikeWorkerTab(tabId, targetUrl, botId, jobId) {
-  const response = await tabsSendMessage(tabId, {
+  // This is read-only preparation. If the SPA route cannot settle promptly,
+  // let the caller fall back to a normal tab navigation. Never repeat RUN.
+  const response = await tabsSendMessageWithTimeout(tabId, {
     type: "DS_QUICK_DISLIKE_NAVIGATE",
     targetUrl: targetUrl.href,
     botId,
     jobId
-  });
+  }, 3600);
   return response?.ok === true;
 }
 
@@ -317,9 +327,14 @@ async function prepareQuickDislikeWorkerTab(url, bulkRunId = "", job = {}) {
     const existingId = Number(existing.id);
     const target = stampedFor(url);
     let reusedWithoutReload = false;
-    try {
-      reusedWithoutReload = await navigateQuickDislikeWorkerTab(existingId, target, botId, jobId);
-    } catch {}
+    // First failure proves this route cannot be reused reliably during the
+    // current bulk run. Avoid repeating the failed SPA attempt for every bot.
+    if (!runId || !quickDislikeSpaFallbackBulkRuns.has(runId)) {
+      try {
+        reusedWithoutReload = await navigateQuickDislikeWorkerTab(existingId, target, botId, jobId);
+      } catch {}
+      if (!reusedWithoutReload && runId) quickDislikeSpaFallbackBulkRuns.add(runId);
+    }
 
     if (!reusedWithoutReload) {
       const updated = await tabsUpdate(existingId, { url: target.href, active: false });
@@ -423,6 +438,30 @@ async function releaseQuickLessLikeBulkWorker(runId) {
     await recordHelperLifecycle("quickLessLikeRecommendationWorkerReleased", { tabId, runId: id });
   }
   return released;
+}
+
+// Stop retaining a failed/uncertain bulk feedback worker. This never
+// sends another rating, nor closes a normal user tab that lost its marker.
+async function closeFailedQuickLessLikeBulkWorker(runId, tabId = 0, status = "") {
+  const id = String(runId || "").trim();
+  if (!id) return false;
+  const workerId = Number(tabId || quickLessLikeBulkWorkerTabs.get(id) || 0);
+  quickLessLikeBulkWorkerTabs.delete(id);
+  if (!workerId) return false;
+  const shared = [...quickLessLikeBulkWorkerTabs.values()].some(value => Number(value) === workerId);
+  if (shared) return false;
+  quickLessLikeReadyWorkerTabs.delete(workerId);
+  const tab = await tabsGet(workerId);
+  const url = tab?.url || tab?.pendingUrl || "";
+  if (!tab || !isKnownQuickLessLikeRecommendationWorkerTab(workerId, url)) return false;
+  const result = await tabsRemove(workerId);
+  quickLessLikeWorkerTabIds.delete(workerId);
+  if (Number(quickLessLikePersistentWorkerTabId) === workerId) {
+    quickLessLikePersistentWorkerTabId = null;
+    await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 });
+  }
+  if (result?.ok) await recordHelperLifecycle("quickLessLikeFailedWorkerClosed", { runId: id, tabId: workerId, status: String(status || "") });
+  return !!result?.ok;
 }
 
 async function findPersistentQuickLessLikeWorker(sessionId = "") {
@@ -842,11 +881,19 @@ async function runQuickLessLikeBot(message) {
 
   }
 
+  const runId = String(message?.bulkRunId || "").trim();
   let result;
   try {
     result = await runDirectCharacterFeedback(message, "less-like");
   } finally {
-    if (!String(message?.bulkRunId || "").trim()) await releaseQuickLessLikeStandaloneWorker();
+    if (!runId) {
+      await releaseQuickLessLikeStandaloneWorker().catch(() => {});
+    } else if (!result?.ok) {
+      // Includes worker-not-ready and ambiguous network outcomes. Preserve
+      // the original failure and never retry an uncertain request.
+      await closeFailedQuickLessLikeBulkWorker(runId, result?.feedbackTabId || result?.tabId || 0,
+        result?.status || "worker-error").catch(() => {});
+    }
   }
 
   const historyStartedAt = Date.now();
