@@ -47,11 +47,47 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
+  // Native rating UI can vary between SpicyChat releases. Only choose
+  // controls inside the chat header or a real rating dialog; never click a
+  // message's thumbs-up / thumbs-down feedback button by mistake.
+  function nativeRatingOpenButton() {
+    const exact = [...document.querySelectorAll(
+      "button[aria-label='ThumbsUp-button'], button[aria-label*='rate chatbot' i], button[title*='rate chatbot' i], button[data-testid='ChatRatingButton'], button[data-testid*='RateChatbot']"
+    )].find(button => visibleElement(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true");
+    if (exact) return exact;
+    const header = document.querySelector("[data-testid='ChatHeader'], [data-testid='ChatTopBar'], header");
+    return [...(header?.querySelectorAll("button") || [])].find(button =>
+      visibleElement(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      !!button.querySelector("svg.lucide-thumbs-up, svg[class*='lucide-thumbs-up']")
+    ) || null;
+  }
+
+  function nativeDislikeButton(modal) {
+    return [...(modal?.querySelectorAll("button") || [])].find(button =>
+      !!button.querySelector("svg.lucide-thumbs-down, svg[class*='lucide-thumbs-down']") ||
+      /^(?:bad|thumbs down|dislike)$/i.test(String(button.getAttribute("aria-label") || button.getAttribute("title") || "").trim())
+    ) || null;
+  }
+
   function ratingModal() {
-    return [...document.querySelectorAll("div.fixed, [role='dialog']")].find(el => {
-      if (!visibleElement(el)) return false;
-      return /rate chatbot/i.test(String(el.textContent || ""));
-    }) || null;
+    // React may mount the dialog title before its rating choices. Match the
+    // actual rating panel, not an unrelated fixed overlay or message reaction.
+    const candidates = [...document.querySelectorAll("[role='dialog'], div.fixed")]
+      .filter(el => visibleElement(el) &&
+        /rate chatbot|rating chatbots helps personalize recommendations/i.test(String(el.textContent || "")) &&
+        !!el.querySelector("button[aria-label='Done'], button[aria-label='Cancel']"));
+    // A panel with its real thumbs-down choice is preferable to an outer
+    // dialog container that has rendered only the heading.
+    return candidates.find(el => nativeDislikeButton(el)) ||
+      candidates.find(el => el.getAttribute("role") === "dialog") || candidates[0] || null;
+  }
+
+  function nativeRatingDoneButton(modal) {
+    return [...(modal?.querySelectorAll("button") || [])].find(button =>
+      !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      (/^(?:done|submit|save)$/i.test(String(button.getAttribute("aria-label") || "").trim()) ||
+       /^(?:done|submit|save)$/i.test(String(button.textContent || "").replace(/\s+/g, " ").trim()))
+    ) || null;
   }
 
   function unavailableChatStatus() {
@@ -60,6 +96,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (/you have blocked the creator of this character/i.test(text)) return "unavailable-creator-blocked";
     if ((/not allowed to chat with this character/i.test(text) && /private|deleted/i.test(text)) || prerender === "404") {
       return "unavailable-private-or-deleted";
+    }
+    // A genuine 404 / not-found page cannot be rated. Require a page-level
+    // heading or alert AND absence of the actual chatbot profile control;
+    // generic words inside a roleplay message must never count as deletion.
+    const chatProfile = document.querySelector("a[aria-label='chatbot-profile']");
+    if (!chatProfile) {
+      const pageErrors = [...document.querySelectorAll("main h1, main h2, [role='alert'], h1")]
+        .map(el => String(el?.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+      if (pageErrors.some(value => /^(?:404(?:\s*[-–:]\s*(?:not found|page not found))?|(?:chatbot|character) not found|(?:this )?(?:chatbot|character) (?:has been deleted|does not exist))$/i.test(value))) {
+        return "unavailable-private-or-deleted";
+      }
     }
     return "";
   }
@@ -96,7 +144,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (profile) return true;
       const unavailable = unavailableChatStatus();
       return unavailable ? true : null;
-    }, 12000, 140);
+    }, 2600, 140);
 
     return ready
       ? { ok: true, status: "navigated", botId }
@@ -124,27 +172,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const opening = await waitForElement(() => {
       const unavailable = unavailableChatStatus();
       if (unavailable) return { unavailable };
-      const button = document.querySelector("button[aria-label='ThumbsUp-button']");
-      return visibleElement(button) && !button.disabled ? { button } : null;
+      const button = nativeRatingOpenButton();
+      return button ? { button } : null;
     }, 10000);
     if (opening?.unavailable) return finish({ ok: true, status: opening.unavailable });
     const openButton = opening?.button || null;
     if (!openButton) {
       const unavailable = unavailableChatStatus();
       if (unavailable) return finish({ ok: true, status: unavailable });
-      return finish({ ok: false, status: "rating-button-not-found" });
+      return finish({ ok: false, status: "rating-button-not-found", requestSent: false,
+        reason: "The chat loaded, but SpicyChat did not show a native character-rating button. This can happen if there is no existing chat to rate." });
     }
 
     try { openButton.click(); } catch { DS.realClick?.(openButton); }
 
-    const modal = await waitForElement(() => ratingModal(), 6000);
-    if (!modal) return finish({ ok: false, status: "rating-modal-not-found" });
-
-    const dislike = [...modal.querySelectorAll("button")].find(button =>
-      !!button.querySelector("svg.lucide-thumbs-down, svg[class*='lucide-thumbs-down']")
-    );
-    if (!dislike || dislike.disabled || dislike.getAttribute("aria-disabled") === "true") {
-      return finish({ ok: true, status: "already-rated-or-unavailable" });
+    // A visible dialog title does not mean React has finished mounting its
+    // choices. Wait for the thumb-down button before reporting it missing.
+    const readyChoice = await waitForElement(() => {
+      const panel = ratingModal();
+      const choice = nativeDislikeButton(panel);
+      return panel && choice ? { panel, choice } : null;
+    }, 8500);
+    if (!readyChoice) {
+      const panel = ratingModal();
+      return finish({ ok: false,
+        status: panel ? "dislike-option-not-found" : "rating-modal-not-found",
+        requestSent: false,
+        reason: panel
+          ? "The native rating dialog opened but its thumbs-down choice did not become available. No rating was sent."
+          : "The native rating dialog did not appear. No rating was sent."
+      });
+    }
+    const { panel: modal, choice: dislike } = readyChoice;
+    if (dislike.disabled || dislike.getAttribute("aria-disabled") === "true") {
+      return finish({ ok: false, status: "dislike-option-disabled", requestSent: false,
+        reason: "SpicyChat currently disables its native Dislike choice for this chat." });
     }
     if (dislikeAlreadySelected(dislike)) {
       return finish({ ok: true, status: "already-disliked", nativeUiConfirmed: true, requestSent: false });
@@ -152,10 +214,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try { dislike.click(); } catch { DS.realClick?.(dislike); }
 
-    const done = await waitForElement(() => {
-      const button = modal.querySelector("button[aria-label='Done']");
-      return button && !button.disabled && button.getAttribute("aria-disabled") !== "true" ? button : null;
-    }, 3500);
+    const done = await waitForElement(() => nativeRatingDoneButton(modal), 3500);
 
     if (!done) return finish({ ok: false, status: "done-button-not-ready" });
 
@@ -164,15 +223,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!closed) return finish({ ok: false, status: "submit-not-confirmed", requestSent: true });
     // Reopen the actual native control to confirm the persisted selection.
     // A closed dialog or an HTTP 200 on /event is not proof of a Dislike.
-    const freshOpenButton = document.querySelector("button[aria-label='ThumbsUp-button']");
+    const freshOpenButton = nativeRatingOpenButton();
     if (!visibleElement(freshOpenButton)) {
       return finish({ ok: false, status: "native-rating-unverified", requestSent: true });
     }
     try { freshOpenButton.click(); } catch { DS.realClick?.(freshOpenButton); }
     const selected = await waitForElement(() => {
       const checkModal = ratingModal();
-      const selectedButton = [...(checkModal?.querySelectorAll("button") || [])].find(button =>
-        !!button.querySelector("svg.lucide-thumbs-down, svg[class*='lucide-thumbs-down']"));
+      const selectedButton = nativeDislikeButton(checkModal);
       return selectedButton && dislikeAlreadySelected(selectedButton) ? checkModal : null;
     }, 4000);
     if (!selected) return finish({ ok: false, status: "native-rating-unverified", requestSent: true });

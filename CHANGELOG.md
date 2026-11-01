@@ -1,3 +1,16 @@
+## 0.2.67
+- Added a Persona count and plan-limit indicator to My Personas.
+- Added Open avatar links to Bot Status cards that have a saved image URL.
+- Fixed private or deleted bots being counted as failed Dislikes; these now count as unavailable without sending a rating.
+- Showed available memory counts on the new layout without enabling unsupported bulk editing actions.
+- Added private words and names to hide from recommendations, including words in descriptions.
+- Added memory-pack JSON import and export, character labels, categories, and text splitting.
+- Improved Lorebook moderation warnings.
+- Fixed Memory Manager exports on newer SpicyChat layouts; added a private layout report when QoL cannot read the list.
+- Improved Dislike button detection and confirmation in SpicyChat chats.
+- Fixed misleading Bulk Dislike errors and stopped repeat attempts when a rating may already have been sent.
+- Fixed Bulk Dislike missing the thumbs-down button when SpicyChat takes longer to load the rating window.
+
 ## 0.2.66
 - Added More Like This to bot cards without changing public bot ratings.
 - Improved performance diagnostics for Favorites, chat messages, and creator backups.

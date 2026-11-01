@@ -16,6 +16,8 @@ function isRepeatedAuthOrCorsError(response) {
 
 function quickDislikeResponseIsTransient(response) {
   const status = String(response?.status || (response ? "failed" : "worker-error"));
+  // Never replay a rating if its Save may already have been submitted.
+  if (response?.requestSent === true || response?.networkAmbiguous === true || response?.retryable === false) return false;
   return !response?.ok && BULK_DISLIKE_TRANSIENT_STATUSES.has(status);
 }
 
@@ -94,7 +96,8 @@ function updateBlockedBulkResumeControls() {
   resume.hidden = !(interrupted && resumeCount);
   resume.textContent = resumeCount ? `Resume unfinished (${resumeCount})` : "Resume unfinished";
   retry.hidden = !failedCount;
-  retry.textContent = failedCount ? `Retry last failed (${failedCount})` : "Retry last failed";
+  // "3 consecutive" is a pause threshold, while this count includes earlier runs.
+  retry.textContent = failedCount ? `Retry failed bots (${failedCount} saved)` : "Retry failed bots";
 }
 
 async function runBlockedBulkDislike(mode = "remaining") {
@@ -143,6 +146,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
   let consecutiveWorkerFailures = 0;
   let consecutiveAccessFailures = 0;
   let autoPausedAfterFailures = false;
+  let autoPauseReason = "";
   const failedIds = [];
   let candidates = [];
   let startedAt = Date.now();
@@ -239,12 +243,13 @@ async function runBlockedBulkDislike(mode = "remaining") {
         consecutiveAccessFailures += 1;
         if (consecutiveAccessFailures >= BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD) {
           autoPausedAfterFailures = true;
+          autoPauseReason = "SpicyChat rejected the rating helper's authentication or network connection.";
           blockedBulkDislikeStopRequested = true;
           await persistQuickDislikeBulkState({
             ...quickDislikeBulkState, status: "paused", currentId: "",
             pendingIds: candidates.slice(index), runId, stopRequested: true
           });
-          updateBlockedDislikeStatus("Bulk Dislike paused after 3 consecutive 401/CORS errors. The remaining queue is saved for Resume.");
+          updateBlockedDislikeStatus(`Bulk Dislike paused: ${autoPauseReason} The remaining queue is saved for Resume.`);
           break;
         }
       } else consecutiveAccessFailures = 0;
@@ -277,6 +282,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
         consecutiveWorkerFailures += 1;
         if (consecutiveWorkerFailures >= BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD) {
           autoPausedAfterFailures = true;
+          autoPauseReason = `The native rating step failed repeatedly (${String(response?.status || "unknown").replace(/[^a-z0-9-]/gi, "").slice(0, 70)}).`;
           blockedBulkDislikeStopRequested = true;
         }
       }
@@ -316,8 +322,15 @@ async function runBlockedBulkDislike(mode = "remaining") {
     // snapshot loop reached its end. New blocks, failed checks, and work skipped
     // during a concurrent history update may still be eligible. Keep the real
     // remainder as a resumable queue instead of silently discarding it.
-    const unfinished = blockedBulkCandidateIds("remaining");
-    const finalFailed = uniqueClean([...(quickDislikeBulkState.failedIds || []), ...failedIds]).filter(id => !quickDislikeHistoryEntry(id));
+    // Preserve the actual run checkpoint. Reconstructing from every blocked
+    // bot here turned a three-bot selection into a whole-list Resume job.
+    // New/unselected blocked bots remain reachable through the normal
+    // "Dislike remaining blocked bots" action.
+    const unfinished = uniqueClean([
+      quickDislikeBulkState.currentId, ...(quickDislikeBulkState.pendingIds || [])
+    ]).filter(id => (blockedState?.ids || []).includes(id) && !quickDislikeHistoryEntry(id));
+    const finalFailed = uniqueClean([...(quickDislikeBulkState.failedIds || []), ...failedIds])
+      .filter(id => (blockedState?.ids || []).includes(id) && !quickDislikeHistoryEntry(id));
     const hasPending = unfinished.length > 0;
     await persistQuickDislikeBulkState({
       ...quickDislikeBulkState,
@@ -340,7 +353,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
         .slice(0, 3).join(", ");
       const failedSuffix = failedReasonSummary ? ` Reasons: ${failedReasonSummary}.` : "";
       showSettingsToast(autoPausedAfterFailures
-        ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} consecutive failures (including 401/CORS). Remaining bots were kept for Resume.`
+        ? `Bulk Dislike paused after ${BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD} failures in a row. ${autoPauseReason} ${finalFailed.length} total failed bot${finalFailed.length === 1 ? "" : "s"} saved across attempts. Retry failed bots rechecks those; Resume unfinished continues the remaining queue.`
         : stopped || hasPending
           ? `Bulk Dislike ${stopped ? "stopped" : "finished this batch"}. ${sentRequests} new native Dislikes confirmed, ${alreadyDisliked + previouslyVerified} previously verified, ${unavailable} unavailable, ${failed} failed; ${unfinished.length} still eligible. Remaining IDs saved for Resume.${failedSuffix}`
           : `Bulk Dislike completed all currently eligible blocked bots. ${sentRequests} new native Dislikes confirmed, ${alreadyDisliked + previouslyVerified} previously verified, ${alreadySet} other rated, ${creatorBlocked} creator blocked, ${unavailable} unavailable, ${failed} failed.${failedSuffix}`);

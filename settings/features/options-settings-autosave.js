@@ -583,6 +583,7 @@ function readSettingsFromPage() {
     recommendationPreferFavoriteCreators: checked("recommendationPreferFavoriteCreators"),
     recommendationPreferredTags: value("recommendationPreferredTags"),
     recommendationAvoidTags: value("recommendationAvoidTags"),
+    recommendationAvoidWords: value("recommendationAvoidWords"),
     recommendationShowReasonBadges: checked("recommendationShowReasonBadges"),
     recommendationHideFavoriteBots: checked("recommendationHideFavoriteBots"),
     recommendationHideOwnBots: checked("recommendationHideOwnBots"),
@@ -1213,6 +1214,7 @@ function readSingleSettingFromPage(settingKey) {
     case "recommendationPreferFavoriteCreators": return (checked("recommendationPreferFavoriteCreators"));
     case "recommendationPreferredTags": return (value("recommendationPreferredTags"));
     case "recommendationAvoidTags": return (value("recommendationAvoidTags"));
+    case "recommendationAvoidWords": return (value("recommendationAvoidWords"));
     case "recommendationShowReasonBadges": return (checked("recommendationShowReasonBadges"));
     case "recommendationHideFavoriteBots": return (checked("recommendationHideFavoriteBots"));
     case "recommendationHideOwnBots": return (checked("recommendationHideOwnBots"));

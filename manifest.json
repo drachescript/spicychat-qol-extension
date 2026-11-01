@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpicyChat QoL",
-  "version": "0.2.66",
+  "version": "0.2.67",
   "description": "Configurable quality-of-life tools for SpicyChat: chat helpers, filters, saved lists, creator tools, backups, and UI cleanup.",
   "permissions": [
     "storage",
@@ -177,6 +177,7 @@
         "content/selection-memory.js",
         "content/message-options.js",
         "content/memory-manager.js",
+        "content/memory-packs.js",
         "content/chat-lorebook-manager.js",
         "content/chat-lorebook-suggestions.js",
         "content/chat-lorebook-recall.js",
@@ -208,6 +209,7 @@
         "content/persona-full-backup.js",
         "content/lorebook-entries.js",
         "content/moderation-warnings.js",
+        "content/lorebook-moderation-review.js",
         "content/creator-editor-privacy-guard.js",
         "content/chat-rulebook-metadata.js",
         "content/rulebook-diagnostics.js",

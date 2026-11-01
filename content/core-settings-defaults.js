@@ -370,6 +370,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     recommendationPreferFavoriteCreators: false,
     recommendationPreferredTags: "",
     recommendationAvoidTags: "",
+    recommendationAvoidWords: "",
     recommendationShowReasonBadges: false,
 
     cardDensityMode: "normal",

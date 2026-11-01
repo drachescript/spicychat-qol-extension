@@ -780,6 +780,7 @@ async function load() {
   setChecked("recommendationPreferFavoriteCreators", !!settings.recommendationPreferFavoriteCreators);
   setValue("recommendationPreferredTags", settings.recommendationPreferredTags || "");
   setValue("recommendationAvoidTags", settings.recommendationAvoidTags || "");
+  setValue("recommendationAvoidWords", settings.recommendationAvoidWords || "");
   setChecked("recommendationShowReasonBadges", !!settings.recommendationShowReasonBadges);
   setChecked("recommendationHideFavoriteBots", !!settings.recommendationHideFavoriteBots);
   setChecked("recommendationHideOwnBots", !!settings.recommendationHideOwnBots);

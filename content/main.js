@@ -831,7 +831,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function personaToolsWanted(settings) {
-    return anySetting(settings, ["autoAcceptPersonaChange", "savePersonasFromPages", "keepLocalPersonaCopies", "expandPersonaDescriptions", "enablePersonaOrganizer", "showPersonaQuickSwitch"]);
+    return /^\/personas\/?$/.test(location.pathname) || anySetting(settings, ["autoAcceptPersonaChange", "savePersonasFromPages", "keepLocalPersonaCopies", "expandPersonaDescriptions", "enablePersonaOrganizer", "showPersonaQuickSwitch"]);
   }
 
   async function runPersonaPickerLowImpact(source = "runtime") {
