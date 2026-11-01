@@ -36,12 +36,12 @@ class SettingsOwnershipTest(unittest.TestCase):
             contract = json.loads((CONTRACT_DIR / f"{fid}.json").read_text(encoding="utf-8"))
             with self.subTest(feature=fid):
                 self.assertIn(f"settings/feature-panels/{fid}.js", contract.get("settingsFiles", []))
-                pattern = r'"' + re.escape(fid) + r'"\\s*:\\s*\\[([^\\]]*)\\]'
-                found = re.search(pattern, OWNER_JS)
-                self.assertIsNotNone(found, f"Missing Settings owner for {fid}")
+                owner = OWNER_JS.split(f'"{fid}":', 1)
+                self.assertEqual(len(owner), 2, f"Missing Settings owner for {fid}")
+                owner_section = owner[1].split("]", 1)[0]
                 for key in keys:
                     self.assertIn(key, contract.get("settingsKeys", []))
-                    self.assertIn(f'"{key}"', found.group(1))
+                    self.assertIn(f'"{key}"', owner_section)
 
     def test_soundscapes_settings_css_has_one_owner(self):
         contract = json.loads((CONTRACT_DIR / "soundscapes.json").read_text(encoding="utf-8"))
