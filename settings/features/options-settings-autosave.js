@@ -398,7 +398,6 @@ function readSettingsFromPage() {
 
 
     enableSavedTextSnippets: checked("enableSavedTextSnippets"),
-    enableSelectionRemember: checked("enableSelectionRemember"),
 
     rpStateTrackerMode: ["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative",
     rpStateInjectMode: ["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed",
@@ -635,9 +634,10 @@ function readSettingsFromPage() {
     debug: checked("debug"),
     // Only installed feature modules contribute their controls here.
     // Omitted modules cannot silently write default values for their keys.
-    ...Object.fromEntries(Object.entries(window.__DSQ_FEATURE_SETTINGS_READERS__ || {}).map(
-      ([key, reader]) => [key, reader()]
-    ))
+    ...Object.fromEntries(Object.entries(window.__DSQ_FEATURE_SETTINGS_READERS__ || {})
+      .filter(([key]) => !isSettingOwnedByExcludedFeature(key))
+      .map(([key, reader]) => [key, reader()])
+    )
   };
   const profile = window.__DSQ_BUILD_PROFILE__;
   if (profile?.generated && Array.isArray(profile.features)) {
@@ -656,7 +656,22 @@ function readSettingsFromPage() {
   return result;
 }
 
+// Build-time feature exclusions must never turn a missing Settings control
+// into a saved false/default value. Full QoL has no generated exclusion profile.
+function isSettingOwnedByExcludedFeature(settingKey) {
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (!profile?.generated || !Array.isArray(profile.features)) return false;
+  const key = String(settingKey || '').trim();
+  if (!key) return false;
+  const owners = window.__DSQ_FEATURE_SETTING_OWNERS__ || {};
+  for (const [feature, keys] of Object.entries(owners)) {
+    if (Array.isArray(keys) && keys.includes(key) && !profile.features.includes(feature)) return true;
+  }
+  return false;
+}
+
 function readSingleSettingFromPage(settingKey) {
+  if (isSettingOwnedByExcludedFeature(settingKey)) return SETTINGS_AUTOSAVE_MISSING;
   const ownedReader = window.__DSQ_FEATURE_SETTINGS_READERS__?.[String(settingKey || "")];
   if (typeof ownedReader === "function") return ownedReader();
   switch (String(settingKey || "")) {
@@ -1037,7 +1052,6 @@ function readSingleSettingFromPage(settingKey) {
 
 
     case "enableSavedTextSnippets": return (checked("enableSavedTextSnippets"));
-    case "enableSelectionRemember": return (checked("enableSelectionRemember"));
 
     case "rpStateTrackerMode": return (["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative");
     case "rpStateInjectMode": return (["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed");
@@ -1301,7 +1315,7 @@ function autosaveDelayForControl(control, eventType = "change") {
 
 function queueSettingsAutosaveValue(settingKey, nextValue, { delay = 350 } = {}) {
   const key = String(settingKey || "").trim();
-  if (!key || !settingsAutosaveReady) return;
+  if (!key || !settingsAutosaveReady || isSettingOwnedByExcludedFeature(key)) return;
   const pendingValue = settingsAutosavePending.has(key) ? settingsAutosavePending.get(key) : loadedSettingsSnapshot[key];
   if (storageValueMatches(pendingValue, nextValue)) return;
   const originalValue = settingsAutosavePrevious.has(key) ? settingsAutosavePrevious.get(key) : loadedSettingsSnapshot[key];

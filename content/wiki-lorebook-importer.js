@@ -1236,17 +1236,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       failed: 0, completed: 0, cancelled: false, paused: false, nextIndex: 0, stopReason: "" };
     const startIndex = Math.max(0, Math.min(items.length, Math.trunc(Number(options.startIndex) || 0)));
     const operation = { cancelled: false, id: route.id };
+    const tracing = !!DS.isDiagnosticTraceActive?.("normal");
+    const traceToken = tracing ? DS.diagOperationStart?.("lorebook-import", "native-entry-batch", {
+      entryCount: items.length, duplicatePolicy, resumed: startIndex > 0
+    }) : null;
+    let existingListMs = 0;
+    let nativeWriteMs = 0;
+    let traceOutcome = "error";
     DS.activeLorebookEntryImport = operation;
     busy = true;
     try {
       // Load/verify every existing name before choosing Skip/Merge/Replace.
       // This also makes interrupted imports safe to re-import when there are
       // more than 100 current entries.
-      if (!await ensureAllExistingEntriesLoaded(operation, options.onProgress)) {
+      const existingListStartedAt = Date.now();
+      const existingListReady = await ensureAllExistingEntriesLoaded(operation, options.onProgress);
+      existingListMs = Date.now() - existingListStartedAt;
+      if (!existingListReady) {
         counts.cancelled = !!operation.cancelled;
         counts.paused = !operation.cancelled;
         counts.stopReason = operation.cancelled ? "Cancelled before entry import." : "Lorebook changed before the import could start.";
         options.onProgress?.({ ...counts, stopped: true });
+        traceOutcome = counts.cancelled ? "cancelled" : "paused";
         return counts;
       }
       // Keep a complete, stable name set. React may reset its mounted cards
@@ -1277,7 +1288,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             if (knownNames.has(key) && !findExistingRowByName(item.name)) {
               throw new Error(`Matching entry “${item.name}” is no longer loaded. Refresh and review before continuing.`);
             }
-            result = await importOne(item, duplicatePolicy);
+            const writeStartedAt = Date.now();
+            try { result = await importOne(item, duplicatePolicy); }
+            finally { nativeWriteMs += Date.now() - writeStartedAt; }
           }
           const action = String(result?.action || "");
           if (action === "created") knownNames.add(key);
@@ -1308,7 +1321,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if ((counts.paused || counts.cancelled) && typeof options.onProgress === "function") {
         try { options.onProgress({ ...counts, current: "", stopped: true }); } catch {}
       }
+      traceOutcome = counts.paused ? "paused" : counts.cancelled ? "cancelled" : counts.failed ? "partial" : "complete";
     } finally {
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: traceOutcome,
+        counts: { scanned: counts.completed + counts.failed, changed: counts.created + counts.replaced + counts.merged + counts.duplicated, skipped: counts.skipped, errors: counts.failed },
+        meta: { entryCount: items.length, duplicatePolicy, existingListMs, nativeWriteMs,
+          completed: counts.completed, attemptedWrites: counts.created + counts.replaced + counts.merged + counts.duplicated + counts.failed,
+          paused: counts.paused, cancelled: counts.cancelled }
+      });
       if (DS.activeLorebookEntryImport === operation) DS.activeLorebookEntryImport = null;
       busy = false;
     }

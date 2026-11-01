@@ -1,3 +1,8 @@
+## 0.2.68
+- Added optional free, on-device greeting translation with manual Google Translate fallback in Chat Translation.
+- Detect the Persona limit from account information when available, with a manual plan dropdown only when detection cannot confirm the limit.
+- Let Bot Status review and remove out-of-scope pending checks without deleting saved bot data.
+
 ## 0.2.67
 - Added a Persona count and plan-limit indicator to My Personas.
 - Added Open avatar links to Bot Status cards that have a saved image URL.
@@ -296,7 +301,6 @@
 - Improved narrow-screen Rulebook status text wrapping, and made the troubleshooting drawer fit smaller screens without covering the main chat with a permanent toolbar.
 - Added per-chat image Fit and Position choices to the background popup, including corners, with an independent "Use global setting" choice for each. Existing global options, original source URLs, images and scene galleries remain intact.
 - Began Core + OOC minimal-installation testing: extracted the OOC composer controls, added a small dedicated OOC Settings editor and a fixed minimal Chrome/Brave build recipe. Full QoL continues using the same OOC modules; other Custom combinations are not yet supported.
-
 - Added HTTPS image URL backgrounds for global/chat views. Download a local copy by default or keep the URL only; both keep the original URL for refreshing the image later. Per-host permission and the 8 MB limit still apply.
 - Added an Active options panel showing enabled named features in their original Settings context, with per-feature navigation and a confirmed bulk switch-off that preserves saved data.
 

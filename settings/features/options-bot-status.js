@@ -735,6 +735,12 @@ function formatBotStatusLastRunFeedback(report) {
   if (unknown) parts.push(`${unknown} inconclusive`);
   if (changed) parts.push(`${changed} updated`);
   if (recovered) parts.push(`${recovered} recovered`);
+  if (report.uniqueTargets != null && Number.isFinite(Number(report.uniqueTargets))) parts.push(`${Number(report.uniqueTargets)} unique targets`);
+  if (Number(report.duplicateQueueEntries || 0)) parts.push(`${Number(report.duplicateQueueEntries)} repeated queue entries`);
+  if (Number(report.retries || 0)) parts.push(`${Number(report.retries)} helper retries`);
+  if (Number(report.cacheHits || 0)) parts.push(`${Number(report.cacheHits)} cache hits`);
+  if (Number(report.accessFailures || 0)) parts.push(`${Number(report.accessFailures)} network/auth failures`);
+  if (report.cancelled) parts.push("stopped by user");
   if (report.saveVerified === false) parts.push("Save verification failed — check previous checkpoints");
   return parts.join(" · ") + ".";
 }
@@ -746,6 +752,93 @@ async function refreshBotStatusLastRunFeedback() {
     const report = (await storageGet([BOT_STATUS_LAST_RUN_FEEDBACK_KEY]))?.[BOT_STATUS_LAST_RUN_FEEDBACK_KEY];
     host.textContent = formatBotStatusLastRunFeedback(report);
   } catch { host.textContent = "Last scan summary unavailable; existing saved results were not changed."; }
+}
+
+// A resumed scan may contain IDs that have since left its original source.
+// Keep them until the user explicitly reviews the queue; never silently
+// recheck blocked/forgotten bots or delete their saved Bot Status records.
+function reviewBotStatusQueueEligibility(queue) {
+  const ids = (Array.isArray(queue?.ids) ? queue.ids : []).filter(validBotId);
+  const mode = String(queue?.mode || "all");
+  const scope = String(queue?.scope || "all");
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
+  const saved = normalizeBotAvailability(botAvailabilityState).meta;
+  const archives = normalizeBotArchive(botArchiveState).meta;
+  const trackedInScope = collectTrackedAvailabilityBots(scope);
+  const eligibleIds = mode === "outside"
+    ? new Set(botStatusCenterBaseEntries("all")
+      .filter(entry => !entry._scanEligible && !blockedIds.has(String(entry.id || "").toLowerCase()) && !botStatusIdIgnored(entry.id))
+      .map(entry => entry.id))
+    : mode === "archived"
+      ? new Set(Object.values(saved).filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase())).map(entry => entry.id))
+      : new Set(trackedInScope.map(entry => entry.id));
+  const elsewhere = new Set(collectTrackedAvailabilityBots("all").map(entry => entry.id));
+  const unavailable = ids.filter(id => !eligibleIds.has(id)).map(id => {
+    let reason;
+    if (botStatusIdIgnored(id)) reason = "Forgotten / excluded from Bot Status";
+    else if (mode === "outside" && blockedIds.has(id.toLowerCase())) reason = "Blocked; excluded from outside-scope scans";
+    else if (mode === "archived" && blockedIds.has(id.toLowerCase())) reason = "Blocked; excluded from archived rechecks";
+    else if (mode === "archived" && !archives[id]) reason = "No longer has an eligible saved recovery copy";
+    else if (mode === "archived" && !isConfirmedUnavailableBotStatus(saved[id])) reason = "No longer confirmed unavailable";
+    else if (mode === "outside" && elsewhere.has(id)) reason = "Now included in routine tracking";
+    else if (scope !== "all" && elsewhere.has(id)) reason = `No longer in the original ${scope} scan scope`;
+    else reason = "No longer in an eligible tracked source";
+    return { id, reason };
+  });
+  return { ids, unavailable, mode, scope };
+}
+
+async function reviewAndRemoveIneligibleBotStatusPending() {
+  if (botAvailabilityScanRunning) {
+    showSettingsToast("Stop the active Bot Status scan before reviewing its saved queue.");
+    return;
+  }
+  await ensureSavedListsDataLoaded();
+  await ensureSavedRecoveryDataLoaded();
+  const snapshots = await Promise.all([botStatusPausedQueue("main"), botStatusPausedQueue("stale")]);
+  const reports = snapshots.map(reviewBotStatusQueueEligibility);
+  const count = reports.reduce((total, report) => total + report.unavailable.length, 0);
+  if (!count) {
+    showSettingsToast("All saved pending IDs are eligible again; you can use Resume.");
+    await refreshBotStatusPauseButton();
+    return;
+  }
+  const preview = reports.flatMap((report, i) => report.unavailable.map(item =>
+    `${i === 1 ? "Stale" : "Regular"}: ${item.id} — ${item.reason}`));
+  const message = `${count} saved pending Bot Status ID${count === 1 ? " is" : "s are"} no longer eligible for the original scan.\n\n` +
+    `${preview.slice(0, 8).join("\n")}${preview.length > 8 ? `\n...and ${preview.length - 8} more` : ""}\n\n` +
+    "OK: remove ONLY these ineligible IDs from the saved resume queue.\n" +
+    "Cancel: preserve everything.\n\n" +
+    "Existing Bot Status results, saved bot copies, blocked lists, Favorites and other QoL data are not changed.";
+  if (!confirm(message)) return;
+  // Re-read before editing so an updated queue from a different Settings tab
+  // is never replaced using an old review snapshot.
+  const current = await Promise.all([botStatusPausedQueue("main"), botStatusPausedQueue("stale")]);
+  const sameQueue = (a, b) => JSON.stringify(a?.ids || []) === JSON.stringify(b?.ids || []) &&
+    String(a?.updatedAt || "") === String(b?.updatedAt || "") &&
+    String(a?.scope || "") === String(b?.scope || "") && String(a?.mode || "") === String(b?.mode || "");
+  if (current.some((queue, i) => !sameQueue(queue, snapshots[i])) || botAvailabilityScanRunning) {
+    showSettingsToast("The saved scan queue changed during review. Nothing was removed; review it again.");
+    await refreshBotStatusPauseButton();
+    return;
+  }
+  const updates = {};
+  for (let i = 0; i < current.length; i++) {
+    const queue = current[i];
+    if (!queue?.ids?.length || !reports[i].unavailable.length) continue;
+    const removeIds = new Set(reports[i].unavailable.map(item => item.id));
+    const remaining = queue.ids.filter(id => !removeIds.has(id));
+    updates[botStatusQueueKey(i === 1 ? "stale" : "main")] = remaining.length
+      ? { ...queue, ids: remaining, updatedAt: Date.now(), reason: "Remaining checks after manual pending review" }
+      : null;
+  }
+  if (!await storageSetVerified(updates)) {
+    showSettingsToast("Could not verify the saved queue update. Existing results were left alone; reload Settings before retrying.");
+    return;
+  }
+  await refreshBotStatusPauseButton();
+  renderBotAvailability({ skipRecoveryRerender: true });
+  showSettingsToast(`Removed ${count} ineligible pending ID${count === 1 ? "" : "s"} from the resume queue only. Saved bot data was preserved.`);
 }
 
 async function refreshBotStatusPauseButton() {
@@ -777,6 +870,14 @@ async function refreshBotStatusPauseButton() {
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
     "These queues are independent; running Refresh stale bots does not resume unchecked bots or clear pending rechecks."
   ].join(" ");
+  const reviewButton = $("botStatusReviewOutOfScopePending");
+  if (reviewButton) {
+    // Listing scans may hold thousands of records. Keep this refresh cheap;
+    // compute actual eligibility only when the user opens Review.
+    reviewButton.hidden = count + staleCount === 0;
+    reviewButton.disabled = botAvailabilityScanRunning;
+    reviewButton.textContent = `Review pending IDs (${count + staleCount})`;
+  }
 }
 
 async function runBotAvailabilityScan(options = {}) {
@@ -862,6 +963,10 @@ async function runBotAvailabilityScan(options = {}) {
     ? pausedQueue.ids.filter(validBotId).filter(id => !entries.some(entry => entry.id === id))
     : [];
   const totalCandidates = entries.length;
+  // An already deduplicated queue normally has zero repeated IDs. Count any
+  // duplicates for diagnostics without changing ordering or resume semantics.
+  const candidateIdSet = new Set(entries.map(item => String(item.id || "").toLowerCase()));
+  const duplicateQueueEntries = entries.length - candidateIdSet.size;
   const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
   const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
   const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;
@@ -964,6 +1069,14 @@ async function runBotAvailabilityScan(options = {}) {
   let lastQueueCheckpointAt = 0;
   let lastQueueCheckpointCompleted = 0;
   const runStartedAt = Date.now();
+  const uniqueCheckedIds = new Set();
+  let checkAttempts = 0;
+  let accessFailures = 0;
+  let requestTimeMs = 0;
+  let lastAggregateAt = runStartedAt;
+  // Existing worker counters are only observed at start and finish. No
+  // periodic stats fetch and no per-bot diagnostic events.
+  const initialWorkerStats = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
   // The persisted queue is written only AFTER its completed records have been
   // saved. If the tab disappears between those writes, a few bots might be
   // checked again, but no completed result is skipped or lost from the queue.
@@ -1037,11 +1150,16 @@ async function runBotAvailabilityScan(options = {}) {
         lastProgressPaintAt = now;
       }
       const previous = botAvailabilityState?.meta?.[entry.id] || null;
+      checkAttempts++;
+      uniqueCheckedIds.add(String(entry.id || "").toLowerCase());
+      const requestStartedAt = Date.now();
       const rawResult = await checkBotAvailability(
         { ...entry, ...(previous || {}), sources: uniqueClean([...(previous?.sources || []), ...(entry.sources || [])]) },
         { keepHelper: true, forceOwnHelper: true, bulkScan: true, timeoutMs: 17000 }
       );
+      requestTimeMs += Math.max(0, Date.now() - requestStartedAt);
       if (isBotStatusAccessFailure(rawResult)) {
+        accessFailures++;
         // A temporary auth/CORS outage must never replace an earlier
         // confirmed Available/Unavailable result with an Unknown check.
         deferredAccessIds.push(entry.id);
@@ -1120,6 +1238,18 @@ async function runBotAvailabilityScan(options = {}) {
           break;
         }
         if (status) status.dataset.dsSavedCheckpoints = String(checkpointCount);
+        // Aggregate only at an existing checkpoint, at most once per minute.
+        // The background receives only numbers and mode/scope labels, not IDs.
+        if (scanLastCheckAt - lastAggregateAt >= 60000) {
+          lastAggregateAt = scanLastCheckAt;
+          await noteBotStatusRunEvent("bot-status-run-progress", {
+            mode, scope, completed, requested: entries.length,
+            uniqueTargets: uniqueCheckedIds.size, checkAttempts,
+            duplicateQueueEntries, accessFailures,
+            pending: Math.max(0, entries.length - nextScanIndex) + deferredAccessIds.length + omittedByBotLimit.length,
+            requestTimeMs, elapsedMs: scanLastCheckAt - runStartedAt
+          });
+        }
         // Update this lightweight count without rebuilding thousands of cards.
         const summary = $("botAvailabilitySummary");
         if (summary) summary.textContent = `${completed} checked this run · ${checkpointCount} durably checkpointed · ${entries.length - completed} remaining (the full counts refresh when this run ends)`;
@@ -1253,14 +1383,42 @@ async function runBotAvailabilityScan(options = {}) {
       : `${finalStatusText} Save/queue verification failed; review the last durable checkpoint before running another scan.`;
     if (status) status.textContent = safeStatusText;
     if (archivedStatus) archivedStatus.textContent = safeStatusText;
+    const finalWorkerStats = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
+    const statsDelta = name => {
+      if (!initialWorkerStats?.ok || !finalWorkerStats?.ok) return null;
+      const before = Number(initialWorkerStats[name] || 0);
+      const after = Number(finalWorkerStats[name] || 0);
+      // Service workers may restart during long scans. Never label a reset
+      // counter as a genuine zero-retry or zero-cache-hit result.
+      return after >= before ? after - before : null;
+    };
+    const retries = statsDelta("retryAttempts");
+    const cacheHits = statsDelta("cached");
+    const coalesced = statsDelta("coalesced");
+    const outgoingStats = {
+      uniqueTargets: uniqueCheckedIds.size, checkAttempts, duplicateQueueEntries,
+      accessFailures, requestTimeMs,
+      retries, cacheHits, coalesced,
+      workerChecks: statsDelta("checked"),
+      timeouts: statsDelta("timeouts"),
+      outstanding: finalWorkerStats?.ok ? Number(finalWorkerStats.outstanding || 0) : null
+    };
     await noteBotStatusRunEvent("bot-status-run-complete", {
-      mode, scope, completed, requested: entries.length, totalCandidates, maxBots, maxMinutes,
-      stopped: !!botAvailabilityStopRequested || timeLimitReached || countLimitReached,
+      // The lifecycle collector retains the first twelve public counters.
+      // Put the actionable run summary first; advanced counts follow.
+      mode, scope, completed, requested: entries.length,
+      uniqueTargets: outgoingStats.uniqueTargets, checkAttempts,
+      retries, cacheHits, accessFailures,
+      pending: botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit).length,
+      durationMs: Date.now() - runStartedAt,
       stopReason: botAvailabilityStopRequested ? "manual" : timeLimitReached ? "time" : countLimitReached ? "count" : "complete",
+      ...outgoingStats,
+      totalCandidates, maxBots, maxMinutes,
+      stopped: !!botAvailabilityStopRequested || timeLimitReached || countLimitReached,
       changesPreserved, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
-      stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped,
-      durationMs: Date.now() - runStartedAt
+      stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped
     });
+    const manuallyStopped = !!botAvailabilityStopRequested;
     botAvailabilityStopRequested = false;
     await refreshBotStatusPauseButton();
     // The persisted resume queue remains authoritative; never use a guessed
@@ -1269,6 +1427,8 @@ async function runBotAvailabilityScan(options = {}) {
     const pendingCount = Array.isArray(pauseState?.ids) ? pauseState.ids.length : 0;
     const feedback = {
       at: Date.now(), mode, checked: completed,
+      ...outgoingStats,
+      cancelled: manuallyStopped,
       pending: pendingCount,
       deferred: deferredAccessIds.length,
       changed: changesPreserved,
@@ -2555,6 +2715,18 @@ function setupBotAvailabilityControls() {
   setupBotAvatarLookup();
   // On-demand worker counters (no bot IDs or private card text). Existing
   // scan pacing/stop/resume controls remain unchanged.
+  const pendingHint = $("botStatusPendingQueueSummary");
+  if (pendingHint && !$("botStatusReviewOutOfScopePending")) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "botStatusReviewOutOfScopePending";
+    button.hidden = true;
+    button.textContent = "Review pending IDs";
+    button.title = "Review and optionally remove only ineligible IDs from the saved resume queue; no bot data is deleted.";
+    button.addEventListener("click", () => reviewAndRemoveIneligibleBotStatusPending().catch(() =>
+      showSettingsToast("Could not review pending Bot Status IDs. No queue entries were removed.")));
+    pendingHint.insertAdjacentElement("afterend", button);
+  }
   const scanStatus = $("botAvailabilityScanStatus");
   if (scanStatus && !document.getElementById("ds-bot-status-worker-stats")) {
     const workerStats = document.createElement("button");
@@ -2566,7 +2738,8 @@ function setupBotAvailabilityControls() {
     workerStats.addEventListener("click", async () => {
       const result = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
       if (!result?.ok) { showSettingsToast("Bot Status worker statistics aren't available."); return; }
-      const label = `Requests ${result.requested || 0} · checked ${result.checked || 0} · cached ${result.cached || 0} · deduplicated ${result.coalesced || 0} · failed ${result.failed || 0}` +
+      const label = `Requests ${result.requested || 0} · unique ${result.uniqueTargets || 0} · checked ${result.checked || 0} · cached ${result.cached || 0} · deduplicated ${result.coalesced || 0} · retries ${result.retryAttempts || 0} · in flight ${result.outstanding || 0} · failed ${result.failed || 0}` +
+        (result.checked ? ` · slowest ${Math.round(result.slowestCheckMs || 0)}ms` : "") +
         (result.rateLimited ? ` · rate limits ${result.rateLimited}` : "") +
         (result.cooldownMs > 0 ? ` · cooldown ${Math.ceil(result.cooldownMs / 1000)}s` : "");
       showSettingsToast(label);

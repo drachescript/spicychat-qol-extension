@@ -314,19 +314,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   };
 
-  // My Personas: live account-card count with a user-selected documented plan limit.
-  // Do not use DS.state.savedPersonas: it may include locally archived/deleted Personas.
-  const PERSONA_LIMIT_CHOICE_KEY = "dsPersonaLimitChoiceV1";
-  const PERSONA_LIMIT_OPTIONS = [
-    ["auto", "Choose plan"],
-    ["3", "Free (3)"],
-    ["10", "Get A Taste (10)"],
-    ["50", "True Supporter (50)"],
-    ["100", "I'm All In (100)"]
-  ];
-  let personaLimitChoice = "auto";
-  let personaLimitChoiceRead = null;
-
+  // My Personas: only count the live site cards. Do not use locally saved
+  // personas: that archive may contain personas no longer on the account.
   function livePersonaCount() {
     const ids = new Set();
     for (const link of document.querySelectorAll("a[aria-label='edit-persona'][href*='/personas/edit/']")) {
@@ -336,17 +325,61 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return ids.size;
   }
 
-  // Some site builds show a native count near Create. Only read small, native
-  // leaf labels in that header, never user-written Persona descriptions.
-  function nativePersonaLimit(create) {
-    const header = create?.closest("header") || create?.parentElement?.parentElement;
-    if (!header || header.querySelector("a[aria-label='edit-persona']")) return 0;
-    for (const el of header.querySelectorAll("span,small,p")) {
-      if (el.closest("#ds-persona-limit-indicator") || el.children.length) continue;
-      const label = String(el.textContent || "").trim();
-      if (label.length > 70) continue;
-      const match = label.match(/(?:^|\b)(\d{1,3})\s*\/\s*(3|10|50|100)(?:\s*personas?\b|$)/i);
-      if (match) return Number(match[2]);
+  // The exact account quota wins. Internal API role strings such as
+  // "paid_premium" do not identify a published plan on their own.
+  const PERSONA_PLAN_LIMITS = Object.freeze({
+    free: 3,
+    getataste: 10,
+    truesupporter: 50,
+    imallin: 100
+  });
+  const PERSONA_LIMIT_CHOICE_KEY = "dsPersonaLimitChoiceV1"; // existing v0.2.67 preference
+  const PERSONA_LIMIT_OPTIONS = Object.freeze([
+    ["auto", "Choose plan"],
+    ["3", "Free (3)"],
+    ["10", "Get A Taste (10)"],
+    ["50", "True Supporter (50)"],
+    ["100", "I'm All In (100)"]
+  ]);
+  let personaLimitChoice = "auto";
+  let personaLimitChoiceRead = null;
+  let personaAccountLimit = 0;
+  let personaAccountLimitChecked = false;
+  let personaAccountLimitPending = null;
+
+  function planLimitFromLabel(raw) {
+    const clean = cleanText(raw).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]/g, "");
+    return PERSONA_PLAN_LIMITS[clean] || 0;
+  }
+
+  // An explicit account quota or named plan is usable; an undocumented role
+  // alias, generic paid badge, navigation advert, or number of created personas
+  // is not. Do not keep the account record itself in QoL storage.
+  function accountPersonaLimit(response) {
+    const user = response?.user;
+    if (!user || typeof user !== "object") return 0;
+    const subscription = user.subscription && typeof user.subscription === "object" ? user.subscription : {};
+    const sources = [user, subscription, user.limits, subscription.limits].filter(value => value && typeof value === "object");
+    for (const source of sources) {
+      for (const key of ["max_personas", "persona_limit", "personas_limit", "max_persona_count", "persona_slots", "maxPersonas", "personaLimit", "personaSlots"]) {
+        const value = source[key];
+        if (typeof value !== "number" && typeof value !== "string") continue;
+        const numeric = Number(value);
+        if (Number.isInteger(numeric) && [3, 10, 50, 100].includes(numeric)) return numeric;
+      }
+    }
+    const status = cleanText(subscription.status).toLowerCase();
+    if (status && !["active", "trialing", "trial", "grace_period"].includes(status)) return 0;
+    for (const source of [subscription, user]) {
+      for (const key of ["plan_name", "planName", "tier_name", "tierName", "subscription_plan", "subscriptionPlan"]) {
+        const limit = planLimitFromLabel(source[key]);
+        if (limit) return limit;
+      }
+    }
+    for (const value of [subscription.name, subscription.plan, subscription.role, user.plan]) {
+      if (typeof value !== "string") continue;
+      const limit = planLimitFromLabel(value);
+      if (limit) return limit;
     }
     return 0;
   }
@@ -364,62 +397,156 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await personaLimitChoiceRead;
   }
 
+  // Check only after the user enables this indicator. The optional, existing
+  // authenticated read service is reused without exposing/storing credentials.
+  // Custom Lite packages without that service still get the manual fallback.
+  function requestPersonaAccountLimit() {
+    if (personaAccountLimitChecked || personaAccountLimitPending ||
+        !DS.state?.settings?.enabled || !DS.state.settings.showPersonaLimitIndicator ||
+        !isPersonasListPage()) return;
+    const request = DS.privateLorebookAuth?.request;
+    if (typeof request !== "function") {
+      personaAccountLimitChecked = true;
+      return;
+    }
+    personaAccountLimitPending = Promise.resolve().then(() => request("/v2/users", "GET"))
+      .then(result => { personaAccountLimit = accountPersonaLimit(result); })
+      .catch(() => { personaAccountLimit = 0; })
+      .finally(() => {
+        personaAccountLimitPending = null;
+        personaAccountLimitChecked = true;
+        if (DS.state?.settings?.enabled && DS.state.settings.showPersonaLimitIndicator && isPersonasListPage()) {
+          DS.applyPersonaLimitIndicator?.();
+        }
+      });
+  }
+
+  // A plan label elsewhere in navigation (for example Voice's "I'm All In"
+  // requirement) is *not* evidence of the current user's subscription.
+  function nativePersonaLimit(create) {
+    const ancestor = create?.closest("[role='group']") || create?.parentElement;
+    const page = create?.closest("main") || document.querySelector("[data-testid='Personas-PageStaticMetaTags']")?.parentElement || document.body;
+    if (!page) return 0;
+
+    const quotaSelectors = [
+      "[data-testid='PersonaLimit']", "[data-testid='PersonasLimit']",
+      "[data-testid='Personas-Quota']", "[data-testid='PersonaCount']",
+      "[data-testid='Personas-Count']"
+    ];
+    for (const container of [ancestor, ...quotaSelectors.flatMap(selector => [...page.querySelectorAll(selector)])]) {
+      if (!container || container.closest?.("#ds-persona-limit-indicator")) continue;
+      for (const el of container.querySelectorAll("span, small, p, output")) {
+        if (el.closest("#ds-persona-limit-indicator") || el.children.length) continue;
+        const label = cleanText(el.textContent);
+        if (label.length > 90) continue;
+        const match = label.match(/\b\d{1,3}\s*(?:\/|of)\s*(3|10|50|100)\s*(?:personas?\b|slots?\b|$)/i);
+        if (match) return Number(match[1]);
+      }
+    }
+
+    for (const node of [document.documentElement, page]) {
+      if (!node) continue;
+      const raw = node.getAttribute("data-current-subscription-plan") ||
+        node.getAttribute("data-user-subscription-plan") ||
+        node.getAttribute("data-account-subscription-plan");
+      const limit = planLimitFromLabel(raw);
+      if (limit) return limit;
+    }
+    for (const element of document.querySelectorAll(
+      "[data-testid='CurrentSubscriptionPlan'],[data-testid='ActiveSubscriptionPlan'],[data-testid='AccountSubscriptionPlan']"
+    )) {
+      if (element.closest("#ds-persona-limit-indicator")) continue;
+      const text = cleanText(element.textContent);
+      if (text.length > 90) continue;
+      const plan = text.replace(/^(?:current|active|your|account)\s+(?:subscription\s+)?plan\s*[:\-]?\s*/i, "");
+      const limit = planLimitFromLabel(plan);
+      if (limit) return limit;
+    }
+    return 0;
+  }
+
   DS.applyPersonaLimitIndicator = async function applyPersonaLimitIndicator() {
     const indicatorId = "ds-persona-limit-indicator";
     const current = document.getElementById(indicatorId);
-    if (!DS.state?.settings?.enabled || !isPersonasListPage()) {
+    if (!DS.state?.settings?.enabled || !DS.state.settings.showPersonaLimitIndicator || !isPersonasListPage()) {
       current?.remove();
       return;
     }
+
+    // Put the count with the native page heading, like the Favorites count,
+    // instead of beside the sticky Create New button at the foot of the page.
+    // This heading is the site-provided translation target and is independent
+    // of the active display language.
+    const title = document.querySelector("[data-translate-key='personas:page.title']");
+    const heading = title?.closest("p,h1,h2,h3");
+    const headingArea = heading?.parentElement;
+    if (!heading || !headingArea) { current?.remove(); return; }
     const create = document.querySelector("a[href$='/personas/create'],a[href*='/personas/create?']");
-    if (!create?.parentElement) { current?.remove(); return; }
+
     await readPersonaLimitChoice();
-    // The site may replace the header during navigation. Reinsert if needed.
+    // Prefer the site's live quota. The account-specific read is best effort;
+    // do not pause the page or guess from a generic subscription upsell.
+    const nativeLimit = nativePersonaLimit(create);
+    if (!nativeLimit) requestPersonaAccountLimit();
+
     let bar = current;
-    if (!bar || bar.parentElement !== create.parentElement) {
-      bar?.remove();
-      bar = document.createElement("span");
+    if (!bar) {
+      bar = document.createElement("div");
       bar.id = indicatorId;
       bar.dataset.dsOwned = "1";
-      bar.style.cssText = "display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid rgba(148,163,184,.48);border-radius:10px;font:600 12px/1.4 system-ui,sans-serif;color:inherit;white-space:normal;";
       const countLabel = document.createElement("span");
       countLabel.dataset.dsPersonaLimitCount = "1";
-      const select = document.createElement("select");
-      select.setAttribute("aria-label", "Persona subscription limit");
-      select.title = "Choose your SpicyChat plan to show your Persona limit. QoL does not change your plan.";
-      select.style.cssText = "background:transparent;color:inherit;font:inherit;border:1px solid rgba(148,163,184,.45);border-radius:6px;padding:3px;max-width:160px;";
-      for (const [value, title] of PERSONA_LIMIT_OPTIONS) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = title;
-        option.style.color = "initial";
-        select.appendChild(option);
-      }
-      select.addEventListener("change", async () => {
-        const value = select.value;
-        if (!PERSONA_LIMIT_OPTIONS.some(([id]) => id === value)) return;
-        personaLimitChoice = value;
-        try {
-          await DS.storageSet?.({ [PERSONA_LIMIT_CHOICE_KEY]: value });
-        } catch { select.title = "Could not save plan choice. It may reset next visit."; }
-        DS.applyPersonaLimitIndicator?.();
-      });
-      bar.append(countLabel, select);
-      create.parentElement.insertBefore(bar, create);
+      bar.append(countLabel);
     }
+    // React can recreate the page header without removing a previous QoL
+    // node. Reattach the same node (and its selector listener) safely.
+    if (bar.parentElement !== headingArea || bar.previousElementSibling !== heading) {
+      heading.insertAdjacentElement("afterend", bar);
+    }
+
     const count = livePersonaCount();
-    const nativeLimit = nativePersonaLimit(create);
-    const limit = personaLimitChoice === "auto" ? nativeLimit : Number(personaLimitChoice);
+    const detectedLimit = nativeLimit || personaAccountLimit;
+    const limit = detectedLimit || Number(personaLimitChoice) || 0;
     const label = bar.querySelector("[data-ds-persona-limit-count]");
-    const select = bar.querySelector("select");
-    if (select && select.value !== personaLimitChoice) select.value = personaLimitChoice;
-    const shown = String(count);
-    const next = limit ? `${shown}/${limit} Personas` : `${shown} Personas`;
+    const next = limit ? `${count} / ${limit} personas` : `${count} personas`;
     if (label && label.textContent !== next) label.textContent = next;
-    const note = limit
-      ? (personaLimitChoice === "auto" ? "Using the limit shown on SpicyChat." : "Plan limit selected locally; it is not verified against your subscription.")
-      : "Choose your plan to show its Persona limit.";
-    if (bar.title !== note) bar.title = note;
+
+    let select = bar.querySelector("select[data-ds-persona-plan-fallback]");
+    if (detectedLimit) {
+      // Keep a previously chosen manual plan saved; automatic detection always
+      // wins for display, and the manual fallback remains available later.
+      select?.remove();
+      bar.title = "Persona limit detected from SpicyChat's account information.";
+    } else {
+      if (!select) {
+        select = document.createElement("select");
+        select.dataset.dsPersonaPlanFallback = "1";
+        select.setAttribute("aria-label", "Persona plan (manual fallback)");
+        select.title = "SpicyChat did not provide a verified limit. Choose your plan manually; this does not change your subscription.";
+        // Keep appearance entirely in the dedicated Persona feature CSS.
+        // In particular, never use color:initial on <option> (unreadable
+        // light popup with the site's dark theme, even without Dark Reader).
+        for (const [value, title] of PERSONA_LIMIT_OPTIONS) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = title;
+          select.append(option);
+        }
+        select.addEventListener("change", async () => {
+          const choice = select.value;
+          if (!PERSONA_LIMIT_OPTIONS.some(([id]) => id === choice)) return;
+          personaLimitChoice = choice;
+          try { await DS.storageSet?.({ [PERSONA_LIMIT_CHOICE_KEY]: choice }); }
+          catch { select.title = "The plan choice could not be saved."; }
+          DS.applyPersonaLimitIndicator?.();
+        });
+        bar.append(select);
+      }
+      if (select.value !== personaLimitChoice) select.value = personaLimitChoice;
+      bar.title = personaLimitChoice === "auto"
+        ? "Subscription limit not confirmed by SpicyChat. Choose a plan to show a manual estimate."
+        : "Manual plan selection; this limit has not been verified against your subscription.";
+    }
   };
 
   DS.applyPersonaPageTools = async function applyPersonaPageTools() {

@@ -313,7 +313,9 @@ async function waitForBotStatusApiCheck(tabId, botId, timeoutMs = 12000) {
   if (!id) return null;
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 12000);
   let response = null;
+  let attempts = 0;
   do {
+    if (attempts++) botStatusCheckStats.retryAttempts++;
     const remaining = Math.max(500, deadline - Date.now());
     response = await tabsSendMessageWithTimeout(id, { type: "DS_BOT_STATUS_API_CHECK", botId }, Math.min(12000, remaining));
     if (response?.__dsTimeout) {
@@ -332,12 +334,24 @@ const botStatusRecentAnswers = new Map();
 const botStatusPendingAnswers = new Map();
 const BOT_STATUS_RECENT_TTL_MS = 3 * 60_000;
 const botStatusCheckStats = { requested: 0, cached: 0, coalesced: 0, checked: 0,
-  available: 0, restricted: 0, unavailable: 0, failed: 0, rateLimited: 0 };
+  available: 0, restricted: 0, unavailable: 0, failed: 0, rateLimited: 0,
+  uniqueTargets: 0, retryAttempts: 0, timeouts: 0, totalCheckMs: 0, slowestCheckMs: 0 };
+// Session-only set for *counts*. Never log, persist or export individual target IDs.
+const botStatusCountedTargets = new Set();
 let botStatusApiCooldownUntil = 0;
 
 async function runBotStatusHelperCheck(message) {
   const id = String(message?.botId || "").trim().toLowerCase();
   botStatusCheckStats.requested++;
+  if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id) && !botStatusCountedTargets.has(id)) {
+    botStatusCountedTargets.add(id);
+    botStatusCheckStats.uniqueTargets++;
+    // Only the current worker lifetime is counted; bound retained IDs.
+    if (botStatusCountedTargets.size > 12000) {
+      const oldest = botStatusCountedTargets.values().next().value;
+      botStatusCountedTargets.delete(oldest);
+    }
+  }
   const explicit = !!message?.forceOwnHelper || !!message?.forceRefresh || !!message?.bulkScan || !!message?.keepHelper;
   if (Date.now() < botStatusApiCooldownUntil) {
     return { ok: false, ready: true, status: "rate-limited", httpStatus: 429,
@@ -354,8 +368,17 @@ async function runBotStatusHelperCheck(message) {
   const pending = botStatusPendingAnswers.get(key);
   if (pending) { botStatusCheckStats.coalesced++; return pending; }
   const task = (async () => {
-    const result = await runUncachedBotStatusHelperCheck(message);
+    const startedAt = Date.now();
+    let result;
+    try { result = await runUncachedBotStatusHelperCheck(message); }
+    catch (error) { botStatusCheckStats.failed++; throw error; }
+    finally {
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      botStatusCheckStats.totalCheckMs += elapsedMs;
+      botStatusCheckStats.slowestCheckMs = Math.max(botStatusCheckStats.slowestCheckMs, elapsedMs);
+    }
     botStatusCheckStats.checked++;
+    if (String(result?.status || "") === "worker-timeout") botStatusCheckStats.timeouts++;
     const status = String(result?.status || "unknown");
     if (Object.prototype.hasOwnProperty.call(botStatusCheckStats, status)) botStatusCheckStats[status]++;
     else if (!result?.ok) botStatusCheckStats.failed++;
@@ -382,7 +405,9 @@ async function runBotStatusHelperCheck(message) {
 function currentBotStatusCheckStats() {
   return { ...botStatusCheckStats, cacheEntries: botStatusRecentAnswers.size,
     inFlight: botStatusPendingAnswers.size,
-    cooldownMs: Math.max(0, botStatusApiCooldownUntil - Date.now()) };
+    cooldownMs: Math.max(0, botStatusApiCooldownUntil - Date.now()),
+    // Number of currently outstanding requests is a snapshot, not a cumulative count.
+    outstanding: botStatusPendingAnswers.size };
 }
 
 async function runUncachedBotStatusHelperCheck(message) {
@@ -412,6 +437,7 @@ async function runUncachedBotStatusHelperCheck(message) {
   const status = String(response?.status || "");
   const shouldRetryOnOwnHelper = !forceOwnHelper && !worker.owned && (!response || ["api-bridge-not-ready", "auth-unavailable", "worker-error", "unknown", "worker-timeout"].includes(status));
   if (shouldRetryOnOwnHelper) {
+    botStatusCheckStats.retryAttempts++;
     botStatusWorkerTabId = null;
     botStatusWorkerOwned = false;
     await rememberBotStatusWorker(0, false);
