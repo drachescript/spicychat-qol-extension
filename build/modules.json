@@ -120,6 +120,7 @@
         "content/generation-profiles.js",
         "content/lorebook-consistency.js",
         "content/memory-manager.js",
+        "content/memory-packs.js",
         "content/message-options.js",
         "content/model-selector.js",
         "content/native-rating-helpers.js",
@@ -256,6 +257,7 @@
       "files": [
         "content/lorebook-backup.js",
         "content/lorebook-entries.js",
+        "content/lorebook-moderation-review.js",
         "content/lorebook-filter.js",
         "content/lorebook-search-filter.js",
         "content/lorebook-tags.js",
