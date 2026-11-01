@@ -25,22 +25,23 @@ class SettingsOwnershipTest(unittest.TestCase):
         for fid in EXPECTED:
             with self.subTest(feature=fid):
                 path = f"settings/feature-panels/{fid}.js"
-                self.assertEqual(len(re.findall(r'<script\\b[^>]*\\bsrc=["\\\']' +
-                                   re.escape(path) + r'["\\\'][^>]*>', HTML)), 1, path)
-                self.assertEqual(len(re.findall(r'<div\\b[^>]*\\bdata-dsq-feature-panel=["\\\']' +
-                                   re.escape(fid) + r'["\\\'][^>]*>\\s*</div>', HTML)), 1, fid)
+                self.assertEqual(HTML.count(f'<script src="{path}"></script>'), 1, path)
+                mount = f'<div id="ds-feature-panel-{fid}" data-dsq-feature-panel="{fid}"></div>'
+                self.assertEqual(HTML.count(mount), 1, fid)
                 self.assertTrue((ROOT / path).is_file())
         self.assertNotIn('src="settings/features/options-translation.js"', HTML)
 
     def test_contract_keys_and_saved_settings_ownership(self):
-        from_text = OWNER_JS
         for fid, keys in EXPECTED.items():
             contract = json.loads((CONTRACT_DIR / f"{fid}.json").read_text(encoding="utf-8"))
             with self.subTest(feature=fid):
                 self.assertIn(f"settings/feature-panels/{fid}.js", contract.get("settingsFiles", []))
+                pattern = r'"' + re.escape(fid) + r'"\\s*:\\s*\\[([^\\]]*)\\]'
+                found = re.search(pattern, OWNER_JS)
+                self.assertIsNotNone(found, f"Missing Settings owner for {fid}")
                 for key in keys:
                     self.assertIn(key, contract.get("settingsKeys", []))
-                    self.assertRegex(from_text, r'"' + re.escape(fid) + r'"\\s*:\\s*\\[[^\\]]*"' + re.escape(key) + r'"')
+                    self.assertIn(f'"{key}"', found.group(1))
 
     def test_soundscapes_settings_css_has_one_owner(self):
         contract = json.loads((CONTRACT_DIR / "soundscapes.json").read_text(encoding="utf-8"))
