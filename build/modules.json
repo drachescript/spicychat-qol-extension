@@ -460,7 +460,7 @@
         "settings/features/options-storage-maintenance.js",
         "settings/features/options-control-center.js",
         "settings/features/options-diagnostics.js",
-        "settings/features/options-translation.js",
+        "settings/feature-panels/translation.js",
         "settings/features/options-release-notes.js",
         "settings/options-performance-presets.js",
         "settings/features/options-settings-controls.js",
