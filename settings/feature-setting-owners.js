@@ -1,5 +1,8 @@
 // Small feature -> Settings ownership map. Values remain untouched when omitted.
 window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
+  "daily-message-limit": ["dailyMessageLimitTrackerEnabled"],
+  "personas": ["showPersonaLimitIndicator"],
+  "selection-memory": ["enableSelectionRemember"],
   "command-palette": [
     "enableCommandPalette",
     "commandPaletteShortcut",
@@ -11,6 +14,8 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
     "translationPerChatControls",
     "enableTranslation",
     "translationShowMessageButtons",
+    "translationGreetingButton",
+    "translationAutoGreeting",
     "translationAutoAi",
     "translationAutoUser",
     "translationTargetLanguage",
@@ -51,7 +56,6 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
     "contextKeeperAutoEveryMessages",
     "contextKeeperAutoMaxDetails",
     "contextKeeperMessageButtons",
-    "enableSelectionRemember",
     "contextKeeperRecapSize",
     "contextKeeperAutoRecall",
     "contextKeeperRelevantRecall",
@@ -127,6 +131,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   ],
   "chat-bookmarks": [
     "enableMessageBookmarks",
+    "enableChatHistoryNavigator",
     "messageBookmarkButtons"
   ],
   "focus-mode": [

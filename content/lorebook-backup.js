@@ -2174,6 +2174,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // A stuck native form must not leave the status at "Importing 1/5" forever.
     // All timeouts stop further entries; uncertain saves are never resent.
     importRunning = true;
+    const traceToken = DS.isDiagnosticTraceActive?.("normal")
+      ? DS.diagOperationStart?.("lorebook-import", "import-and-verify", { entryCount: count, duplicatePolicy }) : null;
+    let traceOutcome = "failed";
+    let nativeImportMs = 0;
+    let nativeImportStartedAt = 0;
+    let verificationMs = 0;
+    let traceCompleted = 0;
+    let traceErrors = 0;
     const controller = new AbortController();
     let timer;
     let lastFailure = '';
@@ -2196,6 +2204,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try {
       setStatus(`Preparing ${count} Lorebook entries…`);
       const maximumWait = Math.max(45000, Math.min(240000, count * 14000 + 15000));
+      nativeImportStartedAt = Date.now();
       const result = await Promise.race([
         DS.importLorebookEntryBatch(payload.entries, {
           duplicatePolicy,
@@ -2222,6 +2231,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           }, maximumWait);
         })
       ]);
+      nativeImportMs = Date.now() - nativeImportStartedAt;
+      traceCompleted = Number(result.completed || 0);
+      traceErrors = Number(result.failed || 0);
       const parts = [];
       if (result.created) parts.push(`${result.created} added`);
       if (result.skipped) parts.push(`${result.skipped} already existed`);
@@ -2232,6 +2244,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (result.paused || result.cancelled || result.failed || result.completed !== count) {
         const reason = lastFailure || result.stopReason || `Only ${result.completed}/${count} entries finished.`;
         setStatus(`Import stopped: ${reason} (${counts}). Your JSON is still available to retry after checking SpicyChat.`);
+        traceOutcome = result.cancelled ? "cancelled" : result.paused ? "paused" : "partial";
         return false;
       }
       // Refresh from SpicyChat rather than treating a closed modal as proof
@@ -2243,6 +2256,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       setStatus(`Checking SpicyChat saved all ${count} entries…`);
       let verifyTimer;
       let current;
+      const verificationStartedAt = Date.now();
       try {
         current = await Promise.race([
           DS.getCurrentOwnLorebookBackupData(info.id),
@@ -2251,7 +2265,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch (error) {
         setStatus(`Import submitted (${counts}), but the saved entries could not be checked: ${error?.message || error}. Review the Entries list before retrying.`);
         return false;
-      } finally {clearTimeout(verifyTimer);}
+      } finally {clearTimeout(verifyTimer); verificationMs = Date.now() - verificationStartedAt;}
       const saved = Array.isArray(current?.entries) ? current.entries : [];
       const names = new Set(saved.map(entry=>String(entry?.name||'').trim().toLowerCase()));
       const missing = payload.entries.filter(entry=>!names.has(String(entry.name||'').trim().toLowerCase()));
@@ -2268,7 +2282,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       let tagsQueued=false, tagWarning='';
       try {tagsQueued = await queueMissingLorebookTags(payload, info);}
       catch (error) {tagWarning=String(error?.message||error);}
-      if (tagsQueued) return true;
+      if (tagsQueued) { traceOutcome = "verified-tags-pending"; return true; }
       try {
         const pending=JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY)||'null');
         if(pending?.targetId===info.id && JSON.stringify(pending.payload?.entries||[])===JSON.stringify(payload.entries))
@@ -2279,6 +2293,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (routeInfo()?.id === info.id && routeInfo()?.page === 'entries' &&
             !document.querySelector('[role="dialog"][open], [data-state="open"][role="dialog"]')) location.reload();
       }, 1000);
+      traceOutcome = "verified";
       return true;
     } catch (error) {
       setStatus(`Import stopped: ${lastFailure || error?.message || error}. Check SpicyChat before retrying. Your JSON is unchanged.`);
@@ -2286,6 +2301,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } finally {
       clearTimeout(timer);
       if (timedOut) controller.abort();
+      if (!nativeImportMs && nativeImportStartedAt) nativeImportMs = Date.now() - nativeImportStartedAt;
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: timedOut ? "timeout" : traceOutcome,
+        counts: { scanned: traceCompleted, changed: traceCompleted, errors: traceErrors },
+        meta: { entryCount: count, duplicatePolicy, nativeImportMs, verificationMs,
+          serverVerificationAttempted: verificationMs > 0, timedOut }
+      });
       document.getElementById('ds-lorebook-cancel-import')?.remove();
       importRunning = false;
     }

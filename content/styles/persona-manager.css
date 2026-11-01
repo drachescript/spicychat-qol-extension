@@ -219,3 +219,62 @@
   }
 }
 
+
+/* Persona count by the native My Personas heading (same position as Favorites' count). */
+#ds-persona-limit-indicator {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: fit-content;
+  max-width: calc(100% - 12px);
+  margin: 2px 0 8px 12px;
+  color: inherit;
+  font: 400 14px/1.4 system-ui, sans-serif;
+}
+
+#ds-persona-limit-indicator [data-ds-persona-limit-count] {
+  white-space: nowrap;
+}
+
+/* Form popups must match SpicyChat's theme, including the actual <option> text.
+   Using transparent/initial colors made the menu white-on-white on Windows. */
+html.dark #ds-persona-limit-indicator select[data-ds-persona-plan-fallback] {
+  color-scheme: dark !important;
+  background-color: #1c1e22 !important;
+  color: #f5f5f6 !important;
+  -webkit-text-fill-color: #f5f5f6 !important;
+  border: 1px solid #555b66 !important;
+}
+html.dark #ds-persona-limit-indicator select[data-ds-persona-plan-fallback] option {
+  color-scheme: dark !important;
+  background-color: #1c1e22 !important;
+  color: #f5f5f6 !important;
+  -webkit-text-fill-color: #f5f5f6 !important;
+}
+html:not(.dark) #ds-persona-limit-indicator select[data-ds-persona-plan-fallback] {
+  color-scheme: light !important;
+  background-color: #fff !important;
+  color: #1c1e22 !important;
+  -webkit-text-fill-color: #1c1e22 !important;
+  border: 1px solid #858b96 !important;
+}
+html:not(.dark) #ds-persona-limit-indicator select[data-ds-persona-plan-fallback] option {
+  color-scheme: light !important;
+  background-color: #fff !important;
+  color: #1c1e22 !important;
+  -webkit-text-fill-color: #1c1e22 !important;
+}
+#ds-persona-limit-indicator select[data-ds-persona-plan-fallback] {
+  display: inline-block;
+  min-height: 30px;
+  max-width: min(185px, 75vw);
+  padding: 4px 25px 4px 8px;
+  border-radius: 7px;
+  font: 500 12px/1.35 system-ui, sans-serif;
+  cursor: pointer;
+}
+#ds-persona-limit-indicator select[data-ds-persona-plan-fallback]:focus-visible {
+  outline: 2px solid #5296ff;
+  outline-offset: 2px;
+}

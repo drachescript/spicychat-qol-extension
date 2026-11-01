@@ -318,3 +318,10 @@ $("soundscapeAddScene")?.addEventListener("click", async () => {
   await persistSoundscapeScenes({ rerender: true });
 });
 }
+
+// The shared backup helpers above are still used by Settings backup tools.
+// Only bind the Soundscapes editor when its own panel was installed.
+if (document.getElementById('soundscapesCard')) {
+  if (document.readyState === 'complete') bindSoundscapesSettingsEvents();
+  else window.addEventListener('load', bindSoundscapesSettingsEvents, { once: true });
+}

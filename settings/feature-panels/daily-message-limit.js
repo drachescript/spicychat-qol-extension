@@ -1,29 +1,31 @@
-// Optional Custom Lite Settings panel for passive daily-message-limit notices.
+// Daily Message Limit owns its Settings panel and setting handlers.
 (() => {
-  "use strict";
+  'use strict';
   const profile = window.__DSQ_BUILD_PROFILE__;
   if (profile?.generated && Array.isArray(profile.features) &&
-      !profile.features.includes("daily-message-limit")) return;
-  const host = document.getElementById("ds-feature-panel-daily-message-limit");
+      !profile.features.includes('daily-message-limit')) return;
+  const host = document.getElementById('ds-feature-panel-daily-message-limit');
   if (!host) return;
-  const card = document.createElement("section");
-  card.className = "card";
-  card.id = "dailyMessageLimitCard";
-  const title = document.createElement("h2");
-  title.textContent = "Daily message-limit notice";
-  const label = document.createElement("label");
-  label.className = "row";
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.id = "dailyMessageLimitTrackerEnabled";
-  const span = document.createElement("span");
-  span.textContent = "Show a notice when SpicyChat reports the daily message limit";
-  label.append(input, span);
-  const note = document.createElement("p");
-  note.className = "hint";
-  note.textContent = "Only reacts to a native limit error. The reset countdown is an estimate from your local midnight, not a verified reset time. No messages are sent to test it.";
-  card.append(title, label, note);
-  (window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled = () => input.checked;
-  (window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled = settings => { input.checked = settings.dailyMessageLimitTrackerEnabled === true; };
-  host.replaceWith(card);
+  const section = document.createElement('section');
+  section.className = 'card';
+  section.id = 'dailyMessageLimitSettingsCard';
+  const heading = document.createElement('h2');
+  heading.textContent = 'Daily message limit';
+  const label = document.createElement('label');
+  label.className = 'row';
+  const checkbox = document.createElement('input');
+  checkbox.id = 'dailyMessageLimitTrackerEnabled';
+  checkbox.type = 'checkbox';
+  const caption = document.createElement('span');
+  caption.textContent = 'Show the daily message counter and estimated reset time in chat';
+  label.append(checkbox, caption);
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = 'The counter uses observed activity and may differ from SpicyChat’s account limit.';
+  section.append(heading, label, hint);
+  host.replaceWith(section);
+  (window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled =
+    () => checkbox.checked;
+  (window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled =
+    settings => { checkbox.checked = settings.dailyMessageLimitTrackerEnabled === true; };
 })();

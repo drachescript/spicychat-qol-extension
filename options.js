@@ -795,6 +795,8 @@ const OPTIONAL_FEATURE_KEYS = [
   "chatTextReplacementPreview",
   "enableTranslation",
   "translationShowMessageButtons",
+  "translationGreetingButton",
+  "translationAutoGreeting",
   "translationAutoAi",
   "translationAutoUser",
   "blockCards",
@@ -898,6 +900,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "savePersonasFromPages",
   "keepLocalPersonaCopies",
   "expandPersonaDescriptions",
+  "showPersonaLimitIndicator",
   "enablePersonaOrganizer",
   "showPersonaQuickSwitch",
   "hideChatPlusButton",
@@ -2791,12 +2794,12 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableMessageBookmarks", name: "Message bookmarks", children: ["messageBookmarkButtons", "enableChatHistoryNavigator"] },
   { parent: "enableChatContinuationAssistant", name: "Chat Continuation / Transfer", children: [] },
   { parent: "enableFocusMode", name: "Focus / Immersive Mode", children: ["focusHideSidebar", "focusHideTopBar", "focusHideChatHeader", "focusHideQolPanel"] },
-  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "enableSelectionRemember", "contextKeeperAutoRecall", "contextKeeperRelevantRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
+  { parent: "enableContextKeeper", name: "Context Keeper", children: ["contextKeeperAutoCapture", "contextKeeperAutoSensitivity", "contextKeeperAutoEveryMessages", "contextKeeperAutoMaxDetails", "contextKeeperMessageButtons", "contextKeeperAutoRecall", "contextKeeperRelevantRecall", "contextKeeperRecallEverySends", "contextKeeperRecallMaxChars"] },
   { parent: "enableStoryDayTracker", name: "Internal Day Tracker", children: ["storyDayTrackerMode", "storyDayTrackerIncludeInContext", "storyDayTrackerShowQuickPanel"] },
   { parent: "enableRpStateTracker", name: "RP State Tracker", children: ["rpStateTrackerMode", "rpStateInjectMode", "rpStateMaxContextChars", "rpStateShowQuickPanel"] },
   { parent: "enableGlobalMemory", name: "Global Memory", children: ["globalMemoryText", "globalMemorySendMode", "globalMemoryOocWrapper", "globalMemoryShowChatButton"] },
   { parent: "enableChatNudges", name: "Chat Nudges", children: ["chatNudgeDefaultHours", "chatNudgeBrowserNotifications"] },
-  { parent: "enableTranslation", name: "Message translation", children: ["translationShowMessageButtons", "translationAutoAi", "translationAutoUser", "translationAllowRemoteFallback", "translationPerChatControls"] },
+  { parent: "enableTranslation", name: "Message translation", children: ["translationShowMessageButtons", "translationGreetingButton", "translationAutoGreeting", "translationAutoAi", "translationAutoUser", "translationAllowRemoteFallback", "translationPerChatControls"] },
   { parent: "showFormattingToolbar", name: "Formatting toolbar", children: ["formatToolbarAsterisk", "formatToolbarBold", "formatToolbarBoldItalic", "formatToolbarStrike", "formatToolbarParens", "formatToolbarQuotes", "formatToolbarBackticks", "formatToolbarBrackets", "formatToolbarBraces"] },
   { parent: "enableBulkMemoryManager", name: "Memory Manager", children: ["enableMemoryVault"] },
   { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerExplorerFolders", "botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
@@ -2917,29 +2920,6 @@ $("duplicateTabCheckNow")?.addEventListener("click", runDuplicateTabCheckNow);
 bindTabCleanupSettingsEvents();
 
 
-$("saveLibreTranslate")?.addEventListener("click", () => saveLibreInstance());
-$("testLibreTranslate")?.addEventListener("click", () => saveLibreInstance({ testing: true }));
-$("copyEnglishFirstOoc")?.addEventListener("click", async () => {
-  const instruction = "(OOC: Please write your next replies in natural English, preserving character names, dialogue formatting and actions. My chat interface may translate your responses for display. Do not translate or control my character's own dialogue.)";
-  try {
-    await navigator.clipboard.writeText(instruction);
-    showSettingsToast("English-first OOC copied. Paste it into chat using your usual OOC workflow.");
-  } catch { showSettingsToast("Could not copy. Enable clipboard access or copy the instruction manually."); }
-});
-$("testLocalTranslator")?.addEventListener("click", async () => {
-  const host = $("localTranslatorStatus");
-  if (!host) return;
-  // Options pages and content scripts can expose the same Chrome Translator API.
-  const API = globalThis.Translator;
-  if (!API?.availability || !API?.create) { host.textContent = "This browser doesn't expose the on-device Translator API to QoL."; return; }
-  host.textContent = "Checking language model...";
-  try {
-    const targetLanguage = value("translationTargetLanguage", "DE").split("-")[0].toLowerCase();
-    const sourceLanguage = targetLanguage === "en" ? "de" : "en";
-    const state = await API.availability({ sourceLanguage, targetLanguage });
-    host.textContent = `On-device support (${sourceLanguage} → ${targetLanguage}): ${state}. A model download may be needed.`;
-  } catch (error) { host.textContent = error?.message || String(error); }
-});
 $("chatBackgroundGlobalUpload")?.addEventListener("change", async event => { await importGlobalChatBackground(event.target.files); event.target.value = ""; });
 $("useGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl());
 $("refreshGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl({ refresh: true }));
@@ -2947,7 +2927,6 @@ $("clearGlobalChatBackground")?.addEventListener("click", clearGlobalChatBackgro
 $("clearPerChatBackgrounds")?.addEventListener("click", clearPerChatBackgrounds);
 $("chatBackgroundFit")?.addEventListener("change", renderChatBackgroundOptions);
 $("chatBackgroundPosition")?.addEventListener("change", renderChatBackgroundOptions);
-bindSoundscapesSettingsEvents();
 
 $("clearOpened")?.addEventListener("click", clearOpened);
 $("exportSettings")?.addEventListener("click", exportSettings);
@@ -3083,9 +3062,6 @@ $("addBlockedBot")?.addEventListener("click", () => addManagedBot("blocked"));
 $("addNotInterestedBot")?.addEventListener("click", () => addManagedBot("notInterested"));
 $("addFavoriteCreator")?.addEventListener("click", addFavoriteCreator);
 $("addFollowedCreator")?.addEventListener("click", addFollowedCreator);
-$("saveDeeplKey")?.addEventListener("click", () => saveDeepLKey());
-$("testDeepl")?.addEventListener("click", testDeepL);
-$("checkDeeplUsage")?.addEventListener("click", checkDeepLUsage);
 [
   "textNormalizationEnabled",
   "normalizeFancyUnicode",

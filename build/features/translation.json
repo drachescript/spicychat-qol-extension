@@ -14,7 +14,9 @@
     "translationProvider",
     "translationShowMessageButtons",
     "translationTargetLanguage",
-    "translationUnderstoodLanguages"
+    "translationUnderstoodLanguages",
+    "translationGreetingButton",
+    "translationAutoGreeting"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

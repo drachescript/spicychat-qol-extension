@@ -23,5 +23,8 @@
   ],
   "settingsFiles": [
     "settings/feature-panels/soundscapes.js"
+  ],
+  "settingsStyles": [
+    "settings/styles/soundscapes.css"
   ]
 }

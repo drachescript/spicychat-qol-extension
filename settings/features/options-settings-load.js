@@ -614,7 +614,6 @@ async function load() {
   setChecked("showMessageQuickActions", !!settings.showMessageQuickActions);
 
   setChecked("enableSavedTextSnippets", !!settings.enableSavedTextSnippets);
-  setChecked("enableSelectionRemember", !!settings.enableSelectionRemember);
 
   setValue("rpStateTrackerMode", ["manual", "conservative", "assisted"].includes(settings.rpStateTrackerMode) ? settings.rpStateTrackerMode : "conservative");
   setValue("rpStateInjectMode", ["manual", "changed", "every"].includes(settings.rpStateInjectMode) ? settings.rpStateInjectMode : "changed");
@@ -623,7 +622,7 @@ async function load() {
 
   renderChatNudgeManager(result[CHAT_NUDGE_STORE_KEY]);
   refreshChatNudgePermissionStatus();
-  armLazySoundscapeManager();
+  if ($("soundscapesCard") && typeof armLazySoundscapeManager === "function") armLazySoundscapeManager();
   setChecked("messageQuickActionCopy", !!settings.messageQuickActionCopy);
   setChecked("messageQuickActionEdit", !!settings.messageQuickActionEdit);
   setChecked("messageQuickActionRemoveImage", !!settings.messageQuickActionRemoveImage);

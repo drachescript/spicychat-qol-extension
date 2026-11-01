@@ -3,10 +3,15 @@
   "primary": "content/selection-memory.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "enableSelectionRemember"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/selection-memory.js"
+  ]
 }

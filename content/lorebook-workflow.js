@@ -1101,15 +1101,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function saveWorkspaceEntry(entry, { rerender = true } = {}) {
     if (!entry || !entry.dirty || multiWorkspaceSaving) return true;
     multiWorkspaceSaving = true;
+    const traceToken = rerender && DS.isDiagnosticTraceActive?.("normal")
+      ? DS.diagOperationStart?.("lorebook-workspace", "save-entry", {}) : null;
+    let traceOutcome = "failed";
+    let openMs = 0;
+    let nativeSaveMs = 0;
     if (rerender) renderMultiWorkspace();
     try {
       const row = workspaceRowByName(entry.originalName) || workspaceRowByName(entry.name);
       if (!row) throw new Error(`Could not find “${entry.originalName || entry.name}” in the loaded Lorebook entries.`);
+      const openStartedAt = Date.now();
       const parts = await openRow(row);
+      openMs = Date.now() - openStartedAt;
       nativeSetValue(parts.name, clean(entry.name, 50));
       nativeSetValue(parts.content, clean(entry.content, 2000));
-      await setKeywords(parts, entry.keywords || []);
-      await submitModal(parts);
+      const saveStartedAt = Date.now();
+      try {
+        await setKeywords(parts, entry.keywords || []);
+        await submitModal(parts);
+      } finally { nativeSaveMs = Date.now() - saveStartedAt; }
       analyzedEntries.delete(entry.originalName);
       analyzedEntries.set(clean(entry.name, 50), {
         name: clean(entry.name, 50),
@@ -1121,11 +1131,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       entry.dirty = false;
       setManagerStatus(`Saved “${entry.name}”.`);
       await sleep(120);
+      traceOutcome = "saved";
       return true;
     } catch (error) {
       setManagerStatus(`Could not save “${entry.name || entry.originalName}”: ${error?.message || error}`);
       return false;
     } finally {
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: traceOutcome, meta: { openMs, nativeSaveMs }
+      });
       multiWorkspaceSaving = false;
       if (rerender) renderMultiWorkspace();
     }
@@ -1136,10 +1150,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const dirty = multiWorkspaceEntries.filter(entry => entry.dirty);
     if (!dirty.length) return;
     let saved = 0;
-    for (const entry of dirty) {
-      const ok = await saveWorkspaceEntry(entry, { rerender: false });
-      if (!ok) break;
-      saved += 1;
+    const traceToken = DS.isDiagnosticTraceActive?.("normal")
+      ? DS.diagOperationStart?.("lorebook-workspace", "save-changed-batch", { entryCount: dirty.length }) : null;
+    try {
+      for (const entry of dirty) {
+        const ok = await saveWorkspaceEntry(entry, { rerender: false });
+        if (!ok) break;
+        saved += 1;
+      }
+    } finally {
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: saved === dirty.length ? "complete" : "partial",
+        counts: { scanned: saved, changed: saved, errors: saved < dirty.length ? 1 : 0 },
+        meta: { requested: dirty.length }
+      });
     }
     renderMultiWorkspace();
     if (saved) setManagerStatus(`Saved ${saved} workspace entr${saved === 1 ? "y" : "ies"}.`);

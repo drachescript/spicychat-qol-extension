@@ -783,7 +783,10 @@ async function runSettingsHealthCheck() {
   const warnings = [];
   const notices = [];
 
-  const missingControls = Object.keys(DEFAULT_SETTINGS).filter(key => !SETTINGS_NO_DIRECT_CONTROL_KEYS.has(key) && !document.getElementById(key));
+  const missingControls = Object.keys(DEFAULT_SETTINGS).filter(key =>
+    !SETTINGS_NO_DIRECT_CONTROL_KEYS.has(key) &&
+    !isSettingOwnedByExcludedFeature(key) &&
+    !document.getElementById(key));
   const requiredMissing = [...SETTINGS_RUNTIME_REQUIRED_KEYS].filter(key => !(key in DEFAULT_SETTINGS) || !document.getElementById(key));
   const missing = uniqueClean([...missingControls, ...requiredMissing]);
   if (missing.length) {
@@ -792,7 +795,9 @@ async function runSettingsHealthCheck() {
       detail: `Developer self-check: ${missing.slice(0, 18).join(", ")}${missing.length > 18 ? ` +${missing.length - 18} more` : ""}. This usually means a feature was wired in code but its Settings UI was not shipped.`
     });
   }
-  if (current.enableTranslation && (current.translationProvider || "deepl") === "deepl" && !String(result[DEEPL_API_KEY] || "").trim()) {
+  if (current.enableTranslation && (current.translationProvider || "deepl") === "deepl" &&
+      (current.translationShowMessageButtons || current.translationAutoAi || current.translationAutoUser || current.translationPerChatControls) &&
+      !String(result[DEEPL_API_KEY] || "").trim()) {
     warnings.push({ title: "DeepL translation is enabled without an API key", detail: "Translation cannot run until a DeepL API key is saved and tested.", target: "deeplApiKey" });
   }
 

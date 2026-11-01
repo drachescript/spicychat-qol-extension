@@ -32,6 +32,9 @@ jobs:
       - name: Check Custom feature ownership and catalog
         run: python -m unittest discover -s build -p 'test_custom_52.py' -v
 
+      - name: Test newly split feature Settings ownership
+        run: python -m unittest discover -s build -p 'test_custom_settings_split.py' -v
+
       - name: Test feature recipes and minimal package
         run: python -m unittest discover -s build -p 'test_custom_recipes.py' -v && python -m unittest discover -s build -p 'test_minimal_ooc.py' -v
 

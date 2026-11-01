@@ -68,6 +68,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return !!root?.querySelector?.("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
   }
 
+  // The opening greeting is the first *loaded* message only when it belongs
+  // to the bot. Do not mark the first visible reply in an older chat as a
+  // greeting after the virtualized history has scrolled off the DOM.
+  function getOpeningGreeting() {
+    const roots = getMessageRoots();
+    const first = roots[0];
+    if (!first || !isAiMessage(first)) return null;
+    const lane = first.closest('[data-testid="ChatMessageList"]');
+    if (!lane) return null;
+    // Older-message fetch/load controls mean the actual beginning is missing.
+    if (lane.querySelector('[data-testid*="LoadOlder"], [data-testid*="LoadPrevious"], [data-testid*="LoadMore"], button[aria-label*="older" i], button[aria-label*="previous messages" i]')) return null;
+    return first;
+  }
+
   function sourceText(root) {
     const container = textContainer(root);
     // textContent avoids a forced style/layout flush on every QoL pass.
@@ -104,6 +118,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       root.querySelector(":scope .ds-translation-block")?.remove();
       delete root.dataset.dsTranslationDone; delete root.dataset.dsTranslationSkipped;
       delete root.dataset.dsTranslationSourceHash; delete root.dataset.dsTranslationTarget;
+      delete root.dataset.dsTranslationGreetingBusy;
     });
     lastApplySignature = "";
     DS.applyTranslationTools?.();
@@ -328,6 +343,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.setSafeMarkup(block, `
       <div class="ds-translation-actions">
         <button type="button" class="ds-translation-button">Translate</button>
+        <button type="button" class="ds-translation-greeting-provider" hidden>Use selected provider</button>
+        <button type="button" class="ds-translation-greeting-external" hidden>Open in Google Translate</button>
         <button type="button" class="ds-translation-toggle" hidden>Hide translation</button>
       </div>
       <div class="ds-translation-text" hidden></div>
@@ -337,6 +354,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const translateButton = block.querySelector(".ds-translation-button");
     const toggle = block.querySelector(".ds-translation-toggle");
     translateButton.addEventListener("click", () => {
+      if (root.dataset.dsTranslationGreeting === "1") {
+        translateGreeting(root, { manual: true });
+        return;
+      }
       if (provider() === "external") {
         // Open directly inside the user gesture; await/storage operations can
         // cause browsers to block a newly opened translation tab.
@@ -345,6 +366,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           const note = block.querySelector(".ds-translation-note");
           note.hidden = false; note.textContent = error?.message || String(error);
         }
+      } else translateRoot(root, { manual: true });
+    });
+    block.querySelector(".ds-translation-greeting-external")?.addEventListener("click", () => {
+      try { openExternalTranslator(sourceText(root), targetLang()); }
+      catch (error) {
+        const note = block.querySelector(".ds-translation-note");
+        if (note) { note.hidden = false; note.textContent = error?.message || String(error); }
+      }
+    });
+    block.querySelector(".ds-translation-greeting-provider")?.addEventListener("click", () => {
+      // Explicit user gesture only: this can use a configured remote service.
+      if (provider() === "external") {
+        try { openExternalTranslator(sourceText(root), targetLang()); } catch {}
       } else translateRoot(root, { manual: true });
     });
     toggle.addEventListener("click", () => {
@@ -371,13 +405,81 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ? `Translated from ${result.detectedSourceLanguage} with ${result.provider || "DeepL"}`
       : `Translated with ${result.provider || "DeepL"}`;
     note.hidden = false;
-    button.textContent = "Translate again";
+    button.textContent = root.dataset.dsTranslationGreeting === "1" ? "Translate greeting again" : "Translate again";
+    block.querySelector(".ds-translation-greeting-external")?.setAttribute("hidden", "");
+    block.querySelector(".ds-translation-greeting-provider")?.setAttribute("hidden", "");
     button.disabled = false;
     toggle.hidden = false;
     toggle.textContent = "Hide translation";
     root.dataset.dsTranslationDone = "1";
     root.dataset.dsTranslationTarget = targetLang();
     if (source) root.dataset.dsTranslationSourceHash = `${simpleHash(source)}:${source.length}`;
+  }
+
+  async function translateGreeting(root, { manual = false } = {}) {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !settings.enableTranslation || !DS.isSingleChatPage?.()) return;
+    if (!settings.translationGreetingButton && !settings.translationAutoGreeting) return;
+    if (root !== getOpeningGreeting()) return;
+    const text = sourceText(root);
+    if (!text || text.length < 2 || root.dataset.dsTranslationGreetingBusy) return;
+    if (!manual) {
+      const guessed = guessLanguage(text);
+      if (guessed && understoodLanguages().has(guessed)) {
+        root.dataset.dsTranslationSkipped = guessed;
+        root.dataset.dsTranslationSourceHash = `${simpleHash(text)}:${text.length}`;
+        return;
+      }
+    }
+    const target = targetLang();
+    const block = ensureBlock(root);
+    if (!block) return;
+    const button = block.querySelector(".ds-translation-button");
+    const note = block.querySelector(".ds-translation-note");
+    const google = block.querySelector(".ds-translation-greeting-external");
+    const remote = block.querySelector(".ds-translation-greeting-provider");
+    root.dataset.dsTranslationGreetingBusy = "1";
+    if (button) { button.disabled = true; button.textContent = "Translating greeting..."; }
+    if (note) note.hidden = true;
+    try {
+      await loadCache();
+      const key = `local:${target}:${simpleHash(text)}:${text.length}`;
+      let result = memoryCache.get(key);
+      if (!result?.text) {
+        const protectedText = protectForTranslation(text);
+        result = await localTranslate(protectedText.text, target);
+        result = {
+          text: protectedText.restore(result.text || ""),
+          detectedSourceLanguage: result.detectedSourceLanguage || "",
+          provider: "On-device",
+          savedAt: Date.now()
+        };
+        if (!result.text) throw new Error("The translator returned no text.");
+        memoryCache.set(key, result);
+        scheduleCacheSave();
+      }
+      // A chat switch, message edit or target language change invalidates work in flight.
+      if (!root.isConnected || root !== getOpeningGreeting() || sourceText(root) !== text || targetLang() !== target) return;
+      renderResult(root, result, text);
+    } catch (error) {
+      if (!root.isConnected || root !== getOpeningGreeting()) return;
+      if (note) {
+        note.hidden = false;
+        note.textContent = `On-device greeting translation unavailable: ${error?.message || String(error)}. Use Google Translate or your selected provider manually.`;
+      }
+      if (google) google.hidden = false;
+      if (remote && !["local", "auto"].includes(provider())) {
+        remote.hidden = false;
+        remote.textContent = provider() === "deepl" ? "Use DeepL API" : provider() === "libre" ? "Use LibreTranslate" : "Open with selected provider";
+      }
+      if (!manual) {
+        root.dataset.dsTranslationSkipped = "local-unavailable";
+        root.dataset.dsTranslationSourceHash = `${simpleHash(text)}:${text.length}`;
+      }
+    } finally {
+      delete root.dataset.dsTranslationGreetingBusy;
+      if (button) { button.disabled = false; button.textContent = root.dataset.dsTranslationDone ? "Translate greeting again" : "Translate greeting"; }
+    }
   }
 
   async function translateRoot(root, { manual = false } = {}) {
@@ -485,6 +587,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       delete el.dataset.dsTranslationSkipped;
       delete el.dataset.dsTranslationTarget;
       delete el.dataset.dsTranslationSourceHash;
+      delete el.dataset.dsTranslationGreeting;
+      delete el.dataset.dsTranslationGreetingBusy;
     });
   }
 
@@ -575,6 +679,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const signature = JSON.stringify([
       targetLang(),
       !!settings.translationShowMessageButtons,
+      !!settings.translationGreetingButton,
+      !!settings.translationAutoGreeting,
       !!settings.translationAutoAi,
       !!settings.translationAutoUser,
       String(settings.translationUnderstoodLanguages || ""),
@@ -596,7 +702,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.translationDirtyRoots = Number(counters.translationDirtyRoots || 0) + roots.length;
     }
 
+    const openingGreeting = (settings.translationGreetingButton || settings.translationAutoGreeting) ? getOpeningGreeting() : null;
     for (const root of roots) {
+      const isGreeting = root === openingGreeting;
+      if (isGreeting && (settings.translationGreetingButton || settings.translationAutoGreeting)) root.dataset.dsTranslationGreeting = "1";
+      else delete root.dataset.dsTranslationGreeting;
       const currentText = sourceText(root);
       const currentSourceHash = currentText ? `${simpleHash(currentText)}:${currentText.length}` : "";
       if (
@@ -611,12 +721,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       const ai = isAiMessage(root);
-      const showButton = !!settings.translationShowMessageButtons || provider() === "external";
-      const auto = provider() !== "external" && (ai ? !!settings.translationAutoAi : !!settings.translationAutoUser);
+      const greetingEnabled = isGreeting && (!!settings.translationGreetingButton || !!settings.translationAutoGreeting);
+      const showButton = !!settings.translationShowMessageButtons || provider() === "external" || (greetingEnabled && !!settings.translationGreetingButton);
+      const autoGreeting = greetingEnabled && !!settings.translationAutoGreeting;
+      const normalAuto = provider() !== "external" && (ai ? !!settings.translationAutoAi : !!settings.translationAutoUser);
+      const auto = autoGreeting || normalAuto;
 
       if (showButton || auto) {
         const block = ensureBlock(root);
-        if (block) block.querySelector(".ds-translation-actions").hidden = !showButton;
+        if (block) {
+          block.querySelector(".ds-translation-actions").hidden = !showButton && !autoGreeting;
+          const button = block.querySelector(".ds-translation-button");
+          if (button) {
+            button.hidden = !showButton;
+            if (isGreeting && !root.dataset.dsTranslationDone && !root.dataset.dsTranslationGreetingBusy && !root.dataset.dsTranslationPending) button.textContent = "Translate greeting";
+          }
+        }
       }
 
       if (
@@ -628,7 +748,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         !root.dataset.dsTranslationSkipped
       ) {
         root.dataset.dsTranslationPending = "1";
-        translateRoot(root).finally(() => delete root.dataset.dsTranslationPending);
+        (autoGreeting ? translateGreeting(root) : translateRoot(root)).finally(() => delete root.dataset.dsTranslationPending);
       }
     }
   };

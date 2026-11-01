@@ -1801,6 +1801,10 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
   overflow-wrap: anywhere;
 }
 
+/* Greeting translation uses the existing chat translation block. */
+.ds-translation-greeting-provider,
+.ds-translation-greeting-external { color: inherit !important; }
+
 /* DeepL message translations */
 .ds-translation-block {
   display: flex;
