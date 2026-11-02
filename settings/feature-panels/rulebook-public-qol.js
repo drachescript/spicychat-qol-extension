@@ -23,8 +23,8 @@
   const label=document.createElement("label");label.textContent="Blocked Rulebook UUIDs, one per line";
   const textarea=document.createElement("textarea");textarea.id="rulebookBlockedIds";textarea.spellcheck=false;
   textarea.placeholder="12f13d54-5738-5c46-b7a7-9ac6dd00b52f";label.appendChild(textarea);card.appendChild(label);
-  readers.rulebookBlockedIds=()=>[...new Set(textarea.value.split(/\\r?\\n/).map(v=>v.trim()).filter(Boolean))];
-  loaders.rulebookBlockedIds=settings=>{textarea.value=Array.isArray(settings.rulebookBlockedIds)?settings.rulebookBlockedIds.join("\\n"):"";};
+  readers.rulebookBlockedIds=()=>[...new Set(textarea.value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean))];
+  loaders.rulebookBlockedIds=settings=>{textarea.value=Array.isArray(settings.rulebookBlockedIds)?settings.rulebookBlockedIds.join("\n"):"";};
   const hint=document.createElement("p");hint.className="hint";
   hint.textContent="Local blocking by ID, blocked words, or creator. Rulebook meters aren't tags.";
   card.appendChild(hint);host.replaceWith(card);
