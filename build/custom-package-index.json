@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.68",
+  "sourceVersion": "0.2.69",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -554,6 +554,25 @@
       "settings": [],
       "settingsStyles": [],
       "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-pins",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "chat-list"
+      ],
+      "runtime": "content/chat-pins.js",
+      "settings": [
+        "settings/feature-panels/chat-pins.js"
+      ],
+      "settingsStyles": [],
+      "styles": [
+        "content/styles/chat-pins.css"
+      ],
       "background": [],
       "helpers": [],
       "fullyIndependent": false
@@ -1709,6 +1728,21 @@
       "styles": [
         "content/styles/rulebook-filter.css"
       ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "rulebook-public-qol",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/rulebook-public-qol.js",
+      "settings": [
+        "settings/feature-panels/rulebook-public-qol.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
       "background": [],
       "helpers": [],
       "fullyIndependent": false

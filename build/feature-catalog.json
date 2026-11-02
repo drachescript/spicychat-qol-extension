@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.68",
+  "version": "0.2.69",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 132,
+  "featureCount": 134,
   "sections": [
     "Blocking",
     "Chat List",
@@ -111,6 +111,7 @@
     "content/chat-picture-core.js",
     "content/chat-picture-editor-core.js",
     "content/chat-picture-override-core.js",
+    "content/chat-pins.js",
     "content/chat-rulebook-metadata.js",
     "content/chat-scene-notes.js",
     "content/chat-search.js",
@@ -216,6 +217,7 @@
     "content/rp-state-tracker.js",
     "content/rulebook-diagnostics.js",
     "content/rulebook-filter.js",
+    "content/rulebook-public-qol.js",
     "content/runtime-improvements.js",
     "content/runtime-kernel.js",
     "content/runtime-plan.js",
@@ -1371,6 +1373,42 @@
       "backgroundServices": [],
       "settingKeys": [
         "enableChatOrganizer"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "chat-pins",
+      "label": "Chat Pins",
+      "description": "Adds the chat pins tools.",
+      "section": "Chat List",
+      "group": "chatList",
+      "requiredFeatures": [
+        "chat-list"
+      ],
+      "runtimeScripts": [
+        "content/chat-pins.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [
+        "content/styles/chat-pins.css"
+      ],
+      "settingsScripts": [
+        "settings/feature-panels/chat-pins.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableChatPins"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -3840,6 +3878,41 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "rulebook-public-qol",
+      "label": "Rulebook Public Qol",
+      "description": "Adds the rulebook public qol tools.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/rulebook-public-qol.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/rulebook-public-qol.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "rulebookBlockingEnabled",
+        "applyBotBlockingToRulebooks",
+        "showRulebookBlockButtons",
+        "rulebookBlockedIds"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
