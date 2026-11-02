@@ -1,0 +1,23 @@
+{
+  "id": "chat-pins",
+  "primary": "content/chat-pins.js",
+  "type": "content",
+  "dependencies": [
+    "chat-list"
+  ],
+  "settingsKeys": [
+    "enableChatPins"
+  ],
+  "requiredHelpers": [],
+  "styleFiles": [
+    "content/styles/chat-pins.css"
+  ],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false,
+  "settingsFiles": [
+    "settings/feature-panels/chat-pins.js"
+  ],
+  "settingsMarkupIsolated": true
+}

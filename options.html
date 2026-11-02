@@ -246,7 +246,7 @@
 <label class="row"><input id="autoAfkActionClose" name="autoAfkAction" type="radio" value="close"/><span>Close tab</span></label>
 <label class="row"><input checked="" id="autoAfkProtectActive" type="checkbox"/><span>Never unload or close the currently active tab</span></label>
 <label class="row"><input checked="" id="autoAfkResetOnActivate" type="checkbox"/><span>Reset the timer when the tab is opened or selected</span></label>
-<p class="hint">Automatically unload or close SpicyChat tabs you haven't used for a while. Unloading keeps the tab visible; it reloads when you go back. This is separate from the low-memory limit above.</p>
+<p class="hint">Unload or close unused SpicyChat tabs after a set time. Unloaded tabs reload when opened.</p>
 <div class="button-row">
 <button id="autoAfkCheckNow" type="button">Run cleanup check now</button>
 </div>
@@ -257,7 +257,7 @@
 <label>Maximum loaded normal SpicyChat tabs
 <input id="maxAwakeSpicyTabs" max="20" min="1" step="1" type="number" value="3"/>
 </label>
-<p class="hint">If too many SpicyChat tabs are open, QoL unloads older inactive ones to save memory. Active, pinned, playing-audio and protected tabs stay open. Unloaded tabs reload when selected.</p>
+<p class="hint">Unload older inactive tabs to save memory. Active, pinned, audio and protected tabs are left alone.</p>
 </section><section class="card" id="duplicateTabGuardCard">
 <h2>Duplicate SpicyChat tab guard</h2>
 <label class="row"><input id="duplicateTabGuardEnabled" type="checkbox"/><span>Automatically close duplicate SpicyChat tabs</span></label>
@@ -372,7 +372,7 @@
 <button id="tabCleanupUndoSnapshotRemoval" type="button" hidden="">Undo last snapshot cleanup</button>
 </div>
 <p class="hint" id="tabCleanupSnapshotReviewSummary">Snapshot cleanup preview loading…</p>
-<p class="hint">Unavailable here means the last saved Bot Status result, not a new live check. Private or restricted bots aren't automatically treated as deleted. Removing a saved entry doesn't close a tab or delete a chat; QoL asks for a backup first.</p>
+<p class="hint">Status comes from the last saved check, not a new scan. Private does not mean deleted. Removing a saved record never deletes a chat.</p>
 <div class="tab-cleanup-review-controls tab-cleanup-close-controls">
 <button id="tabCleanupCloseSelected" type="button">Save session + close selected</button>
 <label class="row" hidden="" id="tabCleanupRemoveReopenedWrap"><input id="tabCleanupRemoveReopened" type="checkbox"/><span>Remove successfully reopened entries from this closed-session recovery list</span></label>
@@ -405,14 +405,15 @@
 
 <div class="tab-page" data-page="chat-list"><p class="page-intro">Search, filter, sort, rediscover, and manage conversations on /chat and /chats.</p>
 <section class="card">
-<h2>Chat list tools</h2>
-<label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable Chat List tools</span></label>
-<label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable local chat folders + multi-select organizing</span></label>
+<h2>Conversation tools</h2>
+<label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable conversation list tools</span></label>
+<label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable conversation folders and bulk organizing</span></label>
+<div id="ds-feature-panel-chat-pins" data-dsq-feature-panel="chat-pins"></div>
 <div id="ds-feature-panel-chat-smart-folders" data-dsq-feature-panel="chat-smart-folders"></div>
-<label>Chat folders<textarea id="chatCollections" placeholder="Favorites
+<label>Conversation folders<textarea id="chatCollections" placeholder="Favorites
 Long chats
 Testing"></textarea></label>
-<p class="hint">Organize chats into your own folders and move several at once. These folders only exist in QoL; your actual SpicyChat conversations don't move or change.</p>
+<p class="hint">Organize individual chats into local folders, including several at once. SpicyChat conversations stay unchanged.</p>
 <label class="row"><input id="showSavedChatQuickActions" type="checkbox"/><span>Show Change Title, Clone, and Remove quick actions on saved conversations</span></label>
 <label>
           Default chat sort
@@ -457,10 +458,10 @@ Testing"></textarea></label>
 <h3>Chat Index</h3>
 <label class="row"><input id="enableChatIndex" type="checkbox"/><span>Enable Chat Index on the chat list (off by default)</span></label>
 <label class="row"><input id="chatIndexEnhanceNativeSearch" type="checkbox"/><span>Show additional Chat Index matches under SpicyChat's native History search (off by default)</span></label>
-<p class="hint">Uses the existing locally imported conversation names/IDs; no chats are fetched or mounted when searching. The native Search button keeps working, and pressing Enter in its search field also searches. Requires Chat List Tools or Chat Index to be enabled. Message-text indexing remains a separate manual tool.</p>
-<p class="hint">When enabled, a Chat Index button appears with the chat list tools on /chats. It opens a larger searchable window with local chat favorites, status filters and manual API refresh controls. Existing indexed data stays saved when disabled. No automatic scan is started by this option.</p>
+<p class="hint">Search locally saved chat names and IDs without loading the chats. Message-text search is a separate manual index.</p>
+<p class="hint">Adds a searchable Chat Index on /chats. Refresh it manually; disabling it keeps saved index data.</p>
 </section>
-<p class="hint">Visible chat cards and the locally imported conversation catalog are searched separately, so matches don't require loading thousands of cards. Message/saved/blocked filters affect native cards; the imported results show matching saved conversation names/IDs and link to their exact chats. Full API rescan refreshes chat names and IDs, not the actual message text. For message content, enable Chat Index and choose Messages / text, then manually index selected batches. Favorite history is QoL's remembered local history, not SpicyChat's live favorite state. <strong>Load all / Refresh chats also imports every conversation bot into Bot Status Center's Opened history</strong> with the metadata SpicyChat's conversation API exposes; blocked bots remain tracked through the Blocked source instead.</p>
+<p class="hint">Search loaded chat cards and locally saved conversations separately. Full rescan updates names and IDs; use Chat Index → Messages / text to index message content manually. Load all also records conversation bots in Bot Status.</p>
 </section>
 
 
@@ -468,7 +469,7 @@ Testing"></textarea></label>
 <div class="tab-page" data-page="saved"><p class="page-intro">Review saved lists and local organization first; Bot Status Center and Lorebook Status & History are grouped together at the bottom.</p>
 <section class="card" id="savedBotsHubCard">
 <h2>Saved Bots Hub</h2>
-<p class="hint">One local overview for bots QoL already knows from Favorite history, Later, Recently Seen, followed-creator new-bot detections, Bot Organizer, or Bot Status Center opened history. Use the bulk controls to organize the full filtered known-bot set into folders/tags without first adding everything to Later. The underlying lists stay separate.</p>
+<p class="hint">View and organize bots saved across Favorites history, Later, Recently Seen, followed creators, Bot Organizer and Bot Status. The original lists stay separate.</p>
 <div class="saved-bots-hub-stats" id="savedBotsHubStats"></div>
 <div class="saved-bots-hub-toolbar">
 <input id="savedBotsHubSearch" placeholder="Search bots, creators, folders, tags or notes — use commas for multiple terms" type="search"/>
@@ -520,17 +521,17 @@ Testing"></textarea></label>
 </div>
 </section>
 <section class="card" id="botOrganizerCard">
-<h2>Bot Organizer</h2>
-<p class="hint">Add your own folders, notes, tags and creation statuses to bots. These are private QoL labels and won't change the public bot.</p>
-<label class="row"><input id="enableBotOrganizer" type="checkbox"/><span>Enable Bot Organizer</span></label>
-<label class="row"><input id="botOrganizerExplorerFolders" type="checkbox"/><span>Show clickable Explorer-style folders on Favorites and My Creations</span></label>
-<p class="hint">Optional folder tiles above the existing bot grid. Open a folder to view its bots; use Back, All bots, or Unfoldered. Use the pencil on a folder tile (or Change folder picture inside it) to choose its location (Favorites, My Chatbots, or Shared), the standard icon, two bot avatars, selected bot avatars, or a custom uploaded cover. Existing folders remain Shared. Folder tiles only appear on Favorites and My Creations, never Home/Recommendations. Small custom thumbnails are stored in Bot Organizer backups. The existing bottom toolbar stays available.</p>
-<label class="row"><input id="botOrganizerShowCardMeta" type="checkbox"/><span>Show local folders, tags, notes, and creator status on cards</span></label>
+<h2>Bot folders &amp; labels</h2>
+<p class="hint">Organize bot profiles with local folders, notes, tags and creator labels. Nothing changes on SpicyChat.</p>
+<label class="row"><input id="enableBotOrganizer" type="checkbox"/><span>Enable Bot Organizer (bot folders &amp; labels)</span></label>
+<label class="row"><input id="botOrganizerExplorerFolders" type="checkbox"/><span>Show folder tiles on Favorites and My Creations</span></label>
+<p class="hint">Show folder tiles above bots on Favorites and My Creations. Open folders to view their bots; use the pencil to change their location, icon or cover. Covers are included in Bot Organizer backups.</p>
+<label class="row"><input id="botOrganizerShowCardMeta" type="checkbox"/><span>Show my bot labels on cards</span></label>
 <label class="row"><input id="botOrganizerBulkTools" type="checkbox"/><span>Show listing filters and bulk selection tools</span></label>
-<label>Chatbot folders<textarea id="botCollections" placeholder="Testing
+<label>Bot folders<textarea id="botCollections" placeholder="Testing
 Creature POV
 Favorites to revisit" spellcheck="false"></textarea></label>
-<p class="hint">Folders are local QoL organization and reuse the existing multi-collection data, so a bot can belong to more than one folder. On My Creations you can create, rename, delete and filter folders directly; deleting a folder never deletes a chatbot. Bulk actions support folders, personal tags, Later, copy links, and creator status.</p>
+<p class="hint">A bot can be in multiple local folders. Create and manage folders on My Creations; deleting a folder never deletes its bots. Bulk actions can update folders and tags.</p>
 </section>
 <section class="card">
 <h2>Favorite protection</h2>
@@ -545,13 +546,13 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <label class="row"><input id="trackFavoriteBots" type="checkbox"/><span>Remember favorite bots seen on the Favorites page</span></label>
 <label class="row"><input id="favoritePageFoldersEnabled" type="checkbox"/><span>Show private QoL folder filter directly on Favorites</span></label>
 <label class="row"><input id="favoritePageSortEnabled" type="checkbox"/><span>Show Favorites sorting for loaded cards (observed additions + first-seen)</span></label>
-<p class="hint">Folders come from Bot Organizer. Sorting affects only loaded native cards. Observed additions are tracked from changes between account snapshots; older favorites have no confirmed added date. QoL first-seen dates are estimates.</p>
+<p class="hint">Folders use Bot Organizer. Sorting uses loaded cards; old Favorites may not have a reliable added date.</p>
 <label class="row"><input id="showFavoritesBulkSelect" type="checkbox"/><span>Show Select bots on Favorites (bulk Unfavorite / Later)</span></label>
 <label class="row"><input id="showFavoritesScanButton" type="checkbox"/><span>Show Scan Favorites button</span></label>
-<p class="hint">Scan Favorites checks the searchable Chatbots results against SpicyChat’s account Favorites counter. Some account favorites may not be available in the listing; QoL keeps those records and does not mark them as removed.</p>
+<p class="hint">Compare the Favorites listing with your account total. Missing listing results are kept, not marked as removed.</p>
 <label class="row"><input id="showFavoriteHistoryButton" type="checkbox"/><span>Show the Favorite history button on the Favorites page</span></label>
 <label class="row"><input id="enableFavoritesRecovery" type="checkbox"/><span>Full Favorites (QoL) · account recovery and cleanup assistant</span></label>
-<p class="hint">Off by default. Full Favorites reads current favorite IDs from SpicyChat account settings when you ask, then looks up missing bot details in small read-only batches. It has its own cards, search, filters and pages. Cleanup suggestions are review-only; Add to Later is verified before a requested move, and unfavorites are checked against a fresh account response. Your Favorite History is kept.</p>
+<p class="hint">On request, find account Favorites missing from SpicyChat’s list. Includes search, filters and reviewed cleanup actions; Favorite History stays separate.</p>
 <p class="hint">Favorite tracking can stay enabled without adding the extra page button. You can still manage remembered favorites here in Settings.</p>
 <div class="bot-manager-toolbar">
 <input id="favoriteBotSearch" placeholder="Search favorite bots — comma = multiple terms" type="search"/>
@@ -659,7 +660,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <input autocomplete="off" id="creatorBotDiscordWebhookUrl" placeholder="https://discord.com/api/webhooks/…" type="password"/>
 </label>
 <div class="button-row"><button id="creatorBotWebhookTest" type="button">Test Discord webhook</button><button id="creatorBotCheckNow" type="button">Check now</button><span class="count" id="creatorBotWatchStatus"></span></div>
-<p class="hint">QoL only watches creators you locally chose to follow. It opens the creator's normal public SpicyChat listing in the background using <strong>Latest</strong> sort and ignores whatever tag filters are currently in your browser. The first successful check for each creator creates a baseline and does not alert on old bots.</p>
+<p class="hint">Check public bots from creators you follow locally. The first check sets a baseline, so old bots do not trigger alerts.</p>
 <p class="hint">Creator checks only run while your browser is open. Discord webhook links stay in local storage and aren't included in normal backups.</p>
 </fieldset>
 <div class="manager-add-row">
@@ -695,7 +696,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <label class="row"><input id="showLaterFavoritesTab" type="checkbox"/><span>Show the separate Later view on SpicyChat (sidebar + Favorites shortcut)</span></label>
 <label class="row"><input id="laterPageHideOpenedBots" type="checkbox"/><span>Hide already-opened bots on the Later page only</span></label>
 <label class="row"><input id="laterPageHideBlockedBots" type="checkbox"/><span>Hide blocked bots on the Later page only</span></label>
-<p class="hint">These Later-page filters are separate from regular listing filters. The dedicated Later view keeps saved bots visible by default. The page has its own search, tags, folders, SFW/NSFW and numbered navigation.</p>
+<p class="hint">Later has its own search, tags, folders and page controls, separate from normal listing filters.</p>
 <label class="row"><input id="showLaterBotButtons" type="checkbox"/><span>Show Later button beside card favorite buttons</span></label>
 <label class="row"><input id="protectLaterBotsFromFiltering" type="checkbox"/><span>Keep Later bots visible when other filters match</span></label>
 <label class="row"><input id="hideLaterBotsFromListings" type="checkbox"/><span>Hide bots after saving them for Later</span></label>
@@ -762,7 +763,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <h2>Bot Status Center</h2>
 <fieldset id="botAvatarLookupCard">
 <legend>Avatar link from ID</legend>
-<p class="hint">Paste a bot ID, SpicyChat bot/chat link, or an existing avatar CDN link. QoL checks already saved bot details first, including older snapshots, then builds a clearly marked guess if no real image URL is known. A bot ID may differ from its avatar file ID; guessed links may return AccessDenied. No images are downloaded or stored.</p>
+<p class="hint">Paste a bot ID, chat link or avatar URL. QoL prefers a saved image link, otherwise offers an unverified CDN guess. It never downloads the image.</p>
 <div class="button-row" style="flex-wrap:wrap; align-items:center">
 <input id="botAvatarLookupInput" type="text" spellcheck="false" autocomplete="off" placeholder="Character ID or bot URL" aria-label="Character ID or bot URL" style="flex:1 1 300px; min-width:170px"/>
 <select id="botAvatarLookupFormat" aria-label="Avatar image file format">
@@ -777,7 +778,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <p class="hint" id="botAvatarLookupStatus" role="status"></p>
 <a id="botAvatarLookupResult" target="_blank" rel="noopener noreferrer" hidden></a>
 </fieldset>
-<p class="hint">Checks tracked bots by ID and refreshes their saved details when live data is available. It reuses a signed-in SpicyChat page when possible and only opens one background Home helper if needed; it never opens every bot profile just to scan them. Duplicate matching uses locally known bot data. Large scans keep new results in memory and save them when you press Stop or when the scan finishes, so leave Settings open while a scan is running.</p>
+<p class="hint">Refresh saved details for tracked bots without opening every profile. Large scans save at Stop or completion, so keep Settings open while scanning.</p>
 <fieldset class="bot-status-opened-tracking">
 <legend>Opened history tracking</legend>
 <div id="ds-feature-panel-previously-chatted-indicator" data-dsq-feature-panel="previously-chatted-indicator"></div>
@@ -788,7 +789,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </fieldset>
 <fieldset class="bot-status-opened-history">
 <legend>Opened history</legend>
-<p class="hint">Bots logged by Bot Status Center opened-history tracking. Blocked bots always take priority: blocking a bot removes it from opened history, and it cannot be re-added here while the block remains active.</p>
+<p class="hint">Bots remembered by Bot Status. Blocked bots are excluded from Opened history.</p>
 <div class="bot-manager-toolbar">
 <input id="openedBotSearch" placeholder="Search opened history — comma = multiple terms" type="search"/>
 <select id="openedBotSortMode">
@@ -896,7 +897,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="clearBotArchive" type="button">Clear all saved bot copies</button>
 <span class="count" id="botStatusArchiveExportStatus"></span>
 </div>
-<p class="hint">The standard archived-blocked cleanup only removes local saved copies after exact Archive preservation is verified. Blocked IDs remain blocked. The optional manual compacting tool below can also remove unarchived copies, but only after an extra warning.</p>
+<p class="hint">Standard cleanup requires verified Archive preservation. Manual compacting below has additional warnings. Blocked IDs remain blocked.</p>
 <span class="count" id="blockedArchiveCleanupStatus"></span>
 <div class="button-row" style="flex-wrap:wrap; align-items:center; margin-top:12px">
 <label for="blockedCompactAge">Compact blocked bots last updated</label>
@@ -914,7 +915,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </select>
 <button id="compactOldBlockedBotData" type="button">Compact old blocked bot data</button>
 </div>
-<p class="hint">Manual only: keeps every blocked bot ID, removes old details from the Blocked list, and optionally deletes heavy local saved copies. Unverified Archive copies require an extra irreversible confirmation. SpicyChat chats and completed recommendation history are not deleted.</p>
+<p class="hint">Keep blocked IDs while removing older local details. Deleting unarchived copies requires an extra warning; chats are not deleted.</p>
 <span class="count" id="blockedCompactStatus" role="status"></span>
 </details>
 <div class="button-row" id="botStatusArchiveUploadActions" hidden>
@@ -925,7 +926,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <fieldset id="botStatusArchiveContributionSettings">
 <legend>Public Archive contribution</legend>
 <label class="row"><input id="enableBotStatusArchiveContribution" type="checkbox"/><span>Allow my saved Bot Status copies to be submitted anonymously to the public SpicyChat Archive for review</span></label>
-<p class="hint">Only saved bot snapshots are submitted. QoL does not include chats, personas, Favorites/Later membership, settings, account details, cookies, or SpicyChat login/session data. A random extension-install identifier is hashed locally and sent only for basic anti-spam/rate limiting.</p>
+<p class="hint">Uploads contain saved bot snapshots, not chats, account details, settings or saved lists. A hashed install ID is used for rate limiting.</p>
 <div class="button-row" id="botStatusArchiveContributionActions" hidden>
 <button id="submitBotStatusArchiveChanged" type="button">Submit saved copies for review</button>
 <button id="submitBotStatusArchiveAll" type="button" hidden>Submit all saved copies for review</button>
@@ -943,7 +944,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </label>
 <div class="button-row"><button id="testBotStatusArchiveEndpoint" type="button">Test endpoint</button><span class="count" id="botStatusArchiveConfigStatus"></span></div>
 <p class="hint" id="botStatusArchiveUploadSummary">Configure the endpoint and private import token to enable archive upload.</p>
-<p class="hint">The import token is stored only in extension local storage. It is deliberately excluded from QoL settings backup/export/import. Uploading never deletes your local Bot Status saved copies.</p>
+<p class="hint">The import token stays in local extension storage and is never included in settings backups. Uploads do not delete saved copies.</p>
 </fieldset>
 <fieldset id="botAvailabilityResultsCard">
 <legend>Tracked Bot Status Results</legend>
@@ -968,13 +969,13 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <option value="168">7 days</option>
 </select>
 </label>
-<p class="hint"><strong>Bot Profile Snapshots:</strong> when enabled, opening a chatbot profile stores the bot ID, name/title, creator, image, tags, Greeting, description and any definition/scenario/example fields, stats or other metadata that SpicyChat actually exposes to QoL. Meaningful profile changes are kept in profile history; stats-only observations stay separate where possible. QoL never unlocks or guesses private/hidden definition fields.</p>
-<p class="hint">Successful Bot Status Center checks still update the local copy. The optional chat-open refresh only updates an older saved copy when live SpicyChat character data is still readable; opening an old chat by itself never overwrites a recovery copy for a deleted/unavailable bot.</p>
+<p class="hint"><strong>Bot Profile Snapshots:</strong> Save publicly accessible profile details when you visit a bot, including visible definitions and avatar links. Changes are kept in local history; hidden fields are never retrieved.</p>
+<p class="hint">Bot Status updates saved copies after successful checks. Old chats never overwrite a recovery copy when live bot data is unavailable.</p>
 <p class="hint"><strong>Public archive JSON:</strong> saved copies can be exported using only fields QoL actually captured. QoL never unlocks private/hidden definition fields.</p>
 </fieldset>
 <fieldset id="savedBotInfoCard">
 <legend>Saved Bot Copies / Recovery</legend>
-<p class="hint">Browse bot data QoL has saved locally. This list can include bots that are still Available; confirmed deleted/unavailable recovery copies are shown separately below. Currently blocked bots stay out of recovery views and are not added by Bot Status scans; any older recovery data is kept locally rather than deleted. Only fields SpicyChat actually exposed to QoL are stored.</p>
+<p class="hint">Browse saved bot profiles, including available bots. Unavailable recovery copies are listed separately; blocked bots remain excluded.</p>
 <div class="bot-manager-toolbar">
 <input id="savedBotInfoSearch" placeholder="Search saved bot copies, creators or IDs" type="search"/>
 <span class="manager-count" id="savedBotInfoSummary">0 saved copies</span>
@@ -988,7 +989,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </fieldset>
 <fieldset id="deletedSavedBotsCard">
 <legend>Deleted / Unavailable Saved Bots</legend>
-<p class="hint">Confirmed deleted/unavailable bots that still have a local recovery copy. Open an old chat when one is still available, keep the saved fields for recovery, or use <strong>Forget from QoL</strong> to remove that exact character ID and all of its local QoL data. Forgotten IDs are kept only as a tiny ignore entry so Load all / future scans do not immediately recreate them; this never deletes the real SpicyChat conversation.</p>
+<p class="hint">Review local copies of unavailable bots. Forget removes that bot’s QoL data, not its SpicyChat chat, and prevents it from being reimported automatically.</p>
 <div class="bot-manager-toolbar">
 <input id="deletedSavedBotSearch" placeholder="Search deleted saved bots, creators or IDs" type="search"/>
 <span class="manager-count" id="deletedSavedBotSummary">0 recoverable deleted bots</span>
@@ -1008,11 +1009,11 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button id="clearForgottenBotStatusIds" type="button">Allow forgotten IDs to be tracked again</button>
 </div>
 </fieldset>
-<p class="hint"><strong>Saved bot copies:</strong> successful profile checks can preserve the accessible name, description, greeting, personality/definition, scenario, example dialogues, tags, creator, visible stats and avatar URL in extension storage. A saved copy stays available here even if the live bot later disappears. Clearing status history does not clear these copies.</p>
-<p class="hint"><strong>Archive export:</strong> creates a versioned compressed JSON backup for the SpicyChat Archive importer. It exports only public / Bot Status snapshot data, skips manual creator/editor backups and private local notes, makes no live API calls, and treats unavailable/private status as historical observations that still need current verification.</p>
-<p class="hint"><strong>Profile change history:</strong> the first successful profile check becomes the starting snapshot. Later successful checks compare stable profile fields such as name, description, greeting, personality, scenario, tags, visibility, creator and avatar when SpicyChat exposes them. Meaningful changes are preserved automatically as history and the newest snapshot becomes the next baseline; cards show only the fields that changed. Missing fields and comparison-only noise such as repeated adjacent words are ignored instead of being treated as edits.</p>
-<p class="hint"><strong>Duplicate / Reupload Finder:</strong> compares local names, avatars and captured profile text and labels matches as Exact, Likely or Possible. These are hints only and can have false positives; QoL never hides, blocks or deletes a bot because of a match.</p>
-<p class="hint">Availability checks only mark clear results. Deleted/404 pages show as unavailable, private/restricted pages stay restricted, and timeouts or rate limits stay Unknown instead of being guessed as deleted.</p>
+<p class="hint"><strong>Saved bot copies:</strong> Keep available profile text, tags, creator, stats and avatar URL even if a bot later disappears. Clearing status history does not delete copies.</p>
+<p class="hint"><strong>Archive export:</strong> Download public Bot Status records for the Archive importer. Private details stay local; unavailable statuses are historical observations.</p>
+<p class="hint"><strong>Profile change history:</strong> Compare successful snapshots and keep meaningful field changes. Missing data and comparison noise are ignored.</p>
+<p class="hint"><strong>Duplicate / Reupload Finder:</strong> Find possible matches from names, avatars and saved text. Matches may be wrong; nothing is blocked or removed automatically.</p>
+<p class="hint">Deleted/404 and private/restricted results are kept distinct. Timeouts and rate limits stay Unknown.</p>
 </section>
 <section class="card" id="lorebookStatusHistoryCard">
 <h2>Lorebook Status &amp; History</h2>
@@ -1021,7 +1022,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <legend>Lorebook history tracking</legend>
 <label class="row"><input id="lorebookTrackHistory" type="checkbox"/><span>Track and save Lorebooks I encounter</span></label>
 <label class="row"><input id="showLorebookConnections" type="checkbox"/><span>Show public Lorebook discovery and local bot links</span></label>
-<p class="hint">On public Lorebook pages, show the visible creator-profile link and bots already associated by your local creator tools. On public Lorebook listings, filter currently loaded cards by creator. No extra bot requests or private-page scans; connections are incomplete by design.</p>
+<p class="hint">Show public Lorebook creators and locally known bot connections. Filter loaded public Lorebooks by creator; no extra bot scans.</p>
 <p class="hint">Off by default. When enabled, QoL saves exposed Lorebook metadata and meaningful changes in IndexedDB. A missing listing result is not treated as proof that a Lorebook was deleted.</p>
 </fieldset>
 <div class="bot-availability-controls">
@@ -1062,7 +1063,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 <button disabled="" id="stopLorebookAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="lorebookCenterScanStatus"></span>
 </div>
-<p class="hint">Bulk status checks only query the exact Lorebook UUIDs already tracked by QoL. Public records are verified with SpicyChat's current Lorebook search key, and public recovery copies come from the same public Lorebook-entry collection used by the Archive. The signed-in Home helper is only a fallback for index misses or failed public-entry recovery. A Public-index hit is immediately <strong>Available</strong> even if recovery temporarily fails; the previous recovery copy is kept. QoL never crawls or saves the whole Public Lorebook index. A missing/404 Lorebook stays an unavailable candidate until deleted/private behavior is fully confirmed.</p>
+<p class="hint">Check only tracked Lorebook IDs. Public-index matches confirm availability; missing entries remain uncertain until verified. Saved recovery copies are preserved.</p>
 <fieldset class="bot-status-opened-history">
 <legend>Tracked Lorebook Status &amp; History</legend>
 <div class="bot-manager-toolbar">
@@ -1079,7 +1080,7 @@ Favorites to revisit" spellcheck="false"></textarea></label>
 </select>
 </div>
 <div class="button-row"><button id="refreshLorebookCenter" type="button">Reload saved Lorebooks</button><button id="exportLorebookHistory" type="button">Export history</button><button id="exportLorebookArchiveData" type="button">Export Lorebook archive data (.json.gz)</button><button id="clearLorebookHistory" type="button">Clear history</button><span class="count" id="lorebookArchiveExportStatus"></span></div>
-<p class="hint"><strong>Lorebook archive export:</strong> exports only Lorebooks confirmed by the Public index and includes saved public recovery entries when available. Private, restricted, unknown and unconfirmed recovery copies stay local and are excluded.</p>
+<p class="hint"><strong>Lorebook archive export:</strong> Export confirmed public Lorebooks and available public entries. Private, unknown and unconfirmed copies stay local.</p>
 <div id="lorebookCenterRecent" class="bot-manager-list"></div>
 <div class="bot-manager-pager">
 <button hidden id="lorebookCenterShowMore" type="button">Show 20 more</button>
@@ -1116,7 +1117,7 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <label class="row"><input id="showGenerationElapsed" type="checkbox"/><span>Show generation time for new replies</span></label>
 <label class="row"><input id="showGenerationSettings" type="checkbox"/><span>Show captured generation slider values</span></label>
 <label class="row"><input id="compactGenerationMetadata" type="checkbox"/><span>Keep the details on one compact line</span></label>
-<p class="hint">The individual options work on their own; the first checkbox is only a quick default. Existing messages can show timestamps, model, and saved generation settings when SpicyChat provides them. Generation time is only available for replies created while metadata capture is active.</p>
+<p class="hint">The options below work independently. Timestamps and model details appear only when SpicyChat provides them.</p>
 <div class="sub-card">
 <h3>RP context-full warning</h3>
 <label class="row"><input id="enableContextWindowWarning" type="checkbox"/><span>Warn me before older RP messages start falling out of the model context</span></label>
@@ -1125,7 +1126,7 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <label>Manual context window (tokens, 0 = auto)<input id="contextWarningManualLimit" min="0" step="512" type="number" value="0"/></label>
 <label class="row"><input id="contextWarningBrowserNotifications" type="checkbox"/><span>Also use a browser notification when permission is available</span></label>
 <div class="button-row"><button id="contextWarningRequestNotifications" type="button">Enable browser notifications</button><span class="count" id="contextWarningNotificationPermissionStatus"></span></div>
-<p class="hint">QoL first uses token/context usage exposed by SpicyChat's generation traffic. If SpicyChat does not expose the model context limit, set it manually here. When exact prompt usage is unavailable, QoL uses a conservative local estimate from captured chat messages and warns early. The feature never stores chat text for this calculation; only token estimates/metadata are retained. The meter is experimental and cannot identify an exact forgotten-message boundary: bot definitions, native Memories, and Lorebooks consume context too.</p>
+<p class="hint">Use SpicyChat’s token data when available, otherwise estimate locally. You can set an unknown model limit manually. Estimates cannot show exactly what the AI forgot.</p>
 </div>
 </section><div id="ds-feature-panel-rp-format-repair" data-dsq-feature-panel="rp-format-repair"></div>
 <section class="card">
@@ -1133,7 +1134,7 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <label class="row"><input id="hideChatPlusButton" type="checkbox"/><span>Hide plus button in chat input</span></label>
 <label class="row"><input id="hideChatImageButton" type="checkbox"/><span>Hide image generation button</span></label>
 <label class="row"><input id="replaceChatImageWithOocButton" type="checkbox"/><span>Show OOC button in the chat input</span></label>
-<p class="hint">The chat-input OOC button inserts the preset currently selected in the mini panel. Compact/mobile controls insert immediately when only one OOC preset exists and only show a preset choice when there are multiple. OOC appears immediately to the left of Suggest and stays available while typing. The separate Hide image generation option only affects Image.</p>
+<p class="hint">The OOC button inserts your selected preset. With one preset it inserts directly; with several you choose one.</p>
 <label class="row"><input id="showAsteriskButton" type="checkbox"/><span>Show dedicated * button in the chat input</span></label>
 <label>Dedicated * / backtick shortcut position
 <select id="composerShortcutPlacement">
@@ -1142,7 +1143,7 @@ SpicyXL 132B" spellcheck="false"></textarea></label>
 <option value="outside-right">Outside typing box — right</option>
 </select>
 </label>
-<p class="hint">Select text and press * to wrap it in asterisks for actions. With no selection, it inserts ** and puts the cursor between them. The position choice also keeps a dedicated backtick shortcut beside it when one is present. If the formatting toolbar already provides the same * action wrapper, QoL automatically hides the duplicate dedicated button.</p>
+<p class="hint">Wrap selected text in *asterisks*, or insert a pair at the cursor. Duplicate formatting buttons are hidden automatically.</p>
 <label class="row"><input id="autoPairAsterisks" type="checkbox"/><span>Automatically add the matching * when typing an asterisk</span></label>
 <p class="hint">Auto * turns a typed * into ** with the cursor between them, so you can type the action without manually adding the closing asterisk.</p>
 <label>Enter / Return key behavior
@@ -1170,7 +1171,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 </label>
 <p class="hint">Optional custom buttons: one per line as <code>Label | before | after</code>. Up to 5 buttons are shown; labels are kept short and the wrapper text is inserted literally.</p>
 </div>
-<p class="hint">Select text and press a toolbar button to wrap it. With no selection, QoL inserts the pair and leaves the cursor between it. Works with normal SpicyChat input and S.AI Toolkit's WYSIWYG editor.</p>
+<p class="hint">Wrap selected text, or insert matching formatting marks at the cursor. Supports native and Toolkit editors.</p>
 <label class="row"><input id="hideChatVoiceButton" type="checkbox"/><span>Hide voice recording button</span></label>
 <label class="row"><input id="hideUnlockCustomVoices" type="checkbox"/><span>Hide "Unlock Custom Voices" option</span></label>
 <label class="row"><input id="allowTypingWhileAiResponding" type="checkbox"/><span>Keep the message box usable while the AI is responding</span></label>
@@ -1183,7 +1184,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 </section><section class="card" id="savedSnippetsCard">
 <h2>Saved Text / Snippets</h2>
 <label class="row"><input id="enableSavedTextSnippets" type="checkbox"/><span>Enable Saved Snippets in chats</span></label>
-<p class="hint">Adds a Saved snippets button to the QoL panel. Save reusable text locally, search it by name or content, edit/delete entries, use your current draft as a snippet, and insert saved text back into the chat box.</p>
+<p class="hint">Save, search and insert reusable chat text from the QoL panel.</p>
 </section><div id="ds-feature-panel-chat-scene-notes" data-dsq-feature-panel="chat-scene-notes"></div><div id="ds-feature-panel-reply-instructions" data-dsq-feature-panel="reply-instructions"></div><section class="card">
 <h2>OOC presets</h2>
 <label class="row"><input id="showOocTools" type="checkbox"/><span>Show OOC insert tools on chat pages</span></label>
@@ -1203,11 +1204,11 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <h2>Native Memory Manager tools</h2>
 <label class="row"><input id="enableBulkMemoryManager" type="checkbox"/><span>Enable Memory Manager</span></label>
 <label class="row"><input id="enableMemoryVault" type="checkbox"/><span>Enable reversible Memory Vault (archive native memories and restore later)</span></label>
-<p class="hint">Requires Memory Manager. Saves and verifies the exact memory locally before requesting native deletion. Archived memories stay in local QoL storage and backups until you restore or export them. Nothing is archived automatically. Deactivation does not erase earlier chat messages.</p>
-<p class="hint">Adds checkboxes plus Select all, Select unpinned, Invert, Clear, Pin selected, Keep selected for Context Keeper, Load all memories, JSON export/import, Reorder pinned, and Delete selected. Import previews the file first, skips exact duplicates by default, and creates memories in the current chat through SpicyChat's normal Memory controls.</p>
+<p class="hint">Requires Memory Manager. Saves and verifies a local archive before native deletion; archived memories remain available for restore or export.</p>
+<p class="hint">Bulk-select, pin, reorder, delete or export Memories. Imports are previewed and skip exact duplicates by default.</p>
 <label class="row"><input id="memoryAutoLoadAll" type="checkbox"/><span>Automatically load all available memories when the Memories manager opens</span></label>
 <label class="row"><input id="showCopyMemoryAction" type="checkbox"/><span>Add Copy Memory to each memory's three-dot menu</span></label>
-<p class="hint">Load all repeatedly uses SpicyChat's own Load More Memories button until it is gone. Memory JSON can export all or only selected memories and can be imported into another/fresh chat without reusing the old chat ID. Keep selected is shown when Context Keeper is enabled and copies only the selected memory text into local Context Keeper data.</p>
+<p class="hint">Load all uses SpicyChat’s native Load More button. Export selected/all Memories as JSON or import them into another chat.</p>
 </section><section class="card" id="globalMemoryCard">
 <h2>Global Memory / Baseline Notes</h2>
 <label class="row"><input id="enableGlobalMemory" type="checkbox"/><span>Use the same baseline notes in every chat</span></label>
@@ -1226,7 +1227,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 <h2>Persona helpers</h2>
 <label class="row"><input id="savePersonasFromPages" type="checkbox"/><span>Save personas when the extension sees the persona list</span></label>
 <label class="row"><input id="personaFullBackupEnabled" type="checkbox"/><span>Show full Persona backup on My Personas</span></label>
-<p class="hint">Adds a manual Download all Personas button. It reads current editor data when clicked, includes avatar image data when available, and reports incomplete items instead of silently treating them as complete. No background backup runs automatically.</p>
+<p class="hint">Manually back up Personas, including accessible avatars. Incomplete backups are reported rather than treated as complete.</p>
 <label class="row"><input id="keepLocalPersonaCopies" type="checkbox"/><span>Keep local persona copies even after they disappear from My Personas</span></label>
 <label class="row"><input id="expandPersonaDescriptions" type="checkbox"/><span>Show expand buttons for persona descriptions on My Personas</span></label>
 <div id="ds-feature-panel-personas" data-dsq-feature-panel="personas"></div>
@@ -1235,7 +1236,7 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 Roleplay
 Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="personaShowLocalMetaInPicker" type="checkbox"/><span>Show QoL folder/note labels in the in-chat persona picker</span></label>
-<p class="hint">Persona organization is local to QoL. Use the persona three-dot menu for notes, local copies, duplication and move controls, or drag the ↕ handle for a custom order. The in-chat persona picker can filter by the same folders/favorites and use SpicyChat, custom, name, or favorites-first sorting. The Local Persona Library shows whether text and the avatar were actually saved, can preview/copy the stored persona text, and can restore a saved copy into SpicyChat when you have a free persona slot. It does not bypass SpicyChat's active persona limit.</p>
+<p class="hint">Organize Personas with folders, favorites, notes and custom order. Local Library can preview and restore saved copies when you have a free slot; it cannot bypass the persona limit.</p>
 <label class="row"><input id="showPersonaQuickSwitch" type="checkbox"/><span>Show persona quick-switch in the mini panel</span></label>
 <label class="row"><input id="autoAcceptPersonaChange" type="checkbox"/><span>Automatically press Yes on the Change Persona warning</span></label>
 <label>Max persona quick buttons<input id="personaQuickSwitchLimit" max="12" min="1" step="1" type="number"/></label>
@@ -1245,7 +1246,7 @@ Testing" spellcheck="false"></textarea></label>
 <div class="tab-page" data-page="advanced"><p class="page-intro">Compatibility fallbacks, performance controls, per-character overrides, and other settings intended for troubleshooting or specialized setups.</p><section class="card" id="chatExportCompatibilityCard">
 <h2>Chat export — Advanced / Compatibility</h2>
 <p class="hint">Normal chat exports fetch the complete active conversation without loading every older message onto the page.</p>
-<p class="hint">If the API fetch fails or you are specifically testing compatibility, open <strong>Advanced / Compatibility</strong> inside the Chat export window and use <strong>Load full chat through page (very slow)</strong>. That fallback uses SpicyChat's own Load Previous Messages flow and mounts old messages into the live page, so very large chats can become slow or memory-heavy until the chat is reloaded.</p>
+<p class="hint">If the normal export fails, Advanced / Compatibility can load the chat through the page. It may be very slow for long chats.</p>
 </section><div id="ds-feature-panel-character-qol-profiles" data-dsq-feature-panel="character-qol-profiles"></div><section class="card">
 <h2>Debug</h2>
 <label class="row"><input id="debug" type="checkbox"/><span>Debug badges for dimmed cards</span></label>
@@ -1273,7 +1274,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="reduceQolAnimations" type="checkbox"/><span>Reduce QoL-added animations and transitions</span></label>
 <label class="row"><input id="reduceOptionsAnimations" type="checkbox"/><span>Reduce animations/transitions on the QoL Settings page</span></label>
 <label class="row"><input id="deepSleepDisabledFeatures" type="checkbox" checked disabled/><span>Disabled features stay asleep (always enabled)</span></label>
-<p class="hint">Disabled features are no longer scheduled, even if an older backup had this switched off. A one-time cleanup may still run when an enabled feature is turned off. Packaged scripts can still be parsed at page load; this is runtime gating, not yet on-demand script injection.</p>
+<p class="hint">Disabled features stop running, though their bundled scripts may still load. Existing saved data is preserved.</p>
 <label class="row"><input id="performanceDiagnostics" type="checkbox"/><span>Collect local QoL performance timings for Diagnostics</span></label>
 <div class="sub-card" id="performanceTroubleshooterCard">
 <h3>Performance Troubleshooter</h3>
@@ -1281,7 +1282,7 @@ Testing" spellcheck="false"></textarea></label>
 <button type="button" id="refreshPerformanceTroubleshooter">Show measured feature activity</button>
 <pre id="performanceTroubleshooterResults" class="diagnostic-output" style="white-space:pre-wrap">No performance snapshot requested.</pre>
 </div>
-<p class="hint">Adaptive is a good starting point. Aggressive and Maximum delay more optional QoL work on slow or very large chats. The large-chat option can switch to stronger handling automatically after your chosen message count. Performance reports stay local unless you copy one.</p>
+<p class="hint">Adaptive is a good default. Stronger presets delay optional work on slow devices or very long chats.</p>
 </section></div>
 <div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Everything is optional.</p>
 <section class="card" id="customPicturesCard">
@@ -1443,7 +1444,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickPanelShowSoundscapes" type="checkbox"/><span>Show Soundscape controls when Soundscapes are enabled</span></label>
 </section><section class="card">
 <h2>Layout preview</h2>
-<p class="hint">Test the panel against simulated chat, chat-list, and bot-listing pages. Drag the preview panel to set the default custom position. Actual SpicyChat tabs remember their own dragged position separately.</p>
+<p class="hint">Preview the panel on sample pages and drag it to set the default position. Individual tabs remember their own position.</p>
 <label>Preview page
           <select id="miniPanelPreviewMode">
 <option value="chat">Chat</option>
@@ -1619,9 +1620,9 @@ Testing" spellcheck="false"></textarea></label>
 </section><div id="ds-feature-panel-alternate-dialogue" data-dsq-feature-panel="alternate-dialogue"></div><section class="card" id="chatBubbleCustomizationCard">
 <h2>Chat bubble customization</h2>
 <label class="row"><input id="enableChatBubbleCustomization" type="checkbox"/><span>Enable chat bubble customization</span></label>
-<p class="hint">Local appearance only. Customize AI and user bubbles separately without changing message text or anything saved by SpicyChat. Global chat font size and line spacing are under Accessibility &amp; text size; custom chat pictures are under Custom Pictures.</p>
+<p class="hint">Customize local chat bubbles without changing saved messages. Font size and pictures have their own settings.</p>
 <label class="row"><input id="persistSpicyChatUserAppearance" type="checkbox"/><span>Keep my SpicyChat “My messages” appearance locked across site updates</span></label>
-<p class="hint">When enabled, QoL automatically remembers the native My messages background/normal-text colors whenever that SpicyChat appearance panel is open and reapplies them locally if a site update resets the bubble. After enabling it, open that native appearance panel once so QoL can capture your current choices. Nothing is overridden before a native appearance has been captured, and message text is never changed.</p>
+<p class="hint">Remember the colors from SpicyChat’s own My messages appearance panel. Open that panel once after enabling to capture them.</p>
 <div class="button-row">
 <button data-chat-bubble-preset="default" type="button">Reset all (SpicyChat)</button>
 <button data-chat-bubble-preset="soft" type="button">Soft</button>
@@ -1812,7 +1813,7 @@ Testing" spellcheck="false"></textarea></label>
 </label>
 <label class="row"><input id="chatBubbleUserShadow" type="checkbox"/><span>Add shadow</span></label>
 </div>
-<p class="hint">The contrast note is advisory only. Shape decoration color controls speech tails, cat ears and cloud puffs separately from the main bubble. Cat ears keep the original grouped layout, but can also be grouped left/right or split across the top like a cat head. These decorations are CSS-only and do not alter chat content.</p>
+<p class="hint">Bubble decorations affect only appearance, not message text. Cat ears can be grouped or split across the top.</p>
 </section><div id="ds-feature-panel-soundscapes" data-dsq-feature-panel="soundscapes"></div><div id="ds-feature-panel-animation-control" data-dsq-feature-panel="animation-control"></div></div>
 <div class="tab-page" data-page="android"><p class="page-intro">Controls for Android browsers, installed apps, and compact/WebView layouts.</p>
 <section class="card">
@@ -1835,7 +1836,7 @@ Testing" spellcheck="false"></textarea></label>
 <h2>Compact chat top-bar controls</h2>
 <label class="row"><input id="androidTopBarMenu" type="checkbox"/><span>Show one compact QoL menu in the chat top bar</span></label>
 <label class="row"><input id="androidHideComposerShortcuts" type="checkbox"/><span>Use the compact top-bar menu instead of separate * composer buttons</span></label>
-<p class="hint">If the compact menu checkbox is enabled manually, it is allowed to appear on normal Firefox/Chrome, Firefox Android, installed web apps and the Android APK even when Auto does not detect a WebView. Setting the mode to Never is the hard-off override. The OOC composer button remains visible when its separate option is enabled.</p>
+<p class="hint">The compact menu can be enabled on desktop or Android browsers. Never disables it entirely; OOC has its own setting.</p>
 <h3>Actions in the compact QoL menu</h3>
 <label class="row"><input id="androidTopBarOoc" type="checkbox"/><span>OOC</span></label>
 <label class="row"><input id="androidTopBarAsterisk" type="checkbox"/><span>* action wrapper</span></label>
@@ -1870,7 +1871,7 @@ Testing" spellcheck="false"></textarea></label>
 </select>
 </label>
 <label class="row"><input id="chatTextReplacementPreview" type="checkbox"/><span>Ask me before each saved replacement</span></label>
-<p class="hint">Display only changes what you see locally. Save mode waits for a message to settle, then uses SpicyChat's normal Edit + Save flow so the replacement becomes part of the conversation and can affect later AI context. Saved replacements get an Undo button when possible.</p>
+<p class="hint">Display mode changes text locally. Save mode uses SpicyChat’s Edit + Save and can affect later AI context.</p>
 <label>Replacement rules<textarea id="chatTextReplacementRules" placeholder="money =&gt; Bingo Coins
 cash =&gt; Bingo Coins
 /dollars?|bucks?/gi =&gt; Bingo Coins" spellcheck="false"></textarea></label>
@@ -1884,13 +1885,13 @@ phrase to hide" spellcheck="false"></textarea></label>
 <label>Apply to <select id="chatWordCensorScope"><option value="ai">AI messages</option><option value="user">My messages</option><option value="both">Both</option></select></label>
 <label class="row"><input id="chatWordCensorReveal" type="checkbox"/><span>Show a Reveal/Hide button on censored messages</span></label>
 <label class="row"><input id="chatWordCensorShowChatToggle" type="checkbox"/><span>Show a per-chat censor on/off button</span></label>
-<p class="hint">Whole words and phrases only, ignoring case. Only changes displayed text; the original messages are not edited. Exclude individual chats using the button in their header. Chat exports use original history by default, with a separate censored export option. As with muted words, native Save replacement mode is suspended while censoring is active.</p>
+<p class="hint">Hide words or phrases from displayed text without editing messages. Chat exports keep original text unless you choose a censored export.</p>
 </div>
 <div class="sub-card"><h3>Muted words (optional, local display only)</h3>
 <label class="row"><input id="enableChatMutedWords" type="checkbox"/><span>Hide muted words / phrases from displayed chat messages</span></label>
 <label>Muted words / phrases, one per line<textarea id="chatMutedWords" placeholder="mark you as mine
 predatory grin" spellcheck="false"></textarea></label>
-<p class="hint">This affects only what is shown locally, not the AI model or saved chat. While muted words or a named per-chat preset are active, all replacements switch to display-only; native Save mode is suspended for that chat.</p>
+<p class="hint">Muted words only affect display, not AI context. Native Save replacements pause while muting is active.</p>
 </div>
 <div class="sub-card"><h3>Named replacement presets</h3>
 <label>Rule sets<textarea id="chatTextReplacementPresets" placeholder="[Fantasy]
@@ -1925,7 +1926,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="showSwipeJumpButtons" type="checkbox"/><span>Show First/Last reply buttons beside native swipe counters</span></label>
 <label class="row"><input id="showSwipeJumpToNumber" type="checkbox"/><span>Show an optional reply-number field to jump to a specific generated reply</span></label>
 <label class="row"><input id="restoreFirstSwipeOnLoad" type="checkbox"/><span>Return to the first reply when opening/refreshing a chat or loading previous messages</span></label>
-<p class="hint">Uses SpicyChat's own previous/next swipe controls. Large histories can take time because each jump uses paced native steps; use Stop to cancel. These options do not change or delete stored replies. OFF by default, and only operates where native swipe controls are present.</p></div>
+<p class="hint">Jump between generated replies using SpicyChat’s native swipe controls. Large histories may be slow; Stop cancels.</p></div>
 <div class="sub-card">
 <strong>Show enabled scroll buttons on</strong>
 <label class="row"><input id="scrollNavOnHome" type="checkbox"/><span>Home</span></label>
@@ -1948,7 +1949,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <option value="background">Jump immediately and keep loading in the background</option>
 </select>
 </label>
-<p class="hint">Works in desktop browsers, Firefox and the Android app because it uses the same synced QoL page code. The arrows only appear when there is somewhere useful to jump and only on the page types selected above. On chats, the optional ↑ behavior uses SpicyChat's own Load Previous Messages button. Background mode jumps immediately, then keeps loading older batches above your current reading position without making you wait for the full history first. Other pages keep the normal small faded jump button.</p>
+<p class="hint">Show useful jump arrows on selected pages. Chat ↑ can load older messages using SpicyChat’s normal controls.</p>
 </section>
 
 <section class="card">
@@ -1958,7 +1959,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="stackChatMessages" type="checkbox"/><span>Stack user and AI messages in one chat column</span></label>
 <p class="hint">Aligns user and AI message boxes in the same vertical chat column without rebuilding SpicyChat's message DOM. Turn it off to keep SpicyChat's normal left/right message layout.</p>
 </div>
-<p class="hint">Adds small quick-action icons to chat messages. Every individual action switch is authoritative. The first checkbox is only a group toggle for Copy + Edit + Report, so turning Report off below always removes the Report icon. Copy is handled directly when the rendered message can be read safely; Edit, Report and Remove Image silently trigger SpicyChat's own native actions without showing the intermediate three-dot popup. The native report form/editor still appears when needed.</p>
+<p class="hint">Show optional Copy, Edit, Report and Remove Image actions on messages. SpicyChat’s normal editor/report form still opens when needed.</p>
 <label class="row"><input id="showMessageQuickActions" type="checkbox"/><span>Copy, Edit &amp; Report quick actions (toggle all three)</span></label>
 <label class="row"><input id="messageQuickActionCopy" type="checkbox"/><span>Show Copy icon</span></label>
 <label class="row"><input id="messageQuickActionEdit" type="checkbox"/><span>Show Edit icon</span></label>
@@ -1971,7 +1972,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <section class="card">
 <h2>Chat export</h2>
 <label class="row"><input id="showChatExportButton" type="checkbox"/><span>Show Copy / Export chat buttons on chat pages</span></label>
-<p class="hint">Opening Copy / Export automatically fetches the full active chat through the fast API and keeps that history out of the live page. When the chat is ready, the export window uses the complete in-memory history; a retry button only appears if the automatic fetch did not complete.</p>
+<p class="hint">Copy / Export loads full chat history through the API without rendering older messages in the page.</p>
 <label class="row"><input id="chatExportIncludeBotInfo" type="checkbox"/><span>Include available bot info</span></label>
 <label class="row"><input id="chatExportIncludeRulebook" type="checkbox"/><span>Include current Rulebook meter snapshot (only visible information, not full history)</span></label>
 <label class="row"><input id="chatExportIncludeOocDirectives" type="checkbox"/><span>Include OOC and directive notes</span></label>
@@ -1980,7 +1981,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="chatExportIncludeAvatars" type="checkbox"/><span>Include avatar links in HTML/JSON exports</span></label>
 <label>Default format<select id="chatExportDefaultFormat"><option value="text">Plain text</option><option value="markdown">Markdown</option><option value="html">HTML archive</option><option value="json">JSON backup</option></select></label>
 <label>Default HTML layout<select id="chatExportHtmlLayout"><option value="bubbles">Match current chat appearance</option><option value="transcript">Clean transcript</option></select></label>
-<p class="hint">For Match current chat appearance, API history supplies the message data while the currently loaded chat supplies the appearance template (bubble colors, text, borders, radius, font, and backtick styling). Clean transcript uses a simple portable layout. The very slow page-loading fallback is kept under Advanced / Compatibility for troubleshooting only.</p>
+<p class="hint">Use your current chat’s colors and layout with API-loaded message history, or choose a clean transcript. The slower page fallback is under Advanced.</p>
 </section>
 
 
@@ -1989,7 +1990,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="enableRulebookDiagnostics" type="checkbox"/><span>Show a read-only Rulebook log in chats</span></label>
 <label class="row"><input id="storyReadingLayout" type="checkbox"/><span>Improve Story Mode reading layout (visual only)</span></label>
 <p class="hint">Adds subtle message boundaries and readable wrapping on native Story Mode pages. Does not merge Story Mode with normal RP, edit text or alter generation.</p>
-<p class="hint">Off by default. Tracks changes to meters and status text SpicyChat actually shows while this tab is open. Keeps up to 150 observations in tab memory, with a JSON export for bug reports. Hidden/minimized meters are not treated as zero or deleted. It does not read hidden rules, explain trigger logic, or change Rulebook values. Turning this off clears the session log.</p>
+<p class="hint">Record visible Rulebook meter changes in this tab for troubleshooting (up to 150). Hidden rules are not read and Rulebook values are not changed.</p>
 </section>
 
 <div id="ds-feature-panel-native-rating-helpers" data-dsq-feature-panel="native-rating-helpers"></div>
@@ -2012,9 +2013,9 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label>Bot history / safety revisions to keep per bot
 <input id="botArchiveOwnRevisionLimit" type="number" min="1" max="50" step="1" value="10"/>
 </label>
-<p class="hint">When chatbot backup tools are enabled for the first time, automatic backups default to On. The default retention is 10 per bot and can be changed from 1–50. Manual checkpoints are kept separately and are never removed by this retention limit.</p>
-<p class="hint"><strong>Bot Version History</strong> is separate from rotating safety revisions and manual checkpoints. A new version is recorded only when creator-controlled content actually changes: Name/Title, Greeting, Personality, Scenario, Example Dialogue, sorted Tags, Avatar, or a learned attached Lorebook association. Unchanged saves, message/like/rating changes, and visibility/review-state changes do not create a new version.</p>
-<p class="hint">Visibility/review state is recorded separately for context. Compare shows field-level differences; Restore and bot imports fill selected normal editor fields for review and never press Save or publish anything. Bot import supports JSON, labeled TXT replacements and ZIP files on Create/Edit pages. Lorebook association is version metadata only and Restore does not automatically attach or detach a Lorebook.</p>
+<p class="hint">Automatic backups start on when chatbot backup tools are first enabled. Keep 1–50 revisions per bot; manual checkpoints are separate.</p>
+<p class="hint">Version History saves meaningful creator-content changes, not unchanged saves or normal stats changes.</p>
+<p class="hint">Compare versions or restore fields into the editor for review. QoL never presses Save or publishes automatically.</p>
 <p class="hint">With automatic saves turned off manually, nothing is saved until you click Save backup now. Export remains manual too.</p>
 </div>
 <div class="sub-card ds-lorebook-settings">
@@ -2038,12 +2039,12 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 </fieldset>
 <p class="hint">Existing Lorebooks can import entries only, or use the reviewed merge workflow. Private-copy creation won't change the original Lorebook.</p>
 </div>
-<p class="hint">Backup tools remain opt-in. Once chatbot backup tools are enabled, automatic chatbot backups start On by default unless you turn them off. The Backup manager can still review or delete backups you already created after the editor controls are disabled.</p>
+<p class="hint">Bot backups are optional. Automatic backups start on initially; existing backups remain manageable when editor tools are off.</p>
 </section>
 <div id="ds-feature-panel-profile-export" data-dsq-feature-panel="profile-export"></div>
 <section class="card" id="creatorBackupManagerCard">
 <h2>Backup manager</h2>
-<p class="hint">Search your own chatbot backups, Bot Version History, manual checkpoints, rotating safety revisions, optional visited-profile snapshots, and Lorebook backups. Restore fills the normal SpicyChat editor for review and never presses Save for you; QoL creates a manual safety checkpoint before applying restored fields. Profile snapshots appear here when “Automatically save a Bot Profile Snapshot/history when I visit a chatbot profile” is enabled under Local Bot Archive.</p>
+<p class="hint">Search bot/Lorebook backups and version history. Restores fill the editor for review and create a safety checkpoint; nothing is published automatically.</p>
 <div class="creator-backup-toolbar">
 <input id="creatorBackupSearch" type="search" placeholder="Search bot, profile, or Lorebook backups"/>
 <select id="creatorBackupType"><option value="all">Bots + profiles + Lorebooks</option><option value="bots">My chatbots only</option><option value="profiles">Bot profiles only</option><option value="lorebooks">Lorebooks only</option></select>
@@ -2056,17 +2057,17 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <h2>Creation helpers</h2>
 <label class="row"><input id="botEditorAutoOpenAdvanced" type="checkbox"/><span>Always open the Advanced chatbot section</span></label>
 <label class="row"><input id="rememberBotImagePrompt" type="checkbox"/><span>Remember my chatbot image-generation prompt on edit pages</span></label>
-<p class="hint">Stores the image prompt locally per chatbot and restores it when SpicyChat leaves the prompt blank after a refresh or later edit visit. It does not generate or upload an image by itself.</p>
+<p class="hint">Remember a bot’s image prompt locally and restore it if the editor leaves the field blank. No images are generated.</p>
 <label class="row"><input id="enableWikiLorebookImporter" type="checkbox"/><span>Add Wiki / Web import tools to Lorebook entries</span></label>
-<p class="hint">On a Lorebook's Entries page, import from Fandom, MediaWiki-style wikis, or other article pages. QoL asks for access only to the site you choose, removes common wiki clutter, previews editable entries/keywords first, and can selectively pull linked pages. If a site blocks fetching, you can paste article text or HTML instead.</p>
-<div class="sub-card" id="creatorTriggerPreviewCard"><h3>Creator trigger preview</h3><label class="row"><input id="enableCreatorTriggerPreview" type="checkbox"/><span>Show read-only Lorebook keyword preview in chats</span></label><p class="hint">Compares local Lorebook backups with visible chat/test text. Estimates possible keyword matches only; it cannot reveal the real engine block, hidden prompts, which entries actually fired, or native context usage. Off by default.</p></div>
+<p class="hint">Import Lorebook entries from a wiki or webpage. Review text and keywords before importing; paste article text if fetching fails.</p>
+<div class="sub-card" id="creatorTriggerPreviewCard"><h3>Creator trigger preview</h3><label class="row"><input id="enableCreatorTriggerPreview" type="checkbox"/><span>Show read-only Lorebook keyword preview in chats</span></label><p class="hint">Estimate which saved Lorebook keywords might match visible text. This cannot confirm actual engine triggers or hidden prompts.</p></div>
 <div class="sub-card" id="lorebookConsistencyCard">
 <strong>Lorebook response consistency</strong>
 <label class="row"><input id="enableLorebookConsistency" type="checkbox"/><span>Check settled AI replies for new locally-backed-up Lorebook matches</span></label>
 <label class="row"><input id="lorebookConsistencyShowMatches" type="checkbox"/><span>Show matched Lorebook entries under the AI reply</span></label>
 <label class="row"><input id="lorebookConsistencyAutoQueue" type="checkbox"/><span>Queue newly matched Lorebook context for the next user turn (off by default)</span></label>
 <label>Maximum entries queued per reply <input id="lorebookConsistencyMaxEntries" type="number" min="1" max="5" step="1" value="3"/></label>
-<p class="hint">QoL compares an AI reply with the previous user message and looks for Lorebook keywords introduced by the AI. It can show those local backup entries and carry them into the next turn. SpicyChat does not expose a supported hook that lets QoL silently rewrite the response that already finished generating.</p>
+<p class="hint">Suggest saved Lorebook entries when a reply introduces matching keywords. QoL cannot rewrite a reply already generated.</p>
 </div>
 <label class="row"><input id="lorebookDefaultEntriesTab" type="checkbox"/><span>Open Edit Lorebook on the Entries tab first</span></label>
 <p class="hint">Starts on Entries once when you open a Lorebook, then leaves Details / Entries tab switching alone.</p>
@@ -2075,7 +2076,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="lorebookEditShortcuts" type="checkbox"/><span>Add Edit Lorebook shortcuts to attached chatbot editors and chats when the attachment is known</span></label>
 <label class="row"><input id="lorebookEntryManager" type="checkbox"/><span>Enable Lorebook entry manager tools</span></label>
 <label class="row"><input id="lorebookMultiEntryWorkspace" type="checkbox"/><span>Allow multiple Lorebook entries to stay open in an editing workspace</span></label>
-<p class="hint">Select two or more entries and use Open selected. QoL keeps editable copies side by side/stacked, then saves each one through SpicyChat's normal entry editor. Normal single-entry behavior stays unchanged when this is off.</p>
+<p class="hint">Open several Lorebook entries together for editing. Each saves through SpicyChat’s normal editor.</p>
 <div class="sub-card">
 <strong>Per-entry row tools</strong>
 <label class="row"><input id="lorebookEntrySelectionCheckbox" type="checkbox"/><span>Show selection checkbox</span></label>
@@ -2101,21 +2102,21 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="lorebookBulkToggleEnabled" type="checkbox"/><span>Show Enable/disable</span></label>
 <label class="row"><input id="lorebookBulkDeleteSelected" type="checkbox"/><span>Show Delete selected</span></label>
 <label class="row"><input id="lorebookBulkFindKeyword" type="checkbox"/><span>Show Find keyword</span></label>
-<p class="hint">On the Lorebook page these actions now sit behind one compact Bulk actions button instead of permanently taking up a full multi-row toolbar. Selection-based bulk actions are hidden when selection checkboxes are disabled.</p>
+<p class="hint">Keep Lorebook bulk actions in a compact menu. Selection actions appear only when selection is enabled.</p>
 </div>
-<p class="hint">Lorebook workflow tools use SpicyChat's normal entry editor. Draft protection keeps a local recovery copy until SpicyChat successfully saves it. Analyze entries can open entries through the native editor to learn full keyword/content data.</p>
+<p class="hint">Use SpicyChat’s normal Lorebook editor, with a local draft copy until a save succeeds.</p>
 <label class="row"><input id="lorebookAutoStartNew" type="checkbox"/><span>Automatically click Start New when opening Create Lorebook</span></label>
 <label class="row"><input id="lorebookBulkKeywordPaste" type="checkbox"/><span>Add an Insert copied button for Lorebook keywords</span></label>
 <label class="row"><input id="lorebookExpandEntryEditor" type="checkbox"/><span>Make the Lorebook entry editor/content field taller</span></label>
 <label class="row"><input id="lorebookExpandTags" type="checkbox"/><span>Expand collapsed Lorebook tag / keyword lists</span></label>
-<p class="hint">Expands public Lorebook card tags and collapsed entry-keyword rows. Public data uses SpicyChat's current Lorebook search indexes; owned/private editor rows fall back to the current authenticated Lorebook data. QoL only replaces +N when it has the complete list.</p>
+<p class="hint">Show all known public Lorebook tags and entry keywords. QoL only expands +N when it has the full list.</p>
 <label class="row"><input id="botTagBulkPaste" type="checkbox"/><span>Add an Insert copied button for chatbot tags</span></label>
 <label class="row"><input id="botEditorSaveActions" type="checkbox"/><span>Add Save &amp; Stay and Save &amp; Chat buttons to the chatbot editor</span></label>
 <label class="row"><input id="botEditorSaveChatNewTab" type="checkbox"/><span>Make Save &amp; Chat open the chat in a new tab and keep the editor available</span></label>
 <label class="row"><input id="enableBotEditorDraftHistory" type="checkbox"/><span>Keep local chatbot-editor draft snapshots with restore controls</span></label>
 <label>Snapshots kept per bot/draft<input id="botEditorDraftHistoryLimit" max="20" min="3" step="1" type="number" value="8"/></label>
 <p class="hint">Keep earlier drafts while editing a bot. Restoring fills the editor for you to review; it doesn't save or publish anything by itself.</p>
-<p class="hint">Save &amp; Stay and Save &amp; Chat press SpicyChat's normal save button first, then redirect only after the saved bot can be identified. New-tab mode opens the chat separately and returns the current tab to the editor.</p>
+<p class="hint">Save with SpicyChat first, then stay or open the chat. Nothing redirects until the save is confirmed.</p>
 <label class="row"><input id="showLorebookEntryExpandButtons" type="checkbox"/><span>Show expand buttons for Lorebook entry text</span></label>
 <label class="row"><input id="creatorModerationWarnings" type="checkbox"/><span>Warn about wording that might trigger moderation in Lorebooks</span></label>
 <label class="row"><input id="creatorModerationWarningsChatbots" type="checkbox"/><span>Also show those wording warnings in chatbot editor fields</span></label>
@@ -2155,8 +2156,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint" id="moderationTermSummary"></p>
 <div class="moderation-term-list" id="moderationTermList"></div>
 </details>
-<p class="hint">These are community-reported warnings, not an official SpicyChat blocklist. The source thread itself reports inconsistent behavior and false positives. Follow-up posts specifically indicate that plain number words, second/trio and class are not standalone triggers, so QoL no longer warns on those by themselves; minor was shown as the actual cause in the Lorebook example. Balanced mode still suppresses other broad terms unless stronger context is present. Custom terms always use exact local matching. Ignored/custom terms stay local and are included with normal Settings backups.</p>
-<p class="hint">The same thread reports that Lorebooks and private bots can still be checked by SpicyChat moderation. QoL only warns about reported wording; it never supplies moderation bypass or loophole instructions.</p>
+<p class="hint">Community-reported words can cause false positives. Balanced mode avoids broad words without context. Custom and ignored words stay local.</p>
+<p class="hint">Warnings are advisory; Lorebooks and private bots may still be moderated by SpicyChat.</p>
 <label>Default visibility for new chatbots
           <select id="botEditorDefaultVisibility">
 <option value="ignore">Leave SpicyChat default</option>
@@ -2166,7 +2167,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 </label>
 <label class="row"><input id="autoAgreeCreationGuidelines" type="checkbox"/><span>Automatically tick the Community Guidelines agreement on chatbot and Lorebook creation pages</span></label>
 <p class="hint">The visibility helper only sets the initial choice on /chatbot/create. You can still change it manually before saving.</p>
-<p class="hint">The Lorebook Start New helper only acts on the chooser at /lorebook/create and leaves Import alone. Insert copied parses comma/semicolon/newline-separated keywords one by one, respects SpicyChat's 12-keyword/3-character rules, and skips duplicates instead of pasting one broken string. The taller editor only changes the local form layout.</p>
+<p class="hint">Start New only affects the create chooser. Insert copied splits keywords, skips duplicates and respects SpicyChat’s limits.</p>
 <p class="hint">The guidelines helper only targets the agreement checkbox on /chatbot/create and /lorebook/create.</p>
 </section>
 <section class="card">
@@ -2176,9 +2177,9 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="rememberMyCreationsView" type="checkbox"/><span>Remember My Creations sort/filter choices after reloads and returning to the page</span></label>
 <label class="row"><input id="autoLoadMyCreations" type="checkbox"/><span>Automatically load more bots on My Creations</span></label>
 <label>Extra My Creations pages to auto-load<input id="myCreationsAutoLoadPages" max="30" min="1" step="1" type="number" value="1"/></label>
-<p class="hint">Automatically load more of your bots using SpicyChat's normal Load More button. The default is one extra batch. QoL waits for React to mount/re-enable the native control and for real card growth before continuing, then stops early when no more bots are available.</p>
-<p class="hint">Adds a separate QoL Filter beside SpicyChat's own list controls. It starts on All and lets you combine visibility, message-count ranges, Lorebook presence, definition visibility and card-token ranges. Filters only affect currently loaded cards and never change a bot's actual visibility.</p>
-<p class="hint">View memory also restores SpicyChat's own My Chatbots sort choice (for example Oldest instead of resetting to Recent). If SpicyChat changes or removes a saved sort option, QoL leaves the native control alone instead of guessing.</p>
+<p class="hint">Load extra My Creations pages with SpicyChat’s normal Load More button. Stops when no more bots appear.</p>
+<p class="hint">Filter loaded My Chatbots cards by visibility, messages, Lorebooks, definition and tokens. No public data is changed.</p>
+<p class="hint">Remember My Chatbots sorting without changing unsupported or removed sort options.</p>
 </section>
 <section class="card" id="myCreationsBackupCard">
 <h2>My Creations backup &amp; shortcuts</h2>
@@ -2248,7 +2249,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="showRulebookFilters" type="checkbox"/><span>Add Rulebook Has / confirmed No / Unknown filter to My Creations (no profile requests)</span></label>
 <label class="row"><input id="lorebookUnknownSafeFilter" type="checkbox"/><span>Separate unknown Lorebook status from confirmed No Lorebook when filtering</span></label>
 <p class="hint">Unknown means the loaded card does not prove whether a Lorebook is attached. Private/public visibility is not inferred from missing icons or denied API requests.</p>
-<p class="hint">Exact message counts replace SpicyChat's rounded values (for example 1.2k) with the exact public count already returned by SpicyChat's Typesense listing search; QoL does not make a separate per-bot request for this. Token info loads bot profile data only as cards become visible, caches the result locally, and can show Greeting, Personality, Scenario and Example Dialogue counts. Greeting stays enabled by default; the other fields are optional. Counts use ~ because tokenization can differ by model. Lorebook tools add All / Has Lorebook / No Lorebook, Lorebook-first sorting, a count, a Has Lorebook toggle in SpicyChat's normal search/filter sidebar, and a Needs Lorebook shortcut on My Creations.</p>
+<p class="hint">Exact message counts use public listing results without extra requests. Token counts load only for visible cards and are approximate (~). Lorebook tools add filters, sorting and a Needs Lorebook shortcut on My Creations.</p>
 <label>
           Hidden card mode
           <select id="hiddenCardMode">
@@ -2280,7 +2281,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Both controls are optional.</strong> Enable either one or both; they share the same negative recommendation rating, so a successful rating is only sent once. Less Like and Dislike both use the persistent signed recommendation-feedback helper; Dislike still waits for its idle cooldown and keeps separate handled history. If both point at the same negative recommendation event, QoL coordinates them so the same rating is not posted twice. Blocking itself still happens immediately. Disabled on phone/mobile for now.</p>
+<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately; Less Like and Dislike send coordinated negative feedback without posting twice. Dislike keeps its own cooldown/history. Desktop only.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
@@ -2296,7 +2297,8 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="applyBotBlockingToLorebooks" type="checkbox"/><span>Use my normal blocked words, tags, and creators for Lorebooks too</span></label>
 <label class="row"><input id="showLorebookBlockButtons" type="checkbox"/><span>Show a quick Block × on Lorebook cards</span></label>
 <label>Blocked Lorebook UUIDs, one per line<textarea id="lorebookBlockedIds" placeholder="01a0fb21-3f8e-7171-a7e1-f869236bea19" spellcheck="false"></textarea></label>
-<p class="hint"><strong>Public Lorebooks:</strong> all Lorebook controls are opt-in and default off. Normal blocked words check Lorebook names/descriptions, normal blocked tags check Lorebook tags, and normal blocked creators check the Lorebook creator. Exact UUID blocks stay Lorebook-only.</p>
+<div id="ds-feature-panel-rulebook-public-qol" data-dsq-feature-panel="rulebook-public-qol"></div>
+<p class="hint"><strong>Public Lorebooks:</strong> Optional local filters for names, descriptions, tags, creators and exact Lorebook IDs.</p>
 <details class="sub-card blocker-test-card">
 <summary>Advanced: test blocking rules</summary>
 <p class="hint">Optional troubleshooting tool. Paste a sample only when you want to check exactly why a word, creator, or tag rule does or does not match. It is not needed for normal blocking.</p>
@@ -2383,7 +2385,7 @@ step sister" spellcheck="false"></textarea></label>
 <button id="blockedBotApplyBulk" type="button">Apply</button>
 </div>
 <p class="hint ds-bulk-selection-hint">Selections stay active after Apply so you can run another bulk action on the same bots. Use Clear selection when you are finished.</p>
-<p class="hint">Desktop browser only. Dislike and Stop recommending have separate controls and history but submit the same underlying negative recommendation rating. Dislike and Stop recommending share one inactive SpicyChat Home recommendation helper so auth and SpicyChat's recommendation client stay initialized, then send feedback directly by bot ID without navigating between bots or searching/clicking cards. Their handled histories remain separate, while the shared coordinator prevents duplicate negative-rating POSTs. The helper closes when the run finishes. If you close it manually, the run pauses and Resume recreates it. Successful actions are remembered locally and skipped on later runs; failures remain eligible for retry. Name-only blocks are skipped because they do not have a bot ID.</p>
+<p class="hint">Desktop only. Dislike and Stop recommending share one background helper but keep separate histories. Successful feedback is remembered; failures can be retried.</p>
 <div class="bot-manager-list" id="blockedBotManager"></div>
 <div class="bot-manager-pager">
 <button id="blockedBotShowMore" type="button">Show 10 more</button>
@@ -2405,7 +2407,7 @@ Fantasy" spellcheck="false"></textarea></label>
 <section class="card">
 <h2>Smart filter presets</h2>
 <label class="row"><input id="enableSmartFilterPresets" type="checkbox"/><span>Enable Smart Filter Presets</span></label>
-<p class="hint">Adds ready-made filters and lets you save your own presets. Lorebook, Opened, followed-creator, Favorites and Later filters now support both include and exclude states, so combinations such as Followed + fresh or Unsaved fresh are possible. Custom presets can be saved, renamed and deleted locally and are included in Everything backups.</p>
+<p class="hint">Save or reuse filter combinations, including include/exclude choices for Favorites, Later, Lorebooks and followed creators.</p>
 </section>
 <section class="card">
 <h2>Recommendation helpers</h2>
@@ -2428,13 +2430,13 @@ NTR"></textarea></label>
 <label>Hide recommendations containing these words or names<textarea id="recommendationAvoidWords" rows="3" spellcheck="false" placeholder="Simon Ghost Riley
 MILF
 DILF"></textarea></label>
-<p class="hint">One word or phrase per line. Checks names and visible descriptions on Recommendations and Home’s For You cards. This is a private QoL filter: it does not block, dislike, or change tags. Remove a line to show matching recommendations again.</p>
+<p class="hint">Hide recommendations containing these words in titles or descriptions. This does not block, rate or change bots.</p>
 </div>
-<p class="hint">These filters apply to Recommendations and Home's For You cards. “Hide my own bots” learns your creator handle when you visit My Creations. Temporary hides last only until that tab is closed.</p>
+<p class="hint">Applies to Home and Recommendations. Temporary hides reset when the tab closes.</p>
 </section>
 <section class="card">
 <h2>Language filter</h2>
-<p class="hint">Choose whether to show only the selected languages or hide them. Exclude mode is useful when most English bots are untagged: unknown/untagged cards stay visible unless QoL can confidently detect an excluded language. Suggested by SeregaKR.</p>
+<p class="hint">Include or exclude selected languages. Unknown-language bots stay visible until a match is reliable.</p>
 <label class="row"><input id="enableLanguageFilter" type="checkbox"/><span>Filter bot cards by language</span></label>
 <label>Selected-language behavior
 <select id="languageSelectionMode">
@@ -2464,7 +2466,7 @@ DILF"></textarea></label>
 </div>
 <label class="row"><input id="languageAutoDetectUntagged" type="checkbox"/><span>Auto-detect untagged bots from their title + description + greeting when needed</span></label>
 <label class="row"><input id="languageShowDetectedBadge" type="checkbox"/><span>Show a small local “QoL: language” badge on detected cards</span></label>
-<p class="hint">Detected languages are only used by QoL's filters. Your changes won't edit the creator's real tags. Obvious language can be detected from sentence-like titles or card descriptions immediately; ambiguous untagged cards are checked gradually from public greeting/description data and cached locally so listings are not hammered with requests.</p>
+<p class="hint">Language detection is local and never edits bot tags. Uncertain matches may use cached public details.</p>
 <input id="languageFilterMode" type="hidden" value="conservative"/>
 </section>
 <section class="card">
@@ -2488,10 +2490,10 @@ DILF"></textarea></label>
 <label class="row"><input id="autoFillListings" type="checkbox"/><span>Enable Listing Refill</span></label>
 <label class="row"><input id="paginationTopJumpBox" type="checkbox"/><span>Show a page-number box above chatbot listings</span></label>
 <label class="row"><input id="paginationQuickJumpMenu" type="checkbox"/><span>Show a quick page-jump dropdown beside bottom pagination</span></label>
-<p class="hint">The three-dots controls in bottom pagination are editable page-number boxes (1–20,000). QoL also expands the native page window and adds an estimated last-page shortcut when the listing exposes a result count. The optional dropdown adds Random page plus useful page landmarks.</p>
+<p class="hint">Use page-number shortcuts, estimated last page and optional Random page in pagination.</p>
 <label>Target visible cards<input id="autoFillTargetCards" max="200" min="1" step="1" type="number"/></label>
 <label>Max extra pages / Load More attempts per listing<input id="autoFillMaxClicks" max="30" min="1" step="1" type="number"/></label>
-<p class="hint">Default target is 50 visible cards; you can raise it up to 200. On current paginated listings QoL briefly opens later pages in an inactive helper tab, copies only candidates that pass the current filters back into your listing, skips duplicate bots, and closes/reuses the helper automatically. Listing filter statistics are configured separately under Bot Blocking &amp; Dislikes.</p>
+<p class="hint">Refill filtered lists from later pages, skipping duplicates. Target 50–200 visible cards; a helper tab closes automatically.</p>
 </section>
 <section class="card">
 <h2>Not interested</h2>
@@ -2520,7 +2522,7 @@ DILF"></textarea></label>
 <label>Aliases, one per line<textarea id="tagAliasRules" rows="6" spellcheck="false" placeholder="wlw => FemalePOV | 🌈
 poly => Multiple Characters | 👥
 myth => Fantasy | ✨"></textarea></label>
-<p class="hint">Aliases are personal and never replace SpicyChat's real tags. Because shorthand such as “wlw” is used inconsistently by different creators, QoL does not hardcode meanings. Format: alias =&gt; exact SpicyChat tag | optional emoji.</p>
+<p class="hint">Aliases are local and never change SpicyChat tags. Format: alias => exact tag | optional emoji.</p>
 <div class="sub-card">
 <h3>Personal tags from bot text</h3>
 <label class="row"><input id="localTagMatchEnabled" type="checkbox"/><span>Automatically add personal tags when matching bot text is found</span></label>
@@ -2528,7 +2530,7 @@ myth => Fantasy | ✨"></textarea></label>
 Werewolf => title,description,greeting: werewolf, lycanthrope
 Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input id="localTagMatchFetchPublic" type="checkbox"/><span>Check public bot profiles for greeting/details not already saved (slower)</span></label>
-<p class="hint">Format: personal tag =&gt; fields: matching words/phrases. Fields: title, description, greeting, personality, scenario, examples. A comma means any matching word/phrase; * at the end matches word endings. QoL only adds local personal tags; it never changes real SpicyChat tags. Scans loaded public bot cards only, avoids My Creations, and leaves previously assigned personal tags intact if you change the rules. Private bot editors are never scanned. Without the public-profile option, greeting/details only match when QoL already has a saved bot copy.</p>
+<p class="hint">Rules: personal tag => fields: matching words. Commas match any phrase; a trailing * matches word endings. Tags stay local and do not scan private editors.</p>
 </div>
 </section>
 <section class="card" id="randomChatSettingsCard">
@@ -2539,7 +2541,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input id="randomChatIncludeOpened" type="checkbox"/><span>Allow bots already known as opened</span></label>
 <label class="row"><input id="randomChatIncludeLater" type="checkbox"/><span>Allow bots saved for Later</span></label>
 <label class="row"><input id="randomChatIncludeFavorites" type="checkbox"/><span>Allow Favorite-history bots when picking from Home / Recommended</span></label>
-<p class="hint">Random Chat now uses SpicyChat's public character search API instead of opening temporary rendered Home helper tabs. On Favorites it picks from your saved Favorite bot IDs and confirms the chosen bot through the API. On Home / Recommended it picks from the API discovery pool and can reuse your current/last Home text search.</p>
+<p class="hint">Pick random public bots through SpicyChat search or your Favorites list, without opening helper pages.</p>
 </div>
 </section></div>
 
@@ -2576,7 +2578,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div class="button-row"><button id="accountSyncNow" type="button">Sync now</button><button id="accountSyncPause" type="button">Pause sync</button><button id="accountSyncCreateLinkCode" type="button">Link another device</button></div>
 <div class="sub-card" id="accountSyncDevicePreferences">
 <h3>What this device syncs</h3>
-<p class="hint">Each linked device chooses independently. For a main Brave profile, use Settings: Upload only and saved lists: Two-way. On mobile, choose Settings: Off and Blocked bots: Two-way if you only want to share blocked bots. The phone's other settings will stay local.</p>
+<p class="hint">Choose sync directions per device. For example, sync blocked IDs on mobile without syncing all desktop settings.</p>
 <label>Settings (all syncable preferences) <select id="accountSyncSettingsMode">
 <option value="off">Off on this device</option><option value="two-way">Upload and download (merge)</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option><option value="manual">Manual only</option>
 </select></label>
@@ -2584,7 +2586,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input id="accountSyncLimitSettings" type="checkbox"/><span>Only sync selected settings</span></label>
 <details id="accountSyncSettingChoices" class="sub-card account-sync-setting-choices"><summary>Choose individual settings (expand to search and edit)</summary><div id="accountSyncSettingSelection" hidden><input id="accountSyncSearchSetting" placeholder="Find a setting by name" type="search"/><div id="accountSyncSettingsChecklist" class="account-sync-selectable-settings"></div></div></details>
 <h4>Saved lists (ID-only)</h4>
-<p class="hint">These lists merge individual bot IDs (plus manual blocked-name rules). They do not sync message text, bot backup details, pictures, draft history, or your SpicyChat account's own favorites. Remote unblocks are respected. Other devices may need one refresh before seeing a newly linked device.</p>
+<p class="hint">Sync bot IDs and blocked names, not messages, images, detailed backups or SpicyChat Favorites. Unblocks also sync.</p>
 <div class="account-sync-list-modes" id="accountSyncListModes">
 <label>Blocked bots <select data-sync-list="blockedBots"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 <label>Favorite bots <select data-sync-list="favoriteBots"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
@@ -2593,12 +2595,12 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label>Opened bot IDs <select data-sync-list="openedChats"><option value="off">Off</option><option value="two-way">Upload + download</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option></select></label>
 </div>
 <div class="button-row" id="accountSyncQuickModes"><button type="button" data-sync-preset="all-off">Turn all off</button><button type="button" data-sync-preset="blocked-only">Blocked bots (two-way)</button><button type="button" data-sync-preset="desktop-upload">Desktop upload settings</button><button type="button" id="accountSyncAndroidBlockedReceive" title="Save this device as receive-only for blocked bots, without syncing general settings or other lists">Phone: receive blocked bots only</button><button type="button" id="accountSyncAndroidBlockedTwoWay" title="Save blocked-bot ID/name sync in both directions, without other settings">Phone: blocked bots two-way</button><button type="button" id="accountSyncAndroidBlockedUpload" title="Send this phone’s blocked bot IDs/names to linked devices">Phone: upload blocked bots only</button><button type="button" id="accountSyncAndroidBlockedLaterReceive" title="Download blocked-bot and Later-bot IDs into this phone, preserving existing local metadata">Phone: receive Blocked + Later</button><button type="button" id="accountSyncAndroidBlockedLaterTwoWay" title="Sync blocked-bot and Later-bot IDs in both directions">Phone: Blocked + Later two-way</button><button type="button" id="accountSyncAndroidBlockedLaterUpload" title="Upload blocked-bot and Later-bot IDs from this phone">Phone: upload Blocked + Later</button><button type="button" data-sync-preset="all-two-way">All supported data (two-way)</button></div>
-<p class="hint">Quick modes change the form until you save. The three phone blocked-bot buttons save immediately; use Sync now after linking. All supported data includes settings and saved lists, but not private chat text, pictures or archives. Two-way sync shares manual unblocks too; a deleted/unavailable bot is not automatically unblocked. Blocked-word/tag rules are separate settings.</p>
+<p class="hint">Presets choose sync settings; save to apply. Two-way sync includes manual unblocks, not automatic unblocking of unavailable bots.</p>
 <div class="button-row"><button id="accountSyncPreviewChoices" type="button">Preview directions</button><button id="accountSyncSavePreferences" type="button">Save device sync choices</button></div>
 <p id="accountSyncDirectionPreview" class="hint" role="status"></p>
 <p id="accountSyncSelectionSummary" class="hint"></p>
-<p class="hint">Phone list presets sync bot IDs (and blocked names), not chat content, images or full bot descriptions. Downloaded Later entries retain metadata already saved on the receiving device. Sync runs after list edits settle, and checks every 6 hours while linked. You can always use Sync now.</p>
-<p class="hint">Cloud revisions are change counters, not proof that entire copies are stored. Historical revisions and cloud cleanup depend on the sync backend. ID-only lists use compact, deduplicated per-device updates; they do not upload unchanged lists on every check.</p>
+<p class="hint">Phone presets sync IDs and blocked names, not chat data or images. Sync runs after changes and checks every 6 hours.</p>
+<p class="hint">Cloud revisions count changes, not full stored backups. Unchanged ID lists are not reuploaded each check.</p>
 </div>
 <div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>
 </div>
@@ -2609,7 +2611,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 </div>
 <div class="sub-card">
 <h3>How compatibility-aware sync works</h3>
-<p class="hint">QoL sync stores the setting you actually chose. Each device separately decides whether it can run that setting. A desktop-only bulk/helper-tab option can stay ON in your account while Android keeps it inactive, so Android never syncs a fake OFF value back to desktop.</p>
+<p class="hint">Each device keeps the selected setting, but runs only features it supports. Android does not overwrite desktop-only choices.</p>
 <p class="hint">Styles, visual changes, editing/creator tools, chat appearance, presets and normal current-page controls remain Android-capable unless a feature has a real technical blocker.</p>
 </div>
 <p class="hint" id="accountSyncBackendStatus">Checking sync service…</p>
@@ -2643,7 +2645,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="settingsAdvanced" type="checkbox"/><span>Advanced &amp; Compatibility <span class="hint" data-export-count-for="settingsAdvanced"></span></span></label>
 <label class="row"><input data-export-scope="accountSyncRules" type="checkbox"/><span>Account &amp; Sync choices <span class="hint" data-export-count-for="accountSyncRules"></span></span></label>
 </div>
-<p class="hint">Account &amp; Sync backups include only sync directions and selected categories, not link codes, authentication tokens, account IDs or device identity. Restoring sync choices does not link a device. On an already linked device, restore pauses sync by default so you can review directions before resuming.</p>
+<p class="hint">Sync backups include choices, not credentials or device IDs. Restoring them never links a device and pauses existing sync for review.</p>
 <p><strong>Saved data</strong></p>
 <div class="export-scope-grid">
 <label class="row"><input data-export-scope="opened" type="checkbox"/><span>Bot Status Center opened history <span class="hint" data-export-count-for="opened"></span></span></label>
@@ -2684,7 +2686,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <label class="row"><input data-export-scope="localChangeHistory" type="checkbox"/><span>Recent QoL change history <span class="hint" data-export-count-for="localChangeHistory"></span></span></label>
 <label class="row"><input data-export-scope="localMedia" type="checkbox"/><span>Local media (soundscapes, backgrounds, character/persona pictures, picture library; may be large) <span class="hint" data-export-count-for="localMedia"></span></span></label>
 </div>
-<p class="hint">DeepL API keys, creator Discord webhook URLs, temporary caches, diagnostics, and refill/helper state are never included. Local media is intentionally excluded from Active / Used and must be selected explicitly.</p>
+<p class="hint">API keys, webhook URLs, temporary caches and diagnostics are excluded. Local media must be chosen separately.</p>
 </fieldset>
 <div class="button-row">
 <button id="exportSettings" type="button">Export to box</button>
@@ -2696,7 +2698,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 </div>
 <input accept=".json,.json.gz,.gz,.txt,.qol,.backup,application/json,application/gzip,text/plain" hidden="" id="settingsBackupFile" type="file"/>
 <textarea id="settingsJson" placeholder="Exported/imported JSON appears here. You can also drop a .json/.txt backup file here." spellcheck="false"></textarea>
-<p class="hint">Backups can be plain .json/.txt or compressed .json.gz. Download .json automatically uses gzip above 50 MB (uncompressed). Everything remains a complete backup. The separate storage optimization below reduces QoL’s internal IndexedDB footprint without removing or excluding saved records. Use Everything for a complete backup. Large compressed imports are decompressed locally before preview. Android WebView gzip support depends on the wrapper.</p>
+<p class="hint">Download JSON, text or gzip backups. Everything includes all supported data; large files compress automatically. Imports are previewed locally.</p>
 <div class="import-preview" hidden="" id="importPreview">
 <div>
 <strong>Import preview</strong>
@@ -2728,20 +2730,20 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <section class="card" id="recentChangesCard">
 <h2>Recently changed / Undo</h2>
 <label class="row"><input id="enableLocalChangeHistory" type="checkbox"/><span>Keep a short local history for supported QoL changes</span></label>
-<p class="hint">Stores up to 12 recent local QoL changes on this device. Supported actions can be rolled back without touching SpicyChat server data. Very large changes may be logged without an Undo snapshot to avoid bloating extension storage.</p>
+<p class="hint">Undo up to 12 recent supported QoL changes. Very large actions may not have an Undo snapshot.</p>
 <div class="local-change-history" id="localChangeHistory"><span class="hint">No recent changes loaded.</span></div>
 <div class="button-row"><button id="refreshLocalChangeHistory" type="button">Refresh</button><button id="undoLastLocalChange" type="button">Undo latest</button><button id="clearLocalChangeHistory" type="button">Clear history</button></div>
 </section>
 <section class="card" id="personalUsageCard">
 <h2>Personal usage &amp; context</h2>
 <label class="row"><input id="enablePersonalUsageSummary" type="checkbox"/><span>Enable local personal usage summary</span></label>
-<p class="hint">This summary reads data QoL already stores (Opened, Favorites, Later, blocked/not-interested, saved copies, Personas, and local organization). It does not start recording chat text, message content, or a new browsing history.</p>
+<p class="hint">Summary of already saved QoL data. It does not record new chats or browsing history.</p>
 <div class="button-row"><button id="refreshPersonalUsage" type="button">Refresh summary</button></div>
 <pre id="personalUsageSummary" class="diagnostic-output">Turn the option on, then refresh.</pre>
 </section>
 <section class="card" id="storageCard">
 <h2>Local storage & recovery</h2>
-<p class="hint">Shows what QoL has saved in this browser. You can check cleanup candidates first; cleanup only normalizes supported duplicate/orphaned local records. QoL also keeps one lightweight recovery snapshot you can load back through the normal import preview.</p>
+<p class="hint">Review saved data and cleanup suggestions first. QoL keeps a local recovery snapshot.</p>
 <p class="hint" id="recoverySnapshotStatus">Loading recovery snapshot status...</p>
 <div class="button-row"><button id="createRecoverySnapshot" type="button">Create recovery snapshot</button><button id="loadRecoverySnapshot" type="button">Load last snapshot</button><button id="clearRecoverySnapshot" type="button">Clear snapshot</button></div>
 <div class="storage-usage" id="storageUsage">Loading storage details...</div>
@@ -2754,11 +2756,11 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <button id="cleanLocalData" type="button">Clean local data</button>
 </div>
 <div id="localStorageBreakdown" class="hint" aria-live="polite"></div>
-<p class="hint" id="optimizeStoredDataStatus">Keeps all saved data and complete backups. Compresses older bot records in small batches; new large records are compressed automatically. Download a full backup first if you may downgrade QoL: older extension versions cannot read compressed storage. The first optimization may take a while.</p>
+<p class="hint" id="optimizeStoredDataStatus">Compress older saved records without deleting them. Back up first if downgrading: older QoL versions may not read compressed storage.</p>
 <p class="hint" id="cleanupStatus"></p>
 </section><section class="card" id="settingsHealthCard">
 <h2>Settings check</h2>
-<p class="hint">Checks things that are likely to need action, including enabled features missing setup, invalid values, interrupted bulk actions, broken local records, unusually large storage, and developer wiring mistakes where a registered setting has no Settings control. It does not change anything by itself.</p>
+<p class="hint">Check missing setup, broken records, interrupted jobs, large storage and invalid settings. Nothing is changed automatically.</p>
 <div class="button-row"><button id="runSettingsHealthCheck" type="button">Check configuration</button></div>
 <div class="settings-health-results" id="settingsHealthResults"><span class="hint">No check run yet.</span></div>
 </section>
@@ -2804,7 +2806,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <section class="card help-card" id="simpleFeatureGuideCard">
 <h2>Simple feature guide</h2>
 <p>Not sure what a setting does? Here’s the short version. The full Features tab has more detail.</p>
-<p class="hint"><strong>Local</strong> means QoL saves it in your browser, not on the public bot. Most optional features start OFF. Features marked experimental still need proper testing, so keep backups and review changes before relying on them.</p>
+<p class="hint"><strong>Local</strong> means data is saved in this browser, not on SpicyChat. Most extras are optional; experimental features need testing.</p>
 <div class="eli5-guide">
 <details open><summary>Finding bots</summary><div class="eli5-grid">
 <div><strong>Bot blocking</strong><span>Hide bots you don’t want to see. Quick Block only hides them after the block is saved.</span></div>
@@ -2819,7 +2821,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div><strong>Later</strong><span>Keep a separate list of bots you might want to try later.</span></div>
 <div><strong>Recently Seen</strong><span>Find a bot card you just scrolled past.</span></div>
 <div><strong>Favorite / Follow creators</strong><span>Save creators locally and optionally check for new public bots.</span></div>
-<div><strong>Bot Organizer</strong><span>Add your own bot folders, notes, tags and creation statuses.</span></div>
+<div><strong>Bot Organizer (bot folders &amp; labels)</strong><span>Organize bot profiles with local folders and labels.</span></div>
 <div><strong>Saved Bots Hub</strong><span>Search all the bots QoL already knows about in one place.</span></div>
 <div><strong>Bot Status Center</strong><span>Check saved bot links and keep available profile information for recovery. Private bots aren’t automatically treated as deleted.</span></div>
 <div><strong>Bulk blocking</strong><span>Select several bot cards, then block them together.</span></div>
@@ -2834,8 +2836,8 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <div><strong>Scroll &amp; swipe navigation</strong><span>Jump to the top, bottom or another generated reply; loading older replies can take time.</span></div>
 <div><strong>Search Inside Current Chat</strong><span>Search loaded messages and jump to matches. You can choose to load older messages too.</span></div>
 <div><strong>Message bookmarks</strong><span>Save important messages and jump back to them later.</span></div>
-<div><strong>Chat folders</strong><span>Organize individual conversations into local folders without changing the actual chats.</span></div>
-<div><strong>Smart Chat Folders — experimental</strong><span>Preview folders suggested from persona or bot-tag metadata before applying them.</span></div>
+<div><strong>Conversation folders</strong><span>Organize individual chats, separately from bot profiles.</span></div>
+<div><strong>Smart Conversation Folders — experimental</strong><span>Preview folder suggestions before applying them.</span></div>
 <div><strong>Model quick menu &amp; generation profiles</strong><span>Favorite models or save a model’s generation settings for later.</span></div>
 <div><strong>Chat Export</strong><span>Download conversations as text, Markdown, HTML or JSON.</span></div>
 <div><strong>Chat Nudges</strong><span>Get optional reminders about selected chats you haven’t visited. No fake message is sent.</span></div>
@@ -2903,11 +2905,11 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 </section>
 <section class="card" id="diagnosticsCard">
 <h2>Quick diagnostics</h2>
-<p class="hint">Copies the extension version, browser, enabled feature names, storage counts, Toolkit detection status, and a sanitized SpicyChat page type. It does not copy chat text, memories, personas, blocked words, or other saved content.</p>
+<p class="hint">Copy version, browser, enabled features and storage counts for support. No chat text, memories or private lists.</p>
 <label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include exact enabled feature names in shared support reports (optional; OFF by default)</label>
 <div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
-<p class="hint">If someone asks for everything, use <strong>Copy all support info</strong> or <strong>Download all support info</strong>. The separate copy/download buttons are there if they only need one report. Large downloads use .txt.gz. None of these reports include chat text.</p>
-<p class="hint">Support history stays saved across normal QoL updates and restarts. It is stored separately so new checks do not keep rewriting Settings storage. Older checks are compressed and large reports download as .txt.gz. If your browser confirms the download finished, only checks included in that file are cleared. Otherwise history stays saved until you clear it yourself. Copying never clears history.</p>
+<p class="hint">Use Copy all or Download all for a complete support report, or export individual parts. Chat text is excluded.</p>
+<p class="hint">Support history survives updates. Copy never clears it; downloads clear only successfully saved records when confirmed.</p>
 <div class="button-row"><button id="dsSupportHistoryRefresh" type="button">Check saved support history</button><button id="dsSupportHistoryClear" type="button">Clear support history…</button></div>
 <p class="hint" id="dsSupportHistoryStatus">Saved support history hasn't been checked yet.</p>
 <p class="hint" id="diagnosticsStatus"></p>
@@ -2943,7 +2945,7 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-pins.js"></script><script src="settings/feature-panels/rulebook-public-qol.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

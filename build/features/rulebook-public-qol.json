@@ -1,0 +1,21 @@
+{
+  "id": "rulebook-public-qol",
+  "primary": "content/rulebook-public-qol.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "rulebookBlockingEnabled",
+    "applyBotBlockingToRulebooks",
+    "showRulebookBlockButtons",
+    "rulebookBlockedIds"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/rulebook-public-qol.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false
+}

@@ -12,6 +12,7 @@ function replaceSettingsForImport(importedSettings) {
     "blockedWords",
     "blockedCreators",
     "lorebookBlockedIds",
+    "rulebookBlockedIds",
     "blockedBotIds",
     "blockedBotNames",
     "allowedLanguages"

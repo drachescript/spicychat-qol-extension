@@ -179,7 +179,8 @@
         "content/opened-chats.js",
         "content/chat-index.js",
         "content/saved-chat-actions.js",
-        "content/chat-smart-folders.js"
+        "content/chat-smart-folders.js",
+        "content/chat-pins.js"
       ]
     },
     "listings": {
@@ -217,6 +218,7 @@
         "content/tags-nsfw.js",
         "content/local-tag-matching.js",
         "content/rulebook-filter.js",
+        "content/rulebook-public-qol.js",
         "content/auto-blocking.js",
         "content/previously-chatted-indicator.js"
       ]
@@ -510,7 +512,8 @@
       ],
       "chatList": [
         "content/styles/chat-index.css",
-        "content/styles/chat-smart-folders.css"
+        "content/styles/chat-smart-folders.css",
+        "content/styles/chat-pins.css"
       ],
       "personas": [
         "content/styles/persona-manager.css"

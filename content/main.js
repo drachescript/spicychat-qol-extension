@@ -2068,10 +2068,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (chatList) {
-        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar"), () => DS.applyChatListTools?.());
-      } else if (document.getElementById("ds-chat-organizer-toolbar") || document.querySelector(".ds-chat-row-hidden-by-folder,.ds-chat-org-select")) {
-        DS.removeChatOrganizer?.();
+        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!settings.enableChatPins || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar,#ds-qol-pinned-chats,.ds-chat-pin-toggle"), () => DS.applyChatListTools?.());
+        await runFeatureStep("chat pins", !!settings.enableChatPins || !!document.querySelector("#ds-qol-pinned-chats,.ds-chat-pin-toggle"), () => DS.applyChatPins?.());
+      } else {
+        if (document.getElementById("ds-chat-organizer-toolbar") || document.querySelector(".ds-chat-row-hidden-by-folder,.ds-chat-org-select")) DS.removeChatOrganizer?.();
+        if (document.getElementById("ds-qol-pinned-chats") || document.querySelector(".ds-chat-pin-toggle")) DS.removeChatPins?.();
       }
+
+      // Rulebooks Explore uses its own route, not the normal bot listing route.
+      await runFeatureStep("public rulebook blocking",
+        (page.isRulebookExplorePage && settings.rulebookBlockingEnabled === true)
+          || !!document.querySelector('[data-ds-reason^="rulebook:block:"],.ds-rulebook-block-button'),
+        () => DS.applyPublicRulebookQoL?.());
 
       if (listing) {
         await runFeatureStep("random chat", !!settings.showRandomChatButton || !!document.getElementById("ds-qol-random-chat"), () => DS.applyRandomChatButton?.());

@@ -1,0 +1,28 @@
+/* Local per-conversation pins on /chats. */
+.ds-chat-pins-row { position: relative; }
+.ds-chat-pin-toggle {
+  position: absolute; right: 9px; top: 49px; z-index: 12;
+  display: grid; place-items: center; width: 31px; height: 30px;
+  border: 1px solid #59616e; border-radius: 7px;
+  color: #f4f5f7; background: #252932; cursor: pointer;
+  font: 16px system-ui, sans-serif; line-height: 1;
+}
+.ds-chat-pin-toggle[aria-pressed="true"] { border-color: #5f95d6; background: #19354e; }
+.ds-chat-pin-toggle:hover, .ds-chat-pin-toggle:focus-visible { outline: 2px solid #80aef4; outline-offset: 1px; }
+#ds-qol-pinned-chats {
+  width: 100%; margin: 0 0 14px; padding: 12px;
+  background: #191b20; border: 1px solid #474b55; border-radius: 12px;
+  box-sizing: border-box; color: #f3f4f6;
+}
+#ds-qol-pinned-chats h2 { font-size: 14px; font-weight: 700; margin: 0 0 9px; color: inherit; }
+.ds-chat-pins-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.ds-chat-pins-item { display: flex; align-items: center; min-width: 0; max-width: 100%; background: #292d35; border: 1px solid #4c5360; border-radius: 8px; overflow: hidden; }
+.ds-chat-pins-item a { color: #f4f5f7; text-decoration: none; padding: 8px 10px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(330px, 65vw); }
+.ds-chat-pins-item a:hover { text-decoration: underline; }
+.ds-chat-pins-item button { background: transparent; border: 0; border-left: 1px solid #505561; color: #e5e7eb; cursor: pointer; padding: 7px 10px; font: 19px system-ui, sans-serif; }
+.ds-chat-pins-item button:hover, .ds-chat-pins-item button:focus-visible { background: #4b2832; color: #fff; }
+html.light #ds-qol-pinned-chats { background: #f1f3f6; color: #161a22; border-color: #adb5c2; }
+html.light .ds-chat-pins-item { background: #fff; border-color: #9ba4b3; }
+html.light .ds-chat-pins-item a, html.light .ds-chat-pins-item button { color: #151a24; }
+html.light .ds-chat-pin-toggle { background: #f1f3f6; color: #151a24; }
+@media (max-width: 720px) { .ds-chat-pin-toggle { right: 5px; top: 47px; width: 30px; height: 30px; } }

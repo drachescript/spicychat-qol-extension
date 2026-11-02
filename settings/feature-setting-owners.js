@@ -1,5 +1,7 @@
 // Small feature -> Settings ownership map. Values remain untouched when omitted.
 window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
+  "rulebook-public-qol": ["rulebookBlockingEnabled", "applyBotBlockingToRulebooks", "showRulebookBlockButtons", "rulebookBlockedIds"],
+  "chat-pins": ["enableChatPins"],
   "daily-message-limit": ["dailyMessageLimitTrackerEnabled"],
   "personas": ["showPersonaLimitIndicator"],
   "selection-memory": ["enableSelectionRemember"],
