@@ -512,7 +512,8 @@
       ],
       "chatList": [
         "content/styles/chat-index.css",
-        "content/styles/chat-smart-folders.css"
+        "content/styles/chat-smart-folders.css",
+        "content/styles/chat-pins.css"
       ],
       "personas": [
         "content/styles/persona-manager.css"
