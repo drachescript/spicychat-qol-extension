@@ -65,6 +65,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "chat top bar": "chat",
     "chat top bar cleanup": "chat",
     "chat backgrounds": "chat",
+    // Rulebook Explore is its own route, not a bot-listing route. The build
+    // feature map still gates this optional listing module in Custom builds.
+    "public rulebook blocking": "core",
     "rulebook diagnostics": "chat",
     "rulebook diagnostics cleanup": "chat",
     "chat background cleanup": "chat",

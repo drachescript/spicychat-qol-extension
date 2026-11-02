@@ -102,6 +102,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     lorebookBulkKeywordPaste: false,
     lorebookExpandEntryEditor: false,
     lorebookExpandTags: false,
+    rulebookBlockingEnabled: false,
+    applyBotBlockingToRulebooks: false,
+    showRulebookBlockButtons: false,
+    rulebookBlockedIds: [],
     lorebookBlockingEnabled: false,
     applyBotBlockingToLorebooks: false,
     showLorebookBlockButtons: false,
@@ -493,6 +497,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     showChatListTools: false,
     enableChatOrganizer: false,
+    enableChatPins: false,
     enableChatSmartFolders: false,
     smartChatFolderDailyRefresh: false,
     smartChatFolderFetchBotTags: false,

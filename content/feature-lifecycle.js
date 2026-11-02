@@ -69,6 +69,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "listing refill": () => DS.removeListingRefillButton?.(),
     "main footer": () => DS.removeMainFooterManagement?.(),
     "public lorebook blocking/history": () => DS.applyPublicLorebookQoL?.(),
+    "public rulebook blocking": () => DS.removePublicRulebookQoL?.(),
   });
 
   function markActive(name, group = "core") {
@@ -129,6 +130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "creation audit": ["enableCreationAudit"],
       "creator writing assistant": ["enableCreatorWritingAssistant"],
       "persona organizer": ["enablePersonaOrganizer"],
+      "public rulebook blocking": ["rulebookBlockingEnabled"],
       "rulebook listing tools": ["showRulebookFilters"],
       "lorebook listing tools": ["showLorebookFilters"],
       "lorebook search filter": ["showLorebookFilters"],

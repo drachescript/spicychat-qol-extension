@@ -167,6 +167,7 @@ function readSettingsFromPage() {
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
+    enableChatPins: checked("enableChatPins"),
     chatCollections: value("chatCollections", ""),
     showSavedChatQuickActions: checked("showSavedChatQuickActions"),
     showRandomChatButton: checked("showRandomChatButton"),
@@ -616,6 +617,10 @@ function readSettingsFromPage() {
     blockedTags: linesToArray(value("blockedTags")),
     blockedWords: linesToArray(value("blockedWords")),
     blockedCreators: linesToArray(value("blockedCreators")),
+    rulebookBlockingEnabled: checked("rulebookBlockingEnabled", false),
+    applyBotBlockingToRulebooks: checked("applyBotBlockingToRulebooks", false),
+    showRulebookBlockButtons: checked("showRulebookBlockButtons", false),
+    rulebookBlockedIds: linesToArray(value("rulebookBlockedIds")),
     lorebookBlockingEnabled: checked("lorebookBlockingEnabled", false),
     applyBotBlockingToLorebooks: checked("applyBotBlockingToLorebooks", false),
     showLorebookBlockButtons: checked("showLorebookBlockButtons", false),
@@ -832,6 +837,7 @@ function readSingleSettingFromPage(settingKey) {
     case "chatTextReplacementPreview": return (checked("chatTextReplacementPreview"));
     case "showChatListTools": return (checked("showChatListTools"));
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
+    case "enableChatPins": return (checked("enableChatPins"));
     case "chatCollections": return (value("chatCollections", ""));
     case "showSavedChatQuickActions": return (checked("showSavedChatQuickActions"));
     case "showRandomChatButton": return (checked("showRandomChatButton"));
@@ -1261,6 +1267,10 @@ function readSingleSettingFromPage(settingKey) {
     case "blockedTags": return (linesToArray(value("blockedTags")));
     case "blockedWords": return (linesToArray(value("blockedWords")));
     case "blockedCreators": return (linesToArray(value("blockedCreators")));
+    case "rulebookBlockingEnabled": return checked("rulebookBlockingEnabled", false);
+    case "applyBotBlockingToRulebooks": return checked("applyBotBlockingToRulebooks", false);
+    case "showRulebookBlockButtons": return checked("showRulebookBlockButtons", false);
+    case "rulebookBlockedIds": return linesToArray(value("rulebookBlockedIds"));
     case "lorebookBlockingEnabled": return (checked("lorebookBlockingEnabled", false));
     case "applyBotBlockingToLorebooks": return (checked("applyBotBlockingToLorebooks", false));
     case "showLorebookBlockButtons": return (checked("showLorebookBlockButtons", false));

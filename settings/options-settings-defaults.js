@@ -93,6 +93,10 @@ const DEFAULT_SETTINGS = {
   lorebookBulkKeywordPaste: false,
   lorebookExpandEntryEditor: false,
   lorebookExpandTags: false,
+  rulebookBlockingEnabled: false,
+  applyBotBlockingToRulebooks: false,
+  showRulebookBlockButtons: false,
+  rulebookBlockedIds: [],
   lorebookBlockingEnabled: false,
   applyBotBlockingToLorebooks: false,
   showLorebookBlockButtons: false,
@@ -503,6 +507,7 @@ const DEFAULT_SETTINGS = {
 
   showChatListTools: false,
   enableChatOrganizer: false,
+  enableChatPins: false,
   enableChatSmartFolders: false,
   smartChatFolderDailyRefresh: false,
   smartChatFolderFetchBotTags: false,

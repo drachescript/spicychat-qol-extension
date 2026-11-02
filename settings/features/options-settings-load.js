@@ -372,6 +372,7 @@ async function load() {
 
   setChecked("showChatListTools", settings.showChatListTools);
   setChecked("enableChatOrganizer", !!settings.enableChatOrganizer);
+  setChecked("enableChatPins", !!settings.enableChatPins);
   setValue("chatCollections", settings.chatCollections || "");
   setChecked("showSavedChatQuickActions", !!settings.showSavedChatQuickActions);
   setChecked("showRandomChatButton", !!settings.showRandomChatButton);
@@ -817,6 +818,10 @@ async function load() {
   setValue("blockedTags", arrayToLines(settings.blockedTags));
   setValue("blockedWords", arrayToLines(settings.blockedWords));
   setValue("blockedCreators", arrayToLines(settings.blockedCreators));
+  setChecked("rulebookBlockingEnabled", settings.rulebookBlockingEnabled === true);
+  setChecked("applyBotBlockingToRulebooks", settings.applyBotBlockingToRulebooks === true);
+  setChecked("showRulebookBlockButtons", settings.showRulebookBlockButtons === true);
+  setValue("rulebookBlockedIds", arrayToLines(settings.rulebookBlockedIds));
   setChecked("lorebookBlockingEnabled", settings.lorebookBlockingEnabled === true);
   setChecked("applyBotBlockingToLorebooks", settings.applyBotBlockingToLorebooks === true);
   setChecked("showLorebookBlockButtons", settings.showLorebookBlockButtons === true);

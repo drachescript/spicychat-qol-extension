@@ -357,7 +357,7 @@ async function cleanLocalData() {
   };
   const currentSettings = { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
 
-  ["includeTags", "excludeTags", "blockedTags", "blockedWords", "blockedCreators", "lorebookBlockedIds", "blockedBotIds", "blockedBotNames", "allowedLanguages"]
+  ["includeTags", "excludeTags", "blockedTags", "blockedWords", "blockedCreators", "lorebookBlockedIds", "rulebookBlockedIds", "blockedBotIds", "blockedBotNames", "allowedLanguages"]
     .forEach(key => { currentSettings[key] = uniqueClean(currentSettings[key] || []); });
   currentSettings.botEditorSnippets = normalizeBotEditorSnippets(currentSettings.botEditorSnippets);
   currentSettings.oocTemplates = normalizeOocTemplates(currentSettings.oocTemplates);

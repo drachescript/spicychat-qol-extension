@@ -134,6 +134,7 @@ function mergeSettingsForImport(currentSettings, importedSettings) {
     "blockedWords",
     "blockedCreators",
     "lorebookBlockedIds",
+    "rulebookBlockedIds",
     "blockedBotIds",
     "blockedBotNames",
     "allowedLanguages"

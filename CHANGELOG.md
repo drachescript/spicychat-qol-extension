@@ -1,3 +1,8 @@
+## 0.2.69
+- Added optional pinned conversations at the top of Chats, including older chats no longer loaded in the list.
+- Shortened Settings descriptions and clarified bot folders versus conversation folders.
+- Added optional local Rulebook blocking using existing blocked words and creators, exact Rulebook IDs, and quick Block buttons.
+
 ## 0.2.68
 - Added optional free, on-device greeting translation with manual Google Translate fallback in Chat Translation.
 - Detect the Persona limit from account information when available, with a manual plan dropdown only when detection cannot confirm the limit.
