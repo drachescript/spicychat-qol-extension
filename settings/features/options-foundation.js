@@ -1551,8 +1551,9 @@ async function ensureSavedListsDataLoaded() {
   if (savedListsDataLoadPromise) return savedListsDataLoadPromise;
 
   savedListsDataLoadPromise = (async () => {
-    let result = await storageGet(SAVED_LIST_DATA_KEYS);
-    result = await retryMissingLargeSavedStores(result);
+    const result = await storageGet(SAVED_LIST_DATA_KEYS);
+    // This list contains no large IndexedDB recovery keys. Checking archive
+    // counts here did an unrelated storage round trip on every lazy load.
     currentOpened = Array.isArray(result[OPENED_KEY]) ? result[OPENED_KEY] : [];
     openedChatMetaState = normalizeMetaStore(result[OPENED_META_KEY]);
     favoriteCreatorState = normalizeCreatorStore(result[FAVORITE_CREATORS_KEY]);
@@ -1731,10 +1732,18 @@ async function renderHeavyManagersForTab(tabName) {
   // page while several thousand saved entries are being normalized/sorted.
   // Prefer actual browser idle time when available; requestAnimationFrame alone
   // can still put a large manager render directly into a frame the user needs.
-  for (const render of renderers) {
+  for (let renderIndex = 0; renderIndex < renderers.length; renderIndex += 1) {
+    const render = renderers[renderIndex];
     await nextOptionsIdleSlice();
     if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
+    const renderStarted = performance.now?.() || Date.now();
     render();
+    const elapsedMs = Math.max(0, (performance.now?.() || Date.now()) - renderStarted);
+    const key = `${tabName}:${renderIndex}`;
+    const samples = OPTIONS_PERFORMANCE.managerRenders ||= {};
+    const previous = samples[key] || { count: 0, totalMs: 0, maxMs: 0 };
+    samples[key] = { count: previous.count + 1, totalMs: previous.totalMs + elapsedMs, maxMs: Math.max(previous.maxMs, elapsedMs) };
+    if (elapsedMs > 100) optionsDiag("options-saved-manager", "slow-render", { manager: key, durationMs: Math.round(elapsedMs) }, { critical: elapsedMs > 500 });
   }
 
   renderedHeavyTabs.add(tabName);
@@ -2068,14 +2077,102 @@ function setupSettingsSearch() {
     return /^(?:show\s+(?:\d+\s+more|first\s+\d+|\d+)|load\s+more|open\s+profile|open\s+chat|copy\s+link|select|remove|recheck)$/i.test(text);
   }
 
-  // Search *features*, not the thousands of nested Settings labels, synced
-  // storage keys, repeated creator-specific switches, or manager row controls.
-  // A feature gets one searchable result and still links to its real Settings.
+  // One indexed feature per registry entry, with its distinct named controls
+  // available as targeted matches. Generic words from long descriptions and
+  // entire Settings cards must never turn into hundreds of unrelated results.
+  const SEARCH_CONTROL_DETAILS = {
+    showQuickMoreLikeButtons: {
+      name: "More Like This",
+      aliases: ["more like", "positive recommendation", "similar bots", "recommend more"],
+      description: "Adds an ↑ button to bot cards to send a positive recommendation preference (+1). It does not publicly Like or rate the bot; recommendation effects are not verified."
+    },
+    showQuickLessLikeButtons: {
+      name: "Stop recommending me this",
+      aliases: ["less like this", "less like", "negative recommendation"],
+      description: "Adds SpicyChat's Less Like This action to bot cards to send negative recommendation feedback. This is separate from a native Dislike rating."
+    },
+    showQuickDislikeButtons: {
+      name: "Quick Dislike button",
+      aliases: ["dislike button", "bot card dislike", "native thumbs down"],
+      description: "Adds a separate Dislike control to bot cards on desktop. The native chat rating must be verified; it does not reuse Less Like history."
+    },
+    cardDensityMode: {
+      name: "Card density",
+      description: "Choose normal, compact or dense bot cards while browsing listings."
+    },
+    cardClickBehavior: {
+      name: "Bot card click behavior",
+      description: "Choose whether clicking a bot card opens SpicyChat normally or goes to its public profile first."
+    },
+    showRecentlySeenButton: {
+      name: "Recently Seen listing button",
+      description: "Shows a Recently Seen shortcut on bot listing pages when local history tracking is enabled."
+    },
+    recentlySeenLimit: {
+      name: "Recently Seen history limit",
+      description: "Sets how many locally seen bots QoL remembers in Recently Seen history."
+    },
+    showQuickNotInterestedButtons: {
+      name: "Quick Not Interested button",
+      description: "Adds a Not Interested button to cards. This updates QoL's local filters, not a public SpicyChat rating."
+    },
+    showCopyBotInfoButtons: {
+      name: "Copy Bot Info button",
+      description: "Adds a button on bot cards to copy available public bot details."
+    },
+    enableBotComparison: {
+      name: "Side-by-side bot comparison",
+      description: "Lets you compare available bot-card details side by side without changing the bots."
+    },
+    trackRecentlySeenBots: {
+      name: "Recently Seen bot history",
+      description: "Keeps a local history of bots you've seen while browsing SpicyChat."
+    },
+    rulebookBlockingEnabled: {
+      name: "Public Rulebook blocking",
+      description: "Allows QoL to hide public Rulebook cards using your configured blocking rules. Off by default."
+    },
+    applyBotBlockingToRulebooks: {
+      name: "Apply bot blocking to Rulebooks",
+      description: "Also applies your existing blocked bot words, names and creators to public Rulebook cards."
+    },
+    showRulebookBlockButtons: {
+      name: "Quick Block button for Rulebooks",
+      description: "Shows a Block action on public Rulebook cards, including those in Attach Rulebook discovery."
+    },
+    lorebookBlockingEnabled: {
+      name: "Public Lorebook blocking",
+      description: "Allows QoL to hide public Lorebook cards using your selected blocking rules."
+    },
+    applyBotBlockingToLorebooks: {
+      name: "Apply bot blocking to Lorebooks",
+      description: "Also applies normal blocked bot words, tags and creators to public Lorebooks."
+    },
+    showLorebookBlockButtons: {
+      name: "Quick Block button for Lorebooks",
+      description: "Adds an optional quick Block action to public Lorebook cards."
+    }
+  };
+
   const items = [];
+  const seenControlIds = new Set();
+  const summarize = text => {
+    const value = cleanSearchText(text);
+    if (value.length <= 195) return value;
+    const cut = value.slice(0, 193);
+    const boundary = cut.lastIndexOf(" ");
+    return `${cut.slice(0, boundary > 125 ? boundary : 193).replace(/[.,;:]+$/, "")}…`;
+  };
+  const appendItem = data => items.push({ index: items.length, ...data });
   for (const entry of featureRegistry) {
     if (!entry?.id || !entry?.name || entry.planned) continue;
-    const candidates = [entry.target, entry.setting, ...(Array.isArray(entry.settings) ? entry.settings : [])]
-      .filter(Boolean).map(id => document.getElementById(String(id))).filter(Boolean);
+    const controlIds = [...new Set([
+      entry.setting,
+      ...(Array.isArray(entry.settings) ? entry.settings : []),
+      ...(Array.isArray(entry.searchSettings) ? entry.searchSettings : [])
+    ].filter(Boolean))];
+    const candidateIds = [entry.target, ...controlIds].filter(Boolean);
+    const candidates = candidateIds.map(id => document.getElementById(String(id))).filter(Boolean);
     const target = candidates.find(node => node.closest(".tab-page")) || null;
     const card = target?.closest(".card") || null;
     const page = target?.closest(".tab-page") || null;
@@ -2083,25 +2180,61 @@ function setupSettingsSearch() {
     const tabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(tabName)}"]`);
     const tabLabel = cleanSearchText(tabButton?.textContent) || "Features";
     const name = cleanSearchText(entry.name);
-    // Curated aliases are intentionally searchable; free-form descriptions,
-    // category names and setting IDs aren't (they caused unrelated matches).
-    // Search actual feature names only. Aliases/descriptions are kept in the
-    // registry for help text, not used to flood feature discovery results.
-    const aliases = [];
-    items.push({
-      index: items.length,
-      target: target || $("featureIndexSearch") || $("featureIndexList"),
+    const home = target || $("featureIndexSearch") || $("featureIndexList");
+    appendItem({
+      featureId: entry.id,
+      target: home,
       control: target?.matches?.("input, select, textarea, button") ? target : null,
       card: card || $("featureIndexList"),
-      tabName,
-      tabLabel,
+      tabName, tabLabel,
       cardHeading: name,
       subheading: "",
       label: name,
+      description: summarize(entry.description) || "Find the controls for this QoL feature.",
       kind: "feature",
-      searchText: cleanSearchText([name, ...aliases].join(" ")).toLowerCase(),
+      searchText: cleanSearchText([
+        name, ...(entry.aliases || []),
+        // Keep the visible control label searchable even for features with a
+        // single toggle whose label differs from the catalogue name.
+        ...(controlIds.length === 1 ? [targetLabel(document.getElementById(controlIds[0]))] : [])
+      ].join(" ")).toLowerCase(),
       targetText: name.toLowerCase()
     });
+
+    // A single-control feature is already represented by its named entry.
+    // Multi-control features also expose their individual controls, but the
+    // renderer chooses ONE best result per feature for any given query.
+    if (controlIds.length < 2) continue;
+    for (const id of controlIds) {
+      if (seenControlIds.has(id)) continue;
+      const node = document.getElementById(String(id));
+      const nodePage = node?.closest(".tab-page");
+      if (!nodePage) continue;
+      const label = cleanSearchText(targetLabel(node));
+      if (!label || label === "Setting") continue;
+      seenControlIds.add(id);
+      const detail = SEARCH_CONTROL_DETAILS[id] || {};
+      const controlName = cleanSearchText(detail.name || label);
+      const nodeTab = nodePage.dataset.page || tabName;
+      const nodeTabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(nodeTab)}"]`);
+      appendItem({
+        featureId: entry.id,
+        target: node,
+        control: node.matches("input, select, textarea, button") ? node : null,
+        card: node.closest(".card") || card || $("featureIndexList"),
+        tabName: nodeTab,
+        tabLabel: cleanSearchText(nodeTabButton?.textContent) || tabLabel,
+        cardHeading: name,
+        subheading: "",
+        label: controlName,
+        description: summarize(detail.description || entry.description) || "Adjust this feature's behavior.",
+        kind: "setting",
+        // Search control labels and specifically curated aliases only; don't
+        // inherit broad parent aliases/descriptions for every child control.
+        searchText: cleanSearchText([controlName, label, ...(detail.aliases || [])].join(" ")).toLowerCase(),
+        targetText: controlName.toLowerCase()
+      });
+    }
   }
 
   const clearResults = () => {
@@ -2111,17 +2244,17 @@ function setupSettingsSearch() {
 
   const scoreMatch = (item, query, terms) => {
     let score = 0;
-    if (item.kind === "feature") score += 120;
     if (item.targetText === query) score += 1000;
     else if (item.targetText.startsWith(query)) score += 700;
     else if (item.targetText.includes(query)) score += 500;
-    if (item.label.toLowerCase().includes(query)) score += 350;
-    if (item.subheading.toLowerCase().includes(query)) score += 180;
-    if (item.cardHeading.toLowerCase().includes(query)) score += 90;
+    if (item.label.toLowerCase().includes(query)) score += 300;
     for (const term of terms) {
       if (item.targetText.includes(term)) score += 35;
       if (item.label.toLowerCase().startsWith(term)) score += 20;
     }
+    // Prefer a direct feature title over a vague child match, but give a
+    // precise child label its own result (for example, More Like This).
+    if (item.kind === "feature") score += 90;
     return score;
   };
 
@@ -2202,31 +2335,37 @@ function setupSettingsSearch() {
     const rawQuery = String(input.value || "").trim().toLowerCase();
     const rawTerms = rawQuery.split(/\s+/).filter(Boolean);
     if (!rawTerms.length) {
+      lastMatches = [];
       clearResults();
       return;
     }
 
-    // Words such as "preference", "setting", "option" and "config" describe
-    // what the user is searching, not the feature itself. Treat them as
-    // modifiers when a more specific term is present. Previously a query like
-    // "preference" accidentally favored Context Keeper because its help text
-    // literally contains "preferences".
     const terms = rawTerms.filter(term => !GENERIC_QUERY_TERMS.has(term));
+    // Typing only "setting" or "options" should not dump the whole index.
+    // A genuine feature named "Settings search" is still discoverable.
     const genericOnly = terms.length === 0;
-    const query = terms.join(" ");
-
-    const directItems = genericOnly
-      ? items
-      : items.filter(item => terms.every(term => item.searchText.includes(term)));
+    const query = genericOnly ? rawQuery : terms.join(" ");
+    const directItems = items.filter(item => genericOnly
+      ? item.targetText.includes(query)
+      : terms.every(term => item.searchText.includes(term)));
+    const directSet = new Set(directItems);
     const candidateItems = directItems.length || genericOnly
       ? directItems
       : items.filter(item => terms.every(term => fuzzyTermMatch(item.searchText, term)));
-    const matches = candidateItems
-      .map(item => ({ item, score: genericOnly ? 0 : scoreMatch(item, query, terms) + (directItems.includes(item) ? 0 : -120) }))
-      .sort((a, b) => {
-        if (genericOnly) return a.item.index - b.item.index;
-        return b.score - a.score || a.item.label.length - b.item.label.length;
-      })
+
+    // One result per registered feature. If a search matches an individual
+    // control more closely than its parent, point at that exact control.
+    const grouped = new Map();
+    for (const item of candidateItems) {
+      const score = scoreMatch(item, query, terms) + (directSet.has(item) ? 0 : -120);
+      const previous = grouped.get(item.featureId);
+      if (!previous || score > previous.score ||
+          (score === previous.score && item.label.length < previous.item.label.length)) {
+        grouped.set(item.featureId, { item, score });
+      }
+    }
+    const matches = [...grouped.values()]
+      .sort((a, b) => b.score - a.score || a.item.label.length - b.item.label.length || a.item.index - b.item.index)
       .slice(0, 50);
 
     lastMatches = matches;
@@ -2241,16 +2380,15 @@ function setupSettingsSearch() {
     }
 
     const buttons = matches.map(({ item }) => {
-      const path = [item.tabLabel, item.cardHeading];
-      if (item.subheading && item.subheading !== item.cardHeading) path.push(item.subheading);
-      const exact = item.kind === "feature" ? "Open feature settings" : item.label;
+      const path = [item.tabLabel, item.label];
+      const explanation = item.description;
       const button = makeElement("button", {
         className: "settings-search-result",
         attrs: { type: "button" },
         dataset: { searchItemIndex: item.index }
       }, [
         makeElement("strong", { text: path.join(" › ") }),
-        makeElement("small", { text: exact })
+        makeElement("small", { text: explanation })
       ]);
       return button;
     });
@@ -2259,7 +2397,7 @@ function setupSettingsSearch() {
 
     host.querySelectorAll(".settings-search-result").forEach(button => {
       button.addEventListener("click", () => {
-        const item = items.find(candidate => candidate.index === Number(button.dataset.searchItemIndex));
+        const item = items[Number(button.dataset.searchItemIndex)];
         if (!item) return;
         input.value = "";
         clearResults();

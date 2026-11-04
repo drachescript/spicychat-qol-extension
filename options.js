@@ -3317,22 +3317,32 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     savedRefreshKinds.add("hub");
   }
 
-  if (changes[BOT_AVAILABILITY_KEY] && savedListsDataLoaded) {
+  // IndexedDB recovery stores are lazily loaded. Do not normalize a very
+  // large changed payload until the corresponding recovery UI is in use.
+  if (changes[BOT_AVAILABILITY_KEY] && savedRecoveryDataLoaded) {
     botAvailabilityState = normalizeBotAvailability(changes[BOT_AVAILABILITY_KEY].newValue);
     savedRefreshKinds.add("availability");
   }
 
-  if (changes[BOT_UNAVAILABLE_RECOVERY_KEY] && savedListsDataLoaded) {
+  if (changes[BOT_UNAVAILABLE_RECOVERY_KEY] && savedRecoveryDataLoaded) {
     botUnavailableRecoveryState = normalizeBotUnavailableRecovery(changes[BOT_UNAVAILABLE_RECOVERY_KEY].newValue);
     savedRefreshKinds.add("availability");
   }
 
-  if (changes[BOT_ARCHIVE_KEY] || changes[LOREBOOK_BACKUPS_KEY] || settingsChanged) {
+  const backupSettings = ["botArchiveOnProfileVisit", "botBackupToolsEnabled", "botArchiveOwnEditorBackups", "lorebookBackupToolsEnabled", "lorebookBackupsEnabled"];
+  const backupSettingsChanged = granularSettingChanges.some(([name]) => backupSettings.includes(name)) ||
+    (!!changes.settings && backupSettings.some(name => changes.settings.oldValue?.[name] !== changes.settings.newValue?.[name]));
+  if (changes[BOT_ARCHIVE_KEY] || changes[LOREBOOK_BACKUPS_KEY]) {
     creatorBackupManagerLoaded = false;
     if (activeOptionsTab() === "bot-tools") loadCreatorBackupManager({ force: true }).catch(() => {});
+  } else if (backupSettingsChanged && creatorBackupManagerLoaded) {
+    // Changes to the five backup switches update the existing snapshot; an
+    // unrelated setting must not re-read thousands of saved bot copies.
+    creatorBackupManagerState.settings = { ...DEFAULT_SETTINGS, ...(loadedSettingsSnapshot || {}) };
+    if (activeOptionsTab() === "bot-tools") renderCreatorBackupManager();
   }
 
-  if (changes[BOT_ARCHIVE_KEY] && savedListsDataLoaded) {
+  if (changes[BOT_ARCHIVE_KEY] && savedRecoveryDataLoaded) {
     botArchiveState = normalizeBotArchive(changes[BOT_ARCHIVE_KEY].newValue);
     // Archive metadata feeds name/image recovery helpers used by saved managers.
     savedRefreshKinds.add("opened");

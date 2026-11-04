@@ -140,7 +140,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function sensitiveKey(key = "") {
-    return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html)/i.test(String(key || ""));
+    return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
   }
 
   function summarizeSensitive(value) {
@@ -293,6 +293,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!active() || !document.documentElement) return;
     if (v2State.peerSupportsV2 && !v2State.recording) return;
     const deep = v2Active("deep");
+    // V2 Normal traces should not recursively walk every newly added subtree.
+    // Preserve legacy v1 ownership, but perform V2 subtree attribution in Deep.
+    if (v2State.peerSupportsV2 && !deep) return;
     state.ownershipObserver = new MutationObserver(mutations => {
       let added = 0, removed = 0, attributes = 0, qolOwned = 0;
       const features = {};

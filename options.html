@@ -36,7 +36,7 @@
 <span aria-hidden="true">⌕</span><strong>Find a feature</strong><span class="settings-search-chevron" aria-hidden="true">⌄</span>
 </button>
 <div class="settings-search-body" id="settingsSearchBody" hidden>
-<div class="settings-search-head"><span class="hint">Search named QoL features. Press Enter to open the top result.</span></div>
+<div class="settings-search-head"><span class="hint">Search QoL features or individual controls. Press Enter to open the top match.</span></div>
 <input autocomplete="off" id="settingsSearch" placeholder="Find a feature: OOC, Bot Organizer, Card filters..." type="search"/>
 <div class="settings-quick-nav">
 <select id="settingsPinnedSections" aria-label="Pinned Settings sections"><option value="">Pinned sections…</option></select>
@@ -2282,7 +2282,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately; Less Like and Dislike send coordinated negative feedback without posting twice. Dislike keeps its own cooldown/history. Desktop only.</p>
+<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately. Less Like changes recommendation preferences; Dislike uses the native chat rating controls. Each action keeps its own history. Desktop only.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
@@ -2356,7 +2356,7 @@ step sister" spellcheck="false"></textarea></label>
 </div>
 <div class="button-row">
 <strong>Dislike:</strong>
-<span class="hint">Dislike and Less Like use the same negative recommendation rating. Clearing Dislike history does not undo a Less Like rating or cause another rating request. Confirmed unavailable bots are counted as handled without rating; blocked IDs are preserved. Counts distinguish actual Dislike requests from shared ratings.</span>
+<span class="hint">Dislike counts come from its own history. Native Dislikes are counted as verified only when the chat rating controls confirm them. Unavailable bots are skipped without rating; blocked IDs are preserved.</span>
 <button id="bulkDislikeBlockedBots" type="button">Dislike remaining blocked bots</button>
 <button hidden="" id="resumeBlockedDislikeRun" type="button">Resume unfinished</button>
 <button hidden="" id="retryFailedBlockedDislikes" type="button">Retry last failed</button>

@@ -241,6 +241,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       const messageRootsChanged = isChatPage ? mutationsAddOrRemoveMessageRoots(mutations) : false;
       const nonMessageMutations = isChatPage ? mutations.filter(mutation => !mutationIsMessageScoped(mutation)) : mutations;
+      // Rulebook Explore cards can mount/remount while scrolling. Reuse this
+      // existing observer to mark only changed card roots for the next pass.
+      if (!isChatPage && /^\/rulebooks\/explore(?:\/|$)/i.test(location.pathname) &&
+          DS.state?.settings?.rulebookBlockingEnabled === true) {
+        DS.rulebookExploreMutationsRelevant?.(nonMessageMutations);
+      }
       // Model/banner invalidation is intentionally evaluated only against
       // non-message mutations. A newly mounted/re-rendered chat message must
       // never make either global UI feature inspect the chat tree.

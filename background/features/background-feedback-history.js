@@ -430,16 +430,20 @@ async function submitQuickDislikeUsingNativeUi(message, botId) {
   // handlers, rather than trying to recreate rating API traffic.
   const runId = String(message?.bulkRunId || "").trim();
   const jobId = String(message?.quickDislikeJobId || `native-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const stageMs = { prepareMs: 0, readyMs: 0, nativeMs: 0 };
+  let stageStartedAt = Date.now();
   const prepared = await prepareQuickDislikeWorkerTab(url, runId, {
     jobId, botId, botName: String(message?.botName || ""), startedAt: Date.now()
   });
+  stageMs.prepareMs = Date.now() - stageStartedAt;
   if (!prepared?.ok || !prepared.tabId) {
-    return { ok: false, status: "native-rating-worker-unavailable", requestSent: false };
+    return { ok: false, status: "native-rating-worker-unavailable", requestSent: false, stageMs };
   }
   const tabId = Number(prepared.tabId);
   let result = { ok: false, status: "native-rating-incomplete" };
   try {
     let ready = false;
+    stageStartedAt = Date.now();
     // Read-only readiness checks may be repeated. The mutating RUN is sent
     // only once: a lost response must never trigger another rating.
     for (let attempt = 0; attempt < 24; attempt++) {
@@ -456,13 +460,21 @@ async function submitQuickDislikeUsingNativeUi(message, botId) {
       }
       await new Promise(resolve => setTimeout(resolve, 450));
     }
-    if (!ready) return (result = { ok: false, status: "native-rating-page-not-ready", requestSent: false });
+    stageMs.readyMs = Date.now() - stageStartedAt;
+    if (!ready) return (result = { ok: false, status: "native-rating-page-not-ready", requestSent: false, stageMs });
+    stageStartedAt = Date.now();
     const response = await tabsSendMessageWithTimeout(tabId, { type: "DS_QUICK_DISLIKE_RUN" }, 25000);
+    stageMs.nativeMs = Date.now() - stageStartedAt;
     if (!response || response.__dsTimeout) {
       return (result = { ok: false, status: "native-rating-result-unknown", requestSent: true,
-        networkAmbiguous: true, retryable: false });
+        networkAmbiguous: true, retryable: false, stageMs });
     }
-    return (result = { ...response, nativeUiConfirmed: response.nativeUiConfirmed === true });
+    // Nested UI timings are measurements only; do not alter rating outcomes.
+    for (const key of ["controlsMs", "submitMs", "verifyMs"]) {
+      const ms = Number(response.nativeStages?.[key]);
+      if (Number.isFinite(ms) && ms >= 0) stageMs[key] = Math.round(ms);
+    }
+    return (result = { ...response, stageMs, nativeUiConfirmed: response.nativeUiConfirmed === true });
   } finally {
     // Single-card attempts never need a retained helper. Bulk runs can keep
     // a verified helper; any failed, canceled or unknown outcome releases it.

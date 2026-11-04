@@ -105,8 +105,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const addNode = (node, scanDescendants = false) => {
       candidateNodes += 1;
+      // Removed/remounted React subtrees are detached. They cannot supply
+      // live message text, so skip their expensive descendant/cache work.
+      // Structural mount/unmount counts are tracked independently.
+      const element = node instanceof Element ? node : node?.parentElement;
+      if (!element?.isConnected) {
+        const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+        perf.messageDetachedMutationSkips = Number(perf.messageDetachedMutationSkips || 0) + 1;
+        return;
+      }
       const root = messageRootForMutationNode(node);
-      if (root) {
+      if (root?.isConnected) {
         roots.add(root);
         if (!textRoots.has(root) && touchesMessageText(node)) textRoots.add(root);
         return;
@@ -116,9 +125,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // into a full-chat invalidation. Descendant scanning is only appropriate
       // for the actual added/removed subtree.
       if (!scanDescendants) return;
-      const element = node instanceof Element ? node : node?.parentElement;
-      if (!element) return;
       element.querySelectorAll?.("[id^='message-']").forEach(messageRoot => {
+        if (!messageRoot.isConnected) return;
         roots.add(messageRoot);
         textRoots.add(messageRoot);
       });

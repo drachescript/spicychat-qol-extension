@@ -8,7 +8,7 @@ function qolDiagnosticLevelRank(level) {
 }
 
 function qolDiagnosticSensitiveKey(key = "") {
-  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html)/i.test(String(key || ""));
+  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
 }
 
 function qolDiagnosticFingerprint(value) {
