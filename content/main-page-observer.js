@@ -247,6 +247,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const modelSelectorMutation = isChatPage && nonMessageMutations.length > 0 && !!DS.modelSelectorMutationsRelevant?.(nonMessageMutations);
       const advertBannerMutation = nonMessageMutations.length > 0 && !!DS.advertBannerMutationsRelevant?.(nonMessageMutations);
       const chatHeaderMutation = isChatPage && nonMessageMutations.some(mutationTouchesNativeChatHeader);
+      const rulebookPickerMutation = isChatPage &&
+        DS.state?.settings?.rulebookBlockingEnabled === true &&
+        !!DS.rulebookDiscoverMutationsRelevant?.(nonMessageMutations);
 
       // Contenteditable composers can emit many tiny character/child mutations
       // while the user types. Persistent shortcut/header repair has already run
@@ -404,6 +407,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         if (modelSelectorMutation && !dirty.includes("model")) dirty.push("model");
         if (advertBannerMutation) dirty.push("adverts");
+        if (rulebookPickerMutation) dirty.push("rulebook-picker");
         if (dirty.length) {
           DS.scheduleRun?.({ priority: "slow", source: "chat-targeted-mutation", dirty });
         } else {

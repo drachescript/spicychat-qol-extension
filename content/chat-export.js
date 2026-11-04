@@ -501,6 +501,65 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return cleanMessageText(pieces.join("\n\n"));
   }
 
+  // Keep original image links in exports when SpicyChat exposes them. Do not
+  // fetch, embed, or guess media IDs; never collect unrelated profile avatars.
+  function safeExportImageUrl(raw) {
+    if (typeof raw !== 'string' || !raw.trim() || raw.length > 4096) return '';
+    try {
+      const url = new URL(raw.trim().replace(/&amp;/g, '&'), location.origin);
+      if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password) return '';
+      return url.href;
+    } catch { return ''; }
+  }
+
+  function imageLikeUrl(raw) {
+    try {
+      const url = new URL(raw, location.origin);
+      return /\.(?:png|jpe?g|gif|webp|avif|bmp|svg)(?:$|[?#])/i.test(url.pathname) ||
+        /(?:^|\/)images?\//i.test(url.pathname) ||
+        /\b(?:class|type)=avatar/i.test(url.search);
+    } catch { return false; }
+  }
+
+  function collectExportImageLinks(row = null, text = '', textContainer = null) {
+    const urls = [];
+    const seen = new Set();
+    const add = (raw, knownImage = false) => {
+      const url = safeExportImageUrl(raw);
+      if (!url || (!knownImage && !imageLikeUrl(url)) || seen.has(url) || urls.length >= 20) return;
+      seen.add(url); urls.push(url);
+    };
+    // A message may contain Markdown images or HTML img tags in its content.
+    const content = String(text || '').slice(0, 200000);
+    for (const hit of content.matchAll(/!\[[^\]]*\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+[^)]*)?\)/gi)) add(hit[1], true);
+    for (const hit of content.matchAll(/<img\b[^>]*\bsrc\s*=\s*['"](https?:\/\/[^'"\s>]+)['"][^>]*>/gi)) add(hit[1], true);
+    const mediaFields = ['images', 'image_urls', 'imageUrls', 'image_url', 'imageUrl',
+      'attachments', 'attachment', 'media', 'picture', 'pictures'];
+    const visit = (value, imageContext = false, depth = 0) => {
+      if (depth > 3 || urls.length >= 20) return;
+      if (typeof value === 'string') { add(value, imageContext); return; }
+      if (Array.isArray(value)) { value.slice(0, 20).forEach(item => visit(item, imageContext, depth + 1)); return; }
+      if (!value || typeof value !== 'object') return;
+      const type = String(value.type || value.mimeType || value.mime_type || value.content_type || value.contentType || '').toLowerCase();
+      // Never label videos/audio/files as images solely because a media key exists.
+      if (type && !/(?:image|photo|picture)/.test(type)) return;
+      const isImage = imageContext || /(?:image|photo|picture)/.test(type);
+      for (const key of ['url','src','imageUrl','image_url','image','href','link']) {
+        if (typeof value[key] === 'string') add(value[key], isImage);
+      }
+      for (const key of mediaFields) if (value[key] != null) visit(value[key], isImage || /image|picture/.test(key), depth + 1);
+    };
+    if (row && typeof row === 'object') for (const key of mediaFields) {
+      if (row[key] != null) visit(row[key], /image|picture/.test(key));
+    }
+    // Limit DOM lookup to actual message body, excluding chat header/avatar.
+    if (textContainer?.querySelectorAll) {
+      for (const img of textContainer.querySelectorAll('img[src]')) add(img.currentSrc || img.getAttribute('src'), true);
+      for (const link of textContainer.querySelectorAll('a[href]')) add(link.getAttribute('href'), false);
+    }
+    return urls;
+  }
+
   function collectMessagesFast(settings = DS.state?.settings || {}, rootsOverride = []) {
     const botName = getBotName();
     const messages = [];
@@ -531,14 +590,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const named = cleanText(bubble.querySelector("p")?.textContent || "");
       const speaker = named && !looksLikeUiText(named) ? named : (isUser ? "You" : botName);
       const text = cleanMessageBody(extractMessageTextFast(textContainer, settings), speaker, botName);
-      if (!text || looksLikeUiText(text)) continue;
+      const images = collectExportImageLinks(null, text, textContainer);
+      if ((!text && !images.length) || (text && looksLikeUiText(text))) continue;
 
       messages.push({
         id: rawId.replace(/^message-/, ""),
         speaker,
         text,
         role: isUser ? "user" : "bot",
-        avatar: bubble.querySelector("img")?.src || ""
+        avatar: bubble.querySelector("img")?.src || "",
+        images
       });
     }
     return messages;
@@ -566,8 +627,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const bubbleClass = classText(bubble);
       const isUser = bubbleClass.includes("m-[0_10px_0_53px]") || bubbleClass.includes("bg-blumine") || speaker === "You";
       const text = cleanMessageBody(extractMessageText(textContainer, settings), speaker, botName);
+      const images = collectExportImageLinks(null, text, textContainer);
 
-      if (!text || looksLikeUiText(text)) continue;
+      if ((!text && !images.length) || (text && looksLikeUiText(text))) continue;
 
       // SpicyChat can briefly render two copies of the same row during a rerender.
       // Only drop copies that occupy the same place on screen. Identical messages
@@ -584,7 +646,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         speaker,
         text,
         role: isUser ? "user" : "bot",
-        avatar: findSpeakerAvatar(root, textContainer)
+        avatar: findSpeakerAvatar(root, textContainer),
+        images
       });
     }
 
@@ -939,7 +1002,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const messages = data.messages.map((message, index) => {
       const number = opts.numberMessages ? `${index + 1}. ` : "";
       const meta = opts.includeGenerationDetails ? metadataLines(message.metadata) : [];
-      return `${number}${message.speaker}${meta.length ? ` [${meta.join(" · ")}]` : ""}\n${message.text}`;
+      const images = opts.includeImageLinks && message.images?.length
+        ? `\nImage links:\n${message.images.map(url => `- ${url}`).join('\n')}` : '';
+      return `${number}${message.speaker}${meta.length ? ` [${meta.join(" · ")}]` : ""}\n${message.text}${images}`;
     });
     parts.push(`MESSAGES\n${messages.join("\n\n") || "No chat messages found."}`);
     return parts.join("\n\n---\n\n");
@@ -972,6 +1037,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const meta = opts.includeGenerationDetails ? metadataLines(message.metadata) : [];
       if (meta.length) parts.push(`*${meta.map(escapeMd).join(" · ")}*`);
       parts.push(message.text);
+      if (opts.includeImageLinks && message.images?.length)
+        parts.push(`Image links:\n${message.images.map(url => `- ${escapeMd(url)}`).join('\n')}`);
     });
     if (!data.messages.length) parts.push("No chat messages found.");
     return parts.join("\n\n");
@@ -1009,6 +1076,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         speaker: message.speaker,
         text: message.text,
         avatar: opts.includeAvatars ? message.avatar || undefined : undefined,
+        images: opts.includeImageLinks && message.images?.length ? message.images : undefined,
         generation: opts.includeGenerationDetails ? message.metadata || undefined : undefined
       }))
     }, null, 2);
@@ -1097,15 +1165,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const role = ["user", "human"].includes(String(message.role || "").toLowerCase()) ? "user" : "bot";
       const avatarId = opts.includeAvatars ? avatarIndex.get(String(message.avatar || "").trim()) : undefined;
       const avatar = Number.isInteger(avatarId) ? `<span class="avatar avatar-${avatarId}" aria-hidden="true"></span>` : "";
+      const linkedImages = opts.includeImageLinks && message.images?.length
+        ? `<div class="message-images">Image links: ${message.images.map((url, i) => `<a href="${escapeHtmlText(url)}" target="_blank" rel="noopener noreferrer">Image ${i + 1}</a>`).join(' · ')}</div>` : '';
       const messageId = escapeHtmlText(message.id || "");
       const createdAt = Number(message.createdAt || message.metadata?.createdAt || 0) || 0;
       return `<article class="message ${matched ? "match" : "transcript"} role-${role}"${messageId ? ` data-message-id="${messageId}"` : ""}${createdAt ? ` data-created-at="${createdAt}"` : ""}>
         <header>${avatar}<div><strong>${opts.numberMessages ? `${index + 1}. ` : ""}${escapeHtmlText(message.speaker)}</strong>${meta.length ? `<small>${escapeHtmlText(meta.join(" · "))}</small>` : ""}</div></header>
-        <div class="body">${richTextHtml(message.text)}</div>
+        <div class="body">${richTextHtml(message.text)}${linkedImages}</div>
       </article>`;
     }).join("\n");
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtmlText(bot.name || "SpicyChat")} chat export</title><style>
-      :root{color-scheme:dark;${vars}}*{box-sizing:border-box}body{margin:0;background:${matched ? "var(--ds-export-page-bg)" : "#0b0b0d"};color:${matched ? "var(--ds-export-page-text)" : "#eee"};font:${matched ? "var(--ds-export-font-size)/var(--ds-export-line-height) var(--ds-export-font)" : "15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif"}}main{max-width:900px;margin:auto;padding:28px 18px 60px}h1,h2{margin:.2em 0}.muted,small{color:#aaa}.export-meta{margin-bottom:18px;color:#999}.bot-info{padding:16px;border:1px solid #2b2b31;border-radius:14px;background:#141417;margin-bottom:22px}.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tags span{background:#24242b;padding:3px 8px;border-radius:999px;font-size:12px}details{margin-top:8px;border-top:1px solid #2b2b31;padding-top:8px}summary{cursor:pointer}.messages{display:flex;flex-direction:column;gap:14px}.message{break-inside:avoid}.message header{display:flex;gap:10px;align-items:center;margin-bottom:7px}.message header .avatar{width:38px;height:38px;flex:0 0 38px;background-size:cover;background-position:center;border-radius:9px}${avatarCss}.message header div{display:flex;flex-direction:column}.message.match{padding:14px 16px;max-width:min(100%,650px)}.message.match.role-bot{align-self:flex-start;background:var(--ds-export-bot-bg);color:var(--ds-export-bot-text);border:var(--ds-export-bot-border-width) var(--ds-export-bot-border-style) var(--ds-export-bot-border);border-radius:var(--ds-export-bot-radius)}.message.match.role-user{align-self:flex-end;background:var(--ds-export-user-bg);color:var(--ds-export-user-text);border:var(--ds-export-user-border-width) var(--ds-export-user-border-style) var(--ds-export-user-border);border-radius:var(--ds-export-user-radius)}.message.transcript{padding:10px 0;border-bottom:1px solid #24242a;border-radius:0;background:none}.body{white-space:normal;overflow-wrap:anywhere}.body code{padding:.08em .34em;background:var(--ds-export-code-bg,#24242b);color:var(--ds-export-code-text,inherit);border:1px solid var(--ds-export-code-border,transparent);border-radius:var(--ds-export-code-radius,5px);font:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone}.body pre code{display:block;padding:10px;white-space:pre-wrap}@media print{:root{color-scheme:light}body{background:#fff;color:#111}.bot-info,.message.match{background:#fff!important;color:#111!important;border-color:#ccc!important}.muted,small,.export-meta{color:#555}.tags span{background:#eee}.message.transcript{border-color:#ddd}main{max-width:none;padding:0}}
+      :root{color-scheme:dark;${vars}}*{box-sizing:border-box}body{margin:0;background:${matched ? "var(--ds-export-page-bg)" : "#0b0b0d"};color:${matched ? "var(--ds-export-page-text)" : "#eee"};font:${matched ? "var(--ds-export-font-size)/var(--ds-export-line-height) var(--ds-export-font)" : "15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif"}}main{max-width:900px;margin:auto;padding:28px 18px 60px}h1,h2{margin:.2em 0}.muted,small{color:#aaa}.export-meta{margin-bottom:18px;color:#999}.bot-info{padding:16px;border:1px solid #2b2b31;border-radius:14px;background:#141417;margin-bottom:22px}.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tags span{background:#24242b;padding:3px 8px;border-radius:999px;font-size:12px}details{margin-top:8px;border-top:1px solid #2b2b31;padding-top:8px}summary{cursor:pointer}.messages{display:flex;flex-direction:column;gap:14px}.message{break-inside:avoid}.message header{display:flex;gap:10px;align-items:center;margin-bottom:7px}.message header .avatar{width:38px;height:38px;flex:0 0 38px;background-size:cover;background-position:center;border-radius:9px}${avatarCss}.message header div{display:flex;flex-direction:column}.message.match{padding:14px 16px;max-width:min(100%,650px)}.message.match.role-bot{align-self:flex-start;background:var(--ds-export-bot-bg);color:var(--ds-export-bot-text);border:var(--ds-export-bot-border-width) var(--ds-export-bot-border-style) var(--ds-export-bot-border);border-radius:var(--ds-export-bot-radius)}.message.match.role-user{align-self:flex-end;background:var(--ds-export-user-bg);color:var(--ds-export-user-text);border:var(--ds-export-user-border-width) var(--ds-export-user-border-style) var(--ds-export-user-border);border-radius:var(--ds-export-user-radius)}.message.transcript{padding:10px 0;border-bottom:1px solid #24242a;border-radius:0;background:none}.message-images{font-size:.85em;margin-top:8px;overflow-wrap:anywhere}.message-images a{color:#85bdff;text-decoration:underline}.body{white-space:normal;overflow-wrap:anywhere}.body code{padding:.08em .34em;background:var(--ds-export-code-bg,#24242b);color:var(--ds-export-code-text,inherit);border:1px solid var(--ds-export-code-border,transparent);border-radius:var(--ds-export-code-radius,5px);font:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone}.body pre code{display:block;padding:10px;white-space:pre-wrap}@media print{:root{color-scheme:light}body{background:#fff;color:#111}.bot-info,.message.match{background:#fff!important;color:#111!important;border-color:#ccc!important}.muted,small,.export-meta{color:#555}.tags span{background:#eee}.message.transcript{border-color:#ddd}main{max-width:none;padding:0}}
     </style></head><body><main><h1>SpicyChat Export</h1><div class="export-meta">Exported ${escapeHtmlText(new Date(data.exportedAt).toLocaleString())} · ${escapeHtmlText(data.chatUrl)}</div>${infoBlocks}${rulebookBlock}<section class="messages">${messages || "<p>No chat messages found.</p>"}</section></main></body></html>`;
   }
 
@@ -1504,17 +1574,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return rows.map(row => {
       const role = String(row?.role || "").toLowerCase();
       const isUser = role === "user" || role === "human";
-      const text = cleanMessageText(row?.content || row?.text || row?.message || "");
+      const rawContent = row?.content || row?.text || row?.message || "";
+      const text = cleanMessageText(typeof rawContent === 'string' ? rawContent : '');
+      const images = collectExportImageLinks(row, typeof rawContent === 'string' ? rawContent : '');
       return {
         id: String(row?.id || "").trim(),
         speaker: isUser ? personaName : botName,
         text,
         avatar: isUser ? userAvatar : botAvatar,
+        images,
         createdAt: Number(row?.createdAt || row?.created_at || 0) || null,
         role: role || (isUser ? "user" : "bot")
       };
     }).filter(message => {
-      if (!message.text) return false;
+      if (!message.text && !message.images?.length) return false;
       if (!settings.chatExportIncludeOocDirectives && !["user", "human", "bot", "assistant", "character"].includes(message.role)) return false;
       return true;
     });
@@ -2297,6 +2370,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const generationControl = makeExportCheckbox("ds-export-generation", "Captured timestamps/model details");
     const numbersControl = makeExportCheckbox("ds-export-numbers", "Message numbers");
     const avatarsControl = makeExportCheckbox("ds-export-avatars", "Avatars in HTML/JSON");
+    const imageLinksControl = makeExportCheckbox("ds-export-image-links", "Message image links (when available)");
     const censoredControl = makeExportCheckbox("ds-export-censor", "Export censored copy (original by default)");
     controls.append(
       formatControl.label,
@@ -2307,6 +2381,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       generationControl.label,
       numbersControl.label,
       avatarsControl.label,
+      imageLinksControl.label,
       censoredControl.label,
     );
 
@@ -2353,6 +2428,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const generation = generationControl.input;
     const numbers = numbersControl.input;
     const avatars = avatarsControl.input;
+    const imageLinks = imageLinksControl.input;
     const censored = censoredControl.input;
 
     format.value = settings.chatExportDefaultFormat || "text";
@@ -2363,6 +2439,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     generation.checked = settings.chatExportIncludeGenerationDetails !== false;
     numbers.checked = settings.chatExportNumberMessages !== false;
     avatars.checked = settings.chatExportIncludeAvatars !== false;
+    imageLinks.checked = settings.chatExportIncludeImageLinks === true;
     censored.checked = false; // Never turn this on without a fresh explicit choice.
     censored.disabled = !settings.enableChatWordCensor || !String(settings.chatWordCensorList || "").trim();
     censored.title = "Masks only message text. The original source remains unchanged.";
@@ -2374,7 +2451,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let activeCapture = data.captureStatus?.source === "dom" ? nativeCapture : apiCapture;
     let largePreviewSkipped = false;
     const LARGE_PREVIEW_MESSAGE_THRESHOLD = 3000;
-    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeRulebook: rulebook.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked, censored: censored.checked });
+    const opts = () => ({ format: format.value, layout: layout.value, includeBotInfo: botInfo.checked, includeRulebook: rulebook.checked, includeGenerationDetails: generation.checked, numberMessages: numbers.checked, includeAvatars: avatars.checked, includeImageLinks: imageLinks.checked, censored: censored.checked });
     const exportExt = () => format.value === "markdown" ? "md" : format.value === "json" ? "json" : format.value === "html" ? "html" : "txt";
     const refresh = () => {
       // The user can enable the option inside Export even when the saved
@@ -2433,7 +2510,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (largePreviewSkipped) count.textContent += " Large-chat preview disabled; export is built once on action.";
     };
 
-    for (const control of [format, layout, botInfo, rulebook, generation, numbers, avatars, censored]) control.addEventListener("change", refresh);
+    for (const control of [format, layout, botInfo, rulebook, generation, numbers, avatars, imageLinks, censored]) control.addEventListener("change", refresh);
     ooc.addEventListener("change", async () => {
       const nextSettings = { ...settings, chatExportIncludeOocDirectives: ooc.checked, chatExportIncludeRulebook: rulebook.checked };
       activeCapture.settings = nextSettings;
@@ -2646,7 +2723,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         includeRulebook: !!settings.chatExportIncludeRulebook,
         includeGenerationDetails: settings.chatExportIncludeGenerationDetails !== false,
         numberMessages: settings.chatExportNumberMessages !== false,
-        includeAvatars: false
+        includeAvatars: false,
+        includeImageLinks: settings.chatExportIncludeImageLinks === true
       });
       const ok = await copyTextValue(value);
       DS.setQuickStatus?.(

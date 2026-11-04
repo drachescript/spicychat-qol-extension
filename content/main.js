@@ -1870,6 +1870,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
     }
 
+    if (slowDirtyHas(dirty, "rulebook-picker")) {
+      await runFeatureStep("public rulebook blocking",
+        !!settings.rulebookBlockingEnabled || !!document.querySelector('[data-ds-reason^="rulebook:block:"],.ds-rulebook-block-button'),
+        () => DS.applyPublicRulebookQoL?.());
+    }
+
     if (slowDirtyHas(dirty, "message-ui")) {
       if (settings.showQuickPanel || document.getElementById("ds-qol-panel")) {
         await runFeatureStep("update panel", true, () => DS.updateQuickPanel?.());
@@ -2077,7 +2083,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       // Rulebooks Explore uses its own route, not the normal bot listing route.
       await runFeatureStep("public rulebook blocking",
-        (page.isRulebookExplorePage && settings.rulebookBlockingEnabled === true)
+        ((page.isRulebookExplorePage || (singleChat && !!document.querySelector('[data-testid="ConversationRulebookPicker-Modal"] [data-testid="RulebookDiscoverTab"]'))) && settings.rulebookBlockingEnabled === true)
           || !!document.querySelector('[data-ds-reason^="rulebook:block:"],.ds-rulebook-block-button'),
         () => DS.applyPublicRulebookQoL?.());
 

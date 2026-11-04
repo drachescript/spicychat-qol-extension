@@ -1,3 +1,10 @@
+## 0.2.70
+- Reduced Android support-export stalls by skipping unused compression, avoiding repeated storage-size checks, and collecting history alongside other report sections.
+- Fixed short bot descriptions keeping the scroll box when full card descriptions are enabled.
+- Applied local Rulebook blocking and quick Block buttons to Attach Rulebook → Discover in chats.
+- Added optional message image links to chat exports when SpicyChat exposes them.
+- Fixed generation details disappearing on newer chat layouts and retrying after message metadata loads.
+
 ## 0.2.69
 - Added optional pinned conversations at the top of Chats, including older chats no longer loaded in the list.
 - Shortened Settings descriptions and clarified bot folders versus conversation folders.

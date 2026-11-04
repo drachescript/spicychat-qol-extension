@@ -529,6 +529,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     chatExportIncludeGenerationDetails: true,
     chatExportNumberMessages: true,
     chatExportIncludeAvatars: true,
+    chatExportIncludeImageLinks: false,
     chatExportDefaultFormat: "text",
     chatExportHtmlLayout: "bubbles",
     showOocTools: false,

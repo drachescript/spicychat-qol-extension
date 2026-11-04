@@ -538,6 +538,7 @@ const DEFAULT_SETTINGS = {
   chatExportIncludeGenerationDetails: true,
   chatExportNumberMessages: true,
   chatExportIncludeAvatars: true,
+  chatExportIncludeImageLinks: false,
   chatExportDefaultFormat: "text",
   chatExportHtmlLayout: "bubbles",
   showOocTools: false,

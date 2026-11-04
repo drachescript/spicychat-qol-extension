@@ -2,7 +2,15 @@
 window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   "rulebook-public-qol": ["rulebookBlockingEnabled", "applyBotBlockingToRulebooks", "showRulebookBlockButtons", "rulebookBlockedIds"],
   "chat-pins": ["enableChatPins"],
+  "chat-export": ["showChatExportButton", "chatExportIncludeImageLinks"],
   "daily-message-limit": ["dailyMessageLimitTrackerEnabled"],
+  "generation-metadata": [
+    "showGenerationMetadata", "showMessageTimestamps", "messageTimestamp24Hour",
+    "messageTimestampDateFirst", "messageTimestampShowSeconds", "showGenerationModel",
+    "showGenerationElapsed", "showGenerationSettings", "compactGenerationMetadata",
+    "showMessageTokenEstimate", "enableContextWindowWarning", "contextWarningShowMeter",
+    "contextWarningThreshold", "contextWarningManualLimit", "contextWarningBrowserNotifications"
+  ],
   "personas": ["showPersonaLimitIndicator"],
   "selection-memory": ["enableSelectionRemember"],
   "command-palette": [

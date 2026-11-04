@@ -475,6 +475,7 @@ function readSettingsFromPage() {
     chatExportIncludeGenerationDetails: checked("chatExportIncludeGenerationDetails"),
     chatExportNumberMessages: checked("chatExportNumberMessages"),
     chatExportIncludeAvatars: checked("chatExportIncludeAvatars"),
+    chatExportIncludeImageLinks: checked("chatExportIncludeImageLinks"),
     chatExportDefaultFormat: value("chatExportDefaultFormat", "text"),
     chatExportHtmlLayout: value("chatExportHtmlLayout", "bubbles"),
     showOocTools: checked("showOocTools"),
@@ -1132,6 +1133,7 @@ function readSingleSettingFromPage(settingKey) {
     case "chatExportIncludeGenerationDetails": return (checked("chatExportIncludeGenerationDetails"));
     case "chatExportNumberMessages": return (checked("chatExportNumberMessages"));
     case "chatExportIncludeAvatars": return (checked("chatExportIncludeAvatars"));
+    case "chatExportIncludeImageLinks": return (checked("chatExportIncludeImageLinks"));
     case "chatExportDefaultFormat": return (value("chatExportDefaultFormat", "text"));
     case "chatExportHtmlLayout": return (value("chatExportHtmlLayout", "bubbles"));
     case "showOocTools": return (checked("showOocTools"));

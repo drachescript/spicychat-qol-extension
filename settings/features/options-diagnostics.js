@@ -235,7 +235,7 @@ async function requestAndroidSupportFile(text, filename) {
         const response = await Promise.race([
           Promise.resolve().then(() => bridge.callHandler(handler, JSON.stringify(payload)))
             .then(value => ({ value }), error => ({ error })),
-          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 25000); })
+          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 10000); })
         ]);
         clearTimeout(timer);
         if (response.timedOut) return false;
@@ -778,8 +778,9 @@ async function buildPerformanceSelfCheckText() {
   const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
   const [{ read, storageMs }, context] = await Promise.all([readPromise, contextPromise]);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
+  const liveRuntimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const warnings = performanceWarningLines(context, settings);
-  if (!context?.pageDiagnostics) warnings.push("SpicyChat's QoL runtime did not answer. Page-specific performance checks were unavailable; reload the affected SpicyChat tab and try again.");
+  if (!liveRuntimeAvailable) warnings.push("A live SpicyChat QoL runtime did not answer. Historical counters may still be included, but current page timings could not be confirmed.");
   if (storageMs >= 350) warnings.push(`Settings storage took ${storageMs.toFixed(0)} ms to respond. This is a measured delay, not proof that QoL caused the slowdown.`);
   const total = performance.now() - started;
   const domNodes = document.getElementsByTagName("*").length;
@@ -794,7 +795,7 @@ async function buildPerformanceSelfCheckText() {
     `Self-check total: ${total.toFixed(1)} ms`,
     `Settings storage read: ${storageMs.toFixed(1)} ms${read.ok ? "" : ` (failed: ${read.error || "unknown error"})`}`,
     `Settings DOM: ${domNodes} nodes`,
-    `Source SpicyChat tab: ${context?.pageDiagnostics ? "reachable" : "unavailable"}`,
+    `Source SpicyChat runtime: ${liveRuntimeAvailable ? "reachable" : "unavailable (historical or cached context may be shown)"}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension: ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` (${p.inspectorVersion})` : ""}` : "not paired"}; protocol v${Number(p.protocolVersion || 1)}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension: protocol unavailable"; })(),
     `Warnings: ${warnings.length}`,
     ...warnings.map(line => `  ! ${line}`)
@@ -845,7 +846,7 @@ async function buildFastSupportSnapshot() {
 // updates. This is not a copy of chat messages or the full Settings database.
 async function readSavedSupportHistory({ summaryOnly = false } = {}) {
   const timeoutMs = summaryOnly ? (isAndroidSupportWebView() ? 5500 : 12000)
-    : (isAndroidSupportWebView() ? 12000 : 45000);
+    : (isAndroidSupportWebView() ? 4000 : 45000);
   const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, timeoutMs).catch(() => null);
   const error = String(result?.error || (result?.__dsTimeout ? "The history lookup timed out." : "Support history could not be checked.")).slice(0, 180);
   return result?.ok ? result : { ok: false, text: error, count: 0, through: 0 };
@@ -875,18 +876,18 @@ async function clearSavedSupportHistory() {
 // Download verification is deliberately separate from starting a download. A
 // clicked <a download> cannot prove that the browser actually saved a file.
 async function downloadSupportVerified(text, compressed) {
+  // Android's bridge only accepts text. Do not allocate/serialize/compress a
+  // second copy of the report on the WebView main thread before exporting it.
+  if (isAndroidSupportWebView()) {
+    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
+    return { started, verified: false, isGzip: false };
+  }
   const raw = compressed && typeof CompressionStream === "function"
     ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
     : new Blob([text], { type: "text/plain;charset=utf-8" });
   const isGzip = compressed && raw.type !== "text/plain;charset=utf-8";
   if (!raw.size) throw new Error("The generated support file was empty.");
   const filename = isGzip ? supportReportFilename("support-info").replace(/\.txt$/, ".txt.gz") : supportReportFilename("support-info");
-  if (isAndroidSupportWebView()) {
-    // Do not send compressed blobs to text-only Android export handlers.
-    // The report remains available for copying even if the APK cannot save it.
-    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
-    return { started, verified: false, isGzip: false };
-  }
   let permission = false;
   try { permission = !!chrome.downloads?.download && !!chrome.downloads?.onChanged &&
     await new Promise(resolve => chrome.permissions.contains({ permissions: ["downloads"] }, allowed =>
@@ -942,9 +943,9 @@ async function downloadSupportVerified(text, compressed) {
   return { started, verified: false, isGzip: false };
 }
 
-async function buildAllSupportInfo({ history = null } = {}) {
+async function buildAllSupportInfo({ history = null, historyPromise: suppliedHistoryPromise = null } = {}) {
   return withSharedSupportRuntimeSnapshot(async () => {
-  const historyPromise = history ? Promise.resolve(history) : readSavedSupportHistory();
+  const historyPromise = suppliedHistoryPromise || (history ? Promise.resolve(history) : readSavedSupportHistory());
   const sectionTimeoutMs = 7000;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
@@ -1044,9 +1045,12 @@ async function downloadAllSupportInfo() {
     // Capture the checkpoint before building. A later sample must survive.
     // A slow/corrupt history archive must not prevent a new current report.
     // Its error is written into the report, and no history is deleted.
-    const history = await readSavedSupportHistory();
-    const text = await buildAllSupportInfo({ history });
-    const compressed = new TextEncoder().encode(text).byteLength > 256 * 1024;
+    const historyPromise = readSavedSupportHistory();
+    // Build all sections while the history request is running. Waiting for
+    // Android's often-unreachable background first made a simple export stall.
+    const text = await buildAllSupportInfo({ historyPromise });
+    const history = await historyPromise;
+    const compressed = !isAndroidSupportWebView() && new TextEncoder().encode(text).byteLength > 256 * 1024;
     const saved = await downloadSupportVerified(text, compressed);
     if (!saved.started) {
       if (status) status.textContent = isAndroidSupportWebView()

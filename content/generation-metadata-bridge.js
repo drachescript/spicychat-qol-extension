@@ -183,10 +183,14 @@
   }
 
   function emitGenerationResponse(data, request) {
-    const message = normalizeMessage(data?.message || data?.data?.message, "bot");
+    const responseMessage = data?.message || data?.data?.message || data?.result?.message || data?.response?.message;
+    const message = normalizeMessage(responseMessage, "bot");
     if (!message) return;
 
-    const responseEngine = data?.engine || data?.data?.engine || null;
+    // Report an actual engine only when the server supplies an engine field.
+    // The requested inference_model is tracked separately below.
+    const responseEngine = data?.engine || data?.data?.engine || data?.result?.engine
+      || data?.response?.engine || responseMessage?.engine || null;
     const requestedModel = request?.requestedModel || message.inferenceModel || null;
 
     emit("DSQ_NEW_GENERATION", {

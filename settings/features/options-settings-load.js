@@ -696,6 +696,7 @@ async function load() {
   setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false);
   setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false);
   setChecked("chatExportIncludeAvatars", settings.chatExportIncludeAvatars !== false);
+  setChecked("chatExportIncludeImageLinks", settings.chatExportIncludeImageLinks === true);
   setValue("chatExportHistoryMode", settings.chatExportHistoryMode || "api");
   setValue("chatExportDefaultFormat", settings.chatExportDefaultFormat || "text");
   setValue("chatExportHtmlLayout", settings.chatExportHtmlLayout || "bubbles");

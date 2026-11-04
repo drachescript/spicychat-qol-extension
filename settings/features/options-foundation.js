@@ -63,6 +63,10 @@ function recordSlowStorageRead(keys, elapsed) {
   OPTIONS_PERFORMANCE.slowStorageReads.push(record);
   OPTIONS_PERFORMANCE.slowStorageReads.sort((a, b) => Number(b.ms || 0) - Number(a.ms || 0));
   OPTIONS_PERFORMANCE.slowStorageReads = OPTIONS_PERFORMANCE.slowStorageReads.slice(0, 5);
+  // On Android, getBytesInUse can re-enumerate megabytes of storage for
+  // every slow read, precisely when support export is already under pressure.
+  // Keep the latency sample; the report separately records total storage size.
+  if (typeof isAndroidSupportWebView === "function" && isAndroidSupportWebView()) return;
   try {
     chrome.storage.local.getBytesInUse(keys, bytes => {
       if (!chrome.runtime?.lastError) record.bytes = Math.max(0, Number(bytes || 0));

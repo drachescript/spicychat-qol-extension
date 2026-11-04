@@ -16,8 +16,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MAX_RECORDS = 3000;
 
   let records = {};
-  let loaded = false;
+  let loadPromise = null;
   let saveTimer = null;
+  let metadataRetryTimers = [];
   let initializedRoute = "";
   let lastDisplaySignature = "";
   const dirtyRecordIds = new Set();
@@ -65,12 +66,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
-  async function ensureLoaded() {
-    if (loaded) return;
-    loaded = true;
-    const result = await DS.storageGet(STORAGE_KEY);
-    const saved = result?.[STORAGE_KEY];
-    records = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  function ensureLoaded() {
+    // A history event and the first DOM pass can arrive concurrently. Share
+    // the storage load so a late completion never overwrites newer metadata.
+    if (!loadPromise) {
+      loadPromise = Promise.resolve().then(() => DS.storageGet(STORAGE_KEY)).then(result => {
+        const saved = result?.[STORAGE_KEY];
+        records = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+      }).catch(() => { records = {}; });
+    }
+    return loadPromise;
   }
 
   function compactRecords() {
@@ -114,17 +119,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     dirtyRecordIds.add(incoming.id);
   }
 
+  function retryLoadedMetadata(ids) {
+    // A newly loaded history response can precede React's message wrappers.
+    // Retry the actual affected IDs rather than scanning the whole chat on a timer.
+    metadataRetryTimers.forEach(clearTimeout);
+    metadataRetryTimers = [];
+    const pending = [...new Set(ids.filter(Boolean))].slice(-180);
+    if (!pending.length) return;
+    for (const delay of [250, 1200]) {
+      metadataRetryTimers.push(setTimeout(() => {
+        const settings = DS.state?.settings || {};
+        if (!settings.enabled || !metadataFeatureRequested(settings) || !DS.isSingleChatPage?.()) return;
+        for (const id of pending) {
+          const root = document.getElementById(`message-${id}`);
+          if (!root) continue;
+          // A wrapper may have been marked ready before its metadata arrived.
+          delete root.dataset.dsGenerationMetadataReady;
+          applyToMessage(root, settings);
+          dirtyRecordIds.delete(id);
+        }
+      }, delay));
+    }
+  }
+
   async function handleBridgeMessage(message) {
     if (message?.source !== SOURCE) return;
     await ensureLoaded();
 
     if (message.type === "DSQ_MESSAGES_LOADED") {
       const conversationId = message.payload?.conversationId || null;
+      const ids = [];
       for (const item of message.payload?.messages || []) {
         mergeRecord({ ...item, conversationId });
+        if (item?.id) ids.push(String(item.id));
       }
       scheduleSave();
       DS.scheduleRun?.();
+      retryLoadedMetadata(ids);
       return;
     }
 
@@ -132,6 +163,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       mergeRecord(message.payload || {});
       scheduleSave();
       DS.scheduleRun?.();
+      retryLoadedMetadata([String(message.payload?.id || "")]);
     }
   }
 
@@ -164,8 +196,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function modelText(record) {
     const requested = clean(record?.requestedModel);
     const engine = clean(record?.responseEngine);
-    if (requested && engine && requested.toLowerCase() !== engine.toLowerCase()) return `${requested} → ${engine}`;
-    return engine || requested;
+    if (requested && engine && requested.toLowerCase() !== engine.toLowerCase()) return `Requested: ${requested} → Engine: ${engine}`;
+    if (engine) return `Engine: ${engine}`;
+    return requested ? `Requested: ${requested}` : "";
   }
 
   function settingsText(value) {
@@ -180,10 +213,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function isAiMessage(root) {
+    // Newer SpicyChat replies may omit the bot profile link entirely.
+    if (root.querySelector('[data-chat-bubble-side="bot"]')) return true;
+    if (root.querySelector('[data-chat-bubble-side="user"]')) return false;
     return !!root.querySelector("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
   }
 
   function findMetadataHost(root) {
+    // Prefer the bubble column, whose children are the header, message and
+    // controls. The metadata can be inserted after its direct-child header;
+    // we never assume a nested menu button is an insertBefore reference.
+    const bubble = root.querySelector('[data-testid="ChatBubble-Column"][data-chat-bubble-side]')
+      || root.querySelector('[data-chat-bubble-side]');
+    if (bubble) return bubble;
+
     const textNodes = Array.from(root.querySelectorAll(
       "span.leading-6, div[class*='overflow-wrap'], div[class*='break-words']"
     )).filter(node => clean(node.textContent));
@@ -452,9 +495,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!element) {
       element = document.createElement("div");
       element.className = "ds-generation-metadata";
-      host.appendChild(element);
-    } else if (element.parentElement !== host) {
-      host.appendChild(element);
+    }
+    // For the current chat bubble, place metadata immediately below the
+    // header. Use a DIRECT child as the reference node (or append safely).
+    // For older layouts, preserve the previous append-only behavior.
+    const isBubbleColumn = host.matches?.('[data-chat-bubble-side]');
+    const reference = isBubbleColumn ? [...host.children].find(child => child !== element && !child.classList?.contains('ds-generation-metadata') && child !== host.firstElementChild) : null;
+    if (element.parentElement !== host || (reference && element.nextElementSibling !== reference)) {
+      if (isBubbleColumn && reference) host.insertBefore(element, reference);
+      else host.appendChild(element);
     }
 
     const compact = settings.compactGenerationMetadata !== false;
@@ -472,6 +521,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function cleanup() {
+    metadataRetryTimers.forEach(clearTimeout);
+    metadataRetryTimers = [];
     document.querySelectorAll(".ds-generation-metadata").forEach(node => node.remove());
     document.querySelectorAll("[data-ds-generation-metadata-ready]").forEach(root => delete root.dataset.dsGenerationMetadataReady);
     initializedRoute = "";

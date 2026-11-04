@@ -7,7 +7,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   window.__DSQ_RULEBOOK_CARD_BLOCKING__ = true;
 
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const CARD = '[data-testid="RulebookListCard"][data-rulebook-id]';
+  const EXPLORE_CARD = '[data-testid="RulebookListCard"][data-rulebook-id]';
+  const PICKER_CARD = '[data-testid^="RulebookDiscoverTab-Card-"][data-rulebook-id]';
+  const PICKER = '[data-testid="ConversationRulebookPicker-Modal"] [data-testid="RulebookDiscoverTab"]';
   const BUTTON = '.ds-rulebook-block-button';
   const REASON = 'rulebook:block:';
   const text = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
@@ -27,7 +29,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   function metaFor(card) {
     const id = text(card?.getAttribute('data-rulebook-id')).toLowerCase();
-    const creatorNode = card?.querySelector('[data-testid="RulebookListCard-CreatorLink"]');
+    const creatorNode = card?.querySelector('[data-testid="RulebookListCard-CreatorLink"], [data-testid$="-Creator"]');
     const creatorHref = creatorNode?.getAttribute('href') || '';
     const creatorHandle = decodeURIComponent(creatorHref.split('/creator/')[1]?.split(/[?#/]/)[0] || '');
     const descNode = card?.querySelector('[data-testid="RulebookListCard-Description"]');
@@ -61,6 +63,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return '';
   }
   function targetFor(card) {
+    // Discover cards share a single flex results column. Never hide their
+    // parent: that would remove every choice from the native picker.
+    if (card?.matches?.(PICKER_CARD)) return card;
     const wrapper = card?.parentElement;
     const grid = wrapper?.parentElement;
     return wrapper && wrapper.children.length === 1 && grid?.classList?.contains('grid') ? wrapper : card;
@@ -97,9 +102,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.setAttribute('aria-label', 'Block this Rulebook');
     button.title = 'Block this Rulebook in QoL';
     button.textContent = '×';
-    // Keep clear of SpicyChat's own More options button at top right.
+    // Standalone cards have a native More button; picker cards do not.
+    const inPicker = card.matches(PICKER_CARD);
     Object.assign(button.style, {
-      position: 'absolute', top: '8px', right: '44px', zIndex: '12',
+      position: 'absolute', top: '8px', right: inPicker ? '8px' : '44px', zIndex: '12',
       width: '28px', height: '28px', borderRadius: '999px', border: '0',
       background: 'rgba(0,0,0,.7)', color: '#fff', fontSize: '21px',
       lineHeight: '24px', cursor: 'pointer', padding: '0'
@@ -110,6 +116,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, true);
     card.appendChild(button);
   }
+  // Use the existing page observer. Only native Discover mount/search/sort
+  // mutations invalidate the targeted chat slow lane; streaming replies and
+  // ordinary chat UI updates do not cause Rulebook-card rescans.
+  DS.rulebookDiscoverMutationsRelevant = function rulebookDiscoverMutationsRelevant(mutations) {
+    if (!Array.isArray(mutations) || !mutations.length) return false;
+    for (const mutation of mutations) {
+      const target = mutation.target?.nodeType === 1 ? mutation.target : mutation.target?.parentElement;
+      if (target?.closest?.(PICKER)) return true;
+      for (const node of [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])]) {
+        if (node?.nodeType !== 1) continue;
+        if (node.matches?.(PICKER_CARD) || node.matches?.('[data-testid="ConversationRulebookPicker-Modal"], [data-testid="RulebookDiscoverTab"]')) return true;
+        if (node.querySelector?.('[data-testid="RulebookDiscoverTab"]')) return true;
+      }
+    }
+    return false;
+  };
   DS.removePublicRulebookQoL = restore;
   DS.getPublicRulebookCardMeta = metaFor;
   DS.getPublicRulebookBlockReason = meta => {
@@ -118,10 +140,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
   DS.applyPublicRulebookQoL = function applyPublicRulebookQoL() {
     const settings = DS.state?.settings || {};
-    if (!isExplore() || settings.enabled !== true || settings.rulebookBlockingEnabled !== true) {
+    const explore = isExplore();
+    const picker = document.querySelector(PICKER);
+    if ((!explore && !picker) || settings.enabled !== true || settings.rulebookBlockingEnabled !== true) {
       restore(); return;
     }
-    const cards = document.querySelectorAll(CARD);
+    const cards = explore
+      ? document.querySelectorAll(EXPLORE_CARD)
+      : picker.querySelectorAll(PICKER_CARD);
     for (const card of cards) {
       const meta = metaFor(card);
       if (!UUID.test(meta.id)) continue;
