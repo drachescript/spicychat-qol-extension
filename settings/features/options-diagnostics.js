@@ -74,7 +74,7 @@ function percentChange(current, baseline) {
 async function comparePerformanceBaseline({ returnText = false } = {}) {
   const result = await storageGet([PERFORMANCE_BASELINE_KEY]);
   const baseline = result[PERFORMANCE_BASELINE_KEY];
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
   if (!baseline || !context?.pageDiagnostics) {
     const text = !baseline ? "No performance baseline saved yet." : "No reachable source SpicyChat tab for comparison.";
     if (!returnText) { const status = $("controlSupportStatus"); if (status) status.textContent = text; }
@@ -469,7 +469,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   // section because one large/local store stalls after an extension restart.
   const [resultValue, context, bytesValue, largeStatsValue, recoverySnapshotMeta] = await Promise.all([
     promiseWithValueTimeout(storageGet(diagnosticStorageKeys), 3500, null),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
     promiseWithValueTimeout(storageBytesInUse(null), 2000, null),
     promiseWithValueTimeout(readLargeStorageStats(), 2500, null),
     promiseWithValueTimeout(readRecoverySnapshotMeta(), 2000, null)
@@ -501,6 +501,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
+    ...(context?.probe ? [`Runtime check: ${Number(context.probe.pingsAnswered || 0)}/${Number(context.probe.tabsPinged || 0)} tab pings answered; lightweight runtime ${context.probe.lightRuntimeAnswered ? "answered" : "unavailable"}; full snapshot ${context.probe.snapshotsAnswered ? "answered" : "unavailable"}.` ] : []),
     (() => { const q = context?.probe; return q ? `Runtime probe: ping ${Number(q.pingsAnswered || 0)}/${Number(q.tabsPinged || 0)} replied; snapshots ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} replied; ${Number(q.tabsFlaggedStale || 0)} stale-marked and ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no result"; })(),
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
@@ -651,7 +652,11 @@ function formatChatVisibilityStatus(v) {
     `${Number(v.transparent || 0)} transparent`,
     `${folded} intentionally folded by QoL`
   ];
-  return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}. This checks layout only, not whether chat text was deleted.`;
+  const source = v.hiddenSource;
+  const sourceText = source ? `; first hidden element ${source.tag || "element"} (${source.property || source.cause || "unknown"}, ${Number(source.ancestorDepth || 0)} levels above message); source ${source.sourceHint || "unknown"}; rule ${source.selectorHint || "unknown"}${Array.isArray(source.classes) && source.classes.length ? `; classes ${source.classes.join(", ")}` : ""}` : "";
+  const last = v.recentForegroundEvent;
+  const historyText = last ? `; foreground visibility alerts ${Number(last.count || 0)}; latest ${new Date(Number(last.lastAt || 0)).toISOString()} during ${last.trigger || "unknown"} (generation ${last.generation || "unknown"}), ${Number(last.mounted || 0)} mounted, ${Number(last.hidden || 0)}/${Number(last.inspected || 0)} hidden; latest style ${last.hiddenSource?.property || "unknown"} from ${last.hiddenSource?.sourceHint || "unknown"}, rule ${last.hiddenSource?.selectorHint || "unknown"}; QoL display features enabled: ${Array.isArray(last.activeQolDisplayFeatures) && last.activeQolDisplayFeatures.length ? last.activeQolDisplayFeatures.join(", ") : "none"}` : "; no sustained foreground hide captured";
+  return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}${sourceText}${historyText}. This checks layout only, not whether chat text was deleted.`;
 }
 
 function performanceWarningLines(context, settings) {
@@ -665,6 +670,10 @@ function performanceWarningLines(context, settings) {
     else if (max >= 250) lines.push(`Slow QoL step: ${entry.name} max ${max} ms.`);
   }
   const visibility = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
+  if (visibility?.recentForegroundEvent?.lastAt) {
+    const event = visibility.recentForegroundEvent;
+    lines.push(`Chat display warning: QoL saw ${Number(event.hidden || 0)} of ${Number(event.inspected || 0)} sampled message containers hidden in a foreground chat during ${event.trigger || "unknown"}. The messages were still mounted. Cause is not established; inspect the Current chat DOM line for CSS clues.`);
+  }
   if (visibility && Number(visibility.inspected || 0) >= 2 &&
       Number(visibility.hidden || 0) === Number(visibility.inspected || 0) &&
       Number(visibility.qolFolded || 0) === 0) {
@@ -689,7 +698,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   if (status && !returnOnly) status.textContent = "Building performance report...";
   const [stored, context, liveTabValue] = await Promise.all([
     storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
     runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1500)
   ]);
   const liveTabSummary = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
@@ -720,7 +729,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     `Runtime data: ${runtimeAvailable ? "available" : `unavailable — ${context?.runtimeStatus || "snapshot-request-timeout"}; Options-page measurements below are still valid`}`,
-    (() => { const q = context?.probe; return q ? `Runtime probe: ${Number(q.tabsPinged || 0)}/${Number(q.tabsFound || 0)} tabs pinged; ${Number(q.pingsAnswered || 0)} replies; ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} full snapshots; ${Number(q.tabsFlaggedStale || 0)} stale-marked, ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no results received"; })(),
+    (() => { const q = context?.probe; return q ? `Runtime probe: ${Number(q.tabsPinged || 0)}/${Number(q.tabsFound || 0)} tabs pinged; ${Number(q.pingsAnswered || 0)} replies; lightweight runtime ${q.lightRuntimeAnswered ? "answered" : "unavailable"}; ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} full snapshots; ${Number(q.tabsFlaggedStale || 0)} stale-marked, ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no results received"; })(),
     `Sample scope: ${sampleScope}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}; operation markers ${Number(p.counters?.operationsStarted || 0)}/${Number(p.counters?.operationsEnded || 0)}; network markers ${Number(p.counters?.networkStarted || 0)}/${Number(p.counters?.networkEnded || 0)}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable"; })(),
     `Environment: Android ${env.android ? "yes" : "no"}; WebView ${env.webview ? "yes" : "no"}; installed/standalone ${env.installedApp ? `yes (${env.displayMode || "standalone"})` : "no"}; Firefox-family ${env.firefox || env.waterfox ? "yes" : "no"}; Opera ${env.opera ? "yes" : "no"}`,
@@ -737,10 +746,10 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)
       : []),
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} scheduling requests (not completed passes); ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
-    `Android QoL pacing: ${env.android ? "active" : "not Android"}; ${Number(runtime.androidMessageLaneDeferrals || 0)} delayed message updates; ${Number(runtime.androidRuntimeDeferrals || 0)} delayed maintenance passes. These counts are scheduling changes, not measured UI lag.`,
+    `Android QoL pacing: ${env.android ? "active" : "not Android"}; ${Number(runtime.androidMessageLaneDeferrals || 0)} delayed message updates; ${Number(runtime.androidRuntimeDeferrals || 0)} delayed maintenance passes; ${Number(runtime.androidPostStallQuietWindows || 0)} post-stall quiet windows (last observed ${Number(runtime.androidPostStallLastMs || 0)} ms). These counts are scheduling changes, not proof of the stall cause.`,
     `Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots processed in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes deferred; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`,
     ...(runtimeAvailable ? [
-      `Message remount guard: ${Number(runtime.messageDetachedMutationSkips || 0)} detached mutation nodes excluded from text-cache work (sampled tab only)`,
+      `Message remount guard: ${Number(runtime.messageDetachedMutationSkips || 0)} detached mutation nodes excluded from text-cache work; ${Number(runtime.messageMutationTextRoots || 0)} text-changed roots vs ${Number(runtime.messageMutationNonTextRoots || 0)} other message-root changes; ${Number(runtime.messageCacheDetachedSkips || 0)} detached invalidations skipped (sampled tab only)`,
       `Rulebook Explore QoL work: ${Number(runtime.rulebookExploreScans || 0)} scans / ${Number(runtime.rulebookExploreCardsChecked || 0)} cards checked; ${Number(runtime.rulebookExploreUnchangedPassesSkipped || 0)} unchanged passes skipped; worst scan ${Number(runtime.rulebookExploreWorstScanMs || 0)} ms (sampled tab only)`
     ] : []),
     `Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`,
@@ -808,7 +817,7 @@ async function buildPerformanceSelfCheckText() {
   const started = performance.now();
   const readStarted = performance.now();
   const readPromise = storageGetChecked(["settings"]).then(read => ({ read, storageMs: performance.now() - readStarted }));
-  const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
   const [{ read, storageMs }, context] = await Promise.all([readPromise, contextPromise]);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
   const liveRuntimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
@@ -1167,7 +1176,7 @@ async function refreshPerformanceTroubleshooter() {
   const output = $("performanceTroubleshooterResults");
   if (!output) return;
   output.textContent = "Reading local feature timings…";
-  const response = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500).catch(() => null);
+  const response = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()).catch(() => null);
   const runtime = response?.pageDiagnostics;
   if (!runtime || response?.runtimeAvailable === false) {
     output.textContent = "No responsive SpicyChat page was found. Open a chat with QoL enabled, then try again. Android WebView may not expose this runtime to Settings; use Copy all support info in that case.";

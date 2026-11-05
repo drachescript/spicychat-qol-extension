@@ -214,6 +214,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let actual = 0;
     let deduped = 0;
     for (const root of roots) {
+      if (!root.isConnected) {
+        deduped += 1;
+        counters.messageCacheDetachedSkips = Number(counters.messageCacheDetachedSkips || 0) + 1;
+        continue;
+      }
       const fingerprints = DS.state.messageTextFingerprints || (DS.state.messageTextFingerprints = new WeakMap());
       const previousFingerprint = fingerprints.get(root);
       if (previousFingerprint) {
@@ -224,11 +229,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           continue;
         }
       }
-      DS.state.messageEnhancerSeen?.delete?.(root);
       const newlyDirty = DS.markMessageRootDirty(root);
       const hadCachedText = !!DS.state.messageTextCache?.delete?.(root);
-      if (newlyDirty || hadCachedText) actual += 1;
-      else deduped += 1;
+      // Keep the existing enhancer mark during repeated mutations that have
+      // already queued the same root. Clearing it on every irrelevant update
+      // could make the next pass re-run all message decorations.
+      if (newlyDirty || hadCachedText) {
+        DS.state.messageEnhancerSeen?.delete?.(root);
+        actual += 1;
+      } else deduped += 1;
     }
     if (actual) DS.state.messageTextRevision = Number(DS.state.messageTextRevision || 0) + actual;
     counters.messageCacheInvalidations = Number(counters.messageCacheInvalidations || 0) + actual;

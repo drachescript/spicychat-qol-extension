@@ -123,6 +123,78 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch {}
       return "unknown";
     }
+    // Existing page observer plus short-lived, event-triggered samples. Never
+    // install a second MutationObserver or poll the chat indefinitely.
+    let visibilityWatch = null;
+    let visibilityWatchTimer = 0;
+    let lastVisibilityWatchAt = 0;
+    function stopVisibilityWatch() {
+      if (visibilityWatchTimer) clearTimeout(visibilityWatchTimer);
+      visibilityWatchTimer = 0;
+      visibilityWatch = null;
+    }
+    function sampleVisibilityWatch() {
+      const watch = visibilityWatch;
+      if (!watch || DS.isQolPausedForTab?.() || !DS.isSingleChatPage?.() ||
+          location.pathname !== watch.route || document.visibilityState !== "visible") {
+        stopVisibilityWatch();
+        return;
+      }
+      const sample = DS.readChatVisibilitySnapshot?.();
+      const eligible = Number(sample?.inspected || 0) - Number(sample?.qolFolded || 0);
+      const suspicious = eligible >= 2 && Number(sample?.hidden || 0) === eligible;
+      const now = Date.now();
+      if (suspicious) {
+        if (watch.firstHiddenAt && now - watch.firstHiddenAt >= 450) {
+          // Only after two sustained samples do we inspect CSS rules once.
+          const full = DS.readChatVisibilitySnapshot?.({ inspectRule: true }) || sample;
+          DS.recordChatVisibilityEvent?.(full, {
+            generation: checkGenerationState(), trigger: watch.reason,
+            elapsedMs: now - watch.firstHiddenAt
+          });
+          stopVisibilityWatch();
+          return;
+        }
+        if (!watch.firstHiddenAt) watch.firstHiddenAt = now;
+      } else {
+        watch.firstHiddenAt = 0;
+      }
+      watch.step++;
+      const delays = [650, 1200, 2000, 3000];
+      if (watch.step >= delays.length) { stopVisibilityWatch(); return; }
+      visibilityWatchTimer = setTimeout(sampleVisibilityWatch, delays[watch.step]);
+    }
+    function scheduleVisibilityWatch(reason) {
+      if (document.visibilityState !== "visible" || !DS.isSingleChatPage?.() || DS.isQolPausedForTab?.()) return;
+      const now = Date.now();
+      if (visibilityWatch || now - lastVisibilityWatchAt < 7000) return;
+      lastVisibilityWatchAt = now;
+      visibilityWatch = { route: location.pathname, reason, step: 0, firstHiddenAt: 0 };
+      visibilityWatchTimer = setTimeout(sampleVisibilityWatch, 320);
+    }
+    // One passive pair of listeners for native send / redo / continue. No DOM
+    // modifications and no reading of composer or message contents.
+    document.addEventListener("submit", event => {
+      if (event.target?.querySelector?.("textarea, [contenteditable='true']")) scheduleVisibilityWatch("send");
+    }, true);
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.repeat) return;
+      const target = event.target;
+      if (target?.matches?.("textarea, [contenteditable='true']") && !target.closest?.(".sai-wysiwyg-editor")) {
+        scheduleVisibilityWatch("send");
+      }
+    }, true);
+    document.addEventListener("click", event => {
+      const button = event.target?.closest?.("button");
+      if (!button || !DS.isSingleChatPage?.()) return;
+      const label = String(button.getAttribute("aria-label") || button.title || button.textContent || "")
+        .replace(/\s+/g, " ").trim().toLowerCase().slice(0, 48);
+      if (button.type === "submit" && button.closest?.("form")?.querySelector?.("textarea")) {
+        scheduleVisibilityWatch("send");
+      } else if (/^(redo|regenerate|continue|retry)(?:$|[ :\-])/.test(label)) {
+        scheduleVisibilityWatch("generation-action");
+      }
+    }, true);
     const observer = new MutationObserver(mutations => {
       if (DS.isQolPausedForTab?.()) return;
       const callbackStartedAt = performance.now();
@@ -132,6 +204,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.mutations += mutations.length;
       if (checkRouteChange()) {
         stopEmptyWatch();
+        stopVisibilityWatch();
         return;
       }
 
@@ -286,6 +359,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (messageRootsChanged) {
+        if (!DS.state?.bulkChatHistoryLoadActive) scheduleVisibilityWatch("message-remount");
         const previousMounted = loadedChatMessageCount();
         updateLoadedChatMessageCountFromMutations(mutations);
         const currentMounted = loadedChatMessageCount();

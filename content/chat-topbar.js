@@ -116,13 +116,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function getTitleActionsContainer(host, profile) {
-    if (!host || !profile) return null;
+    if (!host) return null;
 
     let actions = host.querySelector(":scope > .ds-chat-title-buttons");
     if (!actions) {
       actions = document.createElement("span");
       actions.className = "ds-chat-title-buttons";
-      profile.insertAdjacentElement("afterend", actions);
+      if (profile?.isConnected) profile.insertAdjacentElement("afterend", actions);
+      else host.appendChild(actions);
     }
 
     return actions;
@@ -290,7 +291,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function cleanupChatHistoryButtons() {
-    DS.qsa(".ds-chat-history-button, .ds-chat-new-chat-button, .ds-chat-profile-button").forEach(button => button.remove());
+    DS.qsa(".ds-chat-history-button, .ds-chat-new-chat-button, .ds-chat-profile-button, .ds-chat-jump-start-button, .ds-chat-open-window-button").forEach(button => button.remove());
     cleanupEmptyTitleActions();
   }
 
@@ -344,9 +345,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function applyPerCharacterChatHistoryButtons() {
     const settings = DS.state.settings || {};
     const profile = getBotProfileAnchor();
-    const host = profile?.parentElement;
+    const host = profile?.parentElement || (settings.chatAlwaysShowProfileLink ? getChatDropdownButton()?.parentElement : null);
 
-    if (!profile || !host) {
+    if (!host || (!profile && !settings.chatAlwaysShowProfileLink)) {
       cleanupChatHistoryButtons();
       return;
     }
@@ -357,9 +358,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // and QoL controls. Keep an explicit Profile shortcut in the same stable
     // action row whenever Chat Top Bar tools are active so the profile remains
     // reachable even when there is very little title space.
-    const wantsProfile = compactChatHeader();
+    const wantsProfile = compactChatHeader() || settings.chatAlwaysShowProfileLink === true;
+    const wantsStart = settings.chatJumpToStartShortcut === true;
+    const wantsWindow = settings.chatOpenWindowShortcut === true;
+    const wantsGeneration = settings.chatGenerationSettingsShortcut === true;
 
-    if (!wantsHistory && !wantsNewChat && !wantsProfile) {
+    if (!wantsHistory && !wantsNewChat && !wantsProfile && !wantsStart && !wantsWindow && !wantsGeneration) {
       cleanupChatHistoryButtons();
       return;
     }
@@ -381,8 +385,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation();
-          const href = getBotProfileAnchor()?.href || `${location.origin}/chatbot/${getCurrentBotId()}`;
+          const botId = getCurrentBotId();
+          const href = getBotProfileAnchor()?.href || (botId ? `${location.origin}/chatbot/${botId}` : "");
           if (href) location.assign(href);
+          else DS.setQuickStatus?.("No profile link is available for this bot.");
         }, true);
         actions.appendChild(profileButton);
       }
@@ -431,6 +437,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } else {
       newChatButton?.remove();
     }
+
+    let startButton = actions.querySelector(".ds-chat-jump-start-button");
+    if (wantsStart && !startButton) {
+      startButton = document.createElement("button");
+      startButton.type = "button";
+      startButton.className = "ds-chat-title-mini-button ds-chat-jump-start-button";
+      startButton.textContent = "Start";
+      startButton.title = "Jump toward the first message using the normal chat scroll controls";
+      startButton.setAttribute("aria-label", startButton.title);
+      startButton.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        // Keep native Load Previous behavior and the user's scroll-loading setting.
+        if (typeof DS.scrollChatToTop === "function") void DS.scrollChatToTop();
+        else document.querySelector("[id^='message-']")?.scrollIntoView?.({ block: "start" });
+      });
+      actions.appendChild(startButton);
+    } else if (!wantsStart) startButton?.remove();
+
+    let windowButton = actions.querySelector(".ds-chat-open-window-button");
+    if (wantsWindow && !windowButton) {
+      windowButton = document.createElement("button");
+      windowButton.type = "button";
+      windowButton.className = "ds-chat-title-mini-button ds-chat-open-window-button";
+      windowButton.textContent = "Window";
+      windowButton.title = "Open this conversation in a separate browser window";
+      windowButton.setAttribute("aria-label", windowButton.title);
+      windowButton.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        if (DS.isSingleChatPage?.()) window.open(location.href, "_blank", "noopener,noreferrer,width=1100,height=780");
+      });
+      actions.appendChild(windowButton);
+    } else if (!wantsWindow) windowButton?.remove();
+
+    let generationButton = actions.querySelector(".ds-chat-generation-settings-button");
+    if (wantsGeneration && !generationButton) {
+      generationButton = document.createElement("button");
+      generationButton.type = "button";
+      generationButton.className = "ds-chat-title-mini-button ds-chat-generation-settings-button";
+      generationButton.textContent = "Settings";
+      generationButton.title = "Open SpicyChat Generation Settings";
+      generationButton.setAttribute("aria-label", generationButton.title);
+      generationButton.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        void clickNativeChatMenuAction("Generation Settings");
+      });
+      actions.appendChild(generationButton);
+    } else if (!wantsGeneration) generationButton?.remove();
 
     cleanupEmptyTitleActions();
   }
@@ -580,6 +633,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.chatTopBarAddLaterButton ||
       settings.showPerCharacterChatHistory ||
       settings.showQuickNewChatButton ||
+      settings.chatAlwaysShowProfileLink ||
+      settings.chatJumpToStartShortcut ||
+      settings.chatOpenWindowShortcut ||
+      settings.chatGenerationSettingsShortcut ||
       settings.showChatExportButton ||
       settings.showChatTopBarTools
     );

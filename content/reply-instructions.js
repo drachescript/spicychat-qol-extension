@@ -314,6 +314,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     if (!setTextareaValue(textarea, current)) return false;
     textarea.selectionStart = textarea.selectionEnd = current.length;
+    if (added.some(candidate => candidate.kind === "context-recall")) {
+      showToast("Context Keeper added a story reminder. Turn off Automatic Recall in Settings to stop this.");
+    }
     if (skipped.length) showToast(`${skipped.length} QoL guidance block${skipped.length === 1 ? " was" : "s were"} skipped because the message or shared guidance budget is full.`);
 
     event?.preventDefault?.(); event?.stopPropagation?.(); event?.stopImmediatePropagation?.();

@@ -409,6 +409,9 @@
 <label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable conversation list tools</span></label>
 <label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable conversation folders and bulk organizing</span></label>
 <label class="row"><input id="enableChatPins" type="checkbox"/><span>Show pinned conversations at the top of Chats</span></label>
+<label class="row"><input id="chatListTwoColumns" type="checkbox"/><span>Show conversations in two columns on wide screens</span></label>
+<label class="row"><input id="chatListPopoutShortcut" type="checkbox"/><span>Add an Open window button to conversation cards</span></label>
+<label class="row"><input id="chatListRenameShortcut" type="checkbox"/><span>Add a quick Rename button to conversation cards (uses SpicyChat)</span></label>
 <p class="hint">Pin a chat from its card. Pinned links stay at the top even when older chats leave the loaded list.</p>
 <div id="ds-feature-panel-chat-smart-folders" data-dsq-feature-panel="chat-smart-folders"></div>
 <label>Conversation folders<textarea id="chatCollections" placeholder="Favorites
@@ -1853,6 +1856,13 @@ Testing" spellcheck="false"></textarea></label>
 </section>
 </div>
 <div class="tab-page" data-page="chat-ui"><p class="page-intro">Controls used inside an open conversation: top-bar tools, search, bookmarks, navigation, message actions, export, and text display helpers.</p>
+<section class="card" id="qol72ChatShortcuts"><h2>Optional chat shortcuts</h2>
+<label class="row"><input id="chatAlwaysShowProfileLink" type="checkbox"/><span>Always show a Profile button in chats</span></label>
+<label class="row"><input id="chatJumpToStartShortcut" type="checkbox"/><span>Show a Start button to jump toward the first message</span></label>
+<label class="row"><input id="chatOpenWindowShortcut" type="checkbox"/><span>Show an Open window button for the current chat</span></label>
+<label class="row"><input id="chatGenerationSettingsShortcut" type="checkbox"/><span>Show a Generation Settings shortcut in chats</span></label>
+<p class="hint">Start uses the existing scroll navigation and only loads older messages if you have enabled that option. Opening a window is controlled by the browser.</p>
+</section>
 <div id="ds-feature-panel-chat-topbar" data-dsq-feature-panel="chat-topbar"></div>
 
 <section class="card">
@@ -1968,6 +1978,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint">Resend safely puts that old user message back into the composer so you can edit/send it again; it never auto-sends. If you already have a draft, QoL asks before replacing it.</p>
 <label class="row"><input id="messageQuickActionConfirmRemoveImage" type="checkbox"/><span>Confirm before removing an uploaded image</span></label>
 <label class="row"><input id="messageQuickActionReport" type="checkbox"/><span>Show Report icon on AI messages</span></label>
+<label class="row"><input id="messageBottomMenuShortcut" type="checkbox"/><span>Add a three-dot message menu beside the bottom message actions</span></label>
+<p class="hint">Uses SpicyChat's normal Edit, Copy and Report actions. The original menu stays available.</p>
 </section>
 <section class="card">
 <h2>Chat export</h2>
@@ -2235,6 +2247,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="showCardGreetingTokenInfo" type="checkbox"/><span>Show token counts on bot cards</span></label>
 <label class="row"><input id="showExactMessageCounts" type="checkbox"/><span>Show exact message counts on bot cards</span></label>
 <label class="row"><input id="showBotCreationDates" type="checkbox"/><span>Show bot creation dates on bot cards and profiles</span></label>
+<label class="row"><input id="showNewBotBadge" type="checkbox"/><span>Mark bots created in the last 7 days as New (when a real date is available)</span></label>
 <label class="row"><input id="expandBotNamesOnHover" type="checkbox"/><span>Expand cut-off bot names horizontally on hover / tap</span></label>
 <div class="sub-card">
 <strong>Token counts to show</strong>
@@ -2444,8 +2457,10 @@ DILF"></textarea></label>
 </section>
 <section class="card">
 <h2>Language filter</h2>
-<p class="hint">Include or exclude selected languages. Unknown-language bots stay visible until a match is reliable.</p>
+<p class="hint">Include or exclude selected languages. Turn on the main bot-card filter to use the optional Lorebook and Rulebook filters below. Uncertain language matches stay visible.</p>
 <label class="row"><input id="enableLanguageFilter" type="checkbox"/><span>Filter bot cards by language</span></label>
+<label class="row"><input id="languageFilterLorebooks" type="checkbox"/><span>Also filter public Lorebooks by language</span></label>
+<label class="row"><input id="languageFilterRulebooks" type="checkbox"/><span>Also filter public Rulebooks by language</span></label>
 <label>Selected-language behavior
 <select id="languageSelectionMode">
 <option value="include">Show only selected languages</option>
@@ -2474,7 +2489,7 @@ DILF"></textarea></label>
 </div>
 <label class="row"><input id="languageAutoDetectUntagged" type="checkbox"/><span>Auto-detect untagged bots from their title + description + greeting when needed</span></label>
 <label class="row"><input id="languageShowDetectedBadge" type="checkbox"/><span>Show a small local “QoL: language” badge on detected cards</span></label>
-<p class="hint">Language detection is local and never edits bot tags. Uncertain matches may use cached public details.</p>
+<p class="hint">Lorebooks and Rulebooks use their visible titles and descriptions with the same language choices. Unknown languages stay visible. Filtering only hides cards on your screen; it never blocks or changes them. Bot detection may also use cached public details.</p>
 <input id="languageFilterMode" type="hidden" value="conservative"/>
 </section>
 <section class="card">

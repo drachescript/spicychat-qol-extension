@@ -4,6 +4,172 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   "use strict";
   const DS = window.DragonScriptQoL;
   if (!DS) return;
+  // Read-only and bounded. The page observer calls this only around an
+  // actual chat action/remount, and Settings calls it on demand. Never inspect
+  // chat text or expose a conversation/message identifier.
+  const VISIBILITY_SUMMARY_KEY = "dsQolChatStyleVisibilityV1";
+  function previousVisibilityEvent() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(VISIBILITY_SUMMARY_KEY) || "null");
+      const at = Number(value?.lastAt || 0);
+      return value && Number.isFinite(at) && at > 0 && at <= Date.now() + 60000 && Date.now() - at < 86400000 ? value : null;
+    } catch { return null; }
+  }
+  DS.getPreviousChatVisibilityEvent = previousVisibilityEvent;
+  const safeClassHints = node => {
+    try {
+      return [...(node.classList || [])].filter(name => /^(?:ds-|hidden$|invisible$|opacity-0$|sr-only$|collapse$|content-visibility-|transition-)/i.test(name))
+        .slice(0, 6).map(name => String(name)
+          .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, "id")
+          .replace(/[0-9a-f]{20,}/ig, "id").slice(0, 54));
+    } catch { return []; }
+  };
+  function safeRuleSelector(selector) {
+    return String(selector || "")
+      .replace(/\[[^\]]*\]/g, "[attribute]")
+      .replace(/#[\w-]+/g, "#id")
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, "id")
+      .replace(/[0-9a-f]{20,}/ig, "id").slice(0, 125);
+  }
+  function matchedHideRule(node, property, expected) {
+    // Only invoked for a confirmed/suspected anomaly or an explicit support
+    // snapshot. Stop after a fixed amount of CSSOM work, including nested rules.
+    let remaining = 1200;
+    let found = null;
+    const testRules = (rules, sheetSource, depth = 0) => {
+      if (!rules || depth > 2 || remaining <= 0) return;
+      for (const rule of rules) {
+        if (--remaining < 0) break;
+        if (rule?.selectorText && rule.style) {
+          const declared = String(rule.style.getPropertyValue?.(property) || "").trim().toLowerCase();
+          if (!declared || (expected === "0" ? Number(declared) !== 0 : declared !== expected)) continue;
+          try {
+            if (node.matches(rule.selectorText)) found = { selector: safeRuleSelector(rule.selectorText), source: sheetSource };
+          } catch {}
+        } else if (rule?.cssRules) testRules(rule.cssRules, sheetSource, depth + 1);
+      }
+    };
+    try {
+      for (const sheet of document.styleSheets || []) {
+        if (remaining <= 0) break;
+        const ownerId = String(sheet.ownerNode?.id || "");
+        const url = String(sheet.href || "");
+        let qolOrigin = "";
+        try { qolOrigin = typeof chrome !== "undefined" ? String(chrome.runtime?.getURL?.("") || "") : ""; } catch {}
+        const source = ownerId.startsWith("ds-") || ownerId.startsWith("dsq-") ||
+          (qolOrigin && url.startsWith(qolOrigin)) ? "QoL stylesheet"
+          : ownerId.startsWith("sai-") ? "S.AI Toolkit stylesheet"
+          : /^chrome-extension:|^moz-extension:/i.test(url) ? "other extension stylesheet"
+          : "page or injected stylesheet";
+        try { testRules(sheet.cssRules, source); } catch { /* Cross-origin CSS cannot be inspected. */ }
+      }
+    } catch {}
+    return found || { selector: "unidentified", source: "unknown (or stylesheet not accessible)" };
+  }
+  function hiddenMessageDetail(root, inspectRule) {
+    // Only the message wrapper and at most nine ancestors. Ignore offscreen
+    // placement; scrolling away from a message does not make it hidden.
+    for (let node = root, depth = 0; node && depth < 10; node = node.parentElement, depth++) {
+      try {
+        const style = getComputedStyle(node);
+        let property = "", expected = "";
+        if (style.display === "none") { property = "display"; expected = "none"; }
+        else if (style.visibility === "hidden" || style.visibility === "collapse") { property = "visibility"; expected = style.visibility; }
+        else if (style.contentVisibility === "hidden") { property = "content-visibility"; expected = "hidden"; }
+        else if (Number(style.opacity) === 0) { property = "opacity"; expected = "0"; }
+        if (!property) continue;
+        const inline = String(node.style?.getPropertyValue?.(property) || "").trim();
+        const rule = inline ? { selector: "inline style", source: "inline style" }
+          : inspectRule ? matchedHideRule(node, property, expected) : null;
+        return {
+          cause: property === "opacity" ? "transparent" : "css",
+          property: `${property}: ${expected}`,
+          ancestorDepth: depth,
+          tag: String(node.tagName || "element").toLowerCase().slice(0, 18),
+          classes: safeClassHints(node),
+          sourceHint: rule?.source || (inline ? "inline style" : "not yet checked"),
+          selectorHint: rule?.selector || "not yet checked",
+          qolStyledElement: !!safeClassHints(node).some(x => x.startsWith("ds-"))
+        };
+      } catch { /* This is diagnostic-only. */ }
+    }
+    try {
+      const rect = root.getBoundingClientRect();
+      if (!root.getClientRects().length || rect.height <= 0 || rect.width <= 0) {
+        return { cause: "zero-layout", property: "no rendered size", ancestorDepth: 0,
+          tag: "div", classes: safeClassHints(root), sourceHint: "unknown", selectorHint: "unidentified" };
+      }
+    } catch {}
+    return null;
+  }
+  function featureFlagsAtCapture() {
+    const s = DS.state?.settings || {};
+    const enabledNames = [
+      ["chatPerformanceMode", "chat performance folding"],
+      ["enableChatBackgrounds", "chat backgrounds"],
+      ["enableChatBubbleCustomization", "chat bubble styling"],
+      ["styleAlternateDialogue", "alternate dialogue"],
+      ["showMessageQuickActions", "message quick actions"],
+      ["messageBookmarkButtons", "message bookmarks"],
+      ["rpFormatRepairAuto", "format repair"],
+      ["translationAutoAi", "AI translation"]
+    ];
+    return enabledNames.filter(([key]) => s[key] === true).map(([, label]) => label);
+  }
+  DS.readChatVisibilitySnapshot = function readChatVisibilitySnapshot({ inspectRule = false } = {}) {
+    if (!DS.isSingleChatPage?.()) return null;
+    const roots = [...document.querySelectorAll("div[id^='message-']")];
+    const sample = roots.slice(-3);
+    const counts = { hidden: 0, cssHidden: 0, zeroLayout: 0, transparent: 0, qolFolded: 0 };
+    let firstHidden = null;
+    for (const root of sample) {
+      const folded = !!root.closest?.(".ds-chat-message-windowed, .ds-chat-message-far") ||
+        !!root.classList?.contains("ds-chat-message-windowed") || !!root.classList?.contains("ds-chat-message-far");
+      if (folded) { counts.qolFolded++; continue; }
+      const detail = hiddenMessageDetail(root, inspectRule && !firstHidden);
+      if (!detail) continue;
+      counts.hidden++;
+      if (detail.cause === "css") counts.cssHidden++;
+      else if (detail.cause === "transparent") counts.transparent++;
+      else counts.zeroLayout++;
+      if (!firstHidden) firstHidden = detail;
+    }
+    return {
+      mounted: roots.length,
+      inspected: sample.length,
+      ...counts,
+      sourceTabVisible: document.visibilityState === "visible",
+      performanceMode: document.documentElement.classList.contains("ds-chat-performance"),
+      composerPresent: !!document.querySelector("textarea, [contenteditable='true']"),
+      hiddenSource: firstHidden,
+      recentForegroundEvent: previousVisibilityEvent(),
+      activeQolDisplayFeatures: firstHidden ? featureFlagsAtCapture() : []
+    };
+  };
+  DS.recordChatVisibilityEvent = function recordChatVisibilityEvent(snapshot, { generation, trigger, elapsedMs } = {}) {
+    if (!snapshot?.sourceTabVisible || !snapshot.hiddenSource) return;
+    const prior = previousVisibilityEvent();
+    const event = {
+      count: Math.min(1000, Number(prior?.count || 0) + 1),
+      lastAt: Date.now(),
+      generation: ["active", "inactive", "unknown"].includes(generation) ? generation : "unknown",
+      trigger: ["send", "generation-action", "message-remount"].includes(trigger) ? trigger : "unknown",
+      elapsedMs: Math.min(10000, Math.max(0, Math.round(Number(elapsedMs) || 0))),
+      mounted: Math.min(10000, Number(snapshot.mounted || 0)),
+      hidden: Math.min(3, Number(snapshot.hidden || 0)),
+      inspected: Math.min(3, Number(snapshot.inspected || 0)),
+      hiddenSource: snapshot.hiddenSource,
+      activeQolDisplayFeatures: snapshot.activeQolDisplayFeatures
+    };
+    try { sessionStorage.setItem(VISIBILITY_SUMMARY_KEY, JSON.stringify(event)); } catch {}
+    const counters = DS.state?.runtimePerformance || {};
+    counters.chatForegroundHiddenEvents = event.count;
+    counters.chatForegroundHiddenLastAt = event.lastAt;
+    DS.diagPerformance?.("foreground-message-visibility", {
+      mounted: event.mounted, hidden: event.hidden, generation: event.generation,
+      elapsedMs: event.elapsedMs, styleSource: event.hiddenSource?.sourceHint || "unknown"
+    });
+  };
   // Kept available even when the main QoL feature runtime is disabled.
   DS.installMainDiagnostics = function installMainDiagnostics({ runtimeProfile, loadedChatMessageCount, desktopAppPerformanceGuardActive }) {
   try {
@@ -15,6 +181,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (message?.type === "DS_SET_QOL_TAB_STATE") {
         const state = DS.setQolEnabledForTab?.(message.enabled !== false) || DS.getQolTabState?.() || {};
         sendResponse({ ok: true, ...state });
+        return false;
+      }
+      if (message?.type === "DS_GET_PAGE_DIAGNOSTICS_LIGHT") {
+        // Read-only readiness probe for WebViews. Unlike a full snapshot this
+        // never walks the DOM, reads private chat content or forces layout.
+        const perf = DS.state?.runtimePerformance || {};
+        sendResponse({ ok: true, runtimeReady: !!DS.state?.settings,
+          paused: !!DS.isQolPausedForTab?.(),
+          sampleAt: Date.now(),
+          sampleKind: "lightweight-no-dom",
+          messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
+          messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0) });
         return false;
       }
       if (message?.type === "DS_GET_PAGE_DIAGNOSTICS") {
@@ -48,53 +226,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             textareaPaddingRight: composer ? getComputedStyle(composer).paddingRight : ""
           };
         })();
-        // Run only when the user requests diagnostics, not in the hot observer.
-        // Inspect styling and layout of three recent message roots; never read
-        // message text or expose chat IDs. Hidden DOM is different from unmount.
-        const chatVisibility = (() => {
-          if (!DS.isSingleChatPage?.()) return null;
-          const roots = [...document.querySelectorAll("div[id^='message-']")];
-          const sample = roots.slice(-3);
-          const counts = { hidden: 0, cssHidden: 0, zeroLayout: 0, transparent: 0, qolFolded: 0 };
-          for (const root of sample) {
-            // A folded old message is deliberately hidden by QoL, not a lost
-            // native message. Keep it separate from genuinely suspicious UI.
-            const folded = !!root.closest?.(".ds-chat-message-windowed") || root.classList?.contains("ds-chat-message-windowed");
-            if (folded) counts.qolFolded++;
-            let cause = "";
-            try {
-              for (let node = root, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
-                const style = getComputedStyle(node);
-                if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.contentVisibility === "hidden") {
-                  cause = "css";
-                  break;
-                }
-                if (Number(style.opacity) === 0) {
-                  cause = "transparent";
-                  break;
-                }
-              }
-              if (!cause) {
-                const rect = root.getBoundingClientRect();
-                if (root.getClientRects().length === 0 || rect.width <= 0 || rect.height <= 0) cause = "zero-layout";
-              }
-            } catch { /* A diagnostic must not affect the live page. */ }
-            if (cause) {
-              counts.hidden++;
-              if (cause === "css") counts.cssHidden++;
-              else if (cause === "transparent") counts.transparent++;
-              else counts.zeroLayout++;
-            }
-          }
-          return {
-            mounted: roots.length,
-            inspected: sample.length,
-            ...counts,
-            sourceTabVisible: document.visibilityState === "visible",
-            performanceMode: document.documentElement.classList.contains("ds-chat-performance"),
-            composerPresent: !!document.querySelector("textarea, [contenteditable='true']")
-          };
-        })();
+        // On-demand, read-only foreground/layout snapshot. Passive checks also
+        // keep the latest sustained anomaly across reloads in sessionStorage.
+        const chatVisibility = DS.readChatVisibilitySnapshot?.({ inspectRule: true }) || null;
         sendResponse({
           ok: true,
           tabQol: DS.getQolTabState?.() || null,

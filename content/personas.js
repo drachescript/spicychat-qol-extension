@@ -207,17 +207,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function setPersonaDescriptionExpanded(description, toggle, expanded) {
-    description.classList.toggle("ds-persona-description-expanded", expanded);
-
+    // React/persona refreshes may call this repeatedly with unchanged state.
+    // Avoid attribute/text writes that wake observers and replace text nodes.
+    if (description.classList.contains("ds-persona-description-expanded") !== expanded) {
+      description.classList.toggle("ds-persona-description-expanded", expanded);
+    }
     if (expanded) {
-      description.dataset.dsPersonaDescriptionExpanded = "1";
-    } else {
+      if (description.dataset.dsPersonaDescriptionExpanded !== "1") description.dataset.dsPersonaDescriptionExpanded = "1";
+    } else if (description.hasAttribute("data-ds-persona-description-expanded")) {
       delete description.dataset.dsPersonaDescriptionExpanded;
     }
-
-    toggle.dataset.dsExpanded = expanded ? "1" : "0";
-    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-    toggle.textContent = expanded ? "Show less" : "Show more";
+    const state = expanded ? "1" : "0";
+    const aria = expanded ? "true" : "false";
+    const label = expanded ? "Show less" : "Show more";
+    if (toggle.dataset.dsExpanded !== state) toggle.dataset.dsExpanded = state;
+    if (toggle.getAttribute("aria-expanded") !== aria) toggle.setAttribute("aria-expanded", aria);
+    if (toggle.textContent !== label) toggle.textContent = label;
   }
 
   function ensurePersonaDescriptionToggle(card, description) {
@@ -226,8 +231,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // 0.1.8.56-0.1.8.63 expanded every description immediately. Strip that
     // old state unless this page's new toggle explicitly expanded the card.
     if (description.dataset.dsPersonaToggleExpanded !== "1") {
-      description.classList.remove("ds-persona-description-expanded");
-      delete description.dataset.dsPersonaDescriptionExpanded;
+      if (description.classList.contains("ds-persona-description-expanded")) description.classList.remove("ds-persona-description-expanded");
+      if (description.hasAttribute("data-ds-persona-description-expanded")) delete description.dataset.dsPersonaDescriptionExpanded;
     }
 
     const textLength = cleanText(description.textContent).length;
@@ -237,9 +242,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let toggle = card.querySelector(".ds-persona-description-toggle");
     if (!needsToggle) {
       toggle?.remove();
-      description.classList.remove("ds-persona-description-expanded");
-      delete description.dataset.dsPersonaDescriptionExpanded;
-      delete description.dataset.dsPersonaToggleExpanded;
+      if (description.classList.contains("ds-persona-description-expanded")) description.classList.remove("ds-persona-description-expanded");
+      if (description.hasAttribute("data-ds-persona-description-expanded")) delete description.dataset.dsPersonaDescriptionExpanded;
+      if (description.hasAttribute("data-ds-persona-toggle-expanded")) delete description.dataset.dsPersonaToggleExpanded;
       return null;
     }
 

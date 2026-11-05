@@ -80,7 +80,7 @@ if (!(() => { try {
   }
 
   function applySettings(settings) {
-    setEnabled(!!(settings?.enabled && (settings?.showExactMessageCounts || settings?.showBotCreationDates)));
+    setEnabled(!!(settings?.enabled && (settings?.showExactMessageCounts || settings?.showBotCreationDates || settings?.showNewBotBadge)));
   }
 
   // A disabled feature must not install a MAIN-world network bridge.
@@ -89,7 +89,7 @@ if (!(() => { try {
   // request before the first count can be shown.
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
-  const watchedSettingNames = ["enabled", "showExactMessageCounts", "showBotCreationDates"];
+  const watchedSettingNames = ["enabled", "showExactMessageCounts", "showBotCreationDates", "showNewBotBadge"];
   const watchedSettings = {};
 
   function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }

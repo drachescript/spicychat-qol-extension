@@ -534,26 +534,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (
       !settings.enabled ||
       !metadataFeatureRequested(settings) ||
-      !DS.isSingleChatPage?.() ||
-      (DS.shouldDeferToSaiToolkit?.("generation-metadata") && !settings.enableContextWindowWarning)
+      !DS.isSingleChatPage?.()
     ) {
       cleanup();
+      removeContextWarning();
+      return;
+    }
+
+    const toolkitOwnsStats = DS.shouldDeferToSaiToolkit?.("generation-metadata") === true;
+    // Toolkit owns models, timestamps and generation settings. QoL's separate
+    // optional token estimate and context warning should remain available.
+    const displaySettings = toolkitOwnsStats ? {
+      ...settings,
+      showGenerationMetadata: false,
+      showMessageTimestamps: false,
+      showGenerationModel: false,
+      showGenerationElapsed: false,
+      showGenerationSettings: false
+    } : settings;
+    if (toolkitOwnsStats && settings.showMessageTokenEstimate !== true) {
+      cleanup();
+      dirtyRecordIds.clear();
+      if (settings.enableContextWindowWarning) {
+        await ensureLoaded();
+        applyContextWarning(settings);
+      } else {
+        removeContextWarning();
+      }
       return;
     }
 
     await ensureLoaded();
     const route = String(location.pathname || "");
     const displaySignature = JSON.stringify({
-      combined: settings.showGenerationMetadata === true,
-      timestamps: settings.showMessageTimestamps === true,
-      seconds: settings.messageTimestampShowSeconds === true,
-      hour24: settings.messageTimestamp24Hour === true,
-      dateFirst: settings.messageTimestampDateFirst !== false,
-      model: settings.showGenerationModel === true,
-      elapsed: settings.showGenerationElapsed === true,
-      sliders: settings.showGenerationSettings === true,
-      tokens: settings.showMessageTokenEstimate === true,
-      compact: settings.compactGenerationMetadata !== false
+      combined: displaySettings.showGenerationMetadata === true,
+      timestamps: displaySettings.showMessageTimestamps === true,
+      seconds: displaySettings.messageTimestampShowSeconds === true,
+      hour24: displaySettings.messageTimestamp24Hour === true,
+      dateFirst: displaySettings.messageTimestampDateFirst !== false,
+      model: displaySettings.showGenerationModel === true,
+      elapsed: displaySettings.showGenerationElapsed === true,
+      sliders: displaySettings.showGenerationSettings === true,
+      tokens: displaySettings.showMessageTokenEstimate === true,
+      compact: displaySettings.compactGenerationMetadata !== false
     });
     const force = initializedRoute !== route || lastDisplaySignature !== displaySignature;
     initializedRoute = route;
@@ -563,16 +586,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const historyBusy = !!DS.state?.bulkChatHistoryLoadActive || Date.now() < Number(DS.state?.chatHistoryBatchUntil || 0);
     if (force) {
       const loadedRoots = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || DS.getLoadedMessageRoots?.() || document.querySelectorAll("[id^='message-']");
-      loadedRoots.forEach(root => applyToMessage(root, settings));
+      loadedRoots.forEach(root => applyToMessage(root, displaySettings));
     } else if (laneRoots.length) {
-      laneRoots.forEach(root => applyToMessage(root, settings));
+      laneRoots.forEach(root => applyToMessage(root, displaySettings));
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.generationMetadataScopedPasses = Number(counters.generationMetadataScopedPasses || 0) + 1;
       counters.generationMetadataScopedMessages = Number(counters.generationMetadataScopedMessages || 0) + laneRoots.length;
     } else if (!historyBusy) {
       const roots = DS.getMessageEnhancerRoots?.({ readyAttribute: "data-ds-generation-metadata-ready", readyValue: "1", newest: 24, margin: 1400 })
         || document.querySelectorAll("[id^='message-']:not([data-ds-generation-metadata-ready='1'])");
-      roots.forEach(root => applyToMessage(root, settings));
+      roots.forEach(root => applyToMessage(root, displaySettings));
     } else {
       const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.generationMetadataHistoryDeferrals = Number(counters.generationMetadataHistoryDeferrals || 0) + 1;
@@ -580,7 +603,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!historyBusy) {
       for (const id of dirtyRecordIds) {
         const root = document.getElementById(`message-${id}`);
-        if (root) applyToMessage(root, settings);
+        if (root) applyToMessage(root, displaySettings);
       }
       dirtyRecordIds.clear();
       applyContextWarning(settings);

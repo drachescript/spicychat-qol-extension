@@ -1,3 +1,19 @@
+## 0.2.72
+- The optional language filter now works on public Lorebooks and Rulebooks, using the same language choices as bot cards.
+- Improved support reports for chats that briefly go blank, including whether messages are still there and what might be hiding them.
+- Reduced unnecessary message processing in chats, especially on Android.
+- Fixed Persona description buttons repeatedly refreshing when nothing changed.
+- Reduced repeated Settings reads during support checks.
+- Improved message bookmark saving when switching between chats or using multiple tabs.
+- Fixed new-chat bookmarks being saved under the bot instead of the conversation.
+- Made it clearer when Context Keeper automatically adds a story reminder to a message.
+- Chat folders and pinned conversations are now off by default, unless you turn them on.
+- Added optional shortcuts for bot profiles, generation settings, jumping to the start of chats, and opening chats in a separate window.
+- Added optional two-column chat lists and quick Rename / Open window buttons for conversations.
+- Added an optional three-dot menu beside the bottom message buttons.
+- Added an optional New label for recently created bots when their creation date is available.
+- Improved compatibility when QoL and S.AI Toolkit are installed together.
+
 ## 0.2.71
 - Improved performance when browsing Rulebooks by reducing unnecessary repeated checks.
 - Reduced background work in long chats, especially when messages reload or update.

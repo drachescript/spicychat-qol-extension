@@ -27,6 +27,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let store = {};
   let loaded = false;
   let loading = null;
+  // Serialize this tab's bookmark saves. Re-read the shared storage before
+  // writing so editing a different chat cannot overwrite a newer chat's marks.
+  let saveQueue = Promise.resolve();
   const nav = { chatId: "", entries: [], index: -1, suppress: false };
 
   function settings() { return DS.state?.settings || {}; }
@@ -34,7 +37,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function clean(value) { return String(value || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim(); }
   function chatId() {
     const m = location.pathname.match(/^\/chat\/[^/]+\/([^/?#]+)/i);
-    return String(m?.[1] || DS.chatIdFromHref?.(location.href) || "").trim();
+    if (m?.[1]) return String(m[1]).trim();
+    // The first /chat/ segment identifies the bot, not the conversation.
+    // Never store a fresh draft's bookmarks under that shared bot ID.
+    const scope = DS.getCurrentChatScope?.();
+    return scope?.persisted === false ? String(scope.key || "") : "";
   }
   function currentChatStore(create = false) {
     const id = chatId();
@@ -45,22 +52,78 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!Array.isArray(value.entries)) value.entries = [];
     return value;
   }
+  function readStoredBookmarks() {
+    // A failed storage read must not be mistaken for an empty bookmark list.
+    if (!chrome.storage?.local?.get) return Promise.reject(new Error("Bookmark storage is unavailable"));
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.storage.local.get([KEY], result => {
+          const error = chrome.runtime?.lastError;
+          if (error) return reject(new Error(error.message || "Bookmark storage read failed"));
+          const raw = result?.[KEY];
+          resolve(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {});
+        });
+      } catch (error) { reject(error); }
+    });
+  }
   async function ensureLoaded() {
     if (loaded) return;
     if (loading) return loading;
     loading = (async () => {
-      const result = await DS.storageGet?.([KEY]);
-      const raw = result?.[KEY];
-      store = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+      store = await readStoredBookmarks();
       loaded = true;
-      loading = null;
-    })();
+    })().finally(() => { loading = null; });
     return loading;
   }
-  async function save(label = "Updated message bookmarks", before = null) {
-    const after = JSON.parse(JSON.stringify(store));
-    await DS.storageSet?.({ [KEY]: after });
-    if (before) await DS.recordLocalChange?.(label, { [KEY]: before }, { [KEY]: after });
+  async function save(label = "Updated message bookmarks", before = null, scopeId = chatId()) {
+    if (!scopeId) return false;
+    const changedChat = JSON.parse(JSON.stringify(store[scopeId] || { entries: [] }));
+    const work = async () => {
+      let latest;
+      try {
+        latest = await readStoredBookmarks();
+      } catch (error) {
+        // Undo only this pending chat edit in memory. Do not replace any
+        // bookmarks from another chat while the storage read is unavailable.
+        if (before && Object.prototype.hasOwnProperty.call(before, scopeId)) store[scopeId] = before[scopeId];
+        else if (before) delete store[scopeId];
+        DS.setQuickStatus?.("Couldn't read saved bookmarks. No bookmarks were overwritten.");
+        return false;
+      }
+      const after = { ...latest, [scopeId]: changedChat };
+      let saved = false;
+      try { saved = await DS.storageSet?.({ [KEY]: after }, { immediate: true }); } catch {}
+      if (saved !== true) {
+        store = latest;
+        DS.setQuickStatus?.("Couldn't save the bookmark. Your existing bookmarks were kept.");
+        return false;
+      }
+      store = after;
+      // History is optional. A failed history entry must never undo a saved bookmark.
+      if (before) try { await DS.recordLocalChange?.(label, { [KEY]: before }, { [KEY]: after }); } catch {}
+      return true;
+    };
+    const pending = saveQueue.then(work, work);
+    saveQueue = pending.catch(() => false);
+    return pending;
+  }
+  async function promoteDraftBookmarks() {
+    const scope = DS.getCurrentChatScope?.();
+    const draft = String(scope?.draftKey || "");
+    const target = String(scope?.conversationId || "");
+    // Only hand off a draft that was actually open immediately before this
+    // conversation was created. Never copy from an unrelated chat or bot ID.
+    if (!scope?.persisted || !draft || !target || nav.chatId !== draft) return;
+    const source = store[draft];
+    if (!Array.isArray(source?.entries) || !source.entries.length) return;
+    const current = store[target] || { entries: [] };
+    const ids = new Set((current.entries || []).map(item => item.messageId));
+    const added = source.entries.filter(item => item?.messageId && !ids.has(item.messageId));
+    if (!added.length) return;
+    const before = JSON.parse(JSON.stringify(store));
+    store[target] = { ...current, entries: [...(current.entries || []), ...added] };
+    // Retain the original draft record as a recovery copy; never delete data.
+    await save("Kept new-chat bookmarks after chat creation", before, target);
   }
   function messageRoot(node) { return node?.closest?.(MESSAGE_SELECTOR) || null; }
   function role(root) { return root?.querySelector?.("a[href*='/chatbot/'], a[aria-label='chatbot-profile']") ? "bot" : "user"; }
@@ -250,15 +313,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       button.parentElement === target.host;
   }
   async function toggle(root) {
-    await ensureLoaded();
+    const expectedChat = chatId();
+    try { await ensureLoaded(); } catch {
+      DS.setQuickStatus?.("Couldn't load saved bookmarks. Try again without reloading this chat.");
+      return;
+    }
     const id = String(root?.id || "").trim();
-    if (!id) return;
+    if (!id || !expectedChat || chatId() !== expectedChat || !root?.isConnected) return;
     const before = JSON.parse(JSON.stringify(store));
     const chat = currentChatStore(true);
     const index = chat.entries.findIndex(entry => entry?.messageId === id);
     if (index >= 0) {
       const removed = chat.entries.splice(index, 1)[0];
-      await save(`Removed message bookmark${removed?.note ? `: ${removed.note}` : ""}`, before);
+      if (!await save(`Removed message bookmark${removed?.note ? `: ${removed.note}` : ""}`, before, expectedChat)) return;
       DS.setQuickStatus?.("Message bookmark removed.");
     } else {
       chat.entries.push({
@@ -269,7 +336,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         note: "",
         createdAt: Date.now()
       });
-      await save("Bookmarked message", before);
+      if (!await save("Bookmarked message", before, expectedChat)) return;
       DS.setQuickStatus?.("Message bookmarked.");
     }
     applyButtons();
@@ -384,7 +451,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (value == null) return;
     const before = JSON.parse(JSON.stringify(store));
     entry.note = clean(value).slice(0, 300);
-    await save("Updated message bookmark note", before);
+    if (!await save("Updated message bookmark note", before)) return;
     openManager(true);
   }
   function closeManager() { document.getElementById(MODAL_ID)?.remove(); }
@@ -405,7 +472,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const list = document.createElement("div"); list.className = "ds-tool-list";
     const entries = [...(currentChatStore(false)?.entries || [])].sort((a,b) => (a.createdAt||0)-(b.createdAt||0));
     if (!entries.length) {
-      const p = document.createElement("p"); p.className = "ds-tool-empty"; p.textContent = "No bookmarked messages in this chat yet."; list.appendChild(p);
+      const p = document.createElement("p"); p.className = "ds-tool-empty";
+      p.textContent = "No bookmarked messages in this chat yet. Cloned chats have their own bookmarks; the original chat keeps its bookmarks separately.";
+      list.appendChild(p);
     }
     for (const entry of entries) {
       const card = document.createElement("div"); card.className = "ds-tool-list-item ds-chat-bookmark-item";
@@ -431,7 +500,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove"; remove.addEventListener("click", async () => {
         const before = JSON.parse(JSON.stringify(store));
         const chat = currentChatStore(true); chat.entries = chat.entries.filter(item => item.id !== entry.id);
-        await save("Removed message bookmark", before); applyButtons(); refreshBookmarkButtonStates(); updateManagerButton(); openManager(true); DS.refreshChatSearch?.();
+        if (!await save("Removed message bookmark", before)) return;
+        applyButtons(); refreshBookmarkButtonStates(); updateManagerButton(); openManager(true); DS.refreshChatSearch?.();
       });
       actions.append(jump, note, remove); card.append(meta, actions); list.appendChild(card);
     }
@@ -454,7 +524,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
     DS.state.chatBookmarksWasActive = true;
-    await ensureLoaded(); resetNavIfNeeded(); ensureManagerButton(); ensureNavControls(); applyButtons(); updateManagerButton();
+    try { await ensureLoaded(); } catch {
+      DS.setQuickStatus?.("Couldn't read saved bookmarks. Existing bookmarks weren't changed.");
+      return;
+    }
+    await promoteDraftBookmarks();
+    resetNavIfNeeded(); ensureManagerButton(); ensureNavControls(); applyButtons(); updateManagerButton();
     DS.applyChatHistoryNavigator?.();
   };
   DS.removeChatBookmarks = function removeChatBookmarks() {
@@ -479,7 +554,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     else chat.entries.push({ id: `bookmark-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
       messageId: id, role: messageRole === 'user' ? 'user' : 'bot',
       preview: clean(preview).slice(0, 220), note: '', createdAt: Date.now() });
-    await save('Updated message bookmark', before);
+    if (!await save('Updated message bookmark', before)) throw new Error('Could not save the bookmark');
     refreshBookmarkButtonStates(); updateManagerButton(); updateNavControls();
     DS.refreshChatSearch?.();
     return at < 0;

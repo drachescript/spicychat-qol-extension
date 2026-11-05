@@ -274,13 +274,23 @@ async function getReachableDiagnosticContext() {
   const notResponding = pinged.filter(row => !row.ping?.ok);
   const selected = [...responsive, ...notResponding].slice(0, 2);
   const snapshots = [];
+  const androidWebView = /Android/i.test(String(navigator.userAgent || ""));
   for (const row of selected) {
     const [pageDiagnostics, tabState] = await Promise.all([
-      sendTabMessage(row.tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" }, 1100),
+      // Mobile can be busy with a native React render at the moment the user
+      // requests a report. Allow longer for ONE on-demand snapshot, not for
+      // periodic checks. Desktop retains the short response deadline.
+      sendTabMessage(row.tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" }, androidWebView ? 2400 : 1100),
       row.ping?.ok ? Promise.resolve(null) : sendTabMessage(row.tab.id, { type: "DS_GET_QOL_TAB_STATE" }, 650)
     ]);
     snapshots.push({ tab: row.tab, pageDiagnostics, tabState });
     if (pageDiagnostics?.ok) break;
+  }
+  // A cheap explicit probe distinguishes a responsive content runtime from a
+  // timed-out full snapshot. Never use these partial counters as full live data.
+  let lightProbe = null;
+  if (!snapshots.some(row => row.pageDiagnostics?.ok) && responsive.length) {
+    lightProbe = await sendTabMessage(responsive[0].tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS_LIGHT" }, androidWebView ? 1400 : 700);
   }
   const probe = {
     tabsFound: allCandidates.length,
@@ -290,7 +300,10 @@ async function getReachableDiagnosticContext() {
     snapshotsAnswered: snapshots.filter(row => row.pageDiagnostics?.ok).length,
     tabsFlaggedStale: candidates.filter(tab => !!staleTabs[String(tab.id)]).length,
     sampledPausedTabs: snapshots.filter(row => row.tabState?.ok && row.tabState?.paused === true).length,
-    sampledStateReplies: snapshots.filter(row => row.tabState?.ok).length
+    sampledStateReplies: snapshots.filter(row => row.tabState?.ok).length,
+    lightRuntimeAnswered: !!lightProbe?.ok,
+    lightRuntimeReady: !!lightProbe?.runtimeReady,
+    probeScope: "read-only; full snapshot only when available"
   };
   const winner = snapshots.find(row => row.pageDiagnostics?.ok);
   if (winner) {
@@ -300,12 +313,14 @@ async function getReachableDiagnosticContext() {
   }
   const fallback = candidates[0] || allCandidates[0] || null;
   const runtimeStatus = !fallback ? "no-spicychat-tab"
+    : probe.lightRuntimeAnswered ? "runtime-lightweight-ok-full-snapshot-timeout"
     : probe.pingsAnswered ? "runtime-ping-ok-diagnostics-unreachable"
     : probe.sampledPausedTabs ? "sampled-tabs-intentionally-paused"
     : probe.sampledStateReplies ? "runtime-state-handler-ok-diagnostics-unreachable"
     : probe.tabsFlaggedStale ? "runtime-marked-stale-after-update"
     : "page-found-runtime-unreachable";
   const runtimeError = !fallback ? "No open SpicyChat tab was found."
+    : probe.lightRuntimeAnswered ? "QoL answered a lightweight runtime check, but its full snapshot timed out. Live performance data remains unavailable; the runtime is not necessarily disabled."
     : probe.pingsAnswered ? "Some QoL tab handlers answered a lightweight ping, but none of the sampled tabs finished the full diagnostic snapshot. QoL may still be active."
     : probe.sampledPausedTabs ? "At least one sampled SpicyChat tab has QoL intentionally paused, so that tab cannot return full runtime diagnostics."
     : probe.sampledStateReplies ? "A QoL tab-state handler answered, but sampled full diagnostic handlers did not. This is not evidence that all QoL features are disabled."

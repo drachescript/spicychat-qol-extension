@@ -311,9 +311,23 @@ async function storageGetChecked(keys) {
   }
 }
 
+const pendingSettingsOnlyRead = { promise: null };
 async function storageGet(keys) {
-  const result = await storageGetChecked(keys);
-  return result.data;
+  const narrowSettingsRead = (Array.isArray(keys) && keys.length === 1 && keys[0] === "settings") || keys === "settings";
+  if (!narrowSettingsRead) {
+    const result = await storageGetChecked(keys);
+    return result.data;
+  }
+  if (!pendingSettingsOnlyRead.promise) {
+    const request = storageGetChecked(keys).then(result => result.data);
+    pendingSettingsOnlyRead.promise = request;
+    request.finally(() => {
+      if (pendingSettingsOnlyRead.promise === request) pendingSettingsOnlyRead.promise = null;
+    }).catch(() => {});
+  }
+  const result = await pendingSettingsOnlyRead.promise;
+  return { ...result, ...(result?.settings && typeof result.settings === "object"
+    ? { settings: { ...result.settings } } : {}) };
 }
 
 function rawStorageSet(obj) {
@@ -494,10 +508,18 @@ function runtimeMessage(message) {
 // followed by an unrelated Performance/Self-Check timeout.
 let supportRuntimeSnapshotPromise = null;
 let supportRuntimeSnapshotReaders = 0;
+function supportDiagnosticRuntimeTimeoutMs() {
+  // Android's WebView can be busy on the UI thread when a report is requested.
+  // Only on-demand snapshots get a longer deadline; no permanent polling.
+  const android = typeof isAndroidSupportWebView === "function"
+    ? isAndroidSupportWebView()
+    : /Android/i.test(String(navigator.userAgent || ""));
+  return android ? 8500 : 3500;
+}
 
 async function withSharedSupportRuntimeSnapshot(build) {
   if (!supportRuntimeSnapshotPromise) {
-    supportRuntimeSnapshotPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500);
+    supportRuntimeSnapshotPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
   }
   supportRuntimeSnapshotReaders += 1;
   try {

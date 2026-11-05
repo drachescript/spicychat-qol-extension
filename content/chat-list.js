@@ -707,8 +707,100 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyRandomChatButton = applyRandomChatButton;
 
+  // Optional /chats shortcuts share the existing chat-list pass. No extra
+  // observer, polling or API calls; only newly mounted rows get buttons.
+  function removeChatListExtras() {
+    document.querySelectorAll(".ds-qol-chat-card-extras").forEach(el => el.remove());
+    document.querySelectorAll(".ds-qol-chat-row-with-extras").forEach(el => el.classList.remove("ds-qol-chat-row-with-extras"));
+    document.querySelectorAll(".ds-qol-chat-grid-two").forEach(el => el.classList.remove("ds-qol-chat-grid-two"));
+  }
+
+  function canOpenConversation(href) {
+    try {
+      const url = new URL(href, location.origin);
+      return url.origin === location.origin && /^\/chat\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/?$/i.test(url.pathname) ? url.href : "";
+    } catch { return ""; }
+  }
+
+  function isNativeActionVisible(button) {
+    if (!button?.isConnected || button.disabled) return false;
+    const rect = button.getBoundingClientRect();
+    return !!(rect.width && rect.height) && getComputedStyle(button).visibility !== "hidden";
+  }
+
+  async function requestNativeRename(row) {
+    const nativeMenu = row.querySelector('button[aria-label="EllipsisVertical-button"]');
+    if (!nativeMenu) { DS.setQuickStatus?.("Use SpicyChat's conversation menu to rename this chat."); return; }
+    nativeMenu.click();
+    // Only click a single, visibly mounted native action after opening this
+    // row's menu. Ambiguous or missing actions are left for the user to pick.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 70));
+      if (!row.isConnected || !DS.isChatListPage?.()) return;
+      const actions = [...document.querySelectorAll('button[aria-label="Change Title"]')].filter(isNativeActionVisible);
+      if (actions.length === 1) { actions[0].click(); return; }
+      if (actions.length > 1) break;
+    }
+    DS.setQuickStatus?.("Use the open SpicyChat menu to choose Change Title.");
+  }
+
+  function applyChatListExtras() {
+    const settings = DS.state?.settings || {};
+    const enabled = settings.enabled && DS.isChatListPage?.() && !DS.isQolPausedForTab?.();
+    if (!enabled) { removeChatListExtras(); return; }
+    const grid = settings.chatListTwoColumns === true;
+    const popout = settings.chatListPopoutShortcut === true;
+    const rename = settings.chatListRenameShortcut === true;
+    if (!grid && !popout && !rename) { removeChatListExtras(); return; }
+    const rows = DS.collectChatRows?.() || [];
+    // Only grid actual direct-child conversation rows, never native search,
+    // load-more controls, or multi-group wrappers.
+    const host = rows.length >= 2 ? findChatListHost(rows) : null;
+    const safeGridHost = !!host && rows.every(item => item.row.parentElement === host);
+    for (const old of document.querySelectorAll(".ds-qol-chat-grid-two")) {
+      if (!grid || old !== host || !safeGridHost) old.classList.remove("ds-qol-chat-grid-two");
+    }
+    if (grid && safeGridHost) host.classList.add("ds-qol-chat-grid-two");
+    const present = new Set(rows.map(item => item.row));
+    for (const old of document.querySelectorAll(".ds-qol-chat-row-with-extras")) {
+      if (!present.has(old)) { old.querySelector(":scope > .ds-qol-chat-card-extras")?.remove(); old.classList.remove("ds-qol-chat-row-with-extras"); }
+    }
+    for (const item of rows) {
+      const href = canOpenConversation(item.anchor?.href);
+      const row = item.row;
+      let bar = row.querySelector(":scope > .ds-qol-chat-card-extras");
+      if (!href || (!popout && !rename)) {
+        bar?.remove(); row.classList.remove("ds-qol-chat-row-with-extras"); continue;
+      }
+      row.classList.add("ds-qol-chat-row-with-extras");
+      if (!bar) { bar = document.createElement("div"); bar.className = "ds-qol-chat-card-extras"; row.appendChild(bar); }
+      const make = (name, label, symbol, action) => {
+        let button = bar.querySelector(`[data-ds-chat-extra="${name}"]`);
+        if (!button) {
+          button = document.createElement("button"); button.type = "button";
+          button.dataset.dsChatExtra = name; button.textContent = symbol;
+          button.title = label; button.setAttribute("aria-label", label);
+          button.addEventListener("click", event => {
+            event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+            action();
+          }, true);
+          bar.appendChild(button);
+        }
+      };
+      if (popout) make("window", "Open this chat in a separate window", "↗", () => {
+        window.open(href, "_blank", "noopener,noreferrer,width=1100,height=780");
+      });
+      else bar.querySelector('[data-ds-chat-extra="window"]')?.remove();
+      if (rename) make("rename", "Rename this conversation with SpicyChat", "✎", () => void requestNativeRename(row));
+      else bar.querySelector('[data-ds-chat-extra="rename"]')?.remove();
+    }
+  }
+
+  DS.applyChatListExtras = applyChatListExtras;
+
   DS.applyChatListTools = function applyChatListTools() {
     const { settings } = DS.state;
+    DS.applyChatListExtras?.();
     if (!settings.enabled || !settings.showChatListTools || !DS.isChatListPage()) {
       DS.applyChatOrganizer?.();
       if (DS.state.chatListToolsWasActive) {

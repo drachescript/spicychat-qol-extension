@@ -12,6 +12,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const PICKER = '[data-testid="ConversationRulebookPicker-Modal"] [data-testid="RulebookDiscoverTab"]';
   const BUTTON = '.ds-rulebook-block-button';
   const REASON = 'rulebook:block:';
+  const LANGUAGE_REASON = 'rulebook:language:';
   // Reuse the existing page observer. No extra MutationObserver or polling.
   // A runtime pass needs to inspect only cards that native React changed.
   const changedExploreCards = new Set();
@@ -90,7 +91,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   function restore() {
     if (activeLastTime) {
-      document.querySelectorAll(`[data-ds-reason^="${REASON}"]`).forEach(el => DS.unhideElement?.(el));
+      document.querySelectorAll(`[data-ds-reason^="${REASON}"], [data-ds-reason^="${LANGUAGE_REASON}"]`).forEach(el => DS.unhideElement?.(el));
       document.querySelectorAll(BUTTON).forEach(el => el.remove());
     }
     activeLastTime = false;
@@ -196,7 +197,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
     const explore = isExplore();
     const picker = explore ? null : document.querySelector(PICKER);
-    if ((!explore && !picker) || settings.enabled !== true || settings.rulebookBlockingEnabled !== true) {
+    const languageActive = settings.enableLanguageFilter === true && settings.languageFilterRulebooks === true;
+    if ((!explore && !picker) || settings.enabled !== true || (settings.rulebookBlockingEnabled !== true && !languageActive)) {
       if (activeLastTime) restore();
       return;
     }
@@ -208,7 +210,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.enabled, settings.rulebookBlockingEnabled,
       settings.applyBotBlockingToRulebooks, settings.blockCards,
       settings.showRulebookBlockButtons, settings.rulebookBlockedIds,
-      settings.blockedWords, settings.blockedCreators, settings.blockedTags
+      settings.blockedWords, settings.blockedCreators, settings.blockedTags,
+      settings.enableLanguageFilter, settings.languageFilterRulebooks,
+      settings.allowedLanguages, settings.languageSelectionMode
     ]);
     if (lastConfigSignature !== configSignature || lastRoute !== route || lastMode !== mode) {
       fullExploreRefresh = true;
@@ -245,9 +249,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       checked += 1;
       buttonFor(card, meta, settings);
       const target = targetFor(card);
-      const why = reasonFor(meta, settings, rules);
+      const why = settings.rulebookBlockingEnabled === true ? reasonFor(meta, settings, rules) : '';
+      const language = !why && languageActive
+        ? DS.getPublicListingLanguageHideReason?.(meta, 'rulebook') || '' : '';
+      const currentReason = String(target?.dataset?.dsReason || '');
       if (why) DS.hideElement?.(target, REASON + why);
-      else if (String(target?.dataset?.dsReason || '').startsWith(REASON)) DS.unhideElement?.(target);
+      else if (language) {
+        if (!currentReason || currentReason.startsWith(REASON) || currentReason.startsWith(LANGUAGE_REASON)) DS.hideElement?.(target, LANGUAGE_REASON + language);
+      } else if (currentReason.startsWith(REASON) || currentReason.startsWith(LANGUAGE_REASON)) DS.unhideElement?.(target);
     }
     if (explore) {
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});

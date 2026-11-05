@@ -187,6 +187,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return detectLikelyLanguage(text);
   };
 
+  // Public Lorebooks and Rulebooks have no bot profile/greeting to fetch. Use
+  // only the text already rendered on each card, with the same conservative
+  // detector and selected-language settings used on bot discovery.
+  DS.getPublicListingLanguageHideReason = function getPublicListingLanguageHideReason(meta, kind) {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !languageFilterEnabled()) return "";
+    if (kind === "lorebook" ? settings.languageFilterLorebooks !== true
+      : kind === "rulebook" ? settings.languageFilterRulebooks !== true : true) return "";
+    const selected = getAllowedLanguages();
+    if (!selected.length) return "";
+
+    // A creator's explicit language label is authoritative only when it is
+    // actually a language label, never a genre or a Rulebook meter name.
+    const tags = Array.isArray(meta?.tags) ? meta.tags.map(norm) : [];
+    const explicit = Object.entries(LANGUAGE_NAMES).find(([code, label]) => {
+      const name = norm(label).replace(/\s*\/.*$/, "");
+      return tags.some(tag => tag === code || tag === name || tag === `language: ${code}` || tag === `language: ${name}`);
+    })?.[0] || "";
+    const description = detectLikelyLanguage(meta?.description || "");
+    const title = detectSentenceLikeTitleLanguage(meta?.name || "");
+    const codes = [explicit, title.code, description.code].filter(Boolean);
+    const hiddenCode = codes.find(code => selectedLanguageShouldHide(code, selected));
+    if (!hiddenCode) return ""; // Unknown/ambiguous language stays visible.
+    const mode = getLanguageSelectionMode() === "exclude" ? "excluded" : "outside selected languages";
+    return `likely ${LANGUAGE_NAMES[hiddenCode] || hiddenCode} (${mode})`;
+  };
+
   function ignoredDescriptionArea(el) {
     return !!el.closest([
       "#ds-qol-panel",
