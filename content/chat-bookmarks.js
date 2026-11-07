@@ -412,7 +412,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function bookmarkSummary(data = store, currentId = chatId()) {
+    const groups = Object.entries(data || {}).filter(([, value]) => Array.isArray(value?.entries) && value.entries.length);
+    return {
+      total: groups.reduce((sum, [, value]) => sum + value.entries.length, 0),
+      chats: groups.length,
+      current: groups.find(([id]) => id === currentId)?.[1].entries.length || 0,
+      other: groups.filter(([id]) => id !== currentId).length,
+      drafts: groups.filter(([id]) => String(id).startsWith("draft:")).length
+    };
+  }
+  function publishBookmarkSummary() {
+    const summary = bookmarkSummary();
+    const perf = counters();
+    perf.bookmarkStoredTotal = summary.total;
+    perf.bookmarkStoredChatCount = summary.chats;
+    perf.bookmarkCurrentChatCount = chatId() ? summary.current : -1;
+    perf.bookmarkOtherChatCount = summary.other;
+  }
+
   function updateManagerButton() {
+    publishBookmarkSummary();
     const count = currentChatStore(false)?.entries?.length || 0;
     const id = chatId();
     if (lastManagerChat === id && lastManagerCount === count) return;
@@ -470,6 +490,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     feedback.setAttribute("role", "status");
     feedback.hidden = true;
     const list = document.createElement("div"); list.className = "ds-tool-list";
+    const summary = bookmarkSummary();
+    const counts = document.createElement("p"); counts.className = "ds-chat-bookmark-feedback";
+    counts.textContent = `${summary.total} saved across ${summary.chats} chat${summary.chats === 1 ? "" : "s"} · ${summary.current} in this chat`;
+    const otherView = document.createElement("button"); otherView.type = "button";
+    otherView.textContent = "Review saved bookmarks in other chats";
+    otherView.addEventListener("click", () => void openBookmarkRecovery());
     const entries = [...(currentChatStore(false)?.entries || [])].sort((a,b) => (a.createdAt||0)-(b.createdAt||0));
     if (!entries.length) {
       const p = document.createElement("p"); p.className = "ds-tool-empty";
@@ -505,11 +531,66 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       actions.append(jump, note, remove); card.append(meta, actions); list.appendChild(card);
     }
-    dialog.append(head, feedback, list); overlay.appendChild(dialog); document.body.appendChild(overlay);
+    dialog.append(head, counts, otherView, feedback, list); overlay.appendChild(dialog); document.body.appendChild(overlay);
     overlay.addEventListener("click", e => { if (e.target === overlay) closeManager(); });
   }
 
+  // Read-only review of every locally stored bookmark group. No chat records
+  // are deleted, merged, or reassigned; an unknown key isn't proof of data loss.
+  async function openBookmarkRecovery() {
+    const existing = document.getElementById("ds-chat-bookmarks-recovery");
+    if (existing) { existing.remove(); return; }
+    let latest;
+    try { latest = await readStoredBookmarks(); } catch {
+      DS.setQuickStatus?.("Couldn't read bookmark storage. No changes were made.");
+      return;
+    }
+    const id = chatId();
+    const groups = Object.entries(latest).filter(([, value]) => Array.isArray(value?.entries) && value.entries.length);
+    const overlay = document.createElement("div"); overlay.id = "ds-chat-bookmarks-recovery";
+    overlay.className = "ds-tool-modal-overlay";
+    const dialog = document.createElement("div"); dialog.className = "ds-chat-bookmarks-modal";
+    const head = document.createElement("div"); head.className = "ds-tool-modal-head";
+    const title = document.createElement("h3"); title.textContent = "Saved bookmark recovery review";
+    const close = document.createElement("button"); close.type = "button";
+    close.textContent = "×"; close.addEventListener("click", () => overlay.remove());
+    head.append(title, close);
+    const info = document.createElement("p");
+    info.textContent = `${bookmarkSummary(latest).total} saved bookmarks in ${groups.length} chat groups. This view never moves or deletes anything. An unmatched group may belong to another chat, a clone, or an older draft.`;
+    const list = document.createElement("div"); list.className = "ds-tool-list";
+    const sorted = groups.sort(([a], [b]) => (a === id ? -1 : b === id ? 1 : a.localeCompare(b)));
+    for (const [index, [key, data]] of sorted.slice(0, 150).entries()) {
+      const details = document.createElement("details"); details.className = "ds-tool-list-item";
+      const heading = document.createElement("summary");
+      const kind = key === id ? "Current chat" : key.startsWith("draft:") ? "Older unsaved chat" : "Other saved chat";
+      heading.textContent = `${kind}${key === id ? "" : ` ${index + 1}`} — ${data.entries.length} bookmark${data.entries.length === 1 ? "" : "s"}`;
+      details.append(heading);
+      const note = document.createElement("p");
+      note.textContent = key === id ? "These belong to your open conversation." :
+        "Stored under a different conversation key. QoL cannot confirm whether that conversation is still available from this record alone.";
+      details.append(note);
+      for (const mark of data.entries.slice(0, 100)) {
+        const row = document.createElement("p");
+        const date = Number(mark.createdAt) ? new Date(Number(mark.createdAt)).toLocaleDateString() : "Unknown date";
+        row.textContent = `${date} · ${mark.role === "user" ? "You" : "Bot"} · ${clean(mark.note || mark.preview || "Saved message").slice(0, 180)}`;
+        details.append(row);
+      }
+      if (data.entries.length > 100) {
+        const more = document.createElement("p"); more.textContent = `${data.entries.length - 100} additional bookmarks not displayed.`; details.append(more);
+      }
+      list.append(details);
+    }
+    if (groups.length > 150) {
+      const note = document.createElement("p"); note.textContent = "Only the first 150 groups are displayed; no stored records were modified.";
+      list.append(note);
+    }
+    dialog.append(head, info, list);
+    overlay.append(dialog); document.body.append(overlay);
+    overlay.addEventListener("click", event => { if (event.target === overlay) overlay.remove(); });
+  }
+
   function removeAll() {
+    document.getElementById("ds-chat-bookmarks-recovery")?.remove();
     document.querySelectorAll(`.${BUTTON_CLASS}, .ds-chat-bookmarks-row, .ds-chat-bookmarks-header-button, .ds-chat-navigation-row`).forEach(el => el.remove());
     DS.removeChatHistoryNavigator?.();
     lastManagerCount = -1;
@@ -567,6 +648,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     applyButtons(roots);
   };
   DS.openChatBookmarks = openManager;
+  DS.openBookmarkRecovery = openBookmarkRecovery;
   DS.isChatMessageBookmarked = isBookmarked;
   DS.navigateChatTo = (root, options = {}) => scrollToRoot(root, { record: options.record !== false, reason: options.reason || "jump" });
   DS.chatNavigationBack = () => navigateHistory(-1);

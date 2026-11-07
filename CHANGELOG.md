@@ -1,3 +1,12 @@
+## 0.2.73
+- Improved performance mode for newer Android chats, without hiding their messages.
+- Added a check that distinguishes unavailable blocked bots from bots that haven't been checked yet.
+- Added an overview of locally saved bookmarks across conversations and a read-only recovery review.
+- Made model shortcuts easier to add, order and remove.
+- Added a guided backup package for moving your own bots and Lorebooks to another account.
+- Fixed chat bubble colors and styles resetting when timestamps or generation details appear.
+- Added a safeguard against QoL hiding an entire chat and improved reports when messages disappear or after returning to a chat.
+
 ## 0.2.72
 - The optional language filter now works on public Lorebooks and Rulebooks, using the same language choices as bot cards.
 - Improved support reports for chats that briefly go blank, including whether messages are still there and what might be hiding them.

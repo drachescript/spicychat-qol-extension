@@ -833,6 +833,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableCreationAudit",
   "enableMyCreationsFilters",
   "enableMyCreationsBulkBackup",
+  "enableAccountMigrationAssistant",
   "showMyLorebookEditButtons",
   "rememberMyCreationsView",
   "autoLoadMyCreations",

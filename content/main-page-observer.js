@@ -172,6 +172,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       visibilityWatch = { route: location.pathname, reason, step: 0, firstHiddenAt: 0 };
       visibilityWatchTimer = setTimeout(sampleVisibilityWatch, 320);
     }
+    // Returning to a chat after switching tabs or leaving the browser is a
+    // separate reported disappearance trigger. Reuse the same short-lived
+    // check; never monitor continuously or attempt to restore native content.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleVisibilityWatch("tab-return");
+    }, { passive: true });
+    window.addEventListener("focus", () => scheduleVisibilityWatch("tab-return"), { passive: true });
     // One passive pair of listeners for native send / redo / continue. No DOM
     // modifications and no reading of composer or message contents.
     document.addEventListener("submit", event => {

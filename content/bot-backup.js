@@ -11,7 +11,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const IMPORT_DIALOG_ID = "ds-bot-import-preview";
   const MAX_BOT_IMPORT_SIZE = 16 * 1024 * 1024;
   const MAX_IMPORT_ENTRY_SIZE = 512 * 1024;
-  const MAX_IMPORT_ARCHIVE_FILES = 60;
+  const MAX_IMPORT_ARCHIVE_FILES = 350;
   const CHATBOT_LOREBOOK_LINKS_KEY = "chatbotLorebookLinks";
   let activeForm = null;
   let saveTimer = null;
@@ -741,6 +741,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const decoder = new TextDecoder("utf-8", { fatal: false });
     const matches = [];
     for (let index = 0; index < count; index++) {
+      // Prevent long import previews from monopolizing the browser UI.
+      if (index > 0 && index % 25 === 0) await new Promise(resolve => setTimeout(resolve, 0));
       if (cursor + 46 > bytes.length || view.getUint32(cursor, true) !== 0x02014b50) throw new Error("The ZIP directory is damaged.");
       const flags = view.getUint16(cursor + 8, true);
       const method = view.getUint16(cursor + 10, true);
@@ -753,7 +755,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (cursor + 46 + filenameLength + extraLength + commentLength > bytes.length) throw new Error("The ZIP directory is incomplete.");
       const filename = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + filenameLength));
       cursor += 46 + filenameLength + extraLength + commentLength;
-      if (!/\.(json|txt)$/i.test(filename) || /(?:^|\/)(?:readme|__macosx)/i.test(filename) || /lorebook/i.test(filename)) continue;
+      if (!/\.(json|txt)$/i.test(filename) || /(?:^|\/)(?:readme|__macosx)/i.test(filename) || /^lorebooks\//i.test(filename)) continue;
       if (/\.txt$/i.test(filename) && !/(?:bot|chatbot|character|replacement)/i.test(filename)) continue;
       if (flags & 1) continue; // encrypted entries cannot be read here
       if (![0, 8].includes(method) || size > MAX_IMPORT_ENTRY_SIZE || plainSize > MAX_IMPORT_ENTRY_SIZE) continue;

@@ -364,6 +364,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     enablePersonalUsageSummary: false,
     enableMyCreationsFilters: false,
     enableMyCreationsBulkBackup: false,
+    enableAccountMigrationAssistant: false,
     showMyLorebookEditButtons: false,
     showMyChatbotEditButtons: false,
     rememberMyCreationsView: false,

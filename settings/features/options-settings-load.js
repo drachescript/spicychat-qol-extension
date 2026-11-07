@@ -779,6 +779,7 @@ async function load() {
 
   setChecked("enableMyCreationsFilters", !!settings.enableMyCreationsFilters);
   setChecked("enableMyCreationsBulkBackup", !!settings.enableMyCreationsBulkBackup);
+  setChecked("enableAccountMigrationAssistant", !!settings.enableAccountMigrationAssistant);
   setChecked("showMyLorebookEditButtons", !!settings.showMyLorebookEditButtons);
   setChecked("showMyChatbotEditButtons", !!settings.showMyChatbotEditButtons);
   setChecked("rememberMyCreationsView", !!settings.rememberMyCreationsView);

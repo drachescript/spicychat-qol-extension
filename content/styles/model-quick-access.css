@@ -5,3 +5,6 @@
 .ds-model-quick-access-buttons button:focus-visible{outline:2px solid #80aef9;outline-offset:2px}
 .ds-model-quick-access-note{font-size:11px;opacity:.8;margin-top:4px}
 .ds-model-quick-access-note:empty{display:none}
+
+.ds-model-add-quick-button{display:inline-flex!important;align-items:center;justify-content:center;min-width:24px!important;min-height:24px!important;margin-inline:3px!important;padding:2px 6px!important;border:1px solid rgba(145,145,145,.45)!important;border-radius:6px!important;background:rgba(115,115,115,.18)!important;color:inherit!important;cursor:pointer!important;font:600 14px/1 system-ui!important}
+.ds-model-add-quick-button[aria-pressed="true"]{border-color:rgba(96,165,250,.9)!important;color:#9cc8ff!important}

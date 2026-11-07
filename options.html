@@ -2197,6 +2197,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <section class="card" id="myCreationsBackupCard">
 <h2>My Creations backup &amp; shortcuts</h2>
 <label class="row"><input id="enableMyCreationsBulkBackup" type="checkbox"/><span>Show bulk backup controls on My Creations</span></label>
+<label class="row"><input id="enableAccountMigrationAssistant" type="checkbox"/><span>Show Account Migration Assistant alongside My Creations backups</span></label>
+<p class="hint">Optionally combine verified chatbot and Lorebook backup ZIPs into one migration package. Import still requires review and saving on the new account. Enable bulk backups above first.</p>
 <p class="hint">Adds Backup all chatbots / Backup all Lorebooks on your My Creations pages. Bulk backup always fetches the current live version from SpicyChat when you start it; local QoL revision/history copies are not used as the source.</p>
 <label class="row"><input id="showMyLorebookEditButtons" type="checkbox"/><span>Show an Edit button on my Lorebook cards</span></label>
 <label class="row"><input id="showMyChatbotEditButtons" type="checkbox"/><span>Show a small Edit button on my Chatbot cards</span></label>
@@ -2584,6 +2586,14 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <p class="account-sync-status-line"><strong id="accountSyncDeviceLabel">Detecting…</strong><span class="hint" id="accountSyncCapabilitySummary"></span></p>
 <p class="hint">Device ID: <span class="account-sync-device-id" id="accountSyncDeviceId">Preparing…</span></p>
 <div class="button-row"><button id="copyAccountSyncDeviceId" type="button">Copy device ID</button><button id="resetAccountSyncDeviceId" type="button">Reset local device identity</button></div>
+</div>
+<div class="sub-card" id="ds-qol-simple-list-sync">
+<h4>Simple Blocked + Later sync</h4>
+<p class="hint">Link your phone and PC once, then choose how this device should use Blocked and Later. Other settings, chats, pictures and Favorites stay out of sync. Existing bot details remain saved locally.</p>
+<div class="button-row"><button id="accountSyncSimpleTwoWay" type="button">Keep Blocked + Later in sync</button><button id="accountSyncSimpleReceive" type="button">Receive Blocked + Later only</button></div>
+<p class="hint">Changes sync after they settle, with checks about every 6 hours. A linked, unpaused device also syncs immediately after you choose a setup.</p>
+<div class="button-row"><button id="accountSyncCheckBlockedStatus" type="button">Check saved lists and unavailable bots</button></div>
+<div id="accountSyncBlockedStatus" class="hint" role="status">A local check distinguishes confirmed unavailable bots from unchecked ones. Nothing is automatically unblocked or deleted.</div>
 </div>
 <div class="sub-card" id="accountSyncSetup">
 <h3>Set up sync</h3>

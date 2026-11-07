@@ -367,6 +367,7 @@ const DEFAULT_SETTINGS = {
   enablePersonalUsageSummary: false,
   enableMyCreationsFilters: false,
   enableMyCreationsBulkBackup: false,
+  enableAccountMigrationAssistant: false,
   showMyLorebookEditButtons: false,
   showMyChatbotEditButtons: false,
   rememberMyCreationsView: false,

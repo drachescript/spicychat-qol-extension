@@ -582,6 +582,7 @@ function readSettingsFromPage() {
 
     enableMyCreationsFilters: checked("enableMyCreationsFilters"),
     enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
+    enableAccountMigrationAssistant: checked("enableAccountMigrationAssistant"),
     showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
     showMyChatbotEditButtons: checked("showMyChatbotEditButtons"),
     rememberMyCreationsView: checked("rememberMyCreationsView"),
@@ -1238,6 +1239,7 @@ function readSingleSettingFromPage(settingKey) {
 
     case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
     case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
+    case "enableAccountMigrationAssistant": return (checked("enableAccountMigrationAssistant"));
     case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
     case "showMyChatbotEditButtons": return (checked("showMyChatbotEditButtons"));
     case "restorePersonasSidebarPosition": return (checked("restorePersonasSidebarPosition"));

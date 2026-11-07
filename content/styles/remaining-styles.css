@@ -152,37 +152,37 @@
 
 
 /* v0.1.8.92: granular RP/dialogue text colors */
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="base"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2) :is(em,i,.ds-rp-repair-action),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="base"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) {
   color: inherit !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2) :is(em,i,.ds-rp-repair-action),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) {
   color: var(--ds-chat-bubble-ai-action-text) !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="base"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2) :is(em,i,.ds-rp-repair-action),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="base"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) {
   color: inherit !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2) :is(em,i,.ds-rp-repair-action),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(em,i,.ds-rp-repair-action) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) {
   color: var(--ds-chat-bubble-user-action-text) !important;
 }
 
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="base"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2) :is(q,.ds-rp-repair-speech),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="base"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) {
   color: inherit !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2) :is(q,.ds-rp-repair-speech),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="custom"] div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) {
   color: var(--ds-chat-bubble-ai-dialogue-text) !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2) :is(q,.ds-rp-repair-speech),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) {
   color: inherit !important;
 }
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2) :is(q,.ds-rp-repair-speech),
-html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(q,.ds-rp-repair-speech) {
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech),
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) {
   color: var(--ds-chat-bubble-user-dialogue-text) !important;
 }
 
@@ -202,11 +202,11 @@ html[data-ds-alt-dialogue-custom-colors="1"] .ds-alt-dialogue,
    incremental enhancer sees the replacement node again. Scope is respected so
    AI-only / user-only styling does not leak to the other side. */
 html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="ai"]
-  div[id^="message-"] div[class*="m-[0_32px_0_10px]"] > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight),
+  div[id^="message-"] div[class*="m-[0_32px_0_10px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(code:not(pre code), blockquote.bg-colorHighlight),
 html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="user"]
-  div[id^="message-"] div[class*="m-[0_10px_0_53px]"] > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight),
+  div[id^="message-"] div[class*="m-[0_10px_0_53px]"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(code:not(pre code), blockquote.bg-colorHighlight),
 html[data-ds-alt-dialogue-active="1"][data-ds-alt-dialogue-custom-colors="1"][data-ds-alt-dialogue-scope="both"]
-  div[id^="message-"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"]) > :nth-child(2) :is(code:not(pre code), blockquote.bg-colorHighlight) {
+  div[id^="message-"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"]) > :nth-child(2 of :not(.ds-generation-metadata)) :is(code:not(pre code), blockquote.bg-colorHighlight) {
   display: inline !important;
   margin: 0 !important;
   padding: 0.08em 0.34em !important;
@@ -2176,3 +2176,23 @@ html.ds-chat-bubble-alpha [id^="message-"] :is(.bg-gray-3,.bg-gray-4,.bg-gray-5)
 .ds-mod-review-panel .ds-mod-review-diff{white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow:auto;margin:0}
 .ds-mod-review-status[data-tone='error'],.ds-mod-review-status[data-error='1']{color:#fca5a5}
 @media(max-width:660px){.ds-memory-pack-card{grid-template-columns:1fr}.ds-memory-pack-panel{max-height:92vh;padding:10px}}
+
+
+/* Current ChatBubble columns: keep per-segment colors when optional
+   timestamps or generation metadata are inserted between header and body. */
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="base"]
+  div[id^="message-"] [data-chat-bubble-side="bot"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) { color: inherit !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-action-mode="custom"]
+  div[id^="message-"] [data-chat-bubble-side="bot"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) { color: var(--ds-chat-bubble-ai-action-text) !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="base"]
+  div[id^="message-"] [data-chat-bubble-side="bot"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: inherit !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-ai-dialogue-mode="custom"]
+  div[id^="message-"] [data-chat-bubble-side="bot"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: var(--ds-chat-bubble-ai-dialogue-text) !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="base"]
+  div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) { color: inherit !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-action-mode="custom"]
+  div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(em,i,.ds-rp-repair-action) { color: var(--ds-chat-bubble-user-action-text) !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"]
+  div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: inherit !important; }
+html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"]
+  div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: var(--ds-chat-bubble-user-dialogue-text) !important; }

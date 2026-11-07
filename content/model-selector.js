@@ -54,7 +54,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "customizeModelQuickMenu",
     "modelFavoriteNames",
     "modelHiddenNames",
-    "modelQuickFavoritesOnly"
+    "modelQuickFavoritesOnly",
+    "enableModelQuickAccess",
+    "modelQuickAccessNames"
   ]);
   let selectorDirty = true;
   let selectorDirtyReason = "startup";
@@ -440,6 +442,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return favorite;
   }
 
+  function ensureQuickAddButton(entry, selectedNames) {
+    let button = entry.row.querySelector(":scope > .ds-model-add-quick-button");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "ds-model-add-quick-button";
+      button.dataset.dsModelName = entry.name;
+      ["pointerdown", "mousedown"].forEach(type => button.addEventListener(type, stopModelSelection, true));
+      button.addEventListener("click", event => {
+        stopModelSelection(event);
+        const name = button.dataset.dsModelName;
+        const current = parseNameList(DS.state?.settings?.modelQuickAccessNames);
+        const at = current.findIndex(item => norm(item) === norm(name));
+        if (at < 0) current.push(name); else current.splice(at, 1);
+        DS.state.settings.modelQuickAccessNames = current.join("\n");
+        DS.saveSettingsPatch?.({ modelQuickAccessNames: DS.state.settings.modelQuickAccessNames }).then(() => {
+          markSelectorDirty("quick-model-setting", entry.row);
+          DS.scheduleRun?.({ priority: "slow", source: "model-quick-setting", dirty: ["model"] });
+        }).catch(() => DS.setQuickStatus?.("Could not save quick model shortcuts."));
+      }, true);
+      entry.row.insertBefore(button, entry.row.querySelector(":scope > .ds-model-favorite-button") || null);
+    }
+    button.dataset.dsModelName = entry.name;
+    const selected = selectedNames.some(item => norm(item) === norm(entry.name));
+    DS.setTextIfChanged?.(button, selected ? "✓" : "+");
+    button.title = selected ? `Remove ${entry.name} from quick models` : `Add ${entry.name} to quick models`;
+    DS.setAttributeIfChanged?.(button, "aria-label", button.title);
+    DS.setAttributeIfChanged?.(button, "aria-pressed", selected ? "true" : "false");
+    return button;
+  }
+
   function rememberOriginalOrder(entries) {
     const byParent = new Map();
     entries.forEach(entry => {
@@ -499,7 +532,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!root) return;
     const entries = findModelRows(root);
     entries.forEach(entry => entry.row.classList.remove("ds-model-quick-hidden"));
-    root.querySelectorAll(".ds-model-favorite-button").forEach(button => button.remove());
+    root.querySelectorAll(".ds-model-favorite-button, .ds-model-add-quick-button").forEach(button => button.remove());
     restoreModelOrder(entries);
 
     const perf = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
@@ -518,6 +551,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const entries = findModelRows(surface.root);
     if (!entries.length) return;
 
+    if (settings.enableModelQuickAccess) {
+      const quickNames = parseNameList(settings.modelQuickAccessNames);
+      entries.forEach(entry => ensureQuickAddButton(entry, quickNames));
+    } else {
+      surface.root.querySelectorAll(".ds-model-add-quick-button").forEach(button => button.remove());
+    }
     rememberOriginalOrder(entries);
 
     const favorites = parseNameList(settings.modelFavoriteNames);
@@ -555,7 +594,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cleanupModelQuickMenu() {
     const entries = [];
-    document.querySelectorAll(".ds-model-favorite-button").forEach(button => button.remove());
+    document.querySelectorAll(".ds-model-favorite-button, .ds-model-add-quick-button").forEach(button => button.remove());
     document.querySelectorAll(".ds-model-quick-hidden").forEach(row => row.classList.remove("ds-model-quick-hidden"));
     document.querySelectorAll("[data-ds-model-original-index]").forEach(row => {
       entries.push({ row, name: "" });
@@ -584,6 +623,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try {
       if (!settings.enabled || !DS.isSingleChatPage?.()) {
         if (DS.state.modelQuickMenuWasActive) cleanupModelQuickMenu();
+        document.querySelectorAll(".ds-model-add-quick-button").forEach(button => button.remove());
         DS.state.modelQuickMenuWasActive = false;
         selectorRouteKey = currentRoute;
         selectorSettingsKey = currentSettings;
@@ -610,6 +650,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       cachedSurfaces = surfaces;
       rootsChecked = surfaces.length;
 
+      if (!settings.customizeModelQuickMenu && DS.state.modelQuickMenuWasActive) {
+        // Restore the native layout first, then optionally add Quick Access
+        // controls. Otherwise the old cleanup removes freshly added buttons.
+        cleanupModelQuickMenu();
+        DS.state.modelQuickMenuWasActive = false;
+        changed += 1;
+      }
+
       const processSurface = surface => {
         const revision = surfaceRevision(surface.root);
         const stateKey = `${currentSettings}|${revision}`;
@@ -622,6 +670,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (settings.customizeModelQuickMenu) {
           DS.state.modelQuickMenuWasActive = true;
           applyModelMenu(surface, settings);
+        } else if (settings.enableModelQuickAccess) {
+          // Only add shortcut controls; never reorder/hide native rows.
+          if (!(surface.kind !== "explore" && isMobileLike())) {
+            const quickNames = parseNameList(settings.modelQuickAccessNames);
+            findModelRows(surface.root).forEach(entry => ensureQuickAddButton(entry, quickNames));
+          }
         }
         processedSurfaceState.set(surface.root, stateKey);
         changed += 1;
@@ -636,12 +690,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         cleanupHiddenUpgradeButtons();
       }
 
-      if (!settings.customizeModelQuickMenu && DS.state.modelQuickMenuWasActive) {
-        cleanupModelQuickMenu();
-        DS.state.modelQuickMenuWasActive = false;
-        changed += 1;
-      }
-
+      if (!settings.enableModelQuickAccess) document.querySelectorAll(".ds-model-add-quick-button").forEach(button => button.remove());
       selectorRouteKey = currentRoute;
       selectorSettingsKey = currentSettings;
       selectorDirty = false;

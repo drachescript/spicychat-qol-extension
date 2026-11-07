@@ -536,7 +536,15 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Generation profiles: ${countStoreItems(result[GENERATION_PROFILES_KEY], "profiles")}`,
     `Smart filter presets: ${normalizeSmartFilterPresets(result[SMART_FILTER_PRESETS_KEY]).length}; pinned: ${normalizeSmartFilterPins(result[SMART_FILTER_PINNED_KEY], result[SMART_FILTER_PRESETS_KEY]).length}`,
     `Editor draft snapshots: ${Object.values(normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]).entries).reduce((n, list) => n + list.length, 0)}`,
-    `Message bookmarks: ${Object.values(result[CHAT_BOOKMARKS_KEY] || {}).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0)}`,
+    ...(() => {
+      const values = Object.values(result[CHAT_BOOKMARKS_KEY] || {}).filter(chat => Array.isArray(chat?.entries) && chat.entries.length);
+      const total = values.reduce((n, chat) => n + chat.entries.length, 0);
+      const live = context?.runtimeAvailable ? context?.pageDiagnostics?.runtimePerformance : null;
+      const current = Number(live?.bookmarkCurrentChatCount);
+      const currentText = Number.isFinite(current) && current >= 0 && live?.bookmarkCurrentChatCount !== undefined
+        ? String(current) : "unavailable (no confirmed current-chat bookmark scope)";
+      return [`Message bookmarks: ${total} across ${values.length} chats; current chat: ${currentText}`];
+    })(),
     `Enabled optional features: ${enabledFeatures.length} of ${OPTIONAL_FEATURE_KEYS.length} available; ${supportFeatureCounts(enabledFeatures)}`,
     ...(supportIncludeFeatureNames() ? [`Enabled feature names (explicit opt-in): ${enabledFeatures.join(", ") || "none"}`] : []),
     ...(partialSources.length ? [`Partial diagnostics: ${partialSources.join(", ")} timed out or were unavailable; the rest of this section is still valid.`] : [])
@@ -653,7 +661,7 @@ function formatChatVisibilityStatus(v) {
     `${folded} intentionally folded by QoL`
   ];
   const source = v.hiddenSource;
-  const sourceText = source ? `; first hidden element ${source.tag || "element"} (${source.property || source.cause || "unknown"}, ${Number(source.ancestorDepth || 0)} levels above message); source ${source.sourceHint || "unknown"}; rule ${source.selectorHint || "unknown"}${Array.isArray(source.classes) && source.classes.length ? `; classes ${source.classes.join(", ")}` : ""}` : "";
+  const sourceText = source ? `; first hidden element ${source.tag || "element"} (${source.property || source.cause || "unknown"}, ${Number(source.ancestorDepth || 0)} levels above message); source ${source.sourceHint || "unknown"}; rule ${source.selectorHint || "unknown"}${source.qolHideReason ? `; QoL hide reason ${source.qolHideReason}` : ""}${Array.isArray(source.classes) && source.classes.length ? `; classes ${source.classes.join(", ")}` : ""}` : "";
   const last = v.recentForegroundEvent;
   const historyText = last ? `; foreground visibility alerts ${Number(last.count || 0)}; latest ${new Date(Number(last.lastAt || 0)).toISOString()} during ${last.trigger || "unknown"} (generation ${last.generation || "unknown"}), ${Number(last.mounted || 0)} mounted, ${Number(last.hidden || 0)}/${Number(last.inspected || 0)} hidden; latest style ${last.hiddenSource?.property || "unknown"} from ${last.hiddenSource?.sourceHint || "unknown"}, rule ${last.hiddenSource?.selectorHint || "unknown"}; QoL display features enabled: ${Array.isArray(last.activeQolDisplayFeatures) && last.activeQolDisplayFeatures.length ? last.activeQolDisplayFeatures.join(", ") : "none"}` : "; no sustained foreground hide captured";
   return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}${sourceText}${historyText}. This checks layout only, not whether chat text was deleted.`;
@@ -740,7 +748,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep always on; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
-    `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages`,
+    `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages; ${Number(runtime.preventedChatContainerHides || 0)} unsafe QoL hides prevented`,
     (() => { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility; return formatChatVisibilityStatus(v); })(),
     ...((settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.slowFeatureSamples))
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)

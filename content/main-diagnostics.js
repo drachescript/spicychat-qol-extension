@@ -79,7 +79,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         else if (Number(style.opacity) === 0) { property = "opacity"; expected = "0"; }
         if (!property) continue;
         const inline = String(node.style?.getPropertyValue?.(property) || "").trim();
+        // .ds-hidden is defined by QoL's content stylesheet. Browser pages
+        // cannot always enumerate extension stylesheets via CSSOM, so a
+        // generic rule lookup often incorrectly reports this as unknown.
+        const qolHiddenClass = !inline && property === "display" && node.classList?.contains("ds-hidden");
+        const reasonValue = String(node.getAttribute?.("data-ds-reason") || "");
+        const safeReason = qolHiddenClass && /^[a-z0-9:_-]{1,80}$/i.test(reasonValue) ? reasonValue : "";
         const rule = inline ? { selector: "inline style", source: "inline style" }
+          : qolHiddenClass ? { selector: ".ds-hidden", source: "QoL hide class" }
           : inspectRule ? matchedHideRule(node, property, expected) : null;
         return {
           cause: property === "opacity" ? "transparent" : "css",
@@ -89,7 +96,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           classes: safeClassHints(node),
           sourceHint: rule?.source || (inline ? "inline style" : "not yet checked"),
           selectorHint: rule?.selector || "not yet checked",
-          qolStyledElement: !!safeClassHints(node).some(x => x.startsWith("ds-"))
+          qolHideReason: safeReason || (qolHiddenClass ? "unrecorded" : ""),
+          qolStyledElement: qolHiddenClass || !!safeClassHints(node).some(x => x.startsWith("ds-"))
         };
       } catch { /* This is diagnostic-only. */ }
     }
@@ -153,7 +161,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       count: Math.min(1000, Number(prior?.count || 0) + 1),
       lastAt: Date.now(),
       generation: ["active", "inactive", "unknown"].includes(generation) ? generation : "unknown",
-      trigger: ["send", "generation-action", "message-remount"].includes(trigger) ? trigger : "unknown",
+      trigger: ["send", "generation-action", "message-remount", "tab-return"].includes(trigger) ? trigger : "unknown",
       elapsedMs: Math.min(10000, Math.max(0, Math.round(Number(elapsedMs) || 0))),
       mounted: Math.min(10000, Number(snapshot.mounted || 0)),
       hidden: Math.min(3, Number(snapshot.hidden || 0)),
