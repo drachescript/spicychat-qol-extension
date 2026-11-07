@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.69",
+  "sourceVersion": "0.2.73",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -1027,7 +1027,10 @@
       "settingsStyles": [],
       "styles": [],
       "background": [],
-      "helpers": [],
+      "helpers": [
+        "content/lorebook-public-qol.js",
+        "content/rulebook-public-qol.js"
+      ],
       "fullyIndependent": false
     },
     {

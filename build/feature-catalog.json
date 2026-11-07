@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.69",
+  "version": "0.2.73",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 134,
@@ -1119,7 +1119,8 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "showChatExportButton"
+        "showChatExportButton",
+        "chatExportIncludeImageLinks"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1206,7 +1207,11 @@
       "settingsScripts": [],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "chatListTwoColumns",
+        "chatListPopoutShortcut",
+        "chatListRenameShortcut"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -1647,7 +1652,11 @@
         "hideChatTopBarContextDot",
         "hideChatTopBarModelButton",
         "hideChatTopBarRatingButton",
-        "showChatTopBarTools"
+        "showChatTopBarTools",
+        "chatAlwaysShowProfileLink",
+        "chatJumpToStartShortcut",
+        "chatOpenWindowShortcut",
+        "chatGenerationSettingsShortcut"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -2110,7 +2119,8 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "showExactMessageCounts"
+        "showExactMessageCounts",
+        "showNewBotBadge"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -2405,13 +2415,18 @@
       "runtimeScripts": [
         "content/language-filter.js"
       ],
-      "requiredHelpers": [],
+      "requiredHelpers": [
+        "content/lorebook-public-qol.js",
+        "content/rulebook-public-qol.js"
+      ],
       "cssFiles": [],
       "settingsScripts": [],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableLanguageFilter"
+        "enableLanguageFilter",
+        "languageFilterLorebooks",
+        "languageFilterRulebooks"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -2855,7 +2870,9 @@
       "settingsScripts": [],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "messageBottomMenuShortcut"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3102,7 +3119,8 @@
       ],
       "backgroundServices": [],
       "settingKeys": [
-        "enableMyCreationsBulkBackup"
+        "enableMyCreationsBulkBackup",
+        "enableAccountMigrationAssistant"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
