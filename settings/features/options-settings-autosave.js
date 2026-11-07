@@ -142,6 +142,10 @@ function readSettingsFromPage() {
     closeChatTabAfterSavingLater: checked("closeChatTabAfterSavingLater"),
     showPerCharacterChatHistory: checked("showPerCharacterChatHistory"),
     showQuickNewChatButton: checked("showQuickNewChatButton"),
+    chatAlwaysShowProfileLink: checked("chatAlwaysShowProfileLink"),
+    chatJumpToStartShortcut: checked("chatJumpToStartShortcut"),
+    chatOpenWindowShortcut: checked("chatOpenWindowShortcut"),
+    chatGenerationSettingsShortcut: checked("chatGenerationSettingsShortcut"),
 
 
     enableBulkMemoryManager: checked("enableBulkMemoryManager"),
@@ -167,6 +171,9 @@ function readSettingsFromPage() {
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
+    chatListTwoColumns: checked("chatListTwoColumns"),
+    chatListPopoutShortcut: checked("chatListPopoutShortcut"),
+    chatListRenameShortcut: checked("chatListRenameShortcut"),
     chatCollections: value("chatCollections", ""),
     showSavedChatQuickActions: checked("showSavedChatQuickActions"),
     showRandomChatButton: checked("showRandomChatButton"),
@@ -410,6 +417,7 @@ function readSettingsFromPage() {
     messageQuickActionResend: checked("messageQuickActionResend"),
     messageQuickActionConfirmRemoveImage: checked("messageQuickActionConfirmRemoveImage"),
     messageQuickActionReport: checked("messageQuickActionReport"),
+    messageBottomMenuShortcut: checked("messageBottomMenuShortcut"),
     allowTypingWhileAiResponding: checked("allowTypingWhileAiResponding"),
     keepChatPositionWhileTyping: checked("keepChatPositionWhileTyping"),
     showScrollToTopButton: checked("showScrollToTopButton"),
@@ -474,6 +482,7 @@ function readSettingsFromPage() {
     chatExportIncludeGenerationDetails: checked("chatExportIncludeGenerationDetails"),
     chatExportNumberMessages: checked("chatExportNumberMessages"),
     chatExportIncludeAvatars: checked("chatExportIncludeAvatars"),
+    chatExportIncludeImageLinks: checked("chatExportIncludeImageLinks"),
     chatExportDefaultFormat: value("chatExportDefaultFormat", "text"),
     chatExportHtmlLayout: value("chatExportHtmlLayout", "bubbles"),
     showOocTools: checked("showOocTools"),
@@ -552,6 +561,7 @@ function readSettingsFromPage() {
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
     showExactMessageCounts: checked("showExactMessageCounts"),
     showBotCreationDates: checked("showBotCreationDates"),
+    showNewBotBadge: checked("showNewBotBadge"),
     expandBotNamesOnHover: checked("expandBotNamesOnHover"),
     cardTokenShowGreeting: checked("cardTokenShowGreeting", true),
     cardTokenShowDescription: false,
@@ -571,6 +581,7 @@ function readSettingsFromPage() {
 
     enableMyCreationsFilters: checked("enableMyCreationsFilters"),
     enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
+    enableAccountMigrationAssistant: checked("enableAccountMigrationAssistant"),
     showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
     showMyChatbotEditButtons: checked("showMyChatbotEditButtons"),
     rememberMyCreationsView: checked("rememberMyCreationsView"),
@@ -607,6 +618,8 @@ function readSettingsFromPage() {
     quickDislikeIdleMinutes: Math.min(60, Math.max(1, Number(value("quickDislikeIdleMinutes", "5")) || 5)),
     blockedBulkDislikeDelayMs: Math.min(10000, Math.max(250, Number(value("blockedBulkDislikeDelayMs", "750")) || 750)),
     enableLanguageFilter: checked("enableLanguageFilter"),
+    languageFilterLorebooks: checked("languageFilterLorebooks"),
+    languageFilterRulebooks: checked("languageFilterRulebooks"),
     allowedLanguages: getAllowedLanguages(),
     languageSelectionMode: ["include", "exclude"].includes(value("languageSelectionMode")) ? value("languageSelectionMode") : "include",
     languageFilterMode: "conservative",
@@ -832,6 +845,9 @@ function readSingleSettingFromPage(settingKey) {
     case "chatTextReplacementPreview": return (checked("chatTextReplacementPreview"));
     case "showChatListTools": return (checked("showChatListTools"));
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
+    case "chatListPopoutShortcut": return checked("chatListPopoutShortcut");
+    case "chatListRenameShortcut": return checked("chatListRenameShortcut");
+    case "chatListTwoColumns": return checked("chatListTwoColumns");
     case "chatCollections": return (value("chatCollections", ""));
     case "showSavedChatQuickActions": return (checked("showSavedChatQuickActions"));
     case "showRandomChatButton": return (checked("showRandomChatButton"));
@@ -1126,6 +1142,7 @@ function readSingleSettingFromPage(settingKey) {
     case "chatExportIncludeGenerationDetails": return (checked("chatExportIncludeGenerationDetails"));
     case "chatExportNumberMessages": return (checked("chatExportNumberMessages"));
     case "chatExportIncludeAvatars": return (checked("chatExportIncludeAvatars"));
+    case "chatExportIncludeImageLinks": return (checked("chatExportIncludeImageLinks"));
     case "chatExportDefaultFormat": return (value("chatExportDefaultFormat", "text"));
     case "chatExportHtmlLayout": return (value("chatExportHtmlLayout", "bubbles"));
     case "showOocTools": return (checked("showOocTools"));
@@ -1216,6 +1233,7 @@ function readSingleSettingFromPage(settingKey) {
 
     case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
     case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
+    case "enableAccountMigrationAssistant": return (checked("enableAccountMigrationAssistant"));
     case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
     case "showMyChatbotEditButtons": return (checked("showMyChatbotEditButtons"));
     case "restorePersonasSidebarPosition": return (checked("restorePersonasSidebarPosition"));
@@ -1253,6 +1271,8 @@ function readSingleSettingFromPage(settingKey) {
     case "quickDislikeIdleMinutes": return (Math.min(60, Math.max(1, Number(value("quickDislikeIdleMinutes", "5")) || 5)));
     case "blockedBulkDislikeDelayMs": return (Math.min(10000, Math.max(250, Number(value("blockedBulkDislikeDelayMs", "750")) || 750)));
     case "enableLanguageFilter": return (checked("enableLanguageFilter"));
+    case "languageFilterLorebooks": return (checked("languageFilterLorebooks"));
+    case "languageFilterRulebooks": return (checked("languageFilterRulebooks"));
     case "allowedLanguages": return (getAllowedLanguages());
     case "languageSelectionMode": return (["include", "exclude"].includes(value("languageSelectionMode")) ? value("languageSelectionMode") : "include");
     case "languageFilterMode": return ("conservative");
@@ -1275,6 +1295,12 @@ function readSingleSettingFromPage(settingKey) {
     case "deepImportMaxPages": return (80);
     case "showBlockCurrentBotButton": return (false);
     case "enablePersonalUsageSummary": return (checked("enablePersonalUsageSummary"));
+    case "chatAlwaysShowProfileLink": return checked("chatAlwaysShowProfileLink");
+    case "chatJumpToStartShortcut": return checked("chatJumpToStartShortcut");
+    case "chatOpenWindowShortcut": return checked("chatOpenWindowShortcut");
+    case "chatGenerationSettingsShortcut": return checked("chatGenerationSettingsShortcut");
+    case "messageBottomMenuShortcut": return checked("messageBottomMenuShortcut");
+    case "showNewBotBadge": return checked("showNewBotBadge");
     case "debug": return (checked("debug"));
     case "textNormalizationEnabled": return (checked("textNormalizationEnabled"));
     case "normalizeFancyUnicode": return (checked("normalizeFancyUnicode"));

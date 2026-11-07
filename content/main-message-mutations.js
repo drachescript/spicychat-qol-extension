@@ -83,58 +83,67 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const roots = new Set();
     const textRoots = new Set();
     let candidateNodes = 0;
-    const qolMessageDecorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
-    // One streaming delivery may contain dozens of records targeting the same
-    // text container. Reuse these DOM checks within the batch only; the next
-    // delivery gets a fresh cache and observes any changed text structure.
-    const textTargetCache = new WeakMap();
+    const messageSelector = "div[id^='message-']";
+    const textSelector = "div[class*='overflow-wrap']";
+    const decorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
+    const textAncestorCache = new WeakMap();
 
-    const touchesMessageText = node => {
-      const element = node instanceof Element ? node : node?.parentElement;
-      if (!element) return false;
-      if (textTargetCache.has(element)) return textTargetCache.get(element);
-      let result = false;
-      if (!(element.matches?.(qolMessageDecorationSelector) || element.closest?.(qolMessageDecorationSelector))) {
-        result = !!(element.matches?.("div[class*='overflow-wrap']") ||
-          element.closest?.("div[class*='overflow-wrap']") ||
-          element.querySelector?.("div[class*='overflow-wrap']"));
-      }
-      textTargetCache.set(element, result);
-      return result;
+    const isDecoration = node => {
+      const el = node instanceof Element ? node : node?.parentElement;
+      return !!el && !!(el.matches?.(decorationSelector) || el.closest?.(decorationSelector));
     };
-
-    const addNode = (node, scanDescendants = false) => {
-      candidateNodes += 1;
-      const root = messageRootForMutationNode(node);
-      if (root) {
-        roots.add(root);
-        if (!textRoots.has(root) && touchesMessageText(node)) textRoots.add(root);
-        return;
-      }
-      // A MutationRecord target can be the entire chat/message-list container.
-      // Never scan all of its descendants or one appended message would turn
-      // into a full-chat invalidation. Descendant scanning is only appropriate
-      // for the actual added/removed subtree.
-      if (!scanDescendants) return;
-      const element = node instanceof Element ? node : node?.parentElement;
-      if (!element) return;
-      element.querySelectorAll?.("[id^='message-']").forEach(messageRoot => {
-        roots.add(messageRoot);
-        textRoots.add(messageRoot);
-      });
+    const insideText = node => {
+      const el = node instanceof Element ? node : node?.parentElement;
+      if (!el) return false;
+      if (textAncestorCache.has(el)) return textAncestorCache.get(el);
+      // Only inspect ancestors. A native action button added to the message
+      // root must not invalidate text merely because that root CONTAINS a
+      // different, unchanged message-text container.
+      const matched = !!(el.matches?.(textSelector) || el.closest?.(textSelector));
+      textAncestorCache.set(el, matched);
+      return matched;
+    };
+    const containsTextHost = node => {
+      const el = node instanceof Element ? node : null;
+      return !!el && !!(el.matches?.(textSelector) || el.querySelector?.(textSelector));
     };
 
     for (const mutation of mutations) {
-      addNode(mutation.target, false);
-      for (const node of mutation.addedNodes || []) addNode(node, true);
-      for (const node of mutation.removedNodes || []) addNode(node, true);
+      candidateNodes += 1;
+      const root = messageRootForMutationNode(mutation.target);
+      if (root?.isConnected && mutation.type !== "attributes") {
+        roots.add(root);
+        if (mutation.type === "characterData") {
+          if (!isDecoration(mutation.target) && insideText(mutation.target)) textRoots.add(root);
+        } else if (mutation.type === "childList") {
+          // Only read the changed nodes, not the whole message root. This is
+          // important when React replaces action controls alongside streaming.
+          const changed = [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+          const textMutation = changed.some(node => !isDecoration(node) &&
+            (insideText(mutation.target) || insideText(node) || containsTextHost(node)));
+          if (textMutation) textRoots.add(root);
+        }
+      }
+      for (const node of mutation.addedNodes || []) {
+        candidateNodes += 1;
+        if (!(node instanceof Element) || !node.isConnected) continue;
+        // Only descend into the newly inserted subtree, never the existing
+        // parent message list. Removed React subtrees are handled by the
+        // independent mount/unmount tracker, not the text-cache invalidator.
+        const mounted = node.matches?.(messageSelector) ? [node] :
+          (node.querySelectorAll?.(messageSelector) || []);
+        for (const child of mounted) {
+          if (child.isConnected && !child.parentElement?.closest?.(messageSelector)) roots.add(child);
+        }
+      }
+      candidateNodes += mutation.removedNodes?.length || 0;
     }
 
-    const counters=DS.state.runtimePerformance||(DS.state.runtimePerformance={});
-    counters.messageMutationCandidateNodes=(counters.messageMutationCandidateNodes||0)+candidateNodes;
-    counters.messageMutationDistinctRoots=(counters.messageMutationDistinctRoots||0)+roots.size;
-    // Counts scoped to actual native message text vs QoL-owned decoration churn.
-    counters.messageMutationTextRoots=(counters.messageMutationTextRoots||0)+textRoots.size;
+    const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    counters.messageMutationCandidateNodes = Number(counters.messageMutationCandidateNodes || 0) + candidateNodes;
+    counters.messageMutationDistinctRoots = Number(counters.messageMutationDistinctRoots || 0) + roots.size;
+    counters.messageMutationTextRoots = Number(counters.messageMutationTextRoots || 0) + textRoots.size;
+    counters.messageMutationNonTextRoots = Number(counters.messageMutationNonTextRoots || 0) + Math.max(0, roots.size - textRoots.size);
     return { roots, textRoots, candidateNodes };
   }
 

@@ -1078,30 +1078,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return cleanCardText(block?.textContent).slice(0, 240);
   }
 
-  function isLongDescription(block) {
-    if (!block) return false;
-
-    const text = cleanCardText(block.textContent);
-    if (text.length < 40) return false;
-
-    try {
-      const rect = block.getBoundingClientRect();
-      const visibleHeight = Math.max(rect.height, block.clientHeight || 0);
-      const fullHeight = block.scrollHeight || 0;
-
-      if (fullHeight > visibleHeight + 3) return true;
-    } catch {
-      // Fall back to a text-length estimate below.
-    }
-
-    const cls = DS.classText?.(block) || String(block.className || "");
-    // My Creations currently uses a three-line clamp with a fixed ~60px box.
-    // Some cards report equal client/scroll heights while React is settling, so
-    // use a slightly earlier text fallback for that layout.
-    if (cls.includes("line-clamp-3")) return text.length >= 68;
-    return text.length >= 78;
-  }
-
   function descriptionCardBody(card, block) {
     if (!card || !block) return null;
     let node = block.parentElement;
@@ -1145,24 +1121,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     items.forEach(el => {
       el.removeAttribute("data-ds-description-expanded");
       el.classList.remove("ds-card-description-block");
-      [
-        "display",
-        "-webkit-line-clamp",
-        "line-clamp",
-        "-webkit-box-orient",
-        "max-height",
-        "min-height",
-        "overflow",
-        "overflow-y",
-        "scrollbar-width",
-        "white-space"
-      ].forEach(prop => el.style.removeProperty(prop));
+      const originalStyle = el.getAttribute("data-ds-description-original-style");
+      if (originalStyle !== null) {
+        // Restore SpicyChat's original clamp/scrollbox when disabled.
+        if (originalStyle) el.setAttribute("style", originalStyle);
+        else el.removeAttribute("style");
+        el.removeAttribute("data-ds-description-original-style");
+      } else {
+        // Compatibility for cards expanded by earlier QoL versions.
+        [
+          "display",
+          "-webkit-line-clamp",
+          "line-clamp",
+          "-webkit-box-orient",
+          "max-height",
+          "min-height",
+          "overflow",
+          "overflow-y",
+          "scrollbar-width",
+          "white-space"
+        ].forEach(prop => el.style.removeProperty(prop));
+      }
     });
   }
 
   function lockDescriptionExpansion(block) {
     if (!block) return;
 
+    if (!block.hasAttribute("data-ds-description-original-style")) {
+      block.setAttribute("data-ds-description-original-style", block.getAttribute("style") || "");
+    }
     if (block.dataset.dsDescriptionExpanded !== "1") block.dataset.dsDescriptionExpanded = "1";
     if (!block.classList.contains("ds-card-description-block")) block.classList.add("ds-card-description-block");
 
@@ -1214,19 +1202,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       const signature = descriptionSignature(block);
       const sameDescription = card.dataset.dsDescriptionSignature === signature;
-      let shouldExpand = sameDescription && card.dataset.dsDescriptionLong === "1";
+      // This setting means *full* descriptions, not just descriptions above
+      // an arbitrary character limit. Even short SpicyChat descriptions have
+      // a 40px max-height and forced internal scrolling on some card layouts.
+      // Avoid layout reads (scrollHeight/getBoundingClientRect) on every card.
+      const shouldExpand = !!signature;
 
       if (!sameDescription) {
-        // Remove any stale styles from a recycled/virtualized card before
-        // measuring SpicyChat's normal two-line description.
+        // Remove stale styles from recycled/virtualized cards before applying
+        // the current description's layout.
         card.classList.remove("ds-card-long-description");
         clearDescriptionExpansion(card);
         clearDescriptionBodyExpansion(card);
-        shouldExpand = isLongDescription(block);
         card.dataset.dsDescriptionSignature = signature;
-        card.dataset.dsDescriptionLong = shouldExpand ? "1" : "0";
       }
 
+      // Also refresh the cached decision for cards processed by older QoL
+      // versions, which may have marked short descriptions as "0".
+      card.dataset.dsDescriptionLong = shouldExpand ? "1" : "0";
       card.classList.toggle("ds-card-long-description", shouldExpand);
 
       DS.qsa("[data-ds-description-expanded='1']", card).forEach(old => {

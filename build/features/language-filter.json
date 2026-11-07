@@ -4,9 +4,14 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableLanguageFilter"
+    "enableLanguageFilter",
+    "languageFilterLorebooks",
+    "languageFilterRulebooks"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/lorebook-public-qol.js",
+    "content/rulebook-public-qol.js"
+  ],
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

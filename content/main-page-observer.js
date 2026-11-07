@@ -123,6 +123,85 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch {}
       return "unknown";
     }
+    // Existing page observer plus short-lived, event-triggered samples. Never
+    // install a second MutationObserver or poll the chat indefinitely.
+    let visibilityWatch = null;
+    let visibilityWatchTimer = 0;
+    let lastVisibilityWatchAt = 0;
+    function stopVisibilityWatch() {
+      if (visibilityWatchTimer) clearTimeout(visibilityWatchTimer);
+      visibilityWatchTimer = 0;
+      visibilityWatch = null;
+    }
+    function sampleVisibilityWatch() {
+      const watch = visibilityWatch;
+      if (!watch || DS.isQolPausedForTab?.() || !DS.isSingleChatPage?.() ||
+          location.pathname !== watch.route || document.visibilityState !== "visible") {
+        stopVisibilityWatch();
+        return;
+      }
+      const sample = DS.readChatVisibilitySnapshot?.();
+      const eligible = Number(sample?.inspected || 0) - Number(sample?.qolFolded || 0);
+      const suspicious = eligible >= 2 && Number(sample?.hidden || 0) === eligible;
+      const now = Date.now();
+      if (suspicious) {
+        if (watch.firstHiddenAt && now - watch.firstHiddenAt >= 450) {
+          // Only after two sustained samples do we inspect CSS rules once.
+          const full = DS.readChatVisibilitySnapshot?.({ inspectRule: true }) || sample;
+          DS.recordChatVisibilityEvent?.(full, {
+            generation: checkGenerationState(), trigger: watch.reason,
+            elapsedMs: now - watch.firstHiddenAt
+          });
+          stopVisibilityWatch();
+          return;
+        }
+        if (!watch.firstHiddenAt) watch.firstHiddenAt = now;
+      } else {
+        watch.firstHiddenAt = 0;
+      }
+      watch.step++;
+      const delays = [650, 1200, 2000, 3000];
+      if (watch.step >= delays.length) { stopVisibilityWatch(); return; }
+      visibilityWatchTimer = setTimeout(sampleVisibilityWatch, delays[watch.step]);
+    }
+    function scheduleVisibilityWatch(reason) {
+      if (document.visibilityState !== "visible" || !DS.isSingleChatPage?.() || DS.isQolPausedForTab?.()) return;
+      const now = Date.now();
+      if (visibilityWatch || now - lastVisibilityWatchAt < 7000) return;
+      lastVisibilityWatchAt = now;
+      visibilityWatch = { route: location.pathname, reason, step: 0, firstHiddenAt: 0 };
+      visibilityWatchTimer = setTimeout(sampleVisibilityWatch, 320);
+    }
+    // Returning to a chat after switching tabs or leaving the browser is a
+    // separate reported disappearance trigger. Reuse the same short-lived
+    // check; never monitor continuously or attempt to restore native content.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleVisibilityWatch("tab-return");
+    }, { passive: true });
+    window.addEventListener("focus", () => scheduleVisibilityWatch("tab-return"), { passive: true });
+    // One passive pair of listeners for native send / redo / continue. No DOM
+    // modifications and no reading of composer or message contents.
+    document.addEventListener("submit", event => {
+      if (event.target?.querySelector?.("textarea, [contenteditable='true']")) scheduleVisibilityWatch("send");
+    }, true);
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.repeat) return;
+      const target = event.target;
+      if (target?.matches?.("textarea, [contenteditable='true']") && !target.closest?.(".sai-wysiwyg-editor")) {
+        scheduleVisibilityWatch("send");
+      }
+    }, true);
+    document.addEventListener("click", event => {
+      const button = event.target?.closest?.("button");
+      if (!button || !DS.isSingleChatPage?.()) return;
+      const label = String(button.getAttribute("aria-label") || button.title || button.textContent || "")
+        .replace(/\s+/g, " ").trim().toLowerCase().slice(0, 48);
+      if (button.type === "submit" && button.closest?.("form")?.querySelector?.("textarea")) {
+        scheduleVisibilityWatch("send");
+      } else if (/^(redo|regenerate|continue|retry)(?:$|[ :\-])/.test(label)) {
+        scheduleVisibilityWatch("generation-action");
+      }
+    }, true);
     const observer = new MutationObserver(mutations => {
       if (DS.isQolPausedForTab?.()) return;
       const callbackStartedAt = performance.now();
@@ -132,6 +211,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.mutations += mutations.length;
       if (checkRouteChange()) {
         stopEmptyWatch();
+        stopVisibilityWatch();
         return;
       }
 
@@ -241,12 +321,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       const messageRootsChanged = isChatPage ? mutationsAddOrRemoveMessageRoots(mutations) : false;
       const nonMessageMutations = isChatPage ? mutations.filter(mutation => !mutationIsMessageScoped(mutation)) : mutations;
+      // Rulebook Explore cards can mount/remount while scrolling. Reuse this
+      // existing observer to mark only changed card roots for the next pass.
+      if (!isChatPage && /^\/rulebooks\/explore(?:\/|$)/i.test(location.pathname) &&
+          DS.state?.settings?.rulebookBlockingEnabled === true) {
+        DS.rulebookExploreMutationsRelevant?.(nonMessageMutations);
+      }
       // Model/banner invalidation is intentionally evaluated only against
       // non-message mutations. A newly mounted/re-rendered chat message must
       // never make either global UI feature inspect the chat tree.
       const modelSelectorMutation = isChatPage && nonMessageMutations.length > 0 && !!DS.modelSelectorMutationsRelevant?.(nonMessageMutations);
       const advertBannerMutation = nonMessageMutations.length > 0 && !!DS.advertBannerMutationsRelevant?.(nonMessageMutations);
       const chatHeaderMutation = isChatPage && nonMessageMutations.some(mutationTouchesNativeChatHeader);
+      const rulebookPickerMutation = isChatPage &&
+        DS.state?.settings?.rulebookBlockingEnabled === true &&
+        !!DS.rulebookDiscoverMutationsRelevant?.(nonMessageMutations);
 
       // Contenteditable composers can emit many tiny character/child mutations
       // while the user types. Persistent shortcut/header repair has already run
@@ -277,6 +366,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (messageRootsChanged) {
+        if (!DS.state?.bulkChatHistoryLoadActive) scheduleVisibilityWatch("message-remount");
         const previousMounted = loadedChatMessageCount();
         updateLoadedChatMessageCountFromMutations(mutations);
         const currentMounted = loadedChatMessageCount();
@@ -404,6 +494,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         if (modelSelectorMutation && !dirty.includes("model")) dirty.push("model");
         if (advertBannerMutation) dirty.push("adverts");
+        if (rulebookPickerMutation) dirty.push("rulebook-picker");
         if (dirty.length) {
           DS.scheduleRun?.({ priority: "slow", source: "chat-targeted-mutation", dirty });
         } else {

@@ -108,13 +108,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return {
       enabled: !!settings.enabled,
       counts: !!settings.showExactMessageCounts,
-      dates: !!settings.showBotCreationDates
+      dates: !!settings.showBotCreationDates,
+      newBadge: !!settings.showNewBotBadge
     };
   }
 
   function enabled() {
     const settings = featureSettings();
-    return settings.enabled && (settings.counts || settings.dates);
+    return settings.enabled && (settings.counts || settings.dates || settings.newBadge);
   }
 
   function exactCountsEnabled() {
@@ -127,10 +128,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return settings.enabled && settings.dates;
   }
 
+  function creationDateLookupEnabled() {
+    const settings = featureSettings();
+    return settings.enabled && (settings.dates || settings.newBadge);
+  }
+
+  function applyNewBotBadge(card, id) {
+    if (!(card instanceof Element)) return false;
+    const existing = card.querySelector(":scope .ds-bot-new-badge");
+    const created = createdAt.get(id);
+    const age = Date.now() - Number(created || 0);
+    const fresh = featureSettings().newBadge && Number.isFinite(created) &&
+      age >= 0 && age <= 7 * 24 * 60 * 60 * 1000;
+    if (!fresh) { existing?.remove(); return false; }
+    if (existing) return true;
+    const anchor = card.querySelector(".ds-bot-created-date") || creationDateAnchor(card);
+    if (!anchor?.parentElement) return false;
+    const badge = document.createElement("span");
+    badge.className = "ds-bot-new-badge";
+    badge.textContent = "New";
+    badge.title = "Created within the last 7 days";
+    badge.dataset.dsOwned = "1";
+    anchor.insertAdjacentElement("afterend", badge);
+    return true;
+  }
+
   function applyCreationDate(card, id) {
     if (!(card instanceof Element)) return false;
     if (!creationDatesEnabled()) {
       removeCreationDate(card);
+      card.querySelector(".ds-bot-new-badge")?.remove();
       return false;
     }
 
@@ -141,6 +168,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const profileTokenLink = profileId ? document.querySelector('a[aria-label="tokens-info"]') : null;
     if (profileId && id === profileId && profileTokenLink && card.contains(profileTokenLink)) {
       removeCreationDate(card);
+      card.querySelector(".ds-bot-new-badge")?.remove();
       return false;
     }
 
@@ -148,6 +176,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const formatted = formatCreatedAt(value);
     if (!formatted) {
       removeCreationDate(card);
+      card.querySelector(".ds-bot-new-badge")?.remove();
       return false;
     }
 
@@ -265,18 +294,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!enabled()) {
       if (node) restoreNode(node);
       removeCreationDate(card);
+      card.querySelector(".ds-bot-new-badge")?.remove();
       return false;
     }
 
     const id = botIdFromCard(card, item);
     const dateApplied = applyCreationDate(card, id);
+    const badgeApplied = applyNewBotBadge(card, id);
 
     // Creation dates are independent from Exact Message Counts. Turning exact
     // counts off restores SpicyChat's native rounded count while leaving the
     // optional Created line alone.
     if (!exactCountsEnabled()) {
       if (node) restoreNode(node);
-      return dateApplied;
+      return dateApplied || badgeApplied;
     }
 
     if (!node) return dateApplied;
@@ -322,7 +353,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function queueMissingId(id) {
     if (!id || pending.has(id)) return;
     const needCount = exactCountsEnabled() && !counts.has(id);
-    const needDate = creationDatesEnabled() && !createdAtKnown.has(id);
+    const needDate = creationDateLookupEnabled() && !createdAtKnown.has(id);
     if (!needCount && !needDate) return;
     if ((retryAfter.get(id) || 0) > Date.now()) return;
     pending.add(id);
@@ -332,6 +363,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!enabled()) {
       document.querySelectorAll("[data-ds-exact-message-count-applied='1']").forEach(restoreNode);
       document.querySelectorAll(".ds-bot-created-date").forEach(node => node.remove());
+      document.querySelectorAll(".ds-bot-new-badge").forEach(node => node.remove());
       removeProfileCreationDate();
       return;
     }
@@ -343,7 +375,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // current profile ID and render its creation date after SpicyChat's Tokens
     // stat. This reuses the same cached public createdAt lookup as listing cards.
     const profileId = profileBotId();
-    if (profileId && creationDatesEnabled()) {
+    if (profileId && creationDateLookupEnabled()) {
       const before = pending.size;
       queueMissingId(profileId);
       queued = queued || pending.size !== before;
@@ -402,7 +434,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       const countResolved = !exactCountsEnabled() || counts.has(id);
-      const dateResolved = !creationDatesEnabled() || createdAtKnown.has(id);
+      const dateResolved = !creationDateLookupEnabled() || createdAtKnown.has(id);
       if (countResolved && dateResolved) retryAfter.set(id, now + SUCCESS_CACHE_MS);
       else retryAfter.delete(id);
       changed = changed || rowChanged;

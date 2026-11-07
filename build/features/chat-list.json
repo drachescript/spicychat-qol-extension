@@ -3,7 +3,11 @@
   "primary": "content/chat-list.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "chatListTwoColumns",
+    "chatListPopoutShortcut",
+    "chatListRenameShortcut"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,

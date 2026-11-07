@@ -346,7 +346,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const settings = DS.state?.settings || {};
         const pressureEnabled = !!(settings.enabled && settings.chatPerformanceMode && DS.isSingleChatPage?.());
         const detailEnabled = !!settings.performanceDiagnostics || !!DS.isDiagnosticTraceActive?.("normal");
-        if (!pressureEnabled && !detailEnabled) return;
+        const androidChat = !!(settings.enabled && DS.isSingleChatPage?.() &&
+          (DS.getRuntimeEnvironment?.()?.android || /Android/i.test(String(navigator.userAgent || ""))));
+        if (!pressureEnabled && !detailEnabled && !androidChat) return;
         const now = performance.now();
         if (pressureEnabled) {
           for (const entry of entries) {
@@ -356,6 +358,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           while (longTasks.length && now - longTasks[0].at > 30000) longTasks.shift();
         }
         if (DS.isSingleChatPage?.()) DS.state.chatStartupLastLongTaskAt = Date.now();
+        if (androidChat) {
+          // A renderer stall can release a burst of queued QoL cosmetic work
+          // onto the same UI thread. Reuse the existing native/decoration quiet
+          // deadlines after large tasks; no additional observer or polling.
+          const worstMs = entries.reduce((max, entry) => Math.max(max, Number(entry.duration || 0)), 0);
+          if (worstMs >= 750) {
+            const quietMs = worstMs >= 2500 ? 2700 : 1500;
+            const until = Date.now() + quietMs;
+            DS.state.nativeActionQuietUntil = Math.max(Number(DS.state.nativeActionQuietUntil || 0), until);
+            DS.state.chatEnhancerQuietUntil = Math.max(Number(DS.state.chatEnhancerQuietUntil || 0), until);
+            const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+            perf.androidPostStallQuietWindows = Number(perf.androidPostStallQuietWindows || 0) + 1;
+            perf.androidPostStallLastMs = Math.round(worstMs);
+          }
+        }
         // Other consumers receive the same browser measurements; no second observer.
         if (detailEnabled) for (const listener of longTaskSubscribers) {
           try { listener(entries); } catch {}

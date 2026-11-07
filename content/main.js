@@ -764,7 +764,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.messageQuickActionEdit ||
       settings.messageQuickActionRemoveImage ||
       settings.messageQuickActionResend ||
-      settings.messageQuickActionReport
+      settings.messageQuickActionReport ||
+      settings.messageBottomMenuShortcut
     );
   }
 
@@ -780,7 +781,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function chatTopBarWanted(settings) {
     return anySetting(settings, [
       "showChatTopBarTools", "chatTopBarInlineCreator", "chatTopBarAddLaterButton",
-      "showPerCharacterChatHistory", "showQuickNewChatButton", "showChatExportButton", "hideChatTopBarRatingButton",
+      "showPerCharacterChatHistory", "showQuickNewChatButton", "chatAlwaysShowProfileLink",
+      "chatJumpToStartShortcut", "chatOpenWindowShortcut", "chatGenerationSettingsShortcut", "showChatExportButton", "hideChatTopBarRatingButton",
       "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell",
       "hideChatDropdownMemoryItem"
     ]);
@@ -1870,6 +1872,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (settings.enableLorebookConsistency || settings.enableCreatorTriggerPreview || document.querySelector(".ds-lorebook-consistency-bar") || document.getElementById("ds-qol-creator-debug-launch")) await runStep("lorebook consistency", () => DS.applyLorebookConsistency?.());
     }
 
+    if (slowDirtyHas(dirty, "rulebook-picker")) {
+      await runFeatureStep("public rulebook blocking",
+        !!settings.rulebookBlockingEnabled || (!!settings.enableLanguageFilter && !!settings.languageFilterRulebooks) || !!document.querySelector('[data-ds-reason^="rulebook:block:"], [data-ds-reason^="rulebook:language:"], .ds-rulebook-block-button'),
+        () => DS.applyPublicRulebookQoL?.());
+    }
+
     if (slowDirtyHas(dirty, "message-ui")) {
       if (settings.showQuickPanel || document.getElementById("ds-qol-panel")) {
         await runFeatureStep("update panel", true, () => DS.updateQuickPanel?.());
@@ -2044,7 +2052,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (plan.profiles) {
         await runThrottledFeatureStep(
           "bot profile creation date",
-          !!settings.showBotCreationDates || !!document.querySelector(".ds-bot-profile-created-date"),
+          !!settings.showBotCreationDates || !!settings.showNewBotBadge || !!document.querySelector(".ds-bot-profile-created-date,.ds-bot-new-badge"),
           listingCardInterval,
           () => DS.applyExactMessageCounts?.(),
           !!options.force
@@ -2068,17 +2076,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (chatList) {
-        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!settings.enableChatPins || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar,#ds-qol-pinned-chats,.ds-chat-pin-toggle"), () => DS.applyChatListTools?.());
+        await runFeatureStep("chat list", !!settings.showChatListTools || !!settings.enableChatOrganizer || !!settings.enableChatPins || !!settings.chatListTwoColumns || !!settings.chatListPopoutShortcut || !!settings.chatListRenameShortcut || !!document.querySelector("[data-ds-chat-list-tools],#ds-chat-organizer-toolbar,#ds-qol-pinned-chats,.ds-chat-pin-toggle,.ds-qol-chat-grid-two,.ds-qol-chat-card-extras"), () => DS.applyChatListTools?.());
         await runFeatureStep("chat pins", !!settings.enableChatPins || !!document.querySelector("#ds-qol-pinned-chats,.ds-chat-pin-toggle"), () => DS.applyChatPins?.());
       } else {
         if (document.getElementById("ds-chat-organizer-toolbar") || document.querySelector(".ds-chat-row-hidden-by-folder,.ds-chat-org-select")) DS.removeChatOrganizer?.();
         if (document.getElementById("ds-qol-pinned-chats") || document.querySelector(".ds-chat-pin-toggle")) DS.removeChatPins?.();
       }
 
+      // Public Lorebook Explore is not a generic bot-card listing. Run its
+      // existing page pass directly, so the language filter works without
+      // activating unrelated bot listing features.
+      if (page.isLorebookExplorePage) {
+        await runFeatureStep("public lorebook blocking/history",
+          !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled ||
+          !!settings.showLorebookBlockButtons || !!settings.lorebookExpandTags ||
+          (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0) ||
+          (!!settings.enableLanguageFilter && !!settings.languageFilterLorebooks) ||
+          !!document.querySelector("[data-ds-reason^='lorebook:block'], [data-ds-reason^='lorebook:language:'], .ds-lorebook-block-button"),
+          () => DS.applyPublicLorebookQoL?.());
+      }
+
       // Rulebooks Explore uses its own route, not the normal bot listing route.
       await runFeatureStep("public rulebook blocking",
-        (page.isRulebookExplorePage && settings.rulebookBlockingEnabled === true)
-          || !!document.querySelector('[data-ds-reason^="rulebook:block:"],.ds-rulebook-block-button'),
+        ((page.isRulebookExplorePage || (singleChat && !!document.querySelector('[data-testid="ConversationRulebookPicker-Modal"] [data-testid="RulebookDiscoverTab"]'))) && (settings.rulebookBlockingEnabled === true || (settings.enableLanguageFilter === true && settings.languageFilterRulebooks === true)))
+          || !!document.querySelector('[data-ds-reason^="rulebook:block:"], [data-ds-reason^="rulebook:language:"], .ds-rulebook-block-button'),
         () => DS.applyPublicRulebookQoL?.());
 
       if (listing) {
@@ -2096,9 +2117,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("rulebook listing tools", !!settings.showRulebookFilters || !!document.getElementById("ds-rulebook-filter-toolbar"), () => DS.applyRulebookListingTools?.());
         await runFeatureStep("lorebook search filter", !!settings.showLorebookFilters || !!document.getElementById("ds-lorebook-search-filter") || !!document.querySelector(".ds-lorebook-search-filter-hidden"), () => DS.applyLorebookSearchFilter?.());
         await runFeatureStep("lorebook tag expansion", !!settings.lorebookExpandTags || !!document.querySelector("[data-ds-lorebook-tags-expanded]"), () => DS.applyLorebookTagExpansion?.());
-        await runFeatureStep("public lorebook blocking/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0) || !!document.querySelector("[data-ds-reason^='lorebook:block'], .ds-lorebook-block-button"), () => DS.applyPublicLorebookQoL?.());
+        await runFeatureStep("public lorebook blocking/history", !!settings.lorebookTrackHistory || !!settings.lorebookBlockingEnabled || !!settings.showLorebookBlockButtons || (Array.isArray(settings.lorebookBlockedIds) && settings.lorebookBlockedIds.length > 0) || (!!settings.enableLanguageFilter && !!settings.languageFilterLorebooks) || !!document.querySelector("[data-ds-reason^='lorebook:block'], [data-ds-reason^='lorebook:language:'], .ds-lorebook-block-button"), () => DS.applyPublicLorebookQoL?.());
         await runFeatureStep("smart filter presets", !!settings.enableSmartFilterPresets || !!document.querySelector("[data-ds-smart-filter]"), () => DS.applySmartFilterPresets?.());
-        await runThrottledFeatureStep("exact message counts / creation dates", !!settings.showExactMessageCounts || !!settings.showBotCreationDates || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"], .ds-bot-created-date"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
+        await runThrottledFeatureStep("exact message counts / creation dates", !!settings.showExactMessageCounts || !!settings.showBotCreationDates || !!settings.showNewBotBadge || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"], .ds-bot-created-date, .ds-bot-new-badge"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
         await runFeatureStep("my creations view memory", !!settings.rememberMyCreationsView, () => DS.applyMyCreationsViewMemory?.());
         await runFeatureStep("my creations auto-load", !!settings.autoLoadMyCreations, () => DS.applyMyCreationsAutoLoad?.());
         await runFeatureStep("my creations backup", true, () => DS.applyMyCreationsBackupTools?.());

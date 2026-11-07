@@ -9,7 +9,8 @@
     "lorebook-tags"
   ],
   "settingsKeys": [
-    "enableMyCreationsBulkBackup"
+    "enableMyCreationsBulkBackup",
+    "enableAccountMigrationAssistant"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

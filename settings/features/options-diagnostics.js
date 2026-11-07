@@ -38,7 +38,16 @@ function performanceSnapshotFromContext(context) {
     quickPanelCreateMaxMs: Number(byName("create panel") || 0),
     quickPanelRefreshCoalesced: Number(runtime.quickPanelUpdateCoalesced || 0),
     runtimePlanCacheHits: Number(runtime.runtimePlanCacheHits || 0),
-    buildBundleStepSkips: Number(runtime.buildBundleStepSkips || 0)
+    buildBundleStepSkips: Number(runtime.buildBundleStepSkips || 0),
+    optionsOperations: {
+      settingsLoadMs: Number(OPTIONS_PERFORMANCE.loadMs || 0),
+      maxStorageReadMs: Number(OPTIONS_PERFORMANCE.storageReadMaxMs || 0),
+      maxStorageWriteMs: Number(OPTIONS_PERFORMANCE.storageWriteMaxMs || 0),
+      bulkDislikeAvgBotMs: Number(OPTIONS_PERFORMANCE.bulkDislikeLastRun?.avgBotMs || 0),
+      bulkDislikeBots: Number(OPTIONS_PERFORMANCE.bulkDislikeLastRun?.bots || 0),
+      managerRenderMaxMs: Object.fromEntries(Object.entries(OPTIONS_PERFORMANCE.managerRenders || {})
+        .map(([key, sample]) => [key, Number(sample.maxMs || 0)]))
+    }
   };
 }
 
@@ -65,7 +74,7 @@ function percentChange(current, baseline) {
 async function comparePerformanceBaseline({ returnText = false } = {}) {
   const result = await storageGet([PERFORMANCE_BASELINE_KEY]);
   const baseline = result[PERFORMANCE_BASELINE_KEY];
-  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const context = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
   if (!baseline || !context?.pageDiagnostics) {
     const text = !baseline ? "No performance baseline saved yet." : "No reachable source SpicyChat tab for comparison.";
     if (!returnText) { const status = $("controlSupportStatus"); if (status) status.textContent = text; }
@@ -106,6 +115,24 @@ async function comparePerformanceBaseline({ returnText = false } = {}) {
     const before = perMinute(baseline[key], baselineSeconds);
     const after = perMinute(current[key], currentSeconds);
     lines.push(`${label}: ${before.toFixed(1)} → ${after.toFixed(1)} (${percentChange(after, before)})`);
+  }
+  // Per-operation numbers are shown only when both recordings observed that
+  // operation. Unlike session totals they need no duration normalization.
+  const operationLabels = [
+    ["Settings load", "settingsLoadMs"],
+    ["Slowest storage read", "maxStorageReadMs"],
+    ["Slowest storage write", "maxStorageWriteMs"],
+    ["Bulk Dislike average/bot", "bulkDislikeAvgBotMs"]
+  ];
+  for (const [label, key] of operationLabels) {
+    const before = Number(baseline.optionsOperations?.[key] || 0);
+    const after = Number(current.optionsOperations?.[key] || 0);
+    if (before > 0 && after > 0) lines.push(`${label}: ${Math.round(before)}ms → ${Math.round(after)}ms (${percentChange(after, before)})`);
+  }
+  for (const [key, beforeRaw] of Object.entries(baseline.optionsOperations?.managerRenderMaxMs || {})) {
+    const before = Number(beforeRaw || 0);
+    const after = Number(current.optionsOperations?.managerRenderMaxMs?.[key] || 0);
+    if (before > 0 && after > 0) lines.push(`Manager ${key} max render: ${Math.round(before)}ms → ${Math.round(after)}ms (${percentChange(after, before)})`);
   }
   const heading = `Baseline saved ${new Date(Number(baseline.savedAt || 0)).toLocaleString()} · ${baseline.pageFamily} · ${Math.round(baselineSeconds)}s vs ${Math.round(currentSeconds)}s`;
   if (returnText) return [heading, ...lines].join("\n");
@@ -235,7 +262,7 @@ async function requestAndroidSupportFile(text, filename) {
         const response = await Promise.race([
           Promise.resolve().then(() => bridge.callHandler(handler, JSON.stringify(payload)))
             .then(value => ({ value }), error => ({ error })),
-          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 25000); })
+          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 10000); })
         ]);
         clearTimeout(timer);
         if (response.timedOut) return false;
@@ -442,7 +469,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   // section because one large/local store stalls after an extension restart.
   const [resultValue, context, bytesValue, largeStatsValue, recoverySnapshotMeta] = await Promise.all([
     promiseWithValueTimeout(storageGet(diagnosticStorageKeys), 3500, null),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
     promiseWithValueTimeout(storageBytesInUse(null), 2000, null),
     promiseWithValueTimeout(readLargeStorageStats(), 2500, null),
     promiseWithValueTimeout(readRecoverySnapshotMeta(), 2000, null)
@@ -474,6 +501,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
+    ...(context?.probe ? [`Runtime check: ${Number(context.probe.pingsAnswered || 0)}/${Number(context.probe.tabsPinged || 0)} tab pings answered; lightweight runtime ${context.probe.lightRuntimeAnswered ? "answered" : "unavailable"}; full snapshot ${context.probe.snapshotsAnswered ? "answered" : "unavailable"}.` ] : []),
+    (() => { const q = context?.probe; return q ? `Runtime probe: ping ${Number(q.pingsAnswered || 0)}/${Number(q.tabsPinged || 0)} replied; snapshots ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} replied; ${Number(q.tabsFlaggedStale || 0)} stale-marked and ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no result"; })(),
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
     (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; const rulebooks = caps.rulebooks && caps.rulebooks !== "unknown" ? `; Rulebooks ${caps.rulebooks}` : ""; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}${rulebooks}`; })(),
@@ -507,7 +536,15 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Generation profiles: ${countStoreItems(result[GENERATION_PROFILES_KEY], "profiles")}`,
     `Smart filter presets: ${normalizeSmartFilterPresets(result[SMART_FILTER_PRESETS_KEY]).length}; pinned: ${normalizeSmartFilterPins(result[SMART_FILTER_PINNED_KEY], result[SMART_FILTER_PRESETS_KEY]).length}`,
     `Editor draft snapshots: ${Object.values(normalizeBotEditorDraftHistory(result[BOT_EDITOR_DRAFT_HISTORY_KEY]).entries).reduce((n, list) => n + list.length, 0)}`,
-    `Message bookmarks: ${Object.values(result[CHAT_BOOKMARKS_KEY] || {}).reduce((n, chat) => n + (Array.isArray(chat?.entries) ? chat.entries.length : 0), 0)}`,
+    ...(() => {
+      const values = Object.values(result[CHAT_BOOKMARKS_KEY] || {}).filter(chat => Array.isArray(chat?.entries) && chat.entries.length);
+      const total = values.reduce((n, chat) => n + chat.entries.length, 0);
+      const live = context?.runtimeAvailable ? context?.pageDiagnostics?.runtimePerformance : null;
+      const current = Number(live?.bookmarkCurrentChatCount);
+      const currentText = Number.isFinite(current) && current >= 0 && live?.bookmarkCurrentChatCount !== undefined
+        ? String(current) : "unavailable (no confirmed current-chat bookmark scope)";
+      return [`Message bookmarks: ${total} across ${values.length} chats; current chat: ${currentText}`];
+    })(),
     `Enabled optional features: ${enabledFeatures.length} of ${OPTIONAL_FEATURE_KEYS.length} available; ${supportFeatureCounts(enabledFeatures)}`,
     ...(supportIncludeFeatureNames() ? [`Enabled feature names (explicit opt-in): ${enabledFeatures.join(", ") || "none"}`] : []),
     ...(partialSources.length ? [`Partial diagnostics: ${partialSources.join(", ")} timed out or were unavailable; the rest of this section is still valid.`] : [])
@@ -623,7 +660,11 @@ function formatChatVisibilityStatus(v) {
     `${Number(v.transparent || 0)} transparent`,
     `${folded} intentionally folded by QoL`
   ];
-  return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}. This checks layout only, not whether chat text was deleted.`;
+  const source = v.hiddenSource;
+  const sourceText = source ? `; first hidden element ${source.tag || "element"} (${source.property || source.cause || "unknown"}, ${Number(source.ancestorDepth || 0)} levels above message); source ${source.sourceHint || "unknown"}; rule ${source.selectorHint || "unknown"}${source.qolHideReason ? `; QoL hide reason ${source.qolHideReason}` : ""}${Array.isArray(source.classes) && source.classes.length ? `; classes ${source.classes.join(", ")}` : ""}` : "";
+  const last = v.recentForegroundEvent;
+  const historyText = last ? `; foreground visibility alerts ${Number(last.count || 0)}; latest ${new Date(Number(last.lastAt || 0)).toISOString()} during ${last.trigger || "unknown"} (generation ${last.generation || "unknown"}), ${Number(last.mounted || 0)} mounted, ${Number(last.hidden || 0)}/${Number(last.inspected || 0)} hidden; latest style ${last.hiddenSource?.property || "unknown"} from ${last.hiddenSource?.sourceHint || "unknown"}, rule ${last.hiddenSource?.selectorHint || "unknown"}; QoL display features enabled: ${Array.isArray(last.activeQolDisplayFeatures) && last.activeQolDisplayFeatures.length ? last.activeQolDisplayFeatures.join(", ") : "none"}` : "; no sustained foreground hide captured";
+  return `Current chat DOM: ${mounted} mounted; ${hidden}/${checked} recent messages not rendered (${details.join(", ")}); source tab ${v.sourceTabVisible === false ? "in background" : v.sourceTabVisible === true ? "visible" : "visibility unknown"}; chat performance CSS ${v.performanceMode ? "on" : "off"}; composer present ${v.composerPresent ? "yes" : "no"}${sourceText}${historyText}. This checks layout only, not whether chat text was deleted.`;
 }
 
 function performanceWarningLines(context, settings) {
@@ -637,6 +678,10 @@ function performanceWarningLines(context, settings) {
     else if (max >= 250) lines.push(`Slow QoL step: ${entry.name} max ${max} ms.`);
   }
   const visibility = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
+  if (visibility?.recentForegroundEvent?.lastAt) {
+    const event = visibility.recentForegroundEvent;
+    lines.push(`Chat display warning: QoL saw ${Number(event.hidden || 0)} of ${Number(event.inspected || 0)} sampled message containers hidden in a foreground chat during ${event.trigger || "unknown"}. The messages were still mounted. Cause is not established; inspect the Current chat DOM line for CSS clues.`);
+  }
   if (visibility && Number(visibility.inspected || 0) >= 2 &&
       Number(visibility.hidden || 0) === Number(visibility.inspected || 0) &&
       Number(visibility.qolFolded || 0) === 0) {
@@ -661,7 +706,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   if (status && !returnOnly) status.textContent = "Building performance report...";
   const [stored, context, liveTabValue] = await Promise.all([
     storageGet(["settings", "cardTokenFetchDiagnosticsV1", AUTO_AFK_STATUS_KEY]),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500),
+    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
     runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1500)
   ]);
   const liveTabSummary = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
@@ -672,7 +717,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   const perf = Array.isArray(context?.pageDiagnostics?.performance) ? context.pageDiagnostics.performance.slice(0, 20) : [];
   const env = context?.pageDiagnostics?.androidEnvironment || detectSettingsEnvironment();
   const warnings = runtimeAvailable ? performanceWarningLines(context, settings)
-    : ["No SpicyChat QoL runtime replied. Page performance counters below are unavailable, not zero measurements; reload the affected tab after updating QoL."];
+    : [`QoL runtime snapshot unavailable (${context?.runtimeStatus || "diagnostic-request-timeout"}). Page counters are unavailable, not zero measurements. ${context?.runtimeError || "Retry after reloading the affected SpicyChat tab."}`];
   const sampleContext = context?.pageDiagnostics?.runtimeContext || {};
   const backgroundSample = runtimeAvailable && sampleContext.visibilityState === "hidden";
   const sampledPath = String(context?.url || "").replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/, 1)[0];
@@ -691,7 +736,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
-    `Runtime data: ${runtimeAvailable ? "available" : "unavailable — no open SpicyChat tab responded; Options-page measurements below are still valid"}`,
+    `Runtime data: ${runtimeAvailable ? "available" : `unavailable — ${context?.runtimeStatus || "snapshot-request-timeout"}; Options-page measurements below are still valid`}`,
+    (() => { const q = context?.probe; return q ? `Runtime probe: ${Number(q.tabsPinged || 0)}/${Number(q.tabsFound || 0)} tabs pinged; ${Number(q.pingsAnswered || 0)} replies; lightweight runtime ${q.lightRuntimeAnswered ? "answered" : "unavailable"}; ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} full snapshots; ${Number(q.tabsFlaggedStale || 0)} stale-marked, ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no results received"; })(),
     `Sample scope: ${sampleScope}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}; operation markers ${Number(p.counters?.operationsStarted || 0)}/${Number(p.counters?.operationsEnded || 0)}; network markers ${Number(p.counters?.networkStarted || 0)}/${Number(p.counters?.networkEnded || 0)}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable"; })(),
     `Environment: Android ${env.android ? "yes" : "no"}; WebView ${env.webview ? "yes" : "no"}; installed/standalone ${env.installedApp ? `yes (${env.displayMode || "standalone"})` : "no"}; Firefox-family ${env.firefox || env.waterfox ? "yes" : "no"}; Opera ${env.opera ? "yes" : "no"}`,
@@ -702,14 +748,18 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Performance controls: large-chat auto ${settings.autoPerformanceLargeChats ? "on" : "off"} @ ${Number(settings.largeChatPerformanceThreshold || 300)} messages; defer while typing ${settings.deferQolWhileTyping ? "on" : "off"}; edit quieting ${settings.pauseQolWhileMessageEditing !== false ? "on" : "off"}; hidden-tab pause ${settings.pauseQolInHiddenTabs ? "on" : "off"}; desktop-app guard ${settings.desktopAppPerformanceGuard !== false ? "on" : "off"}; disabled-feature deep sleep always on; reduced QoL animations ${settings.reduceQolAnimations ? "on" : "off"}`,
     (() => { const a = liveTabSummary || stored[AUTO_AFK_STATUS_KEY] || {}; const source = liveTabSummary ? "live" : (a.at ? "last scan" : "unavailable"); return `SpicyChat tabs (${source}): ${Number(a.totalSpicyTabs || 0)} total; ${Number(a.loadedNormal || 0)} normal loaded; ${Number(a.discardedNormal || 0)} normal unloaded; ${Number(a.workerTabs || 0)} workers (${Number(a.loadedWorkers || 0)} loaded); PC protection ${settings.lowMemoryProtectionEnabled ? `on, limit ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))}` : "off"}`; })(),
     `Loaded chat messages: ${Number(runtime.loadedChatMessages || 0)}`,
-    `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages`,
+    `Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages; ${Number(runtime.preventedChatContainerHides || 0)} unsafe QoL hides prevented`,
     (() => { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility; return formatChatVisibilityStatus(v); })(),
     ...((settings.performanceDiagnostics && Array.isArray(context?.pageDiagnostics?.slowFeatureSamples))
       ? context.pageDiagnostics.slowFeatureSamples.slice(-30).map(item => `Slow QoL step: ${String(item.feature || "unknown").slice(0,90)} ${Number(item.durationMs || 0).toFixed(1)} ms on ${String(item.route || "").slice(0,90)} (${new Date(Number(item.at || Date.now())).toISOString()})`)
       : []),
     `Scheduler: plan ${runtime.currentRuntimePlan || "unknown"}; ${Number(runtime.schedules || 0)} scheduling requests (not completed passes); ${Number(runtime.messageLaneSchedules || 0)} message-lane schedule requests; ${Number(runtime.messageLaneScheduleCoalesced || 0)} duplicate requests coalesced; ${Number(runtime.messageLaneRuns || 0)} runs; ${Number(runtime.messageLaneDirtyRoots || 0)} dirty roots; ${Number(runtime.disabledFeatureStepSkips || 0)} disabled-feature steps skipped; ${Number(runtime.routeFeatureStepSkips || 0)} off-route feature steps skipped; ${Number(runtime.buildBundleStepSkips || 0)} omitted-bundle steps skipped; ${Number(runtime.runtimeKernelRuns || 0)} kernel-dispatched feature runs; ${Number(runtime.runtimePlanCacheHits || 0)} runtime-plan cache hits; ${Number(runtime.typingDeferrals || 0)} typing deferrals; ${Number(runtime.deferredWhileScrolling || 0)} scroll deferrals; ${Number(runtime.desktopAppGuardDelays || 0)} installed-app delays; ${Number(runtime.quickPanelStateSkips || 0)} unchanged Mini Panel refreshes skipped; ${Number(runtime.quickPanelLayoutSkips || 0)} unchanged Mini Panel layouts skipped; ${Number(runtime.quickPanelUpdateCoalesced || 0)} rapid Mini Panel refreshes coalesced`,
-    `Android QoL pacing: ${env.android ? "active" : "not Android"}; ${Number(runtime.androidMessageLaneDeferrals || 0)} delayed message updates; ${Number(runtime.androidRuntimeDeferrals || 0)} delayed maintenance passes. These counts are scheduling changes, not measured UI lag.`,
+    `Android QoL pacing: ${env.android ? "active" : "not Android"}; ${Number(runtime.androidMessageLaneDeferrals || 0)} delayed message updates; ${Number(runtime.androidRuntimeDeferrals || 0)} delayed maintenance passes; ${Number(runtime.androidPostStallQuietWindows || 0)} post-stall quiet windows (last observed ${Number(runtime.androidPostStallLastMs || 0)} ms). These counts are scheduling changes, not proof of the stall cause.`,
     `Message decoration: ${Number(runtime.messageLaneChunkedPasses || 0)} chunked passes; ${Number(runtime.messageLaneChunkedRoots || 0)} roots processed in chunks; ${Number(runtime.messageLaneDeferredRoots || 0)} older roots deferred; ${Number(runtime.messageEnhancerIncrementalLanePasses || 0)} lane-only enhancer passes; ${Number(runtime.criticalMessageEnhancerPassesDeferred || 0)} critical full-message passes deferred; Mini Panel render-quiet deferrals ${Number(runtime.quickPanelRenderQuietDeferrals || 0)}`,
+    ...(runtimeAvailable ? [
+      `Message remount guard: ${Number(runtime.messageDetachedMutationSkips || 0)} detached mutation nodes excluded from text-cache work; ${Number(runtime.messageMutationTextRoots || 0)} text-changed roots vs ${Number(runtime.messageMutationNonTextRoots || 0)} other message-root changes; ${Number(runtime.messageCacheDetachedSkips || 0)} detached invalidations skipped (sampled tab only)`,
+      `Rulebook Explore QoL work: ${Number(runtime.rulebookExploreScans || 0)} scans / ${Number(runtime.rulebookExploreCardsChecked || 0)} cards checked; ${Number(runtime.rulebookExploreUnchangedPassesSkipped || 0)} unchanged passes skipped; worst scan ${Number(runtime.rulebookExploreWorstScanMs || 0)} ms (sampled tab only)`
+    ] : []),
     `Storage write batching: ${Number(runtime.storageWriteRequests || 0)} save requests → ${Number(runtime.storageWriteBatches || 0)} browser writes; ${Number(runtime.storageWriteMergedKeys || 0)} same-key writes merged; ${Number(runtime.storageWriteImmediateFlushes || 0)} immediate flushes`,
     `Mutations: ${Number(runtime.mutations || 0)} total in ${Number(runtime.observerBatches || 0)} observer batches; ${Number(runtime.chatLocalMutations || 0)} chat-local; ${Number(runtime.composerOnlyMutationSkips || 0)} composer-only skipped; ${Number(runtime.qolOnlyMutations || 0)} QoL-owned ignored (${Number(runtime.observerQolOnlyBatches || 0)} pure + ${Number(runtime.observerMixedQolBatches || 0)} mixed batches)`,
     `Message edit guard: ${Number(runtime.messageEditGuardsStarted || 0)} started; ${Number(runtime.messageEditGuardsSettled || 0)} settled; ${Number(runtime.messageEditMutationSkips || 0)} edit mutations skipped; ${Number(runtime.messageEditLaneSkips || 0)} lane runs skipped; ${Number(runtime.messageEditCriticalSkips || 0)} critical runs skipped`,
@@ -775,11 +825,12 @@ async function buildPerformanceSelfCheckText() {
   const started = performance.now();
   const readStarted = performance.now();
   const readPromise = storageGetChecked(["settings"]).then(read => ({ read, storageMs: performance.now() - readStarted }));
-  const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3000);
+  const contextPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
   const [{ read, storageMs }, context] = await Promise.all([readPromise, contextPromise]);
   const settings = { ...DEFAULT_SETTINGS, ...(read.data?.settings || {}) };
+  const liveRuntimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const warnings = performanceWarningLines(context, settings);
-  if (!context?.pageDiagnostics) warnings.push("SpicyChat's QoL runtime did not answer. Page-specific performance checks were unavailable; reload the affected SpicyChat tab and try again.");
+  if (!liveRuntimeAvailable) warnings.push(`A live SpicyChat QoL runtime snapshot was unavailable (${context?.runtimeStatus || "timed-out"}). Current page timings could not be confirmed; a diagnostic timeout alone does not show that QoL is disabled.`);
   if (storageMs >= 350) warnings.push(`Settings storage took ${storageMs.toFixed(0)} ms to respond. This is a measured delay, not proof that QoL caused the slowdown.`);
   const total = performance.now() - started;
   const domNodes = document.getElementsByTagName("*").length;
@@ -794,7 +845,7 @@ async function buildPerformanceSelfCheckText() {
     `Self-check total: ${total.toFixed(1)} ms`,
     `Settings storage read: ${storageMs.toFixed(1)} ms${read.ok ? "" : ` (failed: ${read.error || "unknown error"})`}`,
     `Settings DOM: ${domNodes} nodes`,
-    `Source SpicyChat tab: ${context?.pageDiagnostics ? "reachable" : "unavailable"}`,
+    `Source SpicyChat runtime: ${liveRuntimeAvailable ? "reachable" : "unavailable (historical or cached context may be shown)"}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension: ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` (${p.inspectorVersion})` : ""}` : "not paired"}; protocol v${Number(p.protocolVersion || 1)}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension: protocol unavailable"; })(),
     `Warnings: ${warnings.length}`,
     ...warnings.map(line => `  ! ${line}`)
@@ -845,7 +896,7 @@ async function buildFastSupportSnapshot() {
 // updates. This is not a copy of chat messages or the full Settings database.
 async function readSavedSupportHistory({ summaryOnly = false } = {}) {
   const timeoutMs = summaryOnly ? (isAndroidSupportWebView() ? 5500 : 12000)
-    : (isAndroidSupportWebView() ? 12000 : 45000);
+    : (isAndroidSupportWebView() ? 4000 : 45000);
   const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, timeoutMs).catch(() => null);
   const error = String(result?.error || (result?.__dsTimeout ? "The history lookup timed out." : "Support history could not be checked.")).slice(0, 180);
   return result?.ok ? result : { ok: false, text: error, count: 0, through: 0 };
@@ -875,18 +926,18 @@ async function clearSavedSupportHistory() {
 // Download verification is deliberately separate from starting a download. A
 // clicked <a download> cannot prove that the browser actually saved a file.
 async function downloadSupportVerified(text, compressed) {
+  // Android's bridge only accepts text. Do not allocate/serialize/compress a
+  // second copy of the report on the WebView main thread before exporting it.
+  if (isAndroidSupportWebView()) {
+    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
+    return { started, verified: false, isGzip: false };
+  }
   const raw = compressed && typeof CompressionStream === "function"
     ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
     : new Blob([text], { type: "text/plain;charset=utf-8" });
   const isGzip = compressed && raw.type !== "text/plain;charset=utf-8";
   if (!raw.size) throw new Error("The generated support file was empty.");
   const filename = isGzip ? supportReportFilename("support-info").replace(/\.txt$/, ".txt.gz") : supportReportFilename("support-info");
-  if (isAndroidSupportWebView()) {
-    // Do not send compressed blobs to text-only Android export handlers.
-    // The report remains available for copying even if the APK cannot save it.
-    const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
-    return { started, verified: false, isGzip: false };
-  }
   let permission = false;
   try { permission = !!chrome.downloads?.download && !!chrome.downloads?.onChanged &&
     await new Promise(resolve => chrome.permissions.contains({ permissions: ["downloads"] }, allowed =>
@@ -942,9 +993,9 @@ async function downloadSupportVerified(text, compressed) {
   return { started, verified: false, isGzip: false };
 }
 
-async function buildAllSupportInfo({ history = null } = {}) {
+async function buildAllSupportInfo({ history = null, historyPromise: suppliedHistoryPromise = null } = {}) {
   return withSharedSupportRuntimeSnapshot(async () => {
-  const historyPromise = history ? Promise.resolve(history) : readSavedSupportHistory();
+  const historyPromise = suppliedHistoryPromise || (history ? Promise.resolve(history) : readSavedSupportHistory());
   const sectionTimeoutMs = 7000;
   const timed = (promise, label) => promiseWithSupportTimeout(
     promise,
@@ -1044,9 +1095,12 @@ async function downloadAllSupportInfo() {
     // Capture the checkpoint before building. A later sample must survive.
     // A slow/corrupt history archive must not prevent a new current report.
     // Its error is written into the report, and no history is deleted.
-    const history = await readSavedSupportHistory();
-    const text = await buildAllSupportInfo({ history });
-    const compressed = new TextEncoder().encode(text).byteLength > 256 * 1024;
+    const historyPromise = readSavedSupportHistory();
+    // Build all sections while the history request is running. Waiting for
+    // Android's often-unreachable background first made a simple export stall.
+    const text = await buildAllSupportInfo({ historyPromise });
+    const history = await historyPromise;
+    const compressed = !isAndroidSupportWebView() && new TextEncoder().encode(text).byteLength > 256 * 1024;
     const saved = await downloadSupportVerified(text, compressed);
     if (!saved.started) {
       if (status) status.textContent = isAndroidSupportWebView()
@@ -1130,7 +1184,7 @@ async function refreshPerformanceTroubleshooter() {
   const output = $("performanceTroubleshooterResults");
   if (!output) return;
   output.textContent = "Reading local feature timings…";
-  const response = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, 3500).catch(() => null);
+  const response = await runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()).catch(() => null);
   const runtime = response?.pageDiagnostics;
   if (!runtime || response?.runtimeAvailable === false) {
     output.textContent = "No responsive SpicyChat page was found. Open a chat with QoL enabled, then try again. Android WebView may not expose this runtime to Settings; use Copy all support info in that case.";

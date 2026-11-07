@@ -16,6 +16,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   let observer = null;
   let detectionTimer = null;
+  let detectionDeadlineTimer = null;
+  let detectionAttemptFinished = false;
   let presenceSaved = false;
 
   function metadataRequested(settings) {
@@ -35,6 +37,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "#sai-toolkit-button-css",
       "[id^='sai-toolkit-']",
       ".sai-wysiwyg-editor",
+      ".generation-stats[data-version-id]",
+      "#profile-controls",
+      "#profile-controls-placeholder",
       "button[aria-label='SAI-Toolkit-button']",
       ".toolkit-button-text"
     ].join(", "));
@@ -59,7 +64,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     window.__DSQ_SAI_TOOLKIT_DETECTED__ = detected;
 
     const settings = DS.state?.settings || {};
-    const metadataEnabled = !!settings.enabled && metadataRequested(settings) && !(settings.saiToolkitCompatibility !== false && detected);
+    // Toolkit owns the overlapping generation-stat display. QoL may still
+    // capture metadata for its *separate* optional context window warning.
+    const captureForContext = settings.enableContextWindowWarning === true || settings.nativeMemoryQualityProbe === true;
+    const metadataEnabled = !!settings.enabled && (metadataRequested(settings) || captureForContext) &&
+      (!(settings.saiToolkitCompatibility !== false && detected) || captureForContext);
     try { window.__DSQ_SET_GENERATION_METADATA_ENABLED__?.(metadataEnabled); } catch {}
 
     if (detected && persist) {
@@ -84,25 +93,50 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       catch { return false; }
     }
 
+    // Toolkit's old Generation Profiles controls are now optional legacy UI.
+    // Only yield when they are actually on screen, rather than hiding QoL's
+    // independent optional controls merely because Toolkit is installed.
+    if (name === "generation-profiles") {
+      return !!document.querySelector("#profile-controls, #profile-controls-placeholder");
+    }
+
     return true;
   };
 
-  DS.startSaiToolkitDetection = function startSaiToolkitDetection() {
-    if (DS.detectSaiToolkit?.({ persist: true })) return;
-    if (observer || !document.documentElement) return;
+  function stopSaiToolkitDetection() {
+    observer?.disconnect();
+    observer = null;
+    clearTimeout(detectionTimer);
+    clearTimeout(detectionDeadlineTimer);
+    detectionTimer = null;
+    detectionDeadlineTimer = null;
+  }
 
+  DS.startSaiToolkitDetection = function startSaiToolkitDetection() {
+    if (DS.detectSaiToolkit?.({ persist: true })) {
+      stopSaiToolkitDetection();
+      return;
+    }
+    if (observer || detectionAttemptFinished || !document.documentElement) return;
+
+    // Toolkit may insert its controls after QoL loads. Listen only briefly:
+    // never leave a whole-page observer active when Toolkit isn't installed.
     observer = new MutationObserver(() => {
-      clearTimeout(detectionTimer);
+      if (detectionTimer) return;
       detectionTimer = setTimeout(() => {
+        detectionTimer = null;
         if (!DS.detectSaiToolkit?.({ persist: true })) return;
-        observer?.disconnect();
-        observer = null;
+        stopSaiToolkitDetection();
         DS.scheduleRun?.({ priority: "critical", source: "sai-toolkit-detected" });
         DS.scheduleRun?.({ priority: "slow", source: "sai-toolkit-detected" });
       }, 180);
     });
 
     observer.observe(document.documentElement, { childList: true, subtree: true });
+    detectionDeadlineTimer = setTimeout(() => {
+      detectionAttemptFinished = true;
+      stopSaiToolkitDetection();
+    }, 8000);
   };
 
   DS.SAI_TOOLKIT_PRESENCE_KEY = PRESENCE_KEY;

@@ -36,7 +36,7 @@
 <span aria-hidden="true">⌕</span><strong>Find a feature</strong><span class="settings-search-chevron" aria-hidden="true">⌄</span>
 </button>
 <div class="settings-search-body" id="settingsSearchBody" hidden>
-<div class="settings-search-head"><span class="hint">Search named QoL features. Press Enter to open the top result.</span></div>
+<div class="settings-search-head"><span class="hint">Search QoL features or individual controls. Press Enter to open the top match.</span></div>
 <input autocomplete="off" id="settingsSearch" placeholder="Find a feature: OOC, Bot Organizer, Card filters..." type="search"/>
 <div class="settings-quick-nav">
 <select id="settingsPinnedSections" aria-label="Pinned Settings sections"><option value="">Pinned sections…</option></select>
@@ -409,6 +409,9 @@
 <label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable conversation list tools</span></label>
 <label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable conversation folders and bulk organizing</span></label>
 <div id="ds-feature-panel-chat-pins" data-dsq-feature-panel="chat-pins"></div>
+<label class="row"><input id="chatListTwoColumns" type="checkbox"/><span>Show conversations in two columns on wide screens</span></label>
+<label class="row"><input id="chatListPopoutShortcut" type="checkbox"/><span>Add an Open window button to conversation cards</span></label>
+<label class="row"><input id="chatListRenameShortcut" type="checkbox"/><span>Add a quick Rename button to conversation cards (uses SpicyChat)</span></label>
 <div id="ds-feature-panel-chat-smart-folders" data-dsq-feature-panel="chat-smart-folders"></div>
 <label>Conversation folders<textarea id="chatCollections" placeholder="Favorites
 Long chats
@@ -1852,6 +1855,13 @@ Testing" spellcheck="false"></textarea></label>
 </section>
 </div>
 <div class="tab-page" data-page="chat-ui"><p class="page-intro">Controls used inside an open conversation: top-bar tools, search, bookmarks, navigation, message actions, export, and text display helpers.</p>
+<section class="card" id="qol72ChatShortcuts"><h2>Optional chat shortcuts</h2>
+<label class="row"><input id="chatAlwaysShowProfileLink" type="checkbox"/><span>Always show a Profile button in chats</span></label>
+<label class="row"><input id="chatJumpToStartShortcut" type="checkbox"/><span>Show a Start button to jump toward the first message</span></label>
+<label class="row"><input id="chatOpenWindowShortcut" type="checkbox"/><span>Show an Open window button for the current chat</span></label>
+<label class="row"><input id="chatGenerationSettingsShortcut" type="checkbox"/><span>Show a Generation Settings shortcut in chats</span></label>
+<p class="hint">Start uses the existing scroll navigation and only loads older messages if you have enabled that option. Opening a window is controlled by the browser.</p>
+</section>
 <div id="ds-feature-panel-chat-topbar" data-dsq-feature-panel="chat-topbar"></div>
 
 <section class="card">
@@ -1968,6 +1978,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <p class="hint">Resend safely puts that old user message back into the composer so you can edit/send it again; it never auto-sends. If you already have a draft, QoL asks before replacing it.</p>
 <label class="row"><input id="messageQuickActionConfirmRemoveImage" type="checkbox"/><span>Confirm before removing an uploaded image</span></label>
 <label class="row"><input id="messageQuickActionReport" type="checkbox"/><span>Show Report icon on AI messages</span></label>
+<label class="row"><input id="messageBottomMenuShortcut" type="checkbox"/><span>Add a three-dot message menu beside the bottom message actions</span></label>
+<p class="hint">Uses SpicyChat's normal Edit, Copy and Report actions. The original menu stays available.</p>
 </section>
 <section class="card">
 <h2>Chat export</h2>
@@ -1979,6 +1991,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="chatExportIncludeGenerationDetails" type="checkbox"/><span>Include captured timestamps/model/generation details when available</span></label>
 <label class="row"><input id="chatExportNumberMessages" type="checkbox"/><span>Number exported messages</span></label>
 <label class="row"><input id="chatExportIncludeAvatars" type="checkbox"/><span>Include avatar links in HTML/JSON exports</span></label>
+<label class="row"><input id="chatExportIncludeImageLinks" type="checkbox"/><span>Include message image links when available</span></label>
 <label>Default format<select id="chatExportDefaultFormat"><option value="text">Plain text</option><option value="markdown">Markdown</option><option value="html">HTML archive</option><option value="json">JSON backup</option></select></label>
 <label>Default HTML layout<select id="chatExportHtmlLayout"><option value="bubbles">Match current chat appearance</option><option value="transcript">Clean transcript</option></select></label>
 <p class="hint">Use your current chat’s colors and layout with API-loaded message history, or choose a clean transcript. The slower page fallback is under Advanced.</p>
@@ -2184,6 +2197,8 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <section class="card" id="myCreationsBackupCard">
 <h2>My Creations backup &amp; shortcuts</h2>
 <label class="row"><input id="enableMyCreationsBulkBackup" type="checkbox"/><span>Show bulk backup controls on My Creations</span></label>
+<label class="row"><input id="enableAccountMigrationAssistant" type="checkbox"/><span>Show Account Migration Assistant alongside My Creations backups</span></label>
+<p class="hint">Optionally combine verified chatbot and Lorebook backup ZIPs into one migration package. Import still requires review and saving on the new account. Enable bulk backups above first.</p>
 <p class="hint">Adds Backup all chatbots / Backup all Lorebooks on your My Creations pages. Bulk backup always fetches the current live version from SpicyChat when you start it; local QoL revision/history copies are not used as the source.</p>
 <label class="row"><input id="showMyLorebookEditButtons" type="checkbox"/><span>Show an Edit button on my Lorebook cards</span></label>
 <label class="row"><input id="showMyChatbotEditButtons" type="checkbox"/><span>Show a small Edit button on my Chatbot cards</span></label>
@@ -2234,6 +2249,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="showCardGreetingTokenInfo" type="checkbox"/><span>Show token counts on bot cards</span></label>
 <label class="row"><input id="showExactMessageCounts" type="checkbox"/><span>Show exact message counts on bot cards</span></label>
 <label class="row"><input id="showBotCreationDates" type="checkbox"/><span>Show bot creation dates on bot cards and profiles</span></label>
+<label class="row"><input id="showNewBotBadge" type="checkbox"/><span>Mark bots created in the last 7 days as New (when a real date is available)</span></label>
 <label class="row"><input id="expandBotNamesOnHover" type="checkbox"/><span>Expand cut-off bot names horizontally on hover / tap</span></label>
 <div class="sub-card">
 <strong>Token counts to show</strong>
@@ -2281,7 +2297,7 @@ money =&gt; credits" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately; Less Like and Dislike send coordinated negative feedback without posting twice. Dislike keeps its own cooldown/history. Desktop only.</p>
+<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately. Less Like changes recommendation preferences; Dislike uses the native chat rating controls. Each action keeps its own history. Desktop only.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
@@ -2348,7 +2364,7 @@ step sister" spellcheck="false"></textarea></label>
 </div>
 <div class="button-row">
 <strong>Dislike:</strong>
-<span class="hint">Dislike and Less Like use the same negative recommendation rating. Clearing Dislike history does not undo a Less Like rating or cause another rating request. Confirmed unavailable bots are counted as handled without rating; blocked IDs are preserved. Counts distinguish actual Dislike requests from shared ratings.</span>
+<span class="hint">Dislike counts come from its own history. Native Dislikes are counted as verified only when the chat rating controls confirm them. Unavailable bots are skipped without rating; blocked IDs are preserved.</span>
 <button id="bulkDislikeBlockedBots" type="button">Dislike remaining blocked bots</button>
 <button hidden="" id="resumeBlockedDislikeRun" type="button">Resume unfinished</button>
 <button hidden="" id="retryFailedBlockedDislikes" type="button">Retry last failed</button>
@@ -2436,8 +2452,10 @@ DILF"></textarea></label>
 </section>
 <section class="card">
 <h2>Language filter</h2>
-<p class="hint">Include or exclude selected languages. Unknown-language bots stay visible until a match is reliable.</p>
+<p class="hint">Include or exclude selected languages. Turn on the main bot-card filter to use the optional Lorebook and Rulebook filters below. Uncertain language matches stay visible.</p>
 <label class="row"><input id="enableLanguageFilter" type="checkbox"/><span>Filter bot cards by language</span></label>
+<label class="row"><input id="languageFilterLorebooks" type="checkbox"/><span>Also filter public Lorebooks by language</span></label>
+<label class="row"><input id="languageFilterRulebooks" type="checkbox"/><span>Also filter public Rulebooks by language</span></label>
 <label>Selected-language behavior
 <select id="languageSelectionMode">
 <option value="include">Show only selected languages</option>
@@ -2466,7 +2484,7 @@ DILF"></textarea></label>
 </div>
 <label class="row"><input id="languageAutoDetectUntagged" type="checkbox"/><span>Auto-detect untagged bots from their title + description + greeting when needed</span></label>
 <label class="row"><input id="languageShowDetectedBadge" type="checkbox"/><span>Show a small local “QoL: language” badge on detected cards</span></label>
-<p class="hint">Language detection is local and never edits bot tags. Uncertain matches may use cached public details.</p>
+<p class="hint">Lorebooks and Rulebooks use their visible titles and descriptions with the same language choices. Unknown languages stay visible. Filtering only hides cards on your screen; it never blocks or changes them. Bot detection may also use cached public details.</p>
 <input id="languageFilterMode" type="hidden" value="conservative"/>
 </section>
 <section class="card">
@@ -2561,6 +2579,14 @@ Monster => greeting,scenario: monster girl, beastfolk"></textarea></label>
 <p class="account-sync-status-line"><strong id="accountSyncDeviceLabel">Detecting…</strong><span class="hint" id="accountSyncCapabilitySummary"></span></p>
 <p class="hint">Device ID: <span class="account-sync-device-id" id="accountSyncDeviceId">Preparing…</span></p>
 <div class="button-row"><button id="copyAccountSyncDeviceId" type="button">Copy device ID</button><button id="resetAccountSyncDeviceId" type="button">Reset local device identity</button></div>
+</div>
+<div class="sub-card" id="ds-qol-simple-list-sync">
+<h4>Simple Blocked + Later sync</h4>
+<p class="hint">Link your phone and PC once, then choose how this device should use Blocked and Later. Other settings, chats, pictures and Favorites stay out of sync. Existing bot details remain saved locally.</p>
+<div class="button-row"><button id="accountSyncSimpleTwoWay" type="button">Keep Blocked + Later in sync</button><button id="accountSyncSimpleReceive" type="button">Receive Blocked + Later only</button></div>
+<p class="hint">Changes sync after they settle, with checks about every 6 hours. A linked, unpaused device also syncs immediately after you choose a setup.</p>
+<div class="button-row"><button id="accountSyncCheckBlockedStatus" type="button">Check saved lists and unavailable bots</button></div>
+<div id="accountSyncBlockedStatus" class="hint" role="status">A local check distinguishes confirmed unavailable bots from unchecked ones. Nothing is automatically unblocked or deleted.</div>
 </div>
 <div class="sub-card" id="accountSyncSetup">
 <h3>Set up sync</h3>

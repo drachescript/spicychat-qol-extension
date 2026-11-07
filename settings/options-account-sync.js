@@ -457,6 +457,114 @@ function setupAccountSyncFoundation() {
   for (const [id, direction, includeLater] of phoneListPresets) {
     $(id)?.addEventListener("click", () => void savePhoneListsPreset(direction, includeLater));
   }
+
+  // One-click setup uses the existing cloud sync/merge service, with no new
+  // background polling. Each device must be explicitly linked by the user.
+  async function simpleBlockedLaterSetup(direction) {
+    const status = $("accountSyncActionStatus");
+    const link = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000).catch(() => null);
+    if (!link?.linked) {
+      if (status) status.textContent = "Link this device to your QoL account first, then choose how Blocked + Later should sync.";
+      return;
+    }
+    const prefs = { mode: "off", allowedKeys: [], scopes: [], listModes: {
+      blockedBots: direction, laterBots: direction,
+      favoriteBots: "off", notInterestedBots: "off", openedChats: "off"
+    }};
+    setAccountSyncBusy(true, "Saving Blocked + Later sync choices…");
+    try {
+      const saved = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_SET_DEVICE_PREFS", prefs }, 30000);
+      if (!saved?.ok) {
+        if (status) status.textContent = `Couldn't save the list sync setup: ${saved?.message || saved?.error || "unknown error"}`;
+        return;
+      }
+      accountSyncUserEditing = false;
+      accountSyncSelectedPrefs = saved.prefs;
+      const remote = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
+      const state = normalizeQolSyncState(remote?.state);
+      if (!remote?.linked) {
+        if (status) status.textContent = "List sync choices saved. Link this device to your QoL account to start syncing.";
+      } else if (state.paused) {
+        if (status) status.textContent = "List sync choices saved. Sync is paused on this device; resume it to apply changes.";
+      } else {
+        if (status) status.textContent = "Syncing Blocked + Later with linked devices…";
+        const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_NOW" }, 120000);
+        if (status) status.textContent = result?.ok
+          ? "Blocked + Later sync completed. Changes will also sync automatically."
+          : `List sync choices saved, but the first sync needs a retry: ${result?.message || result?.error || "unknown error"}`;
+      }
+    } catch (error) {
+      if (status) status.textContent = `Blocked + Later sync setup: ${error?.message || String(error)}`;
+    } finally {
+      setAccountSyncBusy(false);
+      await refreshAccountSyncUi({ refreshDevices: false }).catch(() => {});
+    }
+  }
+  $("accountSyncSimpleTwoWay")?.addEventListener("click", () => void simpleBlockedLaterSetup("two-way"));
+  $("accountSyncSimpleReceive")?.addEventListener("click", () => void simpleBlockedLaterSetup("download-only"));
+
+  // Read-only, on-demand status breakdown. "Unavailable" is a historical
+  // verified state, not proof that a bot was deleted; unknown stays unknown.
+  $("accountSyncCheckBlockedStatus")?.addEventListener("click", async () => {
+    const host = $("accountSyncBlockedStatus");
+    if (!host) return;
+    const button = $("accountSyncCheckBlockedStatus");
+    if (button) button.disabled = true;
+    host.textContent = "Checking this device's saved lists…";
+    try {
+      const data = await storageGet(["blockedBots", "laterBots", "botAvailability", "botUnavailableRecovery"]);
+      // Availability may live in the existing large-data IndexedDB store.
+      // Read it on demand; don't run saved-manager cleanup just for a preview.
+      if (typeof readLargeStorageForRequest === "function") {
+        try {
+          const large = await readLargeStorageForRequest([BOT_AVAILABILITY_KEY]);
+          if (large?.[BOT_AVAILABILITY_KEY]?.meta) data.botAvailability = large[BOT_AVAILABILITY_KEY];
+        } catch {} // Keep available legacy data; unknown remains unknown.
+      }
+      const blocked = [...new Set((data.blockedBots?.ids || []).map(id => String(id || "").toLowerCase()).filter(Boolean))];
+      const later = [...new Set((data.laterBots?.ids || []).map(id => String(id || "").toLowerCase()).filter(Boolean))];
+      const checks = data.botAvailability?.meta || {};
+      const recovery = data.botUnavailableRecovery?.meta || {};
+      const totals = { available: 0, unavailable: 0, unknown: 0 };
+      const unavailable = [];
+      let recoveryCount = 0;
+      for (const id of blocked) {
+        const entry = checks[id];
+        if (entry?.status === "available") totals.available++;
+        else if (entry?.status === "unavailable") { totals.unavailable++; unavailable.push({ id, entry }); }
+        else totals.unknown++;
+        if (recovery[id]) recoveryCount++;
+      }
+      host.replaceChildren();
+      const summary = document.createElement("p");
+      summary.textContent = `${blocked.length} blocked bots · ${later.length} Later bots on this device. Blocked availability: ${totals.available} last checked available; ${totals.unavailable} last marked unavailable; ${totals.unknown} not confirmed (unchecked or unknown). ${recoveryCount} blocked bots have saved unavailable-bot recovery records.`;
+      host.append(summary);
+      const note = document.createElement("p");
+      note.textContent = "Unavailable does not necessarily mean deleted or permanently removed. Checking doesn't delete or unblock bots, and metadata stored only on your PC isn't lost when the IDs sync to your phone.";
+      host.append(note);
+      if (unavailable.length) {
+        const details = document.createElement("details");
+        const title = document.createElement("summary");
+        title.textContent = `Review ${unavailable.length} previously unavailable blocked bot${unavailable.length === 1 ? "" : "s"}`;
+        details.append(title);
+        for (const { id, entry } of unavailable.slice(0, 100)) {
+          const p = document.createElement("p");
+          const link = document.createElement("a");
+          link.textContent = String(entry?.name || data.blockedBots?.meta?.[id]?.name || "Open bot profile").slice(0, 100);
+          if (/^[0-9a-f-]{20,80}$/.test(id)) {
+            link.href = `https://spicychat.ai/chatbot/${encodeURIComponent(id)}`;
+            link.target = "_blank"; link.rel = "noopener noreferrer";
+          }
+          p.append(link, document.createTextNode(` · last status unavailable${Number(entry?.checkedAt) ? ` (${new Date(Number(entry.checkedAt)).toLocaleDateString()})` : ""}; recheck before treating as deleted`));
+          details.append(p);
+        }
+        if (unavailable.length > 100) details.append(document.createTextNode(`${unavailable.length - 100} more not displayed.`));
+        host.append(details);
+      }
+    } catch (error) {
+      host.textContent = `Couldn't read saved lists: ${error?.message || String(error)}`;
+    } finally { if (button) button.disabled = false; }
+  });
   $("accountSyncQuickModes")?.addEventListener("click", event => {
     const preset = event.target?.closest?.("[data-sync-preset]")?.dataset?.syncPreset;
     if (!["all-off", "blocked-only", "desktop-upload", "all-two-way"].includes(preset)) return;

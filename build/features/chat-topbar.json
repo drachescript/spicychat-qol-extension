@@ -10,7 +10,11 @@
     "hideChatTopBarContextDot",
     "hideChatTopBarModelButton",
     "hideChatTopBarRatingButton",
-    "showChatTopBarTools"
+    "showChatTopBarTools",
+    "chatAlwaysShowProfileLink",
+    "chatJumpToStartShortcut",
+    "chatOpenWindowShortcut",
+    "chatGenerationSettingsShortcut"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

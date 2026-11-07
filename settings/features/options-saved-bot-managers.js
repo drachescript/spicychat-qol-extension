@@ -282,8 +282,16 @@ function updateBotManagerBulkCount(kind) {
   if (count) count.textContent = `${selected.size} selected`;
 }
 
+// Build the manager snapshot once for bulk actions, rather than recreating a
+// several-thousand-entry array for every selected bot.
+function botManagerEntriesForIds(kind, ids) {
+  const lookup = new Map(botEntriesFromStore(storeForManagerKind(kind), false)
+    .map(entry => [entry.id, entry]));
+  return ids.map(id => lookup.get(id) || { id, name: id });
+}
+
 function botManagerEntryForId(kind, id) {
-  return botEntriesFromStore(storeForManagerKind(kind), false).find(entry => entry.id === id) || { id, name: id };
+  return botManagerEntriesForIds(kind, [id])[0];
 }
 
 function ensureOrganizerMetaForEntry(entry) {
@@ -362,7 +370,7 @@ async function applyBlockedBotBulkAction() {
   const action = String(actionSelect?.value || "");
   if (!action) { showSettingsToast("Choose a bulk action first."); return; }
   const selected = botManagerBulkSet("blocked");
-  const entries = [...selected].map(id => botManagerEntryForId("blocked", id)).filter(entry => entry.id);
+  const entries = botManagerEntriesForIds("blocked", [...selected]).filter(entry => entry.id);
   if (!entries.length) { showSettingsToast("Select at least one blocked bot first."); return; }
 
   if (action === "copy-links") {
@@ -404,7 +412,7 @@ async function applyBotManagerBulkAction(kind) {
   }
 
   const selected = botManagerBulkSet(kind);
-  const entries = [...selected].map(id => botManagerEntryForId(kind, id)).filter(entry => entry.id);
+  const entries = botManagerEntriesForIds(kind, [...selected]).filter(entry => entry.id);
   if (!entries.length) {
     showSettingsToast("Select at least one saved bot first.");
     return;

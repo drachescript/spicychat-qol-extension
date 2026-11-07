@@ -193,7 +193,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function restoreLorebookHides() {
-    document.querySelectorAll("[data-ds-reason^='lorebook:block']").forEach(el => DS.unhideElement?.(el));
+    document.querySelectorAll("[data-ds-reason^='lorebook:block'], [data-ds-reason^='lorebook:language:']").forEach(el => DS.unhideElement?.(el));
   }
 
   async function explicitlyBlock(meta, card) {
@@ -354,7 +354,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       || settings.showLorebookBlockButtons === true
       || settings.lorebookTrackHistory === true
       || settings.lorebookExpandTags === true
-      || list(settings.lorebookBlockedIds).length > 0;
+      || list(settings.lorebookBlockedIds).length > 0
+      || (settings.enableLanguageFilter === true && settings.languageFilterLorebooks === true && DS.isPublicLorebookExplorePage?.());
     if (!active) {
       restoreLorebookHides();
       document.querySelectorAll(".ds-lorebook-block-button").forEach(el => el.remove());
@@ -376,7 +377,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const currentId = currentLorebookId();
-    await loadExisting([...unique.map(item => item.id), ...(currentId ? [currentId] : [])]);
+    // Language-only browsing needs no status/history reads from IndexedDB.
+    if (settings.lorebookTrackHistory === true || settings.lorebookBlockingEnabled === true || settings.showLorebookBlockButtons === true) {
+      await loadExisting([...unique.map(item => item.id), ...(currentId ? [currentId] : [])]);
+    }
     const processedItems = [];
     for (const item of unique) {
       const meta = cardMeta(item.card, item.anchor);
@@ -386,8 +390,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ensureBlockButton(item.card, item.anchor, meta, settings);
       const target = hideTarget(item.card);
       const reason = settings.lorebookBlockingEnabled === true ? blockReason(meta, settings) : "";
+      const language = !reason && DS.isPublicLorebookExplorePage?.()
+        ? DS.getPublicListingLanguageHideReason?.(meta, "lorebook") || "" : "";
+      const currentReason = String(target?.dataset?.dsReason || "");
       if (reason) DS.hideElement?.(target, `lorebook:block:${reason}`);
-      else if (String(target?.dataset?.dsReason || "").startsWith("lorebook:block")) DS.unhideElement?.(target);
+      else if (language) {
+        if (!currentReason || currentReason.startsWith("lorebook:")) DS.hideElement?.(target, `lorebook:language:${language}`);
+      } else if (currentReason.startsWith("lorebook:block") || currentReason.startsWith("lorebook:language:")) DS.unhideElement?.(target);
       processedItems.push({ ...item, meta });
     }
 
@@ -406,7 +415,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
-    await hydrateMissingTags(processedItems, settings);
+    if (settings.lorebookBlockingEnabled === true) await hydrateMissingTags(processedItems, settings);
     await DS.applyLorebookTagExpansion?.();
   };
 

@@ -8,7 +8,7 @@ function qolDiagnosticLevelRank(level) {
 }
 
 function qolDiagnosticSensitiveKey(key = "") {
-  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html)/i.test(String(key || ""));
+  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
 }
 
 function qolDiagnosticFingerprint(value) {
@@ -22,6 +22,11 @@ function qolDiagnosticFingerprint(value) {
 }
 
 function qolDiagnosticSafe(value, depth = 0, keyHint = "") {
+  // Do not export deterministic hashes of API keys. This only protects data
+  // emitted by QoL; Inspector's own network recorder requires its own fix.
+  if (/(typesense|search.?key|api.?key|client.?key|private.?key|authorization|cookie|token|secret|password|webhook)/i.test(String(keyHint || ""))) {
+    return { redacted: true };
+  }
   if (qolDiagnosticSensitiveKey(keyHint)) {
     if (typeof value === "string") return { changed: true, chars: value.length, fingerprint: `fnv1a-${qolDiagnosticFingerprint(value)}` };
     if (Array.isArray(value)) return { changed: true, count: value.length };

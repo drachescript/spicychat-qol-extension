@@ -4,7 +4,8 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "showExactMessageCounts"
+    "showExactMessageCounts",
+    "showNewBotBadge"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

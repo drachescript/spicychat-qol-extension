@@ -371,6 +371,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.hideElement = function hideElement(el, reason = "") {
     if (!el) return;
 
+    // Optional interface cleanup must never hide native chat history or one
+    // of its ancestors. A broad promotional/sidebar selector can otherwise
+    // hide the whole conversation with the shared .ds-hidden class.
+    // Check only at the point where an optional feature requests a hide;
+    // don't add observers, scans or automatic history repairs.
+    if (/^\/chat\/[^/]+/i.test(String(location.pathname || "")) &&
+        el instanceof Element &&
+        (el.matches?.("div[id^='message-']") || el.querySelector?.("div[id^='message-']"))) {
+      const perf = DS.state?.runtimePerformance;
+      if (perf) perf.preventedChatContainerHides = Number(perf.preventedChatContainerHides || 0) + 1;
+      return;
+    }
+
     const wantedReason = String(reason || "");
     if (el.dataset.dsHidden !== "1") el.dataset.dsHidden = "1";
     if (el.dataset.dsReason !== wantedReason) el.dataset.dsReason = wantedReason;

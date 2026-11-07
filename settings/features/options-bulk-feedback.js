@@ -28,7 +28,7 @@ async function runQuickDislikeWithBackoff(payload, label = "") {
     if (attempt > 0) {
       const wait = Math.min(8000, BULK_DISLIKE_RETRY_BASE_MS * (2 ** (attempt - 1)));
       updateBlockedDislikeStatus(`Retrying ${label || payload.botName || payload.botId} in ${(wait / 1000).toFixed(wait >= 2000 ? 0 : 1)}s · attempt ${attempt + 1}/${BULK_DISLIKE_RETRY_LIMIT + 1}`);
-      await new Promise(resolve => setTimeout(resolve, wait));
+      await waitBlockedDislikePace(wait, "retry-backoff");
       if (navigator.onLine === false) return { ok: false, status: "offline-paused" };
     }
     try {
@@ -39,6 +39,28 @@ async function runQuickDislikeWithBackoff(payload, label = "") {
     if (!quickDislikeResponseIsTransient(response) || attempt >= BULK_DISLIKE_RETRY_LIMIT) return response || { ok: false, status: "worker-error" };
   }
   return response || { ok: false, status: "worker-error" };
+}
+
+// The service worker owns pacing while Settings is in a background tab.
+// Do not restart the wait if the message fails after time has already elapsed.
+async function waitBlockedDislikePace(ms, stage = "between-bots") {
+  const delayMs = Math.min(30000, Math.max(0, Number(ms) || 0));
+  if (!delayMs) return;
+  const started = Date.now();
+  let response = null;
+  try {
+    response = await runtimeMessageWithTimeout({ type: "DS_RECOMMENDATION_PACE_WAIT", delayMs }, delayMs + 2500);
+  } catch {}
+  const elapsedMs = Math.max(0, Date.now() - started);
+  if (!response?.ok && elapsedMs < delayMs) {
+    await new Promise(resolve => setTimeout(resolve, delayMs - elapsedMs));
+  }
+  const totalMs = Date.now() - started;
+  if (totalMs > delayMs + 2000) {
+    optionsDiag("bulk-dislike", "pacing-slow", {
+      stage, requestedMs: delayMs, actualMs: totalMs
+    }, { critical: totalMs > delayMs + 10000 });
+  }
 }
 
 function applyQuickDislikeResponseToLocalHistory(id, name, response) {
@@ -76,7 +98,8 @@ async function refreshQuickDislikeHistoryState() {
 
 function blockedBulkCandidateIds(mode = "remaining") {
   const allBlocked = uniqueClean(blockedState?.ids || []);
-  const stillEligible = id => allBlocked.includes(id) && !quickDislikeHistoryEntry(id);
+  const blockedIds = new Set(allBlocked);
+  const stillEligible = id => blockedIds.has(id) && !quickDislikeHistoryEntry(id);
   if (mode === "selected") return [...botManagerBulkSet("blocked")].filter(stillEligible);
   if (mode === "resume") {
     const stored = uniqueClean([quickDislikeBulkState.currentId, ...(quickDislikeBulkState.pendingIds || [])]);
@@ -150,6 +173,9 @@ async function runBlockedBulkDislike(mode = "remaining") {
   const failedIds = [];
   let candidates = [];
   let startedAt = Date.now();
+  let timedBots = 0;
+  let totalBotMs = 0;
+  let lastRemaining = null;
 
   try {
     await ensureBlockingDataLoaded();
@@ -165,7 +191,7 @@ async function runBlockedBulkDislike(mode = "remaining") {
           ? "There is no unfinished Bulk Dislike run to resume."
           : mode === "selected"
             ? "Select at least one unhandled blocked bot first."
-            : ((blockedState?.ids || []).length ? "No blocked bots remain eligible for Dislike. Less Like history does not count as Dislike, and legacy unverified ratings can be retried." : "No blocked bot IDs are available to rate.");
+            : ((blockedState?.ids || []).length ? "No blocked bots are currently eligible for Dislike. Older unverified ratings can be rechecked by clearing local Dislike history." : "No blocked bot IDs are available to rate.");
       showSettingsToast(message);
       return;
     }
@@ -198,8 +224,8 @@ async function runBlockedBulkDislike(mode = "remaining") {
         runId,
         stopRequested: false
       });
-      updateBlockedDislikeStatus(`Processing ${processed}/${candidates.length} · ${name}`);
-
+      updateBlockedDislikeStatus(`Processing ${processed}/${candidates.length} · ${name} · opening chat / waiting for native rating`);
+      const botStartedAt = Date.now();
       const response = await runQuickDislikeWithBackoff({
         type: "DS_QUICK_DISLIKE_BOT",
         botId: id,
@@ -207,6 +233,17 @@ async function runBlockedBulkDislike(mode = "remaining") {
         chatUrl: meta.chatUrl || `https://spicychat.ai/chat/${id}`,
         bulkRunId: runId
       }, name);
+      const botElapsedMs = Math.max(0, Date.now() - botStartedAt);
+      timedBots += 1;
+      totalBotMs += botElapsedMs;
+      if (botElapsedMs >= 4000) {
+        optionsDiag("bulk-dislike", "slow-native-worker", {
+          elapsedMs: botElapsedMs, stage: String(response?.stage || response?.status || "unknown").slice(0, 60),
+          helperMs: Number(response?.stageMs?.prepareMs || 0),
+          readinessMs: Number(response?.stageMs?.readyMs || 0),
+          nativeMs: Number(response?.stageMs?.nativeMs || 0)
+        });
+      }
 
       // If connectivity drops, keep the current bot and everything after it
       // pending instead of turning an offline period into a wall of failures.
@@ -287,7 +324,13 @@ async function runBlockedBulkDislike(mode = "remaining") {
         }
       }
 
-      await refreshQuickDislikeHistoryState();
+      // Read only the cancellation checkpoint: the background helper already
+      // persisted the verified rating, and our local history was updated above.
+      // Avoid copying and normalizing the entire history after every bot.
+      const latestCheckpoint = await storageGet([QUICK_DISLIKE_BULK_STATE_KEY]);
+      if (Object.prototype.hasOwnProperty.call(latestCheckpoint, QUICK_DISLIKE_BULK_STATE_KEY)) {
+        quickDislikeBulkState = normalizeQuickDislikeBulkState(latestCheckpoint[QUICK_DISLIKE_BULK_STATE_KEY]);
+      }
       if (quickDislikeBulkState?.stopRequested) blockedBulkDislikeStopRequested = true;
       await persistQuickDislikeBulkState({
         ...quickDislikeBulkState,
@@ -299,13 +342,22 @@ async function runBlockedBulkDislike(mode = "remaining") {
         stopRequested: blockedBulkDislikeStopRequested
       });
 
-      const counts = blockedQuickDislikeCounts();
-      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} native Dislikes verified · ${alreadyDisliked + previouslyVerified} previously disliked · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${counts.remaining} remaining`);
+      // Re-count occasionally, not after every saved rating. Keep the final
+      // visible totals exact and continue to checkpoint every completed item.
+      if (lastRemaining === null || processed % 10 === 0 || index === candidates.length - 1) {
+        lastRemaining = blockedQuickDislikeCounts().remaining;
+      } else if (remembered) lastRemaining = Math.max(0, lastRemaining - 1);
+      const avgBotMs = timedBots ? Math.round(totalBotMs / timedBots) : 0;
+      const stages = response?.stageMs;
+      const stageSummary = stages ? ` · last helper ${Math.round(stages.prepareMs || 0)}ms / ready ${Math.round(stages.readyMs || 0)}ms / native ${Math.round(stages.nativeMs || 0)}ms${stages.controlsMs != null ? ` (controls ${Math.round(stages.controlsMs)}ms, submit ${Math.round(stages.submitMs || 0)}ms, verify ${Math.round(stages.verifyMs || 0)}ms)` : ""}` : "";
+      updateBlockedDislikeStatus(`${processed}/${candidates.length} checked · ${sentRequests} native Dislikes verified · ${alreadyDisliked + previouslyVerified} previously disliked · ${alreadySet} other rated · ${creatorBlocked} creator blocked · ${unavailable} unavailable · ${failed} failed · ${lastRemaining} remaining · avg ${avgBotMs}ms/bot${stageSummary}`);
+      OPTIONS_PERFORMANCE.bulkDislikeLastRun = { bots: timedBots, avgBotMs, lastBotMs: botElapsedMs, durationMs: Date.now() - startedAt };
 
       if (blockedBulkDislikeStopRequested) break;
       if (index < candidates.length - 1) {
         const delay = Math.min(10000, Math.max(250, Number(value("blockedBulkDislikeDelayMs", "750")) || 750));
-        await new Promise(resolve => setTimeout(resolve, delay));
+        updateBlockedDislikeStatus(`Waiting ${delay}ms before next bot · ${processed}/${candidates.length} checked`);
+        await waitBlockedDislikePace(delay);
       }
     }
   } finally {
@@ -385,9 +437,9 @@ async function resetAndRedoBlockedDislikes() {
     showSettingsToast("There are no blocked bots to reprocess.");
     return;
   }
-  if (!window.confirm(`Clear local Dislike history and recheck blocked bots without an existing Less Like rating or confirmed unavailable status? This does NOT undo or repeat the shared negative rating for bots already handled by Less Like.`)) return;
+  if (!window.confirm(`Clear local Dislike history and recheck blocked bots using the native chat rating controls? This does not undo existing ratings. Previously handled bots may be checked again.`)) return;
   await resetQuickDislikeLocalHistory();
-  showSettingsToast("Dislike history reset. Only bots not already rated by Less Like or confirmed unavailable will be processed.");
+  showSettingsToast("Local Dislike history cleared. Checking eligible blocked bots through the native rating controls.");
   await runBlockedBulkDislike("remaining");
 }
 
@@ -403,9 +455,9 @@ async function clearBlockedDislikeHistory() {
     showSettingsToast("There is no handled dislike history to clear.");
     return;
   }
-  if (!window.confirm(`Forget Quick/Bulk Dislike history for ${totalHistory} bot${totalHistory === 1 ? "" : "s"}? This does NOT undo SpicyChat's negative ratings. Bots previously handled by Less Like will remain covered and will not get another rating request.`)) return;
+  if (!window.confirm(`Forget local Dislike history for ${totalHistory} bot${totalHistory === 1 ? "" : "s"}? This does not undo ratings on SpicyChat. Previously handled bots may be checked again in a new run.`)) return;
   await resetQuickDislikeLocalHistory();
-  showSettingsToast("Dislike history cleared locally. Existing Less Like ratings still count as handled; no duplicate rating will be sent.");
+  showSettingsToast("Local Dislike history cleared. Previously handled bots may be checked again during the next Dislike run.");
 }
 
 function quickLessLikeFailureMeta(response) {

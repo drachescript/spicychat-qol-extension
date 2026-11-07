@@ -157,7 +157,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const botId = String(params.get("dsQuickBotId") || DS.chatIdFromHref?.(location.href) || "").trim().toLowerCase();
     const jobId = String(params.get("dsQuickJobId") || "").trim();
     const token = DS.diagOperationStart?.("quick-dislike", "helper", { botId, jobId });
+    const stages = { controlsMs: 0, submitMs: 0, verifyMs: 0 };
+    const controlsStartedAt = Date.now();
     const finish = result => {
+      result = { ...result, nativeStages: { ...stages } };
       DS.diagOperationEnd?.(token, {
         scanned: 1,
         changed: result?.status === "disliked" ? 1 : 0,
@@ -203,6 +206,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           : "The native rating dialog did not appear. No rating was sent."
       });
     }
+    stages.controlsMs = Date.now() - controlsStartedAt;
     const { panel: modal, choice: dislike } = readyChoice;
     if (dislike.disabled || dislike.getAttribute("aria-disabled") === "true") {
       return finish({ ok: false, status: "dislike-option-disabled", requestSent: false,
@@ -218,9 +222,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (!done) return finish({ ok: false, status: "done-button-not-ready" });
 
+    const submitStartedAt = Date.now();
     try { done.click(); } catch { DS.realClick?.(done); }
     const closed = await waitForElement(() => !ratingModal(), 4000).catch?.(() => null);
+    stages.submitMs = Date.now() - submitStartedAt;
     if (!closed) return finish({ ok: false, status: "submit-not-confirmed", requestSent: true });
+    const verifyStartedAt = Date.now();
     // Reopen the actual native control to confirm the persisted selection.
     // A closed dialog or an HTTP 200 on /event is not proof of a Dislike.
     const freshOpenButton = nativeRatingOpenButton();
@@ -233,6 +240,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const selectedButton = nativeDislikeButton(checkModal);
       return selectedButton && dislikeAlreadySelected(selectedButton) ? checkModal : null;
     }, 4000);
+    stages.verifyMs = Date.now() - verifyStartedAt;
     if (!selected) return finish({ ok: false, status: "native-rating-unverified", requestSent: true });
     const closeButton = selected.querySelector("button[aria-label='Close'], button[aria-label='close']");
     try { closeButton?.click(); } catch {}

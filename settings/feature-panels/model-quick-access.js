@@ -16,7 +16,49 @@
     if (kind !== "checkbox") label.append(input);
     section.append(label);
   }
-  const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Uses native model actions. Models missing from the compact menu are opened through Explore All when available. Mobile native model rows are not rearranged."; section.append(hint);
+  const hint = document.createElement("p"); hint.className = "hint"; hint.textContent = "Add models using the + button in SpicyChat's model picker while this feature is enabled, or type names below. Move them into your preferred order here. Mobile native model rows are never rearranged."; section.append(hint);
+  const orderedHost = document.createElement("div");
+  orderedHost.id = "ds-model-quick-order";
+  section.append(orderedHost);
+  const namesInput = section.querySelector("#modelQuickAccessNames");
+  const parse = () => [...new Map(String(namesInput?.value || "").split(/\r?\n/).map(name => name.trim()).filter(Boolean).map(name => [name.toLowerCase(), name])).values()];
+  function updateNames(next) {
+    if (!namesInput) return;
+    namesInput.value = next.join("\n");
+    namesInput.dispatchEvent(new Event("input", { bubbles: true }));
+    namesInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function drawOrderedNames() {
+    orderedHost.replaceChildren();
+    const names = parse().slice(0, 30);
+    if (!names.length) {
+      const empty = document.createElement("p"); empty.className = "hint";
+      empty.textContent = "No quick models selected yet."; orderedHost.append(empty);
+      return;
+    }
+    names.forEach((name, index) => {
+      const row = document.createElement("div"); row.className = "button-row";
+      const text = document.createElement("span"); text.textContent = name;
+      text.style.flex = "1";
+      for (const [title, step] of [["Move up", -1], ["Move down", 1], ["Remove", null]]) {
+        const button = document.createElement("button"); button.type = "button";
+        button.textContent = step == null ? "Remove" : step < 0 ? "↑" : "↓";
+        button.title = `${title}: ${name}`;
+        button.disabled = step !== null && (index + step < 0 || index + step >= names.length);
+        button.addEventListener("click", () => {
+          const updated = parse();
+          const at = updated.findIndex(item => item.toLowerCase() === name.toLowerCase());
+          if (at < 0) return;
+          if (step == null) updated.splice(at, 1);
+          else if (at + step >= 0 && at + step < updated.length) [updated[at], updated[at + step]] = [updated[at + step], updated[at]];
+          updateNames(updated); drawOrderedNames();
+        });
+        row.append(button);
+      }
+      row.prepend(text); orderedHost.append(row);
+    });
+  }
+  namesInput?.addEventListener("input", drawOrderedNames);
   host.replaceWith(section);
   // Feature-owned Settings read handlers. The shared Settings controller never
   // needs to know the keys or defaults when this optional panel is excluded.
@@ -25,5 +67,5 @@
   readers["modelQuickAccessNames"] = () => String(document.getElementById("modelQuickAccessNames")?.value || "");
   const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
   loaders["enableModelQuickAccess"] = (settings) => { setChecked("enableModelQuickAccess", !!settings.enableModelQuickAccess); };
-  loaders["modelQuickAccessNames"] = (settings) => { setValue("modelQuickAccessNames", settings.modelQuickAccessNames || ""); };
+  loaders["modelQuickAccessNames"] = (settings) => { setValue("modelQuickAccessNames", settings.modelQuickAccessNames || ""); drawOrderedNames(); };
 })();

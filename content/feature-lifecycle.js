@@ -130,7 +130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "creation audit": ["enableCreationAudit"],
       "creator writing assistant": ["enableCreatorWritingAssistant"],
       "persona organizer": ["enablePersonaOrganizer"],
-      "public rulebook blocking": ["rulebookBlockingEnabled"],
+      "public rulebook blocking": ["rulebookBlockingEnabled", "enableLanguageFilter", "languageFilterRulebooks"],
       "rulebook listing tools": ["showRulebookFilters"],
       "lorebook listing tools": ["showLorebookFilters"],
       "lorebook search filter": ["showLorebookFilters"],

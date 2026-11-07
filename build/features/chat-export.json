@@ -4,7 +4,8 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "showChatExportButton"
+    "showChatExportButton",
+    "chatExportIncludeImageLinks"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

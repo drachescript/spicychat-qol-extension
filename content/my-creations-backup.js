@@ -624,6 +624,138 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
   }
 
+  // Prepare a local, portable package from files exported with the EXISTING
+  // owner-verified backup tool. Never reads cookies or touches the destination.
+  async function readMigrationBackup(file, expectedKind) {
+    if (!file || !/\.zip$/i.test(file.name) || file.size > 20 * 1024 * 1024) {
+      throw new Error("Choose a My Creations backup ZIP smaller than 20 MB.");
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const view = new DataView(bytes.buffer);
+    let end = -1;
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+      if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+    }
+    if (end < 0) throw new Error("ZIP directory not found.");
+    const count = view.getUint16(end + 10, true);
+    let position = view.getUint32(end + 16, true);
+    if (count > 400 || position === 0xffffffff) throw new Error("Too many files or unsupported ZIP format.");
+    const decoder = new TextDecoder();
+    const files = [];
+    let manifest = null;
+    let uncompressedTotal = 0;
+    const names = new Set();
+    for (let i = 0; i < count; i++) {
+      if (position + 46 > bytes.length || view.getUint32(position, true) !== 0x02014b50) throw new Error("Damaged ZIP directory.");
+      const flags = view.getUint16(position + 8, true), method = view.getUint16(position + 10, true);
+      const crc = view.getUint32(position + 16, true);
+      const size = view.getUint32(position + 20, true), plain = view.getUint32(position + 24, true);
+      const len = view.getUint16(position + 28, true), ext = view.getUint16(position + 30, true), comment = view.getUint16(position + 32, true);
+      const offset = view.getUint32(position + 42, true);
+      if (position + 46 + len + ext + comment > bytes.length) throw new Error("Incomplete ZIP directory.");
+      const name = decoder.decode(bytes.subarray(position + 46, position + 46 + len));
+      position += 46 + len + ext + comment;
+      if (flags & 1 || method !== 0 || size !== plain || size > 3 * 1024 * 1024) throw new Error("Unsupported or oversized backup file.");
+      if (offset + 30 > bytes.length || view.getUint32(offset, true) !== 0x04034b50) throw new Error("Incomplete backup entry.");
+      const start = offset + 30 + view.getUint16(offset + 26, true) + view.getUint16(offset + 28, true);
+      if (start + size > bytes.length) throw new Error("Truncated backup entry.");
+      const data = bytes.subarray(start, start + size);
+      if (crc32(data) !== crc) throw new Error("Corrupted backup entry detected.");
+      if (name === "manifest.json") {
+        try { manifest = JSON.parse(decoder.decode(data)); } catch { throw new Error("Backup manifest is invalid."); }
+        continue;
+      }
+      if (name === "README.txt") continue;
+      if (!name.startsWith(`${expectedKind}/`) || !/\.json$/i.test(name) ||
+          name.split("/").length !== 2 || name.includes("..") || /[\\\u0000-\u001f]/.test(name) || names.has(name)) {
+        throw new Error("Unexpected file path or repeated file in backup.");
+      }
+      names.add(name);
+      uncompressedTotal += size;
+      if (uncompressedTotal > 16 * 1024 * 1024) throw new Error("The export is too large to combine safely.");
+      // Verify structure; never import or publish these files at this step.
+      let parsed;
+      try { parsed = JSON.parse(decoder.decode(data)); } catch { throw new Error("A saved creation contains invalid JSON."); }
+      if (expectedKind === "chatbots" && (parsed?.spec !== "chara_card_v2" || !parsed?.data?.name)) {
+        throw new Error("A chatbot backup is not a valid Character Card v2 file.");
+      }
+      if (expectedKind === "lorebooks" &&
+          (parsed?.format !== "spicychat-qol-lorebook-backup" || !parsed?.lorebook || !Array.isArray(parsed?.lorebook?.entries))) {
+        throw new Error("A Lorebook backup has an unexpected format.");
+      }
+      files.push({ name, data });
+    }
+    if (manifest?.format !== "spicychat-qol-my-creations-backup" || manifest.kind !== expectedKind || !files.length) {
+      throw new Error(`Choose a verified ${expectedKind} ZIP from QoL My Creations.`);
+    }
+    if (files.length !== Number(manifest.succeeded)) throw new Error("Saved item count doesn't match the backup manifest.");
+    return { files, manifest };
+  }
+
+  function showMigrationAssistant() {
+    const ID = "ds-account-migration-modal";
+    document.getElementById(ID)?.remove();
+    const overlay = document.createElement("div"); overlay.id = ID; overlay.className = "ds-tool-modal-overlay";
+    const dialog = document.createElement("section"); dialog.className = "ds-chat-bookmarks-modal";
+    dialog.style.cssText = "max-height:85vh;overflow:auto;max-width:650px;padding:18px;";
+    const heading = document.createElement("h2"); heading.textContent = "Account Migration Assistant";
+    const instructions = document.createElement("p");
+    instructions.textContent = "Step 1: Use Backup all chatbots and Backup all Lorebooks on their respective My Creations pages. Step 2: Select those two ZIPs here. Step 3: Download one combined migration package. On the new account, use QoL Import bot on Create Bot and the Lorebook importer for each Lorebook. Review everything before saving.";
+    const makeField = (labelText) => {
+      const label = document.createElement("label"); label.textContent = labelText;
+      const input = document.createElement("input"); input.type = "file"; input.accept = ".zip,application/zip";
+      input.style.cssText = "display:block;max-width:100%;margin:6px 0 12px";
+      label.append(input); dialog.append(label); return input;
+    };
+    const warning = document.createElement("p");
+    warning.textContent = "This creates private copies, not an ownership transfer. Keep the ZIP somewhere safe. Chats, memories, followers, published IDs, and images stored only as URLs won't move automatically. Lorebooks must be reattached manually.";
+    dialog.append(heading, instructions, warning);
+    const bots = makeField("Bot backup ZIP (optional)");
+    const lorebooks = makeField("Lorebook backup ZIP (optional)");
+    const status = document.createElement("p"); status.setAttribute("role", "status");
+    const create = document.createElement("button"); create.type = "button"; create.textContent = "Create migration ZIP";
+    create.addEventListener("click", async () => {
+      create.disabled = true; status.textContent = "Checking selected backups locally…";
+      try {
+        if (!bots.files?.length && !lorebooks.files?.length) throw new Error("Choose at least one backup ZIP first.");
+        const chosen = [];
+        if (bots.files?.length) chosen.push(await readMigrationBackup(bots.files[0], "chatbots"));
+        if (lorebooks.files?.length) chosen.push(await readMigrationBackup(lorebooks.files[0], "lorebooks"));
+        const failures = chosen.flatMap(group => group.manifest.failures || []);
+        if (failures.length && !confirm(`${failures.length} source items were not backed up. Continue with only the successfully verified files?`)) {
+          status.textContent = "Cancelled; no package was downloaded."; return;
+        }
+        const payload = chosen.flatMap(group => group.files);
+        if (payload.length + 2 > 350) throw new Error("This package would have too many files for the bot importer. Import smaller batches from the original ZIPs instead.");
+        const exportedAt = new Date().toISOString();
+        const manifest = {
+          format: "spicychat-qol-account-migration", version: 1, exportedAt,
+          counts: { chatbots: payload.filter(entry => entry.name.startsWith("chatbots/")).length,
+            lorebooks: payload.filter(entry => entry.name.startsWith("lorebooks/")).length },
+          missingCategories: ["chatbots", "lorebooks"].filter(kind => !chosen.some(group => group.manifest.kind === kind)),
+          failedSourceItems: failures.length,
+          note: "Files are portable copies from owner-verified QoL bulk backups, not a transfer of ownership or conversation history."
+        };
+        const readme = `QoL Account Migration — reviewed local exports\n\n1. Sign in to your NEW SpicyChat account.\n2. Enable QoL bot import, open /chatbot/create, and choose Import bot. Select this ZIP and choose one bot. Review fields and save normally. Repeat per bot.\n3. Extract this ZIP and import each lorebooks/*.json using QoL's private Lorebook importer. Reattach Lorebooks manually after import.\n4. Restore pictures manually if their original URLs do not load.\n5. Compare counts and check any failures in the original backup ZIPs. Do not delete the old account until you have verified everything.\n\nThis package does NOT transfer conversations, memories, bot IDs, followers, or ownership. It does not save or publish anything.\n`;
+        const files = [
+          { name: "migration-manifest.json", data: JSON.stringify(manifest, null, 2) },
+          { name: "README-MIGRATION.txt", data: readme },
+          ...payload
+        ];
+        const blob = storedZipBlob(files);
+        if (blob.size > 16 * 1024 * 1024) throw new Error("Combined ZIP exceeds the native 16 MB import limit. Import the two backups separately.");
+        downloadBlob(blob, `spicychat-account-migration-${exportedAt.replace(/[:.]/g, "-")}.zip`);
+        status.textContent = `Migration ZIP prepared: ${manifest.counts.chatbots} bots and ${manifest.counts.lorebooks} Lorebooks. No account data changed.`;
+      } catch(error) { status.textContent = `Could not prepare migration ZIP: ${clean(error?.message || error, 300)}`; }
+      finally { create.disabled = false; }
+    });
+    const close = document.createElement("button"); close.type = "button"; close.textContent = "Close";
+    close.addEventListener("click", () => overlay.remove());
+    dialog.append(status, create, document.createTextNode(" "), close);
+    overlay.append(dialog); document.body.append(overlay);
+    overlay.addEventListener("click", event => { if (event.target === overlay) overlay.remove(); });
+  }
+
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -1202,6 +1334,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
 
     bar.append(title, status, backup, select);
+    if (settings().enableAccountMigrationAssistant === true) {
+      const migrate = document.createElement("button");
+      migrate.type = "button"; migrate.dataset.role = "migration";
+      migrate.textContent = "Move to another account";
+      migrate.addEventListener("click", showMigrationAssistant);
+      bar.append(migrate);
+    }
     if (filter) bar.appendChild(filter);
     bar.append(cancel, retry);
 
@@ -1304,6 +1443,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // Repair old/mis-mounted bars after SPA navigation or an early page
         // startup pass without rebuilding the controls or losing job status.
         placeBar(kind, existing);
+        const currentButton = existing.querySelector('[data-role="migration"]');
+        const needed = settings().enableAccountMigrationAssistant === true;
+        if (needed && !currentButton) {
+          const migrate = document.createElement("button"); migrate.type = "button";
+          migrate.dataset.role = "migration"; migrate.textContent = "Move to another account";
+          migrate.addEventListener("click", showMigrationAssistant); existing.append(migrate);
+        } else if (!needed) currentButton?.remove();
       }
     } else {
       existing?.remove();
@@ -1319,6 +1465,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.removeMyCreationsBackupTools = function removeMyCreationsBackupTools() {
+    document.getElementById("ds-account-migration-modal")?.remove();
     closeSelection();
     if (activeJob) activeJob.cancelled = true;
     document.getElementById(BAR_ID)?.remove();

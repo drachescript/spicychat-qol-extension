@@ -8,6 +8,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   const LONG_CHAT_THRESHOLD = 80;
   const DESKTOP_APP_LONG_CHAT_THRESHOLD = 50;
+  // Android's renderer can stall before a new chat reaches 50 messages. The
+  // lightweight treatment is visual-only; the separate folding gate is unchanged.
+  const ANDROID_EARLY_LIGHT_THRESHOLD = 18;
   const KEEP_FULLY_RENDERED = 10;
   const DESKTOP_APP_KEEP_FULLY_RENDERED = 6;
   const PERFORMANCE_RELOAD_STATE_KEY = "dsQolPerformanceReloadV1";
@@ -731,16 +734,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ? PRESSURE_MAXIMUM_WINDOW.threshold
       : (desktopAppGuardActive() ? DESKTOP_APP_LONG_CHAT_THRESHOLD : LONG_CHAT_THRESHOLD);
     const longChat = roots.length >= threshold;
-    DS.setClassState?.(document.documentElement, "ds-chat-performance", longChat);
+    const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
+    const earlyAndroidLight = !!env.android && roots.length >= ANDROID_EARLY_LIGHT_THRESHOLD;
+    const lightweight = longChat || earlyAndroidLight;
+    DS.setClassState?.(document.documentElement, "ds-chat-performance", lightweight);
 
-    if (longChat) {
+    if (lightweight) {
       applyStaticLightweightClasses(roots);
-      applyChatWindowing(roots);
+      if (longChat) applyChatWindowing(roots);
+      else if (chatWindowApplied || chatWindowControl?.isConnected || Number(DS.state.performanceWindowHiddenCount || 0)) {
+        // A younger chat must never inherit an older chat's folded messages.
+        clearChatWindowState();
+      }
     } else if (DS.state.performanceModeApplied || document.querySelector(".ds-chat-message-lite, .ds-chat-message-far, .ds-chat-message-windowed")) {
       clearMessageClasses();
     }
 
-    DS.state.performanceModeApplied = longChat;
+    DS.state.performanceModeApplied = lightweight;
     DS.state.performanceModeRevision = revision;
     DS.state.performanceModeMessageCount = roots.length;
   };

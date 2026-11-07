@@ -1,3 +1,44 @@
+## 0.2.73
+- Improved performance mode for newer Android chats, without hiding their messages.
+- Added a check that distinguishes unavailable blocked bots from bots that haven't been checked yet.
+- Added an overview of locally saved bookmarks across conversations and a read-only recovery review.
+- Made model shortcuts easier to add, order and remove.
+- Added a guided backup package for moving your own bots and Lorebooks to another account.
+- Fixed chat bubble colors and styles resetting when timestamps or generation details appear.
+- Added a safeguard against QoL hiding an entire chat and improved reports when messages disappear or after returning to a chat.
+
+## 0.2.72
+- The optional language filter now works on public Lorebooks and Rulebooks, using the same language choices as bot cards.
+- Improved support reports for chats that briefly go blank, including whether messages are still there and what might be hiding them.
+- Reduced unnecessary message processing in chats, especially on Android.
+- Fixed Persona description buttons repeatedly refreshing when nothing changed.
+- Reduced repeated Settings reads during support checks.
+- Improved message bookmark saving when switching between chats or using multiple tabs.
+- Fixed new-chat bookmarks being saved under the bot instead of the conversation.
+- Made it clearer when Context Keeper automatically adds a story reminder to a message.
+- Chat folders and pinned conversations are now off by default, unless you turn them on.
+- Added optional shortcuts for bot profiles, generation settings, jumping to the start of chats, and opening chats in a separate window.
+- Added optional two-column chat lists and quick Rename / Open window buttons for conversations.
+- Added an optional three-dot menu beside the bottom message buttons.
+- Added an optional New label for recently created bots when their creation date is available.
+- Improved compatibility when QoL and S.AI Toolkit are installed together.
+
+## 0.2.71
+- Improved performance when browsing Rulebooks by reducing unnecessary repeated checks.
+- Reduced background work in long chats, especially when messages reload or update.
+- Improved Settings and saved bot list performance by avoiding unnecessary reloads.
+- Improved support reports when SpicyChat tabs aren't responding properly.
+- Fixed long delays between Bulk Dislikes when Settings is running in the background.
+- Improved Bulk Dislike progress messages and reduced unnecessary processing.
+- Improved Settings search with better results, individual options like More Like This, and clearer descriptions.
+
+## 0.2.70
+- Reduced Android support-export stalls by skipping unused compression, avoiding repeated storage-size checks, and collecting history alongside other report sections.
+- Fixed short bot descriptions keeping the scroll box when full card descriptions are enabled.
+- Applied local Rulebook blocking and quick Block buttons to Attach Rulebook → Discover in chats.
+- Added optional message image links to chat exports when SpicyChat exposes them.
+- Fixed generation details disappearing on newer chat layouts and retrying after message metadata loads.
+
 ## 0.2.69
 - Added optional pinned conversations at the top of Chats, including older chats no longer loaded in the list.
 - Shortened Settings descriptions and clarified bot folders versus conversation folders.

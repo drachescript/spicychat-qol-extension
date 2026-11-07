@@ -78,7 +78,11 @@ if (!(() => { try {
   }
 
   function setEnabled(nextEnabled) {
-    enabled = !!nextEnabled;
+    const next = !!nextEnabled;
+    // Detection and regular Settings refreshes can both send the same state.
+    // Avoid broadcasting unchanged bridge settings into SpicyChat on every pass.
+    if (enabled === next) return;
+    enabled = next;
     if (enabled) injectBridge();
     else if (injected) sendState();
   }

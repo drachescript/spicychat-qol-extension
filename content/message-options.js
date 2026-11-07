@@ -313,6 +313,83 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return runMenuAction(sourceButton, action.label);
   }
 
+  // An independent bottom shortcut for native message actions. Never move
+  // React-owned nodes or create another message mutation observer.
+  function bottomActionHost(dropdownButton) {
+    const root = dropdownButton.closest("div[id^='message-']") || getMessageRoot(dropdownButton);
+    if (!root?.isConnected) return null;
+    const native = root.querySelector(
+      'button[aria-label="RefreshCcw-button"], button[aria-label="MessageSquarePlus-button"], button[aria-label="Star-button"], button[aria-label="Volume2-button"], button[aria-label="ThumbsUp-button"], button[aria-label="ThumbsDown-button"]'
+    );
+    if (!native || !native.isConnected) return null;
+    const host = native.parentElement;
+    // Restrict to the native button row, not a message bubble or chat header.
+    return host && host !== root && host.querySelectorAll("button").length <= 15 ? host : null;
+  }
+
+  function bottomMenuHealthy(dropdownButton, settings) {
+    if (settings.messageBottomMenuShortcut !== true) return true;
+    const root = dropdownButton.closest("div[id^='message-']") || getMessageRoot(dropdownButton);
+    const host = bottomActionHost(dropdownButton);
+    return !host || !![...host.querySelectorAll(":scope > .ds-qol-message-bottom-menu")]
+      .find(node => node.dataset.dsSourceMessage === root?.id && node.isConnected);
+  }
+
+  function ensureBottomMenu(dropdownButton) {
+    const settings = DS.state?.settings || {};
+    const root = dropdownButton.closest("div[id^='message-']") || getMessageRoot(dropdownButton);
+    if (!root?.isConnected) return;
+    const host = bottomActionHost(dropdownButton);
+    const existing = root.querySelector(".ds-qol-message-bottom-menu");
+    if (settings.messageBottomMenuShortcut !== true || !host) { existing?.remove(); return; }
+    if (existing?.parentElement === host) return;
+    existing?.remove();
+    const wrap = document.createElement("span");
+    wrap.className = "ds-qol-message-bottom-menu";
+    wrap.dataset.dsSourceMessage = root.id || "";
+    const launcher = document.createElement("button");
+    launcher.type = "button"; launcher.className = "ds-qol-message-bottom-launcher";
+    launcher.textContent = "⋯"; launcher.title = "Message actions";
+    launcher.setAttribute("aria-label", "Message actions");
+    launcher.setAttribute("aria-expanded", "false");
+    const menu = document.createElement("span"); menu.className = "ds-qol-message-bottom-menu-panel";
+    menu.hidden = true; menu.setAttribute("role", "menu");
+    const items = isAiMessage(dropdownButton)
+      ? ["Copy", "Edit", "Report"]
+      : ["Copy", "Edit", ...(hasUploadedUserImage(dropdownButton) ? ["Remove Image"] : [])];
+    for (const label of items) {
+      const choice = document.createElement("button"); choice.type = "button";
+      choice.textContent = label; choice.setAttribute("role", "menuitem");
+      choice.addEventListener("click", event => {
+        event.preventDefault(); event.stopPropagation();
+        menu.hidden = true; launcher.setAttribute("aria-expanded", "false");
+        if (!dropdownButton.isConnected || DS.state?.chatExportLock?.active) return;
+        void runAction(dropdownButton, { label }).catch(() => DS.setQuickStatus?.(`${label} failed.`));
+      });
+      menu.appendChild(choice);
+    }
+    launcher.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      const shouldOpen = menu.hidden;
+      for (const open of document.querySelectorAll(".ds-qol-message-bottom-menu-panel:not([hidden])")) {
+        open.hidden = true;
+        open.parentElement?.querySelector(".ds-qol-message-bottom-launcher")?.setAttribute("aria-expanded", "false");
+      }
+      menu.hidden = !shouldOpen;
+      launcher.setAttribute("aria-expanded", String(shouldOpen));
+    });
+    wrap.append(launcher, menu);
+    host.appendChild(wrap);
+  }
+
+  document.addEventListener("click", event => {
+    if (event.target?.closest?.(".ds-qol-message-bottom-menu")) return;
+    for (const menu of document.querySelectorAll(".ds-qol-message-bottom-menu-panel:not([hidden])")) {
+      menu.hidden = true;
+      menu.parentElement?.querySelector(".ds-qol-message-bottom-launcher")?.setAttribute("aria-expanded", "false");
+    }
+  }, true);
+
   function repairContextKeeperForDropdown(dropdownButton) {
     const root = getMessageRoot(dropdownButton);
     if (!root) return;
@@ -321,6 +398,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function ensureQuickActions(dropdownButton, settingsSignature) {
     if (!dropdownButton || dropdownButton.closest("#ds-qol-panel, .ds-message-quick-actions")) return;
+    const settings = DS.state?.settings || {};
 
     const holder = getDropdownHolder(dropdownButton);
     if (!holder) return;
@@ -343,7 +421,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    DS.setClassState?.(holder, "ds-message-dropdown-hidden", true);
+    DS.setClassState?.(holder, "ds-message-dropdown-hidden", settings.messageBottomMenuShortcut !== true);
 
     if (!bar) {
       bar = document.createElement("div");
@@ -411,6 +489,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cleanup() {
     DS.qsa(".ds-message-quick-actions").forEach(el => el.remove());
+    DS.qsa(".ds-qol-message-bottom-menu").forEach(el => el.remove());
     DS.qsa(".ds-message-dropdown-hidden").forEach(el => {
       DS.setClassState?.(el, "ds-message-dropdown-hidden", false);
     });
@@ -429,7 +508,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.messageQuickActionRemoveImage === true ? 1 : 0,
       settings.messageQuickActionResend === true ? 1 : 0,
       settings.messageQuickActionConfirmRemoveImage === true ? 1 : 0,
-      settings.messageQuickActionReport === true ? 1 : 0
+      settings.messageQuickActionReport === true ? 1 : 0,
+      settings.messageBottomMenuShortcut === true ? 1 : 0
     ].join("");
   }
 
@@ -476,7 +556,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       settings.messageQuickActionEdit === true ||
       settings.messageQuickActionRemoveImage === true ||
       settings.messageQuickActionResend === true ||
-      settings.messageQuickActionReport === true
+      settings.messageQuickActionReport === true ||
+      settings.messageBottomMenuShortcut === true
     );
   }
 
@@ -503,7 +584,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (DS.isMessageEditPending?.(root)) return [];
         if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
         return DS.qsa("button[aria-label='message-dropdown']", root)
-          .filter(button => !quickActionRevisionStateHealthy(button, signature));
+          .filter(button => !quickActionRevisionStateHealthy(button, signature) || !bottomMenuHealthy(button, settings));
       });
       const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
       counters.messageOptionsIncrementalUpdates = Number(counters.messageOptionsIncrementalUpdates || 0) + 1;
@@ -513,20 +594,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         buttons = roots.flatMap(root => {
           if (settings.chatPerformanceMode && root.classList.contains("ds-chat-message-far")) return [];
           return DS.qsa("button[aria-label='message-dropdown']", root)
-            .filter(button => signatureChanged || !quickActionRevisionStateHealthy(button, signature));
+            .filter(button => signatureChanged || !quickActionRevisionStateHealthy(button, signature) || !bottomMenuHealthy(button, settings));
         });
       } else {
         let selector = "button[aria-label='message-dropdown']";
         if (settings.chatPerformanceMode) selector = `[id^='message-']:not(.ds-chat-message-far) button[aria-label='message-dropdown']`;
         buttons = DS.qsa(selector);
-        if (!signatureChanged) buttons = buttons.filter(button => !quickActionRevisionStateHealthy(button, signature));
+        if (!signatureChanged) buttons = buttons.filter(button => !quickActionRevisionStateHealthy(button, signature) || !bottomMenuHealthy(button, settings));
       }
     }
 
     buttons
       .filter(button => !button.closest("#ds-qol-panel"))
       .filter(button => !DS.isMessageEditPending?.(button.closest("div[id^='message-']")))
-      .forEach(button => ensureQuickActions(button, signature));
+      .forEach(button => {
+        ensureQuickActions(button, signature);
+        ensureBottomMenu(button);
+      });
   };
 
   // SpicyChat can replace an already-decorated message toolbar without changing
@@ -563,6 +647,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         ensureQuickActions(button, signature);
         repaired += 1;
       }
+      if (settings.messageBottomMenuShortcut) ensureBottomMenu(button);
       // Keep may have been removed by a toolbar-only React remount even if
       // the quick-action bar is already healthy.
       repairContextKeeperForDropdown(button);
@@ -587,6 +672,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (hasAnyQuickActionEnabled(settings) && !quickActionRevisionStateHealthy(button, signature) && !quickActionBarHealthy(button, signature)) {
         ensureQuickActions(button, signature);
       }
+      ensureBottomMenu(button);
       repairContextKeeperForDropdown(button);
     });
   };

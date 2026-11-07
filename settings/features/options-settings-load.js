@@ -372,6 +372,13 @@ async function load() {
 
   setChecked("showChatListTools", settings.showChatListTools);
   setChecked("enableChatOrganizer", !!settings.enableChatOrganizer);
+  setChecked("chatAlwaysShowProfileLink", !!settings.chatAlwaysShowProfileLink);
+  setChecked("chatJumpToStartShortcut", !!settings.chatJumpToStartShortcut);
+  setChecked("chatOpenWindowShortcut", !!settings.chatOpenWindowShortcut);
+  setChecked("chatGenerationSettingsShortcut", !!settings.chatGenerationSettingsShortcut);
+  setChecked("chatListTwoColumns", !!settings.chatListTwoColumns);
+  setChecked("chatListPopoutShortcut", !!settings.chatListPopoutShortcut);
+  setChecked("chatListRenameShortcut", !!settings.chatListRenameShortcut);
   setValue("chatCollections", settings.chatCollections || "");
   setChecked("showSavedChatQuickActions", !!settings.showSavedChatQuickActions);
   setChecked("showRandomChatButton", !!settings.showRandomChatButton);
@@ -495,6 +502,7 @@ async function load() {
   setChecked("showCardGreetingTokenInfo", !!settings.showCardGreetingTokenInfo);
   setChecked("showExactMessageCounts", !!settings.showExactMessageCounts);
   setChecked("showBotCreationDates", !!settings.showBotCreationDates);
+  setChecked("showNewBotBadge", !!settings.showNewBotBadge);
   setChecked("expandBotNamesOnHover", !!settings.expandBotNamesOnHover);
   setChecked("paginationTopJumpBox", !!settings.paginationTopJumpBox);
   setChecked("paginationQuickJumpMenu", !!settings.paginationQuickJumpMenu);
@@ -629,6 +637,7 @@ async function load() {
   setChecked("messageQuickActionResend", !!settings.messageQuickActionResend);
   setChecked("messageQuickActionConfirmRemoveImage", !!settings.messageQuickActionConfirmRemoveImage);
   setChecked("messageQuickActionReport", !!settings.messageQuickActionReport);
+  setChecked("messageBottomMenuShortcut", !!settings.messageBottomMenuShortcut);
   updateMessageQuickActionControlStates();
   setChecked("allowTypingWhileAiResponding", !!settings.allowTypingWhileAiResponding);
   setChecked("keepChatPositionWhileTyping", !!settings.keepChatPositionWhileTyping);
@@ -695,6 +704,7 @@ async function load() {
   setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false);
   setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false);
   setChecked("chatExportIncludeAvatars", settings.chatExportIncludeAvatars !== false);
+  setChecked("chatExportIncludeImageLinks", settings.chatExportIncludeImageLinks === true);
   setValue("chatExportHistoryMode", settings.chatExportHistoryMode || "api");
   setValue("chatExportDefaultFormat", settings.chatExportDefaultFormat || "text");
   setValue("chatExportHtmlLayout", settings.chatExportHtmlLayout || "bubbles");
@@ -768,6 +778,7 @@ async function load() {
 
   setChecked("enableMyCreationsFilters", !!settings.enableMyCreationsFilters);
   setChecked("enableMyCreationsBulkBackup", !!settings.enableMyCreationsBulkBackup);
+  setChecked("enableAccountMigrationAssistant", !!settings.enableAccountMigrationAssistant);
   setChecked("showMyLorebookEditButtons", !!settings.showMyLorebookEditButtons);
   setChecked("showMyChatbotEditButtons", !!settings.showMyChatbotEditButtons);
   setChecked("rememberMyCreationsView", !!settings.rememberMyCreationsView);
@@ -803,6 +814,8 @@ async function load() {
   setValue("quickDislikeIdleMinutes", Math.min(60, Math.max(1, Number(settings.quickDislikeIdleMinutes) || 5)));
   setValue("blockedBulkDislikeDelayMs", Math.min(10000, Math.max(250, Number(settings.blockedBulkDislikeDelayMs) || 750)));
   setChecked("enableLanguageFilter", settings.enableLanguageFilter);
+  setChecked("languageFilterLorebooks", settings.languageFilterLorebooks === true);
+  setChecked("languageFilterRulebooks", settings.languageFilterRulebooks === true);
   setAllowedLanguages(settings.allowedLanguages);
   setValue("languageSelectionMode", ["include", "exclude"].includes(settings.languageSelectionMode) ? settings.languageSelectionMode : "include");
   setValue("languageFilterMode", settings.languageFilterMode || "conservative");
