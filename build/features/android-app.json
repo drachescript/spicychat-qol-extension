@@ -23,5 +23,8 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "styleFiles": [
+    "content/styles/android-app.css"
+  ]
 }

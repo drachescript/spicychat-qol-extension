@@ -19,6 +19,7 @@ STYLE_OWNERS = {
     'persona-manager.css': 'persona-organizer',
     'chat-bubble-themes.css': 'chat-bubbles',
     'bot-organizer.css': 'bot-organizer',
+    'android-app.css': 'android-app',
     'memory-vault.css': 'memory-manager',
     'chat-index.css': 'chat-index',
     'rulebook-filter.css': 'rulebook-filter',
@@ -26,6 +27,11 @@ STYLE_OWNERS = {
     'story-reading-layout.css': 'story-reading-layout',
     'pagination.css': 'pagination-tools',
     # Some OOC styles also support the QoL Mini Panel; retain as shared.
+}
+
+# Explicit ownership does not mean the service is independently omittable.
+BACKGROUND_OWNERS = {
+    'background/background-auto-afk.js': 'auto-afk',
 }
 
 
@@ -53,6 +59,18 @@ def scan(write=True):
         contract = contracts[owner][1]
         contract['styleFiles'] = sorted(set(contract.get('styleFiles', [])) | {rel})
         claimed[rel] = owner
+    entry = (ROOT / 'background-entry.js').read_text(encoding='utf-8')
+    match = re.search(r'\bimportScripts\s*\(([^;]*)\)', entry, re.S)
+    imports = set(re.findall(r'["\']([^"\']+\.js)["\']', match.group(1))) if match else set()
+    for rel, owner in BACKGROUND_OWNERS.items():
+        if owner not in contracts:
+            raise ValueError(f'Unknown background service owner {owner}: {rel}')
+        if rel not in imports or not (ROOT / rel).is_file():
+            raise ValueError(f'Background service not imported by Full: {rel}')
+        contract = contracts[owner][1]
+        contract['backgroundFiles'] = sorted(set(contract.get('backgroundFiles', [])) | {rel})
+        claimed[rel] = owner
+
     for owner,(path,c) in contracts.items():
         existing = json.loads(path.read_text(encoding='utf-8'))
         if c != existing:
@@ -61,7 +79,7 @@ def scan(write=True):
             changed.append(owner)
     return {'contracts':len(contracts),'panelFiles':len(list((ROOT/'settings/feature-panels').glob('*.js'))),
             'claimedPanelFiles':len([p for p in claimed if p.startswith('settings/')]),
-            'newlyOwnedStyles':len(STYLE_OWNERS), 'changedContracts':changed,
+            'newlyOwnedStyles':len(STYLE_OWNERS), 'ownedBackgroundServices':len(BACKGROUND_OWNERS), 'changedContracts':changed,
             'remainingSharedCss':sorted(loaded_css-{p for p in claimed if p.startswith('content/styles/')}
                                         -{x for _,c in contracts.values() for x in c.get('styleFiles',[])})}
 

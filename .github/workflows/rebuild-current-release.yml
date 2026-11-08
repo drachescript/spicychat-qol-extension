@@ -153,6 +153,10 @@ jobs:
           echo "Rebuild: ${{ steps.rebuild.outputs.rebuild }}"
           echo "Reason: ${{ steps.rebuild.outputs.reason }}"
 
+      - name: Synchronize audited feature asset ownership
+        if: steps.release.outputs.publish == 'true'
+        run: python3 build/sync-feature-asset-ownership.py
+
       - name: Verify Full modular build metadata
         if: steps.rebuild.outputs.rebuild == 'true'
         run: python3 scripts/build_extension.py --profile full --verify-only
