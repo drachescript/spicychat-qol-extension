@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.73",
+  "version": "0.2.74",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 134,
@@ -35,6 +35,7 @@
     "content/build-profile.js",
     "content/card-token-auth-loader.js",
     "content/card-token-main.js",
+    "content/cards-safety.js",
     "content/compatibility.js",
     "content/core-settings-defaults.js",
     "content/core-storage-writers.js",
@@ -46,9 +47,18 @@
     "content/feature-build-map.js",
     "content/feature-lifecycle.js",
     "content/generation-metadata-loader.js",
+    "content/main-card-mutation-classifiers.js",
+    "content/main-chat-menu-guards.js",
+    "content/main-chat-startup-guard.js",
     "content/main-diagnostics.js",
+    "content/main-dom-mutation-classifiers.js",
+    "content/main-message-edit-guards.js",
     "content/main-message-mutations.js",
+    "content/main-my-creations-block-guard.js",
     "content/main-page-observer.js",
+    "content/main-presentation-helpers.js",
+    "content/main-refresh-trackers.js",
+    "content/main-route-recovery.js",
     "content/main-scheduler-utils.js",
     "content/main-startup.js",
     "content/main.js",
@@ -91,6 +101,7 @@
     "content/card-token-info.js",
     "content/card-token-main.js",
     "content/card-workflow.js",
+    "content/cards-safety.js",
     "content/cards.js",
     "content/character-pictures.js",
     "content/character-qol-profiles.js",
@@ -170,9 +181,18 @@
     "content/lorebook-search-filter.js",
     "content/lorebook-tags.js",
     "content/lorebook-workflow.js",
+    "content/main-card-mutation-classifiers.js",
+    "content/main-chat-menu-guards.js",
+    "content/main-chat-startup-guard.js",
     "content/main-diagnostics.js",
+    "content/main-dom-mutation-classifiers.js",
+    "content/main-message-edit-guards.js",
     "content/main-message-mutations.js",
+    "content/main-my-creations-block-guard.js",
     "content/main-page-observer.js",
+    "content/main-presentation-helpers.js",
+    "content/main-refresh-trackers.js",
+    "content/main-route-recovery.js",
     "content/main-scheduler-utils.js",
     "content/main-startup.js",
     "content/main.js",
@@ -256,10 +276,22 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/accessibility.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "qolInterfaceScale",
+        "chatTextScale",
+        "chatLineSpacing",
+        "settingsReadingFont",
+        "settingsReadingSize",
+        "settingsReadingLineSpacing",
+        "settingsReadingLetterSpacing",
+        "settingsReadingContrast",
+        "settingsReadingLargerControls"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -352,10 +384,23 @@
       "cssFiles": [
         "content/styles/android-app.css"
       ],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/android-app.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "androidAppControlsMode",
+        "androidTopBarMenu",
+        "androidHideComposerShortcuts",
+        "androidTopBarOoc",
+        "androidTopBarAsterisk",
+        "androidTopBarFormatting",
+        "androidTopBarTranslation",
+        "androidTopBarScroll",
+        "androidTopBarPersona",
+        "androidTopBarModel"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -410,13 +455,23 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/auto-afk.js"
+      ],
       "backgroundFiles": [
         "background/background-auto-afk.js"
       ],
       "backgroundServices": [],
       "settingKeys": [
-        "autoAfkEnabled"
+        "autoAfkEnabled",
+        "autoAfkMinutes",
+        "autoAfkChats",
+        "autoAfkHome",
+        "autoAfkProfiles",
+        "autoAfkProtectActive",
+        "autoAfkResetOnActivate",
+        "autoAfkAction",
+        "autoAfkHours"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -720,10 +775,18 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/bot-editor-snippets.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "botEditorShowCharButton",
+        "botEditorShowUserButton",
+        "botEditorShowContinueButton",
+        "botEditorShowNoControlButton",
+        "botEditorShowCustomSnippets"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -750,11 +813,17 @@
       "cssFiles": [
         "content/styles/bot-organizer.css"
       ],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/bot-organizer.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableBotOrganizer"
+        "enableBotOrganizer",
+        "botOrganizerExplorerFolders",
+        "botOrganizerShowCardMeta",
+        "botOrganizerBulkTools",
+        "botCollections"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1049,11 +1118,56 @@
       "cssFiles": [
         "content/styles/chat-bubble-themes.css"
       ],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-bubbles.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableChatBubbleCustomization"
+        "enableChatBubbleCustomization",
+        "persistSpicyChatUserAppearance",
+        "chatBubbleAiBackground",
+        "chatBubbleAiTextMode",
+        "chatBubbleAiText",
+        "chatBubbleAiFont",
+        "chatBubbleAiActionMode",
+        "chatBubbleAiActionText",
+        "chatBubbleAiActionFont",
+        "chatBubbleAiDialogueMode",
+        "chatBubbleAiDialogueText",
+        "chatBubbleAiDialogueFont",
+        "chatBubbleAiBorder",
+        "chatBubbleAiBorderWidth",
+        "chatBubbleAiBorderStyle",
+        "chatBubbleAiBorderOpacity",
+        "chatBubbleAiOpacity",
+        "chatBubbleAiRadius",
+        "chatBubbleAiShape",
+        "chatBubbleAiDecorationMode",
+        "chatBubbleAiDecorationColor",
+        "chatBubbleAiCatEarLayout",
+        "chatBubbleAiShadow",
+        "chatBubbleUserBackground",
+        "chatBubbleUserTextMode",
+        "chatBubbleUserText",
+        "chatBubbleUserFont",
+        "chatBubbleUserActionMode",
+        "chatBubbleUserActionText",
+        "chatBubbleUserActionFont",
+        "chatBubbleUserDialogueMode",
+        "chatBubbleUserDialogueText",
+        "chatBubbleUserDialogueFont",
+        "chatBubbleUserBorder",
+        "chatBubbleUserBorderWidth",
+        "chatBubbleUserBorderStyle",
+        "chatBubbleUserBorderOpacity",
+        "chatBubbleUserOpacity",
+        "chatBubbleUserRadius",
+        "chatBubbleUserShape",
+        "chatBubbleUserDecorationMode",
+        "chatBubbleUserDecorationColor",
+        "chatBubbleUserCatEarLayout",
+        "chatBubbleUserShadow"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1115,12 +1229,22 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-export.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
         "showChatExportButton",
-        "chatExportIncludeImageLinks"
+        "chatExportIncludeBotInfo",
+        "chatExportIncludeRulebook",
+        "chatExportIncludeOocDirectives",
+        "chatExportIncludeGenerationDetails",
+        "chatExportNumberMessages",
+        "chatExportIncludeAvatars",
+        "chatExportIncludeImageLinks",
+        "chatExportDefaultFormat",
+        "chatExportHtmlLayout"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1204,10 +1328,17 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-list.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
+        "showRandomChatButton",
+        "randomChatUseLastHomeFilters",
+        "randomChatIncludeOpened",
+        "randomChatIncludeLater",
+        "randomChatIncludeFavorites",
         "chatListTwoColumns",
         "chatListPopoutShortcut",
         "chatListRenameShortcut"
@@ -1609,12 +1740,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-tags.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "showChatTagAddButtons",
-        "showChatTagLinks"
+        "showChatTagLinks",
+        "showChatTagAddButtons"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1710,11 +1843,16 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/chat-width-controls.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableChatWidthControls"
+        "enableChatWidthControls",
+        "chatStreamWidth",
+        "chatBubbleMaxWidth",
+        "chatComposerWidth"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -1874,11 +2012,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/creation-audit.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableCreationAudit"
+        "enableCreationAudit",
+        "creationAuditQuickStatus"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -2331,10 +2472,27 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/generation-metadata.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "showGenerationMetadata",
+        "showMessageTimestamps",
+        "messageTimestamp24Hour",
+        "messageTimestampDateFirst",
+        "messageTimestampShowSeconds",
+        "showGenerationModel",
+        "showGenerationElapsed",
+        "showGenerationSettings",
+        "compactGenerationMetadata",
+        "enableContextWindowWarning",
+        "contextWarningShowMeter",
+        "contextWarningThreshold",
+        "contextWarningManualLimit",
+        "contextWarningBrowserNotifications"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -2359,7 +2517,9 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/generation-profiles.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
@@ -2420,13 +2580,19 @@
         "content/rulebook-public-qol.js"
       ],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/language-filter.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
         "enableLanguageFilter",
         "languageFilterLorebooks",
-        "languageFilterRulebooks"
+        "languageFilterRulebooks",
+        "languageSelectionMode",
+        "languageAutoDetectUntagged",
+        "languageShowDetectedBadge",
+        "languageFilterMode"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -2480,10 +2646,16 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/list-fill.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "autoFillListings",
+        "autoFillTargetCards",
+        "autoFillMaxClicks"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -2536,10 +2708,16 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/local-tag-matching.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "localTagMatchEnabled",
+        "localTagMatchRules",
+        "localTagMatchFetchPublic"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -2867,10 +3045,20 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/message-options.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
+        "stackChatMessages",
+        "showMessageQuickActions",
+        "messageQuickActionCopy",
+        "messageQuickActionEdit",
+        "messageQuickActionRemoveImage",
+        "messageQuickActionResend",
+        "messageQuickActionConfirmRemoveImage",
+        "messageQuickActionReport",
         "messageBottomMenuShortcut"
       ],
       "customBuildStatus": "experimental-unverified",
@@ -2990,10 +3178,19 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/model-selector.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "customizeModelQuickMenu",
+        "modelQuickFavoritesOnly",
+        "modelFavoriteNames",
+        "modelHiddenNames",
+        "expandModelSelectorDescriptions",
+        "hideModelUpgradeButtons"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3146,11 +3343,17 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/my-creations-filters.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableMyCreationsFilters"
+        "showBlockButtonOnMyCreations",
+        "enableMyCreationsFilters",
+        "rememberMyCreationsView",
+        "autoLoadMyCreations",
+        "myCreationsAutoLoadPages"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -3334,10 +3537,15 @@
       "cssFiles": [
         "content/styles/pagination.css"
       ],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/pagination-tools.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "paginationTopJumpBox",
+        "paginationQuickJumpMenu"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3552,10 +3760,17 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/premium-notifications.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "hideNotifications",
+        "hideFeatureReleasePopups",
+        "hideTabNotificationBadge",
+        "autoReadNotifications"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3697,10 +3912,52 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/quick-panel.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "showQuickPanel",
+        "quickPanelPlacement",
+        "quickPanelDraggable",
+        "quickPanelDefaultClosed",
+        "quickPanelEnabledByDefaultInTab",
+        "quickPanelWidth",
+        "quickPanelUiScale",
+        "quickPanelMaxHeightPercent",
+        "quickPanelAutoCollapseOverlap",
+        "quickPanelShowCustomPictures",
+        "quickPanelShowContextKeeper",
+        "quickPanelShowFocusMode",
+        "quickPanelShowCharacterProfile",
+        "quickPanelShowSavedSnippets",
+        "quickPanelShowCreatorPreview",
+        "quickPanelShowImageGenerator",
+        "quickPanelShowRulebookDiagnostics",
+        "quickPanelShowStatus",
+        "quickPanelShowLoadedMessageCount",
+        "quickPanelStatusShowOpened",
+        "quickPanelStatusShowBlocked",
+        "quickPanelShowFeatureSummary",
+        "quickPanelShowOptions",
+        "quickPanelShowFillNow",
+        "quickPanelShowSmartFilterPins",
+        "quickPanelShowChatSearch",
+        "quickPanelShowChatMessageSearch",
+        "quickPanelShowChatSort",
+        "quickPanelShowScanVisible",
+        "quickPanelShowLoadAll",
+        "quickPanelShowOoc",
+        "quickPanelShowAutoVoice",
+        "quickPanelShowAutoAsterisk",
+        "quickPanelShowTranslation",
+        "quickPanelShowPersona",
+        "quickPanelShowExport",
+        "quickPanelShowSoundscapes",
+        "quickPanelCustomXPercent",
+        "quickPanelCustomYPercent"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3725,10 +3982,27 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/recommendation-helpers.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "enableRecommendationHelpers",
+        "recommendationHideFavoriteBots",
+        "recommendationHideOwnBots",
+        "recommendationOnlyUnopened",
+        "recommendationOnlyLorebook",
+        "recommendationSessionHideButtons",
+        "recommendationRandomButton",
+        "recommendationHideLaterBots",
+        "recommendationHideNotInterested",
+        "recommendationPreferFavoriteCreators",
+        "recommendationShowReasonBadges",
+        "recommendationPreferredTags",
+        "recommendationAvoidTags",
+        "recommendationAvoidWords"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -3851,7 +4125,9 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/rulebook-diagnostics.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
@@ -4006,10 +4282,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/saved-snippets.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "enableSavedTextSnippets"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4034,10 +4314,27 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/scroll-to-top.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "showScrollToTopButton",
+        "showScrollToBottomButton",
+        "showSwipeJumpButtons",
+        "showSwipeJumpToNumber",
+        "restoreFirstSwipeOnLoad",
+        "scrollNavOnHome",
+        "scrollNavOnChats",
+        "scrollNavOnChat",
+        "scrollNavOnCreation",
+        "scrollNavOnProfiles",
+        "scrollNavOnOther",
+        "scrollTopLoadPreviousMessages",
+        "scrollTopLoadPreviousMode",
+        "scrollTopLoadPreviousTiming"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4094,10 +4391,55 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/sidebar.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "showQolSidebarButton",
+        "qolSidebarButtonPlacement",
+        "hideSidebarLogo",
+        "hideSidebarHome",
+        "hideSidebarChats",
+        "hideSidebarPersonas",
+        "restorePersonasSidebarPosition",
+        "hideSidebarNewBadges",
+        "hideSidebarCreateMenu",
+        "hideSidebarCreateChatbot",
+        "hideSidebarCreateLorebook",
+        "hideSidebarCreateGroup",
+        "hideSidebarCreateVoice",
+        "hideSidebarMyCreationsMenu",
+        "hideSidebarMyChatbots",
+        "hideSidebarMyLorebooks",
+        "hideSidebarMyGroups",
+        "hideSidebarMyVoices",
+        "hideSidebarFavorites",
+        "hideSidebarRecommendations",
+        "hideSidebarLeaderboard",
+        "hideSidebarBlockedCreators",
+        "hideSidebarSubscribe",
+        "hideSidebarHelp",
+        "hideSidebarSocialDiscord",
+        "hideSidebarSocialX",
+        "hideSidebarSocialReddit",
+        "hideSidebarFooterTerms",
+        "hideSidebarFooterPrivacy",
+        "hideSidebarFooterRefunds",
+        "hideSidebarFooterReporting",
+        "hideSidebarFooterGuidelines",
+        "hideSidebarFooterSupport",
+        "hideSidebarFooterAffiliates",
+        "hideSidebarAppDownloadGooglePlay",
+        "hideSidebarAppDownloadAppStore",
+        "hideSidebarAppDownloadGeneric",
+        "hideSidebarWebVersion",
+        "hideSidebarSignOut",
+        "hideSidebarSocialLinks",
+        "hideSidebarFooterLinks",
+        "hideSidebarAppDownload"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4122,10 +4464,14 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/smart-filter-presets.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "enableSmartFilterPresets"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4230,7 +4576,9 @@
       "cssFiles": [
         "content/styles/story-reading-layout.css"
       ],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/story-reading-layout.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
@@ -4260,11 +4608,15 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/tag-aliases.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableTagAliases"
+        "enableTagAliases",
+        "tagAliasRules",
+        "tagAliasShowDisplay"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -4290,10 +4642,17 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/tags-nsfw.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "autoTags",
+        "showTagTemplateButton",
+        "includeTags",
+        "excludeTags"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4318,11 +4677,28 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/text-replacements.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableChatTextReplacements"
+        "enableChatTextReplacements",
+        "chatTextReplacementScope",
+        "chatTextReplacementMode",
+        "chatTextReplacementPreview",
+        "chatTextReplacementRules",
+        "enableChatWordCensor",
+        "chatWordCensorList",
+        "chatWordCensorMask",
+        "chatWordCensorCustom",
+        "chatWordCensorScope",
+        "chatWordCensorReveal",
+        "chatWordCensorShowChatToggle",
+        "enableChatMutedWords",
+        "chatMutedWords",
+        "chatTextReplacementPresets",
+        "chatTextReplacementShowChatPresetControl"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -4348,10 +4724,19 @@
       ],
       "requiredHelpers": [],
       "cssFiles": [],
-      "settingsScripts": [],
+      "settingsScripts": [
+        "settings/feature-panels/top-bar.js"
+      ],
       "backgroundFiles": [],
       "backgroundServices": [],
-      "settingKeys": [],
+      "settingKeys": [
+        "hideTopBarLanguage",
+        "hideTopBarNotifications",
+        "hideTopBarTheme",
+        "topBarProfilePillMode",
+        "topBarProfilePillPersonaPrefix",
+        "topBarProfilePillCustomText"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
