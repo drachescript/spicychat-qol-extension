@@ -450,13 +450,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : DS.DEFAULT_SETTINGS[key];
   };
 
-  // Keep small, content-free performance snapshots in extension storage. The
-  // background writer owns the size cap and gzip rotation across tabs/updates.
-  // No message text, account IDs, bot IDs, URLs, or runtime log details leave this page.
+  // Keep small, content-free performance snapshots. Browser extensions use the
+  // background IndexedDB writer; Android has no extension service worker and
+  // persists an explicitly bounded timeline via the APK storage bridge.
+  // No message text, account IDs, bot IDs, URLs, or runtime log details are stored.
+  const androidSupportHistoryKey = "dsAndroidSupportHistoryV1";
+  const androidSupportStore = window.__spicyChatQolAndroidApp === true ||
+    chrome.runtime?.id === "spicychat-qol-android";
+  const androidSupportMaxRows = 480; // 40 hours at a five-minute sample interval
+  let androidSupportWrite = Promise.resolve();
+  const appendAndroidSupportSnapshot = row => {
+    androidSupportWrite = androidSupportWrite.catch(() => {}).then(async () => {
+      if (typeof chrome.storage?.local?.get !== "function" ||
+          typeof chrome.storage?.local?.set !== "function") return;
+      const stored = (await chrome.storage.local.get(androidSupportHistoryKey))?.[androidSupportHistoryKey];
+      // Never overwrite a newer or unknown schema with a blank history.
+      if (stored && (stored.schema !== 1 || !Array.isArray(stored.rows))) return;
+      const state = stored || { schema: 1, next: 1, dropped: 0, rows: [] };
+      const rows = state.rows;
+      const last = rows[rows.length - 1];
+      if (last && Date.now() - Number(last.at || 0) < 60000) return;
+      const seq = Math.max(1, Number(state.next) || 1);
+      rows.push({ ...row, at: Date.now(), seq });
+      const excess = Math.max(0, rows.length - androidSupportMaxRows);
+      if (excess) rows.splice(0, excess);
+      await chrome.storage.local.set({ [androidSupportHistoryKey]: {
+        schema: 1, next: seq + 1,
+        dropped: Math.max(0, Number(state.dropped) || 0) + excess,
+        rows
+      } });
+    });
+  };
   let supportLastSnapshot = 0;
   const sendSupportSnapshot = () => {
     if (DS.isQolWorkerTab() || qolRuntimeSuspended || document.visibilityState === "hidden") return;
-    if (Date.now() - supportLastSnapshot < 45000) return;
+    if (Date.now() - supportLastSnapshot < (androidSupportStore ? 300000 : 45000)) return;
     const runtime = DS.state?.runtimePerformance || {};
     const wanted = ["mutations", "observerBatches", "qolOnlyMutations", "composerOnlyMutationSkips", "runtimeKernelRuns", "messageLaneRuns", "messageLaneScheduleRequests", "messageCacheHits", "messageCacheMisses", "messageCacheInvalidations", "quickPanelUpdateCoalesced", "typingDeferrals", "hiddenSkips", "longTasks", "maxLongTaskMs", "blockedBotMutationSkips", "routeFeatureStepSkips", "disabledFeatureStepSkips"];
     const metrics = {};
@@ -470,12 +498,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const event of recent) if (event.level === "warn" || event.level === "error") levels[event.level]++;
     supportLastSnapshot = Date.now();
     try {
-      chrome.runtime.sendMessage({ type: "DS_SUPPORT_HISTORY_APPEND", row: { page, version: chrome.runtime.getManifest().version, metrics, levels } }, () => { void chrome.runtime.lastError; });
+      const row = { page, version: chrome.runtime.getManifest().version, metrics, levels };
+      if (androidSupportStore) void appendAndroidSupportSnapshot(row);
+      else chrome.runtime.sendMessage({ type: "DS_SUPPORT_HISTORY_APPEND", row }, () => { void chrome.runtime.lastError; });
     } catch {}
   };
   if (!DS.isQolWorkerTab()) {
     setTimeout(sendSupportSnapshot, 30000);
-    setInterval(sendSupportSnapshot, 120000);
+    setInterval(sendSupportSnapshot, androidSupportStore ? 300000 : 120000);
   }
 
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
