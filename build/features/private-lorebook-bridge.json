@@ -1,0 +1,26 @@
+{
+  "id": "private-lorebook-bridge",
+  "primary": "content/private-lorebook-bridge.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enablePrivateLorebookBridge",
+    "privateLorebookAllowArchiveAutoSync",
+    "privateLorebookAllowAutoCreate",
+    "privateLorebookArchiveCleanup",
+    "privateLorebookArchiveId",
+    "privateLorebookPromotionPolicy",
+    "privateLorebookRequireReview",
+    "privateLorebookStorageMode",
+    "privateLorebookSyncMode"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/private-lorebook-bridge.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

@@ -1,0 +1,22 @@
+{
+  "id": "chat-lorebook-recall",
+  "primary": "content/chat-lorebook-recall.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableLocalLorebookRecall",
+    "enableSharedOocBudget",
+    "localLorebookRecallMaxChars",
+    "localLorebookRecentMessages",
+    "sharedOocBudgetChars"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/chat-lorebook-recall.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}
