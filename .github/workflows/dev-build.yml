@@ -57,6 +57,9 @@ jobs:
           print(f"Version/changelog OK: {version}")
           PY
 
+      - name: Synchronize audited feature asset ownership
+        run: python3 build/sync-feature-asset-ownership.py
+
       - name: Verify Full modular build metadata
         run: python3 scripts/build_extension.py --profile full --verify-only
 
