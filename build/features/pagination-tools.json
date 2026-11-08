@@ -3,8 +3,15 @@
   "primary": "content/pagination-tools.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "paginationTopJumpBox",
+    "paginationQuickJumpMenu"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/pagination-tools.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

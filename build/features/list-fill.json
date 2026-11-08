@@ -3,8 +3,16 @@
   "primary": "content/list-fill.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "autoFillListings",
+    "autoFillTargetCards",
+    "autoFillMaxClicks"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/list-fill.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

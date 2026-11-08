@@ -736,9 +736,14 @@ function formatBotStatusLastRunFeedback(report) {
   if (changed) parts.push(`${changed} updated`);
   if (recovered) parts.push(`${recovered} recovered`);
   if (report.uniqueTargets != null && Number.isFinite(Number(report.uniqueTargets))) parts.push(`${Number(report.uniqueTargets)} unique targets`);
-  if (Number(report.duplicateQueueEntries || 0)) parts.push(`${Number(report.duplicateQueueEntries)} repeated queue entries`);
-  if (Number(report.retries || 0)) parts.push(`${Number(report.retries)} helper retries`);
-  if (Number(report.cacheHits || 0)) parts.push(`${Number(report.cacheHits)} cache hits`);
+  if (report.duplicateQueueEntries != null) parts.push(`${Number(report.duplicateQueueEntries) || 0} duplicate queue checks skipped`);
+  if (report.workerChecks != null) parts.push(`${Number(report.workerChecks)} helper checks`);
+  if (report.retries != null) parts.push(`${Number(report.retries)} helper retries`);
+  // Explicit bulk scans deliberately bypass the short ad-hoc result cache.
+  // A measured zero here is expected, not a missing measurement.
+  if (report.cacheHits != null) parts.push(`${Number(report.cacheHits)} worker cache hits (fresh scan)`);
+  else parts.push('worker cache-hit count unavailable');
+  if (report.coalesced != null) parts.push(`${Number(report.coalesced)} in-flight checks coalesced`);
   if (Number(report.accessFailures || 0)) parts.push(`${Number(report.accessFailures)} network/auth failures`);
   if (report.cancelled) parts.push("stopped by user");
   if (report.saveVerified === false) parts.push("Save verification failed — check previous checkpoints");
@@ -962,11 +967,19 @@ async function runBotAvailabilityScan(options = {}) {
   const unresolvablePendingIds = options?.resume
     ? pausedQueue.ids.filter(validBotId).filter(id => !entries.some(entry => entry.id === id))
     : [];
+  // Some imported/resumed sources can accidentally repeat the same ID.
+  // Check each ID only once per run, keeping its first position in a resumed
+  // queue. Saved queue checkpoints and progress refer to this deduped list.
+  const candidateIdSet = new Set();
+  const candidateCountBeforeDedup = entries.length;
+  entries = entries.filter(entry => {
+    const id = String(entry?.id || '').trim().toLowerCase();
+    if (!id || candidateIdSet.has(id)) return false;
+    candidateIdSet.add(id);
+    return true;
+  });
+  const duplicateQueueEntries = candidateCountBeforeDedup - entries.length;
   const totalCandidates = entries.length;
-  // An already deduplicated queue normally has zero repeated IDs. Count any
-  // duplicates for diagnostics without changing ordering or resume semantics.
-  const candidateIdSet = new Set(entries.map(item => String(item.id || "").toLowerCase()));
-  const duplicateQueueEntries = entries.length - candidateIdSet.size;
   const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
   const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
   const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;

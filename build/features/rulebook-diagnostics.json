@@ -7,6 +7,10 @@
     "enableRulebookDiagnostics"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/rulebook-diagnostics.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

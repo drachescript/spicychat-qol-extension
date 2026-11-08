@@ -7,6 +7,10 @@
     "storyReadingLayout"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/story-reading-layout.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

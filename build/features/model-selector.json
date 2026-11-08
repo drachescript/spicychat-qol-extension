@@ -3,8 +3,19 @@
   "primary": "content/model-selector.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "customizeModelQuickMenu",
+    "modelQuickFavoritesOnly",
+    "modelFavoriteNames",
+    "modelHiddenNames",
+    "expandModelSelectorDescriptions",
+    "hideModelUpgradeButtons"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/model-selector.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

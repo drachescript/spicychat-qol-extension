@@ -6,8 +6,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   const { normalizeSlowDirtyGroups, slowDirtyHas, blockedStoreChangeStats } = DS.mainSchedulerUtils;
   const { nodeIsOrContainsChatMessage, mutationIsMessageScoped, mutationsAreComposerOnly, mutationsAreChatLocal, mutationsAddOrRemoveMessageRoots, addedMessageRootCount, messageRootForMutationNode, collectMessageCacheMutationTargets } = DS.mainMessageMutations;
+  const { mutationRemovedPersistentChatShortcut, mutationRemovedPersistentChatHeaderControl,
+    mutationAddedNativeChatHeader, mutationTouchesNativeChatHeader, mutationIsOnlyQolUi } = DS.mainDomMutationClassifiers;
+  const { isCardListingContext, mutationsMayAffectCards, mutationsAddBotCards } = DS.mainCardMutationClassifiers;
+  const { applyRuntimePerformancePresentation, installTypingPerformanceTracker } = DS.mainPresentationHelpers;
+  const { scheduleNonChatPresentationRecovery } = DS.createMainRouteRecovery({ runtimeCounters });
+  const { prepareEditedMessageForSave, syncMessageEditGuards,
+    nodeInsidePendingMessageEdit, resetMessageEditGuards } = DS.createMainMessageEditGuards({
+    runtimeCounters, pauseReruns, getPauseRerunsUntil: () => pauseRerunsUntil,
+    desktopAppPerformanceGuardActive
+  });
+  const { rerunAfterMenuSettles, installChatMenuGuards } = DS.createMainChatMenuGuards({
+    pauseReruns, scheduleChatHistoryBatchRefresh, prepareEditedMessageForSave
+  });
+  const { discardedWakeSessionActive, noteDiscardedWakeVisible,
+    startChatStartupQuietWindow, chatStartupQuietActive, scheduleChatStartupQuietResume,
+    chatStartupWarmupActive, chatStartupWarmupRemainingMs } = DS.createMainChatStartupGuard({
+    loadedChatMessageCount, scheduleSavedOpenedLane, primeLargeChatMessageLane
+  });
+  const installRefreshTrackers = DS.createMainRefreshTrackers({
+    runtimeCounters, checkRouteChange, scheduleNonChatPresentationRecovery,
+    scheduleSavedOpenedLane, primeLargeChatMessageLane, scheduleLazyHistoryEnhancement,
+    discardedWakeSessionActive, noteDiscardedWakeVisible,
+    scheduleChatStartupQuietResume, longTaskOverlapNames
+  });
 
-  let lastChatDropdownClick = 0;
   let pauseRerunsUntil = 0;
   let pauseRerunTimer = null;
   let criticalTimer = null;
@@ -27,15 +50,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let chatMessageCountCache = { route: "", count: 0, dirty: true };
   let chatHistoryBatchTimer = null;
   let chatHistoryMutationBurst = { lastAt: 0, count: 0 };
-  let routePresentationRecoveryTimers = [];
   let savedOpenedLaneTimer = null;
   let savedOpenedLaneRunning = false;
   let savedOpenedLanePending = false;
   let blockedRefreshTimer = null;
   let blockedRefreshUntil = 0;
   const BLOCKED_REFRESH_IDLE_MS = 120000;
-  const NATIVE_SCROLL_TOP_STYLE_ID = "ds-hide-native-scroll-back-to-top";
-  const messageEditSettleTimers = new Map();
   const slowStepThrottle = new Map();
   const CREATOR_PROFILE_STARTUP_QUIET_MS = 5000;
   const SLOW_SLICE_BUDGET_MS = 10;
@@ -130,55 +150,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     scheduleCreatorProfileQuietResume();
   }
 
-  function isMyCreationsChatbotsPage() {
-    return !!DS.getPageState?.().isMyCreationsChatbotsPage;
-  }
-
-  function removeMyCreationsBlockButtons() {
-    if (!isMyCreationsChatbotsPage()) return 0;
-    let removed = 0;
-    document.querySelectorAll(".ds-card-block-button").forEach(button => {
-      button.remove();
-      removed += 1;
-    });
-    return removed;
-  }
-
-  function installMyCreationsBlockButtonGuard() {
-    if (DS.__myCreationsBlockButtonGuardInstalled) return;
-    const original = DS.applyCardBlockButtons;
-    if (typeof original !== "function") return;
-
-    DS.applyCardBlockButtons = function guardedApplyCardBlockButtons(...args) {
-      const settings = DS.state?.settings || {};
-      if (isMyCreationsChatbotsPage() && !settings.showBlockButtonOnMyCreations) {
-        removeMyCreationsBlockButtons();
-        return undefined;
-      }
-      return original.apply(this, args);
-    };
-
-    DS.__myCreationsBlockButtonGuardInstalled = true;
-  }
-
-  installMyCreationsBlockButtonGuard();
-
+  // Scroll-button visual ownership lives in scroll-to-top.js.
+  // Keep a safe no-op when Custom physically excludes that feature.
   function syncNativeScrollBackToTopVisibility() {
-    const settings = DS.state?.settings || {};
-    const shouldHide = !!(settings.enabled && settings.showScrollToTopButton);
-    let style = document.getElementById(NATIVE_SCROLL_TOP_STYLE_ID);
-
-    if (!shouldHide) {
-      style?.remove();
-      return;
-    }
-
-    if (!style) {
-      style = document.createElement("style");
-      style.id = NATIVE_SCROLL_TOP_STYLE_ID;
-      style.textContent = 'button[aria-label="scroll-back-to-top"]{display:none!important;}';
-      (document.head || document.documentElement).appendChild(style);
-    }
+    DS.syncNativeScrollBackToTopVisibility?.();
   }
 
   function clearBlockedRefreshBatch() {
@@ -225,158 +200,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, ms + 150);
   }
 
-  function messageEditorInside(root) {
-    return root?.querySelector?.("textarea, [contenteditable='true']") || null;
-  }
-
-  function messageEditTimerKey(root) {
-    return String(root?.id || root?.dataset?.dsEditGuardKey || "");
-  }
-
-  function clearMessageEditSettleTimer(root) {
-    const key = messageEditTimerKey(root);
-    if (!key) return;
-    const timer = messageEditSettleTimers.get(key);
-    if (timer) clearTimeout(timer);
-    messageEditSettleTimers.delete(key);
-  }
-
-  function finalizeMessageEditGuard(root, source = "settled") {
-    if (!root) return;
-    clearMessageEditSettleTimer(root);
-    try { delete root.dataset.dsEditSavePending; } catch {}
-    try { delete root.dataset.dsEditGuardSource; } catch {}
-    try { delete root.dataset.dsEditGuardKey; } catch {}
-    DS.state.activeMessageEditRoots?.delete?.(root);
-    try { DS.invalidateMessageCacheForNode?.(root); } catch {}
-
-    const counters = runtimeCounters();
-    counters.messageEditGuardsSettled = Number(counters.messageEditGuardsSettled || 0) + 1;
-
-    const delay = Math.max(60, Number(pauseRerunsUntil || 0) - Date.now() + 80);
-    window.setTimeout(() => {
-      if (!root?.isConnected || messageEditorInside(root)) return;
-      DS.scheduleMessageLane?.(`message-edit-${source}`);
-      DS.scheduleRun?.({ priority: "slow", source: `message-edit-${source}` });
-    }, delay);
-  }
-
-  function prepareEditedMessageForSave(root, source = "editor") {
-    if (!root?.isConnected) return;
-
-    const activeRoots = DS.state.activeMessageEditRoots || (DS.state.activeMessageEditRoots = new Set());
-    activeRoots.add(root);
-    clearMessageEditSettleTimer(root);
-
-    const alreadyPending = root.dataset.dsEditSavePending === "1";
-    root.dataset.dsEditSavePending = "1";
-    root.dataset.dsEditGuardSource = source;
-    if (root.id) root.dataset.dsEditGuardKey = root.id;
-
-    if (alreadyPending) {
-      if (source === "save") pauseReruns(900);
-      return;
-    }
-
-    const counters = runtimeCounters();
-    counters.messageEditGuardsStarted = Number(counters.messageEditGuardsStarted || 0) + 1;
-
-    // Remove only QoL display transforms before SpicyChat/React owns the editor.
-    // This prevents a slow installed/PWA render from leaving a formatted clone of
-    // the old message visible beside the native edit UI.
-    try { DS.prepareRpFormatRepairMessageForEdit?.(root); } catch {}
-    try { DS.prepareAlternateDialogueMessageForEdit?.(root); } catch {}
-    try { DS.restoreChatTextReplacementsForMessage?.(root); } catch {}
-    try { DS.invalidateMessageCacheForNode?.(root); } catch {}
-
-    // Entry into edit mode only needs a very short quiet period. Save gets a bit
-    // longer because high-latency React updates can keep the old tree around.
-    pauseReruns(source === "save" ? 900 : 260);
-  }
-
-  function scheduleMessageEditGuardFinalize(root, source = "settled") {
-    if (!root?.isConnected || root.dataset.dsEditSavePending !== "1") return;
-    if (messageEditorInside(root)) {
-      clearMessageEditSettleTimer(root);
-      return;
-    }
-
-    const key = messageEditTimerKey(root);
-    if (!key) return finalizeMessageEditGuard(root, source);
-    clearMessageEditSettleTimer(root);
-    const delay = desktopAppPerformanceGuardActive() ? 320 : 180;
-    const timer = window.setTimeout(() => {
-      messageEditSettleTimers.delete(key);
-      if (!root?.isConnected) {
-        DS.state.activeMessageEditRoots?.delete?.(root);
-        return;
-      }
-      if (messageEditorInside(root)) return;
-      finalizeMessageEditGuard(root, source);
-    }, delay);
-    messageEditSettleTimers.set(key, timer);
-  }
-
-  function messageRootFromNode(node) {
-    const el = node instanceof Element ? node : node?.parentElement;
-    if (!el) return null;
-    if (el.matches?.("div[id^='message-']")) return el;
-    return el.closest?.("div[id^='message-']") || null;
-  }
-
-  function syncMessageEditGuards(mutations) {
-    if (!DS.isSingleChatPage?.()) return;
-    const roots = new Set();
-    for (const mutation of mutations || []) {
-      // Plain streaming text mutations cannot create an editor. Inspect only
-      // structural additions or a root already in the edit lifecycle.
-      const targetRoot = messageRootFromNode(mutation.target);
-      if (targetRoot?.dataset.dsEditSavePending === "1") roots.add(targetRoot);
-      if (mutation.type !== "childList" || !mutation.addedNodes?.length) continue;
-      for (const node of mutation.addedNodes) {
-        if (!(node instanceof Element)) continue;
-        const possibleEditor = node.matches?.("textarea, [contenteditable='true']")
-          || (node.childElementCount <= 16 && !!node.querySelector?.("textarea, [contenteditable='true']"));
-        if (!possibleEditor) continue;
-        const direct = messageRootFromNode(node) || targetRoot;
-        if (direct) roots.add(direct);
-        // A new message subtree can include multiple editable roots, but
-        // searching the whole chat after every token is unnecessary.
-        if (node.matches?.("div[id^='message-']")) roots.add(node);
-        node.querySelectorAll?.("div[id^='message-'] textarea, div[id^='message-'] [contenteditable='true']").forEach(editor => {
-          const root = messageRootFromNode(editor);
-          if (root) roots.add(root);
-        });
-      }
-    }
-
-    for (const root of roots) {
-      if (!root?.isConnected) continue;
-      if (messageEditorInside(root)) prepareEditedMessageForSave(root, "editor");
-      else if (root.dataset.dsEditSavePending === "1") scheduleMessageEditGuardFinalize(root, "settled");
-    }
-  }
-
-  function nodeInsidePendingMessageEdit(node) {
-    const root = messageRootFromNode(node);
-    return !!(root && (root.dataset.dsEditSavePending === "1" || messageEditorInside(root)));
-  }
-
-  DS.hasActiveMessageEditor = function hasActiveMessageEditor() {
-    const roots = DS.state.activeMessageEditRoots || (DS.state.activeMessageEditRoots = new Set());
-    for (const root of [...roots]) {
-      if (!root?.isConnected || !messageEditorInside(root)) roots.delete(root);
-    }
-    if (roots.size) return true;
-    const editor = document.querySelector("div[id^='message-'] textarea, div[id^='message-'] [contenteditable='true']");
-    const root = editor?.closest?.("div[id^='message-']");
-    if (root) {
-      roots.add(root);
-      return true;
-    }
-    return false;
-  };
-
   function scheduleChatHistoryBatchRefresh() {
     const counters = runtimeCounters();
     if (!chatHistoryBatchTimer) counters.historyBatches = Number(counters.historyBatches || 0) + 1;
@@ -397,117 +220,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, quietMs + 90);
   }
 
-  function isVisible(el) {
-    if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    if (!rect.width || !rect.height) return false;
-    const style = getComputedStyle(el);
-    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-  }
-
-  function normalizedText(el) {
-    const text = String(el?.getAttribute?.("aria-label") || el?.textContent || "");
-    return DS.normalize ? DS.normalize(text) : text.toLowerCase().replace(/\s+/g, " ").trim();
-  }
-
-  function isLoadPreviousMessagesButton(button) {
-    if (!(button instanceof Element)) return false;
-    if (button.querySelector?.("[data-translate-key='chat:page.action.loadPreviousMessages']")) return true;
-    return normalizedText(button).includes("load previous messages");
-  }
-
-  function isChatDropdownMenuElement(el) {
-    if (!el || el.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return false;
-    if (!isVisible(el)) return false;
-
-    const buttons = DS.qsa?.("button", el) || [];
-    if (!buttons.length) return false;
-
-    const labels = buttons.map(normalizedText).filter(Boolean);
-
-    return labels.some(text => (
-      text.includes("start new chat") ||
-      text.includes("share chatbot") ||
-      text.includes("view saved chats") ||
-      text.includes("change persona") ||
-      text.includes("generation settings") ||
-      text.includes("block creator") ||
-      text.includes("disable memory") ||
-      text.includes("enable memory")
-    ));
-  }
-
-  document.addEventListener("pointerdown", event => {
-    const target = event.target;
-    const dropdownButton = target?.closest?.("button[aria-label='chat-dropdown']");
-    const dropdownAction = target?.closest?.("button");
-    const label = normalizedText(dropdownAction);
-
-    if (isLoadPreviousMessagesButton(dropdownAction)) {
-      scheduleChatHistoryBatchRefresh();
-      return;
-    }
-
-    if (dropdownAction && label === "save") {
-      const messageRoot = dropdownAction.closest?.("div[id^='message-']");
-      const editing = messageRoot?.querySelector?.("textarea, [contenteditable='true']");
-      if (messageRoot && editing) prepareEditedMessageForSave(messageRoot, "save");
-    }
-
-    if (dropdownButton) {
-      lastChatDropdownClick = Date.now();
-      pauseReruns(3500);
-      return;
-    }
-
-    if (
-      label.includes("start new chat") ||
-      label.includes("view saved chats") ||
-      label.includes("change persona") ||
-      label.includes("generation settings") ||
-      label.includes("share chatbot")
-    ) {
-      pauseReruns(7500);
-    }
-  }, true);
-
-  document.addEventListener("click", event => {
-    const button = event.target?.closest?.("button");
-    const label = normalizedText(button);
-
-    if (
-      label.includes("start new chat") ||
-      label.includes("view saved chats") ||
-      label.includes("change persona") ||
-      label.includes("generation settings") ||
-      label.includes("share chatbot")
-    ) {
-      pauseReruns(7500);
-    }
-  }, true);
-
-  DS.isChatHeaderMenuOpen = function isChatHeaderMenuOpen() {
-    const button = DS.qs?.("button[aria-label='chat-dropdown']");
-
-    if (button && isVisible(button)) {
-      const expanded = button.getAttribute("aria-expanded") === "true" || button.dataset.state === "open";
-      const justClicked = Date.now() - lastChatDropdownClick < 1500;
-
-      if (expanded || justClicked) return true;
-    }
-
-    return (DS.qsa?.("[role='menu'], [role='dialog'], div.absolute, div.fixed") || [])
-      .some(isChatDropdownMenuElement);
-  };
-
-  function rerunAfterMenuSettles() {
-    clearTimeout(DS.state.chatHeaderMenuTimer);
-    DS.state.chatHeaderMenuTimer = setTimeout(() => {
-      DS.scheduleRun?.({ priority: "critical", source: "chat-menu" });
-      DS.scheduleRun?.({ priority: "slow", source: "chat-menu" });
-    }, 900);
-  }
-
   function dedicatedBackgroundWorkerKind() {
     return String(
       DS.state?.qolBackgroundWorker ||
@@ -523,182 +235,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (dedicatedBackgroundWorkerKind()) return false;
     return !!(settings.enabled && settings.pauseQolInHiddenTabs && document.hidden);
   }
-
-  const CHAT_STARTUP_QUIET_MS = 20000;
-  const CHAT_STARTUP_SETTLE_MIN_MS = 2500;
-  const CHAT_STARTUP_LARGE_SETTLE_MIN_MS = 8000;
-  const CHAT_STARTUP_LARGE_MESSAGE_COUNT = 35;
-  const CHAT_STARTUP_SETTLED_IDLE_MS = 1800;
-  const CHAT_STARTUP_LONG_TASK_IDLE_MS = 1500;
-  const CHAT_STARTUP_WARMUP_MS = 25000;
-  const DISCARDED_WAKE_VISIBLE_QUIET_MS = 8000;
-
-  function discardedWakeSessionActive() {
-    return !!(DS.state?.discardedWakeActive && DS.isSingleChatPage?.());
-  }
-
-  function noteDiscardedWakeVisible(source = "visible") {
-    if (!discardedWakeSessionActive() || document.hidden) return false;
-    const now = Date.now();
-    if (!Number(DS.state.discardedWakeVisibleAt || 0)) {
-      DS.state.discardedWakeVisibleAt = now;
-      DS.state.discardedWakeMinUntil = now + DISCARDED_WAKE_VISIBLE_QUIET_MS;
-      DS.state.chatStartupQuietUntil = Math.max(Number(DS.state.chatStartupQuietUntil || 0), now + CHAT_STARTUP_QUIET_MS);
-      DS.state.chatStartupWarmupUntil = Math.max(Number(DS.state.chatStartupWarmupUntil || 0), now + CHAT_STARTUP_WARMUP_MS);
-      DS.state.chatStartupLastMessageMutationAt = now;
-      DS.runtimeLog?.("info", "performance", `Discarded chat tab became visible (${source})`, { quietMs: DISCARDED_WAKE_VISIBLE_QUIET_MS });
-      DS.diagPerformance?.("discarded-wake-visible", { source: String(source || "visible"), quietMs: DISCARDED_WAKE_VISIBLE_QUIET_MS });
-    }
-    return true;
-  }
-
-  function finishDiscardedWake(reason = "settled") {
-    if (!DS.state?.discardedWakeActive) return;
-    DS.state.discardedWakeActive = false;
-    DS.state.discardedWakeFinishedAt = Date.now();
-    DS.runtimeLog?.("info", "performance", `Discarded chat wake protection ended (${reason})`);
-    DS.diagPerformance?.("discarded-wake-end", { reason: String(reason || "settled") });
-    if (!document.hidden) {
-      setTimeout(() => {
-        DS.maybeAutoReadNotifications?.("discarded-wake-settled");
-        scheduleSavedOpenedLane("discarded-wake-settled", 40);
-        primeLargeChatMessageLane("discarded-wake-settled");
-      }, 0);
-    }
-  }
-
-  function chatStartupMinimumQuietMs() {
-    return loadedChatMessageCount() >= CHAT_STARTUP_LARGE_MESSAGE_COUNT
-      ? CHAT_STARTUP_LARGE_SETTLE_MIN_MS
-      : CHAT_STARTUP_SETTLE_MIN_MS;
-  }
-
-  function startChatStartupQuietWindow(source = "route") {
-    if (!DS.isSingleChatPage?.()) return false;
-    DS.state = DS.state || {};
-    const now = Date.now();
-    const discardedWake = source === "startup" && document.wasDiscarded === true;
-    DS.state.chatStartupQuietRoute = `${location.pathname || ""}${location.search || ""}`;
-    DS.state.chatStartupQuietStartedAt = now;
-    DS.state.chatStartupQuietUntil = now + CHAT_STARTUP_QUIET_MS;
-    DS.state.chatStartupWarmupUntil = now + CHAT_STARTUP_WARMUP_MS;
-    DS.state.chatStartupLastMessageMutationAt = now;
-    DS.state.chatStartupLastLongTaskAt = 0;
-    if (discardedWake) {
-      DS.state.discardedWakeActive = true;
-      DS.state.discardedWakeVisibleAt = document.hidden ? 0 : now;
-      DS.state.discardedWakeMinUntil = document.hidden ? 0 : now + DISCARDED_WAKE_VISIBLE_QUIET_MS;
-      DS.state.discardedWakeStartedAt = now;
-    } else if (source === "route-change") {
-      DS.state.discardedWakeActive = false;
-      DS.state.discardedWakeVisibleAt = 0;
-      DS.state.discardedWakeMinUntil = 0;
-    }
-    DS.runtimeLog?.("info", "performance", `Chat startup quiet window started (${source})`, {
-      quietMs: CHAT_STARTUP_QUIET_MS,
-      discardedWake
-    });
-    DS.diagPerformance?.("startup-quiet-start", { source: String(source || "route"), durationTargetMs: CHAT_STARTUP_QUIET_MS, discardedWake });
-    return true;
-  }
-
-  function chatStartupQuietActive() {
-    if (!DS.isSingleChatPage?.()) return false;
-    const now = Date.now();
-    if (discardedWakeSessionActive()) {
-      if (document.hidden) return true;
-      noteDiscardedWakeVisible("quiet-check");
-      const discardedMinUntil = Number(DS.state?.discardedWakeMinUntil || 0);
-      if (discardedMinUntil && now < discardedMinUntil) return true;
-    }
-    const until = Number(DS.state?.chatStartupQuietUntil || 0);
-    if (!until) {
-      finishDiscardedWake("quiet-cleared");
-      return false;
-    }
-    if (now >= until) {
-      DS.state.chatStartupQuietUntil = 0;
-      finishDiscardedWake("timeout");
-      DS.diagPerformance?.("startup-quiet-end", { reason: "timeout", elapsedMs: Math.max(0, now - Number(DS.state?.chatStartupQuietStartedAt || now)) });
-      return false;
-    }
-    const started = Number(DS.state?.chatStartupQuietStartedAt || now);
-    const lastMutation = Number(DS.state?.chatStartupLastMessageMutationAt || started);
-    const lastLongTask = Number(DS.state?.chatStartupLastLongTaskAt || 0);
-    const minimumQuietMs = chatStartupMinimumQuietMs();
-    const mutationIdleMs = now - lastMutation;
-    const longTaskIdleMs = lastLongTask > 0 ? now - lastLongTask : Number.POSITIVE_INFINITY;
-    if (
-      now - started >= minimumQuietMs &&
-      mutationIdleMs >= CHAT_STARTUP_SETTLED_IDLE_MS &&
-      longTaskIdleMs >= CHAT_STARTUP_LONG_TASK_IDLE_MS
-    ) {
-      DS.state.chatStartupQuietUntil = 0;
-      DS.runtimeLog?.("info", "performance", "Chat startup quiet window ended after history and Long Tasks settled", {
-        elapsedMs: now - started,
-        settledMs: mutationIdleMs,
-        longTaskIdleMs: Number.isFinite(longTaskIdleMs) ? longTaskIdleMs : -1,
-        minimumQuietMs,
-        mountedMessages: loadedChatMessageCount()
-      });
-      DS.diagPerformance?.("startup-quiet-end", {
-        reason: "settled",
-        elapsedMs: now - started,
-        settledMs: mutationIdleMs,
-        longTaskIdleMs: Number.isFinite(longTaskIdleMs) ? longTaskIdleMs : -1,
-        minimumQuietMs,
-        mountedMessages: loadedChatMessageCount()
-      });
-      finishDiscardedWake("settled");
-      return false;
-    }
-    return true;
-  }
-
-  function scheduleChatStartupQuietResume(source = "startup") {
-    if (!chatStartupQuietActive()) return false;
-    if (discardedWakeSessionActive() && document.hidden) {
-      clearTimeout(DS.state.chatStartupQuietTimer);
-      DS.state.chatStartupQuietTimer = 0;
-      return true;
-    }
-    if (discardedWakeSessionActive()) noteDiscardedWakeVisible(`resume-${source}`);
-    const now = Date.now();
-    const until = Number(DS.state.chatStartupQuietUntil || now);
-    const started = Number(DS.state.chatStartupQuietStartedAt || now);
-    const lastMutation = Number(DS.state.chatStartupLastMessageMutationAt || started);
-    const lastLongTask = Number(DS.state.chatStartupLastLongTaskAt || 0);
-    const earliestSettleCheck = Math.max(
-      started + chatStartupMinimumQuietMs(),
-      lastMutation + CHAT_STARTUP_SETTLED_IDLE_MS,
-      lastLongTask > 0 ? lastLongTask + CHAT_STARTUP_LONG_TASK_IDLE_MS : 0,
-      Number(DS.state?.discardedWakeMinUntil || 0)
-    );
-    const wakeAt = Math.min(until, earliestSettleCheck);
-    clearTimeout(DS.state.chatStartupQuietTimer);
-    DS.state.chatStartupQuietTimer = setTimeout(() => {
-      DS.state.chatStartupQuietTimer = 0;
-      DS.scheduleRun?.({ priority: "critical", immediate: true, source: `chat-startup-settle-${source}` });
-      DS.scheduleRun?.({ priority: "slow", source: `chat-startup-settle-${source}` });
-      DS.scheduleMessageLane?.(`chat-startup-settle-${source}`);
-    }, Math.max(80, wakeAt - now + 25));
-    return true;
-  }
-
-  function chatStartupWarmupActive() {
-    if (!DS.isSingleChatPage?.()) return false;
-    return Date.now() < Number(DS.state?.chatStartupWarmupUntil || 0);
-  }
-
-  function chatStartupWarmupRemainingMs() {
-    return Math.max(0, Number(DS.state?.chatStartupWarmupUntil || 0) - Date.now());
-  }
-
-  DS.startChatStartupQuietWindow = startChatStartupQuietWindow;
-  DS.isChatStartupQuiet = chatStartupQuietActive;
-  DS.isChatStartupWarmup = chatStartupWarmupActive;
-  DS.chatStartupWarmupRemainingMs = chatStartupWarmupRemainingMs;
-  DS.isDiscardedWakeProtected = discardedWakeSessionActive;
 
   async function runDiscardedWakeEssentialChatPass(settings) {
     if (!discardedWakeSessionActive() || !DS.isSingleChatPage?.()) return;
@@ -1154,44 +690,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .sort((a, b) => b.totalMs - a.totalMs);
   };
 
-
-  function applyRuntimePerformancePresentation() {
-    const enabled = !!DS.state?.settings?.reduceQolAnimations;
-    let style = document.getElementById("ds-qol-performance-style");
-    if (document.documentElement.classList.contains("ds-qol-reduced-motion") !== enabled) {
-      document.documentElement.classList.toggle("ds-qol-reduced-motion", enabled);
-    }
-    if (enabled && !style) {
-      style = document.createElement("style");
-      style.id = "ds-qol-performance-style";
-      style.dataset.dsOwned = "1";
-      style.textContent = `.ds-qol-reduced-motion [class*="ds-"], .ds-qol-reduced-motion [id^="ds-"] { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }`;
-      (document.head || document.documentElement).appendChild(style);
-    } else if (!enabled) {
-      style?.remove();
-    }
-  }
-
-  function installTypingPerformanceTracker() {
-    if (DS.state.typingPerformanceTrackerInstalled) return;
-    DS.state.typingPerformanceTrackerInstalled = true;
-    const markTyping = event => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (!target.matches("textarea, [contenteditable='true']")) return;
-      if (!DS.isSingleChatPage?.()) return;
-      DS.state.userTypingUntil = Date.now() + 900;
-    };
-    document.addEventListener("input", markTyping, true);
-    document.addEventListener("keydown", markTyping, true);
-  }
-
-  function isCardListingContext() {
-    const page = DS.getPageState?.() || {};
-    if (page.isSingleChatPage || page.isChatListPage || page.isBotProfilePage || page.isBotEditor || page.isLorebookEditor || page.isPersonaPage) return false;
-    if (["listing", "creator-listing", "lorebook-listing"].includes(page.routeType)) return true;
-    return !!DS.qs?.("a[href*='/chat/'], a[href*='/chatbot/']");
-  }
 
   function takeIncrementalMessageLaneRoots(limit = 10) {
     const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
@@ -1911,6 +1409,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Hidden tabs do not need cosmetic DOM work. Critical tracking/filtering has
     // its own lane and the slow lane is refreshed immediately when the tab is shown.
     if (document.hidden && !options.force) return;
+    // Non-chat listings and Rulebook Explore were previously excluded from
+    // the scroll quiet window used for chats. Preserve the pending dirty
+    // groups and check again once native scrolling has settled. No polling.
+    if (!options.force && (isCardListingContext() || DS.isRulebookExplorePage?.())) {
+      const remaining = Number(DS.state?.userScrollingUntil || 0) - Date.now();
+      if (remaining > 0) {
+        const counters = runtimeCounters();
+        counters.listingScrollSlowPassDeferrals = Number(counters.listingScrollSlowPassDeferrals || 0) + 1;
+        scheduleSlowRun(remaining + 160);
+        return;
+      }
+    }
     // Optional work waits for all native interaction windows (including
     // streaming and editing); critical tracking is never held here.
     if (!options.force && Date.now() < optionalUiQuietDeadline()) {
@@ -2397,202 +1907,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
-  function nodeLooksQolOwned(node) {
-    if (!(node instanceof Element)) return false;
-    if (node.dataset?.dsOwner === "qol" || node.dataset?.dsOwned === "1") return true;
-    if (String(node.id || "").startsWith("ds-")) return true;
-    return Array.from(node.classList || []).some(name => String(name).startsWith("ds-"));
-  }
-
-  function nodeContainsPersistentChatShortcut(node) {
-    if (!(node instanceof Element)) return false;
-
-    const selector = [
-      ".ds-chat-asterisk-shortcut",
-      ".ds-chat-asterisk-shortcut-wrapper",
-      ".ds-chat-ooc-shortcut",
-      ".ds-chat-ooc-shortcut-wrapper"
-    ].join(",");
-
-    return node.matches?.(selector) || !!node.querySelector?.(selector);
-  }
-
-  function mutationRemovedPersistentChatShortcut(mutation) {
-    return [...mutation.removedNodes].some(nodeContainsPersistentChatShortcut);
-  }
-
-  function nodeContainsPersistentChatHeaderControl(node) {
-    if (!(node instanceof Element)) return false;
-    const selector = [
-      ".ds-chat-topbar-later-button",
-      ".ds-chat-history-button",
-      ".ds-chat-new-chat-button",
-      ".ds-chat-profile-button",
-      ".ds-chat-search-button",
-      ".ds-creator-fav-button",
-      "#ds-chat-background-control",
-      "#ds-android-qol-menu-button",
-      "#ds-bot-organizer-context-button"
-    ].join(",");
-    return node.matches?.(selector) || !!node.querySelector?.(selector);
-  }
-
-  function mutationRemovedPersistentChatHeaderControl(mutation) {
-    return [...mutation.removedNodes].some(nodeContainsPersistentChatHeaderControl);
-  }
-
-  function nodeContainsNativeChatHeader(node) {
-    if (!(node instanceof Element)) return false;
-    const selector = "a[aria-label='chatbot-profile'], button[aria-label='chat-dropdown']";
-    return node.matches?.(selector) || !!node.querySelector?.(selector);
-  }
-
-  function mutationAddedNativeChatHeader(mutation) {
-    return [...mutation.addedNodes].some(nodeContainsNativeChatHeader);
-  }
-
-  function mutationTouchesNativeChatHeader(mutation) {
-    const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
-    if (target && (nodeContainsNativeChatHeader(target) || target.closest?.("a[aria-label='chatbot-profile'], button[aria-label='chat-dropdown']"))) return true;
-    return [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])].some(nodeContainsNativeChatHeader);
-  }
-
-  function mutationIsOnlyQolUi(mutation) {
-    if (typeof DS.mutationIsQolOnly === "function") return DS.mutationIsQolOnly(mutation);
-    const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
-    if (target?.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return true;
-    if (target && (nodeLooksQolOwned(target) || target.closest?.("[data-ds-owned='1']"))) return true;
-
-    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
-    return nodes.length > 0 && nodes.every(nodeLooksQolOwned);
-  }
-
-  function clearStaleRouteScopedUi(source = "route") {
-    const page = DS.getPageState?.({ refresh: true }) || {};
-    const listing = ["listing", "creator-listing", "lorebook-listing"].includes(page.routeType);
-    let changed = false;
-
-    if (!page.isBotEditor) {
-      if (document.querySelector(".ds-bot-editor-history-tools")) { DS.removeBotEditorDraftHistory?.(); changed = true; }
-      if (document.querySelector(".ds-bot-editor-save-actions")) { DS.removeBotEditorSaveActions?.(); changed = true; }
-      if (document.getElementById("ds-bot-backup-tools")) { DS.removeBotBackupTools?.(); changed = true; }
-    }
-
-    if (!page.isBotEditor && !page.isLorebookEditor) {
-      if (document.querySelector(".ds-creator-writing-button") || document.getElementById("ds-creator-writing-modal")) {
-        DS.removeCreatorWritingAssistant?.();
-        changed = true;
-      }
-    }
-
-    if (!page.isMyCreationsChatbotsPage && document.getElementById("ds-lorebook-filter-toolbar")) {
-      DS.removeLorebookListingTools?.();
-      changed = true;
-    }
-    if (!page.isMyCreationsChatbotsPage && document.getElementById("ds-rulebook-filter-toolbar")) {
-      DS.removeRulebookListingTools?.();
-      changed = true;
-    }
-
-    if (changed) {
-      const counters = runtimeCounters();
-      counters.routeScopedUiCleanups = Number(counters.routeScopedUiCleanups || 0) + 1;
-      counters.lastRouteScopedUiCleanupSource = String(source || "route");
-    }
-    return changed;
-  }
-
-  const STALE_NON_CHAT_PRESENTATION_CLASSES = [
-    "ds-chat-custom-background",
-    "ds-chat-performance",
-    "ds-hide-chat-voice",
-    "ds-android-hide-composer-shortcuts",
-    "ds-focus-mode-active",
-    "ds-focus-hide-sidebar",
-    "ds-focus-hide-topbar",
-    "ds-focus-hide-chat-header",
-    "ds-focus-hide-qol-panel"
-  ];
-
-  function clearStaleNonChatPresentationState(source = "route") {
-    if (DS.isSingleChatPage?.()) return false;
-
-    let changed = false;
-    const html = document.documentElement;
-
-    for (const className of STALE_NON_CHAT_PRESENTATION_CLASSES) {
-      if (!html.classList.contains(className)) continue;
-      html.classList.remove(className);
-      changed = true;
-    }
-
-    const backgroundLayer = document.getElementById("ds-chat-background-layer");
-    if (backgroundLayer) {
-      backgroundLayer.remove();
-      changed = true;
-    }
-
-    // Prefer each feature's own cleanup too. The direct class/layer scrub above
-    // happens first so an Android WebView never has to wait for the delayed
-    // runtime lane before a Home/listing route becomes visible again.
-    try { DS.removeChatBackgrounds?.(); } catch {}
-    try { DS.removeAndroidAppControls?.(); } catch {}
-    try { DS.applyPerformanceMode?.(); } catch {}
-    try { DS.applyFocusMode?.(); } catch {}
-    try { DS.recoverAccidentalCardPageHide?.(); } catch {}
-
-    // Only reverse a page-scale hide when QoL itself marked #root as hidden for
-    // a chat/focus/android/performance reason. Do not touch SpicyChat-owned
-    // loading/visibility state or unrelated QoL hides.
-    const root = document.getElementById("root");
-    const rootReason = String(root?.dataset?.dsReason || "");
-    if (
-      root?.dataset?.dsHidden === "1" &&
-      /^(?:chat|focus|android|performance)(?::|$)/i.test(rootReason)
-    ) {
-      root.classList.remove("ds-hidden");
-      delete root.dataset.dsHidden;
-      delete root.dataset.dsReason;
-      root.style.removeProperty("display");
-      root.style.removeProperty("visibility");
-      root.style.removeProperty("opacity");
-      changed = true;
-    }
-
-    if (changed) {
-      const counters = runtimeCounters();
-      counters.nonChatPresentationRecoveries = Number(counters.nonChatPresentationRecoveries || 0) + 1;
-      counters.lastNonChatPresentationRecoveryAt = Date.now();
-      counters.lastNonChatPresentationRecoverySource = String(source || "route");
-    }
-
-    return changed;
-  }
-
-  function scheduleNonChatPresentationRecovery(source = "route") {
-    routePresentationRecoveryTimers.forEach(timer => clearTimeout(timer));
-    routePresentationRecoveryTimers = [];
-
-    clearStaleRouteScopedUi(`${source}:scoped-immediate`);
-    if (DS.isSingleChatPage?.()) return;
-
-    clearStaleNonChatPresentationState(`${source}:immediate`);
-
-    // WebView/React can swap the route DOM after history.url has already
-    // changed. Re-check a few times without causing a reload.
-    for (const delay of [120, 500, 1400]) {
-      routePresentationRecoveryTimers.push(setTimeout(() => {
-        clearStaleRouteScopedUi(`${source}:scoped-${delay}`);
-        if (DS.isSingleChatPage?.()) return;
-        clearStaleNonChatPresentationState(`${source}:${delay}`);
-        DS.scheduleRun?.({ priority: "critical", source: `route-recovery-${delay}` });
-      }, delay));
-    }
-  }
-
-  DS.clearStaleNonChatPresentationState = clearStaleNonChatPresentationState;
-  DS.clearStaleRouteScopedUi = clearStaleRouteScopedUi;
-
   function checkRouteChange() {
     if (location.href === DS.state.lastUrl) return false;
     const routeCheckStartedAt = performance.now();
@@ -2609,10 +1923,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.chatEnhancerQuietUntil = 0;
     clearTimeout(messageEnhancerQuietTimer);
     messageEnhancerQuietTimer = null;
-    DS.state.activeMessageEditRoots?.clear?.();
+    resetMessageEditGuards();
     clearBlockedRefreshBatch();
-    messageEditSettleTimers.forEach(timer => clearTimeout(timer));
-    messageEditSettleTimers.clear();
     invalidateLoadedChatMessageCount();
     DS.bumpDomRevision?.();
 
@@ -2655,39 +1967,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     routePerf.chatNavigationCount = Number(routePerf.chatNavigationCount || 0) + 1;
     DS.diagPerformance?.("route-sync", { durationMs: routePerf.chatNavigationSyncLastMs, route: DS.isSingleChatPage?.() ? "chat" : "other" });
     return true;
-  }
-
-  function elementMayBelongToCardArea(element) {
-    const node = element instanceof Element ? element : element?.parentElement;
-    if (!node) return false;
-    if (node.closest?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-    // Only inspect ancestors that are themselves card shells. The old version
-    // queried every ancestor for descendant links and could mark a *whole grid*
-    // dirty when React changed an unrelated heading/sidebar sibling.
-    return !!node.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
-  }
-
-  function mutationsMayAffectCards(mutations) {
-    if (!isCardListingContext()) return false;
-
-    return mutations.some(mutation => {
-      if (elementMayBelongToCardArea(mutation.target)) return true;
-
-      return [...mutation.addedNodes, ...mutation.removedNodes].some(node => {
-        if (!(node instanceof Element)) return false;
-        if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-        return !!node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
-      });
-    });
-  }
-
-  function mutationsAddBotCards(mutations) {
-    if (!isCardListingContext()) return false;
-    return mutations.some(mutation => [...(mutation.addedNodes || [])].some(node => {
-      if (!(node instanceof Element)) return false;
-      if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-      return !!node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
-    }));
   }
 
   function isLikelyHistoryInsertionBurst(addedCount) {
@@ -2826,225 +2105,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.scheduleMessageLane?.("lazy-history-scroll");
       }
     }, 180);
-  }
-
-  function installRefreshTrackers() {
-    if (DS.state.refreshTrackersInstalled) return;
-    DS.state.refreshTrackersInstalled = true;
-
-    // One activation may emit both pageshow and visibilitychange. Do not run
-    // two immediate full-page passes, especially with dozens of open tabs.
-    // Coalesce only visible presentation work; background data/tracking lanes
-    // and the explicit user-configured hidden-tab pause remain unchanged.
-    let visibleWakeTimer = 0;
-    function scheduleSettledVisibleWake(source) {
-      const perf = runtimeCounters();
-      perf.tabVisibleWakeRequests = Number(perf.tabVisibleWakeRequests || 0) + 1;
-      if (visibleWakeTimer) {
-        perf.tabVisibleWakeCoalesced = Number(perf.tabVisibleWakeCoalesced || 0) + 1;
-        clearTimeout(visibleWakeTimer);
-      }
-      visibleWakeTimer = window.setTimeout(() => {
-        visibleWakeTimer = 0;
-        if (document.hidden || DS.isQolPausedForTab?.()) return;
-        // A hidden tab can navigate while timers are suspended. Reconcile its
-        // route before trying to repair UI belonging to the previous page.
-        if (checkRouteChange()) return;
-        perf.tabVisibleWakeRuns = Number(perf.tabVisibleWakeRuns || 0) + 1;
-        scheduleNonChatPresentationRecovery(source);
-        scheduleSavedOpenedLane(source, 40);
-        primeLargeChatMessageLane(source);
-        DS.scheduleRun?.({ source: `${source}-settled`, dirty: ["all"] });
-      }, 160);
-    }
-
-    document.addEventListener("scroll", () => {
-      DS.state.userScrollingUntil = Date.now() + 220;
-      scheduleLazyHistoryEnhancement();
-    }, { passive: true, capture: true });
-
-    document.addEventListener("visibilitychange", () => {
-      DS.applyPerformanceMode?.();
-
-      if (document.hidden) {
-        clearTimeout(visibleWakeTimer);
-        visibleWakeTimer = 0;
-        if (!discardedWakeSessionActive()) DS.maybeAutoReadNotifications?.("tab-hidden");
-      } else if (discardedWakeSessionActive()) {
-        clearTimeout(visibleWakeTimer);
-        visibleWakeTimer = 0;
-        noteDiscardedWakeVisible("visibilitychange");
-        DS.scheduleRun?.({ priority: "critical", immediate: true, source: "discarded-wake-visible" });
-        scheduleChatStartupQuietResume("discarded-visible");
-      } else {
-        scheduleSettledVisibleWake("visible");
-      }
-    }, true);
-
-    window.addEventListener("pageshow", () => {
-      if (discardedWakeSessionActive()) {
-        if (!document.hidden) noteDiscardedWakeVisible("pageshow");
-        DS.scheduleRun?.({ priority: "critical", immediate: true, source: "discarded-wake-pageshow" });
-        scheduleChatStartupQuietResume("discarded-pageshow");
-        return;
-      }
-      // pageshow can fire alongside visibilitychange when returning to a
-      // background tab. A single settled wake handles both events.
-      if (!document.hidden) scheduleSettledVisibleWake("pageshow");
-    }, true);
-
-    window.addEventListener("popstate", () => {
-      // Let the URL/history entry settle first; checkRouteChange then performs
-      // the synchronous non-chat scrub before the normal rerun quiet period.
-      setTimeout(() => {
-        if (!checkRouteChange()) scheduleNonChatPresentationRecovery("popstate");
-      }, 0);
-    }, true);
-
-    document.addEventListener("dragonscript-qol-compact", () => {
-      DS.scheduleRun?.({ priority: "slow", source: "compact" });
-    }, true);
-
-    // Firefox/Android long-press selection shares the main thread with React
-    // and the native selection toolbar. Never cancel pointer/touch/selection
-    // events; simply keep optional QoL presentation work out of the way.
-    // Short bounded windows and no timers/DOM observers are added here.
-    let mobileMessageTouchActive = false;
-    let mobileSelectionLastAt = 0;
-    const isMobileSelectionContext = () => {
-      const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
-      return !!env.android || /Android/i.test(navigator.userAgent || "");
-    };
-    const messageForSelectionNode = node => {
-      const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
-      return el?.closest?.("div[id^='message-']") || null;
-    };
-    const quietMobileSelection = (duration, kind) => {
-      const now = Date.now();
-      DS.state.nativeActionQuietUntil = Math.max(Number(DS.state.nativeActionQuietUntil || 0), now + duration);
-      const perf = runtimeCounters();
-      if (kind === "start") perf.mobileTextSelectionStarts = Number(perf.mobileTextSelectionStarts || 0) + 1;
-      if (kind === "change") perf.mobileTextSelectionChanges = Number(perf.mobileTextSelectionChanges || 0) + 1;
-      perf.mobileTextSelectionLastAt = now;
-    };
-    document.addEventListener("pointerdown", event => {
-      if (event.pointerType !== "touch" || !DS.state?.settings?.enabled ||
-          !DS.isSingleChatPage?.() || !isMobileSelectionContext()) return;
-      mobileMessageTouchActive = !!messageForSelectionNode(event.target);
-      if (mobileMessageTouchActive) quietMobileSelection(650, "start");
-    }, { capture: true, passive: true });
-    document.addEventListener("pointerup", () => {
-      if (!mobileMessageTouchActive) return;
-      mobileMessageTouchActive = false;
-      quietMobileSelection(750, "end");
-    }, { capture: true, passive: true });
-    document.addEventListener("pointercancel", () => { mobileMessageTouchActive = false; }, { capture: true, passive: true });
-    document.addEventListener("selectionchange", () => {
-      if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.() ||
-          !isMobileSelectionContext()) return;
-      const now = Date.now();
-      if (now - mobileSelectionLastAt < 240) return;
-      const selection = window.getSelection?.();
-      if (!selection || selection.isCollapsed || !messageForSelectionNode(selection.anchorNode)) return;
-      mobileSelectionLastAt = now;
-      quietMobileSelection(1100, "change");
-    }, { passive: true });
-
-    // Protect native Regenerate/Send interactions from nonessential QoL work.
-    // Never preventDefault(), synthesize a click, or inspect message text.
-    document.addEventListener("pointerdown", event => {
-      if (!DS.isSingleChatPage?.() || !DS.state?.settings?.enabled) return;
-      const button = event.target?.closest?.("button");
-      if (!button || button.matches?.("[id^='ds-'],[class*='ds-qol']") || button.closest?.("#ds-qol-panel,[data-ds-qol-owned]")) return;
-      const label = String(button.getAttribute("aria-label") || button.getAttribute("title") || button.textContent || "").trim().slice(0, 90);
-      const mobile = window.innerWidth <= 760 || !!(DS.getRuntimeEnvironment?.()?.android);
-      const generationAction = /\b(?:regenerat(?:e|ion)?|reroll|retry|send(?: message)?)\b/i.test(label);
-      const mobileEditOrRating = mobile && /\b(?:edit|save|cancel|rating|rate|dislike|like|thumbs?\s*(?:up|down))\b/i.test(label);
-      if (!generationAction && !mobileEditOrRating) return;
-      DS.state.nativeActionQuietUntil = Math.max(Number(DS.state.nativeActionQuietUntil || 0), Date.now() + (mobile ? 1450 : 1100));
-      const counters = runtimeCounters();
-      counters.nativeActionGuardStarts = Number(counters.nativeActionGuardStarts || 0) + 1;
-      if (mobileEditOrRating) counters.mobileNativeActionQuietStarts = Number(counters.mobileNativeActionQuietStarts || 0) + 1;
-    }, { capture: true, passive: true });
-
-    // Event Timing is optional. Never install this browser-level observer when
-    // detailed diagnostics are off; enabling diagnostics later activates it.
-    DS.syncNativeInputTimingObserver = () => {
-      const wantsInputTiming = !!DS.state?.settings?.performanceDiagnostics;
-      if (!wantsInputTiming) {
-        DS.state.nativeInputObserver?.disconnect?.();
-        DS.state.nativeInputObserver = null;
-        return;
-      }
-      if (DS.state.nativeInputObserver) return;
-      try {
-        if (typeof PerformanceObserver !== "function" ||
-            !PerformanceObserver.supportedEntryTypes?.includes?.("event")) return;
-        const inputObserver = new PerformanceObserver(list => {
-          if (!DS.state?.settings?.performanceDiagnostics || document.hidden || !DS.isSingleChatPage?.()) return;
-          const counters = runtimeCounters();
-          for (const entry of list.getEntries()) {
-            if (entry.name !== "click") continue;
-            const delay = Math.max(0, Number(entry.processingStart || 0) - Number(entry.startTime || 0));
-            const duration = Math.max(0, Number(entry.duration || 0));
-            const target = entry.target?.closest?.("button");
-            const label = String(target?.getAttribute?.("aria-label") || target?.getAttribute?.("title") || "").slice(0, 60);
-            const category = /regenerat|reroll|retry/i.test(label) ? "regenerate" : /send/i.test(label) ? "send" : "other";
-            counters.nativeSlowClickSamples = Number(counters.nativeSlowClickSamples || 0) + 1;
-            counters.nativeWorstInputDelayMs = Math.max(Number(counters.nativeWorstInputDelayMs || 0), Math.round(delay));
-            counters.nativeWorstClickMs = Math.max(Number(counters.nativeWorstClickMs || 0), Math.round(duration));
-            counters.nativeLastSlowClickCategory = category;
-          }
-        });
-        inputObserver.observe({ type: "event", durationThreshold: 64 });
-        DS.state.nativeInputObserver = inputObserver;
-      } catch {}
-    };
-    DS.syncNativeInputTimingObserver();
-
-    // Runtime Improvements owns the shared long-task observer when installed.
-    // A Custom Lite package without that module keeps the local fallback.
-    const consumeLongTasks = entries => {
-      if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticTraceActive?.("normal")) return;
-      const counters = runtimeCounters();
-      for (const entry of entries) {
-        const ms = Number(entry.duration || 0);
-        const rounded = Math.round(ms * 10) / 10;
-        const start = Number(entry.startTime || 0);
-        const overlaps = longTaskOverlapNames(start, start + ms);
-        counters.longTasks = Number(counters.longTasks || 0) + 1;
-        counters.lastLongTaskMs = rounded;
-        counters.maxLongTaskMs = Math.max(Number(counters.maxLongTaskMs || 0), rounded);
-        counters.lastLongTaskOverlap = overlaps.join(", ") || "none";
-        // Overlap is correlation only: third-party and native rendering may run
-        // in the same browser task. Avoid attributing the full task to QoL.
-        if (overlaps.length) {
-          counters.longTasksWithQolOverlap = Number(counters.longTasksWithQolOverlap || 0) + 1;
-          counters.maxLongTaskWithQolOverlapMs = Math.max(Number(counters.maxLongTaskWithQolOverlapMs || 0), rounded);
-        } else {
-          counters.longTasksWithoutQolOverlap = Number(counters.longTasksWithoutQolOverlap || 0) + 1;
-          counters.maxLongTaskWithoutQolOverlapMs = Math.max(Number(counters.maxLongTaskWithoutQolOverlapMs || 0), rounded);
-        }
-      }
-    };
-    if (typeof DS.subscribeRuntimeLongTasks === "function") {
-      DS.state.longTaskSubscription = DS.subscribeRuntimeLongTasks(consumeLongTasks);
-      runtimeCounters().sharedLongTaskObserverReuses = Number(runtimeCounters().sharedLongTaskObserverReuses || 0) + 1;
-    } else {
-      try {
-        if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes?.("longtask")) {
-          const observer = new PerformanceObserver(list => {
-            const entries = list.getEntries();
-            if (entries.length && DS.isSingleChatPage?.()) {
-              DS.state.chatStartupLastLongTaskAt = Date.now();
-            }
-            consumeLongTasks(entries);
-          });
-          observer.observe({ type: "longtask" });
-          DS.state.longTaskObserver = observer;
-        }
-      } catch {}
-    }
   }
 
   function changedSettingNames(changes = {}) {
@@ -3220,6 +2280,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     DS.installOpenedClickTracker?.();
+    installChatMenuGuards();
     installRefreshTrackers();
     installTypingPerformanceTracker();
     applyRuntimePerformancePresentation();

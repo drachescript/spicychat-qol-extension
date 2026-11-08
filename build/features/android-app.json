@@ -3,8 +3,23 @@
   "primary": "content/android-app.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "androidAppControlsMode",
+    "androidTopBarMenu",
+    "androidHideComposerShortcuts",
+    "androidTopBarOoc",
+    "androidTopBarAsterisk",
+    "androidTopBarFormatting",
+    "androidTopBarTranslation",
+    "androidTopBarScroll",
+    "androidTopBarPersona",
+    "androidTopBarModel"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/android-app.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

@@ -3,8 +3,14 @@
   "primary": "content/saved-snippets.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "enableSavedTextSnippets"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/saved-snippets.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

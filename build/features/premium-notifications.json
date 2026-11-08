@@ -3,8 +3,17 @@
   "primary": "content/premium-notifications.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "hideNotifications",
+    "hideFeatureReleasePopups",
+    "hideTabNotificationBadge",
+    "autoReadNotifications"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/premium-notifications.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

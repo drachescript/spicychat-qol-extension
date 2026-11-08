@@ -9,17 +9,15 @@ function readSettingsFromPage() {
     saiToolkitCompatibility: checked("saiToolkitCompatibility", false),
     globalNsfwMode: value("globalNsfwMode", "ignore"),
 
-    autoAfkEnabled: checked("autoAfkEnabled"),
-    autoAfkMinutes: Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)),
-    autoAfkHours: Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)),
+
+
+
     lowMemoryProtectionEnabled: checked("lowMemoryProtectionEnabled"),
     maxAwakeSpicyTabs: Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "3")) || 3)),
-    autoAfkChats: checked("autoAfkChats", true),
-    autoAfkHome: checked("autoAfkHome"),
-    autoAfkProfiles: checked("autoAfkProfiles"),
-    autoAfkAction: $("autoAfkActionClose")?.checked ? "close" : "discard",
-    autoAfkProtectActive: checked("autoAfkProtectActive", true),
-    autoAfkResetOnActivate: checked("autoAfkResetOnActivate", true),
+
+
+
+
     duplicateTabGuardEnabled: checked("duplicateTabGuardEnabled"),
     duplicateTabChats: checked("duplicateTabChats", true),
     duplicateTabHome: checked("duplicateTabHome"),
@@ -32,21 +30,18 @@ function readSettingsFromPage() {
     tabCleanupOldDays: Math.min(365, Math.max(3, Number(value("tabCleanupOldDays", "14")) || 14)),
     tabCleanupProtectPinnedOnClose: checked("tabCleanupProtectPinnedOnClose", true),
 
-    autoTags: checked("autoTags"),
-    enableTagAliases: checked("enableTagAliases"),
-    tagAliasRules: value("tagAliasRules"),
-    tagAliasShowDisplay: checked("tagAliasShowDisplay"),
-    localTagMatchEnabled: checked("localTagMatchEnabled"),
-    localTagMatchRules: value("localTagMatchRules"),
-    localTagMatchFetchPublic: checked("localTagMatchFetchPublic"),
-    showTagTemplateButton: checked("showTagTemplateButton"),
-    showChatTagLinks: checked("showChatTagLinks"),
-    showChatTagAddButtons: checked("showChatTagAddButtons"),
-    botEditorShowCharButton: checked("botEditorShowCharButton"),
-    botEditorShowUserButton: checked("botEditorShowUserButton"),
-    botEditorShowContinueButton: checked("botEditorShowContinueButton"),
-    botEditorShowNoControlButton: checked("botEditorShowNoControlButton"),
-    botEditorShowCustomSnippets: checked("botEditorShowCustomSnippets"),
+
+
+
+
+
+
+
+
+
+
+
+
     botEditorAutoOpenAdvanced: checked("botEditorAutoOpenAdvanced"),
     rememberBotImagePrompt: checked("rememberBotImagePrompt"),
     botEditorSaveActions: checked("botEditorSaveActions"),
@@ -99,44 +94,16 @@ function readSettingsFromPage() {
     botEditorDefaultVisibility: ["public", "unlisted"].includes(value("botEditorDefaultVisibility")) ? value("botEditorDefaultVisibility") : "ignore",
     autoAgreeCreationGuidelines: checked("autoAgreeCreationGuidelines"),
     botEditorSnippets: botEditorSnippetsFromPage(),
-    enableGenerationProfiles: checked("enableGenerationProfiles"),
-    showGenerationMetadata: checked("showGenerationMetadata"),
-    showMessageTimestamps: checked("showMessageTimestamps"),
-    messageTimestamp24Hour: checked("messageTimestamp24Hour"),
-    messageTimestampDateFirst: checked("messageTimestampDateFirst"),
-    messageTimestampShowSeconds: checked("messageTimestampShowSeconds"),
-    showGenerationModel: checked("showGenerationModel"),
-    showGenerationElapsed: checked("showGenerationElapsed"),
-    showGenerationSettings: checked("showGenerationSettings"),
-    compactGenerationMetadata: checked("compactGenerationMetadata"),
-    enableContextWindowWarning: checked("enableContextWindowWarning"),
-    contextWarningShowMeter: checked("contextWarningShowMeter"),
-    contextWarningThreshold: Math.min(99, Math.max(50, Number(value("contextWarningThreshold", "85")) || 85)),
-    contextWarningManualLimit: Math.max(0, Number(value("contextWarningManualLimit", "0")) || 0),
-    contextWarningBrowserNotifications: checked("contextWarningBrowserNotifications"),
-    includeTags: linesToArray(value("includeTags")),
-    excludeTags: linesToArray(value("excludeTags")),
+
 
     hidePremium: checked("hidePremium"),
     hideFloatingPremiumPopups: checked("hideFloatingPremiumPopups"),
     hideAdvertBanners: checked("hideAdvertBanners"),
-    expandModelSelectorDescriptions: checked("expandModelSelectorDescriptions"),
-    hideModelUpgradeButtons: checked("hideModelUpgradeButtons"),
-    customizeModelQuickMenu: checked("customizeModelQuickMenu"),
-    modelQuickFavoritesOnly: checked("modelQuickFavoritesOnly"),
-    modelFavoriteNames: value("modelFavoriteNames", ""),
-    modelHiddenNames: value("modelHiddenNames", ""),
-    hideNotifications: checked("hideNotifications"),
-    hideFeatureReleasePopups: checked("hideFeatureReleasePopups"),
-    hideTabNotificationBadge: checked("hideTabNotificationBadge"),
-    autoReadNotifications: checked("autoReadNotifications"),
 
-    hideTopBarLanguage: checked("hideTopBarLanguage"),
-    hideTopBarNotifications: checked("hideTopBarNotifications"),
-    hideTopBarTheme: checked("hideTopBarTheme"),
-    topBarProfilePillMode: value("topBarProfilePillMode", "normal"),
-    topBarProfilePillCustomText: value("topBarProfilePillCustomText", ""),
-    topBarProfilePillPersonaPrefix: checked("topBarProfilePillPersonaPrefix"),
+
+
+
+
 
     chatTopBarAddLaterButton: checked("chatTopBarAddLaterButton"),
     closeChatTabAfterSavingLater: checked("closeChatTabAfterSavingLater"),
@@ -152,35 +119,16 @@ function readSettingsFromPage() {
     enableMemoryVault: checked("enableMemoryVault"),
     showCopyMemoryAction: checked("showCopyMemoryAction"),
     memoryAutoLoadAll: checked("memoryAutoLoadAll"),
-    enableChatTextReplacements: checked("enableChatTextReplacements"),
-    chatTextReplacementRules: value("chatTextReplacementRules", ""),
-    enableChatWordCensor: checked("enableChatWordCensor"),
-    chatWordCensorList: value("chatWordCensorList", ""),
-    chatWordCensorMask: value("chatWordCensorMask", "hash"),
-    chatWordCensorCustom: value("chatWordCensorCustom", "[censored]"),
-    chatWordCensorScope: value("chatWordCensorScope", "ai"),
-    chatWordCensorReveal: checked("chatWordCensorReveal"),
-    chatWordCensorShowChatToggle: checked("chatWordCensorShowChatToggle"),
-    enableChatMutedWords: checked("enableChatMutedWords"),
-    chatMutedWords: value("chatMutedWords", ""),
-    chatTextReplacementPresets: value("chatTextReplacementPresets", ""),
-    chatTextReplacementShowChatPresetControl: checked("chatTextReplacementShowChatPresetControl"),
-    chatTextReplacementScope: ["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai",
-    chatTextReplacementMode: value("chatTextReplacementMode") === "save" ? "save" : "display",
-    chatTextReplacementPreview: checked("chatTextReplacementPreview"),
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
-    chatListTwoColumns: checked("chatListTwoColumns"),
-    chatListPopoutShortcut: checked("chatListPopoutShortcut"),
-    chatListRenameShortcut: checked("chatListRenameShortcut"),
     chatCollections: value("chatCollections", ""),
     showSavedChatQuickActions: checked("showSavedChatQuickActions"),
-    showRandomChatButton: checked("showRandomChatButton"),
-    randomChatUseLastHomeFilters: checked("randomChatUseLastHomeFilters"),
-    randomChatIncludeOpened: checked("randomChatIncludeOpened"),
-    randomChatIncludeLater: checked("randomChatIncludeLater"),
-    randomChatIncludeFavorites: checked("randomChatIncludeFavorites"),
+
+
+
+
+
     chatListSortMode: value("chatListSortMode", "default"),
     chatListSearchMode: "all",
     chatListOpenedFilter: ["all", "opened", "unopened"].includes(value("chatListOpenedFilter")) ? value("chatListOpenedFilter") : "all",
@@ -194,65 +142,35 @@ function readSettingsFromPage() {
     importOpenedFromChatsPage: checked("importOpenedFromChatsPage"),
     hideOpenedChats: checked("hideOpenedChats"),
     openedBotSortMode: value("openedBotSortMode", "newest"),
-    qolInterfaceScale: [100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100,
-    enableChatWidthControls: checked("enableChatWidthControls"),
-    chatStreamWidth: Math.min(1600, Math.max(520, Number(value("chatStreamWidth", "800")) || 800)),
-    chatBubbleMaxWidth: Math.min(1500, Math.max(360, Number(value("chatBubbleMaxWidth", "650")) || 650)),
-    chatComposerWidth: Math.min(1600, Math.max(520, Number(value("chatComposerWidth", "800")) || 800)),
-    chatTextScale: [100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100,
-    chatLineSpacing: ["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native",
-    settingsReadingFont: Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native",
-    settingsReadingSize: SETTINGS_READING_SIZES.includes(Number(value("settingsReadingSize", "100"))) ? Number(value("settingsReadingSize", "100")) : 100,
-    settingsReadingLineSpacing: SETTINGS_READING_LINE_SPACING.includes(value("settingsReadingLineSpacing", "native")) ? value("settingsReadingLineSpacing", "native") : "native",
-    settingsReadingLetterSpacing: SETTINGS_READING_LETTER_SPACING.includes(value("settingsReadingLetterSpacing", "native")) ? value("settingsReadingLetterSpacing", "native") : "native",
-    settingsReadingContrast: checked("settingsReadingContrast"),
-    settingsReadingLargerControls: checked("settingsReadingLargerControls"),
-    showQuickPanel: checked("showQuickPanel"),
-    quickPanelPlacement: value("quickPanelPlacement", "bottom-right") || "bottom-right",
-    quickPanelDraggable: checked("quickPanelDraggable"),
-    quickPanelDefaultClosed: checked("quickPanelDefaultClosed"),
-    quickPanelEnabledByDefaultInTab: checked("quickPanelEnabledByDefaultInTab", true),
-    quickPanelWidth: Math.min(440, Math.max(200, Number(value("quickPanelWidth", "280")) || 280)),
-    quickPanelUiScale: Math.min(125, Math.max(80, Number(value("quickPanelUiScale", "100")) || 100)),
-    quickPanelMaxHeightPercent: Math.min(95, Math.max(25, Number(value("quickPanelMaxHeightPercent", "80")) || 80)),
-    quickPanelCustomXPercent: Math.min(100, Math.max(0, Number.isFinite(Number(value("quickPanelCustomXPercent", "70"))) ? Number(value("quickPanelCustomXPercent", "70")) : 70)),
-    quickPanelCustomYPercent: Math.min(100, Math.max(0, Number.isFinite(Number(value("quickPanelCustomYPercent", "12"))) ? Number(value("quickPanelCustomYPercent", "12")) : 12)),
-    quickPanelAutoCollapseOverlap: checked("quickPanelAutoCollapseOverlap", true),
-    quickPanelShowStatus: checked("quickPanelShowStatus", true),
-    quickPanelShowLoadedMessageCount: checked("quickPanelShowLoadedMessageCount"),
-    quickPanelStatusShowOpened: checked("quickPanelStatusShowOpened", true),
-    quickPanelStatusShowBlocked: checked("quickPanelStatusShowBlocked", true),
+
+
+
+
+
     popupShowOpenedCount: checked("popupShowOpenedCount", false),
     popupShowBlockedCount: checked("popupShowBlockedCount", false),
     popupShowStorageDetails: checked("popupShowStorageDetails"),
-    quickPanelShowFeatureSummary: checked("quickPanelShowFeatureSummary"),
-    quickPanelShowOptions: checked("quickPanelShowOptions", true),
-    quickPanelShowFillNow: checked("quickPanelShowFillNow", true),
-    quickPanelShowSmartFilterPins: checked("quickPanelShowSmartFilterPins"),
-    quickPanelShowChatSearch: checked("quickPanelShowChatSearch", true),
-    quickPanelShowChatMessageSearch: checked("quickPanelShowChatMessageSearch"),
-    quickPanelShowChatSort: checked("quickPanelShowChatSort", true),
-    quickPanelShowScanVisible: checked("quickPanelShowScanVisible", true),
-    quickPanelShowLoadAll: checked("quickPanelShowLoadAll", true),
+
+
+
+
+
+
+
+
+
     enableChatIndex: checked("enableChatIndex"),
     chatIndexEnhanceNativeSearch: checked("chatIndexEnhanceNativeSearch"),
     chatIndexStandaloneLauncher: checked("chatIndexStandaloneLauncher"),
-    quickPanelShowOoc: checked("quickPanelShowOoc", true),
-    quickPanelShowAutoVoice: checked("quickPanelShowAutoVoice", true),
-    quickPanelShowAutoAsterisk: checked("quickPanelShowAutoAsterisk", true),
-    quickPanelShowTranslation: checked("quickPanelShowTranslation"),
-    quickPanelShowPersona: checked("quickPanelShowPersona", true),
-    quickPanelShowExport: checked("quickPanelShowExport", true),
-    quickPanelShowSoundscapes: checked("quickPanelShowSoundscapes"),
-    quickPanelShowCustomPictures: checked("quickPanelShowCustomPictures"),
-    quickPanelShowContextKeeper: checked("quickPanelShowContextKeeper"),
-    quickPanelShowFocusMode: checked("quickPanelShowFocusMode"),
-    quickPanelShowCharacterProfile: checked("quickPanelShowCharacterProfile"),
-    quickPanelShowSavedSnippets: checked("quickPanelShowSavedSnippets"),
-    quickPanelShowCreatorPreview: checked("quickPanelShowCreatorPreview"),
-    quickPanelShowImageGenerator: checked("quickPanelShowImageGenerator"),
+
+
+
+
+
+
+
     showAutoImageInlineButton: checked("showAutoImageInlineButton"),
-    quickPanelShowRulebookDiagnostics: checked("quickPanelShowRulebookDiagnostics"),
+
     compactAfterHiding: checked("compactAfterHiding"),
     neverHideFavorites: checked("neverHideFavorites"),
     protectFavoritesFromBlocking: checked("protectFavoritesFromBlocking"),
@@ -282,23 +200,19 @@ function readSettingsFromPage() {
     laterBotFolderFilter: value("laterBotFolderFilter", "all"),
     laterBotCreatorFilter: value("laterBotCreatorFilter", ""),
     laterBotStateFilter: value("laterBotStateFilter", "all"),
-    enableBotOrganizer: checked("enableBotOrganizer"),
-    botOrganizerExplorerFolders: checked("botOrganizerExplorerFolders"),
+
+
     favoritePageFoldersEnabled: checked("favoritePageFoldersEnabled"),
     favoritePageSortEnabled: checked("favoritePageSortEnabled"),
     lorebookUnknownSafeFilter: checked("lorebookUnknownSafeFilter"),
-    botCollections: value("botCollections", ""),
-    botOrganizerShowCardMeta: checked("botOrganizerShowCardMeta", true),
-    botOrganizerBulkTools: checked("botOrganizerBulkTools", true),
 
-    autoFillListings: checked("autoFillListings"),
-    paginationTopJumpBox: checked("paginationTopJumpBox"),
-    paginationQuickJumpMenu: checked("paginationQuickJumpMenu"),
+
+
+
     showListingRefillButton: checked("showListingRefillButton"),
     showListingFilterStats: checked("showListingFilterStats"),
     showListingFilterStatsDetails: checked("showListingFilterStatsDetails"),
-    autoFillTargetCards: Math.max(1, Math.min(200, Number(value("autoFillTargetCards", "50")) || 50)),
-    autoFillMaxClicks: Math.max(1, Math.min(30, Number(value("autoFillMaxClicks", "8")) || 8)),
+
 
     hideChatPlusButton: checked("hideChatPlusButton"),
     hideChatImageButton: checked("hideChatImageButton"),
@@ -352,88 +266,59 @@ function readSettingsFromPage() {
     chatBackgroundBlur: Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)),
     chatBackgroundFit: ["cover", "contain", "tile"].includes(value("chatBackgroundFit", "cover")) ? value("chatBackgroundFit", "cover") : "cover",
     chatBackgroundPosition: ["center", "top", "bottom", "left", "right"].includes(value("chatBackgroundPosition", "center")) ? value("chatBackgroundPosition", "center") : "center",
-    enableChatBubbleCustomization: checked("enableChatBubbleCustomization"),
-    persistSpicyChatUserAppearance: checked("persistSpicyChatUserAppearance"),
-    chatBubbleAiBackground: value("chatBubbleAiBackground", "#27282d"),
-    chatBubbleAiTextMode: ["native", "custom"].includes(value("chatBubbleAiTextMode")) ? value("chatBubbleAiTextMode") : "custom",
-    chatBubbleAiText: value("chatBubbleAiText", "#f2f2f2"),
-    chatBubbleAiActionMode: ["native", "base", "custom"].includes(value("chatBubbleAiActionMode")) ? value("chatBubbleAiActionMode") : "native",
-    chatBubbleAiActionText: value("chatBubbleAiActionText", "#79c8f5"),
-    chatBubbleAiDialogueMode: ["native", "base", "custom"].includes(value("chatBubbleAiDialogueMode")) ? value("chatBubbleAiDialogueMode") : "base",
-    chatBubbleAiDialogueText: value("chatBubbleAiDialogueText", "#f2f2f2"),
-    chatBubbleAiFont: value("chatBubbleAiFont", "inherit"),
-    chatBubbleAiActionFont: value("chatBubbleAiActionFont", "inherit"),
-    chatBubbleAiDialogueFont: value("chatBubbleAiDialogueFont", "inherit"),
-    chatBubbleAiBorder: value("chatBubbleAiBorder", "#555861"),
-    chatBubbleAiBorderWidth: Math.min(12, Math.max(0, Number(value("chatBubbleAiBorderWidth", "0")) || 0)),
-    chatBubbleAiBorderStyle: ["solid", "dashed", "dotted", "double"].includes(value("chatBubbleAiBorderStyle")) ? value("chatBubbleAiBorderStyle") : "solid",
-    chatBubbleAiBorderOpacity: Math.min(100, Math.max(0, Number(value("chatBubbleAiBorderOpacity", "100")) || 0)),
-    chatBubbleAiOpacity: Math.min(100, Math.max(30, Number(value("chatBubbleAiOpacity", "100")) || 100)),
-    chatBubbleAiRadius: Math.min(40, Math.max(4, Number(value("chatBubbleAiRadius", "20")) || 20)),
-    chatBubbleAiShape: ["native", "rounded", "square", "speech", "cat", "cloud"].includes(value("chatBubbleAiShape")) ? value("chatBubbleAiShape") : "native",
-    chatBubbleAiDecorationMode: ["bubble", "custom"].includes(value("chatBubbleAiDecorationMode")) ? value("chatBubbleAiDecorationMode") : "bubble",
-    chatBubbleAiDecorationColor: value("chatBubbleAiDecorationColor", "#27282d"),
-    chatBubbleAiCatEarLayout: ["auto", "left", "right", "split"].includes(value("chatBubbleAiCatEarLayout")) ? value("chatBubbleAiCatEarLayout") : "auto",
-    chatBubbleAiShadow: checked("chatBubbleAiShadow"),
-    chatBubbleUserBackground: value("chatBubbleUserBackground", "#253f52"),
-    chatBubbleUserTextMode: ["native", "custom"].includes(value("chatBubbleUserTextMode")) ? value("chatBubbleUserTextMode") : "custom",
-    chatBubbleUserText: value("chatBubbleUserText", "#f5f5f5"),
-    chatBubbleUserActionMode: ["native", "base", "custom"].includes(value("chatBubbleUserActionMode")) ? value("chatBubbleUserActionMode") : "native",
-    chatBubbleUserActionText: value("chatBubbleUserActionText", "#79c8f5"),
-    chatBubbleUserDialogueMode: ["native", "base", "custom"].includes(value("chatBubbleUserDialogueMode")) ? value("chatBubbleUserDialogueMode") : "base",
-    chatBubbleUserDialogueText: value("chatBubbleUserDialogueText", "#f5f5f5"),
-    chatBubbleUserFont: value("chatBubbleUserFont", "inherit"),
-    chatBubbleUserActionFont: value("chatBubbleUserActionFont", "inherit"),
-    chatBubbleUserDialogueFont: value("chatBubbleUserDialogueFont", "inherit"),
-    chatBubbleUserBorder: value("chatBubbleUserBorder", "#52718a"),
-    chatBubbleUserBorderWidth: Math.min(12, Math.max(0, Number(value("chatBubbleUserBorderWidth", "0")) || 0)),
-    chatBubbleUserBorderStyle: ["solid", "dashed", "dotted", "double"].includes(value("chatBubbleUserBorderStyle")) ? value("chatBubbleUserBorderStyle") : "solid",
-    chatBubbleUserBorderOpacity: Math.min(100, Math.max(0, Number(value("chatBubbleUserBorderOpacity", "100")) || 0)),
-    chatBubbleUserOpacity: Math.min(100, Math.max(30, Number(value("chatBubbleUserOpacity", "100")) || 100)),
-    chatBubbleUserRadius: Math.min(40, Math.max(4, Number(value("chatBubbleUserRadius", "20")) || 20)),
-    chatBubbleUserShape: ["native", "rounded", "square", "speech", "cat", "cloud"].includes(value("chatBubbleUserShape")) ? value("chatBubbleUserShape") : "native",
-    chatBubbleUserDecorationMode: ["bubble", "custom"].includes(value("chatBubbleUserDecorationMode")) ? value("chatBubbleUserDecorationMode") : "bubble",
-    chatBubbleUserDecorationColor: value("chatBubbleUserDecorationColor", "#253f52"),
-    chatBubbleUserCatEarLayout: ["auto", "left", "right", "split"].includes(value("chatBubbleUserCatEarLayout")) ? value("chatBubbleUserCatEarLayout") : "auto",
-    chatBubbleUserShadow: checked("chatBubbleUserShadow"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     chatBubblePreserveActionColors: value("chatBubbleAiActionMode", "native") !== "base" || value("chatBubbleUserActionMode", "native") !== "base",
     hideChatVoiceButton: checked("hideChatVoiceButton"),
     hideUnlockCustomVoices: checked("hideUnlockCustomVoices"),
 
-    stackChatMessages: checked("stackChatMessages"),
-    showMessageQuickActions: checked("showMessageQuickActions"),
-
-
-    enableSavedTextSnippets: checked("enableSavedTextSnippets"),
 
     rpStateTrackerMode: ["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative",
     rpStateInjectMode: ["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed",
     rpStateMaxContextChars: Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)),
     rpStateShowQuickPanel: checked("rpStateShowQuickPanel", true),
 
-    messageQuickActionCopy: checked("messageQuickActionCopy"),
-    messageQuickActionEdit: checked("messageQuickActionEdit"),
-    messageQuickActionRemoveImage: checked("messageQuickActionRemoveImage"),
-    messageQuickActionResend: checked("messageQuickActionResend"),
-    messageQuickActionConfirmRemoveImage: checked("messageQuickActionConfirmRemoveImage"),
-    messageQuickActionReport: checked("messageQuickActionReport"),
-    messageBottomMenuShortcut: checked("messageBottomMenuShortcut"),
     allowTypingWhileAiResponding: checked("allowTypingWhileAiResponding"),
     keepChatPositionWhileTyping: checked("keepChatPositionWhileTyping"),
-    showScrollToTopButton: checked("showScrollToTopButton"),
-    showScrollToBottomButton: checked("showScrollToBottomButton"),
-    showSwipeJumpButtons: checked("showSwipeJumpButtons"),
-    showSwipeJumpToNumber: checked("showSwipeJumpToNumber"),
-    restoreFirstSwipeOnLoad: checked("restoreFirstSwipeOnLoad"),
-    scrollNavOnHome: checked("scrollNavOnHome", true),
-    scrollNavOnChats: checked("scrollNavOnChats", true),
-    scrollNavOnChat: checked("scrollNavOnChat", true),
-    scrollNavOnCreation: checked("scrollNavOnCreation", true),
-    scrollNavOnProfiles: checked("scrollNavOnProfiles", true),
-    scrollNavOnOther: checked("scrollNavOnOther", true),
-    scrollTopLoadPreviousMessages: checked("scrollTopLoadPreviousMessages"),
-    scrollTopLoadPreviousMode: ["one", "all"].includes(value("scrollTopLoadPreviousMode")) ? value("scrollTopLoadPreviousMode") : "all",
-    scrollTopLoadPreviousTiming: ["before", "background"].includes(value("scrollTopLoadPreviousTiming")) ? value("scrollTopLoadPreviousTiming") : "before",
+
     protectDraftDuringMessageRemoval: checked("protectDraftDuringMessageRemoval"),
     failedMessageHelper: checked("failedMessageHelper"),
     autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
@@ -460,31 +345,21 @@ function readSettingsFromPage() {
     enableLocalChangeHistory: checked("enableLocalChangeHistory"),
     showUpdateNotifications: checked("showUpdateNotifications", false),
 
-    androidAppControlsMode: ["auto", "android", "always", "off"].includes(value("androidAppControlsMode")) ? value("androidAppControlsMode") : "auto",
-    androidTopBarMenu: checked("androidTopBarMenu"),
-    androidHideComposerShortcuts: checked("androidHideComposerShortcuts", true),
-    androidTopBarOoc: checked("androidTopBarOoc", true),
-    androidTopBarAsterisk: checked("androidTopBarAsterisk", true),
-    androidTopBarFormatting: checked("androidTopBarFormatting", true),
-    androidTopBarTranslation: checked("androidTopBarTranslation"),
-    androidTopBarScroll: checked("androidTopBarScroll", true),
-    androidTopBarPersona: checked("androidTopBarPersona", true),
-    androidTopBarModel: checked("androidTopBarModel", true),
 
-    showChatExportButton: checked("showChatExportButton"),
+
+
+
+
+
+
+
+
+
     chatExportLoadPreviousMessages: checked("chatExportLoadPreviousMessages"),
     chatExportHistoryMode: value("chatExportHistoryMode", "api"),
-    chatExportIncludeBotInfo: checked("chatExportIncludeBotInfo"),
-    chatExportIncludeRulebook: checked("chatExportIncludeRulebook"),
-    enableRulebookDiagnostics: checked("enableRulebookDiagnostics"),
-    storyReadingLayout: checked("storyReadingLayout"),
-    chatExportIncludeOocDirectives: checked("chatExportIncludeOocDirectives"),
-    chatExportIncludeGenerationDetails: checked("chatExportIncludeGenerationDetails"),
-    chatExportNumberMessages: checked("chatExportNumberMessages"),
-    chatExportIncludeAvatars: checked("chatExportIncludeAvatars"),
-    chatExportIncludeImageLinks: checked("chatExportIncludeImageLinks"),
-    chatExportDefaultFormat: value("chatExportDefaultFormat", "text"),
-    chatExportHtmlLayout: value("chatExportHtmlLayout", "bubbles"),
+
+
+
     showOocTools: checked("showOocTools"),
     oocTemplates,
 
@@ -499,51 +374,30 @@ function readSettingsFromPage() {
     autoAcceptPersonaChange: checked("autoAcceptPersonaChange"),
     personaQuickSwitchLimit: Math.max(1, Math.min(12, Number(value("personaQuickSwitchLimit", "6")) || 6)),
 
-    showQolSidebarButton: checked("showQolSidebarButton"),
-    restorePersonasSidebarPosition: checked("restorePersonasSidebarPosition"),
-    qolSidebarButtonPlacement: value("qolSidebarButtonPlacement", "after-sai"),
-    hideSidebarLogo: checked("hideSidebarLogo"),
-    hideSidebarHome: checked("hideSidebarHome"),
-    hideSidebarChats: checked("hideSidebarChats"),
-    hideSidebarPersonas: checked("hideSidebarPersonas"),
-    hideSidebarNewBadges: checked("hideSidebarNewBadges"),
-    hideSidebarCreateMenu: checked("hideSidebarCreateMenu"),
-    hideSidebarCreateChatbot: checked("hideSidebarCreateChatbot"),
-    hideSidebarCreateLorebook: checked("hideSidebarCreateLorebook"),
-    hideSidebarCreateGroup: checked("hideSidebarCreateGroup"),
-    hideSidebarCreateVoice: checked("hideSidebarCreateVoice"),
-    hideSidebarMyCreationsMenu: checked("hideSidebarMyCreationsMenu"),
-    hideSidebarMyChatbots: checked("hideSidebarMyChatbots"),
-    hideSidebarMyLorebooks: checked("hideSidebarMyLorebooks"),
-    hideSidebarMyGroups: checked("hideSidebarMyGroups"),
-    hideSidebarMyVoices: checked("hideSidebarMyVoices"),
-    hideSidebarFavorites: checked("hideSidebarFavorites"),
-    hideSidebarRecommendations: checked("hideSidebarRecommendations"),
-    hideSidebarLeaderboard: checked("hideSidebarLeaderboard"),
-    hideSidebarBlockedCreators: checked("hideSidebarBlockedCreators"),
-    hideSidebarSubscribe: checked("hideSidebarSubscribe"),
-    hideSidebarHelp: checked("hideSidebarHelp"),
-    // Legacy all-social flag is cleared once the individual choices are saved.
-    hideSidebarSocialLinks: false,
-    hideSidebarSocialDiscord: checked("hideSidebarSocialDiscord"),
-    hideSidebarSocialX: checked("hideSidebarSocialX"),
-    hideSidebarSocialReddit: checked("hideSidebarSocialReddit"),
-    // Legacy all-footer flag is cleared once the per-link settings are saved.
-    hideSidebarFooterLinks: false,
-    hideSidebarFooterTerms: checked("hideSidebarFooterTerms"),
-    hideSidebarFooterPrivacy: checked("hideSidebarFooterPrivacy"),
-    hideSidebarFooterRefunds: checked("hideSidebarFooterRefunds"),
-    hideSidebarFooterReporting: checked("hideSidebarFooterReporting"),
-    hideSidebarFooterGuidelines: checked("hideSidebarFooterGuidelines"),
-    hideSidebarFooterSupport: checked("hideSidebarFooterSupport"),
-    hideSidebarFooterAffiliates: checked("hideSidebarFooterAffiliates"),
 
-    hideSidebarAppDownload: false,
-    hideSidebarAppDownloadGooglePlay: checked("hideSidebarAppDownloadGooglePlay"),
-    hideSidebarAppDownloadAppStore: checked("hideSidebarAppDownloadAppStore"),
-    hideSidebarAppDownloadGeneric: checked("hideSidebarAppDownloadGeneric"),
-    hideSidebarWebVersion: checked("hideSidebarWebVersion"),
-    hideSidebarSignOut: checked("hideSidebarSignOut"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // Legacy all-social flag is cleared once the individual choices are saved.
+
+    // Legacy all-footer flag is cleared once the per-link settings are saved.
+
+
     enableMainFooterManagement: checked("enableMainFooterManagement"),
     hideMainFooterEntirely: checked("hideMainFooterEntirely"),
     hideMainFooterCompany: checked("hideMainFooterCompany"),
@@ -573,34 +427,13 @@ function readSettingsFromPage() {
     publicPersonalityOnly: checked("publicPersonalityOnly"),
     showLorebookFilters: checked("showLorebookFilters"),
     showRulebookFilters: checked("showRulebookFilters"),
-    enableSmartFilterPresets: checked("enableSmartFilterPresets"),
-    enableCreationAudit: checked("enableCreationAudit"),
-    creationAuditQuickStatus: checked("creationAuditQuickStatus"),
 
-
-
-    enableMyCreationsFilters: checked("enableMyCreationsFilters"),
     enableMyCreationsBulkBackup: checked("enableMyCreationsBulkBackup"),
     enableAccountMigrationAssistant: checked("enableAccountMigrationAssistant"),
     showMyLorebookEditButtons: checked("showMyLorebookEditButtons"),
     showMyChatbotEditButtons: checked("showMyChatbotEditButtons"),
-    rememberMyCreationsView: checked("rememberMyCreationsView"),
-    autoLoadMyCreations: checked("autoLoadMyCreations"),
-    myCreationsAutoLoadPages: Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)),
-    enableRecommendationHelpers: checked("enableRecommendationHelpers"),
-    recommendationHideLaterBots: checked("recommendationHideLaterBots"),
-    recommendationHideNotInterested: checked("recommendationHideNotInterested"),
-    recommendationPreferFavoriteCreators: checked("recommendationPreferFavoriteCreators"),
-    recommendationPreferredTags: value("recommendationPreferredTags"),
-    recommendationAvoidTags: value("recommendationAvoidTags"),
-    recommendationAvoidWords: value("recommendationAvoidWords"),
-    recommendationShowReasonBadges: checked("recommendationShowReasonBadges"),
-    recommendationHideFavoriteBots: checked("recommendationHideFavoriteBots"),
-    recommendationHideOwnBots: checked("recommendationHideOwnBots"),
-    recommendationOnlyUnopened: checked("recommendationOnlyUnopened"),
-    recommendationOnlyLorebook: checked("recommendationOnlyLorebook"),
-    recommendationSessionHideButtons: checked("recommendationSessionHideButtons"),
-    recommendationRandomButton: checked("recommendationRandomButton"),
+
+
 
     showQuickUnblockButtons: checked("showQuickUnblockButtons"),
     reduceAnimatedBotImages: checked("reduceAnimatedBotImages"),
@@ -610,21 +443,16 @@ function readSettingsFromPage() {
     animatedImagesProfiles: checked("animatedImagesProfiles"),
     animatedImagesChatMedia: checked("animatedImagesChatMedia"),
     replaceCardProfileWithBlockButton: checked("replaceCardProfileWithBlockButton"),
-    showBlockButtonOnMyCreations: checked("showBlockButtonOnMyCreations"),
+
     enableBulkCardBlocking: checked("enableBulkCardBlocking"),
     bulkCardBlockingSidebarLauncher: checked("bulkCardBlockingSidebarLauncher"),
     quickDislikeOnBlock: false,
     quickDislikeIdleEnabled: checked("quickDislikeOnBlock"),
     quickDislikeIdleMinutes: Math.min(60, Math.max(1, Number(value("quickDislikeIdleMinutes", "5")) || 5)),
     blockedBulkDislikeDelayMs: Math.min(10000, Math.max(250, Number(value("blockedBulkDislikeDelayMs", "750")) || 750)),
-    enableLanguageFilter: checked("enableLanguageFilter"),
-    languageFilterLorebooks: checked("languageFilterLorebooks"),
-    languageFilterRulebooks: checked("languageFilterRulebooks"),
+
     allowedLanguages: getAllowedLanguages(),
-    languageSelectionMode: ["include", "exclude"].includes(value("languageSelectionMode")) ? value("languageSelectionMode") : "include",
-    languageFilterMode: "conservative",
-    languageAutoDetectUntagged: checked("languageAutoDetectUntagged"),
-    languageShowDetectedBadge: checked("languageShowDetectedBadge"),
+
     ...readTextNormalizationSettingsFromPage(),
     blockedTags: linesToArray(value("blockedTags")),
     blockedWords: linesToArray(value("blockedWords")),
@@ -691,17 +519,15 @@ function readSingleSettingFromPage(settingKey) {
     case "enabled": return (checked("enabled"));
     case "saiToolkitCompatibility": return (checked("saiToolkitCompatibility", false));
     case "globalNsfwMode": return (value("globalNsfwMode", "ignore"));
-    case "autoAfkEnabled": return (checked("autoAfkEnabled"));
-    case "autoAfkMinutes": return (Math.min(43200, Math.max(15, Number(value("autoAfkMinutes", "720")) || 720)));
-    case "autoAfkHours": return (Math.min(720, Math.max(0.25, (Number(value("autoAfkMinutes", "720")) || 720) / 60)));
+
+
+
     case "lowMemoryProtectionEnabled": return (checked("lowMemoryProtectionEnabled"));
     case "maxAwakeSpicyTabs": return (Math.min(20, Math.max(1, Number(value("maxAwakeSpicyTabs", "3")) || 3)));
-    case "autoAfkChats": return (checked("autoAfkChats", true));
-    case "autoAfkHome": return (checked("autoAfkHome"));
-    case "autoAfkProfiles": return (checked("autoAfkProfiles"));
-    case "autoAfkAction": return ($("autoAfkActionClose")?.checked ? "close" : "discard");
-    case "autoAfkProtectActive": return (checked("autoAfkProtectActive", true));
-    case "autoAfkResetOnActivate": return (checked("autoAfkResetOnActivate", true));
+
+
+
+
     case "duplicateTabGuardEnabled": return (checked("duplicateTabGuardEnabled"));
     case "duplicateTabChats": return (checked("duplicateTabChats", true));
     case "duplicateTabHome": return (checked("duplicateTabHome"));
@@ -713,21 +539,18 @@ function readSingleSettingFromPage(settingKey) {
     case "tabCleanupMediumDays": return (Math.min(90, Math.max(2, Number(value("tabCleanupMediumDays", "7")) || 7)));
     case "tabCleanupOldDays": return (Math.min(365, Math.max(3, Number(value("tabCleanupOldDays", "14")) || 14)));
     case "tabCleanupProtectPinnedOnClose": return (checked("tabCleanupProtectPinnedOnClose", true));
-    case "autoTags": return (checked("autoTags"));
-    case "enableTagAliases": return (checked("enableTagAliases"));
-    case "tagAliasRules": return (value("tagAliasRules"));
-    case "tagAliasShowDisplay": return (checked("tagAliasShowDisplay"));
-    case "localTagMatchEnabled": return (checked("localTagMatchEnabled"));
-    case "localTagMatchRules": return (value("localTagMatchRules"));
-    case "localTagMatchFetchPublic": return (checked("localTagMatchFetchPublic"));
-    case "showTagTemplateButton": return (checked("showTagTemplateButton"));
-    case "showChatTagLinks": return (checked("showChatTagLinks"));
-    case "showChatTagAddButtons": return (checked("showChatTagAddButtons"));
-    case "botEditorShowCharButton": return (checked("botEditorShowCharButton"));
-    case "botEditorShowUserButton": return (checked("botEditorShowUserButton"));
-    case "botEditorShowContinueButton": return (checked("botEditorShowContinueButton"));
-    case "botEditorShowNoControlButton": return (checked("botEditorShowNoControlButton"));
-    case "botEditorShowCustomSnippets": return (checked("botEditorShowCustomSnippets"));
+
+
+
+
+
+
+
+
+
+
+
+
     case "botEditorAutoOpenAdvanced": return (checked("botEditorAutoOpenAdvanced"));
     case "rememberBotImagePrompt": return (checked("rememberBotImagePrompt"));
     case "botEditorSaveActions": return (checked("botEditorSaveActions"));
@@ -780,42 +603,16 @@ function readSingleSettingFromPage(settingKey) {
     case "botEditorDefaultVisibility": return (["public", "unlisted"].includes(value("botEditorDefaultVisibility")) ? value("botEditorDefaultVisibility") : "ignore");
     case "autoAgreeCreationGuidelines": return (checked("autoAgreeCreationGuidelines"));
     case "botEditorSnippets": return (botEditorSnippetsFromPage());
-    case "enableGenerationProfiles": return (checked("enableGenerationProfiles"));
-    case "showGenerationMetadata": return (checked("showGenerationMetadata"));
-    case "showMessageTimestamps": return (checked("showMessageTimestamps"));
-    case "messageTimestamp24Hour": return (checked("messageTimestamp24Hour"));
-    case "messageTimestampDateFirst": return (checked("messageTimestampDateFirst"));
-    case "messageTimestampShowSeconds": return (checked("messageTimestampShowSeconds"));
-    case "showGenerationModel": return (checked("showGenerationModel"));
-    case "showGenerationElapsed": return (checked("showGenerationElapsed"));
-    case "showGenerationSettings": return (checked("showGenerationSettings"));
-    case "compactGenerationMetadata": return (checked("compactGenerationMetadata"));
-    case "enableContextWindowWarning": return (checked("enableContextWindowWarning"));
-    case "contextWarningShowMeter": return (checked("contextWarningShowMeter"));
-    case "contextWarningThreshold": return (Math.min(99, Math.max(50, Number(value("contextWarningThreshold", "85")) || 85)));
-    case "contextWarningManualLimit": return (Math.max(0, Number(value("contextWarningManualLimit", "0")) || 0));
-    case "contextWarningBrowserNotifications": return (checked("contextWarningBrowserNotifications"));
-    case "includeTags": return (linesToArray(value("includeTags")));
-    case "excludeTags": return (linesToArray(value("excludeTags")));
+
+
     case "hidePremium": return (checked("hidePremium"));
     case "hideFloatingPremiumPopups": return (checked("hideFloatingPremiumPopups"));
     case "hideAdvertBanners": return (checked("hideAdvertBanners"));
-    case "expandModelSelectorDescriptions": return (checked("expandModelSelectorDescriptions"));
-    case "hideModelUpgradeButtons": return (checked("hideModelUpgradeButtons"));
-    case "customizeModelQuickMenu": return (checked("customizeModelQuickMenu"));
-    case "modelQuickFavoritesOnly": return (checked("modelQuickFavoritesOnly"));
-    case "modelFavoriteNames": return (value("modelFavoriteNames", ""));
-    case "modelHiddenNames": return (value("modelHiddenNames", ""));
-    case "hideNotifications": return (checked("hideNotifications"));
-    case "hideFeatureReleasePopups": return (checked("hideFeatureReleasePopups"));
-    case "hideTabNotificationBadge": return (checked("hideTabNotificationBadge"));
-    case "autoReadNotifications": return (checked("autoReadNotifications"));
-    case "hideTopBarLanguage": return (checked("hideTopBarLanguage"));
-    case "hideTopBarNotifications": return (checked("hideTopBarNotifications"));
-    case "hideTopBarTheme": return (checked("hideTopBarTheme"));
-    case "topBarProfilePillMode": return (value("topBarProfilePillMode", "normal"));
-    case "topBarProfilePillCustomText": return (value("topBarProfilePillCustomText", ""));
-    case "topBarProfilePillPersonaPrefix": return (checked("topBarProfilePillPersonaPrefix"));
+
+
+
+
+
 
     case "chatTopBarAddLaterButton": return (checked("chatTopBarAddLaterButton"));
     case "closeChatTabAfterSavingLater": return (checked("closeChatTabAfterSavingLater"));
@@ -827,34 +624,16 @@ function readSingleSettingFromPage(settingKey) {
     case "enableMemoryVault": return (checked("enableMemoryVault"));
     case "showCopyMemoryAction": return (checked("showCopyMemoryAction"));
     case "memoryAutoLoadAll": return (checked("memoryAutoLoadAll"));
-    case "enableChatTextReplacements": return (checked("enableChatTextReplacements"));
-    case "chatTextReplacementRules": return (value("chatTextReplacementRules", ""));
-    case "enableChatWordCensor": return checked("enableChatWordCensor");
-    case "chatWordCensorList": return value("chatWordCensorList", "");
-    case "chatWordCensorMask": return value("chatWordCensorMask", "hash");
-    case "chatWordCensorCustom": return value("chatWordCensorCustom", "[censored]");
-    case "chatWordCensorScope": return value("chatWordCensorScope", "ai");
-    case "chatWordCensorReveal": return checked("chatWordCensorReveal");
-    case "chatWordCensorShowChatToggle": return checked("chatWordCensorShowChatToggle");
-    case "enableChatMutedWords": return (checked("enableChatMutedWords"));
-    case "chatMutedWords": return (value("chatMutedWords", ""));
-    case "chatTextReplacementPresets": return (value("chatTextReplacementPresets", ""));
-    case "chatTextReplacementShowChatPresetControl": return (checked("chatTextReplacementShowChatPresetControl"));
-    case "chatTextReplacementScope": return (["ai", "user", "both"].includes(value("chatTextReplacementScope")) ? value("chatTextReplacementScope") : "ai");
-    case "chatTextReplacementMode": return (value("chatTextReplacementMode") === "save" ? "save" : "display");
-    case "chatTextReplacementPreview": return (checked("chatTextReplacementPreview"));
+
     case "showChatListTools": return (checked("showChatListTools"));
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
-    case "chatListPopoutShortcut": return checked("chatListPopoutShortcut");
-    case "chatListRenameShortcut": return checked("chatListRenameShortcut");
-    case "chatListTwoColumns": return checked("chatListTwoColumns");
     case "chatCollections": return (value("chatCollections", ""));
     case "showSavedChatQuickActions": return (checked("showSavedChatQuickActions"));
-    case "showRandomChatButton": return (checked("showRandomChatButton"));
-    case "randomChatUseLastHomeFilters": return (checked("randomChatUseLastHomeFilters"));
-    case "randomChatIncludeOpened": return (checked("randomChatIncludeOpened"));
-    case "randomChatIncludeLater": return (checked("randomChatIncludeLater"));
-    case "randomChatIncludeFavorites": return (checked("randomChatIncludeFavorites"));
+
+
+
+
+
     case "chatListSortMode": return (value("chatListSortMode", "default"));
     case "chatListSearchMode": return ("all");
     case "chatListOpenedFilter": return (["all", "opened", "unopened"].includes(value("chatListOpenedFilter")) ? value("chatListOpenedFilter") : "all");
@@ -867,65 +646,35 @@ function readSingleSettingFromPage(settingKey) {
     case "importOpenedFromChatsPage": return (checked("importOpenedFromChatsPage"));
     case "hideOpenedChats": return (checked("hideOpenedChats"));
     case "openedBotSortMode": return (value("openedBotSortMode", "newest"));
-    case "qolInterfaceScale": return ([100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100);
-    case "enableChatWidthControls": return checked("enableChatWidthControls");
-    case "chatStreamWidth": return Math.min(1600, Math.max(520, Number(value("chatStreamWidth", "800")) || 800));
-    case "chatBubbleMaxWidth": return Math.min(1500, Math.max(360, Number(value("chatBubbleMaxWidth", "650")) || 650));
-    case "chatComposerWidth": return Math.min(1600, Math.max(520, Number(value("chatComposerWidth", "800")) || 800));
-    case "chatTextScale": return ([100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100);
-    case "chatLineSpacing": return (["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native");
-    case "settingsReadingFont": return Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native";
-    case "settingsReadingSize": return SETTINGS_READING_SIZES.includes(Number(value("settingsReadingSize", "100"))) ? Number(value("settingsReadingSize", "100")) : 100;
-    case "settingsReadingLineSpacing": return SETTINGS_READING_LINE_SPACING.includes(value("settingsReadingLineSpacing", "native")) ? value("settingsReadingLineSpacing", "native") : "native";
-    case "settingsReadingLetterSpacing": return SETTINGS_READING_LETTER_SPACING.includes(value("settingsReadingLetterSpacing", "native")) ? value("settingsReadingLetterSpacing", "native") : "native";
-    case "settingsReadingContrast": return checked("settingsReadingContrast");
-    case "settingsReadingLargerControls": return checked("settingsReadingLargerControls");
-    case "showQuickPanel": return (checked("showQuickPanel"));
-    case "quickPanelPlacement": return (value("quickPanelPlacement", "bottom-right") || "bottom-right");
-    case "quickPanelDraggable": return (checked("quickPanelDraggable"));
-    case "quickPanelDefaultClosed": return (checked("quickPanelDefaultClosed"));
-    case "quickPanelEnabledByDefaultInTab": return (checked("quickPanelEnabledByDefaultInTab", true));
-    case "quickPanelWidth": return (Math.min(440, Math.max(200, Number(value("quickPanelWidth", "280")) || 280)));
-    case "quickPanelUiScale": return (Math.min(125, Math.max(80, Number(value("quickPanelUiScale", "100")) || 100)));
-    case "quickPanelMaxHeightPercent": return (Math.min(95, Math.max(25, Number(value("quickPanelMaxHeightPercent", "80")) || 80)));
-    case "quickPanelCustomXPercent": return (Math.min(100, Math.max(0, Number.isFinite(Number(value("quickPanelCustomXPercent", "70"))) ? Number(value("quickPanelCustomXPercent", "70")) : 70)));
-    case "quickPanelCustomYPercent": return (Math.min(100, Math.max(0, Number.isFinite(Number(value("quickPanelCustomYPercent", "12"))) ? Number(value("quickPanelCustomYPercent", "12")) : 12)));
-    case "quickPanelAutoCollapseOverlap": return (checked("quickPanelAutoCollapseOverlap", true));
-    case "quickPanelShowStatus": return (checked("quickPanelShowStatus", true));
-    case "quickPanelShowLoadedMessageCount": return (checked("quickPanelShowLoadedMessageCount"));
-    case "quickPanelStatusShowOpened": return (checked("quickPanelStatusShowOpened", true));
-    case "quickPanelStatusShowBlocked": return (checked("quickPanelStatusShowBlocked", true));
+
+
+
+
+
     case "popupShowOpenedCount": return (checked("popupShowOpenedCount", false));
     case "popupShowBlockedCount": return (checked("popupShowBlockedCount", false));
     case "popupShowStorageDetails": return (checked("popupShowStorageDetails"));
-    case "quickPanelShowFeatureSummary": return (checked("quickPanelShowFeatureSummary"));
-    case "quickPanelShowOptions": return (checked("quickPanelShowOptions", true));
-    case "quickPanelShowFillNow": return (checked("quickPanelShowFillNow", true));
-    case "quickPanelShowSmartFilterPins": return (checked("quickPanelShowSmartFilterPins"));
-    case "quickPanelShowChatSearch": return (checked("quickPanelShowChatSearch", true));
-    case "quickPanelShowChatMessageSearch": return checked("quickPanelShowChatMessageSearch");
-    case "quickPanelShowChatSort": return (checked("quickPanelShowChatSort", true));
-    case "quickPanelShowScanVisible": return (checked("quickPanelShowScanVisible", true));
-    case "quickPanelShowLoadAll": return (checked("quickPanelShowLoadAll", true));
+
+
+
+
+
+
+
+
+
     case "enableChatIndex": return checked("enableChatIndex");
     case "chatIndexEnhanceNativeSearch": return checked("chatIndexEnhanceNativeSearch");
     case "chatIndexStandaloneLauncher": return checked("chatIndexStandaloneLauncher");
-    case "quickPanelShowOoc": return (checked("quickPanelShowOoc", true));
-    case "quickPanelShowAutoVoice": return (checked("quickPanelShowAutoVoice", true));
-    case "quickPanelShowAutoAsterisk": return (checked("quickPanelShowAutoAsterisk", true));
-    case "quickPanelShowTranslation": return (checked("quickPanelShowTranslation"));
-    case "quickPanelShowPersona": return (checked("quickPanelShowPersona", true));
-    case "quickPanelShowExport": return (checked("quickPanelShowExport", true));
-    case "quickPanelShowSoundscapes": return (checked("quickPanelShowSoundscapes"));
-    case "quickPanelShowCustomPictures": return checked("quickPanelShowCustomPictures");
-    case "quickPanelShowContextKeeper": return checked("quickPanelShowContextKeeper");
-    case "quickPanelShowFocusMode": return checked("quickPanelShowFocusMode");
-    case "quickPanelShowCharacterProfile": return checked("quickPanelShowCharacterProfile");
-    case "quickPanelShowSavedSnippets": return checked("quickPanelShowSavedSnippets");
-    case "quickPanelShowCreatorPreview": return checked("quickPanelShowCreatorPreview");
-    case "quickPanelShowImageGenerator": return checked("quickPanelShowImageGenerator");
+
+
+
+
+
+
+
     case "showAutoImageInlineButton": return checked("showAutoImageInlineButton");
-    case "quickPanelShowRulebookDiagnostics": return checked("quickPanelShowRulebookDiagnostics");
+
     case "compactAfterHiding": return (checked("compactAfterHiding"));
     case "neverHideFavorites": return (checked("neverHideFavorites"));
     case "protectFavoritesFromBlocking": return (checked("protectFavoritesFromBlocking"));
@@ -955,18 +704,16 @@ function readSingleSettingFromPage(settingKey) {
     case "laterBotFolderFilter": return (value("laterBotFolderFilter", "all"));
     case "laterBotCreatorFilter": return (value("laterBotCreatorFilter", ""));
     case "laterBotStateFilter": return (value("laterBotStateFilter", "all"));
-    case "enableBotOrganizer": return (checked("enableBotOrganizer"));
-    case "botOrganizerExplorerFolders": return (checked("botOrganizerExplorerFolders"));
-    case "botCollections": return (value("botCollections", ""));
-    case "botOrganizerShowCardMeta": return (checked("botOrganizerShowCardMeta", true));
-    case "botOrganizerBulkTools": return (checked("botOrganizerBulkTools", true));
-    case "autoFillListings": return (checked("autoFillListings"));
-    case "paginationTopJumpBox": return (checked("paginationTopJumpBox"));
+
+
+
+
+
     case "showListingRefillButton": return (checked("showListingRefillButton"));
     case "showListingFilterStats": return (checked("showListingFilterStats"));
     case "showListingFilterStatsDetails": return (checked("showListingFilterStatsDetails"));
-    case "autoFillTargetCards": return (Math.max(1, Math.min(200, Number(value("autoFillTargetCards", "50")) || 50)));
-    case "autoFillMaxClicks": return (Math.max(1, Math.min(30, Number(value("autoFillMaxClicks", "8")) || 8)));
+
+
     case "hideChatPlusButton": return (checked("hideChatPlusButton"));
     case "hideChatImageButton": return (checked("hideChatImageButton"));
     case "replaceChatImageWithOocButton": return (checked("replaceChatImageWithOocButton"));
@@ -1016,86 +763,59 @@ function readSingleSettingFromPage(settingKey) {
     case "chatBackgroundBlur": return (Math.min(30, Math.max(0, Number(value("chatBackgroundBlur", "0")) || 0)));
     case "chatBackgroundFit": return (["cover", "contain", "tile"].includes(value("chatBackgroundFit", "cover")) ? value("chatBackgroundFit", "cover") : "cover");
     case "chatBackgroundPosition": return (["center", "top", "bottom", "left", "right"].includes(value("chatBackgroundPosition", "center")) ? value("chatBackgroundPosition", "center") : "center");
-    case "enableChatBubbleCustomization": return (checked("enableChatBubbleCustomization"));
-    case "persistSpicyChatUserAppearance": return (checked("persistSpicyChatUserAppearance"));
-    case "chatBubbleAiBackground": return (value("chatBubbleAiBackground", "#27282d"));
-    case "chatBubbleAiTextMode": return (["native", "custom"].includes(value("chatBubbleAiTextMode")) ? value("chatBubbleAiTextMode") : "custom");
-    case "chatBubbleAiText": return (value("chatBubbleAiText", "#f2f2f2"));
-    case "chatBubbleAiActionMode": return (["native", "base", "custom"].includes(value("chatBubbleAiActionMode")) ? value("chatBubbleAiActionMode") : "native");
-    case "chatBubbleAiActionText": return (value("chatBubbleAiActionText", "#79c8f5"));
-    case "chatBubbleAiDialogueMode": return (["native", "base", "custom"].includes(value("chatBubbleAiDialogueMode")) ? value("chatBubbleAiDialogueMode") : "base");
-    case "chatBubbleAiDialogueText": return (value("chatBubbleAiDialogueText", "#f2f2f2"));
-    case "chatBubbleAiFont": return (value("chatBubbleAiFont", "inherit"));
-    case "chatBubbleAiActionFont": return (value("chatBubbleAiActionFont", "inherit"));
-    case "chatBubbleAiDialogueFont": return (value("chatBubbleAiDialogueFont", "inherit"));
-    case "chatBubbleAiBorder": return (value("chatBubbleAiBorder", "#555861"));
-    case "chatBubbleAiBorderWidth": return (Math.min(12, Math.max(0, Number(value("chatBubbleAiBorderWidth", "0")) || 0)));
-    case "chatBubbleAiBorderStyle": return (["solid", "dashed", "dotted", "double"].includes(value("chatBubbleAiBorderStyle")) ? value("chatBubbleAiBorderStyle") : "solid");
-    case "chatBubbleAiBorderOpacity": return (Math.min(100, Math.max(0, Number(value("chatBubbleAiBorderOpacity", "100")) || 0)));
-    case "chatBubbleAiOpacity": return (Math.min(100, Math.max(30, Number(value("chatBubbleAiOpacity", "100")) || 100)));
-    case "chatBubbleAiRadius": return (Math.min(40, Math.max(4, Number(value("chatBubbleAiRadius", "20")) || 20)));
-    case "chatBubbleAiShape": return (["native", "rounded", "square", "speech", "cat", "cloud"].includes(value("chatBubbleAiShape")) ? value("chatBubbleAiShape") : "native");
-    case "chatBubbleAiDecorationMode": return (["bubble", "custom"].includes(value("chatBubbleAiDecorationMode")) ? value("chatBubbleAiDecorationMode") : "bubble");
-    case "chatBubbleAiDecorationColor": return (value("chatBubbleAiDecorationColor", "#27282d"));
-    case "chatBubbleAiCatEarLayout": return (["auto", "left", "right", "split"].includes(value("chatBubbleAiCatEarLayout")) ? value("chatBubbleAiCatEarLayout") : "auto");
-    case "chatBubbleAiShadow": return (checked("chatBubbleAiShadow"));
-    case "chatBubbleUserBackground": return (value("chatBubbleUserBackground", "#253f52"));
-    case "chatBubbleUserTextMode": return (["native", "custom"].includes(value("chatBubbleUserTextMode")) ? value("chatBubbleUserTextMode") : "custom");
-    case "chatBubbleUserText": return (value("chatBubbleUserText", "#f5f5f5"));
-    case "chatBubbleUserActionMode": return (["native", "base", "custom"].includes(value("chatBubbleUserActionMode")) ? value("chatBubbleUserActionMode") : "native");
-    case "chatBubbleUserActionText": return (value("chatBubbleUserActionText", "#79c8f5"));
-    case "chatBubbleUserDialogueMode": return (["native", "base", "custom"].includes(value("chatBubbleUserDialogueMode")) ? value("chatBubbleUserDialogueMode") : "base");
-    case "chatBubbleUserDialogueText": return (value("chatBubbleUserDialogueText", "#f5f5f5"));
-    case "chatBubbleUserFont": return (value("chatBubbleUserFont", "inherit"));
-    case "chatBubbleUserActionFont": return (value("chatBubbleUserActionFont", "inherit"));
-    case "chatBubbleUserDialogueFont": return (value("chatBubbleUserDialogueFont", "inherit"));
-    case "chatBubbleUserBorder": return (value("chatBubbleUserBorder", "#52718a"));
-    case "chatBubbleUserBorderWidth": return (Math.min(12, Math.max(0, Number(value("chatBubbleUserBorderWidth", "0")) || 0)));
-    case "chatBubbleUserBorderStyle": return (["solid", "dashed", "dotted", "double"].includes(value("chatBubbleUserBorderStyle")) ? value("chatBubbleUserBorderStyle") : "solid");
-    case "chatBubbleUserBorderOpacity": return (Math.min(100, Math.max(0, Number(value("chatBubbleUserBorderOpacity", "100")) || 0)));
-    case "chatBubbleUserOpacity": return (Math.min(100, Math.max(30, Number(value("chatBubbleUserOpacity", "100")) || 100)));
-    case "chatBubbleUserRadius": return (Math.min(40, Math.max(4, Number(value("chatBubbleUserRadius", "20")) || 20)));
-    case "chatBubbleUserShape": return (["native", "rounded", "square", "speech", "cat", "cloud"].includes(value("chatBubbleUserShape")) ? value("chatBubbleUserShape") : "native");
-    case "chatBubbleUserDecorationMode": return (["bubble", "custom"].includes(value("chatBubbleUserDecorationMode")) ? value("chatBubbleUserDecorationMode") : "bubble");
-    case "chatBubbleUserDecorationColor": return (value("chatBubbleUserDecorationColor", "#253f52"));
-    case "chatBubbleUserCatEarLayout": return (["auto", "left", "right", "split"].includes(value("chatBubbleUserCatEarLayout")) ? value("chatBubbleUserCatEarLayout") : "auto");
-    case "chatBubbleUserShadow": return (checked("chatBubbleUserShadow"));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     case "chatBubblePreserveActionColors": return (value("chatBubbleAiActionMode", "native") !== "base" || value("chatBubbleUserActionMode", "native") !== "base");
     case "hideChatVoiceButton": return (checked("hideChatVoiceButton"));
     case "hideUnlockCustomVoices": return (checked("hideUnlockCustomVoices"));
-    case "stackChatMessages": return (checked("stackChatMessages"));
-    case "showMessageQuickActions": return (checked("showMessageQuickActions"));
 
-
-    case "enableSavedTextSnippets": return (checked("enableSavedTextSnippets"));
 
     case "rpStateTrackerMode": return (["manual", "conservative", "assisted"].includes(value("rpStateTrackerMode")) ? value("rpStateTrackerMode") : "conservative");
     case "rpStateInjectMode": return (["manual", "changed", "every"].includes(value("rpStateInjectMode")) ? value("rpStateInjectMode") : "changed");
     case "rpStateMaxContextChars": return (Math.max(300, Math.min(3000, Number(value("rpStateMaxContextChars", "1200")) || 1200)));
     case "rpStateShowQuickPanel": return (checked("rpStateShowQuickPanel", true));
 
-    case "messageQuickActionCopy": return (checked("messageQuickActionCopy"));
-    case "messageQuickActionEdit": return (checked("messageQuickActionEdit"));
-    case "messageQuickActionRemoveImage": return (checked("messageQuickActionRemoveImage"));
-    case "messageQuickActionResend": return (checked("messageQuickActionResend"));
-    case "messageQuickActionConfirmRemoveImage": return (checked("messageQuickActionConfirmRemoveImage"));
-    case "messageQuickActionReport": return (checked("messageQuickActionReport"));
     case "allowTypingWhileAiResponding": return (checked("allowTypingWhileAiResponding"));
     case "keepChatPositionWhileTyping": return (checked("keepChatPositionWhileTyping"));
-    case "showScrollToTopButton": return (checked("showScrollToTopButton"));
-    case "showScrollToBottomButton": return (checked("showScrollToBottomButton"));
-    case "showSwipeJumpButtons": return (checked("showSwipeJumpButtons"));
-    case "showSwipeJumpToNumber": return (checked("showSwipeJumpToNumber"));
-    case "restoreFirstSwipeOnLoad": return (checked("restoreFirstSwipeOnLoad"));
-    case "scrollNavOnHome": return (checked("scrollNavOnHome", true));
-    case "scrollNavOnChats": return (checked("scrollNavOnChats", true));
-    case "scrollNavOnChat": return (checked("scrollNavOnChat", true));
-    case "scrollNavOnCreation": return (checked("scrollNavOnCreation", true));
-    case "scrollNavOnProfiles": return (checked("scrollNavOnProfiles", true));
-    case "scrollNavOnOther": return (checked("scrollNavOnOther", true));
-    case "scrollTopLoadPreviousMessages": return (checked("scrollTopLoadPreviousMessages"));
-    case "scrollTopLoadPreviousMode": return (["one", "all"].includes(value("scrollTopLoadPreviousMode")) ? value("scrollTopLoadPreviousMode") : "all");
-    case "scrollTopLoadPreviousTiming": return (["before", "background"].includes(value("scrollTopLoadPreviousTiming")) ? value("scrollTopLoadPreviousTiming") : "before");
+
     case "protectDraftDuringMessageRemoval": return (checked("protectDraftDuringMessageRemoval"));
     case "failedMessageHelper": return (checked("failedMessageHelper"));
     case "autoRetryFailedMessageSends": return (checked("autoRetryFailedMessageSends"));
@@ -1121,30 +841,21 @@ function readSingleSettingFromPage(settingKey) {
     case "performanceDiagnostics": return (checked("performanceDiagnostics"));
     case "enableLocalChangeHistory": return (checked("enableLocalChangeHistory"));
     case "showUpdateNotifications": return (checked("showUpdateNotifications", false));
-    case "androidAppControlsMode": return (["auto", "android", "always", "off"].includes(value("androidAppControlsMode")) ? value("androidAppControlsMode") : "auto");
-    case "androidTopBarMenu": return (checked("androidTopBarMenu"));
-    case "androidHideComposerShortcuts": return (checked("androidHideComposerShortcuts", true));
-    case "androidTopBarOoc": return (checked("androidTopBarOoc", true));
-    case "androidTopBarAsterisk": return (checked("androidTopBarAsterisk", true));
-    case "androidTopBarFormatting": return (checked("androidTopBarFormatting", true));
-    case "androidTopBarTranslation": return (checked("androidTopBarTranslation"));
-    case "androidTopBarScroll": return (checked("androidTopBarScroll", true));
-    case "androidTopBarPersona": return (checked("androidTopBarPersona", true));
-    case "androidTopBarModel": return (checked("androidTopBarModel", true));
-    case "showChatExportButton": return (checked("showChatExportButton"));
+
+
+
+
+
+
+
+
+
+
     case "chatExportLoadPreviousMessages": return (checked("chatExportLoadPreviousMessages"));
     case "chatExportHistoryMode": return (value("chatExportHistoryMode", "api"));
-    case "chatExportIncludeBotInfo": return (checked("chatExportIncludeBotInfo"));
-    case "chatExportIncludeRulebook": return (checked("chatExportIncludeRulebook"));
-    case "enableRulebookDiagnostics": return checked("enableRulebookDiagnostics");
-    case "storyReadingLayout": return checked("storyReadingLayout");
-    case "chatExportIncludeOocDirectives": return (checked("chatExportIncludeOocDirectives"));
-    case "chatExportIncludeGenerationDetails": return (checked("chatExportIncludeGenerationDetails"));
-    case "chatExportNumberMessages": return (checked("chatExportNumberMessages"));
-    case "chatExportIncludeAvatars": return (checked("chatExportIncludeAvatars"));
-    case "chatExportIncludeImageLinks": return (checked("chatExportIncludeImageLinks"));
-    case "chatExportDefaultFormat": return (value("chatExportDefaultFormat", "text"));
-    case "chatExportHtmlLayout": return (value("chatExportHtmlLayout", "bubbles"));
+
+
+
     case "showOocTools": return (checked("showOocTools"));
     case "oocTemplates": return oocTemplatesFromPage();
     case "savePersonasFromPages": return (checked("savePersonasFromPages"));
@@ -1157,47 +868,32 @@ function readSingleSettingFromPage(settingKey) {
     case "showPersonaQuickSwitch": return (checked("showPersonaQuickSwitch"));
     case "autoAcceptPersonaChange": return (checked("autoAcceptPersonaChange"));
     case "personaQuickSwitchLimit": return (Math.max(1, Math.min(12, Number(value("personaQuickSwitchLimit", "6")) || 6)));
-    case "showQolSidebarButton": return (checked("showQolSidebarButton"));
-    case "qolSidebarButtonPlacement": return (value("qolSidebarButtonPlacement", "after-sai"));
-    case "hideSidebarLogo": return (checked("hideSidebarLogo"));
-    case "hideSidebarHome": return (checked("hideSidebarHome"));
-    case "hideSidebarChats": return (checked("hideSidebarChats"));
-    case "hideSidebarPersonas": return (checked("hideSidebarPersonas"));
-    case "hideSidebarNewBadges": return (checked("hideSidebarNewBadges"));
-    case "hideSidebarCreateMenu": return (checked("hideSidebarCreateMenu"));
-    case "hideSidebarCreateChatbot": return (checked("hideSidebarCreateChatbot"));
-    case "hideSidebarCreateLorebook": return (checked("hideSidebarCreateLorebook"));
-    case "hideSidebarCreateGroup": return (checked("hideSidebarCreateGroup"));
-    case "hideSidebarCreateVoice": return (checked("hideSidebarCreateVoice"));
-    case "hideSidebarMyCreationsMenu": return (checked("hideSidebarMyCreationsMenu"));
-    case "hideSidebarMyChatbots": return (checked("hideSidebarMyChatbots"));
-    case "hideSidebarMyLorebooks": return (checked("hideSidebarMyLorebooks"));
-    case "hideSidebarMyGroups": return (checked("hideSidebarMyGroups"));
-    case "hideSidebarMyVoices": return (checked("hideSidebarMyVoices"));
-    case "hideSidebarFavorites": return (checked("hideSidebarFavorites"));
-    case "hideSidebarRecommendations": return (checked("hideSidebarRecommendations"));
-    case "hideSidebarLeaderboard": return (checked("hideSidebarLeaderboard"));
-    case "hideSidebarBlockedCreators": return (checked("hideSidebarBlockedCreators"));
-    case "hideSidebarSubscribe": return (checked("hideSidebarSubscribe"));
-    case "hideSidebarHelp": return (checked("hideSidebarHelp"));
-    case "hideSidebarSocialLinks": return (false);
-    case "hideSidebarSocialDiscord": return (checked("hideSidebarSocialDiscord"));
-    case "hideSidebarSocialX": return (checked("hideSidebarSocialX"));
-    case "hideSidebarSocialReddit": return (checked("hideSidebarSocialReddit"));
-    case "hideSidebarFooterLinks": return (false);
-    case "hideSidebarFooterTerms": return (checked("hideSidebarFooterTerms"));
-    case "hideSidebarFooterPrivacy": return (checked("hideSidebarFooterPrivacy"));
-    case "hideSidebarFooterRefunds": return (checked("hideSidebarFooterRefunds"));
-    case "hideSidebarFooterReporting": return (checked("hideSidebarFooterReporting"));
-    case "hideSidebarFooterGuidelines": return (checked("hideSidebarFooterGuidelines"));
-    case "hideSidebarFooterSupport": return (checked("hideSidebarFooterSupport"));
-    case "hideSidebarFooterAffiliates": return (checked("hideSidebarFooterAffiliates"));
-    case "hideSidebarAppDownload": return (false);
-    case "hideSidebarAppDownloadGooglePlay": return (checked("hideSidebarAppDownloadGooglePlay"));
-    case "hideSidebarAppDownloadAppStore": return (checked("hideSidebarAppDownloadAppStore"));
-    case "hideSidebarAppDownloadGeneric": return (checked("hideSidebarAppDownloadGeneric"));
-    case "hideSidebarWebVersion": return (checked("hideSidebarWebVersion"));
-    case "hideSidebarSignOut": return (checked("hideSidebarSignOut"));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     case "enableMainFooterManagement": return (checked("enableMainFooterManagement"));
     case "hideMainFooterEntirely": return (checked("hideMainFooterEntirely"));
     case "hideMainFooterCompany": return (checked("hideMainFooterCompany"));
@@ -1225,35 +921,11 @@ function readSingleSettingFromPage(settingKey) {
     case "publicPersonalityOnly": return (checked("publicPersonalityOnly"));
     case "showLorebookFilters": return (checked("showLorebookFilters"));
     case "showRulebookFilters": return (checked("showRulebookFilters"));
-    case "enableSmartFilterPresets": return (checked("enableSmartFilterPresets"));
-    case "enableCreationAudit": return (checked("enableCreationAudit"));
-    case "creationAuditQuickStatus": return (checked("creationAuditQuickStatus"));
 
-
-
-    case "enableMyCreationsFilters": return (checked("enableMyCreationsFilters"));
     case "enableMyCreationsBulkBackup": return (checked("enableMyCreationsBulkBackup"));
     case "enableAccountMigrationAssistant": return (checked("enableAccountMigrationAssistant"));
     case "showMyLorebookEditButtons": return (checked("showMyLorebookEditButtons"));
     case "showMyChatbotEditButtons": return (checked("showMyChatbotEditButtons"));
-    case "restorePersonasSidebarPosition": return (checked("restorePersonasSidebarPosition"));
-    case "rememberMyCreationsView": return (checked("rememberMyCreationsView"));
-    case "autoLoadMyCreations": return (checked("autoLoadMyCreations"));
-    case "myCreationsAutoLoadPages": return (Math.max(1, Math.min(30, Number(value("myCreationsAutoLoadPages", "1")) || 1)));
-    case "enableRecommendationHelpers": return (checked("enableRecommendationHelpers"));
-    case "recommendationHideLaterBots": return (checked("recommendationHideLaterBots"));
-    case "recommendationHideNotInterested": return (checked("recommendationHideNotInterested"));
-    case "recommendationPreferFavoriteCreators": return (checked("recommendationPreferFavoriteCreators"));
-    case "recommendationPreferredTags": return (value("recommendationPreferredTags"));
-    case "recommendationAvoidTags": return (value("recommendationAvoidTags"));
-    case "recommendationAvoidWords": return (value("recommendationAvoidWords"));
-    case "recommendationShowReasonBadges": return (checked("recommendationShowReasonBadges"));
-    case "recommendationHideFavoriteBots": return (checked("recommendationHideFavoriteBots"));
-    case "recommendationHideOwnBots": return (checked("recommendationHideOwnBots"));
-    case "recommendationOnlyUnopened": return (checked("recommendationOnlyUnopened"));
-    case "recommendationOnlyLorebook": return (checked("recommendationOnlyLorebook"));
-    case "recommendationSessionHideButtons": return (checked("recommendationSessionHideButtons"));
-    case "recommendationRandomButton": return (checked("recommendationRandomButton"));
 
     case "showQuickUnblockButtons": return (checked("showQuickUnblockButtons"));
     case "reduceAnimatedBotImages": return (checked("reduceAnimatedBotImages"));
@@ -1263,21 +935,16 @@ function readSingleSettingFromPage(settingKey) {
     case "animatedImagesProfiles": return (checked("animatedImagesProfiles"));
     case "animatedImagesChatMedia": return (checked("animatedImagesChatMedia"));
     case "replaceCardProfileWithBlockButton": return (checked("replaceCardProfileWithBlockButton"));
-    case "showBlockButtonOnMyCreations": return (checked("showBlockButtonOnMyCreations"));
+
     case "enableBulkCardBlocking": return (checked("enableBulkCardBlocking"));
     case "bulkCardBlockingSidebarLauncher": return (checked("bulkCardBlockingSidebarLauncher"));
     case "quickDislikeOnBlock": return (false);
     case "quickDislikeIdleEnabled": return (checked("quickDislikeOnBlock"));
     case "quickDislikeIdleMinutes": return (Math.min(60, Math.max(1, Number(value("quickDislikeIdleMinutes", "5")) || 5)));
     case "blockedBulkDislikeDelayMs": return (Math.min(10000, Math.max(250, Number(value("blockedBulkDislikeDelayMs", "750")) || 750)));
-    case "enableLanguageFilter": return (checked("enableLanguageFilter"));
-    case "languageFilterLorebooks": return (checked("languageFilterLorebooks"));
-    case "languageFilterRulebooks": return (checked("languageFilterRulebooks"));
+
     case "allowedLanguages": return (getAllowedLanguages());
-    case "languageSelectionMode": return (["include", "exclude"].includes(value("languageSelectionMode")) ? value("languageSelectionMode") : "include");
-    case "languageFilterMode": return ("conservative");
-    case "languageAutoDetectUntagged": return (checked("languageAutoDetectUntagged"));
-    case "languageShowDetectedBadge": return (checked("languageShowDetectedBadge"));
+
     case "blockedTags": return (linesToArray(value("blockedTags")));
     case "blockedWords": return (linesToArray(value("blockedWords")));
     case "blockedCreators": return (linesToArray(value("blockedCreators")));
@@ -1299,7 +966,7 @@ function readSingleSettingFromPage(settingKey) {
     case "chatJumpToStartShortcut": return checked("chatJumpToStartShortcut");
     case "chatOpenWindowShortcut": return checked("chatOpenWindowShortcut");
     case "chatGenerationSettingsShortcut": return checked("chatGenerationSettingsShortcut");
-    case "messageBottomMenuShortcut": return checked("messageBottomMenuShortcut");
+
     case "showNewBotBadge": return checked("showNewBotBadge");
     case "debug": return (checked("debug"));
     case "textNormalizationEnabled": return (checked("textNormalizationEnabled"));

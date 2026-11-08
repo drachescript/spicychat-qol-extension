@@ -1,0 +1,39 @@
+// chat-export: optional feature-owned Settings, including its saved-setting handlers.
+(() => {
+  'use strict';
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features) && !profile.features.includes("chat-export")) return;
+  const host = document.getElementById('ds-feature-panel-chat-export');
+  if (!host) return;
+  const make = entry => {
+    if (typeof entry === 'string') return document.createTextNode(entry);
+    const [tag, attrs, ...children] = entry;
+    const element = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    for (const child of children) element.appendChild(make(child));
+    return element;
+  };
+  host.replaceWith(make(["section",{"class":"card"},"\n",["h2",{},"Chat export"],"\n",["label",{"class":"row"},["input",{"id":"showChatExportButton","type":"checkbox"}],["span",{},"Show Copy / Export chat buttons on chat pages"]],"\n",["p",{"class":"hint"},"Copy / Export loads full chat history through the API without rendering older messages in the page."],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeBotInfo","type":"checkbox"}],["span",{},"Include available bot info"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeRulebook","type":"checkbox"}],["span",{},"Include current Rulebook meter snapshot (only visible information, not full history)"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeOocDirectives","type":"checkbox"}],["span",{},"Include OOC and directive notes"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeGenerationDetails","type":"checkbox"}],["span",{},"Include captured timestamps/model/generation details when available"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportNumberMessages","type":"checkbox"}],["span",{},"Number exported messages"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeAvatars","type":"checkbox"}],["span",{},"Include avatar links in HTML/JSON exports"]],"\n",["label",{"class":"row"},["input",{"id":"chatExportIncludeImageLinks","type":"checkbox"}],["span",{},"Include message image links when available"]],"\n",["label",{},"Default format",["select",{"id":"chatExportDefaultFormat"},["option",{"value":"text"},"Plain text"],["option",{"value":"markdown"},"Markdown"],["option",{"value":"html"},"HTML archive"],["option",{"value":"json"},"JSON backup"]]],"\n",["label",{},"Default HTML layout",["select",{"id":"chatExportHtmlLayout"},["option",{"value":"bubbles"},"Match current chat appearance"],["option",{"value":"transcript"},"Clean transcript"]]],"\n",["p",{"class":"hint"},"Use your current chat’s colors and layout with API-loaded message history, or choose a clean transcript. The slower page fallback is under Advanced."],"\n"]));
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["showChatExportButton"] = () => checked("showChatExportButton");
+  loaders["showChatExportButton"] = settings => { setChecked("showChatExportButton", settings.showChatExportButton); };
+  readers["chatExportIncludeBotInfo"] = () => checked("chatExportIncludeBotInfo");
+  loaders["chatExportIncludeBotInfo"] = settings => { setChecked("chatExportIncludeBotInfo", !!settings.chatExportIncludeBotInfo); };
+  readers["chatExportIncludeRulebook"] = () => checked("chatExportIncludeRulebook");
+  loaders["chatExportIncludeRulebook"] = settings => { setChecked("chatExportIncludeRulebook", !!settings.chatExportIncludeRulebook); };
+  readers["chatExportIncludeOocDirectives"] = () => checked("chatExportIncludeOocDirectives");
+  loaders["chatExportIncludeOocDirectives"] = settings => { setChecked("chatExportIncludeOocDirectives", !!settings.chatExportIncludeOocDirectives); };
+  readers["chatExportIncludeGenerationDetails"] = () => checked("chatExportIncludeGenerationDetails");
+  loaders["chatExportIncludeGenerationDetails"] = settings => { setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false); };
+  readers["chatExportNumberMessages"] = () => checked("chatExportNumberMessages");
+  loaders["chatExportNumberMessages"] = settings => { setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false); };
+  readers["chatExportIncludeAvatars"] = () => checked("chatExportIncludeAvatars");
+  loaders["chatExportIncludeAvatars"] = settings => { setChecked("chatExportIncludeAvatars", settings.chatExportIncludeAvatars !== false); };
+  readers["chatExportIncludeImageLinks"] = () => checked("chatExportIncludeImageLinks");
+  loaders["chatExportIncludeImageLinks"] = settings => { setChecked("chatExportIncludeImageLinks", settings.chatExportIncludeImageLinks === true); };
+  readers["chatExportDefaultFormat"] = () => value("chatExportDefaultFormat", "text");
+  loaders["chatExportDefaultFormat"] = settings => { setValue("chatExportDefaultFormat", settings.chatExportDefaultFormat || "text"); };
+  readers["chatExportHtmlLayout"] = () => value("chatExportHtmlLayout", "bubbles");
+  loaders["chatExportHtmlLayout"] = settings => { setValue("chatExportHtmlLayout", settings.chatExportHtmlLayout || "bubbles"); };
+})();

@@ -4,9 +4,17 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableMyCreationsFilters"
+    "showBlockButtonOnMyCreations",
+    "enableMyCreationsFilters",
+    "rememberMyCreationsView",
+    "autoLoadMyCreations",
+    "myCreationsAutoLoadPages"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/my-creations-filters.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

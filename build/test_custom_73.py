@@ -10,7 +10,7 @@ def contract(name):return json.loads(read("build/features/"+name+".json"))
 class CustomSeventyThree(unittest.TestCase):
     def test_release_version_and_feature_scripts(self):
         manifest=json.loads(read("manifest.json"))
-        self.assertEqual(manifest["version"],"0.2.73")
+        self.assertEqual(manifest["version"],"0.2.74")
         js={path for row in manifest["content_scripts"] for path in row.get("js",[])}
         for p in ["content/chat-pins.js","content/chat-bookmarks.js",
                   "content/language-filter.js","content/rulebook-public-qol.js",
@@ -29,8 +29,9 @@ class CustomSeventyThree(unittest.TestCase):
             self.assertNotIn('id="'+key+'"',html)
             self.assertNotIn('case "'+key+'":',autosave)
             self.assertNotIn('setChecked("'+key+'"',load)
-        self.assertIn('id="chatListTwoColumns"',html)
-        self.assertIn('id="languageFilterRulebooks"',html)
+        self.assertIn('id="ds-chat-list-shortcuts-mount"',html)
+        self.assertIn('chatListTwoColumns',read('settings/feature-panels/chat-list.js'))
+        self.assertIn('languageFilterRulebooks',read('settings/feature-panels/language-filter.js'))
     def test_new_settings_ownership(self):
         groups={
             "chat-list":["chatListTwoColumns","chatListPopoutShortcut","chatListRenameShortcut"],

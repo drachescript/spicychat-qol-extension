@@ -3,8 +3,14 @@
   "primary": "content/smart-filter-presets.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "enableSmartFilterPresets"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/smart-filter-presets.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

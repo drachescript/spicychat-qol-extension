@@ -6,12 +6,20 @@
   "settingsKeys": [
     "enableLanguageFilter",
     "languageFilterLorebooks",
-    "languageFilterRulebooks"
+    "languageFilterRulebooks",
+    "languageSelectionMode",
+    "languageAutoDetectUntagged",
+    "languageShowDetectedBadge",
+    "languageFilterMode"
   ],
   "requiredHelpers": [
     "content/lorebook-public-qol.js",
     "content/rulebook-public-qol.js"
   ],
+  "settingsFiles": [
+    "settings/feature-panels/language-filter.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

@@ -4,9 +4,15 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableTagAliases"
+    "enableTagAliases",
+    "tagAliasRules",
+    "tagAliasShowDisplay"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/tag-aliases.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

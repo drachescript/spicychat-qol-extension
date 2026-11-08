@@ -10,6 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const TOOLBAR_ID = "ds-bulk-block-toolbar";
   const CARD_SELECT_CLASS = "ds-bulk-block-select";
   const SELECTED_CLASS = "ds-bulk-block-selected";
+  const CARD_ROOT_SELECTOR = '[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"]';
   const STYLE_ID = "ds-rc86-bulk-block-style";
   const HEADER_HOST_ID = "ds-listing-qol-controls";
   const BOT_LINK_RE = /\/(?:chat|chatbot)\/([0-9a-f-]{20,})(?:[/?#]|$)/i;
@@ -186,81 +187,97 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return String(node?.getAttribute?.("title") || node?.getAttribute?.("alt") || node?.textContent || "").trim();
   }
 
-  function looksLikeBotCard(node, id) {
-    if (!(node instanceof HTMLElement) || !id) return false;
-    if (node.id === "root" || node === document.body || node === document.documentElement) return false;
-    if (node.matches("#ds-qol-panel, #ds-bulk-block-toolbar, #ds-bulk-block-launcher")) return false;
-    const rect = node.getBoundingClientRect?.();
-    if (rect && (rect.width > Math.max(760, innerWidth * 0.72) || rect.height > Math.max(900, innerHeight * 1.15))) return false;
-    const links = node.querySelectorAll?.("a[href*='/chat/'],a[href*='/chatbot/']") || [];
-    let matching = 0;
-    for (const anchor of links) if (botIdFromHref(anchor.getAttribute("href") || anchor.href) === id) matching += 1;
-    if (!matching) return false;
-    if (node.querySelector?.(".ds-card-block-button")) return true;
-    if (node.matches?.("article,[data-testid*='card' i],[class*='rounded-xl'],[class*='rounded-lg']")) return true;
-    return !!node.querySelector?.("img");
+  // A card has several links (image, title, profile) and action buttons. The
+  // link/media/header wrappers are NOT separate selectable cards. Prefer the
+  // actual native card root; only use the fallback for older listing layouts.
+  function wholeCardForNode(node, botId) {
+    if (!(node instanceof Element) || !botId) return null;
+    const nativeCard = node.closest(CARD_ROOT_SELECTOR);
+    if (nativeCard) return cardBotId(nativeCard) === botId ? nativeCard : null;
+
+    let best = null;
+    const list = listingRoot();
+    for (let current = node, depth = 0;
+      current && current !== list && current !== document.body && depth < 14;
+      current = current.parentElement, depth += 1) {
+      if (!(current instanceof HTMLElement)) continue;
+      const ids = new Set();
+      for (const link of current.querySelectorAll("a[href*='/chat/'],a[href*='/chatbot/']")) {
+        const id = botIdFromHref(link.getAttribute("href") || link.href);
+        if (id) ids.add(id);
+        if (ids.size > 1) break;
+      }
+      if (ids.size > 1) break; // Do not select a wrapper containing other bots.
+      if (!ids.has(botId)) continue;
+      if (!current.matches("article,div.relative.group,div[class*='rounded-xl'],div[class*='rounded-lg']")) continue;
+      if (!current.querySelector("img") ||
+          !current.querySelector("a[aria-label^='chat-with-'],a[data-testid*='TitleLink'],a[title]")) continue;
+      best = current;
+    }
+    return best;
   }
 
   function cardFromAnchor(anchor) {
     if (!(anchor instanceof Element)) return null;
     const id = botIdFromHref(anchor.getAttribute("href") || anchor.href);
-    if (!id) return null;
-
-    const preferred = anchor.closest?.("article,[data-testid*='ChatbotCard'],[data-testid*='CharacterCard'],div.relative.group,div[class*='rounded-xl']");
-    if (preferred && looksLikeBotCard(preferred, id)) return preferred;
-
-    let node = anchor.parentElement;
-    let best = null;
-    for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
-      if (looksLikeBotCard(node, id)) best = node;
-      if (node.querySelector?.(".ds-card-block-button") && cardBotId(node) === id) return node;
-    }
-    return best;
+    return wholeCardForNode(anchor, id);
   }
 
   function cardForBlockButton(button) {
     if (!(button instanceof Element)) return null;
-    let node = button.parentElement;
-    for (let depth = 0; node && depth < 10; depth++, node = node.parentElement) {
-      const id = cardBotId(node);
-      if (id && node.querySelector?.(".ds-card-block-button")) return node;
+    let id = String(button.getAttribute("data-ds-block-bot-id") || "").trim().toLowerCase();
+    // Older layouts can omit data-ds-block-bot-id. Derive the bot from the
+    // closest ancestor with a chat link rather than depending on a test ID.
+    if (!id) {
+      for (let node = button.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth += 1) {
+        id = cardBotId(node);
+        if (id) break;
+      }
     }
-    return null;
+    return wholeCardForNode(button, id);
   }
 
   function cardFromTarget(target) {
     if (!(target instanceof Element)) return null;
-    const block = target.closest?.(".ds-card-block-button");
+    const nativeCard = target.closest(CARD_ROOT_SELECTOR);
+    if (nativeCard && cardBotId(nativeCard)) return nativeCard;
+    const block = target.closest(".ds-card-block-button");
     if (block) return cardForBlockButton(block);
-    const anchor = target.closest?.("a[href*='/chat/'],a[href*='/chatbot/']");
+    const anchor = target.closest("a[href*='/chat/'],a[href*='/chatbot/']");
     if (anchor) return cardFromAnchor(anchor);
-
-    let node = target;
-    for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
+    for (let node = target, depth = 0; node && depth < 12; node = node.parentElement, depth += 1) {
       const id = cardBotId(node);
-      if (id && looksLikeBotCard(node, id)) return node;
+      if (!id) continue;
+      const card = wholeCardForNode(target, id);
+      if (card) return card;
     }
     return null;
   }
 
   function selectableCards() {
     const byId = new Map();
+    const list = listingRoot();
+    if (!list) return [];
 
-    // Use the normal QoL block button when it is already on the card.
-    document.querySelectorAll(".ds-card-block-button").forEach(button => {
+    // Native card roots prevent the individual image/header/body segments from
+    // competing for selection, even if they contain their own bot links.
+    for (const card of list.querySelectorAll(CARD_ROOT_SELECTOR)) {
+      const id = cardBotId(card);
+      if (id && !byId.has(id)) byId.set(id, card);
+    }
+
+    // Compatibility for old listing variants that do not expose card test IDs.
+    for (const button of list.querySelectorAll(".ds-card-block-button")) {
       const card = cardForBlockButton(button);
       const id = cardBotId(card);
       if (card && id && !byId.has(id)) byId.set(id, card);
-    });
-
-    // Fallback path: selection remains available while React is still mounting
-    // the block buttons, so Select mode does not depend on that cosmetic control.
-    document.querySelectorAll("a[href*='/chat/'],a[href*='/chatbot/']").forEach(anchor => {
+    }
+    for (const anchor of list.querySelectorAll("a[href*='/chat/'],a[href*='/chatbot/']")) {
       const id = botIdFromHref(anchor.getAttribute("href") || anchor.href);
-      if (!id || byId.has(id)) return;
+      if (!id || byId.has(id)) continue;
       const card = cardFromAnchor(anchor);
       if (card) byId.set(id, card);
-    });
+    }
 
     return Array.from(byId.values()).filter(card => {
       const rect = card.getBoundingClientRect?.();
@@ -292,17 +309,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function syncSelectionVisual(card) {
     if (!(card instanceof HTMLElement)) return;
     const id = cardBotId(card);
-    const selected = !!id && state.selectedIds.has(id);
-    card.classList.toggle(SELECTED_CLASS, selected);
-    let badge = card.querySelector(`.${CARD_SELECT_CLASS}`);
+    const wholeCard = wholeCardForNode(card, id);
+    if (!(wholeCard instanceof HTMLElement)) return;
+
+    // Clean up the older bug: a card could get a separate tick on its media,
+    // header and body, although all of them represented the same bot ID.
+    for (const part of wholeCard.querySelectorAll(`.${SELECTED_CLASS}`)) part.classList.remove(SELECTED_CLASS);
+    let badge = null;
+    for (const part of wholeCard.querySelectorAll(`.${CARD_SELECT_CLASS}`)) {
+      if (part.parentElement === wholeCard && !badge) badge = part;
+      else part.remove();
+    }
+
+    const selected = state.selectedIds.has(id);
+    wholeCard.classList.toggle(SELECTED_CLASS, selected);
     if (selected && !badge) {
       badge = document.createElement("span");
       badge.className = CARD_SELECT_CLASS;
+      badge.dataset.dsOwned = "1";
       badge.textContent = "✓";
       badge.setAttribute("aria-hidden", "true");
-      const position = getComputedStyle(card).position;
-      if (!position || position === "static") card.style.position = "relative";
-      card.appendChild(badge);
+      const position = getComputedStyle(wholeCard).position;
+      if (!position || position === "static") wholeCard.style.position = "relative";
+      wholeCard.appendChild(badge);
     } else if (!selected) {
       badge?.remove();
     }
@@ -347,10 +376,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function toggleCardSelection(card) {
     const id = cardBotId(card);
-    if (!id) return;
+    const wholeCard = wholeCardForNode(card, id);
+    if (!wholeCard || !id) return;
     if (state.selectedIds.has(id)) forgetSelectedId(id);
-    else rememberSelectedCard(card, id);
-    syncSelectionVisual(card);
+    else rememberSelectedCard(wholeCard, id);
+    syncSelectionVisual(wholeCard);
     updateToolbar();
   }
 
@@ -1270,6 +1300,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.addEventListener("click", event => {
       if (!state.selectionMode || !supportedListingRoute() || !(event.target instanceof Element)) return;
       if (event.target.closest(`#${TOOLBAR_ID},#ds-bulk-block-launcher,#ds-qol-panel,.ds-card-block-button`)) return;
+      // The card's chat image/title are selection targets; other native
+      // buttons, favorites, creator/profile links and menus still work.
+      const control = event.target.closest("button,input,textarea,select,[role='button'],a[href]");
+      if (control && !(
+        control.matches("a[href]") &&
+        (control.matches("[data-testid='CharacterCardMedia-ImageLink'],[data-testid='CharacterCardHeader-TitleLink']") ||
+         /^chat-with-/i.test(control.getAttribute("aria-label") || ""))
+      )) return;
       const card = cardFromTarget(event.target);
       if (!card) return;
       event.preventDefault();

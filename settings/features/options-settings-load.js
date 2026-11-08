@@ -200,21 +200,11 @@ async function load() {
     }
   }
 
-  setChecked("autoTags", settings.autoTags);
-  setChecked("enableTagAliases", !!settings.enableTagAliases);
-  setValue("tagAliasRules", settings.tagAliasRules || "");
-  setChecked("tagAliasShowDisplay", settings.tagAliasShowDisplay !== false);
-  setChecked("localTagMatchEnabled", !!settings.localTagMatchEnabled);
-  setValue("localTagMatchRules", settings.localTagMatchRules || "");
-  setChecked("localTagMatchFetchPublic", !!settings.localTagMatchFetchPublic);
-  setChecked("showTagTemplateButton", !!settings.showTagTemplateButton);
-  setChecked("showChatTagLinks", !!settings.showChatTagLinks);
-  setChecked("showChatTagAddButtons", !!settings.showChatTagAddButtons);
-  setChecked("botEditorShowCharButton", !!settings.botEditorShowCharButton);
-  setChecked("botEditorShowUserButton", !!settings.botEditorShowUserButton);
-  setChecked("botEditorShowContinueButton", !!settings.botEditorShowContinueButton);
-  setChecked("botEditorShowNoControlButton", !!settings.botEditorShowNoControlButton);
-  setChecked("botEditorShowCustomSnippets", !!settings.botEditorShowCustomSnippets);
+
+
+
+
+
   setChecked("botEditorAutoOpenAdvanced", !!settings.botEditorAutoOpenAdvanced);
   setChecked("rememberBotImagePrompt", !!settings.rememberBotImagePrompt);
   setChecked("botEditorSaveActions", !!settings.botEditorSaveActions);
@@ -268,21 +258,6 @@ async function load() {
   setValue("botEditorDefaultVisibility", ["public", "unlisted"].includes(settings.botEditorDefaultVisibility) ? settings.botEditorDefaultVisibility : "ignore");
   setChecked("autoAgreeCreationGuidelines", !!settings.autoAgreeCreationGuidelines);
   renderBotEditorSnippets(settings.botEditorSnippets);
-  setChecked("enableGenerationProfiles", !!settings.enableGenerationProfiles);
-  setChecked("showGenerationMetadata", !!settings.showGenerationMetadata);
-  setChecked("showMessageTimestamps", !!settings.showMessageTimestamps);
-  setChecked("messageTimestamp24Hour", !!settings.messageTimestamp24Hour);
-  setChecked("messageTimestampDateFirst", !!settings.messageTimestampDateFirst);
-  setChecked("messageTimestampShowSeconds", !!settings.messageTimestampShowSeconds);
-  setChecked("showGenerationModel", !!settings.showGenerationModel);
-  setChecked("showGenerationElapsed", !!settings.showGenerationElapsed);
-  setChecked("showGenerationSettings", !!settings.showGenerationSettings);
-  setChecked("compactGenerationMetadata", !!settings.compactGenerationMetadata);
-  setChecked("enableContextWindowWarning", !!settings.enableContextWindowWarning);
-  setChecked("contextWarningShowMeter", !!settings.contextWarningShowMeter);
-  setValue("contextWarningThreshold", Math.min(99, Math.max(50, Number(settings.contextWarningThreshold) || 85)));
-  setValue("contextWarningManualLimit", Math.max(0, Number(settings.contextWarningManualLimit) || 0));
-  setChecked("contextWarningBrowserNotifications", !!settings.contextWarningBrowserNotifications);
   refreshContextWarningNotificationPermissionStatus();
   if ($("generationProfileCount")) {
     const profileCount = result[GENERATION_PROFILES_KEY] && typeof result[GENERATION_PROFILES_KEY] === "object"
@@ -290,20 +265,16 @@ async function load() {
       : 0;
     $("generationProfileCount").textContent = `${profileCount} saved`;
   }
-  setValue("includeTags", arrayToLines(settings.includeTags));
-  setValue("excludeTags", arrayToLines(settings.excludeTags));
 
-  setChecked("autoAfkEnabled", !!settings.autoAfkEnabled);
-  setValue("autoAfkMinutes", String(Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))));
+
+
   setChecked("lowMemoryProtectionEnabled", !!settings.lowMemoryProtectionEnabled);
   setValue("maxAwakeSpicyTabs", String(Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))));
-  setChecked("autoAfkChats", settings.autoAfkChats !== false);
-  setChecked("autoAfkHome", !!settings.autoAfkHome);
-  setChecked("autoAfkProfiles", !!settings.autoAfkProfiles);
-  setChecked("autoAfkActionDiscard", (settings.autoAfkAction || "discard") !== "close");
-  setChecked("autoAfkActionClose", (settings.autoAfkAction || "discard") === "close");
-  setChecked("autoAfkProtectActive", settings.autoAfkProtectActive !== false);
-  setChecked("autoAfkResetOnActivate", settings.autoAfkResetOnActivate !== false);
+
+
+
+
+
   renderAutoAfkStatus(result[AUTO_AFK_STATUS_KEY]);
   setChecked("duplicateTabGuardEnabled", !!settings.duplicateTabGuardEnabled);
   setChecked("duplicateTabChats", settings.duplicateTabChats !== false);
@@ -321,24 +292,11 @@ async function load() {
   setChecked("hidePremium", settings.hidePremium);
   setChecked("hideFloatingPremiumPopups", settings.hideFloatingPremiumPopups);
   setChecked("hideAdvertBanners", !!settings.hideAdvertBanners);
-  setChecked("expandModelSelectorDescriptions", !!settings.expandModelSelectorDescriptions);
-  setChecked("hideModelUpgradeButtons", !!settings.hideModelUpgradeButtons);
-  setChecked("customizeModelQuickMenu", !!settings.customizeModelQuickMenu);
 
-  setChecked("modelQuickFavoritesOnly", !!settings.modelQuickFavoritesOnly);
-  setValue("modelFavoriteNames", settings.modelFavoriteNames || "");
-  setValue("modelHiddenNames", settings.modelHiddenNames || "");
-  setChecked("hideNotifications", settings.hideNotifications);
-  setChecked("hideFeatureReleasePopups", !!settings.hideFeatureReleasePopups);
-  setChecked("hideTabNotificationBadge", !!settings.hideTabNotificationBadge);
-  setChecked("autoReadNotifications", settings.autoReadNotifications);
 
-  setChecked("hideTopBarLanguage", settings.hideTopBarLanguage);
-  setChecked("hideTopBarNotifications", settings.hideTopBarNotifications);
-  setChecked("hideTopBarTheme", settings.hideTopBarTheme);
-  setValue("topBarProfilePillMode", settings.topBarProfilePillMode || "normal");
-  setValue("topBarProfilePillCustomText", settings.topBarProfilePillCustomText || "");
-  setChecked("topBarProfilePillPersonaPrefix", !!settings.topBarProfilePillPersonaPrefix);
+
+
+
 
   setChecked("chatTopBarAddLaterButton", !!settings.chatTopBarAddLaterButton);
   setChecked("closeChatTabAfterSavingLater", !!settings.closeChatTabAfterSavingLater);
@@ -349,22 +307,7 @@ async function load() {
   setChecked("enableMemoryVault", !!settings.enableMemoryVault);
   setChecked("showCopyMemoryAction", !!settings.showCopyMemoryAction);
   setChecked("memoryAutoLoadAll", !!settings.memoryAutoLoadAll);
-  setChecked("enableChatTextReplacements", !!settings.enableChatTextReplacements);
-  setValue("chatTextReplacementRules", settings.chatTextReplacementRules || "");
-  setChecked("enableChatWordCensor", !!settings.enableChatWordCensor);
-  setValue("chatWordCensorList", settings.chatWordCensorList || "");
-  setValue("chatWordCensorMask", settings.chatWordCensorMask || "hash");
-  setValue("chatWordCensorCustom", settings.chatWordCensorCustom ?? "[censored]");
-  setValue("chatWordCensorScope", settings.chatWordCensorScope || "ai");
-  setChecked("chatWordCensorReveal", settings.chatWordCensorReveal !== false);
-  setChecked("chatWordCensorShowChatToggle", settings.chatWordCensorShowChatToggle !== false);
-  setChecked("enableChatMutedWords", !!settings.enableChatMutedWords);
-  setValue("chatMutedWords", settings.chatMutedWords || "");
-  setValue("chatTextReplacementPresets", settings.chatTextReplacementPresets || "");
-  setChecked("chatTextReplacementShowChatPresetControl", !!settings.chatTextReplacementShowChatPresetControl);
-  setValue("chatTextReplacementScope", ["ai", "user", "both"].includes(settings.chatTextReplacementScope) ? settings.chatTextReplacementScope : "ai");
-  setValue("chatTextReplacementMode", settings.chatTextReplacementMode === "save" ? "save" : "display");
-  setChecked("chatTextReplacementPreview", !!settings.chatTextReplacementPreview);
+
   setValue("deeplApiKey", String(result[DEEPL_API_KEY] || ""));
   setValue("libreTranslateApiKey", String(result[LIBRE_TRANSLATE_KEY] || ""));
   const deeplStatus = $("deeplStatus");
@@ -376,16 +319,13 @@ async function load() {
   setChecked("chatJumpToStartShortcut", !!settings.chatJumpToStartShortcut);
   setChecked("chatOpenWindowShortcut", !!settings.chatOpenWindowShortcut);
   setChecked("chatGenerationSettingsShortcut", !!settings.chatGenerationSettingsShortcut);
-  setChecked("chatListTwoColumns", !!settings.chatListTwoColumns);
-  setChecked("chatListPopoutShortcut", !!settings.chatListPopoutShortcut);
-  setChecked("chatListRenameShortcut", !!settings.chatListRenameShortcut);
   setValue("chatCollections", settings.chatCollections || "");
   setChecked("showSavedChatQuickActions", !!settings.showSavedChatQuickActions);
-  setChecked("showRandomChatButton", !!settings.showRandomChatButton);
-  setChecked("randomChatUseLastHomeFilters", settings.randomChatUseLastHomeFilters !== false);
-  setChecked("randomChatIncludeOpened", settings.randomChatIncludeOpened !== false);
-  setChecked("randomChatIncludeLater", settings.randomChatIncludeLater !== false);
-  setChecked("randomChatIncludeFavorites", settings.randomChatIncludeFavorites !== false);
+
+
+
+
+
   setValue("chatListSortMode", settings.chatListSortMode || "default");
   setValue("chatListOpenedFilter", ["all", "opened", "unopened"].includes(settings.chatListOpenedFilter) ? settings.chatListOpenedFilter : "all");
   setValue("chatListMessageFilter", ["all", "0", "1-9", "10-49", "50-99", "100-499", "500+", "unknown"].includes(settings.chatListMessageFilter) ? settings.chatListMessageFilter : "all");
@@ -398,65 +338,35 @@ async function load() {
   setChecked("importOpenedFromChatsPage", settings.importOpenedFromChatsPage);
   setChecked("hideOpenedChats", settings.hideOpenedChats);
   setValue("openedBotSortMode", settings.openedBotSortMode || "newest");
-  setValue("qolInterfaceScale", [100, 110, 125, 150].includes(Number(settings.qolInterfaceScale)) ? Number(settings.qolInterfaceScale) : 100);
-  setChecked("enableChatWidthControls", settings.enableChatWidthControls === true);
-  setValue("chatStreamWidth", Math.min(1600, Math.max(520, Number(settings.chatStreamWidth) || 800)));
-  setValue("chatBubbleMaxWidth", Math.min(1500, Math.max(360, Number(settings.chatBubbleMaxWidth) || 650)));
-  setValue("chatComposerWidth", Math.min(1600, Math.max(520, Number(settings.chatComposerWidth) || 800)));
-  setValue("chatTextScale", [100, 110, 125, 150].includes(Number(settings.chatTextScale)) ? Number(settings.chatTextScale) : 100);
-  setValue("chatLineSpacing", ["native", "comfortable", "spacious"].includes(settings.chatLineSpacing) ? settings.chatLineSpacing : "native");
-  setValue("settingsReadingFont", Object.hasOwn(SETTINGS_READING_FONTS, settings.settingsReadingFont) ? settings.settingsReadingFont : "native");
-  setValue("settingsReadingSize", SETTINGS_READING_SIZES.includes(Number(settings.settingsReadingSize)) ? Number(settings.settingsReadingSize) : 100);
-  setValue("settingsReadingLineSpacing", SETTINGS_READING_LINE_SPACING.includes(settings.settingsReadingLineSpacing) ? settings.settingsReadingLineSpacing : "native");
-  setValue("settingsReadingLetterSpacing", SETTINGS_READING_LETTER_SPACING.includes(settings.settingsReadingLetterSpacing) ? settings.settingsReadingLetterSpacing : "native");
-  setChecked("settingsReadingContrast", !!settings.settingsReadingContrast);
-  setChecked("settingsReadingLargerControls", !!settings.settingsReadingLargerControls);
-  setChecked("showQuickPanel", settings.showQuickPanel);
-  setValue("quickPanelPlacement", settings.quickPanelPlacement === "chat-header" ? "bottom-right" : (settings.quickPanelPlacement || "bottom-right"));
-  setChecked("quickPanelDraggable", !!settings.quickPanelDraggable);
-  setChecked("quickPanelDefaultClosed", !!settings.quickPanelDefaultClosed);
-  setChecked("quickPanelEnabledByDefaultInTab", settings.quickPanelEnabledByDefaultInTab !== false);
-  setValue("quickPanelWidth", Math.min(440, Math.max(200, Number(settings.quickPanelWidth) || 280)));
-  setValue("quickPanelUiScale", Math.min(125, Math.max(80, Number(settings.quickPanelUiScale) || 100)));
-  setValue("quickPanelMaxHeightPercent", Math.min(95, Math.max(25, Number(settings.quickPanelMaxHeightPercent) || 80)));
-  setValue("quickPanelCustomXPercent", Math.min(100, Math.max(0, Number.isFinite(Number(settings.quickPanelCustomXPercent)) ? Number(settings.quickPanelCustomXPercent) : 70)));
-  setValue("quickPanelCustomYPercent", Math.min(100, Math.max(0, Number.isFinite(Number(settings.quickPanelCustomYPercent)) ? Number(settings.quickPanelCustomYPercent) : 12)));
-  setChecked("quickPanelAutoCollapseOverlap", settings.quickPanelAutoCollapseOverlap !== false);
-  setChecked("quickPanelShowStatus", settings.quickPanelShowStatus === true);
-  setChecked("quickPanelShowLoadedMessageCount", !!settings.quickPanelShowLoadedMessageCount);
-  setChecked("quickPanelStatusShowOpened", settings.quickPanelStatusShowOpened !== false);
-  setChecked("quickPanelStatusShowBlocked", settings.quickPanelStatusShowBlocked !== false);
+
+
+
+
+
   setChecked("popupShowOpenedCount", !!settings.popupShowOpenedCount);
   setChecked("popupShowBlockedCount", !!settings.popupShowBlockedCount);
   setChecked("popupShowStorageDetails", !!settings.popupShowStorageDetails);
-  setChecked("quickPanelShowFeatureSummary", !!settings.quickPanelShowFeatureSummary);
-  setChecked("quickPanelShowOptions", settings.quickPanelShowOptions !== false);
-  setChecked("quickPanelShowFillNow", settings.quickPanelShowFillNow === true);
-  setChecked("quickPanelShowSmartFilterPins", !!settings.quickPanelShowSmartFilterPins);
-  setChecked("quickPanelShowChatSearch", settings.quickPanelShowChatSearch === true);
-  setChecked("quickPanelShowChatMessageSearch", settings.quickPanelShowChatMessageSearch === true);
-  setChecked("quickPanelShowChatSort", settings.quickPanelShowChatSort === true);
-  setChecked("quickPanelShowScanVisible", settings.quickPanelShowScanVisible === true);
-  setChecked("quickPanelShowLoadAll", settings.quickPanelShowLoadAll === true);
+
+
+
+
+
+
+
+
+
   setChecked("enableChatIndex", settings.enableChatIndex === true);
   setChecked("chatIndexEnhanceNativeSearch", settings.chatIndexEnhanceNativeSearch === true);
   setChecked("chatIndexStandaloneLauncher", settings.chatIndexStandaloneLauncher === true);
-  setChecked("quickPanelShowOoc", settings.quickPanelShowOoc === true);
-  setChecked("quickPanelShowAutoVoice", settings.quickPanelShowAutoVoice === true);
-  setChecked("quickPanelShowAutoAsterisk", settings.quickPanelShowAutoAsterisk === true);
-  setChecked("quickPanelShowTranslation", !!settings.quickPanelShowTranslation);
-  setChecked("quickPanelShowPersona", settings.quickPanelShowPersona === true);
-  setChecked("quickPanelShowExport", settings.quickPanelShowExport === true);
-  setChecked("quickPanelShowSoundscapes", !!settings.quickPanelShowSoundscapes);
-  setChecked("quickPanelShowCustomPictures", settings.quickPanelShowCustomPictures === true);
-  setChecked("quickPanelShowCreatorPreview", settings.quickPanelShowCreatorPreview === true);
-  setChecked("quickPanelShowImageGenerator", settings.quickPanelShowImageGenerator === true);
+
+
+
+
+
+
+
   setChecked("showAutoImageInlineButton", settings.showAutoImageInlineButton === true);
-  setChecked("quickPanelShowRulebookDiagnostics", settings.quickPanelShowRulebookDiagnostics === true);
-  setChecked("quickPanelShowContextKeeper", settings.quickPanelShowContextKeeper === true);
-  setChecked("quickPanelShowFocusMode", settings.quickPanelShowFocusMode === true);
-  setChecked("quickPanelShowCharacterProfile", settings.quickPanelShowCharacterProfile === true);
-  setChecked("quickPanelShowSavedSnippets", settings.quickPanelShowSavedSnippets === true);
+
   setChecked("compactAfterHiding", settings.compactAfterHiding);
   setChecked("neverHideFavorites", !!settings.neverHideFavorites);
   setChecked("protectFavoritesFromBlocking", !!settings.protectFavoritesFromBlocking);
@@ -488,14 +398,11 @@ async function load() {
   setValue("laterBotFolderFilter", settings.laterBotFolderFilter || "all");
   setValue("laterBotCreatorFilter", settings.laterBotCreatorFilter || "");
   setValue("laterBotStateFilter", settings.laterBotStateFilter || "all");
-  setChecked("enableBotOrganizer", !!settings.enableBotOrganizer);
-  setChecked("botOrganizerExplorerFolders", !!settings.botOrganizerExplorerFolders);
+
+
   setChecked("favoritePageFoldersEnabled", !!settings.favoritePageFoldersEnabled);
   setChecked("favoritePageSortEnabled", !!settings.favoritePageSortEnabled);
   setChecked("lorebookUnknownSafeFilter", !!settings.lorebookUnknownSafeFilter);
-  setValue("botCollections", settings.botCollections || "");
-  setChecked("botOrganizerShowCardMeta", settings.botOrganizerShowCardMeta !== false);
-  setChecked("botOrganizerBulkTools", settings.botOrganizerBulkTools !== false);
 
   setChecked("hideHomeForYouCards", settings.hideHomeForYouCards);
   setChecked("expandLongCardDescriptions", settings.expandLongCardDescriptions);
@@ -504,19 +411,18 @@ async function load() {
   setChecked("showBotCreationDates", !!settings.showBotCreationDates);
   setChecked("showNewBotBadge", !!settings.showNewBotBadge);
   setChecked("expandBotNamesOnHover", !!settings.expandBotNamesOnHover);
-  setChecked("paginationTopJumpBox", !!settings.paginationTopJumpBox);
-  setChecked("paginationQuickJumpMenu", !!settings.paginationQuickJumpMenu);
+
+
   setChecked("cardTokenShowGreeting", settings.cardTokenShowGreeting !== false);
   setChecked("cardTokenShowPersonality", !!settings.cardTokenShowPersonality);
   setChecked("cardTokenShowScenario", !!settings.cardTokenShowScenario);
   setChecked("cardTokenShowExamples", !!settings.cardTokenShowExamples);
 
-  setChecked("autoFillListings", settings.autoFillListings);
+
   setChecked("showListingRefillButton", !!settings.showListingRefillButton);
   setChecked("showListingFilterStats", !!settings.showListingFilterStats);
   setChecked("showListingFilterStatsDetails", !!settings.showListingFilterStatsDetails);
-  setValue("autoFillTargetCards", String(settings.autoFillTargetCards || 50));
-  setValue("autoFillMaxClicks", String(settings.autoFillMaxClicks || 8));
+
 
   setChecked("hideChatPlusButton", settings.hideChatPlusButton);
   setChecked("hideChatImageButton", settings.hideChatImageButton);
@@ -569,59 +475,51 @@ async function load() {
   setValue("chatBackgroundBlur", String(settings.chatBackgroundBlur ?? 0));
   setValue("chatBackgroundFit", settings.chatBackgroundFit || "cover");
   setValue("chatBackgroundPosition", settings.chatBackgroundPosition || "center");
-  setChecked("enableChatBubbleCustomization", !!settings.enableChatBubbleCustomization);
-  setChecked("persistSpicyChatUserAppearance", !!settings.persistSpicyChatUserAppearance);
-  setValue("chatBubbleAiBackground", settings.chatBubbleAiBackground || "#27282d");
-  setValue("chatBubbleAiTextMode", ["native", "custom"].includes(settings.chatBubbleAiTextMode) ? settings.chatBubbleAiTextMode : "custom");
-  setValue("chatBubbleAiText", settings.chatBubbleAiText || "#f2f2f2");
-  setValue("chatBubbleAiActionMode", ["native", "base", "custom"].includes(settings.chatBubbleAiActionMode) ? settings.chatBubbleAiActionMode : "native");
-  setValue("chatBubbleAiActionText", settings.chatBubbleAiActionText || "#79c8f5");
-  setValue("chatBubbleAiDialogueMode", ["native", "base", "custom"].includes(settings.chatBubbleAiDialogueMode) ? settings.chatBubbleAiDialogueMode : "base");
-  setValue("chatBubbleAiDialogueText", settings.chatBubbleAiDialogueText || settings.chatBubbleAiText || "#f2f2f2");
-  setValue("chatBubbleAiFont", settings.chatBubbleAiFont || "inherit");
-  setValue("chatBubbleAiActionFont", settings.chatBubbleAiActionFont || "inherit");
-  setValue("chatBubbleAiDialogueFont", settings.chatBubbleAiDialogueFont || "inherit");
-  setValue("chatBubbleAiBorder", settings.chatBubbleAiBorder || "#555861");
-  setValue("chatBubbleAiBorderWidth", String(settings.chatBubbleAiBorderWidth ?? 0));
-  setValue("chatBubbleAiBorderStyle", ["solid", "dashed", "dotted", "double"].includes(settings.chatBubbleAiBorderStyle) ? settings.chatBubbleAiBorderStyle : "solid");
-  setValue("chatBubbleAiBorderOpacity", String(settings.chatBubbleAiBorderOpacity ?? 100));
-  setValue("chatBubbleAiOpacity", String(settings.chatBubbleAiOpacity ?? 100));
-  setValue("chatBubbleAiRadius", String(settings.chatBubbleAiRadius ?? 20));
-  setValue("chatBubbleAiShape", settings.chatBubbleAiShape || "native");
-  setValue("chatBubbleAiDecorationMode", ["bubble", "custom"].includes(settings.chatBubbleAiDecorationMode) ? settings.chatBubbleAiDecorationMode : "bubble");
-  setValue("chatBubbleAiDecorationColor", settings.chatBubbleAiDecorationColor || settings.chatBubbleAiBackground || "#27282d");
-  setValue("chatBubbleAiCatEarLayout", ["auto", "left", "right", "split"].includes(settings.chatBubbleAiCatEarLayout) ? settings.chatBubbleAiCatEarLayout : "auto");
-  setChecked("chatBubbleAiShadow", !!settings.chatBubbleAiShadow);
-  setValue("chatBubbleUserBackground", settings.chatBubbleUserBackground || "#253f52");
-  setValue("chatBubbleUserTextMode", ["native", "custom"].includes(settings.chatBubbleUserTextMode) ? settings.chatBubbleUserTextMode : "custom");
-  setValue("chatBubbleUserText", settings.chatBubbleUserText || "#f5f5f5");
-  setValue("chatBubbleUserActionMode", ["native", "base", "custom"].includes(settings.chatBubbleUserActionMode) ? settings.chatBubbleUserActionMode : "native");
-  setValue("chatBubbleUserActionText", settings.chatBubbleUserActionText || "#79c8f5");
-  setValue("chatBubbleUserDialogueMode", ["native", "base", "custom"].includes(settings.chatBubbleUserDialogueMode) ? settings.chatBubbleUserDialogueMode : "base");
-  setValue("chatBubbleUserDialogueText", settings.chatBubbleUserDialogueText || settings.chatBubbleUserText || "#f5f5f5");
-  setValue("chatBubbleUserFont", settings.chatBubbleUserFont || "inherit");
-  setValue("chatBubbleUserActionFont", settings.chatBubbleUserActionFont || "inherit");
-  setValue("chatBubbleUserDialogueFont", settings.chatBubbleUserDialogueFont || "inherit");
-  setValue("chatBubbleUserBorder", settings.chatBubbleUserBorder || "#52718a");
-  setValue("chatBubbleUserBorderWidth", String(settings.chatBubbleUserBorderWidth ?? 0));
-  setValue("chatBubbleUserBorderStyle", ["solid", "dashed", "dotted", "double"].includes(settings.chatBubbleUserBorderStyle) ? settings.chatBubbleUserBorderStyle : "solid");
-  setValue("chatBubbleUserBorderOpacity", String(settings.chatBubbleUserBorderOpacity ?? 100));
-  setValue("chatBubbleUserOpacity", String(settings.chatBubbleUserOpacity ?? 100));
-  setValue("chatBubbleUserRadius", String(settings.chatBubbleUserRadius ?? 20));
-  setValue("chatBubbleUserShape", settings.chatBubbleUserShape || "native");
-  setValue("chatBubbleUserDecorationMode", ["bubble", "custom"].includes(settings.chatBubbleUserDecorationMode) ? settings.chatBubbleUserDecorationMode : "bubble");
-  setValue("chatBubbleUserDecorationColor", settings.chatBubbleUserDecorationColor || settings.chatBubbleUserBackground || "#253f52");
-  setValue("chatBubbleUserCatEarLayout", ["auto", "left", "right", "split"].includes(settings.chatBubbleUserCatEarLayout) ? settings.chatBubbleUserCatEarLayout : "auto");
-  setChecked("chatBubbleUserShadow", !!settings.chatBubbleUserShadow);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   updateAppearanceColorControlStates();
   updateMessageQuickActionControlStates();
   setChecked("hideChatVoiceButton", settings.hideChatVoiceButton);
   setChecked("hideUnlockCustomVoices", settings.hideUnlockCustomVoices);
 
-  setChecked("stackChatMessages", !!settings.stackChatMessages);
-  setChecked("showMessageQuickActions", !!settings.showMessageQuickActions);
-
-  setChecked("enableSavedTextSnippets", !!settings.enableSavedTextSnippets);
 
   setValue("rpStateTrackerMode", ["manual", "conservative", "assisted"].includes(settings.rpStateTrackerMode) ? settings.rpStateTrackerMode : "conservative");
   setValue("rpStateInjectMode", ["manual", "changed", "every"].includes(settings.rpStateInjectMode) ? settings.rpStateInjectMode : "changed");
@@ -631,30 +529,11 @@ async function load() {
   renderChatNudgeManager(result[CHAT_NUDGE_STORE_KEY]);
   refreshChatNudgePermissionStatus();
   if ($("soundscapesCard") && typeof armLazySoundscapeManager === "function") armLazySoundscapeManager();
-  setChecked("messageQuickActionCopy", !!settings.messageQuickActionCopy);
-  setChecked("messageQuickActionEdit", !!settings.messageQuickActionEdit);
-  setChecked("messageQuickActionRemoveImage", !!settings.messageQuickActionRemoveImage);
-  setChecked("messageQuickActionResend", !!settings.messageQuickActionResend);
-  setChecked("messageQuickActionConfirmRemoveImage", !!settings.messageQuickActionConfirmRemoveImage);
-  setChecked("messageQuickActionReport", !!settings.messageQuickActionReport);
-  setChecked("messageBottomMenuShortcut", !!settings.messageBottomMenuShortcut);
+
   updateMessageQuickActionControlStates();
   setChecked("allowTypingWhileAiResponding", !!settings.allowTypingWhileAiResponding);
   setChecked("keepChatPositionWhileTyping", !!settings.keepChatPositionWhileTyping);
-  setChecked("showScrollToTopButton", !!settings.showScrollToTopButton);
-  setChecked("showScrollToBottomButton", !!settings.showScrollToBottomButton);
-  setChecked("showSwipeJumpButtons", !!settings.showSwipeJumpButtons);
-  setChecked("showSwipeJumpToNumber", !!settings.showSwipeJumpToNumber);
-  setChecked("restoreFirstSwipeOnLoad", !!settings.restoreFirstSwipeOnLoad);
-  setChecked("scrollNavOnHome", settings.scrollNavOnHome !== false);
-  setChecked("scrollNavOnChats", settings.scrollNavOnChats !== false);
-  setChecked("scrollNavOnChat", settings.scrollNavOnChat !== false);
-  setChecked("scrollNavOnCreation", settings.scrollNavOnCreation !== false);
-  setChecked("scrollNavOnProfiles", settings.scrollNavOnProfiles !== false);
-  setChecked("scrollNavOnOther", settings.scrollNavOnOther !== false);
-  setChecked("scrollTopLoadPreviousMessages", !!settings.scrollTopLoadPreviousMessages);
-  setValue("scrollTopLoadPreviousMode", ["one", "all"].includes(settings.scrollTopLoadPreviousMode) ? settings.scrollTopLoadPreviousMode : "all");
-  setValue("scrollTopLoadPreviousTiming", ["before", "background"].includes(settings.scrollTopLoadPreviousTiming) ? settings.scrollTopLoadPreviousTiming : "before");
+
   setValue("botStatusArchiveEndpoint", normalizeArchiveImportEndpoint(result[ARCHIVE_IMPORT_ENDPOINT_KEY] || DEFAULT_ARCHIVE_IMPORT_ENDPOINT) || DEFAULT_ARCHIVE_IMPORT_ENDPOINT);
   setValue("botStatusArchiveToken", String(result[ARCHIVE_IMPORT_TOKEN_KEY] || ""));
   setChecked("enableBotStatusArchiveContribution", result[ARCHIVE_CONTRIBUTION_ENABLED_KEY] === true);
@@ -682,32 +561,22 @@ async function load() {
   setChecked("enableLocalChangeHistory", !!settings.enableLocalChangeHistory);
   setChecked("showUpdateNotifications", !!settings.showUpdateNotifications);
 
-  setValue("androidAppControlsMode", ["auto", "android", "always", "off"].includes(settings.androidAppControlsMode) ? settings.androidAppControlsMode : "auto");
-  setValue("qolSidebarButtonPlacement", settings.qolSidebarButtonPlacement || "after-sai");
-  setChecked("androidTopBarMenu", !!settings.androidTopBarMenu);
-  setChecked("androidHideComposerShortcuts", settings.androidHideComposerShortcuts !== false);
-  setChecked("androidTopBarOoc", settings.androidTopBarOoc !== false);
-  setChecked("androidTopBarAsterisk", settings.androidTopBarAsterisk !== false);
-  setChecked("androidTopBarFormatting", settings.androidTopBarFormatting !== false);
-  setChecked("androidTopBarTranslation", !!settings.androidTopBarTranslation);
-  setChecked("androidTopBarScroll", settings.androidTopBarScroll !== false);
-  setChecked("androidTopBarPersona", settings.androidTopBarPersona !== false);
-  setChecked("androidTopBarModel", settings.androidTopBarModel !== false);
 
-  setChecked("showChatExportButton", settings.showChatExportButton);
+
+
+
+
+
+
+
+
+
   setChecked("chatExportLoadPreviousMessages", !!settings.chatExportLoadPreviousMessages);
-  setChecked("chatExportIncludeBotInfo", !!settings.chatExportIncludeBotInfo);
-  setChecked("chatExportIncludeRulebook", !!settings.chatExportIncludeRulebook);
-  setChecked("enableRulebookDiagnostics", !!settings.enableRulebookDiagnostics);
-  setChecked("storyReadingLayout", !!settings.storyReadingLayout);
-  setChecked("chatExportIncludeOocDirectives", !!settings.chatExportIncludeOocDirectives);
-  setChecked("chatExportIncludeGenerationDetails", settings.chatExportIncludeGenerationDetails !== false);
-  setChecked("chatExportNumberMessages", settings.chatExportNumberMessages !== false);
-  setChecked("chatExportIncludeAvatars", settings.chatExportIncludeAvatars !== false);
-  setChecked("chatExportIncludeImageLinks", settings.chatExportIncludeImageLinks === true);
+
+
+
   setValue("chatExportHistoryMode", settings.chatExportHistoryMode || "api");
-  setValue("chatExportDefaultFormat", settings.chatExportDefaultFormat || "text");
-  setValue("chatExportHtmlLayout", settings.chatExportHtmlLayout || "bubbles");
+
   setChecked("showOocTools", settings.showOocTools);
   renderOocTemplates(settings.oocTemplates);
 
@@ -722,48 +591,11 @@ async function load() {
   setChecked("autoAcceptPersonaChange", settings.autoAcceptPersonaChange);
   setValue("personaQuickSwitchLimit", String(settings.personaQuickSwitchLimit || 6));
 
-  setChecked("restorePersonasSidebarPosition", !!settings.restorePersonasSidebarPosition);
-  for (const key of Object.keys(DEFAULT_SETTINGS).filter(key => key.startsWith("hideSidebar"))) {
-    setChecked(key, settings[key]);
-  }
-
   [
     "enableMainFooterManagement", "hideMainFooterEntirely", "hideMainFooterCompany",
     "hideMainFooterResources", "hideMainFooterCommunity", "hideMainFooterJoinUs",
     "hideMainFooterAppDownload", "hideMainFooter2257"
   ].forEach(key => setChecked(key, !!settings[key]));
-
-  // Migrate the old all-or-nothing footer setting into the new per-link controls.
-  // Saving Settings clears the legacy flag and keeps the individual choices.
-  if (settings.hideSidebarFooterLinks) {
-    [
-      "hideSidebarFooterTerms",
-      "hideSidebarFooterPrivacy",
-      "hideSidebarFooterRefunds",
-      "hideSidebarFooterReporting",
-      "hideSidebarFooterGuidelines",
-      "hideSidebarFooterSupport",
-      "hideSidebarFooterAffiliates"
-    ].forEach(key => setChecked(key, true));
-  }
-
-  // The old social/app-download switches were all-or-nothing. Preserve those
-  // choices by turning on each new individual option in the Settings UI.
-  if (settings.hideSidebarSocialLinks) {
-    [
-      "hideSidebarSocialDiscord",
-      "hideSidebarSocialX",
-      "hideSidebarSocialReddit"
-    ].forEach(key => setChecked(key, true));
-  }
-
-  if (settings.hideSidebarAppDownload) {
-    [
-      "hideSidebarAppDownloadGooglePlay",
-      "hideSidebarAppDownloadAppStore",
-      "hideSidebarAppDownloadGeneric"
-    ].forEach(key => setChecked(key, true));
-  }
 
   setChecked("blockCards", settings.blockCards);
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
@@ -772,32 +604,13 @@ async function load() {
   setChecked("publicPersonalityOnly", !!settings.publicPersonalityOnly);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
   setChecked("showRulebookFilters", !!settings.showRulebookFilters);
-  setChecked("enableSmartFilterPresets", !!settings.enableSmartFilterPresets);
-  setChecked("enableCreationAudit", !!settings.enableCreationAudit);
-  setChecked("creationAuditQuickStatus", settings.creationAuditQuickStatus !== false);
 
-  setChecked("enableMyCreationsFilters", !!settings.enableMyCreationsFilters);
   setChecked("enableMyCreationsBulkBackup", !!settings.enableMyCreationsBulkBackup);
   setChecked("enableAccountMigrationAssistant", !!settings.enableAccountMigrationAssistant);
   setChecked("showMyLorebookEditButtons", !!settings.showMyLorebookEditButtons);
   setChecked("showMyChatbotEditButtons", !!settings.showMyChatbotEditButtons);
-  setChecked("rememberMyCreationsView", !!settings.rememberMyCreationsView);
-  setChecked("autoLoadMyCreations", !!settings.autoLoadMyCreations);
-  setValue("myCreationsAutoLoadPages", String(Math.max(1, Math.min(30, Number(settings.myCreationsAutoLoadPages) || 1))));
-  setChecked("enableRecommendationHelpers", !!settings.enableRecommendationHelpers);
-  setChecked("recommendationHideLaterBots", !!settings.recommendationHideLaterBots);
-  setChecked("recommendationHideNotInterested", !!settings.recommendationHideNotInterested);
-  setChecked("recommendationPreferFavoriteCreators", !!settings.recommendationPreferFavoriteCreators);
-  setValue("recommendationPreferredTags", settings.recommendationPreferredTags || "");
-  setValue("recommendationAvoidTags", settings.recommendationAvoidTags || "");
-  setValue("recommendationAvoidWords", settings.recommendationAvoidWords || "");
-  setChecked("recommendationShowReasonBadges", !!settings.recommendationShowReasonBadges);
-  setChecked("recommendationHideFavoriteBots", !!settings.recommendationHideFavoriteBots);
-  setChecked("recommendationHideOwnBots", !!settings.recommendationHideOwnBots);
-  setChecked("recommendationOnlyUnopened", !!settings.recommendationOnlyUnopened);
-  setChecked("recommendationOnlyLorebook", !!settings.recommendationOnlyLorebook);
-  setChecked("recommendationSessionHideButtons", !!settings.recommendationSessionHideButtons);
-  setChecked("recommendationRandomButton", !!settings.recommendationRandomButton);
+
+
 
   setChecked("showQuickUnblockButtons", !!settings.showQuickUnblockButtons);
   setChecked("reduceAnimatedBotImages", !!settings.reduceAnimatedBotImages);
@@ -807,20 +620,15 @@ async function load() {
   setChecked("animatedImagesProfiles", !!settings.animatedImagesProfiles);
   setChecked("animatedImagesChatMedia", !!settings.animatedImagesChatMedia);
   setChecked("replaceCardProfileWithBlockButton", settings.replaceCardProfileWithBlockButton);
-  setChecked("showBlockButtonOnMyCreations", !!settings.showBlockButtonOnMyCreations);
+
   setChecked("enableBulkCardBlocking", !!settings.enableBulkCardBlocking);
   setChecked("bulkCardBlockingSidebarLauncher", !!settings.bulkCardBlockingSidebarLauncher);
   setChecked("quickDislikeOnBlock", settings.quickDislikeIdleEnabled === true);
   setValue("quickDislikeIdleMinutes", Math.min(60, Math.max(1, Number(settings.quickDislikeIdleMinutes) || 5)));
   setValue("blockedBulkDislikeDelayMs", Math.min(10000, Math.max(250, Number(settings.blockedBulkDislikeDelayMs) || 750)));
-  setChecked("enableLanguageFilter", settings.enableLanguageFilter);
-  setChecked("languageFilterLorebooks", settings.languageFilterLorebooks === true);
-  setChecked("languageFilterRulebooks", settings.languageFilterRulebooks === true);
+
   setAllowedLanguages(settings.allowedLanguages);
-  setValue("languageSelectionMode", ["include", "exclude"].includes(settings.languageSelectionMode) ? settings.languageSelectionMode : "include");
-  setValue("languageFilterMode", settings.languageFilterMode || "conservative");
-  setChecked("languageAutoDetectUntagged", settings.languageAutoDetectUntagged !== false);
-  setChecked("languageShowDetectedBadge", !!settings.languageShowDetectedBadge);
+
   setChecked("textNormalizationEnabled", !!settings.textNormalizationEnabled);
   setChecked("normalizeFancyUnicode", !!settings.normalizeFancyUnicode);
   setChecked("normalizePunctuation", !!settings.normalizePunctuation);

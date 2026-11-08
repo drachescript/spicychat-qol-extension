@@ -3,8 +3,19 @@
   "primary": "content/top-bar.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "hideTopBarLanguage",
+    "hideTopBarNotifications",
+    "hideTopBarTheme",
+    "topBarProfilePillMode",
+    "topBarProfilePillPersonaPrefix",
+    "topBarProfilePillCustomText"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/top-bar.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

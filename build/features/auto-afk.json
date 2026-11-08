@@ -4,9 +4,21 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "autoAfkEnabled"
+    "autoAfkEnabled",
+    "autoAfkMinutes",
+    "autoAfkChats",
+    "autoAfkHome",
+    "autoAfkProfiles",
+    "autoAfkProtectActive",
+    "autoAfkResetOnActivate",
+    "autoAfkAction",
+    "autoAfkHours"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/auto-afk.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

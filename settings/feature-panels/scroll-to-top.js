@@ -1,0 +1,47 @@
+// scroll-to-top: optional feature-owned Settings, including its saved-setting handlers.
+(() => {
+  'use strict';
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features) && !profile.features.includes("scroll-to-top")) return;
+  const host = document.getElementById('ds-feature-panel-scroll-to-top');
+  if (!host) return;
+  const make = entry => {
+    if (typeof entry === 'string') return document.createTextNode(entry);
+    const [tag, attrs, ...children] = entry;
+    const element = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    for (const child of children) element.appendChild(make(child));
+    return element;
+  };
+  host.replaceWith(make(["section",{"class":"card"},"\n",["h2",{},"Scroll navigation"],"\n",["label",{"class":"row"},["input",{"id":"showScrollToTopButton","type":"checkbox"}],["span",{},"Show floating scroll-to-top button on long SpicyChat pages"]],"\n",["label",{"class":"row"},["input",{"id":"showScrollToBottomButton","type":"checkbox"}],["span",{},"Show floating scroll-to-bottom button on long SpicyChat pages"]],"\n",["div",{"class":"sub-card"},["strong",{},"Generated reply (swipe/reroll) navigation — optional"],"\n",["label",{"class":"row"},["input",{"id":"showSwipeJumpButtons","type":"checkbox"}],["span",{},"Show First/Last reply buttons beside native swipe counters"]],"\n",["label",{"class":"row"},["input",{"id":"showSwipeJumpToNumber","type":"checkbox"}],["span",{},"Show an optional reply-number field to jump to a specific generated reply"]],"\n",["label",{"class":"row"},["input",{"id":"restoreFirstSwipeOnLoad","type":"checkbox"}],["span",{},"Return to the first reply when opening/refreshing a chat or loading previous messages"]],"\n",["p",{"class":"hint"},"Jump between generated replies using SpicyChat’s native swipe controls. Large histories may be slow; Stop cancels."]],"\n",["div",{"class":"sub-card"},"\n",["strong",{},"Show enabled scroll buttons on"],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnHome","type":"checkbox"}],["span",{},"Home"]],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnChats","type":"checkbox"}],["span",{},"Chats list"]],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnChat","type":"checkbox"}],["span",{},"Individual chats"]],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnCreation","type":"checkbox"}],["span",{},"My Creations and chatbot/Lorebook editors"]],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnProfiles","type":"checkbox"}],["span",{},"Character profiles and Lorebooks"]],"\n",["label",{"class":"row"},["input",{"id":"scrollNavOnOther","type":"checkbox"}],["span",{},"Other SpicyChat pages and listings"]],"\n"],"\n",["label",{"class":"row"},["input",{"id":"scrollTopLoadPreviousMessages","type":"checkbox"}],["span",{},"On individual chats, let the ↑ button also load older messages"]],"\n",["label",{},"↑ older-message loading\n          ",["select",{"id":"scrollTopLoadPreviousMode"},"\n",["option",{"value":"one"},"Load one older batch"],"\n",["option",{"value":"all"},"Load all available older batches"],"\n"],"\n"],"\n",["label",{},"When ↑ loads older messages\n          ",["select",{"id":"scrollTopLoadPreviousTiming"},"\n",["option",{"value":"before"},"Load first, then jump to the oldest message"],"\n",["option",{"value":"background"},"Jump immediately and keep loading in the background"],"\n"],"\n"],"\n",["p",{"class":"hint"},"Show useful jump arrows on selected pages. Chat ↑ can load older messages using SpicyChat’s normal controls."],"\n"]));
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["showScrollToTopButton"] = () => checked("showScrollToTopButton");
+  loaders["showScrollToTopButton"] = settings => { setChecked("showScrollToTopButton", !!settings.showScrollToTopButton); };
+  readers["showScrollToBottomButton"] = () => checked("showScrollToBottomButton");
+  loaders["showScrollToBottomButton"] = settings => { setChecked("showScrollToBottomButton", !!settings.showScrollToBottomButton); };
+  readers["showSwipeJumpButtons"] = () => checked("showSwipeJumpButtons");
+  loaders["showSwipeJumpButtons"] = settings => { setChecked("showSwipeJumpButtons", !!settings.showSwipeJumpButtons); };
+  readers["showSwipeJumpToNumber"] = () => checked("showSwipeJumpToNumber");
+  loaders["showSwipeJumpToNumber"] = settings => { setChecked("showSwipeJumpToNumber", !!settings.showSwipeJumpToNumber); };
+  readers["restoreFirstSwipeOnLoad"] = () => checked("restoreFirstSwipeOnLoad");
+  loaders["restoreFirstSwipeOnLoad"] = settings => { setChecked("restoreFirstSwipeOnLoad", !!settings.restoreFirstSwipeOnLoad); };
+  readers["scrollNavOnHome"] = () => checked("scrollNavOnHome", true);
+  loaders["scrollNavOnHome"] = settings => { setChecked("scrollNavOnHome", settings.scrollNavOnHome !== false); };
+  readers["scrollNavOnChats"] = () => checked("scrollNavOnChats", true);
+  loaders["scrollNavOnChats"] = settings => { setChecked("scrollNavOnChats", settings.scrollNavOnChats !== false); };
+  readers["scrollNavOnChat"] = () => checked("scrollNavOnChat", true);
+  loaders["scrollNavOnChat"] = settings => { setChecked("scrollNavOnChat", settings.scrollNavOnChat !== false); };
+  readers["scrollNavOnCreation"] = () => checked("scrollNavOnCreation", true);
+  loaders["scrollNavOnCreation"] = settings => { setChecked("scrollNavOnCreation", settings.scrollNavOnCreation !== false); };
+  readers["scrollNavOnProfiles"] = () => checked("scrollNavOnProfiles", true);
+  loaders["scrollNavOnProfiles"] = settings => { setChecked("scrollNavOnProfiles", settings.scrollNavOnProfiles !== false); };
+  readers["scrollNavOnOther"] = () => checked("scrollNavOnOther", true);
+  loaders["scrollNavOnOther"] = settings => { setChecked("scrollNavOnOther", settings.scrollNavOnOther !== false); };
+  readers["scrollTopLoadPreviousMessages"] = () => checked("scrollTopLoadPreviousMessages");
+  loaders["scrollTopLoadPreviousMessages"] = settings => { setChecked("scrollTopLoadPreviousMessages", !!settings.scrollTopLoadPreviousMessages); };
+  readers["scrollTopLoadPreviousMode"] = () => ["one", "all"].includes(value("scrollTopLoadPreviousMode")) ? value("scrollTopLoadPreviousMode") : "all";
+  loaders["scrollTopLoadPreviousMode"] = settings => { setValue("scrollTopLoadPreviousMode", ["one", "all"].includes(settings.scrollTopLoadPreviousMode) ? settings.scrollTopLoadPreviousMode : "all"); };
+  readers["scrollTopLoadPreviousTiming"] = () => ["before", "background"].includes(value("scrollTopLoadPreviousTiming")) ? value("scrollTopLoadPreviousTiming") : "before";
+  loaders["scrollTopLoadPreviousTiming"] = settings => { setValue("scrollTopLoadPreviousTiming", ["before", "background"].includes(settings.scrollTopLoadPreviousTiming) ? settings.scrollTopLoadPreviousTiming : "before"); };
+})();

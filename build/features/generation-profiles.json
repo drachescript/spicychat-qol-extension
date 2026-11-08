@@ -7,6 +7,10 @@
     "enableGenerationProfiles"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/generation-profiles.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

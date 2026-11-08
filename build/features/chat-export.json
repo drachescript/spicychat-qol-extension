@@ -5,9 +5,21 @@
   "dependencies": [],
   "settingsKeys": [
     "showChatExportButton",
-    "chatExportIncludeImageLinks"
+    "chatExportIncludeBotInfo",
+    "chatExportIncludeRulebook",
+    "chatExportIncludeOocDirectives",
+    "chatExportIncludeGenerationDetails",
+    "chatExportNumberMessages",
+    "chatExportIncludeAvatars",
+    "chatExportIncludeImageLinks",
+    "chatExportDefaultFormat",
+    "chatExportHtmlLayout"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/chat-export.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
