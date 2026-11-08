@@ -4,9 +4,28 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableChatTextReplacements"
+    "enableChatTextReplacements",
+    "chatTextReplacementScope",
+    "chatTextReplacementMode",
+    "chatTextReplacementPreview",
+    "chatTextReplacementRules",
+    "enableChatWordCensor",
+    "chatWordCensorList",
+    "chatWordCensorMask",
+    "chatWordCensorCustom",
+    "chatWordCensorScope",
+    "chatWordCensorReveal",
+    "chatWordCensorShowChatToggle",
+    "enableChatMutedWords",
+    "chatMutedWords",
+    "chatTextReplacementPresets",
+    "chatTextReplacementShowChatPresetControl"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/text-replacements.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

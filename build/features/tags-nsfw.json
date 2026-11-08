@@ -3,8 +3,17 @@
   "primary": "content/tags-nsfw.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "autoTags",
+    "showTagTemplateButton",
+    "includeTags",
+    "excludeTags"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/tags-nsfw.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

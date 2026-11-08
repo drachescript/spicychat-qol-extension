@@ -321,12 +321,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       const messageRootsChanged = isChatPage ? mutationsAddOrRemoveMessageRoots(mutations) : false;
       const nonMessageMutations = isChatPage ? mutations.filter(mutation => !mutationIsMessageScoped(mutation)) : mutations;
-      // Rulebook Explore cards can mount/remount while scrolling. Reuse this
-      // existing observer to mark only changed card roots for the next pass.
-      if (!isChatPage && /^\/rulebooks\/explore(?:\/|$)/i.test(location.pathname) &&
-          DS.state?.settings?.rulebookBlockingEnabled === true) {
-        DS.rulebookExploreMutationsRelevant?.(nonMessageMutations);
-      }
+      // Rulebook Explore and language-only filtering share the same card
+      // invalidation path. Only native card changes need a card reconcile.
+      const rulebookExplore = !isChatPage && /^\/rulebooks\/explore(?:\/|$)/i.test(location.pathname);
+      const rulebookRelevant = rulebookExplore &&
+        (DS.state?.settings?.rulebookBlockingEnabled === true ||
+         (DS.state?.settings?.enableLanguageFilter === true && DS.state?.settings?.languageFilterRulebooks === true)) &&
+        !!DS.rulebookExploreMutationsRelevant?.(nonMessageMutations);
       // Model/banner invalidation is intentionally evaluated only against
       // non-message mutations. A newly mounted/re-rendered chat message must
       // never make either global UI feature inspect the chat tree.
@@ -334,7 +335,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const advertBannerMutation = nonMessageMutations.length > 0 && !!DS.advertBannerMutationsRelevant?.(nonMessageMutations);
       const chatHeaderMutation = isChatPage && nonMessageMutations.some(mutationTouchesNativeChatHeader);
       const rulebookPickerMutation = isChatPage &&
-        DS.state?.settings?.rulebookBlockingEnabled === true &&
+        (DS.state?.settings?.rulebookBlockingEnabled === true ||
+          (DS.state?.settings?.enableLanguageFilter === true && DS.state?.settings?.languageFilterRulebooks === true)) &&
         !!DS.rulebookDiscoverMutationsRelevant?.(nonMessageMutations);
 
       // Contenteditable composers can emit many tiny character/child mutations
@@ -442,7 +444,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Keep the expensive whole-page DOM revision stable during token streaming.
       // A real message-root add/remove still bumps it so static long-chat classes
       // and other structure caches refresh, while text edits use messageTextRevision.
-      const cardListing = !isChatPage && isCardListingContext();
+      const cardListing = !isChatPage && !rulebookExplore && isCardListingContext();
       // A blocked ID is authoritative even during the 2-minute refresh batch.
       // This checks only added/updated links, not the other 48+ listing cards.
       if (cardListing) DS.hideBlockedCardMounts?.(mutations);
@@ -470,6 +472,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // settled block refresh still performs the complete listing repair. New
         // cards are never ignored, so refill/infinite-load remains responsive.
         counters.blockedBotMutationSkips = Number(counters.blockedBotMutationSkips || 0) + mutations.length;
+      } else if (rulebookExplore && !cardListing) {
+        // Repeated native count/toolbar/scroll mutations must not run the
+        // entire QoL runtime for each frame. Card changes still get the
+        // normal settled slow pass, including a language-only filter.
+        if (rulebookRelevant) {
+          counters.rulebookExploreRelevantBatches = Number(counters.rulebookExploreRelevantBatches || 0) + 1;
+          DS.scheduleRun?.({ priority: "slow", source: "rulebook-explore-cards" });
+        } else {
+          const now = Date.now();
+          if (now - lastNonCardListingScheduleAt >= 2400) {
+            lastNonCardListingScheduleAt = now;
+            DS.scheduleRun?.({ priority: "slow", source: "rulebook-explore-other" });
+          } else {
+            counters.rulebookExploreNonCardCoalesced = Number(counters.rulebookExploreNonCardCoalesced || 0) + 1;
+          }
+        }
       } else if (cardListing && !affectsCards) {
         // Non-card listing mutations (banner timers, counters, lazy UI, etc.) do
         // not need the critical card-filter lane. Keep them in the throttled

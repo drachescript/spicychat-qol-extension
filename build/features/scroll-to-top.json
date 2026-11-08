@@ -3,8 +3,27 @@
   "primary": "content/scroll-to-top.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "showScrollToTopButton",
+    "showScrollToBottomButton",
+    "showSwipeJumpButtons",
+    "showSwipeJumpToNumber",
+    "restoreFirstSwipeOnLoad",
+    "scrollNavOnHome",
+    "scrollNavOnChats",
+    "scrollNavOnChat",
+    "scrollNavOnCreation",
+    "scrollNavOnProfiles",
+    "scrollNavOnOther",
+    "scrollTopLoadPreviousMessages",
+    "scrollTopLoadPreviousMode",
+    "scrollTopLoadPreviousTiming"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/scroll-to-top.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

@@ -3,8 +3,22 @@
   "primary": "content/accessibility.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "qolInterfaceScale",
+    "chatTextScale",
+    "chatLineSpacing",
+    "settingsReadingFont",
+    "settingsReadingSize",
+    "settingsReadingLineSpacing",
+    "settingsReadingLetterSpacing",
+    "settingsReadingContrast",
+    "settingsReadingLargerControls"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/accessibility.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

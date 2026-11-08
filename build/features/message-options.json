@@ -3,8 +3,22 @@
   "primary": "content/message-options.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "stackChatMessages",
+    "showMessageQuickActions",
+    "messageQuickActionCopy",
+    "messageQuickActionEdit",
+    "messageQuickActionRemoveImage",
+    "messageQuickActionResend",
+    "messageQuickActionConfirmRemoveImage",
+    "messageQuickActionReport",
+    "messageBottomMenuShortcut"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/message-options.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

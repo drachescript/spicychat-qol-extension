@@ -4,9 +4,19 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableLanguageFilter"
+    "enableLanguageFilter",
+    "languageFilterLorebooks",
+    "languageFilterRulebooks",
+    "languageSelectionMode",
+    "languageAutoDetectUntagged",
+    "languageShowDetectedBadge",
+    "languageFilterMode"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/language-filter.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

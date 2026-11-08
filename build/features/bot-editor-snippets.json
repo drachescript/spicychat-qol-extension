@@ -3,8 +3,18 @@
   "primary": "content/bot-editor-snippets.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "botEditorShowCharButton",
+    "botEditorShowUserButton",
+    "botEditorShowContinueButton",
+    "botEditorShowNoControlButton",
+    "botEditorShowCustomSnippets"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/bot-editor-snippets.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

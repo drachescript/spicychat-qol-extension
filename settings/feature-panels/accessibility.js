@@ -1,0 +1,37 @@
+// accessibility: owned Settings markup, serialization and loading. No storage migration.
+(() => {
+  "use strict";
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features) && !profile.features.includes("accessibility")) return;
+  const host = document.getElementById("ds-feature-panel-accessibility");
+  if (!host) return;
+  const make = entry => {
+    if (typeof entry === "string") return document.createTextNode(entry);
+    const [tag, attrs, ...children] = entry;
+    const element = document.createElement(tag);
+    for (const [name, val] of Object.entries(attrs)) element.setAttribute(name, val);
+    for (const child of children) element.appendChild(make(child));
+    return element;
+  };
+  host.replaceWith(make(["section",{"class":"card","id":"accessibilityCard"},"\n",["h2",{},"Accessibility & text size"],"\n",["p",{"class":"hint"},"Make QoL controls and chat text easier to read without changing or rewriting any saved messages."],"\n",["label",{},"QoL tools and Settings size\n",["select",{"id":"qolInterfaceScale"},"\n",["option",{"value":"100"},"100% — default"],"\n",["option",{"value":"110"},"110%"],"\n",["option",{"value":"125"},"125%"],"\n",["option",{"value":"150"},"150%"],"\n"],"\n"],"\n",["label",{},"Chat message text size\n",["select",{"id":"chatTextScale"},"\n",["option",{"value":"100"},"100% — SpicyChat default"],"\n",["option",{"value":"110"},"110%"],"\n",["option",{"value":"125"},"125%"],"\n",["option",{"value":"150"},"150%"],"\n"],"\n"],"\n",["label",{},"Chat line spacing\n",["select",{"id":"chatLineSpacing"},"\n",["option",{"value":"native"},"SpicyChat default"],"\n",["option",{"value":"comfortable"},"Comfortable"],"\n",["option",{"value":"spacious"},"Spacious"],"\n"],"\n"],"\n",["p",{"class":"hint"},"The Settings-size preview applies immediately here. Chat text and line spacing apply to SpicyChat after you save."],"\n",["h3",{},"Reading support for QoL Settings"],"\n",["p",{"class":"hint"},"These choices affect only this Settings page, not chat messages or the rest of SpicyChat."],"\n",["div",{"aria-label":"Settings reading presets","class":"button-row settings-reading-presets"},"\n",["button",{"data-settings-reading-preset":"comfort","type":"button"},"Reading comfort"],"\n",["button",{"data-settings-reading-preset":"vision","type":"button"},"Larger and clearer"],"\n",["button",{"data-settings-reading-preset":"default","type":"button"},"Reset reading options"],"\n"],"\n",["label",{},"Settings font\n",["select",{"id":"settingsReadingFont"},"\n",["option",{"value":"native"},"Normal font"],"\n",["option",{"value":"arial"},"Arial"],"\n",["option",{"value":"verdana"},"Verdana"],"\n",["option",{"value":"trebuchet"},"Trebuchet MS"],"\n",["option",{"value":"serif"},"Georgia"],"\n",["option",{"value":"monospace"},"Monospace"],"\n",["option",{"value":"dyslexia"},"OpenDyslexic (if installed)"],"\n"]],"\n",["label",{},"Settings text and controls size\n",["select",{"id":"settingsReadingSize"},"\n",["option",{"value":"100"},"100% — default"],"\n",["option",{"value":"110"},"110%"],"\n",["option",{"value":"125"},"125%"],"\n",["option",{"value":"150"},"150%"],"\n"]],"\n",["label",{},"Settings line spacing\n",["select",{"id":"settingsReadingLineSpacing"},"\n",["option",{"value":"native"},"Normal"],"\n",["option",{"value":"comfortable"},"Comfortable"],"\n",["option",{"value":"spacious"},"Spacious"],"\n"]],"\n",["label",{},"Settings letter spacing\n",["select",{"id":"settingsReadingLetterSpacing"},"\n",["option",{"value":"native"},"Normal"],"\n",["option",{"value":"slight"},"A little more"],"\n",["option",{"value":"wide"},"More spaced out"],"\n"]],"\n",["label",{"class":"row"},["input",{"id":"settingsReadingContrast","type":"checkbox"}],["span",{},"Stronger contrast in QoL Settings"]],"\n",["label",{"class":"row"},["input",{"id":"settingsReadingLargerControls","type":"checkbox"}],["span",{},"Larger buttons, checkboxes, and form controls"]],"\n",["p",{"class":"hint"},"Fonts use what's installed on your device; QoL doesn't download fonts. All changes preview immediately and can be reset. Chat reading options can be added later."],"\n"]));
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["qolInterfaceScale"] = () => [100, 110, 125, 150].includes(Number(value("qolInterfaceScale", "100"))) ? Number(value("qolInterfaceScale", "100")) : 100;
+  loaders["qolInterfaceScale"] = settings => { setValue("qolInterfaceScale", [100, 110, 125, 150].includes(Number(settings.qolInterfaceScale)) ? Number(settings.qolInterfaceScale) : 100); };
+  readers["chatTextScale"] = () => [100, 110, 125, 150].includes(Number(value("chatTextScale", "100"))) ? Number(value("chatTextScale", "100")) : 100;
+  loaders["chatTextScale"] = settings => { setValue("chatTextScale", [100, 110, 125, 150].includes(Number(settings.chatTextScale)) ? Number(settings.chatTextScale) : 100); };
+  readers["chatLineSpacing"] = () => ["native", "comfortable", "spacious"].includes(value("chatLineSpacing", "native")) ? value("chatLineSpacing", "native") : "native";
+  loaders["chatLineSpacing"] = settings => { setValue("chatLineSpacing", ["native", "comfortable", "spacious"].includes(settings.chatLineSpacing) ? settings.chatLineSpacing : "native"); };
+  readers["settingsReadingFont"] = () => Object.hasOwn(SETTINGS_READING_FONTS, value("settingsReadingFont", "native")) ? value("settingsReadingFont", "native") : "native";
+  loaders["settingsReadingFont"] = settings => { setValue("settingsReadingFont", Object.hasOwn(SETTINGS_READING_FONTS, settings.settingsReadingFont) ? settings.settingsReadingFont : "native"); };
+  readers["settingsReadingSize"] = () => SETTINGS_READING_SIZES.includes(Number(value("settingsReadingSize", "100"))) ? Number(value("settingsReadingSize", "100")) : 100;
+  loaders["settingsReadingSize"] = settings => { setValue("settingsReadingSize", SETTINGS_READING_SIZES.includes(Number(settings.settingsReadingSize)) ? Number(settings.settingsReadingSize) : 100); };
+  readers["settingsReadingLineSpacing"] = () => SETTINGS_READING_LINE_SPACING.includes(value("settingsReadingLineSpacing", "native")) ? value("settingsReadingLineSpacing", "native") : "native";
+  loaders["settingsReadingLineSpacing"] = settings => { setValue("settingsReadingLineSpacing", SETTINGS_READING_LINE_SPACING.includes(settings.settingsReadingLineSpacing) ? settings.settingsReadingLineSpacing : "native"); };
+  readers["settingsReadingLetterSpacing"] = () => SETTINGS_READING_LETTER_SPACING.includes(value("settingsReadingLetterSpacing", "native")) ? value("settingsReadingLetterSpacing", "native") : "native";
+  loaders["settingsReadingLetterSpacing"] = settings => { setValue("settingsReadingLetterSpacing", SETTINGS_READING_LETTER_SPACING.includes(settings.settingsReadingLetterSpacing) ? settings.settingsReadingLetterSpacing : "native"); };
+  readers["settingsReadingContrast"] = () => checked("settingsReadingContrast");
+  loaders["settingsReadingContrast"] = settings => { setChecked("settingsReadingContrast", !!settings.settingsReadingContrast); };
+  readers["settingsReadingLargerControls"] = () => checked("settingsReadingLargerControls");
+  loaders["settingsReadingLargerControls"] = settings => { setChecked("settingsReadingLargerControls", !!settings.settingsReadingLargerControls); };
+})();

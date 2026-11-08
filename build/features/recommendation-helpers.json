@@ -3,8 +3,27 @@
   "primary": "content/recommendation-helpers.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "enableRecommendationHelpers",
+    "recommendationHideFavoriteBots",
+    "recommendationHideOwnBots",
+    "recommendationOnlyUnopened",
+    "recommendationOnlyLorebook",
+    "recommendationSessionHideButtons",
+    "recommendationRandomButton",
+    "recommendationHideLaterBots",
+    "recommendationHideNotInterested",
+    "recommendationPreferFavoriteCreators",
+    "recommendationShowReasonBadges",
+    "recommendationPreferredTags",
+    "recommendationAvoidTags",
+    "recommendationAvoidWords"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/recommendation-helpers.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

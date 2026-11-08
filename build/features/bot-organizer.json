@@ -4,14 +4,19 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "enableBotOrganizer"
+    "enableBotOrganizer",
+    "botOrganizerExplorerFolders",
+    "botOrganizerShowCardMeta",
+    "botOrganizerBulkTools",
+    "botCollections"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/bot-organizer.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false,
-  "styleFiles": [
-    "content/styles/bot-organizer.css"
-  ]
+  "browserVerified": false
 }

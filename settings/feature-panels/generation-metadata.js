@@ -1,0 +1,47 @@
+// Settings panel and persistence owned by generation-metadata; omitted Custom features leave no live controls.
+(() => {
+  'use strict';
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features) && !profile.features.includes("generation-metadata")) return;
+  const host = document.getElementById('ds-feature-panel-generation-metadata');
+  if (!host) return;
+  const make = entry => {
+    if (typeof entry === 'string') return document.createTextNode(entry);
+    const [tag, attrs, ...children] = entry;
+    const element = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    for (const child of children) element.appendChild(make(child));
+    return element;
+  };
+  host.replaceWith(make(["section",{"class":"card"},"\n",["h2",{},"Timestamps and generation details"],"\n",["label",{"class":"row"},["input",{"id":"showGenerationMetadata","type":"checkbox"}],["span",{},"Enable recommended generation details"]],"\n",["label",{"class":"row"},["input",{"id":"showMessageTimestamps","type":"checkbox"}],["span",{},"Show message timestamps"]],"\n",["label",{"class":"row"},["input",{"id":"messageTimestamp24Hour","type":"checkbox"}],["span",{},"Use 24-hour time"]],"\n",["label",{"class":"row"},["input",{"id":"messageTimestampDateFirst","type":"checkbox"}],["span",{},"Show date before time"]],"\n",["label",{"class":"row"},["input",{"id":"messageTimestampShowSeconds","type":"checkbox"}],["span",{},"Show seconds"]],"\n",["label",{"class":"row"},["input",{"id":"showGenerationModel","type":"checkbox"}],["span",{},"Show requested model and actual engine when available"]],"\n",["label",{"class":"row"},["input",{"id":"showGenerationElapsed","type":"checkbox"}],["span",{},"Show generation time for new replies"]],"\n",["label",{"class":"row"},["input",{"id":"showGenerationSettings","type":"checkbox"}],["span",{},"Show captured generation slider values"]],"\n",["label",{"class":"row"},["input",{"id":"compactGenerationMetadata","type":"checkbox"}],["span",{},"Keep the details on one compact line"]],"\n",["p",{"class":"hint"},"The options below work independently. Timestamps and model details appear only when SpicyChat provides them."],"\n",["div",{"class":"sub-card"},"\n",["h3",{},"RP context-full warning"],"\n",["label",{"class":"row"},["input",{"id":"enableContextWindowWarning","type":"checkbox"}],["span",{},"Warn me before older RP messages start falling out of the model context"]],"\n",["label",{"class":"row"},["input",{"id":"contextWarningShowMeter","type":"checkbox"}],["span",{},"Show a compact context meter even below the warning threshold (experimental, off by default)"]],"\n",["label",{},"Warn at context usage %",["input",{"id":"contextWarningThreshold","max":"99","min":"50","step":"1","type":"number","value":"85"}]],"\n",["label",{},"Manual context window (tokens, 0 = auto)",["input",{"id":"contextWarningManualLimit","min":"0","step":"512","type":"number","value":"0"}]],"\n",["label",{"class":"row"},["input",{"id":"contextWarningBrowserNotifications","type":"checkbox"}],["span",{},"Also use a browser notification when permission is available"]],"\n",["div",{"class":"button-row"},["button",{"id":"contextWarningRequestNotifications","type":"button"},"Enable browser notifications"],["span",{"class":"count","id":"contextWarningNotificationPermissionStatus"}]],"\n",["p",{"class":"hint"},"Use SpicyChat’s token data when available, otherwise estimate locally. You can set an unknown model limit manually. Estimates cannot show exactly what the AI forgot."],"\n"],"\n"]));
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["showGenerationMetadata"] = () => checked("showGenerationMetadata");
+  loaders["showGenerationMetadata"] = settings => { setChecked("showGenerationMetadata", !!settings.showGenerationMetadata); };
+  readers["showMessageTimestamps"] = () => checked("showMessageTimestamps");
+  loaders["showMessageTimestamps"] = settings => { setChecked("showMessageTimestamps", !!settings.showMessageTimestamps); };
+  readers["messageTimestamp24Hour"] = () => checked("messageTimestamp24Hour");
+  loaders["messageTimestamp24Hour"] = settings => { setChecked("messageTimestamp24Hour", !!settings.messageTimestamp24Hour); };
+  readers["messageTimestampDateFirst"] = () => checked("messageTimestampDateFirst");
+  loaders["messageTimestampDateFirst"] = settings => { setChecked("messageTimestampDateFirst", !!settings.messageTimestampDateFirst); };
+  readers["messageTimestampShowSeconds"] = () => checked("messageTimestampShowSeconds");
+  loaders["messageTimestampShowSeconds"] = settings => { setChecked("messageTimestampShowSeconds", !!settings.messageTimestampShowSeconds); };
+  readers["showGenerationModel"] = () => checked("showGenerationModel");
+  loaders["showGenerationModel"] = settings => { setChecked("showGenerationModel", !!settings.showGenerationModel); };
+  readers["showGenerationElapsed"] = () => checked("showGenerationElapsed");
+  loaders["showGenerationElapsed"] = settings => { setChecked("showGenerationElapsed", !!settings.showGenerationElapsed); };
+  readers["showGenerationSettings"] = () => checked("showGenerationSettings");
+  loaders["showGenerationSettings"] = settings => { setChecked("showGenerationSettings", !!settings.showGenerationSettings); };
+  readers["compactGenerationMetadata"] = () => checked("compactGenerationMetadata");
+  loaders["compactGenerationMetadata"] = settings => { setChecked("compactGenerationMetadata", !!settings.compactGenerationMetadata); };
+  readers["enableContextWindowWarning"] = () => checked("enableContextWindowWarning");
+  loaders["enableContextWindowWarning"] = settings => { setChecked("enableContextWindowWarning", !!settings.enableContextWindowWarning); };
+  readers["contextWarningShowMeter"] = () => checked("contextWarningShowMeter");
+  loaders["contextWarningShowMeter"] = settings => { setChecked("contextWarningShowMeter", !!settings.contextWarningShowMeter); };
+  readers["contextWarningBrowserNotifications"] = () => checked("contextWarningBrowserNotifications");
+  loaders["contextWarningBrowserNotifications"] = settings => { setChecked("contextWarningBrowserNotifications", !!settings.contextWarningBrowserNotifications); };
+  readers["contextWarningThreshold"] = () => Math.min(99, Math.max(50, Number(value("contextWarningThreshold", "85")) || 85));
+  loaders["contextWarningThreshold"] = settings => { setValue("contextWarningThreshold", Math.min(99, Math.max(50, Number(settings.contextWarningThreshold) || 85))); };
+  readers["contextWarningManualLimit"] = () => Math.max(0, Number(value("contextWarningManualLimit", "0")) || 0);
+  loaders["contextWarningManualLimit"] = settings => { setValue("contextWarningManualLimit", Math.max(0, Number(settings.contextWarningManualLimit) || 0)); };
+})();

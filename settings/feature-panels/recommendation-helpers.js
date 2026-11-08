@@ -1,0 +1,47 @@
+// recommendation-helpers: feature-owned Settings panel and persistence. Omitted packages do not mount this panel.
+(() => {
+  "use strict";
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  if (profile?.generated && Array.isArray(profile.features) && !profile.features.includes("recommendation-helpers")) return;
+  const host = document.getElementById("ds-feature-panel-recommendation-helpers");
+  if (!host) return;
+  const make = entry => {
+    if (typeof entry === 'string') return document.createTextNode(entry);
+    const [tag, attrs, ...children] = entry;
+    const element = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+    for (const child of children) element.appendChild(make(child));
+    return element;
+  };
+  host.replaceWith(make(["section",{"class":"card"},"\n",["h2",{},"Recommendation helpers"],"\n",["label",{"class":"row"},["input",{"id":"enableRecommendationHelpers","type":"checkbox"}],["span",{},"Enable Recommendation helpers"]],"\n",["div",{"class":"sub-card"},"\n",["label",{"class":"row"},["input",{"id":"recommendationHideFavoriteBots","type":"checkbox"}],["span",{},"Hide bots already in Favorites"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationHideOwnBots","type":"checkbox"}],["span",{},"Hide my own bots"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationOnlyUnopened","type":"checkbox"}],["span",{},"Only show unopened bots"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationOnlyLorebook","type":"checkbox"}],["span",{},"Only show bots with a Lorebook"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationSessionHideButtons","type":"checkbox"}],["span",{},"Add a temporary hide button to recommendation cards"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationRandomButton","type":"checkbox"}],["span",{},"Add Random visible bot on Recommendations"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationHideLaterBots","type":"checkbox"}],["span",{},"Hide bots already saved to Later"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationHideNotInterested","type":"checkbox"}],["span",{},"Hide bots already marked Not Interested"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationPreferFavoriteCreators","type":"checkbox"}],["span",{},"Move bots from favorite creators toward the top"]],"\n",["label",{"class":"row"},["input",{"id":"recommendationShowReasonBadges","type":"checkbox"}],["span",{},"Show why QoL preferred a recommendation"]],"\n",["label",{},"Prefer these tags",["textarea",{"id":"recommendationPreferredTags","rows":"3","spellcheck":"false","placeholder":"Fantasy\nMultiple Characters"}]],"\n",["label",{},"Avoid these tags",["textarea",{"id":"recommendationAvoidTags","rows":"3","spellcheck":"false","placeholder":"Cheating\nNTR"}]],"\n",["label",{},"Hide recommendations containing these words or names",["textarea",{"id":"recommendationAvoidWords","rows":"3","spellcheck":"false","placeholder":"Simon Ghost Riley\nMILF\nDILF"}]],"\n",["p",{"class":"hint"},"Hide recommendations containing these words in titles or descriptions. This does not block, rate or change bots."],"\n"],"\n",["p",{"class":"hint"},"Applies to Home and Recommendations. Temporary hides reset when the tab closes."],"\n"]));
+  const readers = window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
+  const loaders = window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
+  readers["enableRecommendationHelpers"] = () => checked("enableRecommendationHelpers");
+  loaders["enableRecommendationHelpers"] = settings => { setChecked("enableRecommendationHelpers", !!settings.enableRecommendationHelpers); };
+  readers["recommendationHideFavoriteBots"] = () => checked("recommendationHideFavoriteBots");
+  loaders["recommendationHideFavoriteBots"] = settings => { setChecked("recommendationHideFavoriteBots", !!settings.recommendationHideFavoriteBots); };
+  readers["recommendationHideOwnBots"] = () => checked("recommendationHideOwnBots");
+  loaders["recommendationHideOwnBots"] = settings => { setChecked("recommendationHideOwnBots", !!settings.recommendationHideOwnBots); };
+  readers["recommendationOnlyUnopened"] = () => checked("recommendationOnlyUnopened");
+  loaders["recommendationOnlyUnopened"] = settings => { setChecked("recommendationOnlyUnopened", !!settings.recommendationOnlyUnopened); };
+  readers["recommendationOnlyLorebook"] = () => checked("recommendationOnlyLorebook");
+  loaders["recommendationOnlyLorebook"] = settings => { setChecked("recommendationOnlyLorebook", !!settings.recommendationOnlyLorebook); };
+  readers["recommendationSessionHideButtons"] = () => checked("recommendationSessionHideButtons");
+  loaders["recommendationSessionHideButtons"] = settings => { setChecked("recommendationSessionHideButtons", !!settings.recommendationSessionHideButtons); };
+  readers["recommendationRandomButton"] = () => checked("recommendationRandomButton");
+  loaders["recommendationRandomButton"] = settings => { setChecked("recommendationRandomButton", !!settings.recommendationRandomButton); };
+  readers["recommendationHideLaterBots"] = () => checked("recommendationHideLaterBots");
+  loaders["recommendationHideLaterBots"] = settings => { setChecked("recommendationHideLaterBots", !!settings.recommendationHideLaterBots); };
+  readers["recommendationHideNotInterested"] = () => checked("recommendationHideNotInterested");
+  loaders["recommendationHideNotInterested"] = settings => { setChecked("recommendationHideNotInterested", !!settings.recommendationHideNotInterested); };
+  readers["recommendationPreferFavoriteCreators"] = () => checked("recommendationPreferFavoriteCreators");
+  loaders["recommendationPreferFavoriteCreators"] = settings => { setChecked("recommendationPreferFavoriteCreators", !!settings.recommendationPreferFavoriteCreators); };
+  readers["recommendationShowReasonBadges"] = () => checked("recommendationShowReasonBadges");
+  loaders["recommendationShowReasonBadges"] = settings => { setChecked("recommendationShowReasonBadges", !!settings.recommendationShowReasonBadges); };
+  readers["recommendationPreferredTags"] = () => value("recommendationPreferredTags");
+  loaders["recommendationPreferredTags"] = settings => { setValue("recommendationPreferredTags", settings.recommendationPreferredTags || ""); };
+  readers["recommendationAvoidTags"] = () => value("recommendationAvoidTags");
+  loaders["recommendationAvoidTags"] = settings => { setValue("recommendationAvoidTags", settings.recommendationAvoidTags || ""); };
+  readers["recommendationAvoidWords"] = () => value("recommendationAvoidWords");
+  loaders["recommendationAvoidWords"] = settings => { setValue("recommendationAvoidWords", settings.recommendationAvoidWords || ""); };
+})();

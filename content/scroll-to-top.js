@@ -6,6 +6,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS) return;
 
+  // This stylesheet belongs to scroll navigation, not the shared runtime.
+  const NATIVE_SCROLL_TOP_STYLE_ID = "ds-hide-native-scroll-back-to-top";
+  DS.syncNativeScrollBackToTopVisibility = function syncNativeScrollBackToTopVisibility() {
+    const settings = DS.state?.settings || {};
+    const shouldHide = !!(settings.enabled && settings.showScrollToTopButton);
+    let style = document.getElementById(NATIVE_SCROLL_TOP_STYLE_ID);
+    if (!shouldHide) {
+      style?.remove();
+      return;
+    }
+    if (!style) {
+      style = document.createElement("style");
+      style.id = NATIVE_SCROLL_TOP_STYLE_ID;
+      style.textContent = 'button[aria-label="scroll-back-to-top"]{display:none!important;}';
+      (document.head || document.documentElement).appendChild(style);
+    }
+  };
+
   const TOP_BUTTON_ID = "ds-scroll-to-top";
   const BOTTOM_BUTTON_ID = "ds-scroll-to-bottom";
   const STOP_BUTTON_ID = "ds-scroll-history-stop";

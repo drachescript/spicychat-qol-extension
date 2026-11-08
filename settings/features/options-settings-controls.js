@@ -443,8 +443,23 @@ function setupFeaturesIndex() {
   if (!host || !search || !category || !summary) return;
 
   const clean = value => String(value || "").replace(/\s+/g, " ").trim();
+  const build = window.__DSQ_BUILD_PROFILE__;
+  const installedFeatures = build?.generated && Array.isArray(build.features) ? new Set(build.features) : null;
+  const settingOwners = window.__DSQ_FEATURE_SETTING_OWNERS__ || {};
+  // An omitted feature should not appear as a broken Settings result. Only
+  // filter entries with a confirmed owner: older catalogue entries sometimes
+  // use aliases and should not be hidden based on their display name.
+  const hasInstalledOwner = entry => {
+    if (!installedFeatures || entry.builtIn || entry.planned) return true;
+    const keys = [entry.setting, ...(Array.isArray(entry.settings) ? entry.settings : [])].filter(Boolean);
+    if (!keys.length) return true;
+    const owners = Object.entries(settingOwners)
+      .filter(([, owned]) => Array.isArray(owned) && owned.some(key => keys.includes(key)))
+      .map(([owner]) => owner);
+    return !owners.length || owners.some(owner => installedFeatures.has(owner));
+  };
   const registry = Array.isArray(window.SpicyChatQoLFeatureRegistry)
-    ? window.SpicyChatQoLFeatureRegistry.filter(entry => entry && entry.id && entry.name && entry.category).map(entry => ({ ...entry }))
+    ? window.SpicyChatQoLFeatureRegistry.filter(entry => entry && entry.id && entry.name && entry.category && hasInstalledOwner(entry)).map(entry => ({ ...entry }))
     : [];
   if (!registry.some(entry => entry.id === "device-compatibility")) {
     registry.push({

@@ -3,8 +3,27 @@
   "primary": "content/generation-metadata.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "showGenerationMetadata",
+    "showMessageTimestamps",
+    "messageTimestamp24Hour",
+    "messageTimestampDateFirst",
+    "messageTimestampShowSeconds",
+    "showGenerationModel",
+    "showGenerationElapsed",
+    "showGenerationSettings",
+    "compactGenerationMetadata",
+    "enableContextWindowWarning",
+    "contextWarningShowMeter",
+    "contextWarningThreshold",
+    "contextWarningManualLimit",
+    "contextWarningBrowserNotifications"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/generation-metadata.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

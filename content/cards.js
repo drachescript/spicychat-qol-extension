@@ -109,97 +109,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return card;
   };
 
-  DS.isUnsafeCardHideTarget = function isUnsafeCardHideTarget(target) {
-    if (!target) return true;
-    if (target === document.documentElement || target === document.body || target.id === "root") return true;
-    if (target.matches?.("main, [role='main'], [data-overlay-container='true'], [data-testid='SearchClientCharacterListing']")) return true;
-
-    // Card filtering must never be allowed to hide an actual chat/page shell.
-    // A fallback card match on a single chat used to climb to the large chat
-    // container, and Hide Opened Chats could then blank the entire page.
-    if (target.querySelector?.("textarea[placeholder='Message...'], button[aria-label='chat-dropdown'], nav, [role='navigation'], [data-testid='SearchClientCharacterListing']")) {
-      return true;
-    }
-
-    // Last-resort page-scale guard. Recommendation cards are small. If a
-    // candidate consumes most of the viewport and contains several bot links,
-    // it is a listing/page shell rather than a single card and must never be
-    // hidden by a card filter.
-    try {
-      const rect = target.getBoundingClientRect();
-      const pageScale = rect.width >= Math.max(480, window.innerWidth * 0.72) && rect.height >= Math.max(360, window.innerHeight * 0.45);
-      const botLinks = target.querySelectorAll?.("a[href*='/chat/'], a[href*='/chatbot/']")?.length || 0;
-      if (pageScale && botLinks >= 3) return true;
-    } catch {}
-
-    return false;
-  };
-
-  DS.recoverAccidentalCardPageHide = function recoverAccidentalCardPageHide() {
-    let restored = 0;
-    DS.qsa?.("[data-ds-hidden='1']").forEach(target => {
-      const reason = String(target.dataset?.dsReason || "");
-      if (!(reason.startsWith("card:") || reason === "opened chat")) return;
-      if (!DS.isUnsafeCardHideTarget?.(target)) return;
-      DS.unhideElement?.(target);
-      restored += 1;
-    });
-
-    if (restored) {
-      DS.runtimeLog?.("warn", "cards", "Recovered an accidentally hidden chat page", { restored });
-    }
-    return restored;
-  };
-
-
-  DS.restoreOpenedCardsForSmartFilter = function restoreOpenedCardsForSmartFilter() {
-    let restored = 0;
-    for (const target of DS.qsa?.("[data-ds-hidden='1']") || []) {
-      const reason = String(target.dataset?.dsReason || "");
-      if (reason !== "opened chat" && reason !== "card:opened chat") continue;
-      DS.unhideElement?.(target);
-      restored += 1;
-    }
-    if (restored) {
-      const runtime = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
-      runtime.openedSmartFilterRestores = Number(runtime.openedSmartFilterRestores || 0) + restored;
-    }
-    return restored;
-  };
-
-  DS.ensureCardHideSafetyWatchdog = function ensureCardHideSafetyWatchdog() {
-    if (DS.state.cardHideSafetyWatchdog || !document.documentElement) return;
-    const observer = new MutationObserver(records => {
-      let restored = 0;
-      for (const record of records) {
-        const target = record.target;
-        if (!(target instanceof Element)) continue;
-        const reason = String(target.dataset?.dsReason || "");
-        const hidden = target.dataset?.dsHidden === "1" || target.classList?.contains("ds-hidden");
-        if (!hidden || !(reason.startsWith("card:") || reason === "opened chat") || !DS.isUnsafeCardHideTarget?.(target)) continue;
-        DS.unhideElement?.(target);
-        restored += 1;
-      }
-      if (restored) {
-        DS.runtimeLog?.("error", "cards", "Safety watchdog prevented a page-scale card hide", { restored, route: location.pathname });
-        DS.setQuickStatus?.("QoL prevented a listing filter from hiding the whole page.");
-      }
-      // Reuse this already-installed, attribute-only watcher for blocked cards.
-      // Native React can strip ds-hidden from an existing wrapper without
-      // adding any nodes; the main page observer deliberately watches hrefs
-      // rather than every class change for performance. Only the affected
-      // card is checked, never the full grid.
-      if (DS.state?.blockedBotIdSet?.size) DS.hideBlockedCardMounts?.(records);
-    });
-    observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["class", "data-ds-hidden", "data-ds-reason"] });
-    DS.state.cardHideSafetyWatchdog = observer;
-  };
-
-  DS.removeCardHideSafetyWatchdog = function removeCardHideSafetyWatchdog() {
-    try { DS.state.cardHideSafetyWatchdog?.disconnect?.(); } catch {}
-    DS.state.cardHideSafetyWatchdog = null;
-  };
-
   DS.addDebugBadge = function addDebugBadge(card, reason) {
     if (!DS.state.settings.debug || !card) return;
 
@@ -377,9 +286,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function preparedCardFields(card, fallbackPreparedText = "") {
-    const prepare = value => String(DS.searchableTextForMatching?.(value || "") || DS.normalize(value || "") || "").toLocaleLowerCase();
-    const title = prepare(DS.getCardTitle?.(card) || "");
-    const description = prepare(DS.getCardDescriptionText?.(card) || "");
+    // Keep both spellings for blocked-word matching. A user who blocks
+    // "TF141" or "TF 141" should match "TF141's Omega", while a rule that
+    // explicitly contains "TF141's" must continue to match as before.
+    const prepareOriginal = value => String(DS.searchableTextForMatching?.(value || "") || DS.normalize(value || "") || "").toLocaleLowerCase();
+    const prepare = value => prepareOriginal(String(value || "").replace(/([\p{L}\p{N}])['\u2019]s\b/giu, "$1"));
+    const rawTitle = DS.getCardTitle?.(card) || "";
+    const rawDescription = DS.getCardDescriptionText?.(card) || "";
+    const title = prepare(rawTitle);
+    const titleOriginal = prepareOriginal(rawTitle);
+    const description = prepare(rawDescription);
+    const descriptionOriginal = prepareOriginal(rawDescription);
+    const descriptionVariants = [...new Set([description, descriptionOriginal].filter(Boolean))];
     const creatorCandidates = [];
     const creatorSeen = new Set();
     const addCreator = rawValue => {
@@ -425,7 +343,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nativeTagLabels = DS.qsa?.("[data-testid*='tag' i] button, [data-testid*='tag' i] span, a[href*='/tag/'], button[aria-label^='tag:' i]", card)
       .map(element => element.getAttribute?.("aria-label") || element.textContent || "") || [];
     const tagValues = new Set([...cardTagLabels, ...nativeTagLabels].map(prepare).filter(Boolean));
-    const verifiedNameCandidates = title && !tagValues.has(title) ? [title] : [];
+    const verifiedNameCandidates = [...new Set([title, titleOriginal]
+      .filter(value => value && !tagValues.has(value)))];
     if (settings.autoBlockWordMatches) {
       const nativeNameLink = card?.querySelector?.(
         "a[aria-label^='chat-with-'][href*='/chat/'], a[aria-label^='chat-with-'][href*='/chatbot/']"
@@ -435,16 +354,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           String(nativeNameLink.getAttribute('aria-label') || '').replace(/^chat-with-/i, ''),
           nativeNameLink.querySelector('img[alt]')?.getAttribute('alt') || ''
         ]) {
-          const verified = prepare(candidate);
-          if (verified && !tagValues.has(verified) && verified.length <= 180) {
-            verifiedNameCandidates.push(verified);
+          for (const verified of new Set([prepare(candidate), prepareOriginal(candidate)])) {
+            if (verified && !tagValues.has(verified) && verified.length <= 180) {
+              verifiedNameCandidates.push(verified);
+            }
           }
         }
       }
     }
     if (!verifiedNameCandidates.length && settings.autoBlockWordMatches) {
       DS.qsa("h1, h2, h3, [data-testid*='name'], [data-testid*='title']", card)
-        .forEach(el => verifiedNameCandidates.push(prepare(el?.textContent || "")));
+        .forEach(el => verifiedNameCandidates.push(prepare(el?.textContent || ""), prepareOriginal(el?.textContent || "")));
     }
 
     // SpicyChat has used several different card title layouts. Keep a small set
@@ -456,11 +376,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const addCandidate = rawValue => {
       const raw = String(rawValue || "").replace(/\s+/g, " ").trim();
       if (!raw || raw.length > 180 || raw.startsWith("@")) return;
-      const value = prepare(raw);
-      if (!value || seenCandidates.has(value)) return;
-      if (["for you", "chat", "profile", "info", "new", "op"].includes(value) || tagValues.has(value)) return;
-      seenCandidates.add(value);
-      nameCandidates.push(value);
+      for (const value of new Set([prepare(raw), prepareOriginal(raw)])) {
+        if (!value || seenCandidates.has(value)) continue;
+        if (["for you", "chat", "profile", "info", "new", "op"].includes(value) || tagValues.has(value)) continue;
+        seenCandidates.add(value);
+        nameCandidates.push(value);
+      }
     };
 
     addCandidate(DS.getCardTitle?.(card) || "");
@@ -473,10 +394,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const descriptiveSeen = new Set();
     const addDescriptiveCandidate = (rawValue, el = null) => {
       if (el?.closest?.("a[href*='/creator/'], a[aria-label*='creator' i], nav, aside, header, footer")) return;
-      const value = prepare(String(rawValue || "").replace(/\s+/g, " ").trim());
-      if (!value || value.length < 2 || descriptiveSeen.has(value) || tagValues.has(value) || creatorSeen.has(value)) return;
-      descriptiveSeen.add(value);
-      descriptiveCandidates.push(value);
+      const raw = String(rawValue || "").replace(/\s+/g, " ").trim();
+      for (const value of new Set([prepare(raw), prepareOriginal(raw)])) {
+        if (!value || value.length < 2 || descriptiveSeen.has(value) || tagValues.has(value) || creatorSeen.has(value)) continue;
+        descriptiveSeen.add(value);
+        descriptiveCandidates.push(value);
+      }
     };
     DS.qsa("p, [data-tooltip-content]", card).forEach(el => {
       if (el.closest?.("button[aria-label]") && tagValues.has(prepare(el.textContent || el.getAttribute?.("data-tooltip-content") || ""))) return;
@@ -486,6 +409,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return {
       title,
       description,
+      descriptionVariants,
       creator,
       creatorCandidates,
       all,
@@ -493,7 +417,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       verifiedNameCandidates: [...new Set(verifiedNameCandidates.filter(Boolean))],
       tagCandidates: [...tagValues],
       descriptionCandidates: descriptiveCandidates,
-      nameDescriptionCandidates: [...nameCandidates, description, ...descriptiveCandidates].filter(Boolean)
+      nameDescriptionCandidates: [...nameCandidates, ...descriptionVariants, ...descriptiveCandidates].filter(Boolean)
     };
   }
 
@@ -507,7 +431,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wordMatchers = DS.state?.preparedMatchers?.blockedWords || [];
     return {
       word: settings.autoBlockWordMatches
-        ? (findPreparedMatchInFields([...fields.verifiedNameCandidates, fields.description].filter(Boolean), wordMatchers)
+        ? (findPreparedMatchInFields([...fields.verifiedNameCandidates, ...fields.descriptionVariants].filter(Boolean), wordMatchers)
           || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers)) : null,
       tag: settings.autoBlockTagMatches
         ? findPreparedMatchInFields(fields.tagCandidates, DS.state?.preparedMatchers?.blockedTags || []) : null
@@ -646,7 +570,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
       const verifiedTagMatch = settings.autoBlockTagMatches
         ? findPreparedMatchInFields(fields.tagCandidates, tagMatchers) : null;
-      const wordFields = [...fields.verifiedNameCandidates, fields.description].filter(Boolean);
+      const wordFields = [...fields.verifiedNameCandidates, ...fields.descriptionVariants].filter(Boolean);
       const verifiedWordMatch = settings.autoBlockWordMatches
         ? (findPreparedMatchInFields(wordFields, wordMatchers)
           || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers))
@@ -731,7 +655,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
         // Persistent word blocks must match a verified name or description,
         // not a tag badge caught by a broad fallback selector.
-        const strictWordFields = [...fields.verifiedNameCandidates, fields.description].filter(Boolean);
+        const strictWordFields = [...fields.verifiedNameCandidates, ...fields.descriptionVariants].filter(Boolean);
         strictWordMatch = findPreparedMatchInFields(strictWordFields, wordMatchers)
           || findUnorderedNameMatch(fields.verifiedNameCandidates, wordMatchers);
         const wordFields = fields.nameDescriptionCandidates.length
@@ -1402,7 +1326,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!el) return;
 
       const direct = el.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group']");
-      if (direct && DS.isRecommendationCardRoot?.(direct)) dirty.add(direct);
+      if (direct && DS.isRecommendationCardRoot?.(direct)) {
+        // A changed child or mounted card already identifies exactly one bot.
+        // Do not query all descendant chat links inside that card again.
+        dirty.add(direct);
+        return;
+      }
 
       const anchors = [];
       if (el.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) anchors.push(el);

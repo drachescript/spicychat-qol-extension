@@ -3,8 +3,18 @@
   "primary": "content/chat-list.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "showRandomChatButton",
+    "randomChatUseLastHomeFilters",
+    "randomChatIncludeOpened",
+    "randomChatIncludeLater",
+    "randomChatIncludeFavorites"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/chat-list.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

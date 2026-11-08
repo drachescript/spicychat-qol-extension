@@ -24,16 +24,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let activeLastTime = false;
   let lastSlowDiagnosticAt = 0;
   let lastFullRefreshAt = 0;
+  // Native React may touch the same card repeatedly without changing its
+  // searchable fields. Keep only cheap per-element snapshots, not metadata
+  // lists or a second observer.
+  let cardResults = new WeakMap();
   const text = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
   const list = v => [...new Set((Array.isArray(v) ? v : []).map(text).filter(Boolean))];
   const norm = v => DS.searchableTextForMatching?.(v) || text(v).toLowerCase();
   const compact = v => norm(String(v || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2')).replace(/[^\p{L}\p{N}]/gu, '');
-  function matches(haystack, rule) {
-    const needle = norm(rule);
-    return !!needle && (norm(haystack).includes(needle) || (compact(rule).length >= 3 && compact(haystack).includes(compact(rule))));
+  function compileMatcher(value) {
+    return { value, normalized: norm(value), compact: compact(value) };
   }
   function firstMatch(values, rules) {
-    for (const rule of rules || []) if (values.some(value => matches(value, rule))) return rule;
+    if (!rules?.length || !values?.length) return '';
+    const prepared = values.map(value => ({ normalized: norm(value), compact: compact(value) }));
+    for (const rule of rules) {
+      if (prepared.some(value => value.normalized.includes(rule.normalized) ||
+          (rule.compact.length >= 3 && value.compact.includes(rule.compact)))) return rule.value;
+    }
     return '';
   }
   function isExplore() {
@@ -65,9 +73,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function compiledRules(settings) {
     return {
       ids: new Set(list(settings.rulebookBlockedIds).map(id => id.toLowerCase())),
-      words: list(settings.blockedWords),
-      creators: list(settings.blockedCreators),
-      tags: list(settings.blockedTags)
+      words: list(settings.blockedWords).map(compileMatcher).filter(rule => rule.normalized),
+      creators: list(settings.blockedCreators).map(compileMatcher).filter(rule => rule.normalized),
+      tags: list(settings.blockedTags).map(compileMatcher).filter(rule => rule.normalized)
     };
   }
   function reasonFor(meta, settings, rules = compiledRules(settings)) {
@@ -100,6 +108,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     fullExploreRefresh = true;
     pickerDirty = true;
     changedExploreCards.clear();
+    cardResults = new WeakMap();
   }
   async function block(meta, card, button) {
     if (!UUID.test(meta.id)) return;
@@ -152,12 +161,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!isExplore() || !Array.isArray(mutations) || !mutations.length) return false;
     let relevant = false;
     const mark = card => {
-      if (!card) return;
-      if (card.isConnected) changedExploreCards.add(card);
+      if (!card || !card.isConnected) return;
+      changedExploreCards.add(card);
       relevant = true;
     };
     for (const mutation of mutations) {
       const target = mutation.target?.nodeType === 1 ? mutation.target : mutation.target?.parentElement;
+      // Button/badge animation inside our own card controls cannot alter
+      // native Rulebook metadata and must not trigger another processing pass.
+      if (target?.closest?.(BUTTON)) continue;
       mark(target?.closest?.(EXPLORE_CARD));
       for (const node of mutation.addedNodes || []) {
         if (node?.nodeType !== 1) continue;
@@ -242,26 +254,50 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     changedExploreCards.clear();
     const rules = compiledRules(settings);
     let checked = 0;
+    let unchanged = 0;
     for (const card of cards) {
       if (!card.isConnected) continue;
       const meta = metaFor(card);
       if (!UUID.test(meta.id)) continue;
+      const target = targetFor(card);
+      const signature = JSON.stringify(meta);
+      const currentReason = String(target?.dataset?.dsReason || '');
+      const wantsButton = settings.rulebookBlockingEnabled === true && settings.showRulebookBlockButtons === true;
+      const buttonPresent = !!card.querySelector(BUTTON);
+      const prior = cardResults.get(card);
+      const priorReason = String(prior?.appliedReason || '');
+      const stillApplied = priorReason
+        ? (currentReason === priorReason && target?.dataset?.dsHidden === '1' && target?.classList?.contains('ds-hidden'))
+        : (!currentReason || (!currentReason.startsWith(REASON) && !currentReason.startsWith(LANGUAGE_REASON)));
+      if (prior && prior.target === target && prior.signature === signature &&
+          prior.config === configSignature && buttonPresent === wantsButton && stillApplied) {
+        unchanged++;
+        continue;
+      }
       checked += 1;
       buttonFor(card, meta, settings);
-      const target = targetFor(card);
       const why = settings.rulebookBlockingEnabled === true ? reasonFor(meta, settings, rules) : '';
       const language = !why && languageActive
         ? DS.getPublicListingLanguageHideReason?.(meta, 'rulebook') || '' : '';
-      const currentReason = String(target?.dataset?.dsReason || '');
-      if (why) DS.hideElement?.(target, REASON + why);
-      else if (language) {
-        if (!currentReason || currentReason.startsWith(REASON) || currentReason.startsWith(LANGUAGE_REASON)) DS.hideElement?.(target, LANGUAGE_REASON + language);
+      let desiredReason = why ? REASON + why : language ? LANGUAGE_REASON + language : '';
+      if (desiredReason && !currentReason && target?.dataset?.dsHidden === '1') {
+        // Do not overwrite a separate feature's hidden state.
+        desiredReason = '';
+      }
+      if (desiredReason) {
+        if (!currentReason || currentReason.startsWith(REASON) || currentReason.startsWith(LANGUAGE_REASON)) {
+          if (currentReason !== desiredReason || target?.dataset?.dsHidden !== '1' || !target?.classList?.contains('ds-hidden')) {
+            DS.hideElement?.(target, desiredReason);
+          }
+        }
       } else if (currentReason.startsWith(REASON) || currentReason.startsWith(LANGUAGE_REASON)) DS.unhideElement?.(target);
+      cardResults.set(card, { target, signature, config: configSignature, appliedReason: desiredReason });
     }
     if (explore) {
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       perf.rulebookExploreScans = Number(perf.rulebookExploreScans || 0) + 1;
       perf.rulebookExploreCardsChecked = Number(perf.rulebookExploreCardsChecked || 0) + checked;
+      perf.rulebookExploreUnchangedCardsSkipped = Number(perf.rulebookExploreUnchangedCardsSkipped || 0) + unchanged;
       const durationMs = performance.now() - startedAt;
       perf.rulebookExploreWorstScanMs = Math.max(Number(perf.rulebookExploreWorstScanMs || 0), Math.round(durationMs * 10) / 10);
       if (durationMs >= 24 && Date.now() - lastSlowDiagnosticAt > 3000) {

@@ -1,6 +1,15 @@
+## 0.2.74
+- **Modularization — Stage 5:** Split more Settings controls, card-hide safeguards, chat startup, menu and tab-refresh helpers into separate modules.
+- Reduced repeated listing and Rulebook card processing while browsing and scrolling.
+- Kept chat-menu click handling off non-chat pages.
+- Added clearer Bot Status scan counters for duplicate skips and worker checks.
+- Fixed blocked-word matching for possessive bot names, including TF141's.
+- Fixed bulk selection highlighting parts of a chatbot instead of selecting the whole card.
+
 ## 0.2.73
 - Improved performance mode for newer Android chats, without hiding their messages.
-- Added a check that distinguishes unavailable blocked bots from bots that haven't been checked yet.
+- Made it easier to keep Blocked and Later bots in sync between phone and PC.
+- Added a read-only check that distinguishes unavailable blocked bots from bots that haven't been checked yet.
 - Added an overview of locally saved bookmarks across conversations and a read-only recovery review.
 - Made model shortcuts easier to add, order and remove.
 - Added a guided backup package for moving your own bots and Lorebooks to another account.

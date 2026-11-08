@@ -4,10 +4,14 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
-    "showChatTagAddButtons",
-    "showChatTagLinks"
+    "showChatTagLinks",
+    "showChatTagAddButtons"
   ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/chat-tags.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,

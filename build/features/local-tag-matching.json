@@ -3,8 +3,16 @@
   "primary": "content/local-tag-matching.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "localTagMatchEnabled",
+    "localTagMatchRules",
+    "localTagMatchFetchPublic"
+  ],
   "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/local-tag-matching.js"
+  ],
+  "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
