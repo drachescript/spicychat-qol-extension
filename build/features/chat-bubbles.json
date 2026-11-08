@@ -53,6 +53,9 @@
   "settingsFiles": [
     "settings/feature-panels/chat-bubbles.js"
   ],
+  "styleFiles": [
+    "content/styles/chat-bubble-themes.css"
+  ],
   "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,

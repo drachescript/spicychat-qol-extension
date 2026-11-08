@@ -1,3 +1,8 @@
+## 0.2.75
+- **Modularization — Stage 6:** Updated feature asset ownership so development packages include the correct styles and background services.
+- Fixed saved Support History checks and clearing in the Android app.
+- Improved Android support exports to recognize verified saved files and preserve newer history records.
+
 ## 0.2.74
 - **Modularization — Stage 5:** Split more Settings controls, card-hide safeguards, chat startup, menu and tab-refresh helpers into separate modules.
 - Reduced repeated listing and Rulebook card processing while browsing and scrolling.

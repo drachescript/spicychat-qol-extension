@@ -14,6 +14,9 @@
   "settingsFiles": [
     "settings/feature-panels/bot-organizer.js"
   ],
+  "styleFiles": [
+    "content/styles/bot-organizer.css"
+  ],
   "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,

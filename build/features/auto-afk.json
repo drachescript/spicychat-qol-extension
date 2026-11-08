@@ -18,6 +18,9 @@
   "settingsFiles": [
     "settings/feature-panels/auto-afk.js"
   ],
+  "backgroundFiles": [
+    "background/background-auto-afk.js"
+  ],
   "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,

@@ -13,10 +13,10 @@
     "personas"
   ],
   "notes": [
-    "Source baseline: SpicyChat QoL Chrome v0.2.74 with QoL 29 Stage 5 cumulative changes applied (November 8, 2026).",
+    "Source baseline: SpicyChat QoL Chrome v0.2.75 with QoL 29 Stage 6 cumulative changes applied (November 8, 2026).",
     "These bundle boundaries describe the current Full runtime and intended Custom Lite ownership; they are not proof that individual bundles can be omitted safely.",
     "The Full manifest.json is authoritative for content-script and stylesheet loading order. options.html is authoritative for Settings script loading order.",
-    "Stage 5: extracted main runtime helpers remain part of Core until shared listeners and lifecycle/dependency contracts are verified for Custom builds.",
+    "Stage 6: extracted main runtime helpers remain part of Core until shared listeners and lifecycle/dependency contracts are verified for Custom builds.",
     "Listing-card hide/recovery safeguards are now declared in the Listings & Discovery bundle.",
     "The Settings required asset list enumerates all currently loaded feature-panel scripts; feature-specific panel omission is not yet verified.",
     "CSS declarations contain ordered Full stylesheet slices. Some legacy CSS remains shared and cannot be omitted blindly.",

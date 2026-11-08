@@ -19,6 +19,9 @@
   "settingsFiles": [
     "settings/feature-panels/android-app.js"
   ],
+  "styleFiles": [
+    "content/styles/android-app.css"
+  ],
   "settingsMarkupIsolated": true,
   "settingsIsolated": false,
   "stylesIsolated": false,
