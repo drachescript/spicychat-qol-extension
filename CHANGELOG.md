@@ -1,3 +1,14 @@
+## 0.2.76
+- Separated runtime feature-demand checks and chat message-count caching into dedicated helpers.
+- Reduced unnecessary card class/style updates on listings and improved blocked-card recovery efficiency.
+- Reduced repeated message-subtree checks during native chat updates.
+- Added clearer preparation and navigation timing labels to recommendation feedback diagnostics.
+- Fixed promo-banner hiding on Home and Chats, including the new Rulebooks/Lorebooks image carousel and previously missed image-only banners.
+- Added an optional Open in Archive shortcut to bot cards and profiles.
+- **Modularization — Stage 7:** Separated chat-history batching, lazy message enhancement, and essential chat-control repairs into dedicated runtime modules.
+- Separated route-change cleanup and targeted Settings refresh decisions from the main runtime.
+- Avoided native composer sizing and padding overrides on Firefox Android to address reported caret drift.
+
 ## 0.2.75
 - **Modularization — Stage 6:** Updated feature asset ownership so development packages include the correct styles and background services.
 - Fixed saved Support History checks and clearing in the Android app.

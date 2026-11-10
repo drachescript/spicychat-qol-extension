@@ -839,7 +839,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function scheduleStackedComposerAlignment(active = true) {
-    if (!active) {
+    // Keep stacked *messages*, but do not resize or translate the native
+    // composer on Firefox Android: that can desynchronize its caret handle.
+    const ua = String(navigator.userAgent || "");
+    const firefoxAndroid = /Android/i.test(ua) && /(?:Firefox|Fennec|Focus)\//i.test(ua);
+    if (!active || firefoxAndroid) {
       clearStackedComposerAlignment();
       return;
     }

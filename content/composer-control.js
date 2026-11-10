@@ -280,6 +280,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // Firefox for Android positions its native textarea caret/selection handle
+  // independently of some flex sizing changes. Keep the native composer tree
+  // untouched there; the Android WebView and Chromium fixes still run.
+  function firefoxAndroidComposerCaretSafe() {
+    const ua = String(navigator.userAgent || "");
+    return /Android/i.test(ua) && /(?:Firefox|Fennec|Focus)\//i.test(ua);
+  }
+
+  let firefoxComposerCleaned = false;
+  function releaseFirefoxComposerOverrides() {
+    if (firefoxComposerCleaned) return;
+    firefoxComposerCleaned = true;
+    document.querySelectorAll('[data-ds-mobile-composer-row="1"]').forEach(node => {
+      node.removeAttribute("data-ds-mobile-composer-row");
+    });
+    document.querySelectorAll('[data-ds-mobile-composer-field="1"]').forEach(node => {
+      node.removeAttribute("data-ds-mobile-composer-field");
+    });
+    document.querySelectorAll('.ds-mobile-chat-send-wrapper').forEach(node => {
+      node.classList.remove('ds-mobile-chat-send-wrapper');
+    });
+    document.querySelectorAll('.ds-mobile-chat-send-button').forEach(node => {
+      node.classList.remove('ds-mobile-chat-send-button');
+    });
+  }
+
   function androidAppRuntime() {
     const env = DS.getRuntimeEnvironment?.() || DS.getAndroidEnvironment?.() || {};
     return !!(
@@ -297,6 +323,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function normalizeMobileSendWrapper() {
     if (!mobileLayoutActive()) return;
+    // No forced flex basis, width, or button wrapper on Firefox Android.
+    // Native layout must remain authoritative while its IME is active.
+    if (firefoxAndroidComposerCaretSafe()) {
+      releaseFirefoxComposerOverrides();
+      return;
+    }
     const textarea = composerTextarea();
     if (!textarea) return;
 

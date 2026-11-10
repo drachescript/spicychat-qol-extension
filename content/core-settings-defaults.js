@@ -142,6 +142,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     hidePremium: false,
     hideFloatingPremiumPopups: false,
     hideAdvertBanners: false,
+    showArchiveWebsiteLinks: false,
     expandModelSelectorDescriptions: false,
     hideModelUpgradeButtons: false,
     customizeModelQuickMenu: false,

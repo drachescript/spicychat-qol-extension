@@ -87,6 +87,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const textSelector = "div[class*='overflow-wrap']";
     const decorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
     const textAncestorCache = new WeakMap();
+    const inspectedInsertedSubtrees = new WeakSet();
+    let repeatedSubtreeSkips = 0;
 
     const isDecoration = node => {
       const el = node instanceof Element ? node : node?.parentElement;
@@ -127,11 +129,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       for (const node of mutation.addedNodes || []) {
         candidateNodes += 1;
         if (!(node instanceof Element) || !node.isConnected) continue;
-        // Only descend into the newly inserted subtree, never the existing
-        // parent message list. Removed React subtrees are handled by the
-        // independent mount/unmount tracker, not the text-cache invalidator.
+        if (inspectedInsertedSubtrees.has(node)) {
+          repeatedSubtreeSkips += 1;
+          continue;
+        }
+        inspectedInsertedSubtrees.add(node);
+        // Only descend into newly inserted subtrees; avoid revisiting the
+        // same subtree multiple times within one native React observer batch.
         const mounted = node.matches?.(messageSelector) ? [node] :
-          (node.querySelectorAll?.(messageSelector) || []);
+          (node.childElementCount ? (node.querySelectorAll?.(messageSelector) || []) : []);
         for (const child of mounted) {
           if (child.isConnected && !child.parentElement?.closest?.(messageSelector)) roots.add(child);
         }
@@ -140,6 +146,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    counters.messageMutationRepeatedSubtreeSkips = Number(counters.messageMutationRepeatedSubtreeSkips || 0) + repeatedSubtreeSkips;
     counters.messageMutationCandidateNodes = Number(counters.messageMutationCandidateNodes || 0) + candidateNodes;
     counters.messageMutationDistinctRoots = Number(counters.messageMutationDistinctRoots || 0) + roots.size;
     counters.messageMutationTextRoots = Number(counters.messageMutationTextRoots || 0) + textRoots.size;

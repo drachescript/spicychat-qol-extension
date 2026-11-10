@@ -436,6 +436,8 @@ async function submitQuickDislikeUsingNativeUi(message, botId) {
     jobId, botId, botName: String(message?.botName || ""), startedAt: Date.now()
   });
   stageMs.prepareMs = Date.now() - stageStartedAt;
+  stageMs.navigationMode = prepared?.reusedWithoutReload === true ? "spa-reuse" :
+    prepared?.reused === true ? "full-navigation" : "new-helper";
   if (!prepared?.ok || !prepared.tabId) {
     return { ok: false, status: "native-rating-worker-unavailable", requestSent: false, stageMs };
   }

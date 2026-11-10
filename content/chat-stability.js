@@ -307,9 +307,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const cfg = settings();
-    const placement = ["inside-right", "outside-left", "outside-right"].includes(cfg.composerShortcutPlacement)
+    const requestedPlacement = ["inside-right", "outside-left", "outside-right"].includes(cfg.composerShortcutPlacement)
       ? cfg.composerShortcutPlacement
       : "inside-right";
+    const ua = String(navigator.userAgent || "");
+    const firefoxAndroid = /Android/i.test(ua) && /(?:Firefox|Fennec|Focus)\//i.test(ua);
+    // Gecko's mobile caret must not be combined with QoL's live-resized
+    // right padding inside the textarea. Keep optional tools accessible
+    // alongside the composer instead of overlaying its text area.
+    const placement = firefoxAndroid && requestedPlacement === "inside-right"
+      ? "outside-right"
+      : requestedPlacement;
     holder.setAttribute("data-ds-placement", placement);
 
     if (placement === "inside-right") {

@@ -1,5 +1,6 @@
 // Small feature -> Settings ownership map. Values remain untouched when omitted.
 window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
+  "archive-website-link": ["showArchiveWebsiteLinks"],
   "accessibility": ["qolInterfaceScale", "chatTextScale", "chatLineSpacing", "settingsReadingFont", "settingsReadingSize", "settingsReadingLineSpacing", "settingsReadingLetterSpacing", "settingsReadingContrast", "settingsReadingLargerControls"],
   "chat-width-controls": ["enableChatWidthControls", "chatStreamWidth", "chatBubbleMaxWidth", "chatComposerWidth"],
   "list-fill": ["autoFillListings", "autoFillTargetCards", "autoFillMaxClicks"],

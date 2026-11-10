@@ -51,6 +51,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "soundscape cleanup": "interface",
     "premium cleanup": "interface",
     "advert banners": "interface",
+    "archive website links": "interface",
     "notifications": "interface",
     "animation controls": "interface",
     "animation cleanup": "interface",
