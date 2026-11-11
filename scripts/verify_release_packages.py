@@ -135,8 +135,12 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
             problems.append('package filename must end with -chrome.zip or -firefox.zip')
         if is_firefox:
             declared = manifest.get('background', {}).get('scripts')
-            if declared != import_order:
-                problems.append(f'Firefox background scripts wrong/order mismatch: {declared!r} != {import_order!r}')
+            # Firefox loads the shared sync service after the worker imports.
+            # Keep this in sync with firefox_manifest() in build_extension.py.
+            expected_firefox_scripts = import_order + ['shared/sync-service.js']
+            if declared != expected_firefox_scripts:
+                problems.append(f'Firefox background scripts wrong/order mismatch: {declared!r} != {expected_firefox_scripts!r}')
+            require('shared/sync-service.js', 'Firefox background script')
             if not manifest.get('browser_specific_settings', {}).get('gecko', {}).get('id'):
                 problems.append('Firefox Gecko extension ID missing')
         else:
