@@ -138,6 +138,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     ].some(phrase => value.includes(phrase));
   }
 
+  // Current SpicyChat Home promos can be image-only. Keep the exact asset
+  // signatures alongside the dismissible-carousel check so a single lazy-
+  // mounted slide can be found without searching all cards or chat images.
+  const NATIVE_BANNER_IMAGE_SELECTOR = [
+    'img[alt="banner" i]',
+    'img[src*="Rulebooks---Anime--Desktop" i]',
+    'img[src*="Lorebooks---Desktop" i]'
+  ].join(", ");
+
   function imageLooksPromotional(img) {
     if (!img) return false;
 
@@ -153,6 +162,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "annualdesk",
       "tts-v3-desktop",
       "lorebooks-desktop",
+      "rulebooks---anime--desktop",
+      "lorebooks---desktop",
       "desktop_1_-_3000x380",
       "desktop_1__1_",
       "desktop-2.png",
@@ -162,6 +173,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "don't just imagine it",
       "dont just imagine it"
     ].some(phrase => combined.includes(phrase));
+  }
+
+  // SpicyChat's current Home and Chats promotions may have no text/CTA.
+  // Recognize ONLY the native, dismissible banner wrappers on these two routes;
+  // never infer that an arbitrary large image or bot card is an advertisement.
+  function nativeBannerRoot(img) {
+    if (!img?.matches?.(NATIVE_BANNER_IMAGE_SELECTOR)) return null;
+    const path = String(location.pathname || "/").replace(/\/+$/, "") || "/";
+    if (path !== "/" && path !== "/chats") return null;
+    let node = img.parentElement;
+    for (let i = 0; node && i < 7; i++, node = node.parentElement) {
+      if (node === document.body || node.id === "root" || isProtectedArea(node)) break;
+      if (!node.classList?.contains("overflow-hidden") ||
+          !node.querySelector?.('button[aria-label="X-button"]')) continue;
+      // Home uses a rounded, single-slide banner; Chats uses a snap carousel.
+      const images = node.querySelectorAll(NATIVE_BANNER_IMAGE_SELECTOR);
+      if (!images.length || images.length > 8) continue;
+      if (path === "/chats") {
+        const grid = node.parentElement;
+        if (grid?.classList?.contains("grid") && grid.classList.contains("mb-2")) return grid;
+      } else if (node.classList.contains("relative") && node.classList.contains("grow")) {
+        return node;
+      }
+    }
+    return null;
   }
 
   function rootHasPromoSignal(root) {
@@ -282,6 +318,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findBannerRoot(el) {
+    const structural = el?.matches?.(NATIVE_BANNER_IMAGE_SELECTOR) ? nativeBannerRoot(el) : null;
+    if (structural) return structural;
     const slide = findSnapSlide(el);
 
     if (slide && rootHasPromoSignal(slide)) {
@@ -323,7 +361,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (seen.has(el) || isProtectedArea(el) || el.closest?.("[id^='message-']")) continue;
         seen.add(el);
         const matches = el.tagName === "IMG"
-          ? imageLooksPromotional(el)
+          ? (imageLooksPromotional(el) || !!nativeBannerRoot(el))
           : hasPromoPhrase((el.textContent || el.getAttribute("aria-label") || "").slice(0, 2400));
         if (matches) out.push(el);
       }
@@ -337,8 +375,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const root of cachedBannerRoots) {
       if (root?.isConnected && (root === el || root.contains(el))) return true;
     }
-    if (el.tagName === "IMG" && imageLooksPromotional(el)) return true;
+    if (el.tagName === "IMG" && (imageLooksPromotional(el) || !!nativeBannerRoot(el))) return true;
     if (el === document.documentElement || el === document.body || el.id === "root" || Number(el.childElementCount || 0) > 80) return false;
+    const nativeShell =
+      (el.classList?.contains("grid") && el.classList.contains("mb-2")) ||
+      (el.classList?.contains("relative") && el.classList.contains("overflow-hidden"));
+    if (nativeShell && el.querySelector?.('button[aria-label="X-button"]') &&
+        [...el.querySelectorAll(NATIVE_BANNER_IMAGE_SELECTOR)].slice(0, 8).some(nativeBannerRoot)) return true;
     // Message-list growth must not wake advert cleanup just because an ancestor
     // happens to contain an old promotional element elsewhere on the page.
     if (DS.isSingleChatPage?.() && el.querySelector?.("[id^='message-']") && !el.matches?.("[role='banner'], .snap-center, [style*='scroll-snap-align']")) return false;
@@ -381,6 +424,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "img[src*='annualdesk' i]",
     "img[src*='tts-v3-desktop' i]",
     "img[src*='lorebooks-desktop' i]",
+    "img[src*='rulebooks---anime--desktop' i]",
+    "img[src*='lorebooks---desktop' i]",
     "img[src*='halloween-contest' i]",
     "img[src*='desktop_1_-_3000x380' i]",
     "img[src*='desktop_1__1_' i]",
@@ -390,7 +435,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "img[alt*='build worlds' i]",
     "img[alt*='lorebook' i]",
     "img[alt*='go annual' i]",
-    "img[alt*='unlock more memory' i]"
+    "img[alt*='unlock more memory' i]",
+    "img[alt='banner' i]"
   ].join(", ");
 
   function bannerDiscoveryScopes() {
@@ -403,7 +449,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (node instanceof Element && !isProtectedArea(node)) scopes.add(node);
     });
     document.querySelectorAll?.(PROMO_IMAGE_SELECTOR).forEach(img => {
-      if (!imageLooksPromotional(img) || isProtectedArea(img)) return;
+      if (isProtectedArea(img) || (!imageLooksPromotional(img) && !nativeBannerRoot(img))) return;
       const slide = findSnapSlide(img);
       scopes.add(slide || img.parentElement || img);
     });
@@ -488,7 +534,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (combined.includes("annual")) return "annual";
     if (combined.includes("memory")) return "memory";
     if (combined.includes("voice") || combined.includes("tts-v3")) return "voices";
-    if (combined.includes("lorebook")) return "lorebook";
+    if (combined.includes("lorebook") || combined.includes("rulebook")) return "lorebook";
     return "promo";
   }
 
