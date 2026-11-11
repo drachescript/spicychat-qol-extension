@@ -1351,15 +1351,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return output;
   }
 
-  function stripOrphanCombiningMarks(value) {
+  function stripOrphanCombiningMarks(value, { preserveEmojiSelectors = false } = {}) {
     let output = "";
     let previousBase = false;
+    let previousEmoji = false;
     for (const character of String(value || "")) {
       if (/\p{M}/u.test(character)) {
-        if (previousBase) output += character;
+        if (previousBase || (preserveEmojiSelectors && previousEmoji && /[\uFE0E\uFE0F]/u.test(character))) output += character;
         continue;
       }
       output += character;
+      previousEmoji = /[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(character);
       previousBase = /[\p{L}\p{N}]/u.test(character);
       if (/\s|[\p{P}\p{S}]/u.test(character)) previousBase = false;
     }
@@ -1391,6 +1393,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return out;
   }
 
+  function removeEmojiSequences(value) {
+    // Include ZWJ families, skin tones, flags and keycaps without removing plain
+    // digits or punctuation. Run only when the separate emoji option is enabled.
+    return String(value || "")
+      .replace(/([★☆✦✧✩✪✫✬✭✮✯✰♡♥])(?!\uFE0F)|(?:\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3|[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})?(?:\u200D[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})?)*)/gu,
+        (match, ornament) => ornament || " ")
+      .replace(/[\uFE0E\uFE0F\u20E3\u200D]/g, "");
+  }
+
   DS.normalizeTextForMatching = function normalizeTextForMatching(value, options = {}) {
     const settings = DS.state?.settings || DS.DEFAULT_SETTINGS || {};
     const enabled = settings.textNormalizationEnabled !== false;
@@ -1403,7 +1414,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (settings.normalizeInvisibleCharacters !== false) {
       text = text
-        .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "")
+        .replace(/[\u200B-\u200C\u200E-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "")
+        // Keep ZWJ sequences for visible emojis unless emoji removal was asked for.
+        .replace(/\u200D/g, (joiner, index, source) => {
+          if (settings.normalizeEmojis) return "";
+          const before = Array.from(source.slice(0, index)).slice(-2).join("");
+          const after = Array.from(source.slice(index + 1))[0] || "";
+          return /[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:\uFE0F|\p{Emoji_Modifier})?$/u.test(before) &&
+            /^[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(after) ? joiner : "";
+        })
         .replace(/[\u00AD]/g, "");
     }
 
@@ -1431,8 +1450,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (settings.normalizeDecorativeSymbols || options.stripDecorativeSymbols) {
       text = text
-        .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, " ")
-        .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥❤💕💖💗💘💝💞💟]/gu, " ")
+        .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥](?!\uFE0F)/gu, " ")
         .replace(/[꧁꧂◦°⋆]+/gu, " ")
         .replace(/[ᩚ]/gu, " ")
         // Decorative title suffixes often mix historic glyph blocks, combining
@@ -1441,9 +1459,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         .replace(/[\u{13000}-\u{1342F}]/gu, " ")
         .replace(/[\u08E3-\u0902₊₋₌⁺⁻⁼]+/gu, " ")
         .replace(/[|｜¦]+/g, " | ");
-      text = stripOrphanCombiningMarks(text);
+      // Do not strip VS16 from an emoji that the user elected to keep.
+      text = stripOrphanCombiningMarks(text, { preserveEmojiSelectors: !settings.normalizeEmojis });
     }
 
+    if (settings.normalizeEmojis || options.stripEmojis) text = removeEmojiSequences(text);
     return text;
   };
 
