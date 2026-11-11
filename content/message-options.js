@@ -24,31 +24,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
   }
 
-  function getDropdownHolder(button) {
-    return button.closest(".relative") || button.parentElement || button;
+  function getMessageRoot(button) {
+    // A native header can contain dropdowns and message-looking text too.
+    // Never attach per-message controls outside a real message-scoped root.
+    return button?.closest?.("div[id^='message-']") || null;
   }
 
-  function getMessageRoot(button) {
-    let node = button;
-
-    for (let i = 0; node && i < 10; i++, node = node.parentElement) {
-      if (node === document.body || node.id === "root") break;
-
-      const hasDropdown = !!node.querySelector("button[aria-label='message-dropdown']");
-      const hasMessageText = !!node.querySelector("span.leading-6, div[class*='overflow-wrap'], p");
-      const hasMessageTools = !!node.querySelector("button[aria-label='RefreshCcw-button'], button[aria-label='MessageSquarePlus-button'], button[aria-label='Star-button']");
-
-      if (hasDropdown && (hasMessageText || hasMessageTools)) {
-        return node;
-      }
-    }
-
-    return button.closest("div") || button;
+  function getDropdownHolder(button) {
+    const root = getMessageRoot(button);
+    if (!root) return null;
+    const parent = button.parentElement;
+    if (!parent || parent === root || !root.contains(parent)) return null;
+    // If SpicyChat moved the button into a message-body wrapper, leave the
+    // native dropdown alone instead of inserting controls into the prose.
+    if (parent.querySelector("textarea, div[class*='overflow-wrap']")) return null;
+    if (parent.querySelectorAll("button[aria-label='message-dropdown']").length !== 1) return null;
+    const relative = button.closest(".relative");
+    if (relative && relative !== root && root.contains(relative) &&
+        relative.querySelectorAll("button[aria-label='message-dropdown']").length === 1 &&
+        !relative.querySelector("textarea, div[class*='overflow-wrap']")) return relative;
+    return parent;
   }
 
   function isAiMessage(button) {
     const root = getMessageRoot(button);
-    return !!root.querySelector("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
+    return !!root?.querySelector("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
   }
 
   function hasUploadedUserImage(sourceButton) {
@@ -130,7 +130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return includeHidden || isVisible(button);
     };
 
-    const local = DS.qsa(exact, holder).filter(accept);
+    const local = holder ? DS.qsa(exact, holder).filter(accept) : [];
     if (local.length) return local;
 
     const sourceRect = sourceButton.getBoundingClientRect();
@@ -400,6 +400,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!dropdownButton || dropdownButton.closest("#ds-qol-panel, .ds-message-quick-actions")) return;
     const settings = DS.state?.settings || {};
 
+    // Guard before hiding SpicyChat's native menu or creating a QoL toolbar.
+    // A header dropdown or stale React portal must remain untouched.
+    if (!getMessageRoot(dropdownButton)) return;
     const holder = getDropdownHolder(dropdownButton);
     if (!holder) return;
 
@@ -526,7 +529,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const dynamicActions = settings.messageQuickActionResend === true ||
       settings.messageQuickActionRemoveImage === true;
     if (dynamicActions && Number(DS.getMessageRootRevision?.(root) || 0) !== Number(state.revision || 0)) return false;
-    if (!state.holder?.isConnected || state.holder !== getDropdownHolder(button)) return false;
+    if (!state.holder?.isConnected || !getMessageRoot(button) || state.holder !== getDropdownHolder(button)) return false;
     if (button.dataset.dsMessageQuickReady !== signature) return false;
     if (state.hasActions) {
       const bar = state.bar;
@@ -605,6 +608,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     buttons
+      .filter(button => !!getMessageRoot(button))
       .filter(button => !button.closest("#ds-qol-panel"))
       .filter(button => !DS.isMessageEditPending?.(button.closest("div[id^='message-']")))
       .forEach(button => {

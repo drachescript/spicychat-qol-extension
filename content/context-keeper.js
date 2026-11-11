@@ -1418,33 +1418,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     renderStatus();
   }
 
-  function placeMessageKeepButton(root, button) {
-    if (!(root instanceof Element) || !(button instanceof Element)) return;
+  function placeMessageKeepButton(root, button, dropdown) {
+    if (!(root instanceof Element) || !(button instanceof Element) ||
+        !(dropdown instanceof Element) || !root.contains(dropdown)) return false;
 
-    const dropdown = root.querySelector("button[aria-label='message-dropdown']");
-    const holder = dropdown?.closest?.(".relative") || dropdown?.parentElement || null;
-    if (!holder) {
-      // Native toolbar may temporarily mount without the three-dot control.
-      // Keep the action beside the header rather than putting it into message text.
-      const header = root.querySelector("a[aria-label='chatbot-profile']")?.closest?.(".flex") ||
-        root.querySelector("button[aria-label='message-dropdown']")?.parentElement || null;
-      if (header && button.parentElement !== header) header.append(button);
-      else if (!header && button.parentElement !== root) root.append(button);
-      return;
+    // Attach to the dropdown's IMMEDIATE control wrapper. Using the nearest
+    // `.relative` ancestor can select the entire message / chat content after
+    // a native layout change, stretching one Keep button into a full-width row.
+    // Never append to the message body while its toolbar is still mounting.
+    const holder = dropdown.parentElement;
+    if (!(holder instanceof Element) || !root.contains(holder) ||
+        holder.matches("button, textarea, [contenteditable='true']")) return false;
+    if (button.parentElement !== holder || button.nextSibling !== dropdown) {
+      holder.insertBefore(button, dropdown);
     }
-
-    // Keep Context Keeper OUTSIDE message-options' quick-action bar. That bar is
-    // intentionally rebuilt with replaceChildren() when SpicyChat rerenders a
-    // message toolbar, which used to delete Keep while leaving this message's
-    // ready marker behind. As a sibling, Keep survives quick-action rebuilds.
-    const dropdownWrapper = dropdown?.parentElement;
-    if (dropdownWrapper && dropdownWrapper.parentElement === holder) {
-      if (button.parentElement !== holder || button.nextSibling !== dropdownWrapper) {
-        holder.insertBefore(button, dropdownWrapper);
-      }
-    } else if (button.parentElement !== holder) {
-      holder.append(button);
-    }
+    return true;
   }
 
   // React frequently replaces native message toolbars before the background
@@ -1473,10 +1461,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!(root instanceof Element) || !root.isConnected || DS.isMessageEditPending?.(root)) return false;
     if (!DS.state?.settings?.enableContextKeeper || DS.state?.settings?.contextKeeperMessageButtons !== true || !DS.isSingleChatPage?.()) return false;
 
-    // React can leave an obsolete Keep node behind while replacing the native
-    // toolbar. Keep exactly one live button attached to the current dropdown
-    // holder and discard stale duplicates from older toolbar instances.
+    // The native toolbar can temporarily disappear during React remounts.
+    // Never place a Keep button directly in the message text: it could inherit
+    // a full-width row or an overlay position from the site's layout.
+    const dropdown = root.querySelector("button[aria-label='message-dropdown']");
     const buttons = Array.from(root.querySelectorAll(`.${BUTTON_CLASS}`));
+    if (!dropdown?.isConnected) {
+      buttons.forEach(candidate => candidate.remove());
+      delete root.dataset.dsContextKeeperReady;
+      return false;
+    }
     let button = buttons.find(candidate => candidate.isConnected) || null;
     buttons.forEach(candidate => { if (candidate !== button) candidate.remove(); });
 
@@ -1537,7 +1531,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
     }
 
-    placeMessageKeepButton(root, button);
+    if (!placeMessageKeepButton(root, button, dropdown)) {
+      button.remove();
+      delete root.dataset.dsContextKeeperReady;
+      return false;
+    }
     root.dataset.dsContextKeeperReady = "1";
     return true;
   }

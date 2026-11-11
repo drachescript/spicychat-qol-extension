@@ -1552,6 +1552,33 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
   cursor: pointer;
 }
 
+/* Native Memory Manager V2 controls: compact, non-overlay actions. */
+[data-testid="MemoryManagerV2-List"] .ds-memory-select-control {
+  padding-top: 5px;
+  padding-right: 4px;
+}
+.ds-memory-copy-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 11px/1.3 system-ui, sans-serif;
+  border: 1px solid rgba(150, 150, 160, .45);
+  border-radius: 6px;
+  padding: 3px 5px;
+  margin: 1px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#ds-memory-bulk-toolbar .ds-memory-native-lifecycle {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: .85;
+}
+#ds-memory-bulk-toolbar .ds-memory-native-lifecycle[hidden] { display: none; }
+
 /* Floating scroll navigation helpers */
 .ds-scroll-nav-button {
   position: fixed;

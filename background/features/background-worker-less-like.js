@@ -770,9 +770,11 @@ async function runDirectCharacterFeedback(message, mode) {
   // cached tab identity directly instead of tabs.get + lifecycle/session writes
   // for every bot. A real send failure still falls through to the existing
   // self-heal/closed-worker path below.
-  const worker = cachedReadyQuickLessLikeBulkWorker(runId)
-    || await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
+  const cachedWorker = cachedReadyQuickLessLikeBulkWorker(runId);
+  const worker = cachedWorker || await ensureQuickLessLikeRecommendationWorker(runId, { allowReload: true });
   const workerReadyMs = Date.now() - workerStartedAt;
+  const workerPreparationMode = cachedWorker ? "cached-ready" :
+    worker?.cached === true ? "ready-cache-probe" : "readiness-probe";
   if (!worker?.ready) {
     return { ...worker, ok: false, feedbackTabsTried: worker?.tabId ? 1 : 0, requestSent: false, networkAttempts: 0, workerReadyMs, totalMs: Date.now() - totalStartedAt };
   }
@@ -857,6 +859,7 @@ async function runDirectCharacterFeedback(message, mode) {
   return {
     ...result,
     workerReadyMs,
+    workerPreparationMode,
     coordinatorWaitMs,
     feedbackMs,
     availabilityMs: Number(result?.availabilityMs || 0),

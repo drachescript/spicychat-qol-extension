@@ -16,6 +16,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     runtimeCounters, pauseReruns, getPauseRerunsUntil: () => pauseRerunsUntil,
     desktopAppPerformanceGuardActive
   });
+  const { scheduleChatHistoryBatchRefresh, isLikelyHistoryInsertionBurst } =
+    DS.createMainChatHistoryBatches({ runtimeCounters, loadedChatMessageCount });
+  const { repairEssentialChatControls, scheduleEssentialChatControls, clearEssentialChatDirtyRoots } =
+    DS.createMainEssentialChatControls({ runtimeCounters });
+  const { primeLargeChatMessageLane, scheduleLazyHistoryEnhancement } =
+    DS.createMainLazyHistory({ runtimeCounters });
+  const { changedSettingNames, slowDirtyForSettingChanges } = DS.mainStorageDirtyGroups;
   const { rerunAfterMenuSettles, installChatMenuGuards } = DS.createMainChatMenuGuards({
     pauseReruns, scheduleChatHistoryBatchRefresh, prepareEditedMessageForSave
   });
@@ -23,6 +30,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     startChatStartupQuietWindow, chatStartupQuietActive, scheduleChatStartupQuietResume,
     chatStartupWarmupActive, chatStartupWarmupRemainingMs } = DS.createMainChatStartupGuard({
     loadedChatMessageCount, scheduleSavedOpenedLane, primeLargeChatMessageLane
+  });
+  const { checkRouteChange } = DS.createMainRouteChange({
+    runtimeCounters,
+    clearSlowThrottle: () => slowStepThrottle.clear(),
+    clearEssentialChatDirtyRoots,
+    clearMessageEnhancerQuiet: () => {
+      clearTimeout(messageEnhancerQuietTimer);
+      messageEnhancerQuietTimer = null;
+    },
+    resetMessageEditGuards, clearBlockedRefreshBatch,
+    invalidateLoadedChatMessageCount, loadedChatMessageCount,
+    startChatStartupQuietWindow, startCreatorProfileStartupQuietWindow,
+    scheduleNonChatPresentationRecovery, scheduleSavedOpenedLane, pauseReruns
   });
   const installRefreshTrackers = DS.createMainRefreshTrackers({
     runtimeCounters, checkRouteChange, scheduleNonChatPresentationRecovery,
@@ -48,8 +68,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let slowRunning = false;
   let slowPending = false;
   let chatMessageCountCache = { route: "", count: 0, dirty: true };
-  let chatHistoryBatchTimer = null;
-  let chatHistoryMutationBurst = { lastAt: 0, count: 0 };
   let savedOpenedLaneTimer = null;
   let savedOpenedLaneRunning = false;
   let savedOpenedLanePending = false;
@@ -198,26 +216,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.scheduleRun?.({ priority: "critical", source: "menu-settled" });
       DS.scheduleRun?.({ priority: "slow", source: "menu-settled" });
     }, ms + 150);
-  }
-
-  function scheduleChatHistoryBatchRefresh() {
-    const counters = runtimeCounters();
-    if (!chatHistoryBatchTimer) counters.historyBatches = Number(counters.historyBatches || 0) + 1;
-    const quietMs = loadedChatMessageCount() >= 250 ? 1450 : 1100;
-    DS.state.chatHistoryBatchUntil = Date.now() + quietMs;
-    counters.historyBatchDeferrals = Number(counters.historyBatchDeferrals || 0) + 1;
-    document.documentElement.classList.add("ds-qol-history-loading");
-    clearTimeout(chatHistoryBatchTimer);
-    chatHistoryBatchTimer = setTimeout(() => {
-      chatHistoryBatchTimer = null;
-      DS.state.chatHistoryBatchUntil = 0;
-      if (!DS.state.bulkChatHistoryLoadActive) document.documentElement.classList.remove("ds-qol-history-loading");
-      DS.bumpDomRevision?.();
-      // One message-lane wake is enough here. In Normal mode it routes through
-      // the critical lane; adaptive modes process the dirty message roots
-      // directly and schedule the slower cosmetic lane after the chat is quiet.
-      DS.scheduleMessageLane?.("history-batch-settled");
-    }, quietMs + 90);
   }
 
   function dedicatedBackgroundWorkerKind() {
@@ -1180,6 +1178,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("bot organizer context", !!settings.enableBotOrganizer || !!document.querySelector("[data-ds-bot-organizer],.ds-bot-organizer"), () => DS.applyBotOrganizer?.());
       }
 
+      if (listing || page.isBotProfilePage || document.querySelector(".ds-archive-website-link")) {
+        await runFeatureStep("archive website links",
+          !!settings.showArchiveWebsiteLinks || !!document.querySelector(".ds-archive-website-link"),
+          () => DS.applyArchiveWebsiteLinks?.());
+      }
+
       if (singleChat) {
         // The targeted slow lane can skip general feature startup on chats.
         // Install the light swipe observer during the critical chat pass once,
@@ -1907,126 +1911,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
-  function checkRouteChange() {
-    if (location.href === DS.state.lastUrl) return false;
-    const routeCheckStartedAt = performance.now();
-
-    DS.state.lastUrl = location.href;
-    slowStepThrottle.clear();
-    DS.invalidatePageStateCache?.();
-    DS.handleLorebookWorkflowRouteChange?.();
-    DS.state.openedImportRevision = -1;
-    DS.state.lastMarkedChatId = "";
-    DS.state.messageDirtyRoots?.clear?.();
-    essentialChatDirtyRoots.clear();
-    DS.state.messageLaneRoots = null;
-    DS.state.chatEnhancerQuietUntil = 0;
-    clearTimeout(messageEnhancerQuietTimer);
-    messageEnhancerQuietTimer = null;
-    resetMessageEditGuards();
-    clearBlockedRefreshBatch();
-    invalidateLoadedChatMessageCount();
-    DS.bumpDomRevision?.();
-
-    if (DS.isSingleChatPage?.()) {
-      startChatStartupQuietWindow("route-change");
-      DS.diagPerformance?.("chat-navigation", { mountedMessages: loadedChatMessageCount(), phase: "route-start" });
-    }
-    else {
-      DS.state.chatStartupQuietUntil = 0;
-      DS.state.chatStartupQuietRoute = "";
-      clearTimeout(DS.state.chatStartupQuietTimer);
-      DS.state.chatStartupQuietTimer = 0;
-    }
-    startCreatorProfileStartupQuietWindow("route-change");
-
-    sessionStorage.removeItem("dsAutoReadNotificationsDone");
-    DS.resetChatListLoaderForRoute?.();
-
-    // Route cleanup must happen BEFORE the normal 1s rerun quiet period.
-    // This matters in the Android WebView, where back/SPA navigation can keep
-    // the same document alive while React replaces the chat DOM underneath us.
-    scheduleNonChatPresentationRecovery("route-change");
-
-    // Opened/saved tracking must not wait behind the 1s route quiet period.
-    // Run once after the URL settles and once after React has had time to mount
-    // the destination chat/list DOM. Module-level dedupe keeps these cheap.
-    scheduleSavedOpenedLane("route-change", 70);
-    setTimeout(() => scheduleSavedOpenedLane("route-change-settled", 0), 450);
-
-    pauseReruns(1000);
-    DS.markModelSelectorDirty?.("route-change");
-    DS.markAdvertBannerDirty?.("route-change");
-    DS.scheduleRun?.({ immediate: true, source: "route-change", dirty: ["all"] });
-    // Separate the synchronous QoL route handler cost from subsequent native
-    // React mounting / deferred feature work in Inspector and support data.
-    const syncMs = Math.max(0, performance.now() - routeCheckStartedAt);
-    const routePerf = runtimeCounters();
-    routePerf.chatNavigationSyncLastMs = Math.round(syncMs * 10) / 10;
-    routePerf.chatNavigationSyncWorstMs = Math.max(Number(routePerf.chatNavigationSyncWorstMs || 0), routePerf.chatNavigationSyncLastMs);
-    routePerf.chatNavigationCount = Number(routePerf.chatNavigationCount || 0) + 1;
-    DS.diagPerformance?.("route-sync", { durationMs: routePerf.chatNavigationSyncLastMs, route: DS.isSingleChatPage?.() ? "chat" : "other" });
-    return true;
-  }
-
-  function isLikelyHistoryInsertionBurst(addedCount) {
-    if (!DS.isSingleChatPage?.() || addedCount <= 0 || loadedChatMessageCount() < 80) return false;
-    const now = Date.now();
-    if (now - chatHistoryMutationBurst.lastAt > 450) chatHistoryMutationBurst.count = 0;
-    chatHistoryMutationBurst.lastAt = now;
-    chatHistoryMutationBurst.count += addedCount;
-    if (chatHistoryMutationBurst.count < 3) return false;
-    chatHistoryMutationBurst.count = 0;
-    return true;
-  }
-
-
-  // Essential chat controls must not wait for the ~20s message-decoration
-  // quiet window. This pass touches only the latest few native message roots.
-  let essentialChatControlsPending = false;
-  const essentialChatDirtyRoots = new Set();
-  function repairEssentialChatControls(source = "mount") {
-    if (DS.isQolPausedForTab?.() || !DS.state?.settings?.enabled || !DS.isSingleChatPage?.()) return;
-    const settings = DS.state.settings;
-    try {
-      if (settings.replaceChatImageWithOocButton) DS.applyEssentialOocShortcut?.();
-      // Message mounts should not rebuild the Mini Panel/OOC template picker.
-      // Critical Settings/route passes still reconcile it when preferences change.
-      if ((settings.showOocTools || settings.quickPanelShowOoc) &&
-          !document.getElementById("ds-qol-ooc-row")) DS.applyOocTools?.();
-      const newRoots = [...essentialChatDirtyRoots].filter(root => root?.isConnected);
-      essentialChatDirtyRoots.clear();
-      // Only the native roots touched by this MutationObserver delivery.
-      // The cached newest roots are used only for the first startup pass.
-      const roots = newRoots.length ? newRoots.slice(-8) : (DS.getLoadedMessageRoots?.() || []).slice(-8);
-      for (const root of roots) DS.repairMessageToolbarForRoot?.(root);
-      if (settings.enableMessageBookmarks && roots.length) DS.reconcileChatBookmarkStars?.(roots);
-      DS.diagPerformance?.("essential-controls", { source, inspected: Math.min(8, roots.length) });
-    } catch (error) {
-      DS.runtimeLog?.("warn", "essential-controls", String(error?.message || error));
-    }
-  }
-  function scheduleEssentialChatControls(source = "mount", roots = []) {
-    for (const root of roots) if (root?.isConnected) essentialChatDirtyRoots.add(root);
-    // A large history insertion can mount hundreds of native messages before
-    // the frame callback runs. Only the latest controls need urgent repair;
-    // older roots remain eligible for the normal incremental message lane.
-    if (essentialChatDirtyRoots.size > 24) {
-      const latest = [...essentialChatDirtyRoots].slice(-16);
-      essentialChatDirtyRoots.clear();
-      for (const root of latest) essentialChatDirtyRoots.add(root);
-      const perf = runtimeCounters();
-      perf.essentialControlBacklogsTrimmed = Number(perf.essentialControlBacklogsTrimmed || 0) + 1;
-    }
-    if (essentialChatControlsPending || DS.isQolPausedForTab?.()) return;
-    essentialChatControlsPending = true;
-    // Targeted once per animation frame; never a full-message scan.
-    requestAnimationFrame(() => {
-      essentialChatControlsPending = false;
-      repairEssentialChatControls(source);
-    });
-  }
-
   DS.installMainPageObserver?.({
     runtimeCounters,
     checkRouteChange,
@@ -2058,91 +1942,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     mutationsAreChatLocal,
     mutationsAddBotCards
   });
-
-  function primeLargeChatMessageLane(source = "resume") {
-    if (!DS.isSingleChatPage?.()) return false;
-    const roots = DS.getLoadedMessageRoots?.() || [];
-    if (roots.length < 120) return false;
-
-    DS.state.messageResumeLazyUntil = Date.now() + 8000;
-    const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
-    // Hidden tabs can accumulate hundreds of stale dirty roots. On resume,
-    // discard that backlog and only enhance what the user can see plus the
-    // newest messages. Older history is picked up lazily while scrolling.
-    dirty.clear();
-    const visible = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 24, margin: 1400 }) || roots.slice(-24);
-    let queued = 0;
-    for (const root of visible) {
-      if (DS.messageEnhancerHasVisited?.(root)) continue;
-      if (DS.markMessageRootDirty?.(root)) queued++;
-    }
-
-    const counters = runtimeCounters();
-    counters.messageResumeLazyPrunes = Number(counters.messageResumeLazyPrunes || 0) + 1;
-    counters.messageResumeLazyRoots = Number(counters.messageResumeLazyRoots || 0) + queued;
-    if (queued) DS.scheduleMessageLane?.(`lazy-${source}`);
-    return true;
-  }
-
-  function scheduleLazyHistoryEnhancement() {
-    if (!DS.isSingleChatPage?.()) return;
-    clearTimeout(DS.state.messageLazyScrollTimer);
-    DS.state.messageLazyScrollTimer = window.setTimeout(() => {
-      DS.state.messageLazyScrollTimer = null;
-      const roots = DS.getLoadedMessageRoots?.() || [];
-      if (roots.length < 120) return;
-      DS.state.messageResumeLazyUntil = Math.max(Number(DS.state.messageResumeLazyUntil || 0), Date.now() + 1200);
-      const near = DS.getMessageEnhancerRoots?.({ forceLazy: true, newest: 8, margin: 900 }) || [];
-      let added = 0;
-      for (const root of near) {
-        if (DS.messageEnhancerHasVisited?.(root)) continue;
-        if (DS.markMessageRootDirty?.(root)) added++;
-      }
-      if (added) {
-        const counters = runtimeCounters();
-        counters.messageLazyScrollBatches = Number(counters.messageLazyScrollBatches || 0) + 1;
-        counters.messageLazyScrollRoots = Number(counters.messageLazyScrollRoots || 0) + added;
-        DS.scheduleMessageLane?.("lazy-history-scroll");
-      }
-    }, 180);
-  }
-
-  function changedSettingNames(changes = {}) {
-    const names = new Set();
-    const prefix = "dsSettingV1:";
-    for (const key of Object.keys(changes || {})) {
-      if (String(key).startsWith(prefix)) names.add(String(key).slice(prefix.length));
-    }
-    const monolithic = changes.settings;
-    if (monolithic) {
-      const oldValue = monolithic.oldValue && typeof monolithic.oldValue === "object" ? monolithic.oldValue : {};
-      const newValue = monolithic.newValue && typeof monolithic.newValue === "object" ? monolithic.newValue : {};
-      for (const key of new Set([...Object.keys(oldValue), ...Object.keys(newValue)])) {
-        try {
-          if (JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key])) names.add(key);
-        } catch { names.add(key); }
-      }
-    }
-    return names;
-  }
-
-  function slowDirtyForSettingChanges(changes = {}) {
-    const names = changedSettingNames(changes);
-    if (!names.size) return ["all"];
-    const modelKeys = new Set(["expandModelSelectorDescriptions", "hideModelUpgradeButtons", "customizeModelQuickMenu", "modelFavoriteNames", "modelHiddenNames", "modelQuickFavoritesOnly"]);
-    const advertKeys = new Set(["hideAdvertBanners"]);
-    const dirty = new Set();
-    let hasOther = false;
-    for (const name of names) {
-      if (modelKeys.has(name)) dirty.add("model");
-      else if (advertKeys.has(name)) dirty.add("adverts");
-      else hasOther = true;
-    }
-    if (names.has("hideAdvertBanners")) DS.markAdvertBannerDirty?.("settings-change");
-    if ([...names].some(name => modelKeys.has(name))) DS.markModelSelectorDirty?.("settings-change");
-    if (hasOther) return ["all"];
-    return dirty.size ? [...dirty] : ["all"];
-  }
 
   try {
     if (DS.isExtensionContextValid?.()) {

@@ -1,0 +1,18 @@
+{
+  "id": "archive-website-link",
+  "primary": "content/archive-website-link.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "showArchiveWebsiteLinks"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/archive-website-link.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

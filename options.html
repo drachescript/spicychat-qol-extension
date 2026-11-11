@@ -376,8 +376,11 @@
 <h2>Conversation tools</h2>
 <label class="row"><input id="showChatListTools" type="checkbox"/><span>Enable conversation list tools</span></label>
 <label class="row"><input id="enableChatOrganizer" type="checkbox"/><span>Enable conversation folders and bulk organizing</span></label>
-<div id="ds-feature-panel-chat-pins" data-dsq-feature-panel="chat-pins"></div>
-<div id="ds-chat-list-shortcuts-mount"></div>
+<label class="row"><input id="enableChatPins" type="checkbox"/><span>Show pinned conversations at the top of Chats</span></label>
+<label class="row"><input id="chatListTwoColumns" type="checkbox"/><span>Show conversations in two columns on wide screens</span></label>
+<label class="row"><input id="chatListPopoutShortcut" type="checkbox"/><span>Add an Open window button to conversation cards</span></label>
+<label class="row"><input id="chatListRenameShortcut" type="checkbox"/><span>Add a quick Rename button to conversation cards (uses SpicyChat)</span></label>
+<p class="hint">Pin a chat from its card. Pinned links stay at the top even when older chats leave the loaded list.</p>
 <div id="ds-feature-panel-chat-smart-folders" data-dsq-feature-panel="chat-smart-folders"></div>
 <label>Conversation folders<textarea id="chatCollections" placeholder="Favorites
 Long chats
@@ -1048,7 +1051,7 @@ Testing"></textarea></label>
 </section>
 </div>
 <div class="tab-page" data-page="writing"><p class="page-intro">Composer helpers, generation controls, translation, OOC presets, and reusable text tools.</p>
-<div id="ds-feature-panel-daily-message-limit" data-dsq-feature-panel="daily-message-limit"></div><div id="ds-feature-panel-model-selector" data-dsq-feature-panel="model-selector"></div><div id="ds-feature-panel-model-quick-access" data-dsq-feature-panel="model-quick-access"></div><div id="ds-feature-panel-chat-lorebook-manager" data-dsq-feature-panel="chat-lorebook-manager"></div><div id="ds-feature-panel-chat-lorebook-recall" data-dsq-feature-panel="chat-lorebook-recall"></div><div id="ds-feature-panel-private-lorebook-bridge" data-dsq-feature-panel="private-lorebook-bridge"></div>
+<div id="ds-feature-panel-daily-message-limit"></div><div id="ds-feature-panel-model-selector" data-dsq-feature-panel="model-selector"></div><div id="ds-feature-panel-model-quick-access" data-dsq-feature-panel="model-quick-access"></div><div id="ds-feature-panel-chat-lorebook-manager" data-dsq-feature-panel="chat-lorebook-manager"></div><div id="ds-feature-panel-chat-lorebook-recall" data-dsq-feature-panel="chat-lorebook-recall"></div><div id="ds-feature-panel-private-lorebook-bridge" data-dsq-feature-panel="private-lorebook-bridge"></div>
 <div id="ds-feature-panel-translation" data-dsq-feature-panel="translation"></div><div id="ds-feature-panel-generation-profiles" data-dsq-feature-panel="generation-profiles"></div><div id="ds-feature-panel-generation-metadata" data-dsq-feature-panel="generation-metadata"></div><div id="ds-feature-panel-rp-format-repair" data-dsq-feature-panel="rp-format-repair"></div>
 <section class="card">
 <h2>Composer and draft helpers</h2>
@@ -1119,13 +1122,14 @@ Meta | &lt; | &gt;" spellcheck="false"></textarea>
 </section></div>
 <div class="tab-page" data-page="personas-memory"><p class="page-intro">Persona backups and switching, SpicyChat Memory helpers, and Context Keeper.</p><section class="card">
 <h2>Native Memory Manager tools</h2>
-<label class="row"><input id="enableBulkMemoryManager" type="checkbox"/><span>Enable Memory Manager</span></label>
+<label class="row"><input id="enableBulkMemoryManager" type="checkbox"/><span>Enable native Memory Manager tools (including V2)</span></label>
 <label class="row"><input id="enableMemoryVault" type="checkbox"/><span>Enable reversible Memory Vault (archive native memories and restore later)</span></label>
-<p class="hint">Requires Memory Manager. Saves and verifies a local archive before native deletion; archived memories remain available for restore or export.</p>
-<p class="hint">Bulk-select, pin, reorder, delete or export Memories. Imports are previewed and skip exact duplicates by default.</p>
+<p class="hint">Requires Memory Manager. Saves and verifies a local archive before native deletion; archived memories remain available for restore or export. SpicyChat may later regenerate an automatically managed fact; restored or imported memories are manually added.</p>
+<p class="hint">SpicyChat creates automatic memories once a chat grows beyond its context, then updates and retires them about every 15 back-and-forths. Pinned and manually added memories stay. QoL does not replace this native memory lifecycle.</p>
+<p class="hint">Select, pin, copy, export, import or delete native memory cards. Import previews skip exact duplicates by default. The older pinned-reordering tool remains unavailable in V2 because native ordering cannot be reliably controlled.</p>
 <label class="row"><input id="memoryAutoLoadAll" type="checkbox"/><span>Automatically load all available memories when the Memories manager opens</span></label>
-<label class="row"><input id="showCopyMemoryAction" type="checkbox"/><span>Add Copy Memory to each memory's three-dot menu</span></label>
-<p class="hint">Load all uses SpicyChat’s native Load More button. Export selected/all Memories as JSON or import them into another chat.</p>
+<label class="row"><input id="showCopyMemoryAction" type="checkbox"/><span>Show Copy Memory on native memory cards (or older three-dot menus)</span></label>
+<p class="hint">Load all only uses SpicyChat's native Load More control when one exists. Export selected/all visible native memories as JSON, or review imports before adding to another chat. Saved memory content stays out of support reports.</p>
 </section><section class="card" id="globalMemoryCard">
 <h2>Global Memory / Baseline Notes</h2>
 <label class="row"><input id="enableGlobalMemory" type="checkbox"/><span>Use the same baseline notes in every chat</span></label>
@@ -1530,7 +1534,14 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="applyBotBlockingToLorebooks" type="checkbox"/><span>Use my normal blocked words, tags, and creators for Lorebooks too</span></label>
 <label class="row"><input id="showLorebookBlockButtons" type="checkbox"/><span>Show a quick Block × on Lorebook cards</span></label>
 <label>Blocked Lorebook UUIDs, one per line<textarea id="lorebookBlockedIds" placeholder="01a0fb21-3f8e-7171-a7e1-f869236bea19" spellcheck="false"></textarea></label>
-<div id="ds-feature-panel-rulebook-public-qol" data-dsq-feature-panel="rulebook-public-qol"></div>
+<div class="sub-card" id="rulebookBlockingCard">
+<h3>Public Rulebook blocking</h3>
+<label class="row"><input id="rulebookBlockingEnabled" type="checkbox"/><span>Block Rulebook cards with QoL rules</span></label>
+<label class="row"><input id="applyBotBlockingToRulebooks" type="checkbox"/><span>Use my normal blocked words, tags, and creators for Rulebooks too</span></label>
+<label class="row"><input id="showRulebookBlockButtons" type="checkbox"/><span>Show a quick Block × on Rulebook cards</span></label>
+<label>Blocked Rulebook UUIDs, one per line<textarea id="rulebookBlockedIds" spellcheck="false" placeholder="12f13d54-5738-5c46-b7a7-9ac6dd00b52f"></textarea></label>
+<p class="hint">Optional local Rulebook blocking by ID, blocked words or creator. Meter names are not treated as tags.</p>
+</div>
 <p class="hint"><strong>Public Lorebooks:</strong> Optional local filters for names, descriptions, tags, creators and exact Lorebook IDs.</p>
 <details class="sub-card blocker-test-card">
 <summary>Advanced: test blocking rules</summary>
@@ -1639,7 +1650,8 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="normalizeFancyUnicode" type="checkbox"/><span>Convert fancy Unicode letters/numbers to normal text (including displayed bot cards)</span></label>
 <label class="row"><input id="normalizePunctuation" type="checkbox"/><span>Normalize curly quotes, long dashes, dots, and similar punctuation</span></label>
 <label class="row"><input id="normalizeInvisibleCharacters" type="checkbox"/><span>Remove invisible/zero-width characters while matching</span></label>
-<label class="row"><input id="normalizeDecorativeSymbols" type="checkbox"/><span>Remove decorative symbols from displayed bot-card text and ignore them while matching</span></label>
+<label class="row"><input id="normalizeDecorativeSymbols" type="checkbox"/><span>Remove decorative ornaments (stars, borders, symbols), keeping emojis</span></label>
+<label class="row"><input id="normalizeEmojis" type="checkbox"/><span>Remove emojis from displayed bot-card text and ignore them while matching (independent of decorative ornaments)</span></label>
 <label>Preview input<input id="textNormalizationPreviewInput" type="text" value="[YOUR BEST FRIENDS GRANDMA]"/></label>
 <div class="normalization-preview">
 <span>Normalized:</span>
@@ -1647,6 +1659,7 @@ step sister" spellcheck="false"></textarea></label>
 </div>
 </section>
 <div id="ds-feature-panel-card-workflow" data-dsq-feature-panel="card-workflow"></div>
+<div id="ds-feature-panel-archive-website-link" data-dsq-feature-panel="archive-website-link"></div>
 <div id="ds-feature-panel-list-fill" data-dsq-feature-panel="list-fill"></div>
 <div id="ds-feature-panel-pagination-tools" data-dsq-feature-panel="pagination-tools"></div>
 <section class="card">
@@ -1702,6 +1715,7 @@ step sister" spellcheck="false"></textarea></label>
 <h3>Set up sync</h3>
 <p class="hint">Create a new QoL account on this device, or enter a one-use code generated by a device that is already linked. No password is required.</p>
 <div class="button-row"><button id="accountSyncCreate" type="button">Create QoL account</button></div>
+<p class="hint" id="accountSyncCreateFeedback" role="status" aria-live="polite"></p>
 <label>When linking this device <select id="accountSyncLinkChoice"><option value="choose" selected>Link without changing local settings (choose after linking)</option><option value="blocked">Sync only Blocked bots now (two-way)</option><option value="settings">Download all account settings now</option></select></label>
 <div class="account-sync-link-row"><input id="accountSyncLinkCode" type="text" autocomplete="off" spellcheck="false" maxlength="16" placeholder="ABCD-1234"/><button id="accountSyncLink" type="button">Link existing account</button></div>
 </div>
@@ -2081,7 +2095,7 @@ step sister" spellcheck="false"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-pins.js"></script><script src="settings/feature-panels/rulebook-public-qol.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="settings/feature-panels/archive-website-link.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

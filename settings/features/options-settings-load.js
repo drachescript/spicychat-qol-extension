@@ -315,10 +315,14 @@ async function load() {
 
   setChecked("showChatListTools", settings.showChatListTools);
   setChecked("enableChatOrganizer", !!settings.enableChatOrganizer);
+  setChecked("enableChatPins", !!settings.enableChatPins);
   setChecked("chatAlwaysShowProfileLink", !!settings.chatAlwaysShowProfileLink);
   setChecked("chatJumpToStartShortcut", !!settings.chatJumpToStartShortcut);
   setChecked("chatOpenWindowShortcut", !!settings.chatOpenWindowShortcut);
   setChecked("chatGenerationSettingsShortcut", !!settings.chatGenerationSettingsShortcut);
+  setChecked("chatListTwoColumns", !!settings.chatListTwoColumns);
+  setChecked("chatListPopoutShortcut", !!settings.chatListPopoutShortcut);
+  setChecked("chatListRenameShortcut", !!settings.chatListRenameShortcut);
   setValue("chatCollections", settings.chatCollections || "");
   setChecked("showSavedChatQuickActions", !!settings.showSavedChatQuickActions);
 
@@ -634,10 +638,15 @@ async function load() {
   setChecked("normalizePunctuation", !!settings.normalizePunctuation);
   setChecked("normalizeInvisibleCharacters", !!settings.normalizeInvisibleCharacters);
   setChecked("normalizeDecorativeSymbols", settings.normalizeDecorativeSymbols);
+  setChecked("normalizeEmojis", !!settings.normalizeEmojis);
   updateTextNormalizationPreview();
   setValue("blockedTags", arrayToLines(settings.blockedTags));
   setValue("blockedWords", arrayToLines(settings.blockedWords));
   setValue("blockedCreators", arrayToLines(settings.blockedCreators));
+  setChecked("rulebookBlockingEnabled", settings.rulebookBlockingEnabled === true);
+  setChecked("applyBotBlockingToRulebooks", settings.applyBotBlockingToRulebooks === true);
+  setChecked("showRulebookBlockButtons", settings.showRulebookBlockButtons === true);
+  setValue("rulebookBlockedIds", arrayToLines(settings.rulebookBlockedIds));
   setChecked("lorebookBlockingEnabled", settings.lorebookBlockingEnabled === true);
   setChecked("applyBotBlockingToLorebooks", settings.applyBotBlockingToLorebooks === true);
   setChecked("showLorebookBlockButtons", settings.showLorebookBlockButtons === true);

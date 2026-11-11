@@ -101,6 +101,17 @@
   text-transform: capitalize;
 }
 .ds-context-keep-button {
+  /* Native message-toolbar layouts may use full-width grid/button defaults. */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  align-self: center !important;
+  width: max-content !important;
+  max-width: max-content !important;
+  position: static !important;
+  float: none !important;
+  white-space: nowrap !important;
   margin-left: 5px;
   padding: 2px 6px !important;
   min-width: 0 !important;

@@ -33,7 +33,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       sheet.dataset.dsOwned = "1";
       sheet.textContent = `
         [data-testid="ChatMemoryManagerCapabilityGate"] .ds-memory-layout-toggle {
-          position: absolute; right: 52px; top: 17px; z-index: 11;
+          position: static; flex: 0 0 auto; margin: 2px 4px 2px 0;
           border: 1px solid rgba(148,163,184,.35); border-radius: 7px;
           background: rgba(65,65,75,.25); color: inherit;
           padding: 4px 6px; font: 500 11px/1.3 system-ui,sans-serif;
@@ -66,7 +66,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.head?.appendChild(sheet);
     }
     manager.classList.toggle("ds-memory-qol-compact", memoryCompactView);
-    let button = manager.querySelector(":scope > .ds-memory-layout-toggle");
+    let button = manager.querySelector(".ds-memory-layout-toggle");
     if (!button && manager.matches('[data-testid="ChatMemoryManagerCapabilityGate"]')) {
       button = document.createElement("button");
       button.type = "button";
@@ -81,6 +81,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       manager.appendChild(button);
     }
     if (button) {
+      // The native header now has multiple overlapping controls. Keep ours in
+      // the scrollable toolbar instead of absolutely positioning over Close.
+      const host = manager.querySelector("#ds-memory-bulk-toolbar .ds-memory-bulk-actions") ||
+        manager.querySelector('[data-testid="MemoryManagerV2-Toolbar"]') ||
+        manager.querySelector(".overflow-y-auto, div[class*='overflow-y-auto']");
+      if (host && button.parentElement !== host) host.prepend(button);
       button.textContent = memoryCompactView ? "Default view" : "Compact view";
       button.setAttribute("aria-pressed", String(memoryCompactView));
     }
@@ -149,7 +155,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
-  function getMemoryRows(manager = getManager()) {
+  function getLegacyMemoryRows(manager = getManager()) {
     if (!manager) return [];
 
     const seen = new Set();
@@ -206,46 +212,72 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return candidates[0]?.value || "";
   }
 
-  // New SpicyChat memory cards (confirmed by the native UI layout capture)
-  // are direct children of the memory scroll list. They have a distinct
-  // paragraph for memory text and separate Pin/Edit/Delete buttons, not the
-  // old dropdown menu. Only use these cards for read-only exports; do not
-  // retrofit edit/delete/pin workflows without authenticated UI verification.
+  // Memory Manager V2: card IDs, controls and their list are native test IDs.
+  // Use the whole opaque card ID for selection so identical text is never
+  // conflated with a second memory. Never include it in exported JSON/logs.
   function getNewMemoryCardRows(manager = getManager()) {
-    if (!manager) return [];
-    const scrollArea = [...manager.querySelectorAll('div.overflow-y-auto, div[class*="overflow-y-auto"]')]
-      .find(el => el !== manager && el.querySelector(':scope > div.group[data-testid][role]'));
-    if (!scrollArea) return [];
+    const list = manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
+    if (!list) return [];
     const results = [];
-    for (const card of [...scrollArea.children].slice(0, 10000)) {
-      if (!card.matches?.('div.group[data-testid][role]') ||
-          card.closest('#ds-memory-bulk-toolbar') ||
-          card.querySelector('#ds-memory-bulk-toolbar')) continue;
+    for (const card of [...list.children].slice(0, 10000)) {
+      const id = card.getAttribute?.('data-testid') || '';
+      if (!id.startsWith('MemoryManagerCard-') || card.getAttribute('role') !== 'group') continue;
       const textNode = card.querySelector('p.text-paragraph-sm.break-words') ||
-        [...card.querySelectorAll('p.text-paragraph-sm')].find(el => el.classList.contains('break-words'));
+        [...card.querySelectorAll('p')].find(p => p.classList.contains('break-words'));
       const rawText = String(textNode?.textContent || '').trim();
-      if (!rawText || [...rawText].length > 250 ||
-          textNode?.closest('button, [role="button"], .ds-memory-bulk-toolbar')) continue;
-      // Check the card's native controls so generic text/list elements are
-      // never mistaken for memories. The labels are read, not exported.
-      const actions = [...card.querySelectorAll('button[aria-label], button[title]')]
-        .filter(button => !button.closest('.ds-memory-bulk-toolbar'))
-        .map(button => `${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`.toLowerCase());
-      if (!actions.some(label => /\bedit\b/.test(label)) ||
-          !actions.some(label => /\bdelete\b|\bremove\b/.test(label)) ||
-          !actions.some(label => /\bunpin\b|\bpin\b/.test(label))) continue;
-      results.push({ row: card, trigger: null, textNode, rawText, text: cleanText(rawText), nativeReadOnly: true,
-        nativeCard: true });
+      if (!rawText || [...rawText].length > 250) continue;
+      const pinButton = card.querySelector('button[data-testid^="MemoryManagerCard-Pin-"]');
+      const editButton = card.querySelector('button[data-testid^="MemoryManagerCard-Edit-"]');
+      const deleteButton = card.querySelector('button[data-testid^="MemoryManagerCard-Delete-"]');
+      // Read-only operations can still use a card when permissions hide one
+      // of its actions; mutations independently require their native button.
+      if (!pinButton && !editButton && !deleteButton) continue;
+      results.push({ row: card, trigger: null, textNode, rawText,
+        text: cleanText(rawText), nativeCard: true, nativeId: id,
+        pinButton, editButton, deleteButton });
     }
     return results;
+  }
+
+  function getMemoryRows(manager = getManager()) {
+    if (!manager) return [];
+    // Do not mix the two generations of controls. V2 has a dedicated list
+    // even while it is empty; legacy rows are otherwise still supported.
+    if (manager.querySelector('[data-testid="MemoryManagerV2-List"]')) {
+      return getNewMemoryCardRows(manager);
+    }
+    return getLegacyMemoryRows(manager);
+  }
+
+  function memoryKey(item) {
+    return item?.nativeCard ? String(item.nativeId || '') : String(item?.text || '');
+  }
+
+  function findMemoryRowByKey(key, manager = getManager()) {
+    return getMemoryRows(manager).find(item => memoryKey(item) === key) || null;
+  }
+
+  function selectedMemoryRows(manager = getManager()) {
+    return getMemoryRows(manager).filter(item => selectedMemories.has(memoryKey(item)));
+  }
+
+  function usesNativeMemoryCards(manager = getManager()) {
+    return !!manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
+  }
+
+  function nativeCardPinnedState(item) {
+    if (!item?.nativeCard) return null;
+    const button = item.row.querySelector('button[data-testid^="MemoryManagerCard-Pin-"]');
+    const label = cleanText(button?.getAttribute('aria-label')).toLowerCase();
+    if (label === 'unpin memory') return true;
+    if (label === 'pin memory') return false;
+    return null;
   }
 
   function getExportMemoryRows(manager = getManager()) {
     if (!manager) return [];
     const standard = getMemoryRows(manager);
-    if (standard.length) return standard;
-    const confirmedCards = getNewMemoryCardRows(manager);
-    if (confirmedCards.length) return confirmedCards;
+    if (standard.length || usesNativeMemoryCards(manager)) return standard;
     const results = [];
     const seen = new Set();
     const controls = manager.querySelectorAll('button[aria-haspopup], button[aria-label], button[title], button[data-testid]');
@@ -310,13 +342,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const rows = getMemoryRows(manager);
     const reportButton = toolbar.querySelector(".ds-memory-layout-report");
     if (reportButton) reportButton.hidden = rows.length > 0 || getExportMemoryRows(manager).length > 0;
-    const available = new Set(rows.map(item => item.text));
-    selectedMemories = new Set([...selectedMemories].filter(text => available.has(text)));
+    const available = new Set(rows.map(memoryKey));
+    selectedMemories = new Set([...selectedMemories].filter(key => available.has(key)));
 
     for (const item of rows) {
+      const selected = selectedMemories.has(memoryKey(item));
       const box = item.row.querySelector("input.ds-memory-select-box");
-      if (box) box.checked = selectedMemories.has(item.text);
-      item.row.classList.toggle("ds-memory-selected", selectedMemories.has(item.text));
+      if (box) box.checked = selected;
+      item.row.classList.toggle("ds-memory-selected", selected);
     }
 
     const count = selectedMemories.size;
@@ -327,9 +360,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const pinButton = toolbar.querySelector(".ds-memory-pin-selected");
     const busy = deleting || checkingPins || pinningSelected || loadingMoreMemories || scanningPinnedOrder || applyingPinnedOrder || importingMemories;
 
-    const readOnlyCards = rows.length ? [] : getNewMemoryCardRows(manager);
-    if (countEl) countEl.textContent = readOnlyCards.length
-      ? `${readOnlyCards.length} memories available for export · selection needs new UI support`
+    const nativeV2 = usesNativeMemoryCards(manager);
+    if (countEl) countEl.textContent = nativeV2
+      ? `${count} selected · ${rows.length} shown (SpicyChat Memories)`
       : `${count} selected`;
     if (deleteButton) {
       deleteButton.textContent = count ? `Delete selected (${count})` : "Delete selected";
@@ -366,24 +399,39 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         button.disabled = busy;
       }
     }
-    // Never activate older edit/pin/delete flows on cards whose native
-    // controls differ from the old SpicyChat memory-row layout.
     for (const selector of ['.ds-memory-select-all', '.ds-memory-select-unpinned', '.ds-memory-invert', '.ds-memory-clear']) {
       const action = toolbar.querySelector(selector);
-      if (action) action.disabled = busy || readOnlyCards.length > 0;
+      if (action) action.disabled = busy;
+    }
+    // V2 can reorder automatically managed memories on its own; re-pinning
+    // does not establish a stable user-defined order, so disable the legacy
+    // re-pin algorithm instead of silently changing native memory priorities.
+    const reorder = toolbar.querySelector('.ds-memory-reorder-pinned');
+    if (reorder) {
+      reorder.disabled = busy || nativeV2;
+      reorder.title = nativeV2 ? 'Pinned ordering is managed by SpicyChat in the new Memory Manager.' : '';
+    }
+    const help = toolbar.querySelector('.ds-memory-native-lifecycle');
+    if (help) help.hidden = !nativeV2;
+    const exportAllButton = toolbar.querySelector('.ds-memory-export-all');
+    if (exportAllButton) {
+      exportAllButton.textContent = nativeV2 ? 'Export shown' : 'Export all';
+      exportAllButton.title = nativeV2 ? 'Exports native memory cards currently shown. Clear SpicyChat filters first to include every memory.' : '';
     }
   }
 
   function decorateMemoryRow(item) {
     const { row, trigger, text } = item;
-    if (!row || !trigger || !text) return;
+    const key = memoryKey(item);
+    if (!row || !text || !key || (!trigger && !item.nativeCard)) return;
 
     row.classList.add("ds-memory-row");
-    row.dataset.dsMemoryText = text;
+    // Do not write native memory content into a DOM data attribute.
+    if (!item.nativeCard) row.dataset.dsMemoryText = text;
 
     let checkbox = row.querySelector("input.ds-memory-select-box");
     if (!checkbox) {
-      const controlsRow = trigger.parentElement?.parentElement;
+      const controlsRow = item.nativeCard ? row : trigger.parentElement?.parentElement;
       if (!controlsRow) return;
 
       const label = document.createElement("label");
@@ -399,8 +447,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       label.addEventListener("click", event => event.stopPropagation(), true);
 
       checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedMemories.add(text);
-        else selectedMemories.delete(text);
+        if (checkbox.checked) selectedMemories.add(key);
+        else selectedMemories.delete(key);
         updateToolbar();
       });
 
@@ -408,8 +456,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       controlsRow.insertBefore(label, controlsRow.firstChild);
     }
 
-    checkbox.checked = selectedMemories.has(text);
-    row.classList.toggle("ds-memory-selected", selectedMemories.has(text));
+    checkbox.checked = selectedMemories.has(key);
+    row.classList.toggle("ds-memory-selected", selectedMemories.has(key));
   }
 
   function setStatus(message, tone = "") {
@@ -584,7 +632,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function getMemoryPinnedState(item) {
-    if (!item?.row || !item?.trigger) return null;
+    if (!item?.row) return null;
+    if (item.nativeCard) return nativeCardPinnedState(item);
+    if (!item.trigger) return null;
 
     // Prefer an explicit pinned indicator if SpicyChat exposes one on the row.
     const pinnedIndicator = item.row.querySelector(
@@ -600,9 +650,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return state;
   }
 
-  async function setMemoryPinned(text, wantPinned = true) {
-    const item = findMemoryRowByText(text);
-    if (!item) return { ok: false, reason: "Memory is no longer visible." };
+  async function setMemoryPinned(key, wantPinned = true) {
+    const item = findMemoryRowByKey(key) || findMemoryRowByText(key);
+    if (!item) return { ok: false, reason: "Memory is no longer visible or has duplicate text." };
+
+    if (item.nativeCard) {
+      const currentState = nativeCardPinnedState(item);
+      if (currentState === wantPinned) return { ok: true, changed: false };
+      if (currentState === null) return { ok: false, reason: "SpicyChat did not expose a readable Pin Memory button." };
+      const button = item.row.querySelector('button[data-testid^="MemoryManagerCard-Pin-"]');
+      if (!button || button.disabled) return { ok: false, reason: "The native Pin Memory control is unavailable." };
+      const scrollState = captureMemoryScrollState();
+      try { button.click(); } catch { restoreMemoryScrollState(scrollState); return { ok: false, reason: "Pin Memory could not be clicked." }; }
+      const confirmed = await waitFor(() => {
+        const current = findMemoryRowByKey(item.nativeId);
+        return current && nativeCardPinnedState(current) === wantPinned ? true : null;
+      }, 4100, 100);
+      restoreMemoryScrollState(scrollState);
+      return confirmed ? { ok: true, changed: true } :
+        { ok: false, reason: "SpicyChat did not confirm the new pin state. Check the memory before retrying." };
+    }
 
     const menu = await openMemoryActionMenu(item.trigger);
     if (!menu) {
@@ -675,10 +742,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try {
       for (let index = 0; index < targets.length; index++) {
-        const text = targets[index];
+        const key = targets[index];
         setStatus(`Pinning ${index + 1} of ${targets.length}...`);
 
-        const result = await setMemoryPinned(text, true);
+        const result = await setMemoryPinned(key, true);
         if (!result.ok) {
           setStatus(`Stopped after ${pinned} pinned: ${result.reason}`, "error");
           return;
@@ -719,15 +786,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try {
       for (let index = 0; index < rows.length; index++) {
-        const text = rows[index].text;
-        const current = findMemoryRowByText(text);
+        const key = memoryKey(rows[index]);
+        const current = findMemoryRowByKey(key);
         if (!current) continue;
 
         setStatus(`Checking pins ${index + 1} of ${rows.length}...`);
         const pinned = await getMemoryPinnedState(current);
 
         if (pinned === false) {
-          selectedMemories.add(text);
+          selectedMemories.add(key);
           unpinned++;
         } else if (pinned === null) {
           unknown++;
@@ -750,7 +817,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findMemoryRowByText(text) {
-    return getMemoryRows().find(item => item.text === text) || null;
+    const matches = getMemoryRows().filter(item => item.text === text);
+    // Text-based lookup is only safe when the text identifies one native card.
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function findDeleteConfirmation(manager) {
@@ -775,10 +844,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
-  async function deleteOneMemory(text) {
+  async function deleteOneMemory(key) {
     const manager = getManager();
-    const item = findMemoryRowByText(text);
-    if (!manager || !item) return { ok: false, reason: "Memory is no longer visible." };
+    const item = findMemoryRowByKey(key) || findMemoryRowByText(key);
+    if (!manager || !item) return { ok: false, reason: "Memory is no longer visible or has duplicate text." };
+
+    if (item.nativeCard) {
+      const button = item.row.querySelector('button[data-testid^="MemoryManagerCard-Delete-"]');
+      if (!button || button.disabled) return { ok: false, reason: "The native Delete Memory button is unavailable." };
+      const scrollState = captureMemoryScrollState();
+      try { button.click(); } catch { return { ok: false, reason: "Native Delete Memory could not be clicked." }; }
+      const confirmation = await waitFor(() => findDeleteConfirmation(manager), 1250, 50);
+      if (confirmation) {
+        try { confirmation.click(); } catch { return { ok: false, reason: "Could not confirm the native deletion." }; }
+      }
+      const gone = await waitFor(() => !findMemoryRowByKey(item.nativeId), 4300, 90);
+      restoreMemoryScrollState(scrollState);
+      return gone ? { ok: true } :
+        { ok: false, reason: "SpicyChat did not confirm removal of this memory. No further memories were touched." };
+    }
 
     const menu = await openMemoryActionMenu(item.trigger);
     if (!menu) {
@@ -851,7 +935,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const manager = getManager();
     if (findLoadMoreMemoriesButton(manager)) await loadAllMemories(manager);
     const rows = getMemoryRows();
-    const targets = rows.filter(row => selectedMemories.has(row.text));
+    const targets = rows.filter(row => selectedMemories.has(memoryKey(row)));
     const duplicates = targets.some(row => rows.filter(other => other.text === row.text).length !== 1);
     if (duplicates || targets.length !== selectedMemories.size) {
       setStatus("Cannot archive ambiguously identified or unloaded memories. Exact duplicates must be handled manually.", "error"); return;
@@ -862,7 +946,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let moved = 0;
     try {
       for (const target of targets) {
-        const current = findMemoryRowByText(target.text);
+        const current = findMemoryRowByKey(memoryKey(target));
         if (!current || getMemoryRows().filter(item => item.text === target.text).length !== 1) throw new Error("Memory changed or became ambiguous during archive.");
         const pinned = await getMemoryPinnedState(current);
         const state = await readMemoryVault();
@@ -876,12 +960,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const next = { version: 1, entries: [...state.entries.filter(item => item.id !== id), entry] };
         await saveVerifiedMemoryVault(next, id);
         setStatus(`Saved and verified ${moved + 1} of ${targets.length}; requesting SpicyChat removal...`);
-        const result = await deleteOneMemory(target.text);
+        const result = await deleteOneMemory(memoryKey(target));
         if (!result.ok) throw new Error(`Copy is safely stored, but native removal was not confirmed: ${result.reason}`);
         entry.status = "stored";
         entry.updatedAt = Date.now();
         await saveVerifiedMemoryVault(next, id);
-        selectedMemories.delete(target.text);
+        selectedMemories.delete(memoryKey(target));
         moved += 1;
       }
       setStatus(`Archived ${moved} memor${moved === 1 ? "y" : "ies"} to the local Vault.`, "ok");
@@ -980,9 +1064,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     let deleted = 0;
 
-    for (const text of targets) {
+    for (const key of targets) {
       setStatus(`Deleting ${deleted + 1} of ${targets.length}...`);
-      const result = await deleteOneMemory(text);
+      const result = await deleteOneMemory(key);
 
       if (!result.ok) {
         setStatus(`Stopped after ${deleted} deleted: ${result.reason}`, "error");
@@ -992,7 +1076,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       deleted++;
-      selectedMemories.delete(text);
+      selectedMemories.delete(key);
       await DS.sleep?.(180);
     }
 
@@ -1385,6 +1469,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function openPinnedOrderEditor(manager = getManager()) {
     const panel = manager?.querySelector(".ds-memory-pinned-order");
     if (!panel) return;
+    if (usesNativeMemoryCards(manager)) {
+      setStatus('Pinned order is managed by SpicyChat in the new Memory Manager; QoL will not re-pin memories to force an order.', 'error');
+      return;
+    }
     if (!panel.hidden) {
       panel.hidden = true;
       panel.replaceChildren();
@@ -1401,7 +1489,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       setStatus("Context Keeper is not ready yet.", "error");
       return;
     }
-    const result = await DS.addContextKeeperDetails([...selectedMemories], { source: "memory" });
+    const details = selectedMemoryRows().map(item => item.rawText || item.text);
+    if (!details.length) return;
+    const result = await DS.addContextKeeperDetails(details, { source: "memory" });
     const added = Number(result?.added || 0);
     const skipped = Number(result?.skipped || 0);
     setStatus(`Kept ${added} ${added === 1 ? "memory" : "memories"}${skipped ? `; ${skipped} already saved/similar` : ""}.`, "ok");
@@ -1433,13 +1523,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function rowPinnedHint(item) {
     if (!item?.row) return null;
-    if (item.nativeCard) {
-      const actions = [...item.row.querySelectorAll('button[aria-label], button[title]')]
-        .map(button => `${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`.toLowerCase());
-      if (actions.some(label => /\bunpin\b/.test(label))) return true;
-      if (actions.some(label => /\bpin\b/.test(label))) return false;
-      return null;
-    }
+    if (item.nativeCard) return nativeCardPinnedState(item);
     const explicit = item.row.querySelector(
       '[aria-label="Pinned" i], [title="Pinned" i], [data-testid*="pinned" i], svg.lucide-pin:not(.lucide-pin-off)'
     );
@@ -1464,11 +1548,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const rows = selectedOnly ? getMemoryRows(manager) : getExportMemoryRows(manager);
     const wanted = selectedOnly
-      ? rows.filter(item => selectedMemories.has(item.text))
+      ? rows.filter(item => selectedMemories.has(memoryKey(item)))
       : rows;
     if (!wanted.length) {
-      setStatus(selectedOnly ? "Select memories first. Selection on the new Memory Manager layout needs a layout update." :
-        "QoL cannot recognize the memory rows in this SpicyChat layout. Use Copy layout report; your memories are not empty.", "error");
+      setStatus(selectedOnly ? "Select memories first." :
+        (usesNativeMemoryCards(manager)
+          ? "No memories are shown. Clear SpicyChat's native filters if you want to export all memories."
+          : "QoL cannot recognize these memory rows. Use Copy layout report without changing saved memories."), "error");
       return;
     }
 
@@ -1545,9 +1631,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const key = nodeTranslationKey(field).toLowerCase();
     const placeholder = cleanText(field.getAttribute?.("placeholder")).toLowerCase();
     const aria = cleanText(field.getAttribute?.("aria-label")).toLowerCase();
-    return key.includes("chat:modal.memories.addmemoryinput") ||
-      /add (?:a )?new memory/.test(placeholder) ||
-      /add (?:a )?new memory/.test(aria);
+    if (key.includes("chat:modal.memories.addmemoryinput") ||
+        /add (?:a )?new memory/.test(placeholder) ||
+        /add (?:a )?new memory/.test(aria)) return true;
+
+    // SpicyChat's inline composer now has an unlabelled textarea beneath a
+    // separate "New memory" caption. Match only this local card; do not infer
+    // a create control from the word "memories" elsewhere in the dialog.
+    if (!field.matches?.("textarea")) return false;
+    const manager = getManager();
+    if (!manager?.contains(field)) return false;
+    const fields = memoryCreateFields(manager).filter(node => node.matches("textarea"));
+    if (fields.length !== 1 || fields[0] !== field) return false;
+    for (let parent = field.parentElement, depth = 0;
+         parent && parent !== manager && depth < 5;
+         parent = parent.parentElement, depth++) {
+      // Stop before reaching the entire native memory list.
+      if (parent.querySelectorAll("textarea").length > 1) return false;
+      const captions = parent.querySelectorAll("label, h2, h3, h4, span, p, div");
+      if ([...captions].some(node => node.children.length === 0 &&
+          /^(?:new|add) memory$/i.test(cleanText(node.textContent)))) return true;
+    }
+    return false;
   }
 
   function findNativeMemorySubmitButton(field, manager = getManager()) {
@@ -1857,6 +1962,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     note.textContent = looksLikeBrandNewChat()
       ? "Choose which memories to add. Exact duplicates are unchecked by default. If this brand-new chat has not been created by SpicyChat yet, QoL will tell you exactly what to do instead of failing with a generic Add Memory error."
       : "Choose which memories to add to this chat. Exact duplicates are unchecked by default. Source chat IDs are never reused.";
+    note.textContent += " Imported memories become manually added SpicyChat memories, even if they were Auto memories in the source chat.";
     const list = document.createElement("div");
     list.className = "ds-memory-import-list";
     memories.forEach((memory, index) => {
@@ -1931,7 +2037,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   // Read-only selected source rows and native import preview for local packs.
-  DS.getMemoryPackSourceRows = () => getMemoryRows().filter(item => selectedMemories.has(item.text)).map(item => ({text: item.rawText || item.text, pinned: rowPinnedHint(item) === true}));
+  DS.getMemoryPackSourceRows = () => selectedMemoryRows().map(item => ({text: item.rawText || item.text, pinned: rowPinnedHint(item) === true}));
   DS.openMemoryPackImportPreview = (rows, name) => { if (getManager()) showMemoryImportPreview(rows, `${name} (memory pack)`); };
   DS.hasNativeMemoryManagerForPacks = () => !!getManager();
 
@@ -1960,13 +2066,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       <div class="ds-memory-bulk-meta">
         <span class="ds-memory-selected-count">0 selected</span>
         <span class="ds-memory-bulk-status" aria-live="polite"></span>
+        <small class="ds-memory-native-lifecycle" hidden>SpicyChat starts automatic memories when a chat outgrows its context, then reviews them about every 15 exchanges. Pinned and manually added memories are kept.</small>
       </div>
       <div class="ds-memory-pinned-order" hidden></div>
       ${DS.state.settings?.enableMemoryVault ? `<div id="ds-memory-vault-panel" class="ds-memory-vault-panel"></div>` : ""}
     `);
 
     toolbar.querySelector(".ds-memory-select-all")?.addEventListener("click", () => {
-      selectedMemories = new Set(getMemoryRows(manager).map(item => item.text));
+      selectedMemories = new Set(getMemoryRows(manager).map(memoryKey));
       updateToolbar(manager);
     });
 
@@ -1981,7 +2088,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     toolbar.querySelector(".ds-memory-invert")?.addEventListener("click", () => {
       const next = new Set();
       for (const item of getMemoryRows(manager)) {
-        if (!selectedMemories.has(item.text)) next.add(item.text);
+        const key = memoryKey(item);
+        if (!selectedMemories.has(key)) next.add(key);
       }
       selectedMemories = next;
       updateToolbar(manager);
@@ -2053,6 +2161,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
     });
 
+    const nativeList = manager.querySelector('[data-testid="MemoryManagerV2-List"]');
+    if (nativeList) {
+      // Keep QoL controls out of the virtualized native list; React can
+      // replace list children after refresh or saving a suggestion.
+      nativeList.insertAdjacentElement('beforebegin', toolbar);
+      applyMemoryLayout(manager);
+      return toolbar;
+    }
     const scrollArea = manager.querySelector(".overflow-y-auto") || manager.querySelector("div[class*='overflow-y-auto']");
     if (!scrollArea) return null;
 
@@ -2129,7 +2245,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     });
 
-    if (!settings.enabled || !settings.showCopyMemoryAction || !manager) return;
+    if (!settings.enabled || !settings.showCopyMemoryAction || !manager) {
+      document.querySelectorAll('.ds-memory-copy-action').forEach(button => button.remove());
+      return;
+    }
+
+    if (usesNativeMemoryCards(manager)) {
+      for (const item of getNewMemoryCardRows(manager)) {
+        const host = item.row.querySelector('[data-testid^="MemoryManagerCard-Actions-"]');
+        if (!host || host.querySelector('.ds-memory-copy-action')) continue;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ds-memory-copy-action';
+        button.dataset.dsOwned = '1';
+        button.setAttribute('aria-label', 'Copy Memory');
+        button.title = 'Copy Memory';
+        button.textContent = 'Copy';
+        button.addEventListener('click', async event => {
+          event.stopPropagation();
+          const ok = await copyTextToClipboard(String(item.textNode?.textContent || '').trim());
+          setStatus(ok ? 'Memory copied.' : 'Could not copy memory.', ok ? 'ok' : 'error');
+        });
+        host.appendChild(button);
+      }
+      return;
+    }
 
     const memory = expandedMemoryItem(manager);
     if (!memory?.rawText) return;
@@ -2227,7 +2367,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     closeMemoryImportPreview();
     lastManager = null;
     lastMemoryMenuTrigger = null;
-    document.querySelectorAll(".ds-memory-copy-menuitem").forEach(el => el.remove());
+    document.querySelectorAll(".ds-memory-copy-menuitem, .ds-memory-copy-action").forEach(el => el.remove());
   }
 
   DS.applyMemoryManagerTools = function applyMemoryManagerTools() {
@@ -2254,7 +2394,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (!copyEnabled) {
-      document.querySelectorAll(".ds-memory-copy-menuitem").forEach(el => el.remove());
+      document.querySelectorAll(".ds-memory-copy-menuitem, .ds-memory-copy-action").forEach(el => el.remove());
       lastMemoryMenuTrigger = null;
     }
 
@@ -2312,7 +2452,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function relevantMemoryMutation(mutations) {
     const gateSelector = '[data-testid="ChatMemoryManagerCapabilityGate"]';
-    const rowsSelector = 'button[data-slot="trigger"][aria-haspopup="true"], [data-testid="ModalConversationMemories-LoadMoreButton"], div.group[data-testid][role]';
+    const rowsSelector = 'button[data-slot="trigger"][aria-haspopup="true"], [data-testid="ModalConversationMemories-LoadMoreButton"], [data-testid^="MemoryManagerCard-"], [data-testid="MemoryManagerV2-List"]';
     for (const mutation of mutations) {
       if (mutation.type !== "childList") continue;
       const target = mutation.target instanceof Element ? mutation.target : null;
@@ -2330,7 +2470,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       for (const node of mutation.removedNodes) {
         if (!(node instanceof Element)) continue;
-        if (node.matches?.('#ds-memory-bulk-toolbar, .ds-memory-layout-toggle, [data-testid="ChatMemoryManagerCapabilityGate"]') ||
+        if (node.matches?.('#ds-memory-bulk-toolbar, .ds-memory-layout-toggle, [data-testid="ChatMemoryManagerCapabilityGate"], [data-testid^="MemoryManagerCard-"]') ||
             (!inGate && node.childElementCount <= 24 && node.querySelector?.(gateSelector))) return true;
       }
     }

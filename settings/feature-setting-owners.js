@@ -1,12 +1,13 @@
 // Small feature -> Settings ownership map. Values remain untouched when omitted.
 window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
+  "archive-website-link": ["showArchiveWebsiteLinks"],
   "accessibility": ["qolInterfaceScale", "chatTextScale", "chatLineSpacing", "settingsReadingFont", "settingsReadingSize", "settingsReadingLineSpacing", "settingsReadingLetterSpacing", "settingsReadingContrast", "settingsReadingLargerControls"],
   "chat-width-controls": ["enableChatWidthControls", "chatStreamWidth", "chatBubbleMaxWidth", "chatComposerWidth"],
   "list-fill": ["autoFillListings", "autoFillTargetCards", "autoFillMaxClicks"],
   "pagination-tools": ["paginationTopJumpBox", "paginationQuickJumpMenu"],
   "rulebook-diagnostics": ["enableRulebookDiagnostics"],
   "story-reading-layout": ["storyReadingLayout"],
-  "chat-list": ["showRandomChatButton", "randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites", "chatListTwoColumns", "chatListPopoutShortcut", "chatListRenameShortcut"],
+  "chat-list": ["showRandomChatButton", "randomChatUseLastHomeFilters", "randomChatIncludeOpened", "randomChatIncludeLater", "randomChatIncludeFavorites"],
   "sidebar": ["showQolSidebarButton", "qolSidebarButtonPlacement", "hideSidebarLogo", "hideSidebarHome", "hideSidebarChats", "hideSidebarPersonas", "restorePersonasSidebarPosition", "hideSidebarNewBadges", "hideSidebarCreateMenu", "hideSidebarCreateChatbot", "hideSidebarCreateLorebook", "hideSidebarCreateGroup", "hideSidebarCreateVoice", "hideSidebarMyCreationsMenu", "hideSidebarMyChatbots", "hideSidebarMyLorebooks", "hideSidebarMyGroups", "hideSidebarMyVoices", "hideSidebarFavorites", "hideSidebarRecommendations", "hideSidebarLeaderboard", "hideSidebarBlockedCreators", "hideSidebarSubscribe", "hideSidebarHelp", "hideSidebarSocialDiscord", "hideSidebarSocialX", "hideSidebarSocialReddit", "hideSidebarFooterTerms", "hideSidebarFooterPrivacy", "hideSidebarFooterRefunds", "hideSidebarFooterReporting", "hideSidebarFooterGuidelines", "hideSidebarFooterSupport", "hideSidebarFooterAffiliates", "hideSidebarAppDownloadGooglePlay", "hideSidebarAppDownloadAppStore", "hideSidebarAppDownloadGeneric", "hideSidebarWebVersion", "hideSidebarSignOut", "hideSidebarSocialLinks", "hideSidebarFooterLinks", "hideSidebarAppDownload"],
   "top-bar": ["hideTopBarLanguage", "hideTopBarNotifications", "hideTopBarTheme", "topBarProfilePillMode", "topBarProfilePillPersonaPrefix", "topBarProfilePillCustomText"],
   "auto-afk": ["autoAfkEnabled", "autoAfkMinutes", "autoAfkChats", "autoAfkHome", "autoAfkProfiles", "autoAfkProtectActive", "autoAfkResetOnActivate", "autoAfkAction", "autoAfkHours"],
