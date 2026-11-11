@@ -379,7 +379,9 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
   if (backendStatus) {
     backendStatus.textContent = linked
       ? `Connected to ${response?.apiBase || "https://syncqol.drache.uk"}. ${state.lastStatus || "Automatic sync is active."}`
-      : `Cloudflare sync is ready at ${response?.apiBase || "https://syncqol.drache.uk"}. Create a QoL account here or enter a one-use code from another linked device.`;
+      : response?.ok === true
+        ? `Sync service available at ${response.apiBase || "https://syncqol.drache.uk"}. Create a QoL account or enter a one-use link code.`
+        : "Sync background service has not answered yet. Creating or linking an account will not work until it is available.";
   }
   const error = $("accountSyncError");
   if (error) {
@@ -622,22 +624,47 @@ function setupAccountSyncFoundation() {
   });
 
   $("accountSyncCreate")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Creating QoL account…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_ACCOUNT", meta: syncDeviceMeta() }, 120000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not create the QoL account.";
-      return;
+    const feedback = $("accountSyncCreateFeedback");
+    const report = message => {
+      if (feedback) feedback.textContent = message;
+      const status = $("accountSyncActionStatus");
+      if (status) status.textContent = message;
+    };
+    setAccountSyncBusy(true, "Checking Firefox/Chrome sync service…");
+    report("Checking the extension's background sync service…");
+    try {
+      const ready = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 6500);
+      if (ready?.ok !== true) {
+        report(ready?.message
+          ? `Sync background service unavailable: ${ready.message}. Reload the extension and reopen QoL Settings; no account was created.`
+          : "Sync background service is not responding. Reload the extension and reopen QoL Settings. If it persists, export a support report; no account was created.");
+        return;
+      }
+      if (ready.linked) {
+        report("This device is already linked. Use Sync now or view its linked devices instead.");
+        return;
+      }
+      report("Creating QoL account…");
+      const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_ACCOUNT", meta: syncDeviceMeta() }, 120000);
+      if (!result?.ok) {
+        report(result?.__dsTimeout ? "Account request timed out. Check whether an account was linked before retrying; the service may have finished after this page stopped waiting."
+          : result?.message || "Account request failed or the background service stopped responding. Check the sync status and support report before retrying.");
+        return;
+      }
+      if (result.initialSyncOk === false || result.sync?.ok === false) {
+        const detail = result.sync?.message ? ` ${result.sync.message}` : "";
+        report(`Account created, but the first settings sync failed.${detail} Use Sync now to retry.`);
+        showSettingsToast("QoL account created; first sync needs a retry.");
+      } else {
+        report("Account created. Your current settings were uploaded and automatic sync is on.");
+        showSettingsToast("QoL sync account created.");
+      }
+      await refreshAccountSyncUi({ refreshDevices: true });
+    } catch (error) {
+      report(`Account setup couldn't finish: ${error?.message || String(error)}`);
+    } finally {
+      setAccountSyncBusy(false);
     }
-    if (result.initialSyncOk === false || result.sync?.ok === false) {
-      const detail = result.sync?.message ? ` ${result.sync.message}` : "";
-      $("accountSyncActionStatus").textContent = `Account created, but the first settings sync failed.${detail} Use Sync now to retry.`;
-      showSettingsToast("QoL account created; first sync needs a retry.");
-    } else {
-      $("accountSyncActionStatus").textContent = "Account created. Your current settings were uploaded and automatic sync is on.";
-      showSettingsToast("QoL sync account created.");
-    }
-    await refreshAccountSyncUi({ refreshDevices: true });
   });
 
   $("accountSyncLink")?.addEventListener("click", async () => {
