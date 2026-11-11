@@ -15,7 +15,15 @@
     "content/private-lorebook-archive-upload-main.js"
   ],
   "settingsKeys": [
-    "enablePrivateLorebookBridge"
+    "enablePrivateLorebookBridge",
+    "privateLorebookAllowArchiveAutoSync",
+    "privateLorebookAllowAutoCreate",
+    "privateLorebookArchiveCleanup",
+    "privateLorebookArchiveId",
+    "privateLorebookPromotionPolicy",
+    "privateLorebookRequireReview",
+    "privateLorebookStorageMode",
+    "privateLorebookSyncMode"
   ],
   "settingsFiles": [
     "settings/feature-panels/private-lorebook-bridge.js"
@@ -31,5 +39,6 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsMarkupIsolated": true
 }
