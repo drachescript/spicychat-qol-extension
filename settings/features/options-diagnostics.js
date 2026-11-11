@@ -186,7 +186,9 @@ function setupControlCenterControls() {
     const downloaded = await downloadAllSupportInfo();
     if (status) status.textContent = downloaded
       ? (isAndroidSupportWebView()
-          ? (lastAndroidSupportExportState === "native"
+          ? (lastAndroidSupportExportState === "verified"
+              ? "Android verified that the support report was saved; included history was cleared if its checkpoint was confirmed."
+              : lastAndroidSupportExportState === "native"
               ? "Android accepted the support export request. Check Downloads; completion isn't verified and history was kept."
               : "Android couldn't save a file. The report was copied instead, and saved history was kept.")
           : "Support download requested. Check Downloads; support history was kept unless completion was confirmed.")
@@ -206,6 +208,7 @@ function supportReportFilename(kind = "support-info") {
 }
 
 let lastAndroidSupportExportState = "";
+let lastAndroidSupportFileResult = { started: false, verified: false };
 // Android fallback has its own report area. Never repurpose the settings
 // import/backup editor for a diagnostic text export.
 function showSupportReportFallback(text) {
@@ -248,50 +251,41 @@ function isAndroidSupportWebView() {
 // Never clear history on the strength of this acknowledgement alone.
 async function requestAndroidSupportFile(text, filename) {
   const body = String(text || "");
-  if (!body) return false;
+  const empty = { started: false, verified: false };
+  if (!body) return empty;
+  const expectedBytes = new TextEncoder().encode(body).byteLength;
   const bridge = window.flutter_inappwebview;
-  if (bridge?.callHandler) {
-    const payload = { text: body, content: body, filename, fileName: filename,
-      mimeType: "text/plain;charset=utf-8", byteLength: new TextEncoder().encode(body).byteLength };
-    for (const handler of ["exportChat", "saveFile"]) {
-      try {
-        // Do not leave Options stuck forever if a WebView handler has stalled.
-        // An uncertain request must not be retried through a second handler:
-        // the first one might still finish and create a duplicate download.
-        let timer;
-        const response = await Promise.race([
-          Promise.resolve().then(() => bridge.callHandler(handler, JSON.stringify(payload)))
-            .then(value => ({ value }), error => ({ error })),
-          new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 10000); })
-        ]);
-        clearTimeout(timer);
-        if (response.timedOut) return false;
-        if (response.error) continue;
-        let result = response.value;
-        // Some Flutter handlers return JSON strings, others objects/booleans.
-        if (typeof result === "string" && result.trim().startsWith("{")) {
-          try { result = JSON.parse(result); } catch {}
-        }
-        if (result === false || result?.success === false || result?.ok === false || result?.error) return false;
-        const reportedBytes = result && typeof result === "object"
-          ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN)
-          : NaN;
-        // Do not call an acknowledgement a saved file. Retry through another
-        // handler could create a duplicate if the first finishes late.
-        return Number.isFinite(reportedBytes) && reportedBytes >= payload.byteLength;
-      } catch {}
+  const normalize = raw => {
+    let result = raw;
+    if (typeof result === "string") {
+      try { result = JSON.parse(result); } catch {}
     }
+    if (result === false || result?.ok === false || result?.success === false || result?.error || result?.canceled) return empty;
+    const bytes = Number(result?.bytes ?? result?.bytesWritten ?? result?.savedBytes ?? result?.fileSize ?? NaN);
+    const verified = result?.ok === true && result?.verified === true && bytes === expectedBytes;
+    return { started: verified || (Number.isFinite(bytes) && bytes === expectedBytes), verified };
+  };
+  if (bridge?.callHandler) {
+    // One native file-picker request only. Never retry after a possible
+    // timeout, which could save a duplicate or clear history incorrectly.
+    const payload = { text: body, filename, mimeType: "text/plain;charset=utf-8" };
+    try {
+      let timer;
+      const response = await Promise.race([
+        Promise.resolve().then(() => bridge.callHandler("saveFile", JSON.stringify(payload)))
+          .then(value => ({ value }), error => ({ error })),
+        new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 30000); })
+      ]);
+      clearTimeout(timer);
+      if (response.timedOut || response.error) return empty;
+      return normalize(response.value);
+    } catch { return empty; }
   }
   if (typeof window._dsRequestExport === "function") {
-    try {
-      const result = await window._dsRequestExport(body, filename);
-      const bytes = result && typeof result === "object"
-        ? Number(result.bytesWritten ?? result.savedBytes ?? result.fileSize ?? result.byteCount ?? NaN) : NaN;
-      return result !== false && result?.success !== false && result?.ok !== false &&
-        Number.isFinite(bytes) && bytes >= new TextEncoder().encode(body).byteLength;
-    } catch {}
+    try { return normalize(await window._dsRequestExport(body, filename)); }
+    catch { return empty; }
   }
-  return false;
+  return empty;
 }
 
 async function preserveAndroidSupportFallback(text) {
@@ -322,16 +316,19 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
 
   const mime = "text/plain;charset=utf-8";
   if (isAndroidSupportWebView()) {
-    const accepted = await requestAndroidSupportFile(body, filename);
+    const result = await requestAndroidSupportFile(body, filename);
+    lastAndroidSupportFileResult = result;
     const fallback = await preserveAndroidSupportFallback(body);
-    lastAndroidSupportExportState = accepted ? "native" : fallback.copied ? "copied" : "manual";
-    if (status) status.textContent = accepted
-      ? `Sent ${filename} to Android's file exporter. Check Downloads; the app cannot confirm the file was written.${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
+    lastAndroidSupportExportState = result.verified ? "verified" : result.started ? "native" : fallback.copied ? "copied" : "manual";
+    if (status) status.textContent = result.verified
+      ? `Android verified the saved report (${new TextEncoder().encode(body).byteLength} bytes).${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
+      : result.started
+        ? `Android accepted ${filename}, but did not verify file completion. History was kept.`
       : (fallback.copied
           ? "Android file export was unavailable. Report copied instead; no file has been verified."
           : "Android file export and clipboard are unavailable. Report is available in Support report text for manual copying.");
     // Copying text is NOT evidence that a file download started.
-    return accepted;
+    return result.started;
   }
   try {
     if (await tryNativeBackupSave(body, filename, mime)) {
@@ -892,9 +889,60 @@ async function buildFastSupportSnapshot() {
   ].join("\n");
 }
 
+// Android has no browser extension background service worker. Keep the
+// bounded Android timeline in the APK's persistent chrome.storage.local bridge.
+// Only the dedicated history key is ever written or cleared here.
+const DS_ANDROID_SUPPORT_HISTORY_KEY = "dsAndroidSupportHistoryV1";
+async function readAndroidSupportHistory({ summaryOnly = false } = {}) {
+  const state = (await chrome.storage.local.get(DS_ANDROID_SUPPORT_HISTORY_KEY))?.[DS_ANDROID_SUPPORT_HISTORY_KEY];
+  if (state && (state.schema !== 1 || !Array.isArray(state.rows)))
+    return { ok: false, error: "Unknown Android history schema; original data was preserved." };
+  const history = state || { schema: 1, next: 1, dropped: 0, rows: [] };
+  const rows = history.rows;
+  const through = Math.max(0, Number(history.next || 1) - 1);
+  const result = { ok: true, count: rows.length, through,
+    dropped: Math.max(0, Number(history.dropped) || 0), compressedBatches: 0,
+    storedIn: "Android local storage" };
+  if (summaryOnly) return result;
+  const lines = [
+    `History: ${rows.length} saved checks across Android QoL updates; ${result.dropped} oldest checks removed by the bounded history limit.`,
+    "Android history contains only page types, QoL versions and numeric performance/warning counters. No chat text, account IDs or bot IDs."
+  ];
+  for (const row of rows) {
+    const metrics = Object.entries(row.metrics || {}).filter(([k, v]) =>
+      /^[a-zA-Z][a-zA-Z0-9]{0,70}$/.test(k) && Number.isFinite(Number(v)))
+      .map(([k, v]) => `${k}=${Number(v)}`).join("; ");
+    const at = Number(row.at);
+    const date = Number.isFinite(at) && at > 0 ? new Date(at).toISOString() : "unknown time";
+    lines.push(`${date} | v${String(row.version || "unknown").slice(0, 24)} | ${String(row.page || "other").slice(0, 24)} | warnings=${Number(row.levels?.warn || 0)}; errors=${Number(row.levels?.error || 0)}${metrics ? ` | ${metrics}` : ""}`);
+  }
+  return { ...result, text: lines.join("\n") };
+}
+async function clearAndroidSupportHistory(through = null) {
+  const key = DS_ANDROID_SUPPORT_HISTORY_KEY;
+  const value = (await chrome.storage.local.get(key))?.[key];
+  if (value && (value.schema !== 1 || !Array.isArray(value.rows)))
+    return { ok: false, error: "Unknown history schema; no data was removed." };
+  const state = value || { schema: 1, next: 1, dropped: 0, rows: [] };
+  const target = through == null ? Number.MAX_SAFE_INTEGER : Number(through);
+  if (!Number.isSafeInteger(target) || target < 0)
+    return { ok: false, error: "Invalid history checkpoint." };
+  const retained = state.rows.filter(row => Number(row.seq || 0) > target);
+  const removed = state.rows.length - retained.length;
+  await chrome.storage.local.set({ [key]: { ...state, rows: retained, dropped: 0 } });
+  const confirmed = (await chrome.storage.local.get(key))?.[key];
+  if (!confirmed || !Array.isArray(confirmed.rows) ||
+      confirmed.rows.some(row => Number(row.seq || 0) <= target))
+    return { ok: false, error: "Could not verify Android history removal." };
+  return { ok: true, cleared: removed, remaining: confirmed.rows.length };
+}
 // Saved support history is a small, privacy-safe timeline kept across normal
 // updates. This is not a copy of chat messages or the full Settings database.
 async function readSavedSupportHistory({ summaryOnly = false } = {}) {
+  if (isAndroidSupportWebView()) {
+    try { return await readAndroidSupportHistory({ summaryOnly }); }
+    catch (error) { return { ok: false, text: String(error?.message || error), count: 0, through: 0 }; }
+  }
   const timeoutMs = summaryOnly ? (isAndroidSupportWebView() ? 5500 : 12000)
     : (isAndroidSupportWebView() ? 4000 : 45000);
   const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_GET", summaryOnly }, timeoutMs).catch(() => null);
@@ -912,7 +960,9 @@ async function refreshSavedSupportStatus() {
 }
 async function clearSavedSupportHistory() {
   if (!confirm("Clear saved support history? This cannot be undone unless you downloaded a copy.")) return;
-  const result = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR" }, 12000).catch(() => null);
+  const result = isAndroidSupportWebView()
+    ? await clearAndroidSupportHistory().catch(error => ({ ok: false, error: String(error) }))
+    : await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR" }, 12000).catch(() => null);
   if (result?.ok) {
     await runtimeMessageWithTimeout({ type: "DS_CLEAR_PAGE_RUNTIME_LOG" }, 1500).catch(() => null);
     const status = $("diagnosticsStatus");
@@ -929,8 +979,9 @@ async function downloadSupportVerified(text, compressed) {
   // Android's bridge only accepts text. Do not allocate/serialize/compress a
   // second copy of the report on the WebView main thread before exporting it.
   if (isAndroidSupportWebView()) {
+    lastAndroidSupportFileResult = { started: false, verified: false };
     const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
-    return { started, verified: false, isGzip: false };
+    return { started, verified: started && lastAndroidSupportFileResult.verified === true, isGzip: false };
   }
   const raw = compressed && typeof CompressionStream === "function"
     ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
@@ -1121,7 +1172,9 @@ async function downloadAllSupportInfo() {
       if (status) status.textContent = "Report saved. Saved support history could not be verified and was kept.";
       return true;
     }
-    const cleared = await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR", through: history.through }, 45000).catch(() => null);
+    const cleared = isAndroidSupportWebView()
+      ? await clearAndroidSupportHistory(history.through).catch(error => ({ ok: false, error: String(error) }))
+      : await runtimeMessageWithTimeout({ type: "DS_SUPPORT_HISTORY_CLEAR", through: history.through }, 45000).catch(() => null);
     if (cleared?.ok) {
       await refreshSavedSupportStatus();
       if (status) status.textContent = `Full support report saved${saved.isGzip ? " as .txt.gz" : ""}. ${cleared.cleared || 0} included history checks cleared; any newer checks were kept.`;
