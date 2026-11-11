@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.74",
+  "sourceVersion": "0.2.77",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -74,6 +74,21 @@
       "runtime": "content/animation-control.js",
       "settings": [
         "settings/feature-panels/animation-control.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-website-link",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/archive-website-link.js",
+      "settings": [
+        "settings/feature-panels/archive-website-link.js"
       ],
       "settingsStyles": [],
       "styles": [],

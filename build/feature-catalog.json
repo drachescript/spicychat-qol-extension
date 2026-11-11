@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.74",
+  "version": "0.2.77",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 134,
+  "featureCount": 135,
   "sections": [
     "Blocking",
     "Chat List",
@@ -48,19 +48,26 @@
     "content/feature-lifecycle.js",
     "content/generation-metadata-loader.js",
     "content/main-card-mutation-classifiers.js",
+    "content/main-chat-history-batches.js",
     "content/main-chat-menu-guards.js",
+    "content/main-chat-message-count.js",
     "content/main-chat-startup-guard.js",
     "content/main-diagnostics.js",
     "content/main-dom-mutation-classifiers.js",
+    "content/main-essential-chat-controls.js",
+    "content/main-feature-demand.js",
+    "content/main-lazy-history.js",
     "content/main-message-edit-guards.js",
     "content/main-message-mutations.js",
     "content/main-my-creations-block-guard.js",
     "content/main-page-observer.js",
     "content/main-presentation-helpers.js",
     "content/main-refresh-trackers.js",
+    "content/main-route-change.js",
     "content/main-route-recovery.js",
     "content/main-scheduler-utils.js",
     "content/main-startup.js",
+    "content/main-storage-dirty-groups.js",
     "content/main.js",
     "content/runtime-improvements.js",
     "content/runtime-kernel.js",
@@ -82,6 +89,7 @@
     "content/alternate-dialogue.js",
     "content/android-app.js",
     "content/animation-control.js",
+    "content/archive-website-link.js",
     "content/auto-afk.js",
     "content/auto-blocking.js",
     "content/auto-images.js",
@@ -182,19 +190,26 @@
     "content/lorebook-tags.js",
     "content/lorebook-workflow.js",
     "content/main-card-mutation-classifiers.js",
+    "content/main-chat-history-batches.js",
     "content/main-chat-menu-guards.js",
+    "content/main-chat-message-count.js",
     "content/main-chat-startup-guard.js",
     "content/main-diagnostics.js",
     "content/main-dom-mutation-classifiers.js",
+    "content/main-essential-chat-controls.js",
+    "content/main-feature-demand.js",
+    "content/main-lazy-history.js",
     "content/main-message-edit-guards.js",
     "content/main-message-mutations.js",
     "content/main-my-creations-block-guard.js",
     "content/main-page-observer.js",
     "content/main-presentation-helpers.js",
     "content/main-refresh-trackers.js",
+    "content/main-route-change.js",
     "content/main-route-recovery.js",
     "content/main-scheduler-utils.js",
     "content/main-startup.js",
+    "content/main-storage-dirty-groups.js",
     "content/main.js",
     "content/memory-manager.js",
     "content/memory-packs.js",
@@ -431,6 +446,38 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "archive-website-link",
+      "label": "Archive Website Link",
+      "description": "Adds the archive website link tools.",
+      "section": "Interface",
+      "group": "interface",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/archive-website-link.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/archive-website-link.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "showArchiveWebsiteLinks"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -1411,7 +1458,11 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
-        "enableLocalLorebookRecall"
+        "enableLocalLorebookRecall",
+        "enableSharedOocBudget",
+        "localLorebookRecallMaxChars",
+        "localLorebookRecentMessages",
+        "sharedOocBudgetChars"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -3854,7 +3905,15 @@
       ],
       "backgroundServices": [],
       "settingKeys": [
-        "enablePrivateLorebookBridge"
+        "enablePrivateLorebookBridge",
+        "privateLorebookAllowArchiveAutoSync",
+        "privateLorebookAllowAutoCreate",
+        "privateLorebookArchiveCleanup",
+        "privateLorebookArchiveId",
+        "privateLorebookPromotionPolicy",
+        "privateLorebookRequireReview",
+        "privateLorebookStorageMode",
+        "privateLorebookSyncMode"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
