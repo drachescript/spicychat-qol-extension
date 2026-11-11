@@ -1,3 +1,30 @@
+## 0.2.77
+- Updated Memory Manager tools for SpicyChat V2 cards: selection, copy, pin, export, import, and native deletion with confirmation.
+- Updated native memory lifecycle guidance; disabled old pinned reordering on V2 rather than changing auto-managed priorities.
+- **Modularization — Stage 8:** Keep the separate Firefox background sync service loaded during extension startup.
+- Fixed Firefox Android account setup feedback: Sync now reports whether the background service is available instead of appearing unresponsive.
+- Split text normalization into separate decorative-symbol and emoji-removal options; emojis are kept unless explicitly removed.
+- Fixed Context Keeper Keep buttons stretching across or overlapping chat messages when toolbars change.
+- Fixed memory imports for SpicyChat's inline New memory editor and moved the memory layout button out of the header.
+- Kept Copy/Edit message tools attached to their own message instead of the chat header after native toolbar changes.
+- Added a read-only bookmark scope report for investigating missing or differently scoped saved bookmarks.
+
+## 0.2.76
+- Separated runtime feature-demand checks and chat message-count caching into dedicated helpers.
+- Reduced unnecessary card class/style updates on listings and improved blocked-card recovery efficiency.
+- Reduced repeated message-subtree checks during native chat updates.
+- Added clearer preparation and navigation timing labels to recommendation feedback diagnostics.
+- Fixed promo-banner hiding on Home and Chats, including the new Rulebooks/Lorebooks image carousel and previously missed image-only banners.
+- Added an optional Open in Archive shortcut to bot cards and profiles.
+- **Modularization — Stage 7:** Separated chat-history batching, lazy message enhancement, and essential chat-control repairs into dedicated runtime modules.
+- Separated route-change cleanup and targeted Settings refresh decisions from the main runtime.
+- Avoided native composer sizing and padding overrides on Firefox Android to address reported caret drift.
+
+## 0.2.75
+- **Modularization — Stage 6:** Updated feature asset ownership so development packages include the correct styles and background services.
+- Fixed saved Support History checks and clearing in the Android app.
+- Improved Android support exports to recognize verified saved files and preserve newer history records.
+
 ## 0.2.74
 - **Modularization — Stage 5:** Split more Settings controls, card-hide safeguards, chat startup, menu and tab-refresh helpers into separate modules.
 - Reduced repeated listing and Rulebook card processing while browsing and scrolling.
