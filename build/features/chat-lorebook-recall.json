@@ -7,7 +7,11 @@
   ],
   "requiredHelpers": [],
   "settingsKeys": [
-    "enableLocalLorebookRecall"
+    "enableLocalLorebookRecall",
+    "enableSharedOocBudget",
+    "localLorebookRecallMaxChars",
+    "localLorebookRecentMessages",
+    "sharedOocBudgetChars"
   ],
   "settingsFiles": [
     "settings/feature-panels/chat-lorebook-recall.js"
@@ -17,5 +21,6 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "settingsMarkupIsolated": true
 }
