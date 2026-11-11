@@ -558,6 +558,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const info = document.createElement("p");
     info.textContent = `${bookmarkSummary(latest).total} saved bookmarks in ${groups.length} chat groups. This view never moves or deletes anything. An unmatched group may belong to another chat, a clone, or an older draft.`;
     const list = document.createElement("div"); list.className = "ds-tool-list";
+    const copyScopeReport = document.createElement("button");
+    copyScopeReport.type = "button";
+    copyScopeReport.textContent = "Copy bookmark scope report";
+    copyScopeReport.title = "Copy counts and shortened chat keys; never copies message text";
+    copyScopeReport.addEventListener("click", async () => {
+      const lines = [
+        "SpicyChat QoL — bookmark scope review (read-only)",
+        `Current route: ${/^\/chat\/[^/]+\/[^/]+/.test(location.pathname) ? "saved conversation" : "single chat / draft"}`,
+        `Current scope: ${id ? "known" : "unavailable"}`,
+        `Groups: ${groups.length} · bookmarks: ${bookmarkSummary(latest).total}`
+      ];
+      groups.forEach(([key, data], index) => {
+        const entries = data.entries || [];
+        const mounted = entries.filter(mark => !!mark?.messageId &&
+          !!document.getElementById(String(mark.messageId))).length;
+        const label = key === id ? "current" : key.startsWith("draft:") ? "draft" :
+          key.startsWith("conversation:") ? "legacy conversation-key format" : "other";
+        lines.push(`${index + 1}. ${label}; key suffix …${String(key).slice(-8)}; saved ${entries.length}; mounted IDs ${mounted}`);
+      });
+      lines.push("No bookmark text, full chat keys, or stored entries are included.");
+      try {
+        await navigator.clipboard.writeText(lines.join("\n"));
+        DS.setQuickStatus?.("Copied read-only bookmark scope report.");
+      } catch {
+        DS.setQuickStatus?.("Could not copy bookmark scope report. No data was changed.");
+      }
+    });
     const sorted = groups.sort(([a], [b]) => (a === id ? -1 : b === id ? 1 : a.localeCompare(b)));
     for (const [index, [key, data]] of sorted.slice(0, 150).entries()) {
       const details = document.createElement("details"); details.className = "ds-tool-list-item";
@@ -584,7 +611,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const note = document.createElement("p"); note.textContent = "Only the first 150 groups are displayed; no stored records were modified.";
       list.append(note);
     }
-    dialog.append(head, info, list);
+    dialog.append(head, info, copyScopeReport, list);
     overlay.append(dialog); document.body.append(overlay);
     overlay.addEventListener("click", event => { if (event.target === overlay) overlay.remove(); });
   }

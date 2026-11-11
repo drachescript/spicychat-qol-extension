@@ -1,3 +1,14 @@
+## 0.2.77
+- Updated Memory Manager tools for SpicyChat V2 cards: selection, copy, pin, export, import, and native deletion with confirmation.
+- Updated native memory lifecycle guidance; disabled old pinned reordering on V2 rather than changing auto-managed priorities.
+- **Modularization — Stage 8:** Keep the separate Firefox background sync service loaded during extension startup.
+- Fixed Firefox Android account setup feedback: Sync now reports whether the background service is available instead of appearing unresponsive.
+- Split text normalization into separate decorative-symbol and emoji-removal options; emojis are kept unless explicitly removed.
+- Fixed Context Keeper Keep buttons stretching across or overlapping chat messages when toolbars change.
+- Fixed memory imports for SpicyChat's inline New memory editor and moved the memory layout button out of the header.
+- Kept Copy/Edit message tools attached to their own message instead of the chat header after native toolbar changes.
+- Added a read-only bookmark scope report for investigating missing or differently scoped saved bookmarks.
+
 ## 0.2.76
 - Separated runtime feature-demand checks and chat message-count caching into dedicated helpers.
 - Reduced unnecessary card class/style updates on listings and improved blocked-card recovery efficiency.

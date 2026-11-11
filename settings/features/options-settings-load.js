@@ -638,6 +638,7 @@ async function load() {
   setChecked("normalizePunctuation", !!settings.normalizePunctuation);
   setChecked("normalizeInvisibleCharacters", !!settings.normalizeInvisibleCharacters);
   setChecked("normalizeDecorativeSymbols", settings.normalizeDecorativeSymbols);
+  setChecked("normalizeEmojis", !!settings.normalizeEmojis);
   updateTextNormalizationPreview();
   setValue("blockedTags", arrayToLines(settings.blockedTags));
   setValue("blockedWords", arrayToLines(settings.blockedWords));

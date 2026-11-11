@@ -13,7 +13,7 @@
     "personas"
   ],
   "notes": [
-    "Source baseline: SpicyChat QoL Chrome v0.2.76, Modularization Stage 7 (November 8, 2026).",
+    "Source baseline: SpicyChat QoL Chrome v0.2.77, Modularization Stage 8 (November 10, 2026).",
     "These bundle boundaries describe the current Full runtime and intended Custom Lite ownership; they are not proof that individual bundles can be omitted safely.",
     "The Full manifest.json is authoritative for content-script and stylesheet loading order. options.html is authoritative for Settings script loading order.",
     "Stage 7: chat-history batching, lazy enhancement, essential chat controls, route changes and storage dirty-group classification were separated from the main runtime; shared listeners and lifecycle contracts still require independent Custom-build verification.",
@@ -21,7 +21,9 @@
     "The Settings required asset list enumerates all currently loaded feature-panel scripts; feature-specific panel omission is not yet verified.",
     "CSS declarations contain ordered Full stylesheet slices. Some legacy CSS remains shared and cannot be omitted blindly.",
     "Background handlers and shared Settings handlers still require further feature-lifecycle isolation before arbitrary Custom builds are supported.",
-    "The Full profile must remain behaviorally identical to the normal extension. Do not treat this preparation schema as a verified Custom-build dependency graph."
+    "The Full profile must remain behaviorally identical to the normal extension. Do not treat this preparation schema as a verified Custom-build dependency graph.",
+    "Stage 7: feature-demand predicates and loaded-chat message count caches are separate Core helpers; Full load order preserves existing scheduler behavior. This does not certify arbitrary Custom Lite bundles.",
+    "Stage 8: text-normalization emoji removal has its own disabled-by-default setting; Firefox account sync uses a dedicated statically loaded background service in generated Firefox builds (with legacy fallback). Full and Custom Lite isolation still require browser verification."
   ],
   "bundles": {
     "core": {
@@ -60,6 +62,8 @@
         "content/main-lazy-history.js",
         "content/main-route-change.js",
         "content/main-storage-dirty-groups.js",
+        "content/main-feature-demand.js",
+        "content/main-chat-message-count.js",
         "content/main.js",
         "content/my-creations-auto-load.js",
         "content/runtime-kernel.js",

@@ -866,6 +866,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "normalizePunctuation",
   "normalizeInvisibleCharacters",
   "normalizeDecorativeSymbols",
+  "normalizeEmojis",
   "autoFillListings",
   "showListingFilterStats",
   "showListingFilterStatsDetails",
@@ -2784,7 +2785,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "quickDislikeOnBlock", name: "Quick Dislike on QoL Block", children: ["quickDislikeIdleMinutes"] },
   { parent: "enableRecommendationHelpers", name: "Recommendation helpers", children: ["recommendationHideFavoriteBots", "recommendationHideOwnBots", "recommendationOnlyUnopened", "recommendationOnlyLorebook", "recommendationSessionHideButtons", "recommendationRandomButton", "recommendationHideLaterBots", "recommendationHideNotInterested", "recommendationPreferFavoriteCreators", "recommendationPreferredTags", "recommendationAvoidTags", "recommendationAvoidWords", "recommendationShowReasonBadges"] },
   { parent: "reduceAnimatedBotImages", name: "Animated bot images", children: ["animatedImagesListings", "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"] },
-  { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols"] },
+  { parent: "textNormalizationEnabled", name: "Text normalization", children: ["normalizeFancyUnicode", "normalizePunctuation", "normalizeInvisibleCharacters", "normalizeDecorativeSymbols", "normalizeEmojis"] },
   { parent: "autoFillListings", name: "Listing refill", children: ["showListingRefillButton"] },
   { parent: "showListingFilterStats", name: "Listing filter stats", children: ["showListingFilterStatsDetails"] },
   { parent: "blockCards", name: "Blocked tag / word / creator rules", children: ["autoBlockWordMatches", "autoBlockTagMatches"] },
@@ -3069,6 +3070,7 @@ $("addFollowedCreator")?.addEventListener("click", addFollowedCreator);
   "normalizePunctuation",
   "normalizeInvisibleCharacters",
   "normalizeDecorativeSymbols",
+  "normalizeEmojis",
   "textNormalizationPreviewInput"
 ].forEach(id => $(id)?.addEventListener("input", updateTextNormalizationPreview));
 [
@@ -3076,7 +3078,8 @@ $("addFollowedCreator")?.addEventListener("click", addFollowedCreator);
   "normalizeFancyUnicode",
   "normalizePunctuation",
   "normalizeInvisibleCharacters",
-  "normalizeDecorativeSymbols"
+  "normalizeDecorativeSymbols",
+  "normalizeEmojis"
 ].forEach(id => $(id)?.addEventListener("change", updateTextNormalizationPreview));
 
 

@@ -422,6 +422,7 @@ const DEFAULT_SETTINGS = {
   normalizePunctuation: false,
   normalizeInvisibleCharacters: false,
   normalizeDecorativeSymbols: false,
+  normalizeEmojis: false,
 
   qolInterfaceScale: 100,
   enableChatWidthControls: false,

@@ -772,7 +772,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       !!settings.normalizeFancyUnicode ||
       !!settings.normalizePunctuation ||
       !!settings.normalizeInvisibleCharacters ||
-      !!settings.normalizeDecorativeSymbols
+      !!settings.normalizeDecorativeSymbols ||
+      !!settings.normalizeEmojis
     );
   }
 

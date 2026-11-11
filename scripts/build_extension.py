@@ -348,7 +348,7 @@ def firefox_manifest(source: dict, dev: bool, profile: dict) -> dict:
         profile.get("devExtensionName" if dev else "extensionName")
         or ("SpicyChat QoL DEV" if dev else "SpicyChat QoL")
     )
-    manifest["background"] = {"scripts": background_script_imports()}
+    manifest["background"] = {"scripts": background_script_imports() + ["shared/sync-service.js"]}
     manifest["browser_specific_settings"] = FIREFOX_SETTINGS
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()

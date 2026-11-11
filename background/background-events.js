@@ -33,6 +33,6 @@ initializeHelperLifecycleRecovery();
 // v0.2.25 account/device sync is intentionally isolated from the large
 // background worker coordinator. Keep it in its own file, but load it from the
 // canonical background.js because the release builder pins this entry point for
-// both Chromium and Firefox packages. Chromium runs a service worker; Firefox's
-// generated manifest may run a background page instead, so support both loaders.
+// both Chromium and Firefox packages. Chromium imports it here; Firefox runs
+// shared/sync-service.js as a static script after the other background scripts.
 registerQolBackgroundSyncBootstrap();

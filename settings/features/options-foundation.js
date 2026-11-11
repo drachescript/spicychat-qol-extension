@@ -492,7 +492,10 @@ function runtimeMessage(message) {
     try {
       chrome.runtime.sendMessage(message, response => {
         if (chrome.runtime.lastError) {
-          resolve(null);
+          const messageText = String(chrome.runtime.lastError.message || "Extension background request failed.");
+          resolve(String(message?.type || "").startsWith("DS_QOL_SYNC_")
+            ? { ok: false, error: "background_unavailable", message: messageText }
+            : null);
           return;
         }
         resolve(response || null);
@@ -1233,19 +1236,28 @@ function normalizeSmallCapLatin(value) {
   return output;
 }
 
-function stripOrphanCombiningMarks(value) {
+function stripOrphanCombiningMarks(value, { preserveEmojiSelectors = false } = {}) {
   let output = "";
   let previousBase = false;
+  let previousEmoji = false;
   for (const character of String(value || "")) {
     if (/\p{M}/u.test(character)) {
-      if (previousBase) output += character;
+      if (previousBase || (preserveEmojiSelectors && previousEmoji && /[\uFE0E\uFE0F]/u.test(character))) output += character;
       continue;
     }
     output += character;
+    previousEmoji = /[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(character);
     previousBase = /[\p{L}\p{N}]/u.test(character);
     if (/\s|[\p{P}\p{S}]/u.test(character)) previousBase = false;
   }
   return output;
+}
+
+function removePreviewEmojiSequences(value) {
+  return String(value || "")
+    .replace(/([★☆✦✧✩✪✫✬✭✮✯✰♡♥])(?!\uFE0F)|(?:\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3|[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})?(?:\u200D[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})?)*)/gu,
+        (match, ornament) => ornament || " ")
+    .replace(/[\uFE0E\uFE0F\u20E3\u200D]/g, "");
 }
 
 function normalizeTextPreviewValue(value) {
@@ -1256,7 +1268,14 @@ function normalizeTextPreviewValue(value) {
 
   if (settings.normalizeInvisibleCharacters) {
     text = text
-      .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "")
+      .replace(/[\u200B-\u200C\u200E-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, "")
+      .replace(/\u200D/g, (joiner, index, source) => {
+        if (settings.normalizeEmojis) return "";
+        const before = Array.from(source.slice(0, index)).slice(-2).join("");
+        const after = Array.from(source.slice(index + 1))[0] || "";
+        return /[\p{Extended_Pictographic}\p{Emoji_Presentation}](?:\uFE0F|\p{Emoji_Modifier})?$/u.test(before) &&
+          /^[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(after) ? joiner : "";
+      })
       .replace(/[\u00AD]/g, "");
   }
 
@@ -1282,16 +1301,16 @@ function normalizeTextPreviewValue(value) {
 
   if (settings.normalizeDecorativeSymbols) {
     text = text
-      .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, " ")
-      .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥❤💕💖💗💘💝💞💟]/gu, " ")
+      .replace(/[★☆✦✧✩✪✫✬✭✮✯✰♡♥](?!\uFE0F)/gu, " ")
       .replace(/[꧁꧂◦°⋆]+/gu, " ")
       .replace(/[ᩚ]/gu, " ")
       .replace(/[\u{13000}-\u{1342F}]/gu, " ")
       .replace(/[\u08E3-\u0902₊₋₌⁺⁻⁼]+/gu, " ")
       .replace(/[|｜¦]+/g, " | ");
-    text = stripOrphanCombiningMarks(text);
+    text = stripOrphanCombiningMarks(text, { preserveEmojiSelectors: !settings.normalizeEmojis });
   }
 
+  if (settings.normalizeEmojis) text = removePreviewEmojiSequences(text);
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -1319,7 +1338,8 @@ function readTextNormalizationSettingsFromPage() {
     normalizeFancyUnicode: checked("normalizeFancyUnicode"),
     normalizePunctuation: checked("normalizePunctuation"),
     normalizeInvisibleCharacters: checked("normalizeInvisibleCharacters"),
-    normalizeDecorativeSymbols: checked("normalizeDecorativeSymbols")
+    normalizeDecorativeSymbols: checked("normalizeDecorativeSymbols"),
+    normalizeEmojis: checked("normalizeEmojis")
   };
 }
 

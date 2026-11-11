@@ -990,6 +990,7 @@ function readSingleSettingFromPage(settingKey) {
     case "normalizePunctuation": return (checked("normalizePunctuation"));
     case "normalizeInvisibleCharacters": return (checked("normalizeInvisibleCharacters"));
     case "normalizeDecorativeSymbols": return (checked("normalizeDecorativeSymbols"));
+    case "normalizeEmojis": return (checked("normalizeEmojis"));
     default: return SETTINGS_AUTOSAVE_MISSING;
   }
 }

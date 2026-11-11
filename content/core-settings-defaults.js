@@ -420,6 +420,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     normalizePunctuation: false,
     normalizeInvisibleCharacters: false,
     normalizeDecorativeSymbols: false,
+    normalizeEmojis: false,
 
     qolInterfaceScale: 100,
     enableChatWidthControls: false,
