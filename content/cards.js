@@ -772,7 +772,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       !!settings.normalizeFancyUnicode ||
       !!settings.normalizePunctuation ||
       !!settings.normalizeInvisibleCharacters ||
-      !!settings.normalizeDecorativeSymbols
+      !!settings.normalizeDecorativeSymbols ||
+      !!settings.normalizeEmojis
     );
   }
 
@@ -805,8 +806,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    el.dataset.dsNormalizedOriginal = source;
-    el.dataset.dsNormalizedApplied = normalized;
+    // Skip unchanged dataset writes. Native React can recheck hundreds of
+    // cards without the displayed text changing, and reassigning data attrs
+    // still produces attribute mutations in other extensions/observers.
+    if (el.dataset.dsNormalizedOriginal !== source) el.dataset.dsNormalizedOriginal = source;
+    if (el.dataset.dsNormalizedApplied !== normalized) el.dataset.dsNormalizedApplied = normalized;
     if (current !== normalized) el.textContent = normalized;
   }
 
@@ -1028,10 +1032,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function lockDescriptionBodyExpansion(card, block) {
     const body = descriptionCardBody(card, block);
     if (!body) return null;
-    body.dataset.dsDescriptionBodyExpanded = "1";
-    body.style.setProperty("height", "auto", "important");
-    body.style.setProperty("min-height", "180px", "important");
-    body.style.setProperty("overflow", "visible", "important");
+    if (body.dataset.dsDescriptionBodyExpanded !== "1") body.dataset.dsDescriptionBodyExpanded = "1";
+    // CSSStyleDeclaration.setProperty can emit a native attribute mutation
+    // even when the value is unchanged. Avoid doing that on every card pass.
+    for (const [property, value] of [["height", "auto"], ["min-height", "180px"], ["overflow", "visible"]]) {
+      if (body.style.getPropertyValue(property) !== value || body.style.getPropertyPriority(property) !== "important") {
+        body.style.setProperty(property, value, "important");
+      }
+    }
     return body;
   }
 
@@ -1092,7 +1100,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       "overflow-y",
       "scrollbar-width",
       "white-space"
-    ].forEach(prop => block.style.removeProperty(prop));
+    ].forEach(prop => {
+      if (block.style.getPropertyValue(prop)) block.style.removeProperty(prop);
+    });
   }
 
   DS.applyCardDescriptionExpansion = function applyCardDescriptionExpansion() {
@@ -1143,8 +1153,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       // Also refresh the cached decision for cards processed by older QoL
       // versions, which may have marked short descriptions as "0".
-      card.dataset.dsDescriptionLong = shouldExpand ? "1" : "0";
-      card.classList.toggle("ds-card-long-description", shouldExpand);
+      const expandedValue = shouldExpand ? "1" : "0";
+      if (card.dataset.dsDescriptionLong !== expandedValue) card.dataset.dsDescriptionLong = expandedValue;
+      if (card.classList.contains("ds-card-long-description") !== shouldExpand) {
+        card.classList.toggle("ds-card-long-description", shouldExpand);
+      }
 
       DS.qsa("[data-ds-description-expanded='1']", card).forEach(old => {
         if (old !== block) clearDescriptionExpansion(old);
@@ -1276,16 +1289,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!target || DS.isUnsafeCardHideTarget?.(target)) return;
       if (DS.hideCard?.(card, `card:blocked bot id: ${id}`)) hidden++;
     };
-    const checkCard = element => {
+    const checkCard = (element, strictShell = false) => {
       if (!element || !(element instanceof Element)) return;
-      // Never query the whole listing/grid for an ordinary class or style
-      // mutation. Only inspect the exact native card or its one-card wrapper.
-      const card = element.matches?.('[data-testid="CharacterCard"]')
-        ? element
-        : element.closest?.('[data-testid="CharacterCard"]') ||
-          (element.children?.length === 1 && element.firstElementChild?.matches?.('[data-testid="CharacterCard"]')
-            ? element.firstElementChild : null);
+      // Ordinary class changes on buttons/images/text inside cards cannot
+      // reveal the hidden outer card. Handle them only when a *new* card is
+      // inserted or its bot link changes; keep class-repair on the actual
+      // card shell and its one-child wrapper.
+      const direct = element.matches?.('[data-testid="CharacterCard"]') ? element : null;
+      const wrapped = element.children?.length === 1 &&
+        element.firstElementChild?.matches?.('[data-testid="CharacterCard"]')
+        ? element.firstElementChild : null;
+      const card = direct || wrapped || (!strictShell ? element.closest?.('[data-testid="CharacterCard"]') : null);
       if (!card || !DS.isRecommendationCardRoot?.(card)) return;
+      if (strictShell) {
+        const target = DS.getBestHideTarget?.(card);
+        const dim = DS.state.settings.hiddenCardMode === "dim";
+        const alreadyHidden = target?.dataset?.dsHidden === "1" &&
+          target.classList?.contains(dim ? "ds-dimmed" : "ds-hidden");
+        if (alreadyHidden) {
+          const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+          perf.blockedCardUnchangedClassSkips = Number(perf.blockedCardUnchangedClassSkips || 0) + 1;
+          return;
+        }
+      }
       checkLink(card.querySelector("a[aria-label^='chat-with-'][href*='/chat/'], a[href*='/chat/'], a[href*='/chatbot/']"));
     };
     for (const mutation of mutations || []) {
@@ -1293,10 +1319,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (mutation.attributeName === "href" && mutation.target?.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) {
           checkLink(mutation.target);
         } else if (["class", "style", "data-ds-hidden"].includes(mutation.attributeName)) {
-          // Native React and listing UI may recycle the *same* card without
-          // inserting an anchor. A class update can make its blocked wrapper
-          // visible again even though the bot ID has not changed.
-          checkCard(mutation.target);
+          // The existing attribute-only safety watcher receives thousands of
+          // native class updates. Only a changed card shell/wrapper can undo
+          // the actual hide; child decorations cannot. Href and mounts above
+          // still handle React changing a bot ID or replacing the card.
+          checkCard(mutation.target, true);
         }
         continue;
       }
@@ -1403,9 +1430,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       dirty.clear();
     }
 
+    const normalizationStarted = cardTimingStart();
+    DS.applyCardDisplayNormalization?.(cards);
+    if (normalizationStarted) recordCardPhase("normalization", normalizationStarted, cards.length);
     const filterStarted = cardTimingStart();
     let filterYieldMs = 0;
-    DS.applyCardDisplayNormalization?.(cards);
 
     if (DS.isFavoriteBotsPage() && DS.state.settings.neverHideFavorites !== false && !DS.state.settings.publicPersonalityOnly) {
       DS.state.cardHidingLastFilterKey = filterKey;
@@ -1496,8 +1525,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
-    DS.compactLayouts(cards);
     recordCardPhase("filtering", filterStarted, processed, filterYieldMs);
+    const layoutStarted = cardTimingStart();
+    DS.compactLayouts(cards);
+    if (layoutStarted) recordCardPhase("layout", layoutStarted, cards.length);
 
     if (hidden > 0) {
       DS.updateQuickPanel?.();
