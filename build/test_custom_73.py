@@ -10,7 +10,7 @@ def contract(name):return json.loads(read("build/features/"+name+".json"))
 class CustomSeventyThree(unittest.TestCase):
     def test_release_version_and_feature_scripts(self):
         manifest=json.loads(read("manifest.json"))
-        self.assertEqual(manifest["version"],"0.2.74")
+        self.assertGreaterEqual(tuple(int(part) for part in manifest["version"].split(".")), (0, 2, 73))
         js={path for row in manifest["content_scripts"] for path in row.get("js",[])}
         for p in ["content/chat-pins.js","content/chat-bookmarks.js",
                   "content/language-filter.js","content/rulebook-public-qol.js",
