@@ -124,7 +124,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function menuButtons(label, sourceButton, includeHidden = false) {
     const holder = getDropdownHolder(sourceButton);
-    const exact = `button[aria-label='${CSS.escape(label)}']`;
+    // SpicyChat's newer portal menu also exposes stable action test IDs.
+    // Use them as a fallback if native button labels change; never click
+    // another message's QoL toolbar or an unrelated dialog.
+    const nativeTestId = {
+      Copy: "message-action-copy",
+      Edit: "message-action-edit",
+      Report: "message-action-report"
+    }[label];
+    const exact = `button[aria-label='${CSS.escape(label)}']` +
+      (nativeTestId ? `, button[data-testid='${nativeTestId}']` : "");
     const accept = button => {
       if (button.closest("#ds-qol-panel, .ds-message-quick-actions")) return false;
       return includeHidden || isVisible(button);
@@ -153,32 +162,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     window.setTimeout(() => {
       if (document.documentElement.hasAttribute(BRIDGE_ATTR)) document.documentElement.removeAttribute(BRIDGE_ATTR);
     }, delay);
-  }
-
-  async function writeClipboard(text) {
-    const value = cleanText(text);
-    if (!value) return false;
-
-    try {
-      await navigator.clipboard.writeText(value);
-      return true;
-    } catch {}
-
-    try {
-      const textarea = document.createElement("textarea");
-      textarea.value = value;
-      textarea.setAttribute("readonly", "");
-      textarea.style.position = "fixed";
-      textarea.style.left = "-10000px";
-      textarea.style.top = "-10000px";
-      document.body.appendChild(textarea);
-      textarea.select();
-      const ok = document.execCommand("copy");
-      textarea.remove();
-      return !!ok;
-    } catch {
-      return false;
-    }
   }
 
   function getDirectCopyText(sourceButton) {
@@ -250,15 +233,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return setComposerText(text);
   }
 
-  async function runDirectCopy(sourceButton) {
-    const text = getDirectCopyText(sourceButton);
-    if (!text) return false;
-
-    const copied = await writeClipboard(text);
-    if (copied) DS.setQuickStatus?.("Copied message.");
-    return copied;
-  }
-
   async function runMenuAction(sourceButton, label) {
     // We still let SpicyChat execute its native Edit / Report / Remove Image
     // handlers, but suppress the intermediate three-dot popup completely.
@@ -296,8 +270,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
 
     if (action.label === "Copy") {
-      const copiedDirectly = await runDirectCopy(sourceButton);
-      if (copiedDirectly) return true;
+      // Always invoke SpicyChat's native Copy action. Reading textContent from
+      // rendered Markdown spans loses *actions*, **emphasis**, and other
+      // original source formatting. If the native action is unavailable, do
+      // not silently copy a different/plain-text representation instead.
       return runMenuAction(sourceButton, "Copy");
     }
 

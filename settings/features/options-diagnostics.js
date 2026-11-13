@@ -433,6 +433,19 @@ function setupSupportFeaturePrivacyControls() {
   }
 }
 
+const DS_MEMORY_MANAGER_UI_OBSERVATION_KEY = "dsMemoryManagerUiObservationV1";
+
+function formatMemoryManagerUiStatus(live, last) {
+  const kind = value => value === "v2" ? "New V2" : value === "legacy" ? "Legacy" : "Unknown";
+  const open = live?.open === true;
+  const liveVersion = open ? kind(live?.version) : "Not open in sampled tab";
+  const safeLast = last && last.schema === 1 && (last.version === "v2" || last.version === "legacy")
+    && Number.isFinite(Number(last.observedAt)) && Number(last.observedAt) > 0
+    && Number(last.observedAt) <= Date.now() + 60000;
+  const lastSeen = safeLast ? `; last observed ${kind(last.version)} at ${new Date(Number(last.observedAt)).toISOString()} (may be another chat/tab)` : "; no recorded observation";
+  return `Memory Manager UI: ${liveVersion}${open ? `; ${Math.max(0, Math.floor(Number(live.visibleRows) || 0))} visible memories; import ${live.canImport ? "supported" : "unavailable/unknown"}` : ""}${lastSeen}. UI-based detection, not an API version or a rollout flag.`;
+}
+
 async function copyDiagnostics({ returnOnly = false } = {}) {
   const status = $("diagnosticsStatus");
   if (status && !returnOnly) status.textContent = "Building diagnostic info...";
@@ -459,7 +472,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     CHAT_BOOKMARKS_KEY,
     SAI_TOOLKIT_PRESENCE_KEY,
     SPICYCHAT_BETA_CAPABILITIES_KEY,
-    "cardTokenFetchDiagnosticsV1"
+    "cardTokenFetchDiagnosticsV1",
+    DS_MEMORY_MANAGER_UI_OBSERVATION_KEY
   ];
 
   // Support diagnostics must degrade per source instead of losing the whole
@@ -497,6 +511,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
+    formatMemoryManagerUiStatus(context?.runtimeAvailable ? context?.pageDiagnostics?.memoryManager : null, result[DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]),
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
     ...(context?.probe ? [`Runtime check: ${Number(context.probe.pingsAnswered || 0)}/${Number(context.probe.tabsPinged || 0)} tab pings answered; lightweight runtime ${context.probe.lightRuntimeAnswered ? "answered" : "unavailable"}; full snapshot ${context.probe.snapshotsAnswered ? "answered" : "unavailable"}.` ] : []),
     (() => { const q = context?.probe; return q ? `Runtime probe: ping ${Number(q.pingsAnswered || 0)}/${Number(q.tabsPinged || 0)} replied; snapshots ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} replied; ${Number(q.tabsFlaggedStale || 0)} stale-marked and ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no result"; })(),
@@ -853,7 +868,7 @@ async function buildPerformanceSelfCheckText() {
 async function buildFastSupportSnapshot() {
   const manifest = chrome.runtime.getManifest?.() || {};
   const [quickStored, bytesValue, largeStatsValue, liveTabValue] = await Promise.all([
-    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY]), 1500, null),
+    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY, DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]), 1500, null),
     promiseWithValueTimeout(storageBytesInUse(null), 1500, null),
     promiseWithValueTimeout(readLargeStorageStats(), 1500, null),
     promiseWithValueTimeout(runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1200), 1400, null)
@@ -866,6 +881,7 @@ async function buildFastSupportSnapshot() {
   const liveTabs = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
   const tabState = liveTabs || afk;
   const bytes = Number(bytesValue);
+  const androidTabProbeUnavailable = isAndroidSupportWebView() && !liveTabs;
   const tabLabel = liveTabs
     ? "Live tab check"
     : afk.at
@@ -877,6 +893,7 @@ async function buildFastSupportSnapshot() {
     `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
+    `Memory Manager UI: ${formatMemoryManagerUiStatus(null, stored[DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]).replace(/^Memory Manager UI: /, "")}`,
     `Options DOM: ${document.getElementsByTagName("*").length} nodes`,
     `chrome.storage.local: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,
@@ -884,7 +901,9 @@ async function buildFastSupportSnapshot() {
       ? `Large-data IndexedDB: ${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records`
       : "Large-data IndexedDB: fast check timed out; full support sections continue independently",
     `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} normal tabs awake` : "off"}`,
-    `${tabLabel}: ${Number(tabState.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(tabState.loadedNormal || 0)} normal loaded; ${Number(tabState.discardedNormal || 0)} normal unloaded; ${Number(tabState.workerTabs || 0)} workers`,
+    androidTabProbeUnavailable
+      ? "Android app tab check: unavailable through the WebView extension bridge; zero tabs is NOT a measurement."
+      : `${tabLabel}: ${Number(tabState.totalSpicyTabs || 0)} SpicyChat tabs; ${Number(tabState.loadedNormal || 0)} normal loaded; ${Number(tabState.discardedNormal || 0)} normal unloaded; ${Number(tabState.workerTabs || 0)} workers`,
     "This snapshot is deliberately lightweight and should still appear when a content runtime or a heavier support section is stuck."
   ].join("\n");
 }

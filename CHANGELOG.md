@@ -1,3 +1,16 @@
+## 0.2.78
+- Fixed message Quick Copy losing original RP/Markdown formatting: always delegate to SpicyChat's native Copy instead of copying rendered `textContent`; missing native actions now report unavailability rather than silently copying altered text.
+- Clarified Memory Pack imports under SpicyChat's newer fact-based memory lifecycle and when to pin critical memories for immediate context.
+- Android Support Info now labels unsupported WebView tab probes as unavailable rather than displaying a misleading measured count of zero tabs.
+- Added a startup integrity check for the split runtime lanes: brief late module registration can recover, while a truly missing file reports its name instead of crashing mid-initialization.
+- Detect Legacy, new V2, or unrecognized Memory Manager layouts from native controls per open manager. Show the detected UI in the memory toolbar and include live/last-observed, content-free evidence in Support Info to assist gradual rollout troubleshooting.
+- Prevent JSON import, Memory Pack import, and native memory mutation when the manager layout is unrecognized or V2 has not mounted its list, rather than assuming the legacy UI.
+- Stage 9: separated Bot Status identity/UI, scan pacing and resume queues, recovery, and blocked/deleted-bot cleanup into dedicated Settings modules. Kept scan, storage and confirmation behavior unchanged.
+- Modularized Settings controller state, feature presets, saved-manager metadata, backup scopes, and UI configuration; `options.js` now retains event wiring and startup.
+- Stage 9: moved critical, slow, and incremental-message execution into separate Core lane factories. `content/main.js` retains scheduling and shared state; no feature defaults, timing windows, or persistence rules were changed.
+- **Modularization — Stage 9:** Moved creator-profile startup quieting and blocked-card refresh batching into Core runtime helpers without changing their timing or when they run.
+- Updated native message-menu action lookup to recognize SpicyChat's current Copy, Edit, and Report test IDs when labels differ.
+
 ## 0.2.77
 - Updated Memory Manager tools for SpicyChat V2 cards: selection, copy, pin, export, import, and native deletion with confirmation.
 - Updated native memory lifecycle guidance; disabled old pinned reordering on V2 rather than changing auto-managed priorities.

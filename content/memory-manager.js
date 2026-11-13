@@ -16,6 +16,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let vaultBusy = false;
   const MEMORY_VAULT_KEY = "dsMemoryVaultV1";
   const MEMORY_LAYOUT_STORAGE_KEY = "dsMemoryCompactLayoutV1";
+  // One privacy-safe, last-seen UI observation. No account, chat, memory IDs or text.
+  const MEMORY_MANAGER_UI_OBSERVATION_KEY = "dsMemoryManagerUiObservationV1";
+  let lastMemoryUiObservation = "";
+  let lastMemoryUiObservationAt = 0;
   let memoryCompactView = false;
   try {
     chrome.storage.local.get({ [MEMORY_LAYOUT_STORAGE_KEY]: false }, saved => {
@@ -239,14 +243,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return results;
   }
 
+  // The rollout is per account/chat, not tied to the QoL version. Never
+  // classify an unrecognized/partially mounted editor as Legacy by default.
+  function detectMemoryManagerVersion(manager = getManager()) {
+    if (!manager) return "unknown";
+    if (manager.querySelector('[data-testid="MemoryManagerV2-List"], [data-testid="MemoryManagerV2-Toolbar"], [data-testid="MemoryManagerV2-AddButton"]')) return "v2";
+    if (manager.querySelector('[data-testid="ModalConversationMemories-LoadMoreButton"], [data-translate-key="chat:modal.memories.dropdown.addNew"]')) return "legacy";
+    if (getLegacyMemoryRows(manager).length) return "legacy";
+    return "unknown";
+  }
+
+  function getMemoryManagerCompatibility() {
+    const manager = getManager();
+    const version = detectMemoryManagerVersion(manager);
+    return {
+      version,
+      open: !!manager,
+      // The count is deliberately metadata only; not a memory-text export.
+      visibleRows: manager && version === "v2" ? getNewMemoryCardRows(manager).length
+        : manager && version === "legacy" ? getLegacyMemoryRows(manager).length : 0,
+      canImport: !!manager && version !== "unknown" && (version !== "v2" || !!manager.querySelector('[data-testid="MemoryManagerV2-List"]'))
+    };
+  }
+  DS.getMemoryManagerCompatibility = getMemoryManagerCompatibility;
+
+  function rememberObservedMemoryManager(manager) {
+    const version = detectMemoryManagerVersion(manager);
+    if (version === "unknown") return;
+    const now = Date.now();
+    // Called on DOM refreshes too: never write for every React card mutation.
+    if (lastMemoryUiObservation === version && now - lastMemoryUiObservationAt < 15 * 60 * 1000) return;
+    lastMemoryUiObservation = version;
+    lastMemoryUiObservationAt = now;
+    try {
+      chrome.storage.local.set({ [MEMORY_MANAGER_UI_OBSERVATION_KEY]: { schema: 1, version, observedAt: now } });
+    } catch {}
+  }
+
   function getMemoryRows(manager = getManager()) {
     if (!manager) return [];
-    // Do not mix the two generations of controls. V2 has a dedicated list
-    // even while it is empty; legacy rows are otherwise still supported.
-    if (manager.querySelector('[data-testid="MemoryManagerV2-List"]')) {
-      return getNewMemoryCardRows(manager);
-    }
-    return getLegacyMemoryRows(manager);
+    const version = detectMemoryManagerVersion(manager);
+    if (version === "v2") return getNewMemoryCardRows(manager);
+    if (version === "legacy") return getLegacyMemoryRows(manager);
+    return [];
   }
 
   function memoryKey(item) {
@@ -262,7 +301,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function usesNativeMemoryCards(manager = getManager()) {
-    return !!manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
+    return detectMemoryManagerVersion(manager) === "v2";
   }
 
   function nativeCardPinnedState(item) {
@@ -360,7 +399,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const pinButton = toolbar.querySelector(".ds-memory-pin-selected");
     const busy = deleting || checkingPins || pinningSelected || loadingMoreMemories || scanningPinnedOrder || applyingPinnedOrder || importingMemories;
 
-    const nativeV2 = usesNativeMemoryCards(manager);
+    const managerVersion = detectMemoryManagerVersion(manager);
+    const nativeV2 = managerVersion === "v2";
+    const versionLabel = toolbar.querySelector(".ds-memory-manager-version");
+    if (versionLabel) {
+      versionLabel.textContent = `Memory UI: ${nativeV2 ? "New V2" : managerVersion === "legacy" ? "Legacy" : "Unknown"}`;
+      versionLabel.title = managerVersion === "unknown"
+        ? "QoL cannot identify this memory interface yet. Import and destructive actions are unavailable to avoid using the wrong layout."
+        : "Detected from SpicyChat's visible native memory controls, not from the QoL version.";
+    }
     if (countEl) countEl.textContent = nativeV2
       ? `${count} selected · ${rows.length} shown (SpicyChat Memories)`
       : `${count} selected`;
@@ -417,6 +464,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (exportAllButton) {
       exportAllButton.textContent = nativeV2 ? 'Export shown' : 'Export all';
       exportAllButton.title = nativeV2 ? 'Exports native memory cards currently shown. Clear SpicyChat filters first to include every memory.' : '';
+    }
+    // Unknown layouts must not accidentally run the legacy mutation flow.
+    if (managerVersion === "unknown" || (nativeV2 && !manager.querySelector('[data-testid="MemoryManagerV2-List"]'))) {
+      for (const selector of [".ds-memory-pin-selected", ".ds-memory-delete-selected", ".ds-memory-import-json", ".ds-memory-packs", ".ds-memory-vault-archive", ".ds-memory-reorder-pinned"]) {
+        const action = toolbar.querySelector(selector);
+        if (action) { action.disabled = true; action.title = "Memory Manager layout not recognized or still loading; no changes were made."; }
+      }
     }
   }
 
@@ -1840,6 +1894,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wanted = cleanText(text);
     const manager = getManager();
     if (!manager) return { ok: false, reason: "The SpicyChat Memories manager is not open." };
+    const compatibility = getMemoryManagerCompatibility();
+    if (!compatibility.canImport) return { ok: false, reason: "Memory Manager is still loading or its layout is unrecognized. Reopen it and copy the Memory UI status in Support Info. No memory was added." };
     if (!wanted) return { ok: false, reason: "The memory is empty." };
 
     const beforeCount = countMemoryRowsByText(wanted, manager);
@@ -1898,6 +1954,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (importingMemories) return;
     let manager = getManager();
     if (!manager) return;
+    if (!getMemoryManagerCompatibility().canImport) {
+      setStatus("Memory Manager layout is unknown or still loading. Import was not started; reopen Memories and check Support Info.", "error");
+      return;
+    }
     importingMemories = true;
     updateToolbar(manager);
     let imported = 0;
@@ -2038,8 +2098,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   // Read-only selected source rows and native import preview for local packs.
   DS.getMemoryPackSourceRows = () => selectedMemoryRows().map(item => ({text: item.rawText || item.text, pinned: rowPinnedHint(item) === true}));
-  DS.openMemoryPackImportPreview = (rows, name) => { if (getManager()) showMemoryImportPreview(rows, `${name} (memory pack)`); };
-  DS.hasNativeMemoryManagerForPacks = () => !!getManager();
+  DS.openMemoryPackImportPreview = (rows, name) => { if (getMemoryManagerCompatibility().canImport) showMemoryImportPreview(rows, `${name} (memory pack)`); };
+  DS.hasNativeMemoryManagerForPacks = () => getMemoryManagerCompatibility().canImport;
 
   function makeToolbar(manager) {
     const toolbar = document.createElement("div");
@@ -2065,6 +2125,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       </div>
       <div class="ds-memory-bulk-meta">
         <span class="ds-memory-selected-count">0 selected</span>
+        <span class="ds-memory-manager-version" title="Detected from the native controls">Memory UI: detecting…</span>
         <span class="ds-memory-bulk-status" aria-live="polite"></span>
         <small class="ds-memory-native-lifecycle" hidden>SpicyChat starts automatic memories when a chat outgrows its context, then reviews them about every 15 exchanges. Pinned and manually added memories are kept.</small>
       </div>
@@ -2373,7 +2434,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyMemoryManagerTools = function applyMemoryManagerTools() {
     const settings = DS.state?.settings || {};
     const manager = getManager();
-    if (manager && settings.enabled) applyMemoryLayout(manager);
+    if (manager && settings.enabled) {
+      rememberObservedMemoryManager(manager);
+      applyMemoryLayout(manager);
+    }
     const bulkEnabled = !!(settings.enabled && settings.enableBulkMemoryManager && manager);
     if (manager?.querySelector("#ds-memory-bulk-toolbar") && !!manager.querySelector("#ds-memory-vault-panel") !== !!settings.enableMemoryVault) manager.querySelector("#ds-memory-bulk-toolbar")?.remove();
     const copyEnabled = !!(settings.enabled && settings.showCopyMemoryAction && manager);
