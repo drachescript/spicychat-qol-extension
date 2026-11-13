@@ -259,6 +259,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           androidEnvironment: DS.getAndroidEnvironment?.() || null,
           buildProfile: DS.getBuildProfile?.() || null,
           diagnosticProtocol: DS.getDiagnosticProtocolState?.() || null,
+          memoryManager: DS.getMemoryManagerCompatibility?.() || { version: "unknown", open: false, visibleRows: 0, canImport: false },
           runtimeLog: DS.getRuntimeLog?.(80) || [],
           activeModules: {
             rpFormatRepair: !!DS.state.rpFormatRepairWasActive,

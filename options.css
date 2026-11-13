@@ -1128,6 +1128,9 @@ footer.hidden { display: none; }
 .settings-search-result small { color: #aaa; line-height: 1.35; }
 .settings-search-empty { color: #aaa; padding: 10px 2px; }
 .ds-search-target { outline: 2px solid #4677b9; outline-offset: 3px; border-radius: 6px; scroll-margin-block: 120px; }
+@media (max-width: 720px) {
+  .ds-search-target { scroll-margin-block-start: 90px; }
+}
 .page-intro {
   color: #aaa;
   font-size: 13px;

@@ -272,9 +272,16 @@ async function storageGetChecked(keys) {
     const requested = localRequest == null
       ? null
       : (Array.isArray(localRequest) ? localRequest : storageRequestedKeyList(localRequest));
+    // Android's Flutter storage bridge can take over a second per round-trip.
+    // Reuse the previous granular index to fetch likely settings keys in the
+    // FIRST request. The authoritative index is still read every time, and
+    // newly added keys are fetched separately if the index has changed.
+    const prefetchedGranularKeys = wantsSettings && requested !== null
+      ? [...granularSettingsIndexCache].map(granularSettingStorageKey)
+      : [];
     const firstKeys = requested === null
       ? null
-      : [...new Set([...(requested || []), ...(wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
+      : [...new Set([...(requested || []), ...(wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY] : []), ...prefetchedGranularKeys])];
 
     const data = await chromeLocalGet(firstKeys);
     const shouldSynthesize = wantsSettings || requested === null;
@@ -283,7 +290,9 @@ async function storageGetChecked(keys) {
       granularSettingsIndexCache = new Set(index);
       granularSettingsMigrationSeen = data[GRANULAR_SETTINGS_MIGRATION_KEY] === true;
       const granularKeys = index.map(granularSettingStorageKey);
-      const granular = !granularKeys.length || requested === null ? data : await chromeLocalGet(granularKeys);
+      const missingGranularKeys = requested === null ? [] : granularKeys.filter(key => !firstKeys.includes(key));
+      const granular = missingGranularKeys.length
+        ? { ...data, ...(await chromeLocalGet(missingGranularKeys)) } : data;
 
       const hadLegacy = Object.prototype.hasOwnProperty.call(data, "settings") && data.settings && typeof data.settings === "object";
       const merged = hadLegacy ? { ...(data.settings || {}) } : {};
@@ -297,7 +306,7 @@ async function storageGetChecked(keys) {
       if (hadLegacy || granularFound) data.settings = merged;
       else delete data.settings;
 
-      for (const name of index) delete data[granularSettingStorageKey(name)];
+      for (const key of new Set([...granularKeys, ...prefetchedGranularKeys])) delete data[key];
       if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_INDEX_KEY)) delete data[GRANULAR_SETTINGS_INDEX_KEY];
       if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_MIGRATION_KEY)) delete data[GRANULAR_SETTINGS_MIGRATION_KEY];
       if (!storageRequestIncludes(keys, GRANULAR_SETTINGS_REVISION_KEY)) delete data[GRANULAR_SETTINGS_REVISION_KEY];
@@ -2300,51 +2309,87 @@ function setupSettingsSearch() {
     return score;
   };
 
+  let searchJumpGeneration = 0;
   const revealAndScrollTo = item => {
+    const jumpId = ++searchJumpGeneration;
+    const compact = window.matchMedia?.("(max-width: 720px)")?.matches === true ||
+      PLATFORM_API?.detectEnvironment?.()?.android === true;
+    if (compact) {
+      // Mobile WebView's soft keyboard changes the visual viewport while a
+      // smooth scroll is in progress. Close it and shrink the sticky search
+      // panel before measuring a target in another tab.
+      if (document.activeElement === input) input.blur();
+      setSettingsSearchExpanded(false);
+    }
+
     setActiveTab(item.tabName);
     if (item.tabName === "features" && item.kind === "feature") {
       const featureSearch = $("featureIndexSearch");
-      if (featureSearch) { featureSearch.value = item.label; featureSearch.dispatchEvent(new Event("input", { bubbles: true })); }
+      if (featureSearch) {
+        // Other filters may hide the result even when the title matches.
+        for (const id of ["featureIndexCategory", "featureIndexStatus", "featureIndexPlatform"]) {
+          const filter = $(id);
+          if (filter && [...filter.options].some(option => option.value === "all")) filter.value = "all";
+        }
+        featureSearch.value = item.label;
+        featureSearch.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     }
     expandSettingsCardForTarget(item.target);
     recordRecentSettingsCard(item.card);
 
-    // A matching setting can live inside a collapsed <details>. Open all of
-    // those ancestors before measuring/scrolling so the browser can actually
-    // land on the requested control.
-    let details = item.target.closest?.("details") || null;
-    while (details) {
-      details.open = true;
-      details = details.parentElement?.closest?.("details") || null;
-    }
-
+    // The catalogue rebuilds its cards after filters change. Prefer the
+    // actual feature row instead of scrolling to the catalogue search field.
+    const resolveTarget = () => {
+      if (item.tabName === "features" && item.kind === "feature") {
+        const row = [...document.querySelectorAll("#featureIndexList .feature-index-item")].find(node =>
+          node.dataset.featureId === item.featureId);
+        if (row) return row;
+      }
+      return item.target?.isConnected ? item.target : (item.card?.isConnected ? item.card : null);
+    };
+    const openDetails = node => {
+      let details = node?.closest?.("details") || null;
+      while (details) {
+        details.open = true;
+        details = details.parentElement?.closest?.("details") || null;
+      }
+    };
+    openDetails(item.target);
     document.querySelectorAll(".ds-search-target").forEach(target => target.classList.remove("ds-search-target"));
 
-    // Tab display changes and heavy-tab rendering can alter layout. Waiting two
-    // frames makes the final scroll use the setting's real post-tab position.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const target = item.target?.isConnected ? item.target : item.card;
-      if (!target) return;
+    const jump = (attempt = 0) => {
+      if (jumpId !== searchJumpGeneration) return;
+      const target = resolveTarget();
+      if (target?.isConnected) openDetails(target);
+      if (!target?.isConnected || !target.getClientRects().length) {
+        if (attempt < 5) window.setTimeout(() => jump(attempt + 1), 75);
+        return;
+      }
       target.classList.add("ds-search-target");
-
-      const focusTarget = item.control?.isConnected
-        ? item.control
-        : target.querySelector?.("input, select, textarea, button");
+      const focusTarget = item.control?.isConnected ? item.control :
+        target.querySelector?.("input, select, textarea, button");
       const isNativeSelect = focusTarget?.tagName === "SELECT";
-
-      // Do not programmatically focus settings after a search jump. The old
-      // delayed focus could steal focus just after the user clicked a native
-      // <select>, immediately collapsing the browser's dropdown. Select targets
-      // also use an instant jump so an in-progress smooth scroll cannot dismiss
-      // the popup while the user is choosing an option.
-      target.scrollIntoView({
-        behavior: isNativeSelect ? "auto" : "smooth",
-        block: "center",
-        inline: "nearest"
-      });
-
-      window.setTimeout(() => target.classList.remove("ds-search-target"), 2200);
-    }));
+      if (compact) {
+        // A direct document scroll avoids the unreliable nested smooth
+        // scrollIntoView path on Android, and keeps the target below search.
+        const stickyHeight = $("settingsSearchCard")?.getBoundingClientRect().height || 0;
+        const viewport = window.visualViewport?.height || window.innerHeight;
+        const topMargin = Math.min(Math.max(stickyHeight + 16, 70), Math.max(85, viewport * 0.25));
+        const nextTop = Math.max(0, window.scrollY + target.getBoundingClientRect().top - topMargin);
+        window.scrollTo({ top: nextTop, behavior: "instant" });
+      } else {
+        target.scrollIntoView({ behavior: isNativeSelect ? "auto" : "smooth", block: "center", inline: "nearest" });
+      }
+      if (attempt === 0 && compact) {
+        // The keyboard can take another frame or two to disappear. Verify
+        // alignment once after it settles, without installing observers.
+        window.setTimeout(() => jump(6), 280);
+      } else {
+        window.setTimeout(() => { if (jumpId === searchJumpGeneration) target.classList.remove("ds-search-target"); }, 2200);
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(() => jump()));
   };
 
   function fuzzyTermMatch(text, term) {

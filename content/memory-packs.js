@@ -132,7 +132,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const title = make("strong", "", "Memory packs");
     const close = button("Close", () => shade.remove());
     header.append(title, close);
-    const intro = make("p", "ds-memory-pack-hint", "Packs are saved locally in QoL and can be reused in other chats. Categories, character tags, and groups stay in the pack; SpicyChat only receives the memory text you choose to import. This does not change native memory retrieval.");
+    const intro = make("p", "ds-memory-pack-hint", "Packs are saved locally in QoL and can be reused in other chats. Categories, character tags, and groups stay in the pack; SpicyChat only receives the memory text you choose to import. Imported facts are manually added memories, which SpicyChat keeps rather than automatically replacing. Pin important facts when you need them included in context immediately; the native memory system controls when unpinned facts are recalled.");
     const controls = make("div", "ds-memory-pack-actions");
     const message = make("p", "ds-memory-pack-status");
     message.setAttribute("aria-live", "polite");

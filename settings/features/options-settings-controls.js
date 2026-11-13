@@ -525,7 +525,10 @@ function setupFeaturesIndex() {
   function renderFeature(entry) {
     const state = featureRegistryState(entry);
     const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || { supported: true, fullySupported: true, partial: false, label: entry.platform || "" };
-    const card = makeElement("article", { className: `feature-index-item feature-catalog-item${compatibility.fullySupported === false && !compatibility.partial ? " is-platform-unavailable" : ""}` });
+    const card = makeElement("article", {
+      className: `feature-index-item feature-catalog-item${compatibility.fullySupported === false && !compatibility.partial ? " is-platform-unavailable" : ""}`,
+      dataset: { featureId: entry.id }
+    });
     const main = makeElement("div", { className: "feature-index-main" }, [
       makeElement("div", { className: "feature-index-title", text: displayNormalizedSavedText(entry.name) }),
       makeElement("div", { className: "feature-index-description", text: entry.description || "" })

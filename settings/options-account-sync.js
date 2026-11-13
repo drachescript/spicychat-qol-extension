@@ -88,6 +88,7 @@ let accountSyncUserEditing = false;
 function readSyncDevicePrefsUi() {
   const previous = accountSyncSelectedPrefs || {};
   const mode = $("accountSyncSettingsMode")?.value || "off";
+  const syncIntervalMinutes = Number($("accountSyncInterval")?.value || 720);
   const limited = !!$("accountSyncLimitSettings")?.checked;
   const checklist = $("accountSyncSettingsChecklist");
   const allowedKeys = limited
@@ -99,7 +100,7 @@ function readSyncDevicePrefsUi() {
   for (const name of ACCOUNT_SYNC_LIST_NAMES) {
     listModes[name] = document.querySelector(`[data-sync-list="${name}"]`)?.value || "off";
   }
-  return { ...previous, mode, allowedKeys, listModes };
+  return { ...previous, mode, syncIntervalMinutes, allowedKeys, listModes };
 }
 function setupSyncSettingsChecklist(prefs) {
   const root = $("accountSyncSettingsChecklist");
@@ -127,6 +128,9 @@ function renderSyncDevicePrefs(prefs) {
   accountSyncSelectedPrefs = prefs;
   const mode = $("accountSyncSettingsMode");
   if (mode) mode.value = prefs.mode || "two-way";
+  const interval = $("accountSyncInterval");
+  if (interval) interval.value = String([360, 720, 1440].includes(Number(prefs.syncIntervalMinutes))
+    ? prefs.syncIntervalMinutes : 720);
   const limited = $("accountSyncLimitSettings");
   if (limited) limited.checked = Array.isArray(prefs.allowedKeys);
   const selection = $("accountSyncSettingSelection");
@@ -160,7 +164,9 @@ function portableAccountSyncRules(value) {
     const chosen = String(source.listModes?.[name] || "off");
     listModes[name] = validListModes.has(chosen) ? chosen : "off";
   }
-  return { schemaVersion: 2, mode: validModes.has(mode) ? mode : "off", allowedKeys: keys, scopes, listModes };
+  const syncIntervalMinutes = [360, 720, 1440].includes(Number(source.syncIntervalMinutes))
+    ? Number(source.syncIntervalMinutes) : 720;
+  return { schemaVersion: 2, mode: validModes.has(mode) ? mode : "off", syncIntervalMinutes, allowedKeys: keys, scopes, listModes };
 }
 
 // The optional grouped sync picker is injected separately on some builds,
@@ -451,7 +457,7 @@ function setupAccountSyncFoundation() {
       accountSyncUserEditing = false;
       accountSyncSelectedPrefs = result.prefs;
       await refreshAccountSyncUi({ refreshDevices: false });
-      if (status) status.textContent = `${map[direction]} ${label} bot IDs${includeLater ? "" : "/names"} only. Other lists, settings and chat text stay excluded. Link if necessary, then Sync now. Automatic checks run every 6 hours or after edits settle.`;
+      if (status) status.textContent = `${map[direction]} ${label} bot IDs${includeLater ? "" : "/names"} only. Other lists, settings and chat text stay excluded. Link if necessary, then Sync now. Periodic checks use your device's selected interval, plus checks after edits settle.`;
     } catch (error) {
       if (status) status.textContent = `Could not save ${label} sync: ${error?.message || String(error)}`;
     } finally { for (const btn of buttons) btn.disabled = false; }
