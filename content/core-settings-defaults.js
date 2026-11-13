@@ -536,6 +536,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     chatExportHistoryMode: "api",
     chatExportIncludeBotInfo: false,
     chatExportIncludeRulebook: false,
+    chatExportIncludeRulebookState: false,
     enableRulebookDiagnostics: false,
     storyReadingLayout: false,
     chatExportIncludeOocDirectives: false,

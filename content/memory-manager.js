@@ -223,9 +223,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const list = manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
     if (!list) return [];
     const results = [];
-    for (const card of [...list.children].slice(0, 10000)) {
+    const candidates = list.querySelectorAll('[data-testid^="MemoryManagerCard-"][role="group"]');
+    for (const card of [...candidates].slice(0, 10000)) {
       const id = card.getAttribute?.('data-testid') || '';
-      if (!id.startsWith('MemoryManagerCard-') || card.getAttribute('role') !== 'group') continue;
+      if (!id.startsWith('MemoryManagerCard-')) continue;
       const textNode = card.querySelector('p.text-paragraph-sm.break-words') ||
         [...card.querySelectorAll('p')].find(p => p.classList.contains('break-words'));
       const rawText = String(textNode?.textContent || '').trim();
@@ -2134,8 +2135,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     `);
 
     toolbar.querySelector(".ds-memory-select-all")?.addEventListener("click", () => {
-      selectedMemories = new Set(getMemoryRows(manager).map(memoryKey));
-      updateToolbar(manager);
+      // Read the current native cards when clicked, not a stale React root.
+      const current = getManager() || manager;
+      const rows = getMemoryRows(current);
+      selectedMemories = new Set(rows.map(memoryKey));
+      updateToolbar(current);
+      if (!rows.length) setStatus("No selectable memories are loaded. Clear any filters or load more memories first.");
     });
 
     toolbar.querySelector(".ds-memory-select-unpinned")?.addEventListener("click", () => {
@@ -2541,13 +2546,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return false;
   }
 
-  try {
-    const observer = new MutationObserver(mutations => {
-      if (relevantMemoryMutation(mutations)) wakeMemoryManagerUi();
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    if (document.querySelector('[data-testid="ChatMemoryManagerCapabilityGate"]')) wakeMemoryManagerUi();
-  } catch {}
+  // Reuse the runtime's existing page observer. A second document-wide
+  // MutationObserver doubles record delivery even when Memories is closed.
+  // The main observer calls this predicate only for native DOM changes.
+  DS.memoryManagerMutationsRelevant = relevantMemoryMutation;
+  DS.wakeMemoryManagerUi = wakeMemoryManagerUi;
 })();
 
 }

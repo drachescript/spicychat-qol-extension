@@ -107,10 +107,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runStep("performance mode", () => DS.applyPerformanceMode?.());
         const counters = runtimeCounters();
         counters.chatEnhancerQuietDeferrals = Number(counters.chatEnhancerQuietDeferrals || 0) + 1;
-        clearTimeout(messageEnhancerQuietTimer);
+        clearTimeout(laneState.messageEnhancerQuietTimer);
         const wait = Math.max(40, enhancerQuietUntil - Date.now() + 20);
-        messageEnhancerQuietTimer = window.setTimeout(() => {
-          messageEnhancerQuietTimer = null;
+        laneState.messageEnhancerQuietTimer = window.setTimeout(() => {
+          laneState.messageEnhancerQuietTimer = null;
           DS.diagPerformance?.("reply-quiet-end", { reason: "timer", waitedMs: wait });
           const resume = () => DS.scheduleMessageLane?.("post-native-render-quiet");
           if (typeof requestIdleCallback === "function") requestIdleCallback(resume, { timeout: 700 });

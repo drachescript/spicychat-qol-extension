@@ -876,6 +876,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function mount(){
     if(!enabled()){setActive(false,false);document.getElementById(TAB)?.remove();document.getElementById(PANEL)?.remove();return;}
+    if(!recoveryInitialized){void hydrateRecoveryWhenNeeded();return;}
     if(location.hash==='#recovered'&&!active){active=true;viewMode='separate';}
     // SPA navigation can use pushState without firing a hashchange event.
     // Do not keep the recovery stylesheet active on native Favorites URLs.
@@ -933,28 +934,50 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const tab=e.target?.closest?.('[data-testid="SearchClientCharacterListing"] [role="tablist"] [role="tab"]');
     if(tab&&tab.id!==TAB&&tab.id!=='ds-favorites-later-tab')setActive(false);
   },true);
-  window.addEventListener('ds-qol-favorites-native-observed-v1',()=>setTimeout(()=>void capturePassive(),150));
-  DS.openFullFavorites=()=>{mount();setActive(true);};
+  window.addEventListener('ds-qol-favorites-native-observed-v1',()=>{if(isPage()&&DS.state?.settings?.passiveFavoritesIdBackup===true)setTimeout(()=>void capturePassive(),150);});
+  DS.openFullFavorites=()=>{if(!recoveryInitialized){void hydrateRecoveryWhenNeeded().then(ok=>{if(ok&&enabled())setActive(true);});return;}mount();setActive(true);};
   DS.isFullFavoritesActive=()=>active&&enabled();
   DS.closeFullFavorites=()=>setActive(false);
   const onRoute=()=>{if(!isPage())return;const wanted=location.hash==='#recovered';if(wanted!==active)setActive(wanted,false);else mount();};
   window.addEventListener('popstate',onRoute);
   window.addEventListener('hashchange',onRoute);
-  void Promise.all([readCoverage(),get(QUEUE),get('dsQolChatIndexV1'),get(EXCLUSIONS),get(VIEW_MODE),get(AUTO_TITLES),get(HISTORY_STATUS),get(OBSERVED_ADDED)]).then(([saved,queued,chatIndex,excluded,mode,autoPref,historySync,additions])=>{
-    observedAdditions=additions?.at&&typeof additions.at==='object'?additions.at:{};
-    DS.state.favoriteObservedAdditions=observedAdditions;
-    autoTitles=autoPref!==false;
-    // The supplementary view can still be selected within a tab, but not inherited on reopen.
-    viewMode='separate';
-    exclusions=new Set(uniq(excluded));indexedBots=new Map();
-    for(const row of Object.values(chatIndex?.entries||{})){if(UUID.test(String(row?.botId||'')))indexedBots.set(row.botId.toLowerCase(),true);}
-    if((saved?.version===1||saved?.version===2)&&Array.isArray(saved.ids)){coverage={...saved,listingVerified:saved.listingVerified===true||(Array.isArray(saved.listingIds)&&saved.listingIds.length>0&&Number(saved.listingCount)===saved.listingIds.length)};status=`Saved coverage from ${new Date(saved.checkedAt).toLocaleString()}${saved.metadataIncomplete?' (some card metadata missing)':''}. Refresh for current membership.`;}
-    historySyncPending=historySync?.state==='pending'&&historySync?.checkedAt===coverage?.checkedAt;
-    cleanupQueue=queued?.mode==='api'?queued:null;mount();
-    // One-shot opt-in reload: no repeated navigation and no automatic writes.
-    let resume=false;
-    try{resume=sessionStorage.getItem(RESUME_NATIVE)==='1';sessionStorage.removeItem(RESUME_NATIVE);}catch{}
-    if(resume && enabled())setTimeout(()=>{setActive(true);void refreshCoverage(false,true);},2500);
-    if(isPage())setTimeout(()=>void capturePassive(),900);
-  });
+  let recoveryInitialized = false;
+  let recoveryHydration = null;
+  function hydrateRecoveryWhenNeeded() {
+    if (recoveryInitialized) return Promise.resolve(true);
+    if (recoveryHydration) return recoveryHydration;
+    if (!enabled()) return Promise.resolve(false);
+    recoveryHydration = Promise.all([readCoverage(),get(QUEUE),get('dsQolChatIndexV1'),get(EXCLUSIONS),get(VIEW_MODE),get(AUTO_TITLES),get(HISTORY_STATUS),get(OBSERVED_ADDED)]).then(([saved,queued,chatIndex,excluded,mode,autoPref,historySync,additions]) => {
+      observedAdditions=additions?.at&&typeof additions.at==='object'?additions.at:{};
+      DS.state.favoriteObservedAdditions=observedAdditions;
+      autoTitles=autoPref!==false;
+      viewMode='separate';
+      exclusions=new Set(uniq(excluded));indexedBots=new Map();
+      for(const row of Object.values(chatIndex?.entries||{})){
+        if(UUID.test(String(row?.botId||'')))indexedBots.set(row.botId.toLowerCase(),true);
+      }
+      if((saved?.version===1||saved?.version===2)&&Array.isArray(saved.ids)){
+        coverage={...saved,listingVerified:saved.listingVerified===true||(Array.isArray(saved.listingIds)&&saved.listingIds.length>0&&Number(saved.listingCount)===saved.listingIds.length)};
+        status=`Saved coverage from ${new Date(saved.checkedAt).toLocaleString()}${saved.metadataIncomplete?' (some card metadata missing)':''}. Refresh for current membership.`;
+      }
+      historySyncPending=historySync?.state==='pending'&&historySync?.checkedAt===coverage?.checkedAt;
+      cleanupQueue=queued?.mode==='api'?queued:null;
+      recoveryInitialized=true;
+      if(enabled()) mount();
+      // Keep one-shot recovery behavior, but only on the page where it applies.
+      let resume=false;
+      try{resume=sessionStorage.getItem(RESUME_NATIVE)==='1';sessionStorage.removeItem(RESUME_NATIVE);}catch{}
+      if(resume&&enabled())setTimeout(()=>{setActive(true);void refreshCoverage(false,true);},2500);
+      if(isPage())setTimeout(()=>void capturePassive(),900);
+      return true;
+    }).catch(error => {
+      recoveryHydration=null;
+      console.warn('[SpicyChat QoL] Favorites recovery could not read local state',error);
+      return false;
+    });
+    return recoveryHydration;
+  }
+  // Direct navigation to Favorites must still mount the recovery tab. All
+  // other routes defer the heavy storage read until navigation or user action.
+  if (enabled() && isPage()) void hydrateRecoveryWhenNeeded();
 })();

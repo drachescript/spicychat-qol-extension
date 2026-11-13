@@ -15,6 +15,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const pageState = DS.state || (DS.state = {});
     if (pageState.mainPageObserverInstalled) return;
     pageState.mainPageObserverInstalled = true;
+    // A Memory Manager opened before this observer starts needs one initial
+    // reconciliation; subsequent changes reuse this same observer.
+    if (DS.state?.settings?.enabled && document.querySelector('[data-testid="ChatMemoryManagerCapabilityGate"]')) {
+      DS.wakeMemoryManagerUi?.();
+    }
     let lastNonCardListingScheduleAt = 0;
     // This is baseline protection, not a user-selectable performance mode.
     // SpicyChat sometimes remounts the title/header many times in one render
@@ -307,6 +312,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         counters.observerMixedQolBatches = Number(counters.observerMixedQolBatches || 0) + 1;
         mutations = nativeMutations;
       }
+
+      // Memory Manager portals are not message roots. Update the toolbar on
+      // native memory-card mounts/removals without registering another observer.
+      if (DS.memoryManagerMutationsRelevant?.(mutations)) DS.wakeMemoryManagerUi?.();
 
       const isChatPage = !!DS.isSingleChatPage?.();
       // Baseline early exit for keystroke/contenteditable changes. The native

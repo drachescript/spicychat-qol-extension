@@ -1,5 +1,4 @@
 // Tab Cleanup Settings. Loaded after the shared defaults, before options.js.
-const TAB_CLEANUP_TOPICS_KEY = "tabCleanupTopics";
 let tabCleanupTopicState = { version: 1, topics: [] };
 let activeTabCleanupSessionId = "";
 let tabCleanupSessionSelection = new Set();
@@ -10,8 +9,6 @@ let tabCleanupReviewUnchecked = Object.create(null);
 let tabCleanupLastSnapshotUndo = null;
 const TAB_CLEANUP_REVIEW_PAGE_SIZE = 60;
 
-const TAB_CLEANUP_ENRICHMENT_KEY = "tabCleanupEnrichment";
-const TAB_CLEANUP_SESSIONS_KEY = "tabCleanupSessions";
 const TAB_CLEANUP_ENRICH_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 
 let lastTabCleanupDiagnostic = null;
@@ -417,22 +414,6 @@ function downloadTabCleanupDiagnostic() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   downloadJsonFile(report, `spicychat-qol-open-tabs-${stamp}.json`);
   if (status) status.textContent = "Diagnostic JSON downloaded.";
-}
-
-function normalizeTabCleanupSessions(value) {
-  const raw = value && typeof value === "object" ? value : {};
-  const sessions = Array.isArray(raw.sessions) ? raw.sessions.filter(item => item && typeof item === "object") : [];
-  return { version: 2, sessions: sessions.slice(0, 40) };
-}
-
-function normalizeTabCleanupTopics(value) {
-  const raw = value && typeof value === "object" ? value : {};
-  const topics = (Array.isArray(raw.topics) ? raw.topics : []).map((topic, index) => ({
-    id: String(topic?.id || `topic-${index + 1}`),
-    name: String(topic?.name || `Topic ${index + 1}`).trim().slice(0, 60),
-    botIds: [...new Set((Array.isArray(topic?.botIds) ? topic.botIds : []).map(id => String(id || "").trim()).filter(Boolean))]
-  })).filter(topic => topic.name);
-  return { version: 1, topics };
 }
 
 function tabCleanupAgeThresholdsFromPage() {

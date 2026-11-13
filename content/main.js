@@ -78,8 +78,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     clearSlowThrottle: () => slowStepThrottle.clear(),
     clearEssentialChatDirtyRoots,
     clearMessageEnhancerQuiet: () => {
-      clearTimeout(messageEnhancerQuietTimer);
-      messageEnhancerQuietTimer = null;
+      clearTimeout(laneState.messageEnhancerQuietTimer);
+      laneState.messageEnhancerQuietTimer = null;
     },
     resetMessageEditGuards, clearBlockedRefreshBatch,
     invalidateLoadedChatMessageCount, loadedChatMessageCount,
@@ -94,7 +94,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   });
 
   let pauseRerunTimer = null;
-  let messageEnhancerQuietTimer = null;
   let idleHandle = null;
   let savedOpenedLaneTimer = null;
   let savedOpenedLaneRunning = false;
@@ -103,6 +102,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     pauseRerunsUntil: 0,
     criticalTimer: null,
     messageLaneTimer: null,
+    messageEnhancerQuietTimer: null,
     messageLaneDueAt: 0,
     messageLaneRunning: false,
     messageLanePending: false,

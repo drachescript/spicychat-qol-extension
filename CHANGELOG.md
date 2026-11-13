@@ -1,5 +1,20 @@
-## 0.2.79
+## 0.2.80
+- Fixed message Quick Edit failing silently when a hidden/stale native menu action was selected; verify the editor opens and restore the native menu when needed.
+- Fixed RP Format Repair losing valid replacements on later message passes and keeping stale RP toggle targets after message edits.
+- Fixed Select bots on SpicyChat’s renamed listing container, restoring card selection on Home and Recommendations.
+- Prevented RP Format Repair from hiding messages when the native layout cannot be converted safely.
+- Fixed a chat performance-mode error caused by the message quiet timer being referenced outside its runtime module.
+- Reduced unnecessary listing/card refresh work and deferred Favorites recovery data until needed.
+- Deferred Tab Cleanup tools on desktop while retaining Android Settings compatibility.
+- Reduced Memory Manager observation overhead and fixed V2 bulk selection on nested cards.
+- Added cloud sync results showing confirmed local list changes and acknowledged uploads.
+- Fixed duplicate Copy/Edit buttons when SpicyChat remounts a message toolbar.
+- Added a Dark Reader-specific correction for blue user narration without overriding native SpicyChat colors.
+- Fixed Settings startup incorrectly treating lazy-loaded Tab Cleanup tools as a missing required module.
+- Added optional Rulebook state updates to TXT, Markdown, JSON and HTML chat exports, including multiple Story Moments on the same message. Captures visible events only; not a full Rulebook history backup.
+- Fixed Select bots interactions on native listings and Favorites when card links change or controls are remounted.
 
+## 0.2.79
 - Reduced redundant Android Settings storage bridge reads by fetching cached-index granular keys together, with a fallback for newly added keys.
 - Fixed compact/Android Settings search jumps: close the keyboard, collapse the sticky search bar, resolve refreshed feature rows and verify scroll position after viewport changes.
 - Added per-device automatic cloud sync checks every 6, 12 (default) or 24 hours. Edits continue to sync sooner; saved-list settle protections and upload/download modes are unchanged.

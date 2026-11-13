@@ -30,7 +30,8 @@ function normalizeQolSyncState(value) {
     lastLocalStorageRevision: Math.max(0, Number(source.lastLocalStorageRevision || 0)),
     lastError: String(source.lastError || ""),
     lastErrorAt: Math.max(0, Number(source.lastErrorAt || 0)),
-    lastStatus: String(source.lastStatus || "")
+    lastStatus: String(source.lastStatus || ""),
+    lastReceipt: source.lastReceipt && typeof source.lastReceipt === "object" ? source.lastReceipt : null
   };
 }
 
@@ -49,6 +50,7 @@ async function ensureQolSyncState({ resetDevice = false } = {}) {
     state.lastError = resetDevice ? "" : state.lastError;
     state.lastErrorAt = resetDevice ? 0 : state.lastErrorAt;
     state.lastStatus = resetDevice ? "Not linked" : state.lastStatus;
+    state.lastReceipt = resetDevice ? null : state.lastReceipt;
     await storageSet({ [QOL_SYNC_STATE_KEY]: state });
   }
   return state;
@@ -362,6 +364,27 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
   if ($("accountSyncRevision")) $("accountSyncRevision").textContent = String(state.lastRevision || 0);
   renderSyncDevicePrefs(response?.prefs);
   if ($("accountSyncLastSync")) $("accountSyncLastSync").textContent = formatSyncTime(state.lastSyncAt);
+  const syncReceipt = $("accountSyncReceipt");
+  if (syncReceipt) {
+    const receipt = state.lastReceipt;
+    const labels = { blockedBots: "Blocked", laterBots: "Later", favoriteBots: "Favorites",
+      notInterestedBots: "Not interested", openedChats: "Opened" };
+    if (!receipt?.at) {
+      syncReceipt.textContent = "No completed sync receipt yet. Use Sync now to verify this device's changes.";
+    } else {
+      const parts = ["Last verified sync: " + formatSyncTime(receipt.at)];
+      for (const [key, label] of Object.entries(labels)) {
+        const added = Math.max(0, Number(receipt.downloaded?.[key]?.added || 0));
+        const removed = Math.max(0, Number(receipt.downloaded?.[key]?.removed || 0));
+        const uploaded = Math.max(0, Number(receipt.uploaded?.[key]?.parts || 0));
+        if (added || removed || uploaded || key === "blockedBots" || key === "laterBots") {
+          parts.push(`${label}: +${added} / -${removed} locally, ${Math.max(0, Number(receipt.localTotals?.[key] || 0))} total${uploaded ? `; ${uploaded} cloud parts acknowledged` : ""}`);
+        }
+      }
+      parts.push("Cloud upload acknowledgement does not confirm another device has downloaded changes.");
+      syncReceipt.textContent = parts.join(" · ");
+    }
+  }
   if ($("accountSyncApiBase")) $("accountSyncApiBase").textContent = response?.apiBase || "https://syncqol.drache.uk";
 
   const caps = env.capabilities || {};
@@ -709,8 +732,10 @@ function setupAccountSyncFoundation() {
     setAccountSyncBusy(true, "Syncing now…");
     const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_NOW" }, 120000);
     setAccountSyncBusy(false);
-    $("accountSyncActionStatus").textContent = result?.ok ? "Sync complete." : (result?.message || "Sync failed.");
-    if (result?.ok) showSettingsToast("QoL settings synced.");
+    $("accountSyncActionStatus").textContent = result?.ok
+      ? (result.receipt?.at ? "Sync verified on this device; see the receipt below." : "Sync checked; no changes applied.")
+      : (result?.message || "Sync failed.");
+    if (result?.ok) showSettingsToast("QoL sync check complete.");
     await refreshAccountSyncUi({ refreshDevices: false });
   });
 

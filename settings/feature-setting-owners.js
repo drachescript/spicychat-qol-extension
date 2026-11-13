@@ -32,7 +32,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   "premium-notifications": ["hideNotifications", "hideFeatureReleasePopups", "hideTabNotificationBadge", "autoReadNotifications"],
   "rulebook-public-qol": ["rulebookBlockingEnabled", "applyBotBlockingToRulebooks", "showRulebookBlockButtons", "rulebookBlockedIds"],
   "chat-pins": ["enableChatPins"],
-  "chat-export": ["showChatExportButton", "chatExportIncludeBotInfo", "chatExportIncludeRulebook", "chatExportIncludeOocDirectives", "chatExportIncludeGenerationDetails", "chatExportNumberMessages", "chatExportIncludeAvatars", "chatExportIncludeImageLinks", "chatExportDefaultFormat", "chatExportHtmlLayout"],
+  "chat-export": ["showChatExportButton", "chatExportIncludeBotInfo", "chatExportIncludeRulebook", "chatExportIncludeRulebookState", "chatExportIncludeOocDirectives", "chatExportIncludeGenerationDetails", "chatExportNumberMessages", "chatExportIncludeAvatars", "chatExportIncludeImageLinks", "chatExportDefaultFormat", "chatExportHtmlLayout"],
   "daily-message-limit": ["dailyMessageLimitTrackerEnabled"],
   "model-selector": ["customizeModelQuickMenu", "modelQuickFavoritesOnly", "modelFavoriteNames", "modelHiddenNames", "expandModelSelectorDescriptions", "hideModelUpgradeButtons"],
   "generation-profiles": ["enableGenerationProfiles"],

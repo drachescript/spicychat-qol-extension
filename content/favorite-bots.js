@@ -579,7 +579,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cards() {
     const found = new Map();
-    const candidates = document.querySelectorAll('[data-testid="CharacterCard"], [data-testid="ChatbotCard"]');
+    const candidates = document.querySelectorAll('[data-testid="CharacterCard"], [data-testid="ChatbotCard"], [data-testid="BotCard"]');
     for (const card of candidates) {
       const id = cardId(card);
       if (id && !found.has(id)) found.set(id, card);
@@ -594,12 +594,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return found;
   }
   function cardId(card) {
-    return idFrom(card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]')?.href);
+    // Some native layouts make the card itself the chat link.
+    return idFrom(card?.getAttribute?.('href') || '') ||
+      idFrom(card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]')?.href);
   }
   function cardMeta(card, id = cardId(card)) {
     if (!safeId(id)) return null;
-    const anchor = card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]');
-    const name = clean(card?.querySelector?.('[data-testid="CharacterCardHeader-TitleLink"],a[title][href*="/chat/"]')?.getAttribute('title') || card?.querySelector?.('img[alt]')?.getAttribute('alt') || id);
+    const anchor = card?.matches?.('a[href*="/chat/"],a[href*="/chatbot/"]')
+      ? card : card?.querySelector?.('a[href*="/chat/"],a[href*="/chatbot/"]');
+    const name = clean(card?.querySelector?.('[data-testid="CharacterCardHeader-TitleLink"],a[title][href*="/chat/"]')?.getAttribute('title') || card?.getAttribute?.('title') || card?.querySelector?.('img[alt]')?.getAttribute('alt') || id);
     const creator = clean(card?.querySelector?.('a[href*="/creator/"]')?.textContent);
     const image = card?.querySelector?.('img[alt]')?.src || '';
     const description = clean(DS.getCardDescriptionText?.(card) || card?.querySelector?.('[data-testid="CharacterCardBody"] p')?.textContent || '');
@@ -710,6 +713,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let b = document.getElementById(LAUNCHER);
     if (b && b.dataset.dsFavBulk !== '1') { b.remove(); b = null; }
     if (!b) {
+      // The document click delegate also handles this button when SpicyChat
+      // remounts/clones it without its originally attached event listener.
       b = button('Select bots', 'select', () => setSelecting(!state.active));
       b.id = LAUNCHER;
       b.dataset.dsOwned = '1';
@@ -1312,9 +1317,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (target.nextElementSibling !== host) target.after(host);
   }
   function handleCardClick(event) {
-    if (!state.active || !isPage() || state.busy || !(event.target instanceof Element)) return;
-    if (event.target.closest(`#${BAR},#${LAUNCHER},#ds-favorites-manager-tools,#ds-qol-panel`)) return;
-    const card = event.target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],div.relative.group');
+    if (!(event.target instanceof Element)) return;
+    // Handle the launcher before cards, and at the document level: native
+    // React rerenders may replace the element while leaving its ID intact.
+    if (event.target.closest(`#${LAUNCHER}`)) {
+      if (!isEnabled() || state.busy) return;
+      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+      setSelecting(!state.active);
+      return;
+    }
+    if (!state.active || !isEnabled() || state.busy) return;
+    if (event.target.closest(`#${BAR},#ds-favorites-manager-tools,#ds-qol-panel`)) return;
+    // Preserve native Favorite, creator, menu, and profile actions; only
+    // ordinary card surface and direct chat links are selection targets.
+    const control = event.target.closest('button,input,textarea,select,[role="button"],a[href]');
+    if (control && !(control.matches('a[href]') && /\/chat\//i.test(control.getAttribute('href') || control.href || '') &&
+      idFrom(control.getAttribute('href') || control.href))) return;
+    let card = event.target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"],div.relative.group');
+    if (!card) {
+      // Fall back to a card already discovered in the native Favorites list,
+      // rather than accidentally selecting one of its inner link wrappers.
+      for (const candidate of cards().values()) {
+        if (candidate.contains(event.target)) { card = candidate; break; }
+      }
+    }
     if (!card) return;
     const meta = cardMeta(card);
     if (!meta) return;
