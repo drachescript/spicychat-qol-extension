@@ -81,7 +81,7 @@ $("enableCreatorBotNotifications")?.addEventListener("change", () => { renderCre
 $("chatNudgeRefresh")?.addEventListener("click", () => renderChatNudgeManager());
 $("autoAfkCheckNow")?.addEventListener("click", runAutoAfkCheckNow);
 $("duplicateTabCheckNow")?.addEventListener("click", runDuplicateTabCheckNow);
-bindTabCleanupSettingsEvents();
+installLazyTabCleanupPanel();
 
 
 $("chatBackgroundGlobalUpload")?.addEventListener("change", async event => { await importGlobalChatBackground(event.target.files); event.target.value = ""; });
@@ -251,7 +251,10 @@ const missingSettingsModules = [
   ["settings/options-settings-defaults.js", typeof DEFAULT_SETTINGS !== "undefined"],
   ["settings/options-reading-accessibility.js", typeof applyOptionsAccessibilityPreview === "function"],
   ["settings/options-section-navigation.js", typeof setupCollapsibleSettingsCards === "function" && typeof setupSettingsSectionNavigation === "function"],
-  ["settings/options-tab-cleanup.js", typeof tabCleanupWords === "function"],
+  // Tab Cleanup panel code is intentionally deferred; only its loader and
+  // shared backup-normalization schema must exist at startup.
+  ["settings/options-tab-cleanup-core.js", typeof normalizeTabCleanupSessions === "function" && typeof normalizeTabCleanupTopics === "function"],
+  ["settings/options-lazy-tab-cleanup.js", typeof ensureTabCleanupPanelLoaded === "function" && typeof installLazyTabCleanupPanel === "function"],
   ["settings/options-soundscapes.js", typeof normalizeSoundscapeScenes === "function"]
 ].filter(([, ready]) => !ready).map(([filename]) => filename);
 if (missingSettingsModules.length) {

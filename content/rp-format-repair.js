@@ -287,6 +287,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return output;
   }
 
+  // Native chat layouts change independently of this optional formatter. Never
+  // hide SpicyChat's text unless we can verify our replacement contains it.
+  // A layout with nested DIV/P nodes previously produced empty blue bubbles
+  // showing only the RP✓ toggle.
+  function safeReplacement(body, contentHost, output) {
+    if (!(body instanceof HTMLElement) || !(contentHost instanceof HTMLElement)) return false;
+    if (contentHost.closest(`.${OUTPUT_CLASS}`) || contentHost.querySelector(`.${BUTTON_CLASS}, .${OUTPUT_CLASS}`)) return false;
+    const nativeText = (body.textContent || "").replace(/\s+/g, " ").trim();
+    const sourceText = (contentHost.textContent || "").replace(/\s+/g, " ").trim();
+    const resultText = (output.textContent || "").replace(/\s+/g, " ").trim();
+    if (sourceText.length < 12 || resultText.length < 12) return false;
+    // On later passes, the generated replacement is already attached inside
+    // the native message body. Do not count its text as native message text:
+    // that doubles the measured length and wrongly rejects valid repairs.
+    const generatedLength = body.contains(output) ? resultText.length : 0;
+    const nativeLength = Math.max(0, nativeText.length - generatedLength);
+    // Refuse if the chosen source was only a narrow UI fragment, or conversion
+    // stripped a substantial amount of the actual message.
+    if (sourceText.length < nativeLength * 0.85) return false;
+    if (resultText.length < sourceText.length * 0.75) return false;
+    return true;
+  }
+
   function isRepairedView(message, s) {
     if (message.dataset.dsRpView === "original") return false;
     if (message.dataset.dsRpView === "repaired") return true;
@@ -327,9 +350,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        const currentlyRepaired = !output.hidden;
+        // Messages can stream/edit and rebuild their rendered replacement.
+        // Resolve the live nodes instead of keeping the original output
+        // reference captured when this button was first created.
+        const liveOutput = message.querySelector(`.${OUTPUT_CLASS}`);
+        const liveContentHost = getMessageParts(message).contentHost;
+        if (!(liveOutput instanceof HTMLElement) || !(liveContentHost instanceof HTMLElement)) return;
+        const currentlyRepaired = !liveOutput.hidden;
         message.dataset.dsRpView = currentlyRepaired ? "original" : "repaired";
-        applyView(message, contentHost, output, settings());
+        applyView(message, liveContentHost, liveOutput, settings());
       });
       host.insertBefore(button, wrapper);
     }
@@ -339,12 +368,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function processMessage(message, force = false) {
     const s = settings();
     if (!message?.isConnected || DS.isMessageEditPending?.(message) || !isAiMessage(message)) return;
-    const { contentHost } = getMessageParts(message);
-    if (!(contentHost instanceof HTMLElement) || contentHost.classList.contains(OUTPUT_CLASS)) return;
+    const { body, contentHost } = getMessageParts(message);
+    if (!(contentHost instanceof HTMLElement) || contentHost.classList.contains(OUTPUT_CLASS)) {
+      // Do not leave a hidden native message or an orphaned RP✓ toggle behind.
+      if (message.querySelector(`.${OUTPUT_CLASS}, .${ORIGINAL_HIDDEN_CLASS}`)) cleanupMessage(message);
+      return;
+    }
 
     const hash = `${settingsHash(s)}|${contentHost.textContent || ""}`;
     if (!force && message.dataset.dsRpReady === hash && message.querySelector(`.${OUTPUT_CLASS}`)) {
       const output = message.querySelector(`.${OUTPUT_CLASS}`);
+      if (!safeReplacement(body, contentHost, output)) {
+        cleanupMessage(message);
+        return;
+      }
       applyView(message, contentHost, output, s);
       ensureToggleButton(message, contentHost, output, s);
       return;
@@ -353,6 +390,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     message.querySelector(`.${OUTPUT_CLASS}`)?.remove();
     contentHost.classList.remove(ORIGINAL_HIDDEN_CLASS);
     const output = buildOutput(contentHost, s);
+    if (!safeReplacement(body, contentHost, output)) {
+      // Unsupported/partial native markup: keep the untouched SpicyChat body.
+      message.querySelector(`.${BUTTON_CLASS}`)?.remove();
+      delete message.dataset.dsRpReady;
+      delete message.dataset.dsRpView;
+      return;
+    }
     contentHost.insertAdjacentElement("afterend", output);
     message.dataset.dsRpReady = hash;
     applyView(message, contentHost, output, s);

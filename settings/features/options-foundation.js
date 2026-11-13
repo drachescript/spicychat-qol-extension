@@ -1884,8 +1884,7 @@ function setActiveTab(tabName) {
     initializeExportScopeSelection().catch(() => {});
   }
   if (tabName === "browser" && optionsDataLoaded) {
-    renderTabCleanupSessions().catch(() => {});
-    loadTabCleanupTopics().catch(() => {});
+    ensureTabCleanupPanelLoaded().catch(() => {});
   }
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);

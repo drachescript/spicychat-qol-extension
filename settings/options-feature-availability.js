@@ -5,7 +5,7 @@
   'use strict';
   const known = {
     interface: ['enableCommandPalette', 'showQuickPanel', 'showFloatingMiniPanel', 'hidePremium', 'hideAdvertBanners', 'enableSounds', 'showScrollToTopButton'],
-    chat: ['showChatExportButton', 'chatExportIncludeBotInfo', 'chatExportIncludeRulebook', 'chatExportIncludeGenerationDetails', 'showOocTools', 'showChatTopBar', 'showMessageTimestamps', 'enableGenerationProfiles', 'enableGlobalMemory', 'enableReplyInstructions', 'showMessageBookmarks'],
+    chat: ['showChatExportButton', 'chatExportIncludeBotInfo', 'chatExportIncludeRulebook', 'chatExportIncludeRulebookState', 'chatExportIncludeGenerationDetails', 'showOocTools', 'showChatTopBar', 'showMessageTimestamps', 'enableGenerationProfiles', 'enableGlobalMemory', 'enableReplyInstructions', 'showMessageBookmarks'],
     chatList: ['showChatListTools', 'enableChatOrganizer', 'enableChatPins', 'enableChatSmartFolders', 'enableChatIndex', 'chatIndexEnabled', 'chatIndexStandaloneLauncher'],
     listings: ['blockCards', 'showCardGreetingTokenInfo', 'showExactMessageCounts', 'showLaterBotButtons', 'showCreatorFavoriteButtons', 'showRulebookFilters', 'showLorebookFilters', 'enableBotOrganizer', 'publicPersonalityOnly', 'enableFavoritesRecovery'],
     creator: ['enableCreationAudit', 'enableMyCreationsFilters', 'enableMyCreationsBulkBackup', 'enableAccountMigrationAssistant', 'enableBotEditorDraftHistory'],

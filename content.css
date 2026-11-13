@@ -566,6 +566,13 @@ body:has(#ds-qol-panel) div.sticky.bottom-0:has([data-translate-key="chat:modal.
   display: none !important;
 }
 
+/* During an Edit shortcut, expose the original React menu anchor. If the
+   automatic path fails, leave the native three-dot control usable. */
+.ds-message-dropdown-hidden.ds-message-native-edit-fallback button[aria-label="message-dropdown"],
+.ds-message-dropdown-hidden.ds-message-native-edit-fallback > div:has(> button[aria-label="message-dropdown"]) {
+  display: inline-flex !important;
+}
+
 /* Message quick actions silently invoke SpicyChat's native menu actions.
    The intermediate Copy/Edit/Report/Remove Image menu is kept off-screen so
    users see only the requested native result (editor/report modal/etc.). */

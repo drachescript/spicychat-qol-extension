@@ -91,7 +91,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function listingRoot() {
-    return document.querySelector('[data-testid="SearchClientCharacterListing"]');
+    // V2 renamed the root to SearchClientCharacterListingBody (Nov 2026).
+    // Search and select only within the active listing, not across the sidebar.
+    return document.querySelector(
+      '[data-testid="SearchClientCharacterListingBody"], [data-testid="SearchClientCharacterListing"]'
+    );
   }
 
   function findNsfwLabel(root) {
@@ -738,12 +742,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.id = id;
     button.textContent = label;
     button.dataset.dsOwned = "1";
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      markActivity(true);
-      setSelectionMode(!state.selectionMode);
-    });
+    // The click is handled by the stable document delegate below. Native
+    // listing updates can recycle/clone this button and discard its listeners.
     return button;
   }
 
@@ -1298,16 +1298,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function installSelectionClickHandler() {
     document.addEventListener("click", event => {
-      if (!state.selectionMode || !supportedListingRoute() || !(event.target instanceof Element)) return;
-      if (event.target.closest(`#${TOOLBAR_ID},#ds-bulk-block-launcher,#ds-qol-panel,.ds-card-block-button`)) return;
-      // The card's chat image/title are selection targets; other native
-      // buttons, favorites, creator/profile links and menus still work.
+      if (!(event.target instanceof Element)) return;
+      // Delegation survives a React-remounted Select bots launcher, including
+      // the Mini Panel copy. Prevent double toggles from a stale old listener.
+      if (event.target.closest("#ds-bulk-block-launcher,#ds-qol-select-bots")) {
+        if (!supportedListingRoute() || !settings().enableBulkCardBlocking) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        markActivity(true);
+        setSelectionMode(!state.selectionMode);
+        return;
+      }
+      if (!state.selectionMode || !supportedListingRoute()) return;
+      if (event.target.closest(`#${TOOLBAR_ID},#ds-qol-panel,.ds-card-block-button`)) return;
+      // The whole card and its chat links are selectable. SpicyChat may change
+      // the native image/title test IDs, so identify links by their destination
+      // rather than only two old test IDs. Preserve other buttons and links.
       const control = event.target.closest("button,input,textarea,select,[role='button'],a[href]");
-      if (control && !(
-        control.matches("a[href]") &&
-        (control.matches("[data-testid='CharacterCardMedia-ImageLink'],[data-testid='CharacterCardHeader-TitleLink']") ||
-         /^chat-with-/i.test(control.getAttribute("aria-label") || ""))
-      )) return;
+      if (control && !(control.matches("a[href]") && /\/chat\//i.test(control.getAttribute("href") || control.href || "") &&
+          botIdFromHref(control.getAttribute("href") || control.href))) return;
       const card = cardFromTarget(event.target);
       if (!card) return;
       event.preventDefault();

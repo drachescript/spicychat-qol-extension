@@ -494,6 +494,8 @@
         "settings/options-settings-defaults.js",
         "settings/options-reading-accessibility.js",
         "settings/options-section-navigation.js",
+        "settings/options-tab-cleanup-core.js",
+        "settings/options-lazy-tab-cleanup.js",
         "settings/options-tab-cleanup.js",
         "settings/options-soundscapes.js",
         "settings/options-platform-compatibility.js",

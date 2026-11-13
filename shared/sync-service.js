@@ -37,6 +37,7 @@
   let pendingLocalDeleted = new Set();
   let pushTimer = null;
   let syncChain = Promise.resolve();
+  let activeSyncReceipt = null;
   const remoteExpectedWrites = new Map();
 
   function now() {
@@ -73,7 +74,9 @@
       lastLocalStorageRevision: Math.max(0, Number(source.lastLocalStorageRevision || 0)),
       lastError: String(source.lastError || "").slice(0, 500),
       lastErrorAt: Math.max(0, Number(source.lastErrorAt || 0)),
-      lastStatus: String(source.lastStatus || "").slice(0, 80)
+      lastStatus: String(source.lastStatus || "").slice(0, 80),
+      lastReceipt: source.lastReceipt && typeof source.lastReceipt === "object"
+        ? source.lastReceipt : null
     };
   }
 
@@ -578,6 +581,7 @@
       // Only merge after the entire response was received. Never partially
       // remove local IDs if the cloud read has failed halfway through.
       await mergeRemoteLists(prefs);
+      if (activeSyncReceipt && !dataOnly) activeSyncReceipt.settingsDownloaded += changed;
       const local = await storageGet([REVISION_KEY]);
       await saveStatePatch({
         lastRevision: finalRevision,
@@ -692,6 +696,7 @@
 
   async function mergeRemoteLists(prefs) {
     const ledger = await readListLedger();
+    const changes = {};
     for (const [scope, info] of Object.entries(LIST_SOURCES)) {
       if (!listMayDownload(prefs, scope)) continue;
       const best = {};
@@ -753,9 +758,27 @@
         expectedListWrites.delete(scope);
         throw new Error(`Could not merge ${scope} into local storage`);
       }
+      // A completed storage callback is not proof that the resulting list is
+      // the intended one. Re-read this exact scope before reporting a merge.
+      const verified = await storageGet([info.storage]);
+      if (JSON.stringify(listIds(verified[info.storage], scope)) !== JSON.stringify(nextIds)) {
+        throw new Error(`Could not verify merged ${scope} list`);
+      }
+      const before = new Set(oldIds), after = new Set(nextIds);
+      changes[scope] = {
+        added: nextIds.filter(id => !before.has(id)).length,
+        removed: oldIds.filter(id => !after.has(id)).length
+      };
+      if (activeSyncReceipt) {
+        const count = activeSyncReceipt.downloaded[scope] || { added: 0, removed: 0 };
+        count.added += changes[scope].added;
+        count.removed += changes[scope].removed;
+        activeSyncReceipt.downloaded[scope] = count;
+      }
       ledger.lastIds[scope] = nextIds;
     }
     await writeListLedger(ledger);
+    return changes;
   }
 
   async function syncListData({ explicit = false } = {}) {
@@ -797,6 +820,12 @@
         if (!result?.ok) return result;
         revision = Number(result.revision || revision);
         applied++;
+        if (activeSyncReceipt) {
+          const count = activeSyncReceipt.uploaded[scope] || { parts: 0, records: 0 };
+          count.parts += 1;
+          count.records += entries.length;
+          activeSyncReceipt.uploaded[scope] = count;
+        }
         ledger.dirty[scope] = (ledger.dirty[scope] || []).filter(value => value !== shard);
         await writeListLedger(ledger); // checkpoint each successful shard
       }
@@ -846,7 +875,7 @@
     return pullRemote({ since: 0, force: true, full: true });
   }
 
-  async function syncNowInternal({ forceFullRecovery = false, explicit = false } = {}) {
+  async function syncNowCore({ forceFullRecovery = false, explicit = false } = {}) {
     // A bulk update can write lists repeatedly for minutes. Wait for its
     // quiet period rather than merging partially updated lists mid-operation.
     if (!explicit) {
@@ -904,6 +933,30 @@
     return syncListData({ explicit });
   }
 
+  async function syncNowInternal(options = {}) {
+    // Sync calls are serialized through queued(). A receipt is published only
+    // after the entire settings + list synchronization succeeds.
+    const receipt = { at: 0, downloaded: {}, uploaded: {}, localTotals: {},
+      settingsDownloaded: 0, verified: true };
+    activeSyncReceipt = receipt;
+    try {
+      const result = await syncNowCore(options);
+      if (!result?.ok || (result.skipped && result.reason)) return result;
+      for (const scope of LIST_NAMES) {
+        const value = await storageGet([LIST_SOURCES[scope].storage]);
+        receipt.localTotals[scope] = listIds(value[LIST_SOURCES[scope].storage], scope).length;
+      }
+      receipt.at = now();
+      // The receipt verifies local application and successful cloud responses.
+      // It never says a *different* device has received its changes.
+      await saveStatePatch({ lastReceipt: receipt, lastSyncAt: receipt.at,
+        lastSyncAttemptAt: receipt.at, lastError: "", lastErrorAt: 0 });
+      return { ...result, receipt };
+    } finally {
+      activeSyncReceipt = null;
+    }
+  }
+
   async function createAccount(meta = {}) {
     const current = await getStateAndAuth();
     if (current.state.accountId && current.auth.token) return { ok: false, error: "already_linked", message: "This device is already linked." };
@@ -929,7 +982,7 @@
         lastSyncAttemptAt: now(),
         lastError: "",
         lastErrorAt: 0,
-        lastStatus: "Account created"
+        lastStatus: "Account created", lastReceipt: null
       };
       await storageSet({
         [STATE_KEY]: state,
@@ -988,7 +1041,7 @@
         lastSyncAttemptAt: now(),
         lastError: "",
         lastErrorAt: 0,
-        lastStatus: "Linked — waiting for this device's sync choices"
+        lastStatus: "Linked — waiting for this device's sync choices", lastReceipt: null
       };
       await storageSet({
         [STATE_KEY]: state,
@@ -1074,7 +1127,7 @@
       lastLocalStorageRevision: 0,
       lastError: "",
       lastErrorAt: 0,
-      lastStatus: "Not linked"
+      lastStatus: "Not linked", lastReceipt: null
     };
     await storageRemove([AUTH_KEY, DEVICE_PREFS_KEY]);
     await storageSet({ [STATE_KEY]: next });

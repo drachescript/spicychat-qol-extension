@@ -38,18 +38,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     style.id = STYLE_ID;
     style.dataset.dsOwned = "1";
     style.textContent = `
-      /* Correct a leaked action-colored parent without rewriting chat text. */
-      html:not(.dark):not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] span.leading-6:has(> em, > i),
+      /* Fix only genuinely action-colored dialogue parents. Do not force all
+         narration-containing lines to white: V2 user messages share a white
+         parent with a native blue <em class="chat-range--narration">. */
       html:not(.dark):not([data-ds-chat-bubbles="1"])
         div[id^="message-"] span.leading-6[class*="text-sky-"]:has(> q) {
         color: #000 !important;
       }
       html.dark:not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] span.leading-6:has(> em, > i),
-      html.dark:not([data-ds-chat-bubbles="1"])
         div[id^="message-"] span.leading-6[class*="text-sky-"]:has(> q) {
         color: #fff !important;
+      }
+      /* Dark Reader may override SpicyChat's blue narration on user messages.
+         Scope this correction to Dark Reader only. Native SpicyChat colors,
+         custom chat bubbles, and bot narration remain untouched. No DOM writes. */
+      html:not(.dark)[data-darkreader-mode]:not([data-ds-chat-bubbles="1"])
+        div[id^="message-"] [data-chat-side="user"]
+        em:is([data-chat-range="narration"], .chat-range--narration) {
+        color: #317eae !important;
+      }
+      html.dark[data-darkreader-mode]:not([data-ds-chat-bubbles="1"])
+        div[id^="message-"] [data-chat-side="user"]
+        em:is([data-chat-range="narration"], .chat-range--narration) {
+        color: #79c8f5 !important;
       }
     `;
     (document.head || document.documentElement).appendChild(style);

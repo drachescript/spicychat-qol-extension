@@ -544,6 +544,7 @@ const DEFAULT_SETTINGS = {
   chatExportLoadPreviousMessages: false,
   chatExportHistoryMode: "api",
   chatExportIncludeBotInfo: false,
+  chatExportIncludeRulebookState: false,
   enableRulebookDiagnostics: false,
   storyReadingLayout: false,
   chatExportIncludeOocDirectives: false,

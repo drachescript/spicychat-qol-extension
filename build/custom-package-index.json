@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.79",
+  "sourceVersion": "0.2.56",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -12,10 +12,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/accessibility.js",
-      "settings": [
-        "settings/feature-panels/accessibility.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -28,7 +25,6 @@
       "dependencies": [],
       "runtime": "content/ad-banners.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -43,7 +39,6 @@
       "settings": [
         "settings/feature-panels/alternate-dialogue.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -55,10 +50,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/android-app.js",
-      "settings": [
-        "settings/feature-panels/android-app.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [
         "content/styles/android-app.css"
       ],
@@ -75,22 +67,6 @@
       "settings": [
         "settings/feature-panels/animation-control.js"
       ],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "archive-website-link",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [],
-      "runtime": "content/archive-website-link.js",
-      "settings": [
-        "settings/feature-panels/archive-website-link.js"
-      ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -102,10 +78,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/auto-afk.js",
-      "settings": [
-        "settings/feature-panels/auto-afk.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [
         "background/background-auto-afk.js"
@@ -123,7 +96,6 @@
       ],
       "runtime": "content/auto-blocking.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -138,7 +110,6 @@
       "settings": [
         "settings/feature-panels/automatic-images.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [
@@ -154,7 +125,6 @@
       "dependencies": [],
       "runtime": "content/auto-voice.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -169,7 +139,6 @@
       "settings": [
         "settings/feature-panels/bot-archive.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -184,7 +153,6 @@
       "settings": [
         "settings/feature-panels/bot-backup.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -197,7 +165,6 @@
       "dependencies": [],
       "runtime": "content/bot-blocking.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -210,7 +177,6 @@
       "dependencies": [],
       "runtime": "content/bot-editor-actions.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -223,7 +189,6 @@
       "dependencies": [],
       "runtime": "content/bot-editor-history.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -236,7 +201,6 @@
       "dependencies": [],
       "runtime": "content/bot-editor-memory.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -248,10 +212,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-editor-snippets.js",
-      "settings": [
-        "settings/feature-panels/bot-editor-snippets.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -263,10 +224,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-organizer.js",
-      "settings": [
-        "settings/feature-panels/bot-organizer.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [
         "content/styles/bot-organizer.css"
       ],
@@ -283,7 +241,6 @@
       "settings": [
         "settings/feature-panels/bot-status.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -296,7 +253,6 @@
       "dependencies": [],
       "runtime": "content/bulk-blocking.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -309,7 +265,6 @@
       "dependencies": [],
       "runtime": "content/card-token-info.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -324,7 +279,6 @@
       "settings": [
         "settings/feature-panels/card-workflow.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -337,7 +291,6 @@
       "dependencies": [],
       "runtime": "content/cards.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -352,7 +305,6 @@
       "settings": [
         "settings/feature-panels/character-pictures.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [
@@ -372,7 +324,6 @@
       "settings": [
         "settings/feature-panels/character-qol-profiles.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/character-qol-profiles.css"
       ],
@@ -389,7 +340,6 @@
       "settings": [
         "settings/feature-panels/chat-backgrounds.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [
@@ -407,12 +357,9 @@
       "settings": [
         "settings/feature-panels/chat-bookmarks.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
-      "helpers": [
-        "content/chat-history-navigator.js"
-      ],
+      "helpers": [],
       "fullyIndependent": false
     },
     {
@@ -421,10 +368,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-bubbles.js",
-      "settings": [
-        "settings/feature-panels/chat-bubbles.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [
         "content/styles/chat-bubble-themes.css"
       ],
@@ -433,34 +377,12 @@
       "fullyIndependent": false
     },
     {
-      "id": "chat-continuation",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [],
-      "runtime": "content/chat-continuation.js",
-      "settings": [
-        "settings/feature-panels/chat-continuation.js"
-      ],
-      "settingsStyles": [],
-      "styles": [
-        "content/styles/chat-continuation.css"
-      ],
-      "background": [],
-      "helpers": [
-        "content/card-token-info.js"
-      ],
-      "fullyIndependent": false
-    },
-    {
       "id": "chat-export",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-export.js",
-      "settings": [
-        "settings/feature-panels/chat-export.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -473,7 +395,6 @@
       "dependencies": [],
       "runtime": "content/chat-format-compatibility.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -486,7 +407,6 @@
       "dependencies": [],
       "runtime": "content/chat-index.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/chat-index.css"
       ],
@@ -500,10 +420,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-list.js",
-      "settings": [
-        "settings/feature-panels/chat-list.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -518,45 +435,9 @@
       "settings": [
         "settings/feature-panels/chat-lorebook-manager.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/chat-lorebook-manager.css"
       ],
-      "background": [
-        "background/features/background-chat-lorebook-local.js"
-      ],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "chat-lorebook-recall",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "chat-lorebook-manager"
-      ],
-      "runtime": "content/chat-lorebook-recall.js",
-      "settings": [
-        "settings/feature-panels/chat-lorebook-recall.js"
-      ],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "chat-lorebook-suggestions",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "context-keeper",
-        "chat-lorebook-manager"
-      ],
-      "runtime": "content/chat-lorebook-suggestions.js",
-      "settings": [],
-      "settingsStyles": [],
-      "styles": [],
       "background": [],
       "helpers": [],
       "fullyIndependent": false
@@ -570,7 +451,6 @@
       "settings": [
         "settings/feature-panels/chat-nudges.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -583,27 +463,7 @@
       "dependencies": [],
       "runtime": "content/chat-organizer.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "chat-pins",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "chat-list"
-      ],
-      "runtime": "content/chat-pins.js",
-      "settings": [
-        "settings/feature-panels/chat-pins.js"
-      ],
-      "settingsStyles": [],
-      "styles": [
-        "content/styles/chat-pins.css"
-      ],
       "background": [],
       "helpers": [],
       "fullyIndependent": false
@@ -615,7 +475,6 @@
       "dependencies": [],
       "runtime": "content/chat-rulebook-metadata.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -632,7 +491,6 @@
       "settings": [
         "settings/feature-panels/chat-scene-notes.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -647,28 +505,8 @@
       "settings": [
         "settings/feature-panels/chat-search.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/chat-search.css"
-      ],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "chat-smart-folders",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "chat-organizer"
-      ],
-      "runtime": "content/chat-smart-folders.js",
-      "settings": [
-        "settings/feature-panels/chat-smart-folders.js"
-      ],
-      "settingsStyles": [],
-      "styles": [
-        "content/styles/chat-smart-folders.css"
       ],
       "background": [],
       "helpers": [],
@@ -681,7 +519,6 @@
       "dependencies": [],
       "runtime": "content/chat-stability.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -693,10 +530,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-tags.js",
-      "settings": [
-        "settings/feature-panels/chat-tags.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -711,7 +545,6 @@
       "settings": [
         "settings/feature-panels/chat-topbar.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -724,22 +557,6 @@
       "dependencies": [],
       "runtime": "content/chat-ui.js",
       "settings": [],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "chat-width-controls",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [],
-      "runtime": "content/chat-width-controls.js",
-      "settings": [
-        "settings/feature-panels/chat-width-controls.js"
-      ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -754,7 +571,6 @@
       "settings": [
         "settings/feature-panels/command-palette.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -767,7 +583,6 @@
       "dependencies": [],
       "runtime": "content/composer-control.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -782,11 +597,8 @@
       "settings": [
         "settings/feature-panels/context-keeper.js"
       ],
-      "settingsStyles": [],
       "styles": [],
-      "background": [
-        "background/features/background-context-keeper-storage.js"
-      ],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -797,7 +609,6 @@
       "dependencies": [],
       "runtime": "content/core-message-cache.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -809,10 +620,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/creation-audit.js",
-      "settings": [
-        "settings/feature-panels/creation-audit.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -825,7 +633,6 @@
       "dependencies": [],
       "runtime": "content/creation-bulk-input.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -838,7 +645,6 @@
       "dependencies": [],
       "runtime": "content/creator-favorites.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -851,7 +657,6 @@
       "dependencies": [],
       "runtime": "content/creator-following.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [
         "background/features/background-creator-watch.js"
@@ -866,11 +671,8 @@
       "dependencies": [],
       "runtime": "content/creator-workspace.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
-      "background": [
-        "background/features/background-creator-watch.js"
-      ],
+      "background": [],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -883,22 +685,6 @@
       "settings": [
         "settings/feature-panels/creator-writing-assistant.js"
       ],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "daily-message-limit",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [],
-      "runtime": "content/daily-message-limit.js",
-      "settings": [
-        "settings/feature-panels/daily-message-limit.js"
-      ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -911,7 +697,6 @@
       "dependencies": [],
       "runtime": "content/delete-guard.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -924,7 +709,6 @@
       "dependencies": [],
       "runtime": "content/exact-message-counts.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -937,7 +721,6 @@
       "dependencies": [],
       "runtime": "content/failed-message-helper.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -950,23 +733,6 @@
       "dependencies": [],
       "runtime": "content/favorite-bots.js",
       "settings": [],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "favorites-recovery",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "favorite-bots",
-        "later-bots"
-      ],
-      "runtime": "content/favorites-recovery.js",
-      "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -981,7 +747,6 @@
       "settings": [
         "settings/feature-panels/focus-mode.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/focus-mode.css"
       ],
@@ -996,7 +761,6 @@
       "dependencies": [],
       "runtime": "content/footer-manager.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1009,7 +773,6 @@
       "dependencies": [],
       "runtime": "content/formatting-toolbar.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1021,10 +784,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/generation-metadata.js",
-      "settings": [
-        "settings/feature-panels/generation-metadata.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1036,10 +796,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/generation-profiles.js",
-      "settings": [
-        "settings/feature-panels/generation-profiles.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1052,7 +809,6 @@
       "dependencies": [],
       "runtime": "content/interface-runtime-tools.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1064,16 +820,10 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/language-filter.js",
-      "settings": [
-        "settings/feature-panels/language-filter.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
-      "helpers": [
-        "content/lorebook-public-qol.js",
-        "content/rulebook-public-qol.js"
-      ],
+      "helpers": [],
       "fullyIndependent": false
     },
     {
@@ -1083,7 +833,6 @@
       "dependencies": [],
       "runtime": "content/later-bots.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1095,10 +844,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/list-fill.js",
-      "settings": [
-        "settings/feature-panels/list-fill.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1111,7 +857,6 @@
       "dependencies": [],
       "runtime": "content/listing-panel-position.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1123,10 +868,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/local-tag-matching.js",
-      "settings": [
-        "settings/feature-panels/local-tag-matching.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1141,7 +883,6 @@
       "settings": [
         "settings/feature-panels/lorebook-backup.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1154,7 +895,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-connections.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/lorebook-connections.css"
       ],
@@ -1169,7 +909,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-consistency.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1182,7 +921,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-entries.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1195,7 +933,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-filter.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1208,7 +945,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-public-qol.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1221,7 +957,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-search-filter.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1234,7 +969,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-tags.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1247,7 +981,6 @@
       "dependencies": [],
       "runtime": "content/lorebook-workflow.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1260,14 +993,11 @@
       "dependencies": [],
       "runtime": "content/memory-manager.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/memory-vault.css"
       ],
       "background": [],
-      "helpers": [
-        "content/memory-packs.js"
-      ],
+      "helpers": [],
       "fullyIndependent": false
     },
     {
@@ -1276,10 +1006,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/message-options.js",
-      "settings": [
-        "settings/feature-panels/message-options.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1292,7 +1019,6 @@
       "dependencies": [],
       "runtime": "content/mobile-bot-organizer.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1305,7 +1031,6 @@
       "dependencies": [],
       "runtime": "content/mobile-listing-overflow.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1322,7 +1047,6 @@
       "settings": [
         "settings/feature-panels/model-quick-access.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/model-quick-access.css"
       ],
@@ -1336,10 +1060,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/model-selector.js",
-      "settings": [
-        "settings/feature-panels/model-selector.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1352,12 +1073,9 @@
       "dependencies": [],
       "runtime": "content/moderation-warnings.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
-      "helpers": [
-        "content/lorebook-moderation-review.js"
-      ],
+      "helpers": [],
       "fullyIndependent": false
     },
     {
@@ -1367,7 +1085,6 @@
       "dependencies": [],
       "runtime": "content/my-chatbot-card-shortcuts.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1380,7 +1097,6 @@
       "dependencies": [],
       "runtime": "content/my-creations-auto-load.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1398,7 +1114,6 @@
       ],
       "runtime": "content/my-creations-backup.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [
         "background/features/background-bot-export.js"
@@ -1412,10 +1127,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/my-creations-filters.js",
-      "settings": [
-        "settings/feature-panels/my-creations-filters.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1428,28 +1140,8 @@
       "dependencies": [],
       "runtime": "content/my-creations-view-memory.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "native-memory-probe",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "generation-metadata"
-      ],
-      "runtime": "content/native-memory-probe.js",
-      "settings": [
-        "settings/feature-panels/native-memory-probe.js"
-      ],
-      "settingsStyles": [],
-      "styles": [],
-      "background": [
-        "background/features/background-native-memory-probe.js"
-      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -1462,7 +1154,6 @@
       "settings": [
         "settings/feature-panels/native-rating-helpers.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1475,10 +1166,7 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "settingsStyles": [],
-      "styles": [
-        "content/styles/ooc.css"
-      ],
+      "styles": [],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"
@@ -1492,7 +1180,6 @@
       "dependencies": [],
       "runtime": "content/opened-chats.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1504,10 +1191,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/pagination-tools.js",
-      "settings": [
-        "settings/feature-panels/pagination-tools.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [
         "content/styles/pagination.css"
       ],
@@ -1522,7 +1206,6 @@
       "dependencies": [],
       "runtime": "content/performance-mode.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1535,7 +1218,6 @@
       "dependencies": [],
       "runtime": "content/persona-full-backup.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1548,7 +1230,6 @@
       "dependencies": [],
       "runtime": "content/persona-organizer.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/persona-manager.css"
       ],
@@ -1565,7 +1246,6 @@
       "settings": [
         "settings/feature-panels/persona-pictures.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [
@@ -1582,10 +1262,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/personas.js",
-      "settings": [
-        "settings/feature-panels/personas.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1600,7 +1277,6 @@
       "settings": [
         "settings/feature-panels/picture-library.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [
@@ -1615,10 +1291,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/premium-notifications.js",
-      "settings": [
-        "settings/feature-panels/premium-notifications.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1635,43 +1308,11 @@
       "settings": [
         "settings/feature-panels/previously-chatted-indicator.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/previously-chatted-indicator.css"
       ],
       "background": [],
       "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "private-lorebook-bridge",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [
-        "context-keeper",
-        "chat-lorebook-manager"
-      ],
-      "runtime": "content/private-lorebook-bridge.js",
-      "settings": [
-        "settings/feature-panels/private-lorebook-bridge.js"
-      ],
-      "settingsStyles": [],
-      "styles": [
-        "content/styles/private-lorebook-bridge.css"
-      ],
-      "background": [
-        "background/features/background-private-lorebook-archive.js",
-        "background/features/background-private-archive-setup-write.js",
-        "background/features/background-private-lorebook-entry-create.js"
-      ],
-      "helpers": [
-        "content/private-lorebook-storage.js",
-        "content/private-lorebook-auth.js",
-        "content/private-lorebook-recovery.js",
-        "content/private-lorebook-archive-handoff.js",
-        "content/private-lorebook-archive-setup.js",
-        "content/private-lorebook-archive-upload-main.js"
-      ],
       "fullyIndependent": false
     },
     {
@@ -1683,7 +1324,6 @@
       "settings": [
         "settings/feature-panels/profile-export.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1695,10 +1335,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/quick-panel.js",
-      "settings": [
-        "settings/feature-panels/quick-panel.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1710,10 +1347,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/recommendation-helpers.js",
-      "settings": [
-        "settings/feature-panels/recommendation-helpers.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1728,7 +1362,6 @@
       "settings": [
         "settings/feature-panels/reply-instructions.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1743,7 +1376,6 @@
       "settings": [
         "settings/feature-panels/rp-format-repair.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/rp-format-repair.css"
       ],
@@ -1760,7 +1392,6 @@
       "settings": [
         "settings/feature-panels/rp-state-tracker.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/rp-state-tracker.css"
       ],
@@ -1774,10 +1405,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/rulebook-diagnostics.js",
-      "settings": [
-        "settings/feature-panels/rulebook-diagnostics.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1790,25 +1418,9 @@
       "dependencies": [],
       "runtime": "content/rulebook-filter.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/rulebook-filter.css"
       ],
-      "background": [],
-      "helpers": [],
-      "fullyIndependent": false
-    },
-    {
-      "id": "rulebook-public-qol",
-      "defaultSelected": false,
-      "defaultUpdatesEnabled": false,
-      "dependencies": [],
-      "runtime": "content/rulebook-public-qol.js",
-      "settings": [
-        "settings/feature-panels/rulebook-public-qol.js"
-      ],
-      "settingsStyles": [],
-      "styles": [],
       "background": [],
       "helpers": [],
       "fullyIndependent": false
@@ -1820,7 +1432,6 @@
       "dependencies": [],
       "runtime": "content/saved-chat-actions.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1833,7 +1444,6 @@
       "dependencies": [],
       "runtime": "content/saved-lists-overlay.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1845,10 +1455,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/saved-snippets.js",
-      "settings": [
-        "settings/feature-panels/saved-snippets.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1860,10 +1467,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/scroll-to-top.js",
-      "settings": [
-        "settings/feature-panels/scroll-to-top.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1875,10 +1479,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/selection-memory.js",
-      "settings": [
-        "settings/feature-panels/selection-memory.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1890,10 +1491,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/sidebar.js",
-      "settings": [
-        "settings/feature-panels/sidebar.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1905,10 +1503,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/smart-filter-presets.js",
-      "settings": [
-        "settings/feature-panels/smart-filter-presets.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1922,9 +1517,6 @@
       "runtime": "content/soundscapes.js",
       "settings": [
         "settings/feature-panels/soundscapes.js"
-      ],
-      "settingsStyles": [
-        "settings/styles/soundscapes.css"
       ],
       "styles": [
         "content/styles/soundscapes.css"
@@ -1942,7 +1534,6 @@
       "settings": [
         "settings/feature-panels/story-day-tracker.js"
       ],
-      "settingsStyles": [],
       "styles": [
         "content/styles/story-day-tracker.css"
       ],
@@ -1956,10 +1547,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/story-reading-layout.js",
-      "settings": [
-        "settings/feature-panels/story-reading-layout.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [
         "content/styles/story-reading-layout.css"
       ],
@@ -1973,10 +1561,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/tag-aliases.js",
-      "settings": [
-        "settings/feature-panels/tag-aliases.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -1988,10 +1573,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/tags-nsfw.js",
-      "settings": [
-        "settings/feature-panels/tags-nsfw.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -2003,10 +1585,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/text-replacements.js",
-      "settings": [
-        "settings/feature-panels/text-replacements.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -2018,10 +1597,7 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/top-bar.js",
-      "settings": [
-        "settings/feature-panels/top-bar.js"
-      ],
-      "settingsStyles": [],
+      "settings": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -2036,7 +1612,6 @@
       "settings": [
         "settings/feature-panels/translation.js"
       ],
-      "settingsStyles": [],
       "styles": [],
       "background": [
         "background/background-translation.js"
@@ -2051,7 +1626,6 @@
       "dependencies": [],
       "runtime": "content/ui-layout-fixes.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [],
       "background": [],
       "helpers": [],
@@ -2064,7 +1638,6 @@
       "dependencies": [],
       "runtime": "content/wiki-lorebook-importer.js",
       "settings": [],
-      "settingsStyles": [],
       "styles": [
         "content/styles/wiki-lorebook-importer.css"
       ],

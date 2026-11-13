@@ -1381,6 +1381,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       for (const node of mutation.addedNodes || []) addNode(node);
     }
+    // Large React grid replacements should produce one full pass, not retain
+    // hundreds of detached card nodes while new pages are still mounting.
+    if (dirty.size > 96) {
+      dirty.clear();
+      DS.state.listingDirtyNeedsFullPass = true;
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.listingDirtyOverflowFullPasses = Number(perf.listingDirtyOverflowFullPasses || 0) + 1;
+    }
     return dirty.size;
   };
 
@@ -1403,6 +1411,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : (DS.state.listingDirtyCards = new Set());
     const canUseDirty =
       !options.force &&
+      !DS.state.listingDirtyNeedsFullPass &&
       !pendingLanguagePass &&
       DS.state.cardHidingHasFullPass === true &&
       DS.state.cardHidingLastFilterKey === filterKey &&
@@ -1428,6 +1437,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } else {
       cards = DS.collectCards();
       dirty.clear();
+      DS.state.listingDirtyNeedsFullPass = false;
     }
 
     const normalizationStarted = cardTimingStart();

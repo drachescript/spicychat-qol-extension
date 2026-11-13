@@ -29,7 +29,6 @@ def make_index():
             'dependencies': dependencies,
             'runtime': c['primary'],
             'settings': c.get('settingsFiles', []),
-            'settingsStyles': c.get('settingsStyles', []),
             'styles': c.get('styleFiles', []),
             'background': c.get('backgroundFiles', []),
             'helpers': c.get('requiredHelpers', []),

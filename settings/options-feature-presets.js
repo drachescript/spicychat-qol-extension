@@ -468,6 +468,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "showRandomChatButton",
   "showChatExportButton",
   "chatExportIncludeRulebook",
+  "chatExportIncludeRulebookState",
   "enableRulebookDiagnostics",
   "showOocTools",
   "enableReplyInstructions",
