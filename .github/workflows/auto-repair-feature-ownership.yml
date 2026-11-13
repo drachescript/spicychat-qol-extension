@@ -15,6 +15,7 @@ on:
       - settings/feature-panels/**
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -44,6 +45,7 @@ jobs:
 
       # Only feature contracts can be committed by this workflow.
       - name: Open a reviewable PR when declarations changed
+        id: repair_pr
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -63,3 +65,46 @@ jobs:
 
             This does not mark Custom Lite features as browser-verified or
             change runtime behavior, user settings or release versions.
+
+      # Only GitHub Actions' own verified feature-contract PR may be merged.
+      # Use a direct merge because repository-level native auto-merge is disabled.
+      - name: Squash-merge validated feature-ownership PR
+        if: ${{ steps.repair_pr.outputs.pull-request-number != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.repair_pr.outputs.pull-request-number }}
+        run: |
+          set -euo pipefail
+
+          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          if ! jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .state == "open"
+            and .draft == false
+            and .base.ref == "main"
+            and .head.ref == "automation/audited-feature-ownership"
+            and .head.repo.full_name == $repo
+            and .user.login == "github-actions[bot]"
+          ' <<< "$pr_json" >/dev/null; then
+            echo "::error::Refusing to merge: PR does not match the verified repair branch."
+            exit 1
+          fi
+
+          # The repair may only modify existing audited feature contracts.
+          files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | [.filename, .status] | @tsv')"
+          if [[ -z "$files" ]]; then
+            echo "::error::Refusing to merge an empty repair PR."
+            exit 1
+          fi
+          while IFS=$'\t' read -r file status; do
+            if [[ ! "$file" =~ ^build/features/[A-Za-z0-9_-]+\.json$ || "$status" != "modified" ]]; then
+              echo "::error::Refusing to merge unexpected repair change: $file ($status)"
+              exit 1
+            fi
+          done <<< "$files"
+
+          gh pr merge "$PR_NUMBER" --squash --delete-branch
+
+          # Merges made with GITHUB_TOKEN do not automatically trigger push workflows.
+          # Explicitly dispatch the usual development build and downstream releases.
+          gh workflow run dev-build.yml --ref main
