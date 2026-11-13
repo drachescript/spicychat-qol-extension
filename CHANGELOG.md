@@ -1,3 +1,10 @@
+## 0.2.79
+
+- Reduced redundant Android Settings storage bridge reads by fetching cached-index granular keys together, with a fallback for newly added keys.
+- Fixed compact/Android Settings search jumps: close the keyboard, collapse the sticky search bar, resolve refreshed feature rows and verify scroll position after viewport changes.
+- Added per-device automatic cloud sync checks every 6, 12 (default) or 24 hours. Edits continue to sync sooner; saved-list settle protections and upload/download modes are unchanged.
+- Automatic checks require an active sync service; Android background execution while the app is closed is not provided by the extension alone.
+
 ## 0.2.78
 - Fixed message Quick Copy losing original RP/Markdown formatting: always delegate to SpicyChat's native Copy instead of copying rendered `textContent`; missing native actions now report unavailability rather than silently copying altered text.
 - Clarified Memory Pack imports under SpicyChat's newer fact-based memory lifecycle and when to pin critical memories for immediate context.

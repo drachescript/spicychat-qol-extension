@@ -1690,7 +1690,7 @@ step sister" spellcheck="false"></textarea></label>
 <div class="tab-page" data-page="account"><p class="page-intro">Link this browser to a simple QoL account and keep compatible settings in sync across devices. Sync starts automatically after linking.</p>
 <section class="card" id="accountSyncCard">
 <h2>QoL Account &amp; Sync</h2>
-<p class="hint">0.2.25 uses the QoL Cloudflare sync service at <strong id="accountSyncApiBase">https://syncqol.drache.uk</strong>. Device credentials stay local and are not included in normal QoL backups.</p>
+<p class="hint">QoL uses the QoL Cloudflare sync service at <strong id="accountSyncApiBase">https://syncqol.drache.uk</strong>. Device credentials stay local and are not included in normal QoL backups.</p>
 <div class="account-sync-grid" id="accountSyncSummary">
 <div class="account-sync-stat"><strong id="accountSyncLinkState">Not linked</strong><span>Account</span></div>
 <div class="account-sync-stat"><strong id="accountSyncAutoState">Starts after linking</strong><span>Settings sync</span></div>
@@ -1707,7 +1707,7 @@ step sister" spellcheck="false"></textarea></label>
 <h4>Simple Blocked + Later sync</h4>
 <p class="hint">Link your phone and PC once, then choose how this device should use Blocked and Later. Other settings, chats, pictures and Favorites stay out of sync. Existing bot details remain saved locally.</p>
 <div class="button-row"><button id="accountSyncSimpleTwoWay" type="button">Keep Blocked + Later in sync</button><button id="accountSyncSimpleReceive" type="button">Receive Blocked + Later only</button></div>
-<p class="hint">Changes sync after they settle, with checks about every 6 hours. A linked, unpaused device also syncs immediately after you choose a setup.</p>
+<p class="hint">Changes sync after they settle, with periodic checks every 12 hours by default (configurable per device). A linked, unpaused device also syncs after you choose a setup.</p>
 <div class="button-row"><button id="accountSyncCheckBlockedStatus" type="button">Check saved lists and unavailable bots</button></div>
 <div id="accountSyncBlockedStatus" class="hint" role="status">A local check distinguishes confirmed unavailable bots from unchecked ones. Nothing is automatically unblocked or deleted.</div>
 </div>
@@ -1729,6 +1729,13 @@ step sister" spellcheck="false"></textarea></label>
 <div class="sub-card" id="accountSyncDevicePreferences">
 <h3>What this device syncs</h3>
 <p class="hint">Choose sync directions per device. For example, sync blocked IDs on mobile without syncing all desktop settings.</p>
+<label>Automatic reconciliation interval
+<select id="accountSyncInterval">
+<option value="360">Every 6 hours</option>
+<option value="720" selected>Every 12 hours (default)</option>
+<option value="1440">Every 24 hours</option>
+</select></label>
+<p class="hint">Applies to this linked device when running and unpaused. Changes may still sync sooner; this is not an offline Android wake-up alarm. Save device sync choices to apply.</p>
 <label>Settings (all syncable preferences) <select id="accountSyncSettingsMode">
 <option value="off">Off on this device</option><option value="two-way">Upload and download (merge)</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option><option value="manual">Manual only</option>
 </select></label>
@@ -1749,7 +1756,7 @@ step sister" spellcheck="false"></textarea></label>
 <div class="button-row"><button id="accountSyncPreviewChoices" type="button">Preview directions</button><button id="accountSyncSavePreferences" type="button">Save device sync choices</button></div>
 <p id="accountSyncDirectionPreview" class="hint" role="status"></p>
 <p id="accountSyncSelectionSummary" class="hint"></p>
-<p class="hint">Phone presets sync IDs and blocked names, not chat data or images. Sync runs after changes and checks every 6 hours.</p>
+<p class="hint">Phone presets sync IDs and blocked names, not chat data or images. Sync runs after changes and at the chosen periodic interval when its sync service is available.</p>
 <p class="hint">Cloud revisions count changes, not full stored backups. Unchanged ID lists are not reuploaded each check.</p>
 </div>
 <div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>

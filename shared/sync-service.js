@@ -12,7 +12,9 @@
   const ALARM_NAME = "ds-qol-account-sync-v1";
   const LIST_SETTLED_ALARM = "ds-qol-list-sync-settled-v1";
   const LIST_QUIET_UNTIL_KEY = "qolSyncListQuietUntilV1";
-  const SYNC_INTERVAL_MINUTES = 360;
+  // Per-device scheduled reconciliation. Local changes still sync after they settle.
+  const DEFAULT_SYNC_INTERVAL_MINUTES = 720;
+  const VALID_SYNC_INTERVAL_MINUTES = new Set([360, 720, 1440]);
   const LIST_EDIT_SETTLE_MS = 90000; // Let long-running list imports/cleanups finish before publishing.
   const REQUEST_TIMEOUT_MS = 30000;
   const MAX_PUSH_KEYS = 20;
@@ -102,6 +104,8 @@
     return {
       schemaVersion: 2,
       mode: VALID_SYNC_MODES.has(requestedMode) ? requestedMode : "two-way",
+      syncIntervalMinutes: VALID_SYNC_INTERVAL_MINUTES.has(Number(source.syncIntervalMinutes))
+        ? Number(source.syncIntervalMinutes) : DEFAULT_SYNC_INTERVAL_MINUTES,
       allowedKeys,
       listModes,
       scopes: Array.isArray(source.scopes) ? [...new Set(source.scopes.map(scope => String(scope || "").trim()).filter(Boolean))] : [],
@@ -341,7 +345,9 @@
       return;
     }
     try {
-      chrome.alarms.create(ALARM_NAME, { periodInMinutes: SYNC_INTERVAL_MINUTES });
+      // Recreate the alarm when device preferences change. Chrome/Firefox
+      // alarms survive background worker suspension, unlike setInterval.
+      chrome.alarms.create(ALARM_NAME, { periodInMinutes: prefs.syncIntervalMinutes });
     } catch {}
   }
 
