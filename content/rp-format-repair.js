@@ -327,7 +327,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function applyView(message, contentHost, output, s) {
-    const repaired = isRepairedView(message, s);
+    // Fail open: React may remove a generated replacement while preserving
+    // the native content host. Never hide the native text without a live,
+    // non-empty replacement attached to this exact message.
+    const validOutput = output?.isConnected && message.contains(output) &&
+      String(output.textContent || "").trim().length >= 12;
+    const repaired = !!validOutput && isRepairedView(message, s);
     contentHost.classList.toggle(ORIGINAL_HIDDEN_CLASS, repaired);
     output.hidden = !repaired;
     updateButton(message.querySelector(`.${BUTTON_CLASS}`), repaired);
@@ -341,9 +346,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     if (!button) {
       const dropdown = message.querySelector('button[aria-label="message-dropdown"]');
-      const wrapper = dropdown?.closest?.("div.relative") || dropdown?.parentElement || null;
-      const host = wrapper?.parentElement || null;
-      if (!host) return;
+      // Never climb to a page-level .relative ancestor. SpicyChat V2's header
+      // may have no message-local .relative node; that previously inserted
+      // page-wide RP✓ bars OUTSIDE the chat message.
+      const holder = dropdown?.parentElement || null;
+      if (!holder || !message.contains(holder) || !message.contains(dropdown)) return;
       button = document.createElement("button");
       button.type = "button";
       button.className = BUTTON_CLASS;
@@ -360,7 +367,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         message.dataset.dsRpView = currentlyRepaired ? "original" : "repaired";
         applyView(message, liveContentHost, liveOutput, settings());
       });
-      host.insertBefore(button, wrapper);
+      holder.insertBefore(button, dropdown);
     }
     updateButton(button, !output.hidden);
   }
@@ -481,6 +488,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     flushScheduled = false;
   }
 
+  function removeOrphanToggles() {
+    // Earlier versions could insert the RP toggle directly into the page
+    // layout because dropdown.closest('.relative') crossed the message root.
+    // Remove only our own unmistakably orphaned controls, and only on route/
+    // settings transitions rather than on every streaming message.
+    document.querySelectorAll(`.${BUTTON_CLASS}`).forEach(button => {
+      if (!button.closest(MESSAGE_SELECTOR)) button.remove();
+    });
+  }
+
   function cleanupMessage(message) {
     message.querySelectorAll(`.${OUTPUT_CLASS}`).forEach(el => el.remove());
     message.querySelectorAll(`.${BUTTON_CLASS}`).forEach(el => el.remove());
@@ -491,6 +508,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cleanup() {
     disconnectObserver();
+    removeOrphanToggles();
     document.querySelectorAll(MESSAGE_SELECTOR).forEach(cleanupMessage);
     lastSettingsHash = "";
     initializedRoute = "";
@@ -516,6 +534,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // The module observer handles individual message edits/streaming after the
     // initial pass. Avoid walking every old message again on each global QoL run.
     if (force || !initializedRoute) {
+      removeOrphanToggles();
       const loaded = DS.getMessageEnhancerRoots?.({ newest: 24, margin: 1400 }) || DS.getLoadedMessageRoots?.() || Array.from(document.querySelectorAll(MESSAGE_SELECTOR));
       loaded.forEach(message => {
         if (!isAiMessage(message)) return;

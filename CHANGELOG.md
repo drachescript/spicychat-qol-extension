@@ -1,3 +1,9 @@
+## 0.2.81
+- Fixed RP Format Repair inserting detached RP✓ controls into the page layout instead of individual message headers; cleans up old stray controls.
+- Fixed missing message bookmark stars on newer SpicyChat chat headers and made star rendering independent of bookmark-storage read delays.
+- Restored native message-menu access when Copy/Edit quick actions disappear after a toolbar remount; shortened urgent recovery delays.
+- Added fail-open safeguards to keep native chat text visible if an RP replacement is removed or hidden.
+
 ## 0.2.80
 - Fixed message Quick Edit failing silently when a hidden/stale native menu action was selected; verify the editor opens and restore the native menu when needed.
 - Fixed RP Format Repair losing valid replacements on later message passes and keeping stale RP toggle targets after message edits.

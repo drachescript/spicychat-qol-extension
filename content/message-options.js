@@ -428,7 +428,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // A header dropdown or stale React portal must remain untouched.
     if (!getMessageRoot(dropdownButton)) return;
     const holder = getDropdownHolder(dropdownButton);
-    if (!holder) return;
+    if (!holder) {
+      // If SpicyChat moved the native menu to an unfamiliar header, keep
+      // that native control accessible rather than leaving it CSS-hidden.
+      const root = getMessageRoot(dropdownButton);
+      root?.querySelectorAll(".ds-message-dropdown-hidden").forEach(old => {
+        if (old.contains(dropdownButton) && !old.querySelector(".ds-message-quick-actions"))
+          DS.setClassState?.(old, "ds-message-dropdown-hidden", false);
+      });
+      return;
+    }
 
     // One message may have a previously injected bar at an older wrapper.
     // Reuse it at the current anchor and remove extras before evaluating state.
@@ -712,7 +721,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function scheduleQuickActionRepair(delay = 6500) {
     clearTimeout(quickActionRepairTimer);
-    quickActionRepairTimer = window.setTimeout(repairNewestQuickActions, Math.max(250, Number(delay) || 6500));
+    // An explicit zero means urgent recovery. Number(0) || 6500 previously
+    // turned it into a long delay, leaving Copy/Edit absent after remounts.
+    const wait = Number.isFinite(Number(delay)) ? Number(delay) : 6500;
+    quickActionRepairTimer = window.setTimeout(repairNewestQuickActions, Math.max(250, wait));
   }
 
   DS.repairMessageToolbarForRoot = function repairMessageToolbarForRoot(root) {
