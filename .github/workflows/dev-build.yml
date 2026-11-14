@@ -216,24 +216,56 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          if gh release view dev-build >/dev/null 2>&1; then
+          set -euo pipefail
+
+          # The rolling dev release normally exists already. An intermittent
+          # gh release view failure is NOT proof that it is missing.
+          edit_release() {
             gh release edit dev-build \
               --title "Development build" \
               --notes-file dev-release-notes.md \
               --prerelease \
               --latest=false
+          }
 
-            gh release upload dev-build \
-              dist/spicychat-qol-dev-chrome.zip \
-              dist/spicychat-qol-dev-firefox.zip \
-              --clobber
-          else
-            gh release create dev-build \
-              dist/spicychat-qol-dev-chrome.zip \
-              dist/spicychat-qol-dev-firefox.zip \
+          if ! edit_release; then
+            echo "::warning::Could not update dev-build; trying initial creation."
+            if ! gh release create dev-build \
               --verify-tag \
               --title "Development build" \
               --notes-file dev-release-notes.md \
               --prerelease \
-              --latest=false
+              --latest=false; then
+              # The release may exist even when the initial lookup fails
+              # (particularly just after the rolling tag is moved).
+              echo "::notice::Release creation failed; retrying existing release update."
+              updated=false
+              for attempt in 1 2 3 4 5; do
+                sleep "$((attempt * 2))"
+                if edit_release; then
+                  updated=true
+                  break
+                fi
+              done
+              if [[ "$updated" != true ]]; then
+                echo "::error::Unable to create or update the dev-build release."
+                exit 1
+              fi
+            fi
           fi
+
+          # Always replace both downloads, even if only metadata changed.
+          gh release upload dev-build \
+            dist/spicychat-qol-dev-chrome.zip \
+            dist/spicychat-qol-dev-firefox.zip \
+            --clobber
+
+          # Ensure both download names remain published.
+          gh release view dev-build --json assets --jq '
+            [.assets[].name] as $names |
+            if (["spicychat-qol-dev-chrome.zip", "spicychat-qol-dev-firefox.zip"] | all(. as $name | $names | index($name))) then
+              "Chrome and Firefox development downloads published"
+            else
+              error("Missing Chrome or Firefox development ZIP on dev-build release")
+            end
+          '
