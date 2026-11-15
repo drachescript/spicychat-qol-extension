@@ -99,8 +99,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         wrapper &&
         wrapper !== document.body &&
         wrapper.id !== "root" &&
-        wrapper.children.length === 1 &&
-        wrapper.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']").length >= 1
+        // isRecommendationCardRoot has already verified a chat link inside
+        // this sole child. A second full wrapper query is redundant.
+        wrapper.children.length === 1
       ) {
         return wrapper;
       }
@@ -447,10 +448,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return `blocked bot id: ${id}`;
     }
 
+    const blockedNameMatchers = DS.state.preparedMatchers?.blockedNames || [];
+    // An explicit ID block above needs no card text. If there are no blocked
+    // name rules, avoid traversing titles, descriptions, tags and creators.
+    if (!blockedNameMatchers.length) return null;
     const fields = typeof preparedFields === "function"
       ? preparedFields()
       : (preparedFields || preparedCardFields(card, preparedText));
-    const blockedNameMatchers = DS.state.preparedMatchers?.blockedNames || [];
     const match = findPreparedMatchInFields(
       fields.nameCandidates.length ? fields.nameCandidates : [fields.title, fields.all],
       blockedNameMatchers
@@ -521,10 +525,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const { settings, openedChats } = DS.state;
     const discoveryContext = !!context.discovery;
     const homeContext = !!context.home;
-    const preparedText = DS.searchableTextForMatching?.(card.textContent || "") || DS.normalize(card.textContent);
     const id = DS.botIdFromHref?.(anchor.href || "") || DS.chatIdFromHref(anchor.href || "");
     let preparedFields = null;
-    const getPreparedFields = () => preparedFields || (preparedFields = preparedCardFields(card, preparedText));
+    const getPreparedFields = () => {
+      if (preparedFields) return preparedFields;
+      // Preserve the established search-normalization rules while calculating
+      // the potentially large card text only if a name/word/tag rule needs it.
+      const preparedText = DS.searchableTextForMatching?.(card.textContent || "") || DS.normalize(card.textContent);
+      return (preparedFields = preparedCardFields(card, preparedText));
+    };
 
     if (!discoveryContext && DS.isBotProfilePage()) {
       return null;
@@ -537,7 +546,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Explicit bot blocks always win. Favorite-creator visibility overrides
     // are intentionally evaluated only after this hard block check so a
     // followed/favorite creator can never resurrect a bot the user blocked.
-    const blockedReason = DS.shouldHideBlockedBot(card, anchor, preparedText, getPreparedFields);
+    const blockedReason = DS.shouldHideBlockedBot(card, anchor, "", getPreparedFields);
     if (blockedReason) return blockedReason;
 
     // My Creations is a management surface, not discovery. Keep explicit
@@ -1454,6 +1463,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     let hidden = 0;
     let processed = 0;
+    let alreadyBlockedSkips = 0;
     const chunkLargeListing = cards.length >= 32;
 
     for (const { card, anchor } of cards) {
@@ -1472,6 +1482,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       const existingReason = String(target.dataset.dsReason || "");
+      // The ID is authoritative. Rechecking every name, tag, language and
+      // recommendation rule on an already-hidden, unchanged explicitly blocked
+      // bot wastes a full card scan. Still verify the CURRENT link: React may
+      // recycle the same wrapper for a different bot after pagination/refill.
+      if (target.dataset.dsHidden === "1") {
+        const liveId = DS.botIdFromHref?.(anchor.href || "") || DS.chatIdFromHref?.(anchor.href || "");
+        const dim = DS.state.settings.hiddenCardMode === "dim";
+        if (liveId && existingReason === `card:blocked bot id: ${liveId}` &&
+            DS.state.blockedBotIdSet?.has(liveId) &&
+            DS.pendingBlockedBotAdds?.get(liveId)?.state !== "pending" &&
+            target.classList.contains(dim ? "ds-dimmed" : "ds-hidden")) {
+          alreadyBlockedSkips++;
+          continue;
+        }
+      }
       // An explicit Smart Filter = Opened should win over the general
       // "hide opened bots" discovery preference. Otherwise the Smart Filter
       // can correctly match an opened card only for the earlier hide pass to
@@ -1536,6 +1561,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     recordCardPhase("filtering", filterStarted, processed, filterYieldMs);
+    if (alreadyBlockedSkips && filterStarted) {
+      // One aggregated marker per pass; no per-card telemetry or extra observer.
+      DS.diagPerformance?.("card-blocked-id-fastpath", { skipped: alreadyBlockedSkips, examined: processed });
+    }
     const layoutStarted = cardTimingStart();
     DS.compactLayouts(cards);
     if (layoutStarted) recordCardPhase("layout", layoutStarted, cards.length);

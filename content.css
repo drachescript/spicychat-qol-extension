@@ -566,6 +566,14 @@ body:has(#ds-qol-panel) div.sticky.bottom-0:has([data-translate-key="chat:modal.
   display: none !important;
 }
 
+/* Fail open after a React toolbar remount: if the QoL quick-action bar was
+   removed, make the native three-dot menu visible even while its old hidden
+   marker remains. A missing Copy/Edit bar must not strand the user. */
+.ds-message-dropdown-hidden:not(:has(.ds-message-quick-actions)) button[aria-label="message-dropdown"],
+.ds-message-dropdown-hidden:not(:has(.ds-message-quick-actions)) > div:has(> button[aria-label="message-dropdown"]) {
+  display: inline-flex !important;
+}
+
 /* During an Edit shortcut, expose the original React menu anchor. If the
    automatic path fails, leave the native three-dot control usable. */
 .ds-message-dropdown-hidden.ds-message-native-edit-fallback button[aria-label="message-dropdown"],

@@ -302,7 +302,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // the message root. The old fallback inserted the star outside the bubble.
     const dropdown = root.querySelector("button[aria-label='message-dropdown']");
     if (!dropdown || dropdown.closest(MESSAGE_SELECTOR) !== root) return null;
-    const holder = dropdown.closest(".relative") || dropdown.parentElement;
+    // The closest .relative can be the PAGE LAYOUT, not a message toolbar.
+    // Never let a bookmark insertion leave its message boundary. V2 commonly
+    // has no .relative wrapper inside the native header at all.
+    const relative = dropdown.closest(".relative");
+    const holder = relative && root.contains(relative) ? relative : dropdown.parentElement;
     const host = holder?.parentElement;
     if (!host || !root.contains(host) || !host.contains(dropdown) ||
         host.closest(MESSAGE_SELECTOR) !== root || !holder || holder.parentElement !== host) return null;
@@ -670,9 +674,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Called only for the native toolbar roots mounted this animation frame.
   // Never runs an extra observer or delays controls behind cosmetic chat work.
   DS.reconcileChatBookmarkStars = roots => {
-    if (!enabled() || !loaded || settings().messageBookmarkButtons === false) return;
+    if (!enabled() || settings().messageBookmarkButtons === false) return;
     if (!Array.isArray(roots) || !roots.length) return;
+    // Native controls must not vanish simply because the shared bookmark
+    // storage (potentially large) has not finished loading. Render unloaded
+    // stars immediately; refresh their saved/unsaved state after the read.
     applyButtons(roots);
+    if (!loaded && !loading) {
+      void ensureLoaded().then(() => {
+        refreshBookmarkButtonStates();
+        updateManagerButton();
+      }).catch(() => {
+        DS.setQuickStatus?.("Couldn't load bookmarks; the stars will retry when chat controls refresh.");
+      });
+    }
   };
   DS.openChatBookmarks = openManager;
   DS.openBookmarkRecovery = openBookmarkRecovery;

@@ -56,6 +56,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function getMessageTextareas() {
     return DS.qsa("textarea")
       .filter(isMessageTextarea)
+      // SpicyChat V2's hidden sizing textarea is a measurement instrument,
+      // not an editable composer. Never force-enable or observe it.
+      .filter(textarea => textarea.getAttribute("data-testid") !== "MarkdownTextarea-AutosizeMeasure" &&
+        textarea.getAttribute("aria-hidden") !== "true")
       // Message edit textareas are owned by SpicyChat's edit flow. Never
       // force-enable or restyle them as though they were the chat composer.
       .filter(textarea => !textarea.closest("[id^='message-'], #ds-qol-panel, #ds-chat-export-modal"));
@@ -711,6 +715,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function resizeAndroidMessageEdit(textarea) {
     if (!mobileLayoutActive()) return false;
     if (!isMessageEditTextarea(textarea) || !textarea.isConnected) return false;
+
+    // New SpicyChat V2 edits use a text mirror for their caret/line layout.
+    // Resizing is safe, but overriding only the textarea's padding or
+    // line-height leaves the mirror unchanged and displaces the caret.
+    // Let SpicyChat own text metrics, width and height; only constrain
+    // overflow and gently compact the outer action row when necessary.
+    const mirrorHost = textarea.closest('[data-testid="MessageEditor-Input"]');
+    const nativeMirror = textarea.matches('.chatV2MarkdownTextarea-input') &&
+      !!mirrorHost?.querySelector('[data-testid="MessageEditor-Input-Mirror"], .chatV2MarkdownTextarea-mirror');
+    if (nativeMirror) {
+      const viewportHeight = Math.max(320, Number(window.visualViewport?.height || window.innerHeight || 640));
+      const maxHeight = Math.max(152, Math.min(260, viewportHeight * 0.38));
+      textarea.style.setProperty('max-height', `${maxHeight}px`, 'important');
+      textarea.style.setProperty('overflow-y', 'auto', 'important');
+      textarea.style.setProperty('overscroll-behavior', 'contain', 'important');
+      // Never set padding, line-height, box-sizing, or an explicit height here.
+      // Those values must match V2's unmodified native mirror.
+      repairMessageEditAncestors(textarea, Math.min(maxHeight, Math.ceil(textarea.getBoundingClientRect().height)));
+      textarea.dataset.dsMobileMessageEditFixed = 'native-mirror';
+      return true;
+    }
 
     const viewportHeight = Math.max(
       320,

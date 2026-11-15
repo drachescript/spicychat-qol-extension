@@ -204,6 +204,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return false;
       }
       if (message?.type === "DS_GET_PAGE_DIAGNOSTICS") {
+        try {
         const chatLayout = (() => {
           if (!DS.isSingleChatPage?.()) return null;
           const root = document.getElementById("root");
@@ -268,6 +269,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             androidControls: !!DS.state.androidAppControlsWasActive
           }
         });
+        } catch (error) {
+          // Never strand Settings on a silent exception in one optional
+          // diagnostics provider. Do not include chat text in the response.
+          sendResponse({ ok: false, errorType: String(error?.name || "Error").slice(0, 48) });
+        }
         return false;
       }
       if (message?.type === "DS_RESET_PAGE_PERFORMANCE") {

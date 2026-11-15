@@ -1,3 +1,22 @@
+## 0.2.82
+- Reduced homepage/listing card-filter CPU: defer costly card-text normalization until matching rules need it, skip empty blocked-name rule traversals, and avoid repeated hide-target wrapper queries.
+- Skip reevaluating already-hidden explicit-ID blocks when their live bot link and hide state still match; recycled React cards continue through normal verification.
+- Avoid cloning the entire blocked-bot database on each card Block click unless local change history is enabled; storage confirmation, error rollback, quick-dislike, and undo history remain intact.
+- Improved on-demand runtime diagnostics after extension updates: verify the current QoL version and lightweight runtime readiness before requesting expensive page snapshots.
+- Increased the bounded desktop snapshot deadline, exposed full-snapshot handler failures instead of silent timeouts, and clarified stale-tab markers versus confirmed runtime responses.
+- Fixed swipe navigation interpreting a message editor’s `N/10000` character counter as a generated-reply counter, causing misplaced First/Last controls beside the three-dot menu and edit buttons.
+- Kept SpicyChat V2’s mirrored message editor text metrics intact on mobile; only limit scrolling and adjust outer controls to avoid caret misalignment.
+- Restored native three-dot message-menu access while a message is being edited, without leaving overlapping QoL quick actions.
+- Kept custom chat background pictures visible with SpicyChat’s non-default Chat Appearance themes by clearing only opaque conversation surfaces when the custom picture is active.
+- Fixed multiline chat composer text/caret misalignment and the final word clipping behind the * shortcut on SpicyChat V2. Native autosized composers now place the shortcut alongside the message box rather than changing the textarea's measured wrapping.
+- Excluded SpicyChat's hidden autosize measurement textarea from the QoL force-enable composer helper.
+
+## 0.2.81
+- Fixed RP Format Repair inserting detached RP✓ controls into the page layout instead of individual message headers; cleans up old stray controls.
+- Fixed missing message bookmark stars on newer SpicyChat chat headers and made star rendering independent of bookmark-storage read delays.
+- Restored native message-menu access when Copy/Edit quick actions disappear after a toolbar remount; shortened urgent recovery delays.
+- Added fail-open safeguards to keep native chat text visible if an RP replacement is removed or hidden.
+
 ## 0.2.80
 - Fixed message Quick Edit failing silently when a hidden/stale native menu action was selected; verify the editor opens and restore the native menu when needed.
 - Fixed RP Format Repair losing valid replacements on later message passes and keeping stale RP toggle targets after message edits.

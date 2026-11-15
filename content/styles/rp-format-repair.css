@@ -5,6 +5,11 @@
 .ds-rp-repair-output[hidden] {
   display: none !important;
 }
+/* Fail open if React removes/hides a generated replacement without removing
+   its original-hidden class. Never leave a textless RP✓ message bubble. */
+div.ds-rp-repair-original-hidden:not(:has(+ .ds-rp-repair-output:not([hidden]))) {
+  display: flex !important;
+}
 .ds-rp-repair-line {
   display: inline;
 }
