@@ -656,35 +656,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function locateSwipeRow(message) {
     if (!message?.isConnected) return null;
-    // Only leaf text nodes, never a parent whose aggregated text happens to
-    // contain a separate counter (such as a story word-count control).
-    const leaves = message.querySelectorAll("span, small, div, p");
+    // Character counts (e.g. 692/10000) inside the native edit box are NOT
+    // generated reply counters. Never attach swipe buttons to an editor.
+    if (message.querySelector('[data-testid="MessageEditor"], .chatV2MessageEditor')) return null;
+
+    // V2 supplies an explicit reply-switch component. Prefer its stable
+    // component IDs instead of walking up from arbitrary N/M-looking text.
+    const versionSwitch = message.querySelector('[data-testid="VersionSwitch"]');
+    if (versionSwitch) {
+      const counterNode = versionSwitch.querySelector('[data-testid="VersionSwitch-VersionCount"]');
+      const count = readSwipeCounter(counterNode);
+      const prev = versionSwitch.querySelector('[data-testid="VersionSwitch-PreviousVersionButton"]');
+      const next = versionSwitch.querySelector('[data-testid="VersionSwitch-NextVersionButton"]');
+      return count && prev && next
+        ? { message, counterNode, wrapper: versionSwitch, prev, next, ...count }
+        : null;
+    }
+
+    // Older native swipe layouts did not have VersionSwitch test IDs. Preserve
+    // support only when a *real* previous/next pair brackets the counter;
+    // unrelated buttons around a character counter are not a swipe control.
+    const leaves = message.querySelectorAll('span, small, div, p');
     for (const node of leaves) {
-      if (node.childElementCount || (node.textContent || "").length > 20) continue;
+      if (node.childElementCount || (node.textContent || '').length > 20) continue;
+      if (node.closest('[data-testid*="MessageEditor"], .chatV2MessageEditor')) continue;
       const count = readSwipeCounter(node);
       if (!count) continue;
       let parent = node.parentElement;
       for (let depth = 0; parent && parent !== message && depth < 5; depth++, parent = parent.parentElement) {
-        // SpicyChat 4.7.x puts the counter in a <p> between two buttons
-        // labelled "previous" and "next". Prefer these native controls
-        // before falling back to older chevron-only layouts.
-        const nativePrev = parent.querySelector('button[aria-label="previous" i]');
-        const nativeNext = parent.querySelector('button[aria-label="next" i]');
+        const nativePrev = parent.querySelector('button[aria-label="previous" i], button[aria-label="previous reply version" i]');
+        const nativeNext = parent.querySelector('button[aria-label="next" i], button[aria-label="next reply version" i]');
         if (nativePrev && nativeNext &&
             (nativePrev.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) &&
             (node.compareDocumentPosition(nativeNext) & Node.DOCUMENT_POSITION_FOLLOWING)) {
           return { message, counterNode: node, wrapper: parent, prev: nativePrev, next: nativeNext, ...count };
         }
+        // Some legacy controls are clickable SVG wrappers rather than buttons.
+        // Require explicit direction hints for both sides: never guess based
+        // solely on DOM position (which caused Edit / three-dot conflicts).
         const controls = swipeArrowCandidates(parent).filter(el => el !== node && !node.contains(el));
         if (controls.length < 2 || controls.length > 18) continue;
-        // Find the closest native controls on either side of the counter.
         const before = controls.filter(el => (el.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
         const after = controls.filter(el => (el.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING) !== 0);
-        if (!before.length || !after.length) continue;
-        const prev = [...before].reverse().find(el => swipeDirectionHint(el) === "prev") || before[before.length - 1];
-        const next = after.find(el => swipeDirectionHint(el) === "next") || after[0];
-        if (prev === next || prev.contains(node) || next.contains(node)) continue;
-        return { message, counterNode: node, wrapper: parent, prev, next, ...count };
+        const prev = [...before].reverse().find(el => swipeDirectionHint(el) === 'prev');
+        const next = after.find(el => swipeDirectionHint(el) === 'next');
+        if (prev && next && prev !== next && !prev.contains(node) && !next.contains(node)) {
+          return { message, counterNode: node, wrapper: parent, prev, next, ...count };
+        }
       }
     }
     return null;

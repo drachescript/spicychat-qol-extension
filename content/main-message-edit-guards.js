@@ -65,6 +65,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const counters = runtimeCounters();
     counters.messageEditGuardsStarted = Number(counters.messageEditGuardsStarted || 0) + 1;
 
+    // On V2 the native three-dot menu remains useful during editing.
+    // The QoL quick-action bar must not hide it after React mounts the editor.
+    try { DS.restoreNativeMessageMenuDuringEdit?.(root); } catch {}
+
     // Remove only QoL display transforms before SpicyChat/React owns the editor.
     // This prevents a slow installed/PWA render from leaving a formatted clone of
     // the old message visible beside the native edit UI.

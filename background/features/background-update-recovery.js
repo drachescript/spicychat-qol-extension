@@ -263,47 +263,56 @@ async function getReachableDiagnosticContext() {
     if (Number(b.id) === storedId && Number(a.id) !== storedId) return 1;
     return Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0);
   });
-  // Lightweight read-only pings run in parallel. The old 900ms sequential
-  // snapshot loop could outlive the entire 3.5s Settings support timeout.
-  // Full layout/performance snapshots run on at most two candidates, one at
-  // a time, to avoid doing heavy DOM work on several tabs simultaneously.
+  const expectedVersion = String(chrome.runtime?.getManifest?.().version || "");
+  const androidWebView = /Android/i.test(String(navigator.userAgent || ""));
+  // An update can leave dozens of OLD page content-script contexts. Pinging is
+  // read-only and cheap, but only a confirmed current-version handler may be
+  // asked for expensive page statistics. A stale badge is not a runtime test.
   const pinged = await Promise.all(candidates.map(async tab => ({
-    tab, ping: await sendTabMessage(tab.id, { type: "DS_TAB_DIAGNOSTIC_PING" }, 650)
+    tab, ping: await sendTabMessage(tab.id, { type: "DS_TAB_DIAGNOSTIC_PING" }, androidWebView ? 900 : 650)
   })));
   const responsive = pinged.filter(row => row.ping?.ok);
-  const notResponding = pinged.filter(row => !row.ping?.ok);
-  const selected = [...responsive, ...notResponding].slice(0, 2);
+  const current = responsive.filter(row => !!expectedVersion && String(row.ping.version || "") === expectedVersion);
+  const mismatched = responsive.filter(row => !!expectedVersion && String(row.ping.version || "") !== expectedVersion);
+  // The second lightweight handler belongs to main-diagnostics.js, not the
+  // small tab ping listener. Verify it BEFORE launching a full DOM snapshot.
+  // At most two current-version tabs are examined. Do not probe old/unresponsive
+  // tabs with a full snapshot, and never reload anything from diagnostics.
+  const lightCandidates = current.slice(0, 2);
+  const lights = await Promise.all(lightCandidates.map(async row => ({
+    ...row,
+    light: await sendTabMessage(row.tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS_LIGHT" }, androidWebView ? 1600 : 800)
+  })));
+  const ready = lights.filter(row => row.light?.ok && row.light?.runtimeReady && !row.light?.paused);
+  // Only two on-demand snapshots at most. The old 1.1s desktop deadline was
+  // routinely shorter than a large chat's snapshot preparation. The Settings
+  // support-report deadline separately allows this bounded foreground request.
+  const selected = ready.slice(0, 2);
   const snapshots = [];
-  const androidWebView = /Android/i.test(String(navigator.userAgent || ""));
-  for (const row of selected) {
-    const [pageDiagnostics, tabState] = await Promise.all([
-      // Mobile can be busy with a native React render at the moment the user
-      // requests a report. Allow longer for ONE on-demand snapshot, not for
-      // periodic checks. Desktop retains the short response deadline.
-      sendTabMessage(row.tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" }, androidWebView ? 2400 : 1100),
-      row.ping?.ok ? Promise.resolve(null) : sendTabMessage(row.tab.id, { type: "DS_GET_QOL_TAB_STATE" }, 650)
-    ]);
-    snapshots.push({ tab: row.tab, pageDiagnostics, tabState });
+  for (const [index, row] of selected.entries()) {
+    const pageDiagnostics = await sendTabMessage(row.tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS" },
+      androidWebView ? (index ? 2600 : 3500) : (index ? 2200 : 2800));
+    snapshots.push({ tab: row.tab, pageDiagnostics });
     if (pageDiagnostics?.ok) break;
-  }
-  // A cheap explicit probe distinguishes a responsive content runtime from a
-  // timed-out full snapshot. Never use these partial counters as full live data.
-  let lightProbe = null;
-  if (!snapshots.some(row => row.pageDiagnostics?.ok) && responsive.length) {
-    lightProbe = await sendTabMessage(responsive[0].tab.id, { type: "DS_GET_PAGE_DIAGNOSTICS_LIGHT" }, androidWebView ? 1400 : 700);
   }
   const probe = {
     tabsFound: allCandidates.length,
     tabsPinged: pinged.length,
     pingsAnswered: responsive.length,
-    snapshotsAttempted: selected.length,
+    currentVersionPings: current.length,
+    mismatchedVersionPings: mismatched.length,
+    lightProbesAttempted: lights.length,
+    lightProbesAnswered: lights.filter(row => row.light?.ok).length,
+    readyCurrentVersionTabs: ready.length,
+    snapshotsAttempted: snapshots.length,
     snapshotsAnswered: snapshots.filter(row => row.pageDiagnostics?.ok).length,
+    snapshotHandlerErrors: snapshots.filter(row => row.pageDiagnostics && row.pageDiagnostics.ok === false).length,
     tabsFlaggedStale: candidates.filter(tab => !!staleTabs[String(tab.id)]).length,
-    sampledPausedTabs: snapshots.filter(row => row.tabState?.ok && row.tabState?.paused === true).length,
-    sampledStateReplies: snapshots.filter(row => row.tabState?.ok).length,
-    lightRuntimeAnswered: !!lightProbe?.ok,
-    lightRuntimeReady: !!lightProbe?.runtimeReady,
-    probeScope: "read-only; full snapshot only when available"
+    sampledPausedTabs: lights.filter(row => row.light?.ok && row.light.paused).length,
+    sampledStateReplies: lights.filter(row => row.light?.ok).length,
+    lightRuntimeAnswered: lights.some(row => row.light?.ok),
+    lightRuntimeReady: ready.length > 0,
+    probeScope: "read-only; two current-version snapshots maximum"
   };
   const winner = snapshots.find(row => row.pageDiagnostics?.ok);
   if (winner) {
@@ -311,21 +320,23 @@ async function getReachableDiagnosticContext() {
     return { ok: true, runtimeAvailable: true, url: winner.tab.url || "", title: winner.tab.title || "",
       pageDiagnostics: winner.pageDiagnostics, helperLifecycleDiagnostics, tabId: winner.tab.id, probe };
   }
-  const fallback = candidates[0] || allCandidates[0] || null;
+  const fallback = ready[0]?.tab || current[0]?.tab || candidates[0] || allCandidates[0] || null;
   const runtimeStatus = !fallback ? "no-spicychat-tab"
-    : probe.lightRuntimeAnswered ? "runtime-lightweight-ok-full-snapshot-timeout"
-    : probe.pingsAnswered ? "runtime-ping-ok-diagnostics-unreachable"
-    : probe.sampledPausedTabs ? "sampled-tabs-intentionally-paused"
-    : probe.sampledStateReplies ? "runtime-state-handler-ok-diagnostics-unreachable"
+    : probe.snapshotHandlerErrors ? "runtime-full-snapshot-error"
+    : probe.lightRuntimeReady ? "runtime-lightweight-ok-full-snapshot-timeout"
+    : probe.lightRuntimeAnswered ? "runtime-lightweight-ok-not-ready"
+    : current.length ? "current-runtime-ping-ok-lightweight-unavailable"
+    : mismatched.length ? "runtime-version-mismatch"
     : probe.tabsFlaggedStale ? "runtime-marked-stale-after-update"
     : "page-found-runtime-unreachable";
   const runtimeError = !fallback ? "No open SpicyChat tab was found."
-    : probe.lightRuntimeAnswered ? "QoL answered a lightweight runtime check, but its full snapshot timed out. Live performance data remains unavailable; the runtime is not necessarily disabled."
-    : probe.pingsAnswered ? "Some QoL tab handlers answered a lightweight ping, but none of the sampled tabs finished the full diagnostic snapshot. QoL may still be active."
-    : probe.sampledPausedTabs ? "At least one sampled SpicyChat tab has QoL intentionally paused, so that tab cannot return full runtime diagnostics."
-    : probe.sampledStateReplies ? "A QoL tab-state handler answered, but sampled full diagnostic handlers did not. This is not evidence that all QoL features are disabled."
-    : probe.tabsFlaggedStale ? "At least one tab is marked stale from an extension update. Reload that tab to attach the current QoL scripts."
-    : "SpicyChat tabs were found, but their diagnostic pings did not answer. The cause is unconfirmed; try reloading an affected tab after the extension update.";
+    : probe.snapshotHandlerErrors ? "A current-version diagnostic handler returned an error; the full snapshot was not available."
+    : probe.lightRuntimeReady ? "A verified current-version runtime answered lightweight diagnostics, but its full snapshot did not finish. Live page counters are unavailable."
+    : probe.lightRuntimeAnswered ? "The current-version lightweight handler responded but reported an unready or paused runtime."
+    : current.length ? "A current-version tab answered the basic ping, but its main diagnostic handler did not respond."
+    : mismatched.length ? "Responding tabs reported a different extension version. Refresh an affected tab manually to attach the current content scripts."
+    : probe.tabsFlaggedStale ? "Tabs are marked as stale after an extension update. This is not proof of a broken runtime; refresh an affected tab to attach current content scripts."
+    : "SpicyChat tabs were found, but no current-version runtime replied. This alone does not show that QoL is disabled.";
   return {
     ok: !!fallback, runtimeAvailable: false, runtimeStatus, runtimeError,
     url: fallback?.url || "", title: fallback?.title || "", pageDiagnostics: null,

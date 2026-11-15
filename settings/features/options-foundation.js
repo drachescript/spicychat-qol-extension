@@ -526,7 +526,7 @@ function supportDiagnosticRuntimeTimeoutMs() {
   const android = typeof isAndroidSupportWebView === "function"
     ? isAndroidSupportWebView()
     : /Android/i.test(String(navigator.userAgent || ""));
-  return android ? 8500 : 3500;
+  return android ? 8500 : 7200;
 }
 
 async function withSharedSupportRuntimeSnapshot(build) {

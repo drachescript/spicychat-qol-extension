@@ -1175,6 +1175,17 @@ html.ds-chat-custom-background #root {
 html.ds-chat-custom-background div.flex.grow.flex-col.top-0.left-0.w-full.h-full.bg-gray-2.relative {
   background-color: transparent !important;
 }
+/* Native Chat Appearance themes (Night / Classic / High Contrast / Soft /
+   Sepia) render an opaque surface inside the conversation. The older
+   background override only cleared the outer bg-gray-2 container, so a
+   selected QoL chat picture appeared only under the Default appearance.
+   Clear the two full-size conversation surfaces, not individual bubbles,
+   menus, or the theme picker. When the QoL picture is off these selectors
+   do not apply and SpicyChat owns its theme colors. */
+html.ds-chat-custom-background [data-testid="ChatAppearanceScope"],
+html.ds-chat-custom-background [data-testid="ChatAppearanceScope"] > [data-chat-scroll-area="chat"] {
+  background-color: transparent !important;
+}
 .ds-chat-background-control {
   display: inline-flex;
   align-items: center;

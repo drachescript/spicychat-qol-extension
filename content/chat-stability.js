@@ -315,10 +315,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Gecko's mobile caret must not be combined with QoL's live-resized
     // right padding inside the textarea. Keep optional tools accessible
     // alongside the composer instead of overlaying its text area.
-    const placement = firefoxAndroid && requestedPlacement === "inside-right"
+    // SpicyChat V2 measures textarea height in an off-screen clone. Adding
+    // padding to just the visible textarea changes its wrapping without updating
+    // that clone, so multiline text/caret positions and autosized height diverge.
+    // Keep the shortcut beside (not over) V2's native composer. Explicit
+    // outside placements are still honored; older composers keep inside-right.
+    const v2AutosizedComposer = composer.textarea.matches(
+      '[data-testid="ChatV2MessageBox-Textarea-Input"], .chatV2MarkdownTextarea-input'
+    );
+    const placement = requestedPlacement === "inside-right" && (firefoxAndroid || v2AutosizedComposer)
       ? "outside-right"
       : requestedPlacement;
     holder.setAttribute("data-ds-placement", placement);
+    if (v2AutosizedComposer && requestedPlacement === "inside-right") {
+      holder.setAttribute("data-ds-native-autosize-guard", "1");
+    } else {
+      holder.removeAttribute("data-ds-native-autosize-guard");
+    }
 
     if (placement === "inside-right") {
       composer.bubble.style.position = composer.bubble.style.position || "relative";

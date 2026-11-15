@@ -565,9 +565,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref(anchor?.href || "");
 
     const { blockedBots } = DS.state;
-    const beforeBlocked = JSON.parse(JSON.stringify(blockedBots));
-
     if (!id) return { ok: false, error: "missing-id" };
+    // Most block clicks do not need a multi-megabyte clone of the blocked list.
+    // Retain the exact before/after snapshots when local undo history is on.
+    const keepHistory = DS.state.settings?.enableLocalChangeHistory === true;
+    const beforeBlocked = keepHistory ? JSON.parse(JSON.stringify(blockedBots)) : null;
+    const wasBlockedBefore = !!DS.state.blockedBotIdSet?.has(id) || (blockedBots.ids || []).includes(id);
 
     if (!DS.state.blockedBotIdSet?.has(id)) {
       blockedBots.ids.push(id);
@@ -603,7 +606,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.finishPendingBotBlock?.(id, pendingBlock, false);
       // Never restore the entire old list: another rapid block may have
       // completed while this save was pending. Undo only this ID if it was new.
-      if (!(beforeBlocked.ids || []).includes(id)) {
+      if (!wasBlockedBefore) {
         DS.state.blockedBots.ids = (DS.state.blockedBots.ids || []).filter(value => value !== id);
         if (DS.state.blockedBots.meta) delete DS.state.blockedBots.meta[id];
         DS.refreshFastLookupCaches?.();
@@ -619,9 +622,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const liveId = DS.botIdFromHref?.(liveAnchor?.href || "") || DS.chatIdFromHref?.(liveAnchor?.href || "");
     if (liveId === id && card?.isConnected) DS.hideCard?.(card, `card:blocked bot id: ${id}`);
     DS.updateQuickPanel?.();
-    try {
-      await DS.recordLocalChange?.(`Blocked bot: ${blockedBots.meta?.[id]?.name || id}`, { [DS.BLOCKED_BOTS_KEY]: beforeBlocked }, { [DS.BLOCKED_BOTS_KEY]: JSON.parse(JSON.stringify(DS.state.blockedBots || blockedBots)) });
-    } catch {}
+    if (keepHistory) {
+      try {
+        await DS.recordLocalChange?.(`Blocked bot: ${blockedBots.meta?.[id]?.name || id}`, { [DS.BLOCKED_BOTS_KEY]: beforeBlocked }, { [DS.BLOCKED_BOTS_KEY]: JSON.parse(JSON.stringify(DS.state.blockedBots || blockedBots)) });
+      } catch {}
+    }
 
     queueQuickDislike(blockedMeta);
     return { ok: true, id, meta: blockedMeta };
