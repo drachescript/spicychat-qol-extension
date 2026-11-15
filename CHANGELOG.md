@@ -1,4 +1,6 @@
 ## 0.2.82
+- Android Favorites compatibility hotfix: identify nested native listing rows (including the V2 body wrapper) when measurable off-screen displacement is present; collapse only the implicated sidebar/results row, without affecting normal listings.
+- Scope the existing mobile overflow CSS to activated layouts; previously the second-child width rule could apply even when the overflow correction was inactive. Keep Favorites filter controls accessible via a Show/Hide button when recovery activates.
 - Reduced homepage/listing card-filter CPU: defer costly card-text normalization until matching rules need it, skip empty blocked-name rule traversals, and avoid repeated hide-target wrapper queries.
 - Skip reevaluating already-hidden explicit-ID blocks when their live bot link and hide state still match; recycled React cards continue through normal verification.
 - Avoid cloning the entire blocked-bot database on each card Block click unless local change history is enabled; storage confirmation, error rollback, quick-dislike, and undo history remain intact.
