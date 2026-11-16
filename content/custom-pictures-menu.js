@@ -40,16 +40,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   DS.openCustomPicturesMenu = openMenu;
   DS.hasCustomPictures = () => kit.availableTabs().length > 0;
+  let initialApplyToken = 0;
+  let initialApplyQueued = false;
+  let lastAppliedRoute = '';
+  const applyPicturesNow = async () => {
+    const settings = DS.state?.settings || {};
+    if (!settings.enabled || !DS.isSingleChatPage?.() || !kit.availableTabs(settings).length) return;
+    const route = String(location.pathname || '');
+    await kit.loadStore();
+    if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.() || location.pathname !== route) return;
+    await DS.applyBackgroundLayer?.(!!settings.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
+    for (const apply of kit.applyHooks()) apply();
+    DS.state.chatBackgroundsWasActive = true;
+  };
   DS.applyChatBackgrounds = async () => {
     const settings=DS.state?.settings || {};
     const active=!!(settings.enabled && DS.isSingleChatPage?.() && kit.availableTabs(settings).length);
     if (!active) { DS.removeChatBackgrounds?.(); return; }
-    await kit.loadStore();
-    await DS.applyBackgroundLayer?.(!!settings.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
-    for (const apply of kit.applyHooks()) apply();
-    DS.state.chatBackgroundsWasActive=true;
+    // Make a newly visited chat interactive before loading potentially large saved pictures.
+    const route = String(location.pathname || '');
+    if (lastAppliedRoute !== route && !initialApplyQueued) {
+      // A previous chat's picture must not remain behind the next chat.
+      DS.removeBackgroundLayer?.();
+      lastAppliedRoute = route;
+      initialApplyQueued = true;
+      const token = ++initialApplyToken;
+      setTimeout(() => {
+        initialApplyQueued = false;
+        if (token !== initialApplyToken || location.pathname !== route) return;
+        void applyPicturesNow().catch(() => {});
+      }, 150);
+      return;
+    }
+    if (initialApplyQueued) return;
+    await applyPicturesNow();
   };
   DS.removeChatBackgrounds = () => {
+    ++initialApplyToken;
+    initialApplyQueued = false;
+    lastAppliedRoute = '';
     DS.removeBackgroundLayer?.();
     DS.removeCharacterPictureOverride?.();
     DS.removePersonaPictureOverride?.();

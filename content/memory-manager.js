@@ -362,7 +362,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const describe = node => ({
       tag: node.tagName.toLowerCase(),
       slot: /^[a-z-]{1,40}$/i.test(node.getAttribute("data-slot") || "") ? node.getAttribute("data-slot") : "",
-      testid: /^[a-z0-9_-]{1,80}$/i.test(node.getAttribute("data-testid") || "") ? node.getAttribute("data-testid") : "",
+      testid: (() => {
+        const value = String(node.getAttribute("data-testid") || "");
+        if (!/^[a-z0-9_-]{1,80}$/i.test(value)) return "";
+        if (/^MemoryManagerCard-/i.test(value)) {
+          const match = /^MemoryManagerCard-(Pin|Edit|Delete)-/i.exec(value);
+          return match ? `MemoryManagerCard-${match[1]}-[id]` : "MemoryManagerCard-[id]";
+        }
+        return value.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "[id]");
+      })(),
       classes: String(typeof node.className === "string" ? node.className : "").split(/\s+/).filter(value => /^[a-z0-9_:-]{1,65}$/i.test(value)).slice(0, 5)
     });
     const nodes = manager ? [...manager.querySelectorAll("[data-testid], button[aria-haspopup], button[data-slot], p")].slice(0, 120) : [];
@@ -381,7 +389,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const rows = getMemoryRows(manager);
     const reportButton = toolbar.querySelector(".ds-memory-layout-report");
-    if (reportButton) reportButton.hidden = rows.length > 0 || getExportMemoryRows(manager).length > 0;
+    // A missing row match must never hide the report needed to diagnose it.
+    // This report contains only structural selectors, never Memory text.
+    if (reportButton) { reportButton.hidden = false; reportButton.title = "Copy a privacy-safe report of the Memory window layout"; }
     const available = new Set(rows.map(memoryKey));
     selectedMemories = new Set([...selectedMemories].filter(key => available.has(key)));
 
@@ -2116,7 +2126,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <button type="button" class="ds-memory-keep-selected" disabled>Keep selected</button>
         <button type="button" class="ds-memory-load-all">Load all memories</button>
         <button type="button" class="ds-memory-export-all">Export all</button>
-        <button type="button" class="ds-memory-layout-report" hidden>Copy layout report</button>
+        <button type="button" class="ds-memory-layout-report">Copy layout report</button>
         <button type="button" class="ds-memory-export-selected" disabled>Export selected</button>
         <button type="button" class="ds-memory-import-json">Import JSON</button>
         <button type="button" class="ds-memory-packs">Memory packs</button>

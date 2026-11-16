@@ -1117,7 +1117,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
-  async function mainWorldConversationListRequest({ limit = 25, lastId = "" } = {}) {
+  async function mainWorldConversationListRequest({ limit = 25, lastId = "", botId = "" } = {}) {
+    const scopedBot = String(botId || "").trim().toLowerCase();
+    if (scopedBot && (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(scopedBot) ||
+        location.pathname !== '/chats' ||
+        new URLSearchParams(location.search).get('ds-research-export') !== '1')) {
+      throw new Error('Per-bot conversation discovery is only available in Research Export');
+    }
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     const ready = await waitForMainBridge(3000);
     if (!ready) throw new Error("main-world conversation list bridge unavailable");
@@ -1169,6 +1175,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             detail: {
               requestId,
               lastId: String(lastId || "").trim().toLowerCase(),
+              botId: scopedBot,
               limit: Math.max(1, Math.min(100, Number(limit) || 25)),
               authToken: isolatedToken,
               guestUserId: auth?.guest || "",
@@ -1212,6 +1219,39 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.fetchConversationListPage = async function fetchConversationListPage(options = {}) {
     return mainWorldConversationListRequest(options);
+  };
+
+  // Research-only native Memory reader. Uses the captured MAIN-world session
+  // already serving Chat Export, without weakening the statistics-only probe.
+  DS.researchReadConversationMemories = async (conversationId, runId) => {
+    const id = String(conversationId || '').toLowerCase();
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id) ||
+        location.pathname !== '/chats' ||
+        new URLSearchParams(location.search).get('ds-research-export') !== '1')
+      return {ok:false,status:'invalid-request'};
+    try {window.DSCardTokenBridgeLoader?.ensure?.();} catch {}
+    if (!await waitForMainBridge(3000)) return {ok:false,status:'bridge-unavailable'};
+    if (!mainBridgeHasCapturedAuth()) await waitForMainBridgeCapturedAuth(4500);
+    if (!mainBridgeHasCapturedAuth()) return {ok:false,status:'auth-unavailable'};
+    const requestId = `dsrm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,12)}`;
+    const requestEvent = 'ds-qol-research-memory-request-v1';
+    const responseEvent = 'ds-qol-research-memory-response-v1';
+    return await new Promise(resolve => {
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled=true;clearTimeout(timer);window.removeEventListener(responseEvent,onResponse);
+        resolve(value || {ok:false,status:'no-response'});
+      };
+      const onResponse = event => {
+        if (event?.detail?.requestId !== requestId || event?.detail?.conversationId !== id) return;
+        const {requestId:_requestId, ...result} = event.detail;finish(result);
+      };
+      const timer=setTimeout(()=>finish({ok:false,status:'timeout'}),22500);
+      window.addEventListener(responseEvent,onResponse);
+      try {window.dispatchEvent(new CustomEvent(requestEvent,{detail:{requestId,conversationId:id,runId}}));}
+      catch {finish({ok:false,status:'bridge-dispatch-failure'});}
+    });
   };
 
   DS.fetchCharacterArchiveData = async function fetchCharacterArchiveData(botId) {

@@ -1311,6 +1311,10 @@ ${description}`);
   function applyFilter(entries, folders) {
     const mode = DS.state.personaOrgFilter || "all";
     const query = cleanText(DS.state.personaOrgLocalSearch || "").toLowerCase();
+    // Build the local lookup only when searching; ordinary Persona page
+    // reconciliation should never read highlight data unnecessarily.
+    const savedHighlights = query ? new Map((DS.state.savedPersonas || [])
+      .map(persona => [String(persona?.id || ""), personaDescription(persona)])) : null;
     const configuredFolders = new Set(folders.map(cleanText));
     for (const entry of entries) {
       const data = org.meta[entry.id] || {};
@@ -1322,7 +1326,12 @@ ${description}`);
       else if (mode.startsWith("folder:")) show = folder === mode.slice(7);
 
       if (show && query) {
-        const haystack = `${entry.name} ${folder} ${note}`.toLowerCase();
+        // Include native highlight text when available on the card, or a
+        // previously saved local Persona copy. No profile fetches or imports.
+        const highlights = savedHighlights?.get(entry.id) ||
+          DS.getPersonaDescriptionFromCard?.(entry.card) ||
+          entry.card.querySelector("span.line-clamp-3, span[class*='line-clamp-3']")?.textContent || "";
+        const haystack = `${entry.name} ${folder} ${note} ${highlights}`.toLowerCase();
         show = haystack.includes(query);
       }
       entry.target.classList.toggle("ds-persona-org-hidden", !show);

@@ -46,6 +46,10 @@ if (!(() => { try {
   const PRIVATE_ENTRY_AUTH_RESPONSE = "ds-qol-private-entry-auth-response-v1";
   const NATIVE_MEMORY_AUTH_REQUEST = "ds-qol-native-memory-auth-request-v1";
   const NATIVE_MEMORY_AUTH_RESPONSE = "ds-qol-native-memory-auth-response-v1";
+  // Explicit user-started, read-only bulk research export. This is independent
+  // of the existing active-chat Memory Probe and never exports auth tokens.
+  const RESEARCH_MEMORY_REQUEST = "ds-qol-research-memory-request-v1";
+  const RESEARCH_MEMORY_RESPONSE = "ds-qol-research-memory-response-v1";
   const OWNED_LIST_REQUEST_EVENT = "ds-qol-owned-chatbots-list-request-v1";
   const OWNED_LIST_RESPONSE_EVENT = "ds-qol-owned-chatbots-list-response-v1";
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
@@ -747,6 +751,83 @@ if (!(() => { try {
     }})); } catch {}
   });
 
+  // On the dedicated /chats research helper only, fetch a specified
+  // conversation's native Memories using the same captured session as the
+  // existing conversation-list/history bridges. Nothing runs on ordinary chats.
+  // No bearer token is sent back to the isolated-world script or saved.
+  const researchMemoryRequests = new Map();
+  let researchMemoryBusy = false, lastResearchMemoryAt = 0, researchMemoryRun = "";
+  function sendResearchMemory(detail) {
+    try { window.dispatchEvent(new CustomEvent(RESEARCH_MEMORY_RESPONSE, { detail })); } catch {}
+  }
+  window.addEventListener(RESEARCH_MEMORY_REQUEST, async event => {
+    const detail = event?.detail || {};
+    const requestId = clean(detail.requestId);
+    const conversationId = clean(detail.conversationId).toLowerCase();
+    const runId = clean(detail.runId);
+    if (!active || !nativeFetch || location.pathname !== '/chats' ||
+        new URLSearchParams(location.search).get('ds-research-export') !== '1' ||
+        !/^[a-z0-9-]{12,90}$/i.test(requestId) ||
+        !/^[a-zA-Z0-9_-]{12,90}$/.test(runId) ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(conversationId)) return;
+    if (researchMemoryRun !== runId) {
+      researchMemoryRun = runId;researchMemoryRequests.clear();
+    }
+    if (researchMemoryBusy) return sendResearchMemory({requestId,conversationId,ok:false,status:'already-reading'});
+    if ((researchMemoryRequests.get(conversationId)||0) >= 3)
+      return sendResearchMemory({requestId,conversationId,ok:false,status:'memory-retry-limit'});
+    // Do not cap requests by the number of conversations: the user may
+    // explicitly export all bots. Keep the per-conversation retry limit,
+    // one-request-at-a-time guard, and minimum pacing interval instead.
+    if (Date.now() - lastResearchMemoryAt < 300)
+      return sendResearchMemory({requestId,conversationId,ok:false,status:'rate-paced'});
+    researchMemoryBusy = true;researchMemoryRequests.set(conversationId, (researchMemoryRequests.get(conversationId)||0) + 1);
+    lastResearchMemoryAt = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      // The native app's captured Authorization is in MAIN world, not always in
+      // localStorage/IndexedDB. The older research handler only checked storage
+      // and returned auth-unavailable without making an HTTP request.
+      const token = isJwt(capturedToken) ? capturedToken : '';
+      if (!token) return sendResearchMemory({requestId,conversationId,ok:false,status:'auth-unavailable'});
+      const headers = {
+        Accept:'application/json','x-app-id':'spicychat',
+        'x-platform':'WEB','x-platform-os':'DESKTOP',Authorization:`Bearer ${token}`
+      };
+      const appVersion = clean(capturedAppVersion || document.querySelector('meta[name="app-version"]')?.content || '');
+      if (appVersion) headers['x-app-version'] = appVersion;
+      if (capturedCountry) headers['x-country'] = capturedCountry;
+      if (isGuest(capturedGuest)) headers['x-guest-userid'] = capturedGuest;
+      const response = await nativeFetch(`https://prod.nd-api.com/conversations/${conversationId}/memories`, {
+        method:'GET',headers,credentials:'include',cache:'no-store',signal:controller.signal
+      });
+      if (response.status === 401) {capturedToken='';capturedAt=0;exposeCapturedAuthState();}
+      if (!response.ok) return sendResearchMemory({requestId,conversationId,ok:false,
+        status:response.status === 401 ? 'auth-rejected' : response.status === 403 ? 'access-denied' :
+          response.status === 429 ? 'rate-limited' : 'http-failed',httpStatus:response.status,
+        retryAfterMs:responseRetryAfterMs(response)});
+      if (Number(response.headers?.get?.('Content-Length')||0)>16*1024*1024)
+        return sendResearchMemory({requestId,conversationId,ok:false,status:'memory-response-too-large'});
+      const rawText = await response.text();
+      if (rawText.length>16*1024*1024)
+        return sendResearchMemory({requestId,conversationId,ok:false,status:'memory-response-too-large'});
+      let payload;
+      try { payload=JSON.parse(rawText); }
+      catch { return sendResearchMemory({requestId,conversationId,ok:false,status:'invalid-json'}); }
+      const items = Array.isArray(payload) ? payload : Array.isArray(payload?.memories) ? payload.memories :
+        Array.isArray(payload?.data?.memories) ? payload.data.memories :
+        Array.isArray(payload?.data) ? payload.data : null;
+      if (!items || items.length>5000)
+        return sendResearchMemory({requestId,conversationId,ok:false,status:'unexpected-memory-format'});
+      sendResearchMemory({requestId,conversationId,ok:true,status:items.length?'ok':'empty',
+        httpStatus:response.status,memories:items});
+    } catch (error) {
+      sendResearchMemory({requestId,conversationId,ok:false,
+        status:error?.name==='AbortError'?'timeout':'network-error'});
+    } finally {clearTimeout(timer);researchMemoryBusy=false;}
+  });
+
   // Explicit Archive-setup-only writes using the captured signed-in session.
   // Never expose the token; never retry a POST after an ambiguous result.
   let privateArchiveWriteBusy = false;
@@ -1075,10 +1156,15 @@ if (!(() => { try {
 
     const requestId = clean(detail.requestId);
     const lastId = clean(detail.lastId).toLowerCase();
+    const botId = clean(detail.botId).toLowerCase();
     const requestedLimit = Math.floor(Number(detail.limit || 25));
     const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 25));
+    const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
     if (!requestId) return;
-    if (lastId && !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lastId)) return;
+    if (lastId && !uuid.test(lastId)) return;
+    // Per-character listings are only used by the user-started research helper.
+    if (botId && (!uuid.test(botId) || location.pathname !== '/chats' ||
+        new URLSearchParams(location.search).get('ds-research-export') !== '1')) return;
 
     const resolved = resolveAuth(detail);
     const controller = new AbortController();
@@ -1102,7 +1188,10 @@ if (!(() => { try {
       if (isJwt(token) && token.length < MAX_TOKEN) headers.Authorization = `Bearer ${token}`;
       if (isGuest(guest)) headers["x-guest-userid"] = guest;
 
-      const response = await nativeFetch(`https://prod.nd-api.com/v2/conversations?${params.toString()}`, {
+      const listUrl = botId
+        ? `https://prod.nd-api.com/v2/characters/${botId}/conversations?${params.toString()}`
+        : `https://prod.nd-api.com/v2/conversations?${params.toString()}`;
+      const response = await nativeFetch(listUrl, {
         method: "GET",
         credentials: "include",
         cache: "no-store",

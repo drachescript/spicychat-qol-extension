@@ -574,21 +574,29 @@ body:has(#ds-qol-panel) div.sticky.bottom-0:has([data-translate-key="chat:modal.
   display: inline-flex !important;
 }
 
-/* During an Edit shortcut, expose the original React menu anchor. If the
-   automatic path fails, leave the native three-dot control usable. */
+/* During an automated native menu action, keep the React anchor measurable
+   without visibly flashing the three-dot launcher next to the QoL shortcuts. */
+.ds-message-dropdown-hidden.ds-message-native-bridge-anchor button[aria-label="message-dropdown"],
+.ds-message-dropdown-hidden.ds-message-native-bridge-anchor > div:has(> button[aria-label="message-dropdown"]) {
+  display: inline-flex !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* If Edit fails, expose the original launcher so users can recover manually. */
 .ds-message-dropdown-hidden.ds-message-native-edit-fallback button[aria-label="message-dropdown"],
 .ds-message-dropdown-hidden.ds-message-native-edit-fallback > div:has(> button[aria-label="message-dropdown"]) {
   display: inline-flex !important;
 }
 
 /* Message quick actions silently invoke SpicyChat's native menu actions.
-   The intermediate Copy/Edit/Report/Remove Image menu is kept off-screen so
-   users see only the requested native result (editor/report modal/etc.). */
+   Keep the intermediate Copy/Edit/Delete/Report menu invisible (but anchored)
+   so users see only the requested native result (editor/report modal/etc.). */
+html[data-ds-message-action-bridge="1"] div.fixed.w-max:has(> button[data-testid="message-action-copy"]):has(> button[data-testid="message-action-edit"]),
 html[data-ds-message-action-bridge="1"] div.absolute.w-max:has(> button[aria-label="Copy"]):has(> button[aria-label="Edit"]),
 html[data-ds-message-action-bridge="1"] div[style*="box-shadow"]:has(> button[aria-label="Copy"]):has(> button[aria-label="Edit"]) {
-  position: fixed !important;
-  left: -10000px !important;
-  top: -10000px !important;
+  /* Do not move the React menu off-screen: its location is used to ensure the
+     selected native action belongs to the current message, not a stale portal. */
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;

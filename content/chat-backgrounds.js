@@ -13,6 +13,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DEFAULT_AVATAR_SIZE = 100;
   const avatarImageChecks = new Map();
   let mediaStore = kit.getStore();
+  // Avoid rebuilding multi-megabyte CSS image strings on every chat pass.
+  let lastLayerElement = null;
+  let lastLayerItem = null;
+  let lastLayerKey = '';
+  let lastLayerSignature = '';
+  function invalidateLayer() {
+    lastLayerElement = null;
+    lastLayerItem = null;
+    lastLayerKey = '';
+    lastLayerSignature = '';
+  }
   async function loadStore(force = false) { mediaStore = await kit.loadStore(force); return mediaStore; }
   async function saveStore(next) { mediaStore = await kit.saveStore(next); return mediaStore; }
   function avatarFromChatHeader() {
@@ -77,6 +88,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function removeLayer() {
+    invalidateLayer();
     document.getElementById("ds-chat-background-layer")?.remove();
     document.documentElement.classList.remove("ds-chat-custom-background", "ds-chat-bubble-alpha");
     document.documentElement.style.removeProperty("--ds-chat-background-bubble-opacity");
@@ -105,6 +117,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.body?.prepend(layer);
     }
     const settings = DS.state?.settings || {};
+    const key = chatKey();
+    const isSameImage = item === lastLayerItem ||
+      (item?.avatar && lastLayerItem?.avatar && item.url === lastLayerItem.url &&
+       item.fallbackUrl === lastLayerItem.fallbackUrl);
+    const signature = JSON.stringify([
+      settings.chatBackgroundBlur, settings.chatBackgroundDim,
+      settings.chatBackgroundFit, settings.chatBackgroundPosition,
+      settings.chatBackgroundBubbleOpacity, settings.chatBackgroundAnimateAvatar,
+      mediaStore.viewModes?.[key], mediaStore.avatarSizes?.[key],
+      mediaStore.avatarSideCopies?.[key], avatarImageChecks.get(item?.url) || ''
+    ]);
+    if (lastLayerElement === layer && isSameImage && lastLayerKey === key &&
+        lastLayerSignature === signature && layer.isConnected &&
+        document.documentElement.classList.contains('ds-chat-custom-background')) return;
     const blur = Math.min(30, Math.max(0, Number(settings.chatBackgroundBlur) || 0));
     const dim = rgbaDim(settings.chatBackgroundDim ?? 45);
     const safeUrl = String(usableAvatarUrl(item)).replace(/"/g, "%22");
@@ -149,6 +175,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const bubbleOpacity = Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
     document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
     document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
+    lastLayerElement = layer;
+    lastLayerItem = item;
+    lastLayerKey = key;
+    lastLayerSignature = signature;
   }
 
   function fetchBackgroundUrlImage(url) {

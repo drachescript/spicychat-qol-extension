@@ -5,10 +5,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   'use strict';
   const LISTING_SELECTOR = '[data-testid="SearchClientCharacterListing"]';
   const BODY_SELECTOR = '[data-testid="SearchClientCharacterListingBody"]';
-  const BUTTON_ID = 'ds-mobile-listing-filters-button';
   const STYLE_ID = 'ds-mobile-listing-overflow-style';
   const ATTR = 'data-ds-mobile-listing-fix';
-  const OPEN_ATTR = 'data-ds-mobile-filters-open';
   const SIDEBAR_ATTR = 'data-ds-mobile-listing-sidebar';
   const RESULTS_ATTR = 'data-ds-mobile-listing-results';
   const ANCESTOR_ATTR = 'data-ds-mobile-listing-ancestor';
@@ -18,10 +16,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let currentRoot = null;
   let currentSidebar = null;
   let currentResults = null;
-  let currentButton = null;
   let currentAncestors = [];
   let activationRoute = '';
-  let opened = false;
 
   function installStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -43,29 +39,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           width: 100% !important;
           box-sizing: border-box !important;
         }
+        /* Keep the native filter drawer in the DOM. Removing only the
+           width-contributing wrapper lets SpicyChat's own sliders button
+           control its drawer, without any duplicate QoL filter controls. */
         [${ATTR}="1"] > [${SIDEBAR_ATTR}="1"] {
-          display: none !important;
-          position: relative !important;
-          inset: auto !important;
-          width: 100% !important;
-          min-width: 0 !important;
-          max-width: 100% !important;
-          max-height: none !important;
-          margin-right: 0 !important;
-          box-sizing: border-box !important;
-        }
-        [${ATTR}="1"][${OPEN_ATTR}="1"] > [${SIDEBAR_ATTR}="1"] {
-          display: flex !important;
-          max-height: min(52dvh, 430px) !important;
-          overflow-y: auto !important;
-          overscroll-behavior: contain;
-          margin-bottom: 10px !important;
-        }
-        [${ATTR}="1"][${OPEN_ATTR}="1"] > [${SIDEBAR_ATTR}="1"] > div {
-          min-width: 0 !important;
-          max-width: 100% !important;
-          width: 100% !important;
-          box-sizing: border-box !important;
+          display: contents !important;
         }
         [${ATTR}="1"] > [${RESULTS_ATTR}="1"] {
           flex: 1 1 auto !important;
@@ -73,22 +51,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           min-width: 0 !important;
           max-width: 100% !important;
           box-sizing: border-box !important;
-        }
-        #${BUTTON_ID} {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          align-self: flex-start;
-          max-width: calc(100vw - 24px);
-          padding: 7px 11px;
-          margin: 8px 0;
-          background: #292a31;
-          border: 1px solid #555962;
-          border-radius: 9px;
-          color: inherit;
-          font: inherit;
-          font-size: 13px;
-          cursor: pointer;
         }
         /* Only the confirmed displaced Favorites listing is altered. Do not
            force normal native filter bars or other listing pages to reflow. */
@@ -103,60 +65,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cleanup() {
     currentRoot?.removeAttribute(ATTR);
-    currentRoot?.removeAttribute(OPEN_ATTR);
     currentSidebar?.removeAttribute(SIDEBAR_ATTR);
     currentResults?.removeAttribute(RESULTS_ATTR);
     for (const el of currentAncestors) el.removeAttribute(ANCESTOR_ATTR);
-    currentButton?.remove();
     currentRoot = null;
     currentSidebar = null;
     currentResults = null;
     currentAncestors = [];
-    currentButton = null;
     activationRoute = '';
-    opened = false;
-  }
-
-  function update() {
-    if (!currentRoot?.isConnected || !currentSidebar?.isConnected || !currentResults?.isConnected) {
-      cleanup();
-      return;
-    }
-    currentRoot.setAttribute(OPEN_ATTR, opened ? '1' : '0');
-    if (currentButton) {
-      currentButton.textContent = opened ? 'Hide filters' : 'Show filters';
-      currentButton.setAttribute('aria-expanded', String(opened));
-    }
   }
 
   function activate(layout, sidebar, results, listing) {
     if (currentRoot === layout && currentSidebar === sidebar &&
-        currentResults === results && currentButton?.isConnected) return;
+        currentResults === results) return;
     cleanup();
     installStyle();
     currentRoot = layout;
     currentSidebar = sidebar;
     currentResults = results;
     activationRoute = location.pathname;
-    // Mark only the actual layout row, rather than guessing its child indices.
+    // Mark only the actual layout row, not the native filter drawer.
     layout.setAttribute(ATTR, '1');
     sidebar.setAttribute(SIDEBAR_ATTR, '1');
     results.setAttribute(RESULTS_ATTR, '1');
-    // The native V2 listing can wrap the row in another flex container.
-    // Limit width corrections to its ancestors inside the listing itself.
+    // Native listing containers may wrap the row in another flex element.
     for (let node = layout.parentElement; node && listing?.contains(node); node = node.parentElement) {
       node.setAttribute(ANCESTOR_ATTR, '1');
       currentAncestors.push(node);
       if (node === listing) break;
     }
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.id = BUTTON_ID;
-    button.setAttribute('aria-label', 'Toggle listing filters');
-    button.addEventListener('click', () => { opened = !opened; update(); });
-    layout.before(button);
-    currentButton = button;
-    update();
   }
 
   function mobileViewport() {
@@ -172,7 +109,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const layout = item.parentElement;
       if (!layout || !listing.contains(layout) || layout.children.length < 2) continue;
       if (layout.firstElementChild !== item) continue;
-      const results = item.nextElementSibling;
+      // Older Favorites builds could insert the QoL action strip as a sibling
+      // between the native sidebar and the results. Skip only that known strip.
+      let results = item.nextElementSibling;
+      if (results?.id === 'ds-listing-qol-controls' && results.dataset.dsOwned === '1') {
+        results = results.nextElementSibling;
+      }
       if (!results) continue;
       const sidebarBox = item.getBoundingClientRect();
       if (sidebarBox.width < 160 || sidebarBox.width >= viewport * 1.8) continue;
@@ -205,7 +147,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!listing) { cleanup(); return; }
     if (currentRoot) {
       if (activationRoute !== location.pathname || !listing.contains(currentRoot) ||
-          !currentButton?.isConnected || !currentSidebar?.isConnected || !currentResults?.isConnected) {
+          !currentSidebar?.isConnected || !currentResults?.isConnected) {
         cleanup();
       } else return;
     }

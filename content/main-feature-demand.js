@@ -9,6 +9,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return !!(
       settings.messageQuickActionCopy ||
       settings.messageQuickActionEdit ||
+      settings.messageQuickActionDelete ||
       settings.messageQuickActionRemoveImage ||
       settings.messageQuickActionResend ||
       settings.messageQuickActionReport ||
