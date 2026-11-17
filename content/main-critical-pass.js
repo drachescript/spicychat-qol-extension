@@ -26,6 +26,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try {
       const settings = DS.state?.settings || {};
 
+      // A dedicated Research Export tab must not run /chats import,
+      // card reconciliation or cosmetic feature passes in the foreground.
+      // Keep core auth bridges eager; load only the manual exporter on demand.
+      if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1") {
+        if (settings.enabled) await DS.prepareOptionalModules?.(settings);
+        return;
+      }
+
       await runStep("accessibility", () => DS.applyAccessibilitySettings?.());
       await runStep("chat width", () => DS.applyChatWidthSettings?.());
 

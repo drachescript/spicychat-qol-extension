@@ -143,20 +143,20 @@ $("refreshLocalChangeHistory")?.addEventListener("click", renderLocalChangeHisto
 $("undoLastLocalChange")?.addEventListener("click", undoLatestLocalChange);
 $("clearLocalChangeHistory")?.addEventListener("click", clearLocalChangeHistoryFromOptions);
 $("cleanLocalData")?.addEventListener("click", cleanLocalData);
-$("copyAllSupportInfo")?.addEventListener("click", copyAllSupportInfo);
+$("copyAllSupportInfo")?.addEventListener("click", () => runOptionsDiagnosticsAction("copyAllSupportInfo"));
 
 
-$("downloadAllSupportInfo")?.addEventListener("click", downloadAllSupportInfo);
-$("dsSupportHistoryRefresh")?.addEventListener("click", refreshSavedSupportStatus);
-$("dsSupportHistoryClear")?.addEventListener("click", clearSavedSupportHistory);
-$("copyDiagnostics")?.addEventListener("click", copyDiagnostics);
-$("downloadDiagnostics")?.addEventListener("click", downloadDiagnostics);
-$("copyPerformanceReport")?.addEventListener("click", copyPerformanceReport);
-$("refreshPerformanceTroubleshooter")?.addEventListener("click", refreshPerformanceTroubleshooter);
-$("downloadPerformanceReport")?.addEventListener("click", downloadPerformanceReport);
-$("runPerformanceSelfCheck")?.addEventListener("click", runPerformanceSelfCheck);
-$("downloadPerformanceSelfCheck")?.addEventListener("click", downloadPerformanceSelfCheck);
-$("resetPerformanceCounters")?.addEventListener("click", resetPerformanceCounters);
+$("downloadAllSupportInfo")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadAllSupportInfo"));
+$("dsSupportHistoryRefresh")?.addEventListener("click", () => runOptionsDiagnosticsAction("refreshSavedSupportStatus"));
+$("dsSupportHistoryClear")?.addEventListener("click", () => runOptionsDiagnosticsAction("clearSavedSupportHistory"));
+$("copyDiagnostics")?.addEventListener("click", () => runOptionsDiagnosticsAction("copyDiagnostics"));
+$("downloadDiagnostics")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadDiagnostics"));
+$("copyPerformanceReport")?.addEventListener("click", () => runOptionsDiagnosticsAction("copyPerformanceReport"));
+$("refreshPerformanceTroubleshooter")?.addEventListener("click", () => runOptionsDiagnosticsAction("refreshPerformanceTroubleshooter"));
+$("downloadPerformanceReport")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadPerformanceReport"));
+$("runPerformanceSelfCheck")?.addEventListener("click", () => runOptionsDiagnosticsAction("runPerformanceSelfCheck"));
+$("downloadPerformanceSelfCheck")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadPerformanceSelfCheck"));
+$("resetPerformanceCounters")?.addEventListener("click", () => runOptionsDiagnosticsAction("resetPerformanceCounters"));
 $("releaseOptionsTemporaryMemory")?.addEventListener("click", releaseTemporaryOptionsMemory);
 $("refreshLorebookCenter")?.addEventListener("click", () => refreshLorebookCenter().catch(() => showSettingsToast("Could not load Lorebook history.")));
 $("scanLorebookAvailability")?.addEventListener("click", () => runLorebookStatusScan({ mode: "all" }).catch(() => showSettingsToast("Lorebook Status scan failed.")));

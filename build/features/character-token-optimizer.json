@@ -1,0 +1,18 @@
+{
+  "id": "character-token-optimizer",
+  "primary": "content/character-token-optimizer.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableCharacterTokenOptimizer"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/character-token-optimizer.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false
+}

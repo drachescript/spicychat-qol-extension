@@ -25,7 +25,8 @@
     "Stage 7: feature-demand predicates and loaded-chat message count caches are separate Core helpers; Full load order preserves existing scheduler behavior. This does not certify arbitrary Custom Lite bundles.",
     "Stage 8: text-normalization emoji removal has its own disabled-by-default setting; Firefox account sync uses a dedicated statically loaded background service in generated Firefox builds (with legacy fallback). Full and Custom Lite isolation still require browser verification.",
     "Stage 9: creator-profile startup quieting and blocked-card refresh batching are separate Core factories; both register without starting optional work, and the Full runtime keeps their prior delays and callbacks.",
-    "Stage 9: critical, slow and message runtime lanes are registered as separate Core factories sharing one scheduler state object. Full runtime and load order are retained; Custom Lite lifecycle independence remains unverified."
+    "Stage 9: critical, slow and message runtime lanes are registered as separate Core factories sharing one scheduler state object. Full runtime and load order are retained; Custom Lite lifecycle independence remains unverified.",
+    "Stage 16: Archive Community Themes is an optional bot-ID-only evidence adapter. Its on-demand content resource and background handler are feature owned; omission must not change local Implied Themes. Browser/Lite combinations require live verification."
   ],
   "bundles": {
     "core": {
@@ -251,7 +252,8 @@
         "content/rulebook-public-qol.js",
         "content/saved-lists-overlay.js",
         "content/smart-filter-presets.js",
-        "content/tags-nsfw.js"
+        "content/tags-nsfw.js",
+        "content/archive-community-themes.js"
       ]
     },
     "creator": {
@@ -272,6 +274,7 @@
         "content/creation-bulk-input.js",
         "content/creator-workspace.js",
         "content/creator-writing-assistant.js",
+        "content/character-token-optimizer.js",
         "content/moderation-warnings.js",
         "content/my-creations-backup.js",
         "content/my-chatbot-card-shortcuts.js",
@@ -381,7 +384,8 @@
         "background/features/background-private-archive-setup-write.js",
         "background/features/background-private-lorebook-entry-create.js",
         "background/features/background-native-memory-probe.js",
-        "background/features/background-research-memory-export.js"
+        "background/features/background-research-memory-export.js",
+        "background/features/background-community-themes.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -437,7 +441,8 @@
         "background/features/background-private-archive-setup-write.js",
         "background/features/background-private-lorebook-entry-create.js",
         "background/features/background-native-memory-probe.js",
-        "background/features/background-research-memory-export.js"
+        "background/features/background-research-memory-export.js",
+        "background/features/background-community-themes.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",
@@ -562,6 +567,7 @@
         "settings/feature-panels/lorebook-backup.js",
         "settings/feature-panels/chat-tags.js",
         "settings/feature-panels/creation-audit.js",
+        "settings/feature-panels/character-token-optimizer.js",
         "settings/feature-panels/recommendation-helpers.js",
         "settings/feature-panels/saved-snippets.js",
         "settings/feature-panels/tags-nsfw.js",

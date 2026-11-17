@@ -228,6 +228,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableCreatorWritingAssistant", name: "Creator Writing Assistant", children: ["creatorWritingUseBrowserAi", "creatorWritingTargetLanguage", "creatorWritingDictionary"] },
   { parent: "enableTagAliases", name: "Local tag aliases", children: ["tagAliasRules", "tagAliasShowDisplay"] },
   { parent: "localTagMatchEnabled", name: "Personal tag matches", children: ["localTagMatchRules", "localTagMatchFetchPublic"] },
+  { parent: "archiveCommunityThemesEnabled", name: "Archive Community Themes", children: ["archiveCommunityThemesMode", "archiveCommunityThemesRiskWarnings", "archiveCommunityThemesExtraTags", "archiveCommunityThemesAllowIds"] },
   { parent: "enableCreationAudit", name: "Creation Audit", children: ["creationAuditQuickStatus"] },
   { parent: "botBackupToolsEnabled", name: "Chatbot backup tools", children: ["botArchiveOwnEditorBackups", "botArchiveOwnRevisionLimit"] },
   { parent: "lorebookBackupToolsEnabled", name: "Lorebook backup tools", children: ["lorebookBackupsEnabled"] },

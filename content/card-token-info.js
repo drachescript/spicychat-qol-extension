@@ -1229,10 +1229,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
     if (cursor && (!cursor.startsWith(id + '.') || !uuid.test(cursor.slice(id.length + 1))))
       return {ok:false,status:'invalid-memory-cursor'};
-    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id) ||
-        location.pathname !== '/chats' ||
+    if (!uuid.test(id)) return {ok:false,status:'invalid-conversation-id'};
+    if (location.pathname !== '/chats' ||
         new URLSearchParams(location.search).get('ds-research-export') !== '1')
-      return {ok:false,status:'invalid-request'};
+      return {ok:false,status:'export-route-changed'};
     try {window.DSCardTokenBridgeLoader?.ensure?.();} catch {}
     if (!await waitForMainBridge(3000)) return {ok:false,status:'bridge-unavailable'};
     if (!mainBridgeHasCapturedAuth()) await waitForMainBridgeCapturedAuth(4500);
@@ -1268,7 +1268,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return {ok:false,status:'fetch_failed',reason:'invalid-character-id',httpStatus:0};
     try {
       window.DSCardTokenBridgeLoader?.ensure?.();
-      const record = await fetchAuditCharacter(id, false);
+      const record = await fetchAuditCharacter(id, false, "research-character");
       const returned = String(record?.id || record?.uuid || record?.character_id || record?.characterId || '').toLowerCase();
       if (returned && returned !== id)
         return {ok:false,status:'fetch_failed',reason:'character-id-mismatch',httpStatus:200};
@@ -1364,12 +1364,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   };
 
-  async function fetchAuditCharacter(botId, forceAuth = false) {
+  async function fetchAuditCharacter(botId, forceAuth = false, diagnosticOwner = "creation-audit") {
     const auth = await discoverSpicychatAuth(forceAuth);
     let mainError = null;
     if (characterAuthCircuitOpen()) skipCharacterApi("character API auth cooldown active");
     if (!auth?.token && !mainBridgeHasCapturedAuth()) skipCharacterApi("character API auth unavailable");
-    const mainNet = DS.diagNetworkStart?.("creation-audit", "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { transport: "main-world" });
+    const mainNet = DS.diagNetworkStart?.(diagnosticOwner, "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { transport: "main-world" });
     try {
       const data = await mainWorldCharacterRequest(botId, auth);
       const sc = characterPayload(data);
@@ -1388,7 +1388,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (!auth?.token) throw new Error(String(mainError?.message || mainError || "character data unavailable"));
-    const backgroundNet = DS.diagNetworkStart?.("creation-audit", "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { transport: "background" });
+    const backgroundNet = DS.diagNetworkStart?.(diagnosticOwner, "GET", `https://prod.nd-api.com/v2/characters/${botId}`, { transport: "background" });
     const response = await runtimeMessage({
       type: "DS_CARD_TOKEN_FETCH",
       botId,

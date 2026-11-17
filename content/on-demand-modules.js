@@ -1,4 +1,4 @@
-// v0.2.85 Stage 15: declarative, on-demand runtime assets.
+// v0.2.86 Stage 16: declarative, on-demand runtime assets.
 // Previously every feature was parsed on every route. These heavy, independently
 // registered modules are now imported only when the matching route+setting is
 // active. No new observer, event listener, repeating task or background request.
@@ -10,12 +10,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const failed = new Map();
   const has = key => DS.featureBuildProfile?.isInstalled?.(key) !== false;
   const any = (s, names) => names.some(k => s?.[k] === true);
-  const CHAT = /^\/(?:[a-z]{2}\/)?chat\/[0-9a-f-]{36}\/[0-9a-f-]{36}(?:\/|$)/i;
+  const CHAT = /^\/(?:[a-z]{2}\/)?chat\/[0-9a-f-]{36}(?:\/[0-9a-f-]{36})?(?:\/|$)/i;
   const CHATS = /^\/(?:[a-z]{2}\/)?chats\/?$/i;
+  const PROFILES = /^\/(?:[a-z]{2}\/)?chatbot\/[0-9a-f-]{36}(?:\/|$)/i;
+  const PERSONAS = /^\/(?:[a-z]{2}\/)?personas\/?$/i;
   const FAV = /^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i;
   const MY_CREATIONS = /^\/(?:[a-z]{2}\/)?my-creations(?:\/|$)/i;
-  const LOREBOOK_EDITOR = /^\/(?:[a-z]{2}\/)?lorebook\/edit(?:\/|$)/i;
-  const BOT_EDITOR = /^\/(?:[a-z]{2}\/)?(?:chatbot\/(?:create|edit)|create-chatbot|edit-chatbot)(?:\/|$)/i;
+  const LOREBOOK_EDITOR = /^\/(?:[a-z]{2}\/)?lorebook\/(?:edit(?:\/|$)|create(?:\/|$))/i;
+  const LISTING = /^\/(?:[a-z]{2}\/)?(?:favorite-bots|recommended-bots|chatbots|search|my-creations\/chatbots|creator\/[^/]+)(?:\/|$)/i;
+  const BOT_EDITOR = /^\/(?:[a-z]{2}\/)?(?:chatbot\/(?:create|edit|[0-9a-f-]{36}\/edit)|create-chatbot|edit-chatbot)(?:\/|$)/i;
   const MODULES = Object.freeze({
     "bulk-chat-research": "content/bulk-chat-research.js",
     "soundscapes": "content/soundscapes.js",
@@ -29,9 +32,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     "favorites-recovery": "content/favorites-recovery.js",
     "lorebook-backup": "content/lorebook-backup.js",
     "my-creations-backup": "content/my-creations-backup.js",
-    "chat-export": "content/chat-export.js"
+    "chat-export": "content/chat-export.js",
+    "persona-full-backup": "content/persona-full-backup.js",
+    "profile-export": "content/profile-export.js",
+    "creator-writing-assistant": "content/creator-writing-assistant.js",
+    "character-token-optimizer": "content/character-token-optimizer.js",
+    "chat-continuation": "content/chat-continuation.js",
+    "chat-scene-notes": "content/chat-scene-notes.js",
+    "lorebook-consistency": "content/lorebook-consistency.js",
+    "smart-filter-presets": "content/smart-filter-presets.js",
+    "wiki-lorebook-importer": "content/wiki-lorebook-importer.js",
+    "persona-organizer": "content/persona-organizer.js",
+    "private-lorebook-bridge": "content/private-lorebook-bridge.js",
+    "archive-community-themes": "content/archive-community-themes.js"
   });
   let lastWantedKey = "";
+  const dependencies = Object.freeze({ "memory-packs": ["memory-manager"] });
+  function ensureWithDependencies(name) {
+    const deps = dependencies[name];
+    return deps?.length ? Promise.all(deps.map(ensureWithDependencies)).then(results => results.every(Boolean) && ensure(name)) : ensure(name);
+  }
   // Module scripts run in the content script's isolated world (not a <script>
   // tag in SpicyChat's MAIN world). Every resource is declared in the manifest.
   function ensure(name) {
@@ -56,10 +76,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     return promise;
   }
   function wanted(settings, path = location.pathname) {
+    // The explicit Research Export helper is NOT an ordinary /chats tab.
+    // It only needs its own exporter module and shared eager auth readers;
+    // unrelated optional panels must not load while thousands of bots scan.
+    if (CHATS.test(path) && new URLSearchParams(location.search).get("ds-research-export") === "1") {
+      return has("bulk-chat-research") ? ["bulk-chat-research"] : [];
+    }
     const chat = CHAT.test(path);
     const myCreations = MY_CREATIONS.test(path);
-    const lorebookEditor = LOREBOOK_EDITOR.test(path);
-    const botEditor = BOT_EDITOR.test(path) || !!DS.getPageState?.().isBotEditor;
+    const page = DS.getPageState?.() || {};
+    const lorebookEditor = LOREBOOK_EDITOR.test(path) || !!page.isLorebookEditor;
+    const botEditor = BOT_EDITOR.test(path) || !!page.isBotEditor;
     const list = [];
     const add = (name,condition) => { if(condition && has(name))list.push(name); };
     add("bulk-chat-research", CHATS.test(path) &&
@@ -82,6 +109,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       params.has("dsQolLorebookExport") || params.has("dsQolLorebookBackupWorker"));
     add("my-creations-backup",myCreations && any(settings,["enableMyCreationsBulkBackup","enableAccountMigrationAssistant"]));
     add("chat-export",chat && any(settings,["showChatExportButton","showQuickPanel","enableCommandPalette","showChatTopBarTools"]));
+    add("persona-full-backup",PERSONAS.test(path) && settings.personaFullBackupEnabled === true);
+    add("profile-export",PROFILES.test(path) && settings.enableProfileExport === true);
+    add("creator-writing-assistant",(botEditor||lorebookEditor) && settings.enableCreatorWritingAssistant === true);
+    add("character-token-optimizer",botEditor && settings.enableCharacterTokenOptimizer === true);
+    add("chat-continuation",chat && settings.enableChatContinuationAssistant === true);
+    add("chat-scene-notes",(chat||botEditor) && settings.enableChatSceneNotes === true);
+    add("lorebook-consistency",chat && any(settings,["enableLorebookConsistency","enableCreatorTriggerPreview"]));
+    add("smart-filter-presets",(LISTING.test(path)||path === "/"||page.routeType === "listing"||page.routeType === "creator-listing") && settings.enableSmartFilterPresets === true);
+    add("wiki-lorebook-importer",lorebookEditor && settings.enableWikiLorebookImporter === true);
+    add("persona-organizer",settings.enablePersonaOrganizer === true);
+    add("private-lorebook-bridge",(chat||lorebookEditor) && settings.enablePrivateLorebookBridge === true);
+    add("archive-community-themes",(LISTING.test(path)||path === "/"||page.routeType === "listing"||page.routeType === "creator-listing") && settings.archiveCommunityThemesEnabled === true);
     return list;
   }
   DS.prepareOptionalModules = async function prepareOptionalModules(settings = DS.state?.settings||{}) {
@@ -90,11 +129,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const key=location.href+"|"+names.join(",");
     if(key === lastWantedKey) return;
     lastWantedKey = key;
-    for (const name of names) {
-      if(DS.isQolPausedForTab?.())return;
-      // Each isolated script establishes its own DS API exactly once.
-      await ensure(name);
-    }
+    // Independent optional modules can load concurrently. The existing
+    // de-duplicated ensure() promises and dependency map enforce safe ordering.
+    // No new work starts after a tab is paused.
+    if (DS.isQolPausedForTab?.()) return;
+    await Promise.all(names.map(name => ensureWithDependencies(name)));
   };
   DS.optionalModuleLoader = Object.freeze({
     names: Object.freeze(Object.keys(MODULES)),

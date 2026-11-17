@@ -1,0 +1,28 @@
+{
+  "id": "archive-community-themes",
+  "primary": "content/archive-community-themes.js",
+  "type": "content",
+  "dependencies": [
+    "cards"
+  ],
+  "settingsKeys": [
+    "archiveCommunityThemesEnabled",
+    "archiveCommunityThemesMode",
+    "archiveCommunityThemesRiskWarnings",
+    "archiveCommunityThemesExtraTags",
+    "archiveCommunityThemesAllowIds"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/archive-community-themes.js"
+  ],
+  "backgroundFiles": [
+    "background/features/background-community-themes.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": true,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false,
+  "notes": "Optional in Full. Do not package public-index background handler or optional content resource when feature excluded."
+}

@@ -1456,6 +1456,7 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint">The extra Edit links work like normal links, including opening them in a new tab. Ctrl/Cmd-clicking the native three-dot button opens the editor in a new tab when the corresponding option is on.</p>
 </section>
 <div id="ds-feature-panel-creation-audit" data-dsq-feature-panel="creation-audit"></div>
+<div id="ds-feature-panel-character-token-optimizer" data-dsq-feature-panel="character-token-optimizer"></div>
 <div id="ds-feature-panel-creator-writing-assistant" data-dsq-feature-panel="creator-writing-assistant"></div>
 
 
@@ -1523,6 +1524,7 @@ Testing" spellcheck="false"></textarea></label>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label class="row"><input id="filterImpliedBlockedTags" type="checkbox"/><span>Also hide bots that clearly imply my excluded themes (experimental)</span></label>
+<div id="ds-feature-panel-archive-community-themes" data-dsq-feature-panel="archive-community-themes"></div>
 <p class="hint">Uses the <strong>visible title/description</strong> to recognize untagged cheating, past affairs, emotional boundary crossing, partner-stealing, NTR and cuckolding. It also recognizes strong <strong>relationship-boundary risk</strong> teasers (such as a partner’s friend circle with undisclosed sexual/romantic history), labeling these as a risk rather than confirmed cheating. The optional stricter cues look for a committed relationship plus explicit romantic or concealed third-party contact; accusations and ordinary friendship alone should not trigger hiding. Applies only when Cheating/NTR/Cuckolding is excluded in SpicyChat's current native filters, or listed in QoL's blocked tags with card blocking enabled. It <strong>only hides</strong> cards; it never adds inferred matches to permanent Blocked bots, sends dislikes, or opens profiles. Off by default. Ambiguous descriptions may remain visible or occasionally be hidden.</p>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
@@ -2146,7 +2148,7 @@ step sister" spellcheck="false"></textarea></label>
 <script src="settings/features/options-backup-import.js"></script>
 <script src="settings/features/options-storage-maintenance.js"></script>
 <script src="settings/features/options-control-center.js"></script>
-<script src="settings/features/options-diagnostics.js"></script>
+<script type="application/x-ds-lazy" src="settings/features/options-diagnostics.js"></script>
 
 <script src="settings/features/options-release-notes.js"></script>
 <script src="settings/options-performance-presets.js"></script>
@@ -2172,11 +2174,13 @@ step sister" spellcheck="false"></textarea></label>
 
 <script src="settings/feature-panels/chat-tags.js"></script>
 <script src="settings/feature-panels/creation-audit.js"></script>
+<script src="settings/feature-panels/character-token-optimizer.js"></script>
 <script src="settings/feature-panels/recommendation-helpers.js"></script>
 <script src="settings/feature-panels/saved-snippets.js"></script>
 <script src="settings/feature-panels/tags-nsfw.js"></script>
 <script src="settings/feature-panels/tag-aliases.js"></script>
 <script src="settings/feature-panels/local-tag-matching.js"></script>
+<script src="settings/feature-panels/archive-community-themes.js"></script>
 
 <script src="settings/feature-panels/bot-organizer.js"></script>
 <script src="settings/feature-panels/my-creations-filters.js"></script>

@@ -1,3 +1,17 @@
+## 0.2.86
+- Improved Research Export responsiveness with fewer progress redraws and a dedicated lightweight export tab.
+- Fixed Example Dialogue metadata availability and repaired previously saved character records without extra profile requests.
+- Added retries for partially retrieved linked Lorebooks and clearer export phase timings and API diagnostics.
+- Added clearer initial synchronous-call timing for runtime steps without changing chat scheduling or recovery.
+- Added an optional Character Token Optimizer to chatbot creation, with per-field estimates, reviewable suggestions and manual Apply actions.
+- Added step-by-step Bulk Research Export progress with a live, stage-specific ETA for bot discovery, conversation scanning, and export.
+- Improved startup performance by deferring more optional creator, Persona, chat, Lorebook, and Smart Filter tools until needed.
+- Reduced delays from loading independent optional modules while preserving their required dependencies.
+- Delayed the heavy Diagnostics/Support Settings code until those tools are used.
+- Kept saved export checkpoints, enabled-feature behavior, and native rating/recovery safeguards unchanged.
+- Added optional Archive Community Themes with reviewed/candidate trust choices, historical-only warnings, per-bot exceptions and batched, version-cached public bot-ID lookups.
+- Kept local Implied Themes independent and added explicit human-review suggestions without uploading private data.
+
 ## 0.2.85
 - Improved startup performance by loading more optional features only when needed.
 - Added guides and clearer explanations for Memory, Context Keeper, Lorebooks, Rulebooks, and creator tools.

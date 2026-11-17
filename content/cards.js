@@ -869,6 +869,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (creatorMatch) return `blocked creator: ${creatorMatch.raw}`;
     }
 
+    // Archive evidence is separate, reversible and cannot trigger auto-blocks.
+    // Preserve native and QoL tag rules, creator exceptions and saved favorites.
+    if (settings.archiveCommunityThemesEnabled && favoritePrefs.ignoreTagWordFilters !== true &&
+        !(settings.protectFavoritesFromBlocking && id && DS.state.favoriteBotIdSet?.has(id))) {
+      const remote = DS.getArchiveCommunityThemeMatch?.(id, settings);
+      if (remote?.hide) return `community theme: ${remote.evidence}`;
+    }
+
     // Native excluded tags also count. Unlike explicit verified tag/word
     // auto-blocks, an inferred theme is reversible and NEVER written to storage.
     if (settings.filterImpliedBlockedTags && favoritePrefs.ignoreTagWordFilters !== true) {
@@ -1464,6 +1472,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       location.href,
       Number(DS.state?.domRevision || 0),
       Number(DS.state?.cardFilterStateRevision || 0),
+      Number(DS.state?.archiveThemeRevision || 0),
+      DS.state?.settings?.archiveCommunityThemesEnabled ? 1 : 0,
+      DS.state?.settings?.archiveCommunityThemesMode || 'reviewed',
+      DS.state?.settings?.archiveCommunityThemesRiskWarnings ? 1 : 0,
+      DS.state?.settings?.archiveCommunityThemesExtraTags || '',
+      DS.state?.settings?.archiveCommunityThemesAllowIds || '',
       DS.state?.settings?.hiddenCardMode || "hide",
       DS.smartFilterWantsOpened?.() ? 1 : 0,
       DS.smartFilterWantsFavorites?.() ? 1 : 0,
@@ -1478,6 +1492,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function cardFilterKey() {
     return [
       Number(DS.state?.cardFilterStateRevision || 0),
+      Number(DS.state?.archiveThemeRevision || 0),
+      DS.state?.settings?.archiveCommunityThemesEnabled ? 1 : 0,
+      DS.state?.settings?.archiveCommunityThemesMode || 'reviewed',
+      DS.state?.settings?.archiveCommunityThemesRiskWarnings ? 1 : 0,
+      DS.state?.settings?.archiveCommunityThemesExtraTags || '',
+      DS.state?.settings?.archiveCommunityThemesAllowIds || '',
       DS.state?.settings?.hiddenCardMode || "hide",
       DS.state?.settings?.publicPersonalityOnly ? 1 : 0,
       DS.smartFilterWantsOpened?.() ? 1 : 0,
@@ -1675,6 +1695,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const normalizationStarted = cardTimingStart();
     DS.applyCardDisplayNormalization?.(cards);
+    // Queues at most one 80-ID request from this already-collected card set.
+    // The background service handles versioned caching and response validation.
+    if (DS.state.settings.archiveCommunityThemesEnabled) DS.queueArchiveCommunityThemeLookups?.(cards);
     if (normalizationStarted) recordCardPhase("normalization", normalizationStarted, cards.length);
     const filterStarted = cardTimingStart();
     let filterYieldMs = 0;
@@ -1725,6 +1748,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // "hide opened bots" discovery preference. Otherwise the Smart Filter
       // can correctly match an opened card only for the earlier hide pass to
       // remove it again, producing an apparently empty listing.
+      DS.applyArchiveCommunityThemeWarning?.(card,
+        DS.botIdFromHref?.(anchor.href || "") || "", DS.state.settings);
       const reason = DS.shouldHideCard(card, anchor, {
         // An explicit membership Smart Filter should temporarily win over the
         // matching "hide saved/opened" preference. Unrelated safety/content

@@ -418,9 +418,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const traceRecording = !!DS.isDiagnosticTraceActive?.("normal");
     const collectTiming = debug || !!DS.state?.settings?.performanceDiagnostics || traceRecording;
     const started = collectTiming && typeof performance !== "undefined" ? performance.now() : 0;
+    let initialSyncCallMs = 0;
 
     try {
-      const result = await fn();
+      // Wall time includes awaited APIs. Measure the direct invocation
+      // separately to identify steps that synchronously monopolize a frame
+      // before they first yield. Later async continuations are not included.
+      const resultOrPromise = fn();
+      if (started) initialSyncCallMs = Math.max(0, performance.now() - started);
+      const result = await resultOrPromise;
       // Direct-run tasks participate in feature stop/start tracking too.
       // Cleanup tasks must not re-arm a feature they just removed.
       if (!/(?:cleanup|restore|remove|unhide|disabled)/i.test(String(name || "")) &&
@@ -446,6 +452,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         entry.calls++;
         entry.totalMs += elapsed;
         entry.maxMs = Math.max(entry.maxMs, elapsed);
+        entry.initialSyncMaxMs = Math.max(Number(entry.initialSyncMaxMs||0), initialSyncCallMs);
+        entry.initialSyncTotalMs = Number(entry.initialSyncTotalMs||0) + initialSyncCallMs;
         entry.lastMs = elapsed;
         entry.lastAt = Date.now();
         entry.lastTrigger = String(DS.state.lastRunTrigger || "").slice(0, 120);
@@ -457,7 +465,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (samples.length > 120) samples.splice(0, samples.length - 120);
         }
       }
-      if (diagToken) DS.diagOperationEnd?.(diagToken, { outcome: diagOutcome });
+      if (diagToken) DS.diagOperationEnd?.(diagToken, {
+        outcome: diagOutcome,
+        ...(initialSyncCallMs >= 24 ? { meta: { initialSyncCallMs: Math.round(initialSyncCallMs * 10) / 10 } } : {})
+      });
       await maybeYieldSlowSlice(name);
     }
   }
@@ -477,6 +488,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         totalMs: Math.round((value.totalMs || 0) * 10) / 10,
         averageMs: value.calls ? Math.round((value.totalMs / value.calls) * 100) / 100 : 0,
         maxMs: Math.round((value.maxMs || 0) * 100) / 100,
+        initialSyncMaxMs: Math.round((value.initialSyncMaxMs || 0) * 100) / 100,
+        initialSyncTotalMs: Math.round((value.initialSyncTotalMs || 0) * 10) / 10,
         lastMs: Math.round((value.lastMs || 0) * 100) / 100,
         lastAt: Number(value.lastAt || 0),
         lastTrigger: String(value.lastTrigger || "")
@@ -504,6 +517,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function runSavedOpenedLane(source = "saved-opened") {
+    if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1") return;
     if (savedOpenedLaneRunning) {
       savedOpenedLanePending = true;
       return;
@@ -544,6 +558,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function scheduleSavedOpenedLane(source = "saved-opened", delay = 100) {
+    if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1") return;
     const settings = DS.state?.settings || {};
     if (!settings.enabled) return;
     if (!DS.isSingleChatPage?.() && !DS.isChatListPage?.()) return;

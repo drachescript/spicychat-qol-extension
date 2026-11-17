@@ -75,6 +75,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.runSlow = async function runSlow(options = {}) {
     if (DS.isQolPausedForTab?.()) return;
+    // Manual export helper needs data readers, not normal chat/listing UI work.
+    if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1") return;
     if (laneState.slowRunning) {
       laneState.slowPending = true;
       return;
@@ -187,6 +189,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runFeatureStep("persona full backup button", !!settings.personaFullBackupEnabled || !!document.getElementById("ds-full-persona-backup"), () => DS.applyPersonaFullBackup?.());
       await runFeatureStep("profile export", !!settings.enableProfileExport || !!document.getElementById("ds-profile-export-button"), () => DS.applyProfileExport?.());
       await runFeatureStep("creator writing assistant", !!settings.enableCreatorWritingAssistant || !!document.querySelector(".ds-creator-writing-button"), () => DS.applyCreatorWritingAssistant?.());
+      await runFeatureStep("character token optimizer", !!settings.enableCharacterTokenOptimizer || !!document.getElementById("ds-character-token-optimizer-open"), () => DS.applyCharacterTokenOptimizer?.());
       await runFeatureStep("native rating helpers", !!settings.enableNativeRatingHelpers || !!document.getElementById("ds-native-rating-quick"), () => DS.applyNativeRatingHelpers?.());
       await runFeatureStep("saved lists overlay", !!settings.enableSavedListsOverlay || !!document.getElementById("ds-saved-lists-open"), () => DS.applySavedListsOverlay?.());
       await runFeatureStep("create panel", !!settings.showQuickPanel || !!document.getElementById("ds-qol-panel"), () => DS.createQuickPanel?.());
