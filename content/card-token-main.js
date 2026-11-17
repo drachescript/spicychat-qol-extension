@@ -765,6 +765,10 @@ if (!(() => { try {
     const requestId = clean(detail.requestId);
     const conversationId = clean(detail.conversationId).toLowerCase();
     const runId = clean(detail.runId);
+    const lastId = clean(detail.lastId).trim().toLowerCase();
+    const memoryUuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+    if (lastId && (!lastId.startsWith(conversationId + '.') ||
+        !memoryUuid.test(lastId.slice(conversationId.length + 1)))) return;
     if (!active || !nativeFetch || location.pathname !== '/chats' ||
         new URLSearchParams(location.search).get('ds-research-export') !== '1' ||
         !/^[a-z0-9-]{12,90}$/i.test(requestId) ||
@@ -774,14 +778,15 @@ if (!(() => { try {
       researchMemoryRun = runId;researchMemoryRequests.clear();
     }
     if (researchMemoryBusy) return sendResearchMemory({requestId,conversationId,ok:false,status:'already-reading'});
-    if ((researchMemoryRequests.get(conversationId)||0) >= 3)
+    // Each cursor is its own page. Keep three attempts per PAGE, rather than
+    // wrongly treating a conversation with >100 Memories as too many retries.
+    const retryKey = `${conversationId}|${lastId}`;
+    if ((researchMemoryRequests.get(retryKey)||0) >= 3)
       return sendResearchMemory({requestId,conversationId,ok:false,status:'memory-retry-limit'});
-    // Do not cap requests by the number of conversations: the user may
-    // explicitly export all bots. Keep the per-conversation retry limit,
-    // one-request-at-a-time guard, and minimum pacing interval instead.
+    // Keep the one-request-at-a-time guard and minimum pacing interval.
     if (Date.now() - lastResearchMemoryAt < 300)
       return sendResearchMemory({requestId,conversationId,ok:false,status:'rate-paced'});
-    researchMemoryBusy = true;researchMemoryRequests.set(conversationId, (researchMemoryRequests.get(conversationId)||0) + 1);
+    researchMemoryBusy = true;researchMemoryRequests.set(retryKey, (researchMemoryRequests.get(retryKey)||0) + 1);
     lastResearchMemoryAt = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
@@ -799,7 +804,9 @@ if (!(() => { try {
       if (appVersion) headers['x-app-version'] = appVersion;
       if (capturedCountry) headers['x-country'] = capturedCountry;
       if (isGuest(capturedGuest)) headers['x-guest-userid'] = capturedGuest;
-      const response = await nativeFetch(`https://prod.nd-api.com/conversations/${conversationId}/memories`, {
+      const memoryParams = new URLSearchParams({include_import_status:'true'});
+      if (lastId) memoryParams.set('last_id',lastId);
+      const response = await nativeFetch(`https://prod.nd-api.com/conversations/${conversationId}/memories?${memoryParams}`, {
         method:'GET',headers,credentials:'include',cache:'no-store',signal:controller.signal
       });
       if (response.status === 401) {capturedToken='';capturedAt=0;exposeCapturedAuthState();}

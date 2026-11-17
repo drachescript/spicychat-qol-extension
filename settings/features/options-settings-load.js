@@ -429,6 +429,7 @@ async function load() {
 
 
   setChecked("hideChatPlusButton", settings.hideChatPlusButton);
+  setChecked("hideNativeChatQuickFormatting", !!settings.hideNativeChatQuickFormatting);
   setChecked("hideChatImageButton", settings.hideChatImageButton);
   setChecked("replaceChatImageWithOocButton", !!settings.replaceChatImageWithOocButton);
   setChecked("showAsteriskButton", !!settings.showAsteriskButton);

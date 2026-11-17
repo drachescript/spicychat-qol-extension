@@ -1,3 +1,10 @@
+## 0.2.84
+- Kept SpicyChat's native chat header visible while typing by default, with an independent option to restore native hiding.
+- Added an option to hide SpicyChat's new * / quote formatting shortcut beside Send
+- Added more selective, balanced Context Keeper continuity capture
+- Added matching chat background opacity for user messages while keeping their original bubble color.
+- Added cloud sync storage estimates and clearer Blocked/Later sync status, including local and cloud list counts.
+
 ## 0.2.83
 - Added a one-line roleplay quality OOC command as the default preset.
 - Added Bulk Chat & Memory Research Export, including native Memories, multiple conversations per bot, resumable ZIP downloads, and a compact export window. Exports start at 50 bots, with no maximum.

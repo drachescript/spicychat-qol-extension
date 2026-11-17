@@ -912,10 +912,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
+  function applyNativeQuickFormattingVisibility(onChat, settings) {
+    const root = document.documentElement;
+    const hide = !!onChat && settings.hideNativeChatQuickFormatting === true;
+    if (hide) {
+      if (!document.getElementById("ds-native-chat-quick-format-style")) {
+        const style = document.createElement("style");
+        style.id = "ds-native-chat-quick-format-style";
+        style.textContent = `
+          html[data-ds-hide-native-chat-quick-format="1"]
+            [data-testid="ChatV2MessageBox-Controls"]
+            :is(button[data-testid="chat-quick-bar-folded-button"],
+                .chatV2QuickBar-folded, .chatV2QuickBar-expanded) {
+            display: none !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+      if (root.getAttribute("data-ds-hide-native-chat-quick-format") !== "1") {
+        root.setAttribute("data-ds-hide-native-chat-quick-format", "1");
+      }
+    } else if (root.hasAttribute("data-ds-hide-native-chat-quick-format")) {
+      root.removeAttribute("data-ds-hide-native-chat-quick-format");
+    }
+  }
+
   DS.applyChatUiCleanup =
     function applyChatUiCleanup() {
       const { settings } = DS.state;
       const onChat = !!settings.enabled && DS.isSingleChatPage();
+      applyNativeQuickFormattingVisibility(onChat, settings);
       installChatEnterBehavior();
       const stackedLayout = !!onChat && !!settings.stackChatMessages;
       if (stackedLayout) DS.setAttributeIfChanged?.(document.documentElement, "data-ds-chat-message-layout", "stacked");
@@ -925,6 +951,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const hasActiveCleanup = !!(
         settings.stackChatMessages ||
         settings.hideChatPlusButton ||
+        settings.hideNativeChatQuickFormatting ||
         settings.hideChatImageButton ||
         settings.replaceChatImageWithOocButton ||
         settings.showAsteriskButton ||

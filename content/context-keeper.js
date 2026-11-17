@@ -125,10 +125,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           storyPhase: ["morning", "afternoon", "evening", "night", "unknown"].includes(String(item?.storyPhase || "")) ? String(item.storyPhase) : "unknown",
           storydate: clean(item?.storydate || "").slice(0, 40)
         };
-        if (normalizedDetails.some(existing =>
-          !existing.supersededBy && !existing.supersedes?.length &&
-          !detail.supersededBy && !detail.supersedes.length &&
-          !possibleConflict(existing.text, detail.text) && isSimilarText(existing.text, detail.text))) continue;
+        // Reading saved data must not silently discard two similar but
+        // distinct story facts, revisions, manual notes or pinned details.
+        // Only remove an accidentally repeated identical record.
+        if (normalizedDetails.some(existing => existing.id === detail.id && existing.text === detail.text)) continue;
         normalizedDetails.push(detail);
       }
       output[String(chatId)] = {
@@ -358,6 +358,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return aWords.filter(word => bWords.has(word)).length >= 2;
   }
 
+  function isSafeDuplicateFact(a, b) {
+    const left = clean(a), right = clean(b);
+    if (!left || !right) return false;
+    if (left.toLowerCase() === right.toLowerCase()) return true;
+    if (possibleConflict(left, right)) return false;
+    // Even close wording can describe a real change over time. Preserve it
+    // for manual review rather than silently folding it into the old fact.
+    const changedState = /\b(?:no longer|used to|previously|formerly|now|afterwards|since then|became|stopped|started|changed|again)\b/i;
+    if (changedState.test(left) || changedState.test(right)) return false;
+    return isSimilarText(left, right);
+  }
+
   function possibleConflicts(details) {
     const current = (details || []).filter(row => row.enabled !== false && !row.needsReview && !row.supersededBy).slice(-150);
     const found = [];
@@ -434,16 +446,39 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .filter(Boolean);
   }
 
-  function scanRoots(messageRoots, minScore = 5, limit = 60) {
+  // Evidence-based quality gate for automatic extraction only. Native Memory
+  // research contains many useful scene observations, but a transient gesture,
+  // hypothetical or first-person quotation is not automatically a lasting fact.
+  // Never use this gate for manual saves or user-selected imported Memories.
+  function automaticCaptureQuality(text, category) {
+    const value = clean(text);
+    if (!value) return "skip";
+    if (/[?]$/.test(value) || /^(?:what|why|how|where|when|who|do|did|does|can|could|would|should|is|are)\b/i.test(value)) return "skip";
+    if (/\b(?:hypothetically|what if|as if|in (?:a|the) dream|might have|could have|would have)\b|^(?:if|imagine|suppose|perhaps|maybe)\b/i.test(value)) return "review";
+    const durable = hasPersistentCue(value) || /\b(?:discovered|escaped|rescued|reunited|confessed|betrayed|was killed|died|wedding|mission completed|learned|reconciled)\b/i.test(value);
+    const physical = /\b(?:blush(?:es|ed|ing)?|smirk(?:s|ed|ing)?|trembl(?:es|ed|ing)?|breath(?:es|ing)?|gasps?|heart(?:beat)?|gaze|eyes?|hands?|fingers?|lips?|leans?|nods?|whispers?|sighs?|kisses?|thighs?)\b/i.test(value);
+    if (physical && !durable) return "skip";
+    if (!durable && ["location", "state", "possession", "other"].includes(category)) return "review";
+    // Without explicit attribution, a first-person sentence can be either
+    // the bot speaking or a player action. Keep it for optional review only.
+    if (/^(?:["“'‘*\s]*)?(?:i|i'm|i’ve|i've|my|me)\b/i.test(value)) return "review";
+    return "keep";
+  }
+
+  function scanRoots(messageRoots, minScore = 5, limit = 60, automatic = false) {
     const candidates = [];
     for (const root of messageRoots || []) {
       for (const sentence of splitSentences(messageText(root))) {
         const score = scoreSentence(sentence);
         if (score < minScore) continue;
-        if (candidates.some(item => isSimilarText(item.text, sentence))) continue;
+        const category = categoryFor(sentence);
+        const quality = automatic ? automaticCaptureQuality(sentence, category) : "keep";
+        if (quality === "skip") continue;
+        if (candidates.some(item => isSafeDuplicateFact(item.text, sentence))) continue;
         candidates.push({
           text: sentence.slice(0, MAX_DETAIL),
-          category: categoryFor(sentence),
+          category,
+          needsReview: quality === "review",
           score,
           messageId: messageIdForRoot(root),
           role: messageRoleForRoot(root)
@@ -479,7 +514,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const auto = list.filter(detail => detail?.source === "auto");
     if (auto.length <= maxAutomatic) return list;
     const keepAutoIds = new Set([...auto]
-      .sort((a, b) => detailPriority(b) - detailPriority(a) || Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .sort((a, b) =>
+        Number(b.enabled !== false && !b.needsReview) - Number(a.enabled !== false && !a.needsReview) ||
+        detailPriority(b) - detailPriority(a) || Number(b.createdAt || 0) - Number(a.createdAt || 0))
       .slice(0, maxAutomatic)
       .map(detail => detail.id));
     return list.filter(detail => detail?.source !== "auto" || keepAutoIds.has(detail.id));
@@ -535,22 +572,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         revisions[id] = updated;
       }
       entry.revisions = Object.fromEntries(Object.entries(revisions).slice(-300));
-      const candidates = scanRoots(changedRoots, autoSensitivityThreshold(), 24);
+      const candidates = scanRoots(changedRoots, autoSensitivityThreshold(), 24, true);
       const story = DS.getStoryDaySnapshot?.() || null;
       let added = 0;
 
       for (const candidate of candidates) {
         const text = clean(candidate.text).slice(0, MAX_DETAIL);
-        if (!text || entry.details.some(detail => isSimilarText(detail.text, text))) continue;
+        if (!text || entry.details.some(detail => isSafeDuplicateFact(detail.text, text))) continue;
         entry.details.push({
           id: `detail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           text,
           category: normalizeCategory(candidate.category || categoryFor(text)),
           source: "auto",
           score: Number(candidate.score) || scoreSentence(text),
-          enabled: true,
+          enabled: !candidate.needsReview,
           pinned: false,
-          needsReview: false,
+          needsReview: candidate.needsReview === true,
           messageId: clean(candidate.messageId || "").slice(0, 160),
           role: clean(candidate.role || "").slice(0, 40),
           storyDay: Number(story?.day || 0),
@@ -617,7 +654,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (expectedChatId && id !== expectedChatId)
       throw new Error("Conversation changed while preparing to keep this message.");
     const entry = store[id] || { details: [], lastRecapAt: 0, lastRecapMessageCount: 0 };
-    if (entry.details.some(detail => isSimilarText(detail.text, value))) return false;
+    if (entry.details.some(detail => isSafeDuplicateFact(detail.text, value))) return false;
     entry.details.push({
       id: `detail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       text: value,
@@ -654,7 +691,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const item = value && typeof value === "object" ? value : { text: value };
       const text = clean(item.text).slice(0, MAX_DETAIL);
       if (!text) continue;
-      if (entry.details.some(detail => isSimilarText(detail.text, text))) {
+      if (entry.details.some(detail => isSafeDuplicateFact(detail.text, text))) {
         skipped++;
         continue;
       }
@@ -700,15 +737,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (detail.pinned) return 1000 + sourceBonus + Number(detail.score || 0);
     const categoryBonus = {
       identity: 6,
-      relationship: 6,
-      growth: 6,
+      relationship: 4,
+      growth: 8,
       npc: 4,
-      event: 5,
+      event: 8,
       rule: 6,
       history: 5,
       preference: 5,
       knowledge: 5,
-      plans: 5,
+      plans: 7,
       ability: 5,
       need: 6,
       possession: 3,
@@ -733,13 +770,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     );
 
     const selected = [];
+    const selectedIds = new Set();
+    const categoryCount = new Map();
     let chars = 0;
+    const canFit = (detail) => selected.length < limits.count &&
+      (!selected.length || chars + detail.text.length + 4 <= limits.chars);
+    const add = (detail) => {
+      selected.push(detail);
+      selectedIds.add(detail.id);
+      chars += detail.text.length + 4;
+      categoryCount.set(detail.category, (categoryCount.get(detail.category) || 0) + 1);
+    };
+    // First pass reserves space for distinct continuity dimensions. Already
+    // pinned facts are exempt; a second pass fills unused space so chats with
+    // only one category do not lose information.
+    const perCategory = mode === "compact" ? 2 : mode === "balanced" ? 3 : 6;
+    for (const detail of ranked) {
+      if (!canFit(detail)) continue;
+      const cap = ["state", "location", "possession"].includes(detail.category) ?
+        Math.max(1, perCategory - 1) : perCategory;
+      if (!detail.pinned && (categoryCount.get(detail.category) || 0) >= cap) continue;
+      add(detail);
+    }
     for (const detail of ranked) {
       if (selected.length >= limits.count) break;
-      const cost = detail.text.length + 4;
-      if (selected.length && chars + cost > limits.chars) continue;
-      selected.push(detail);
-      chars += cost;
+      if (!selectedIds.has(detail.id) && canFit(detail)) add(detail);
     }
     return selected.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
   }

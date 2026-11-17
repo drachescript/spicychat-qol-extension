@@ -219,6 +219,7 @@ function readSettingsFromPage() {
 
 
     hideChatPlusButton: checked("hideChatPlusButton"),
+    hideNativeChatQuickFormatting: checked("hideNativeChatQuickFormatting"),
     hideChatImageButton: checked("hideChatImageButton"),
     replaceChatImageWithOocButton: checked("replaceChatImageWithOocButton"),
     showAsteriskButton: checked("showAsteriskButton"),
@@ -727,6 +728,7 @@ function readSingleSettingFromPage(settingKey) {
 
 
     case "hideChatPlusButton": return (checked("hideChatPlusButton"));
+    case "hideNativeChatQuickFormatting": return (checked("hideNativeChatQuickFormatting"));
     case "hideChatImageButton": return (checked("hideChatImageButton"));
     case "replaceChatImageWithOocButton": return (checked("replaceChatImageWithOocButton"));
     case "showAsteriskButton": return (checked("showAsteriskButton"));

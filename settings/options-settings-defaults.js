@@ -154,6 +154,7 @@ const DEFAULT_SETTINGS = {
   topBarProfilePillPersonaPrefix: false,
 
   showChatTopBarTools: false,
+  keepChatHeaderVisibleWhileTyping: true,
   chatTopBarInlineCreator: false,
   chatTopBarAddLaterButton: false,
   closeChatTabAfterSavingLater: false,
@@ -591,6 +592,7 @@ const DEFAULT_SETTINGS = {
   personaQuickSwitchLimit: 6,
 
   hideChatPlusButton: false,
+  hideNativeChatQuickFormatting: false,
   hideChatImageButton: false,
   replaceChatImageWithOocButton: false,
   showAsteriskButton: false,

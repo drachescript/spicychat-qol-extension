@@ -11,7 +11,93 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   let cancelled = false, running = false;
   let log, startButton, scanButton, freshButton, cancelButton, limitInput, allBotsInput;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const jsonBytes = obj => encoder.encode(JSON.stringify(obj));
+  const phaseMs = Object.create(null);
+  function addPhase(name, milliseconds) { phaseMs[name] = (phaseMs[name] || 0) + milliseconds; }
+  function addWorkerMetrics(metrics) {
+    if (!metrics) return;
+    for (const [key, value] of Object.entries(metrics)) if (Number.isFinite(value)) addPhase(key, value);
+  }
+  async function measure(name, task) {
+    const start = performance.now();
+    try { return await task(); } finally { addPhase(name, performance.now() - start); }
+  }
+  // The worker is created only after the user starts an export and is terminated
+  // at the end; normal browsing pays zero worker/observer cost.
+  let archiveWorker = null, archiveWorkerPromise = null, archiveWorkerDisabled = false;
+  let archiveBackend = 'not-started';
+  let nextWorkerId = 0;
+  const workerRequests = new Map();
+  function stopArchiveWorker(reason = 'Archive worker stopped') {
+    if (archiveWorker) { archiveWorker.terminate(); archiveWorker = null; }
+    for (const request of workerRequests.values()) request.reject(Error(reason));
+    workerRequests.clear();
+    archiveWorkerPromise = null;
+  }
+  async function startArchiveWorker() {
+    if (archiveWorkerDisabled) return null;
+    if (archiveWorkerPromise) return archiveWorkerPromise;
+    archiveWorkerPromise = (async () => {
+      const url = chrome.runtime.getURL('content/bulk-chat-research-worker.js');
+      for (const strategy of ['extension', 'blob']) {
+        let blobUrl = null, worker = null;
+        try {
+          if (strategy === 'blob') {
+            const response = await fetch(url);
+            if (!response.ok) throw Error('Worker source unavailable');
+            blobUrl = URL.createObjectURL(new Blob([await response.text()], {type: 'text/javascript'}));
+          }
+          worker = new Worker(blobUrl || url);
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(Error('Worker start timed out')), 4000);
+            worker.onmessage = event => {
+              if (event.data?.type !== 'ds-research-worker-ready') return;
+              clearTimeout(timeout); resolve();
+            };
+            worker.onerror = error => {
+              clearTimeout(timeout); reject(Error(error?.message || 'Worker failed to load'));
+            };
+          });
+          archiveWorker = worker;
+          archiveBackend = strategy === 'extension' ? 'extension-worker' : 'blob-worker';
+          worker.onmessage = event => {
+            const {id, ok, result, error} = event.data || {};
+            const request = workerRequests.get(id);
+            if (!request) return;
+            workerRequests.delete(id);
+            if (ok) request.resolve(result);
+            else request.reject(Error(error || 'Research Archive worker failed'));
+          };
+          worker.onerror = error => stopArchiveWorker(error?.message || 'Archive worker failed');
+          return worker;
+        } catch (error) {
+          worker?.terminate();
+        } finally { if (blobUrl) URL.revokeObjectURL(blobUrl); }
+      }
+      archiveWorkerDisabled = true;
+      archiveBackend = 'cooperative-fallback';
+      return null;
+    })();
+    return archiveWorkerPromise;
+  }
+  async function callArchiveWorker(type, payload, transferable = []) {
+    const worker = await startArchiveWorker();
+    if (!worker) return null;
+    ensureNotCancelled();
+    const id = ++nextWorkerId;
+    return new Promise((resolve, reject) => {
+      workerRequests.set(id, {resolve, reject});
+      try { worker.postMessage({id, type, payload}, transferable); }
+      catch (error) {workerRequests.delete(id); reject(error);}
+    });
+  }
+  let displayedProgress = '', pendingProgress = '', progressTimer = null, lastProgressAt = 0;
+  function applyProgress(value) {
+    if (log && value !== displayedProgress) {
+      log.textContent = value;
+      displayedProgress = value;
+      lastProgressAt = performance.now();
+    }
+  }
   function safeRaw(value, depth = 0) {
     if (depth > 25) return '[depth-limit]';
     if (Array.isArray(value)) return value.map(v => safeRaw(v, depth + 1));
@@ -23,7 +109,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }
     return clean;
   }
-  function update(message) { if (log) log.textContent = message; }
+  function update(message) {
+    if (!log || message === displayedProgress || message === pendingProgress) return;
+    if (performance.now() - lastProgressAt >= 150) {
+      if (progressTimer) {clearTimeout(progressTimer); progressTimer = null;}
+      pendingProgress = '';
+      applyProgress(message);
+    } else {
+      pendingProgress = message;
+      if (!progressTimer) progressTimer = setTimeout(() => {
+        progressTimer = null;
+        const latest = pendingProgress;
+        pendingProgress = '';
+        applyProgress(latest);
+      }, 150);
+    }
+  }
   function ensureNotCancelled() { if (cancelled) throw new Error('cancelled'); }
   function openDb() {
     return new Promise((resolve, reject) => {
@@ -34,6 +135,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
   }
   async function withStore(method, data) {
+    const start = performance.now();
     const db = await openDb();
     try {
       return await new Promise((resolve, reject) => {
@@ -45,7 +147,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         tx.onerror = () => reject(tx.error || Error('Checkpoint failed'));
         if (method !== 'get') tx.onabort = () => reject(tx.error || Error('Checkpoint aborted'));
       });
-    } finally { db.close(); }
+    } finally { db.close(); addPhase(method === 'get' ? 'checkpointRead' : 'checkpointWrite', performance.now() - start); }
   }
   async function clearResearchCheckpoints() {
     // Only this research pilot's own IndexedDB records are cleared.
@@ -231,14 +333,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         header = safeRaw(Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'messages')));
         expected = Number(data?.num_messages ?? expected) || expected;
       }
-      for (const message of rows) {
+      const parseStart = performance.now();
+      for (let i = 0; i < rows.length; i++) {
+        const message = rows[i];
         const id = String(message?.id || '');
         if (!id) throw Error('A message has no ID; cannot safely verify its order');
         const clean = safeRaw(message);
         if (byId.has(id)) {
           if (JSON.stringify(byId.get(id)) !== JSON.stringify(clean)) throw Error('Conflicting message content under one ID');
         } else byId.set(id, clean);
+        if (i && i % 25 === 0) await sleep(0);
       }
+      addPhase('historyParsing', performance.now() - parseStart);
       pages++; first = false;
       const oldest = rows.at(-1);
       if (!rows.length || (oldest && Object.hasOwn(oldest, 'prev_id') && !oldest.prev_id) || rows.length < pageSize) {
@@ -274,59 +380,169 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     return new Set(history.messages.map(message => String(message?.id || ''))).size === retrieved &&
       history.messages.every(message => message && message.id);
   }
-  async function readMemories(entry) {
-    for (let n = 0; n < 3; n++) {
+  // SpicyChat Memory Manager V2 loads 50 Memories per page. The native
+  // "Load More Memories" control passes the last Memory's full ID as last_id.
+  // Old checkpoints with exactly 50 items cannot be considered complete.
+  const MEMORY_PAGE_SIZE = 50, MAX_MEMORY_PAGES = 1000;
+  const memoryUuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  function validMemoryCursor(id, conversationId) {
+    return typeof id === 'string' && id.startsWith(conversationId + '.') &&
+      memoryUuid.test(id.slice(conversationId.length + 1));
+  }
+  function memoryNeedsResume(memory) {
+    if (!memory || memory.status === 'unavailable') return true;
+    if (!['retrieved','empty-confirmed'].includes(memory.status)) return true;
+    if (memory.paginationComplete === true) return false;
+    // A legacy single-page result of 50 is ambiguous, even if verified.
+    return Array.isArray(memory.items) && memory.items.length >= MEMORY_PAGE_SIZE;
+  }
+  async function readMemories(entry, previous = null, onPage = null) {
+    const items = Array.isArray(previous?.items) ? safeRaw(previous.items) : [];
+    const seen = new Set(items.map(item => String(item?.id || '')));
+    let pages = Number.isInteger(previous?.pages) ? previous.pages :
+      (items.length ? Math.ceil(items.length / MEMORY_PAGE_SIZE) : 0);
+    let cursor = String(previous?.nextCursor || (items.length ? items.at(-1)?.id : '') || '').toLowerCase();
+    const failure = (reason,httpStatus=null) => ({status:'unavailable',reason,httpStatus,
+      items,pages,paginationComplete:false,nextCursor:cursor});
+    if (cursor && !validMemoryCursor(cursor,entry.conversationId))
+      return failure('invalid-memory-cursor');
+    const cursors = new Set();
+    while (pages < MAX_MEMORY_PAGES) {
       ensureNotCancelled();
-      const response = await DS.researchReadConversationMemories?.(entry.conversationId, runId);
-      if (!response?.ok) {
-        if (n < 2 && ['timeout','network-error','rate-limited','http-failed','request-error'].includes(response?.status)) {
-          await sleep(Math.max(1000, Math.min(12000, Number(response?.retryAfterMs) || (n + 1) * 1500)));
-          continue;
-        }
-        return { status: 'unavailable', reason: response?.status || 'memory-api-not-confirmed', httpStatus: response?.httpStatus || null, items: null };
+      let response = null;
+      for (let n = 0; n < 3; n++) {
+        ensureNotCancelled();
+        response = await DS.researchReadConversationMemories?.(entry.conversationId,runId,cursor);
+        if (response?.ok || n === 2 || !['timeout','network-error','rate-limited',
+            'http-failed','request-error','rate-paced','already-reading'].includes(response?.status)) break;
+        await sleep(Math.max(1000, Math.min(12000, Number(response?.retryAfterMs) || (n + 1) * 1500)));
       }
+      if (!response?.ok) return failure(response?.status || 'memory-api-not-confirmed',response?.httpStatus || null);
       if (response.conversationId !== entry.conversationId || !Array.isArray(response.memories))
-        return { status: 'unavailable', reason: 'unexpected-memory-response', items: null };
-      return { status: response.memories.length ? 'retrieved' : 'empty-confirmed', items: safeRaw(response.memories) };
+        return failure('unexpected-memory-response');
+      const parseStart = performance.now();
+      const page = safeRaw(response.memories);
+      addPhase('memoryParsing', performance.now() - parseStart);
+      pages++;
+      let added = 0;
+      for (const memory of page) {
+        const id = String(memory?.id || '');
+        if (!validMemoryCursor(id,entry.conversationId)) return failure('invalid-memory-id');
+        if (!seen.has(id)) {seen.add(id);items.push(memory);added++;}
+      }
+      if (page.length && !added) return failure('repeated-memory-page');
+      if (page.length < MEMORY_PAGE_SIZE) return {
+        status:items.length?'retrieved':'empty-confirmed',items,pages,paginationComplete:true,nextCursor:null};
+      const next = String(page.at(-1)?.id || '').toLowerCase();
+      if (!validMemoryCursor(next,entry.conversationId) || next===cursor || cursors.has(next))
+        return failure('repeated-memory-cursor');
+      cursors.add(next);cursor=next;
+      // Save progress after EACH full page, so cancellation or an API problem
+      // never loses previously downloaded older Memories.
+      if (onPage) await onPage(failure('memory-pagination-pending'));
+      update(`Loading older Memories · ${entry.botName || entry.conversationId} · ${items.length} saved (${pages} pages)...`);
+      await sleep(350); // Existing MAIN-world guard requires at least 300ms.
     }
-    return { status:'unavailable', reason:'memory-api-not-confirmed', items:null };
+    return failure('memory-page-safety-limit');
   }
+  // Cooperative legacy path, used only if the browser blocks worker creation.
   const crcTable = Array.from({length:256}, (_,n) => { let c=n; for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0; });
-  function crc32(bytes) { let c=0xffffffff; for (const b of bytes) c=crcTable[(c^b)&255]^(c>>>8); return (c^0xffffffff)>>>0; }
-  const u16=(v,o,n)=>v.setUint16(o,n&65535,true), u32=(v,o,n)=>v.setUint32(o,n>>>0,true);
-  async function zippedEntry(name, object) {
-    const original = jsonBytes(object), nameBytes = encoder.encode(name);
-    if (original.length > 32*1024*1024) throw Error('A single JSON chunk exceeds 32 MB; reduce message chunk size');
-    let data=original, method=0;
-    if (typeof CompressionStream === 'function') {
-      try { const stream = new Blob([original]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-        const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
-        if (compressed.length < original.length) { data=compressed; method=8; }
-      } catch {} // Stored ZIP files remain independently readable.
+  async function crc32Yield(bytes) {
+    let c=0xffffffff;
+    const start = performance.now();
+    for (let i=0; i<bytes.length; i+=131072) {
+      const stop=Math.min(i+131072,bytes.length);
+      for (let j=i;j<stop;j++) c=crcTable[(c^bytes[j])&255]^(c>>>8);
+      if (stop<bytes.length) {ensureNotCancelled(); await sleep(0);}
     }
-    return {name, nameBytes, data, size:original.length, crc:crc32(original), method};
+    addPhase('crc32', performance.now() - start);
+    return (c^0xffffffff)>>>0;
   }
-  function buildZip(entries) {
-    if (entries.length > 65534) throw Error('Too many files for this ZIP part');
-    const parts=[], central=[]; let offset=0, centralSize=0;
-    const date = new Date();const y=Math.max(1980,date.getFullYear());
+  const u16=(v,o,n)=>v.setUint16(o,n&65535,true), u32=(v,o,n)=>v.setUint32(o,n>>>0,true);
+  async function packSerializedFallback(name, json) {
+    const start=performance.now(), original=encoder.encode(json),nameBytes=encoder.encode(name);
+    addPhase('encoding',performance.now()-start);
+    if(original.length>32*1024*1024)throw Error('A single JSON chunk exceeds 32 MB; reduce message chunk size');
+    let data=original,method=0;
+    if(typeof CompressionStream==='function'){
+      const compressionStart=performance.now();
+      try{
+        const stream=new Blob([original]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+        const compressed=new Uint8Array(await new Response(stream).arrayBuffer());
+        if(compressed.length<original.length){data=compressed;method=8;}
+      }catch{} // Keep a valid stored ZIP entry if compression is unavailable.
+      addPhase('compression',performance.now()-compressionStart);
+    }
+    return {name,nameBytes,data,size:original.length,crc:await crc32Yield(original),method};
+  }
+  async function zippedEntry(name,object){
+    const packed=await callArchiveWorker('pack-json',{name,object});
+    if(packed){addWorkerMetrics(packed.metrics);return packed.entry;}
+    const start=performance.now(),serialized=JSON.stringify(object);
+    addPhase('serialization',performance.now()-start);
+    return packSerializedFallback(name,serialized);
+  }
+  async function zippedMessages(conversationId,messages,firstIndex){
+    const packed=await callArchiveWorker('pack-messages',{conversationId,messages,chunkIndex:firstIndex});
+    if(packed){addWorkerMetrics(packed.metrics);return packed;}
+    const result=[],prefix=`{"conversationId":${JSON.stringify(conversationId)},"order":"oldest-first","messages":[`;
+    let chunk=[],bytes=0,index=firstIndex;
+    const finish=async()=>{
+      if(!chunk.length && messages.length)return;
+      const name=`conversations/${conversationId}/messages-${String(index++).padStart(4,'0')}.json`;
+      result.push(await packSerializedFallback(name,prefix+chunk.join(',')+']}'));
+      chunk=[];bytes=0;
+    };
+    for(let i=0;i<messages.length;i++){
+      const start=performance.now(),json=JSON.stringify(messages[i]);
+      addPhase('serialization',performance.now()-start);
+      chunk.push(json);bytes+=encoder.encode(json).length;
+      if(chunk.length>=150||bytes>=2_000_000)await finish();
+      if(i && i%12===0){ensureNotCancelled();await sleep(0);}
+    }
+    if(chunk.length||!messages.length)await finish();
+    return {entries:result,nextChunkIndex:index};
+  }
+  async function buildZipFallback(entries){
+    if(entries.length>65534)throw Error('Too many files for this ZIP part');
+    const start=performance.now(),parts=[],central=[];
+    let offset=0,centralSize=0;
+    const date=new Date(),y=Math.max(1980,date.getFullYear());
     const dt=((y-1980)<<9)|((date.getMonth()+1)<<5)|date.getDate();
     const tm=(date.getHours()<<11)|(date.getMinutes()<<5)|Math.floor(date.getSeconds()/2);
-    for (const e of entries) {
-      const n=e.nameBytes.length, l=new Uint8Array(30+n),v=new DataView(l.buffer);
+    for(let i=0;i<entries.length;i++){
+      const e=entries[i],n=e.nameBytes.length,l=new Uint8Array(30+n),v=new DataView(l.buffer);
       u32(v,0,0x04034b50);u16(v,4,20);u16(v,6,0x800);u16(v,8,e.method);u16(v,10,tm);u16(v,12,dt);
       u32(v,14,e.crc);u32(v,18,e.data.length);u32(v,22,e.size);u16(v,26,n);l.set(e.nameBytes,30);
       parts.push(l,e.data);
-      const c=new Uint8Array(46+n), w=new DataView(c.buffer);
+      const c=new Uint8Array(46+n),w=new DataView(c.buffer);
       u32(w,0,0x02014b50);u16(w,4,20);u16(w,6,20);u16(w,8,0x800);u16(w,10,e.method);u16(w,12,tm);u16(w,14,dt);
       u32(w,16,e.crc);u32(w,20,e.data.length);u32(w,24,e.size);u16(w,28,n);u32(w,42,offset);c.set(e.nameBytes,46);
       central.push(c);offset+=l.length+e.data.length;centralSize+=c.length;
+      if(i && i%32===0){ensureNotCancelled();await sleep(0);}
     }
     const end=new Uint8Array(22),e=new DataView(end.buffer);
     u32(e,0,0x06054b50);u16(e,8,entries.length);u16(e,10,entries.length);u32(e,12,centralSize);u32(e,16,offset);
     const blob=new Blob([...parts,...central,end],{type:'application/zip'});
-    if (blob.size > MAX_ZIP_BYTES) throw Error('ZIP part exceeded 300 MB');
+    if(blob.size>MAX_ZIP_BYTES)throw Error('ZIP part exceeded 300 MB');
+    addPhase('zipAssembly',performance.now()-start);
     return blob;
+  }
+  async function archiveBlob(entries,partNumber,report){
+    // First check worker availability. If active, transfer the packed byte arrays
+    // rather than blocking the page with a large structured-clone copy.
+    if(await startArchiveWorker()){
+      ensureNotCancelled();
+      const transfers=entries.flatMap(e=>[e.nameBytes.buffer,e.data.buffer]);
+      const result=await callArchiveWorker('build-zip',{entries,partNumber,report},transfers);
+      if(!result)throw Error('Archive worker stopped while assembling a ZIP; Resume will rebuild from checkpoints');
+      addWorkerMetrics(result.metrics);
+      return result.blob;
+    }
+    const manifest={format:'ds-chat-memory-research-v1',generatedAt:new Date().toISOString(),
+      part:partNumber,selection:{botLimit:report.botSelection},safetyLimits:{compressedBytesPerPart:MAX_ZIP_BYTES},
+      summary:report,files:entries.map(e=>({path:e.name,bytes:e.size,compressedBytes:e.data.length,crc32:e.crc}))};
+    return buildZipFallback([await zippedEntry('manifest.json',manifest),...entries]);
   }
   function verifyRequest(filename,expectedBytes,after) {
     return new Promise(resolve => {
@@ -335,17 +551,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
   }
   async function downloadPart(entries, partNumber, report) {
-    const manifest = {format:'ds-chat-memory-research-v1',generatedAt:new Date().toISOString(),
-      part:partNumber,selection:{botLimit:report.botSelection},safetyLimits:{compressedBytesPerPart:MAX_ZIP_BYTES},
-      summary:report,files:entries.map(e=>({path:e.name,bytes:e.size,compressedBytes:e.data.length,crc32:e.crc}))};
-    const bundled=[await zippedEntry('manifest.json',manifest),...entries];
-    const blob=buildZip(bundled);
+    const blob=await archiveBlob(entries,partNumber,report);
     const filename=`spicychat-research-${runId}-part-${String(partNumber).padStart(3,'0')}.zip`;
     const after=Date.now();const url=URL.createObjectURL(blob);
     const a=document.createElement('a');a.download=filename;a.href=url;a.style.display='none';document.body.append(a);a.click();a.remove();
     let result={ok:false,status:'download-not-found'};
     for (let i=0;i<40;i++) {
-      await sleep(1000);result=await verifyRequest(filename,blob.size,after);
+      await sleep(1000);result=await measure('downloadVerification',()=>verifyRequest(filename,blob.size,after));
       if (result.ok || ['size-mismatch','download-verification-unavailable','downloads-permission-unavailable'].includes(result.status)) break;
     }
     setTimeout(()=>URL.revokeObjectURL(url),60000);
@@ -373,7 +585,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   async function run(limit, fresh = false) {
     runId = crypto.randomUUID().replaceAll('-', ''); // Fresh filenames on each export, even in the same helper tab.
-    running=true;cancelled=false;startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
+    running=true;cancelled=false;archiveWorkerDisabled=false;archiveBackend='not-started';for(const key of Object.keys(phaseMs))delete phaseMs[key];startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
     let selected=[],saved=0;const completed=new Map();let completeCount=0;const memoryStatusCounts={};
     try {
       if (!DS.state?.settings?.enabled || !DS.state?.settings?.showBulkChatResearchExport) throw Error('Enable Research Export in QoL Settings first.');
@@ -388,7 +600,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       const priorSelection = await withStore('get','__pilot_selection__');
       const selection = priorSelection?.mode==='per-bot-all-v2' && priorSelection?.limit===limit &&
         Array.isArray(priorSelection?.entries) && priorSelection?.discovery
-        ? priorSelection : await discoverSelection(limit);
+        ? priorSelection : await measure('discovery',()=>discoverSelection(limit));
       selected=selection.entries;
       if (!selected.length) throw Error('No conversations found.');
       update(selectionNote(selection));
@@ -403,7 +615,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           memoryFailures:failed,historyFailures:historyFailed,historyComplete:completeCount,
           memoryStatuses:{...memoryStatusCounts},
           incompleteConversations:[...new Set(staged.map(x=>x.conversationId))].filter(id=>{
-            const record=completed.get(id);return record && (!record.historyComplete||record.memoryStatus==='unavailable');
+            const record=completed.get(id);return record && (!record.historyComplete||record.memoryStatus==='unavailable'||!record.memoryComplete);
           })};
         update(`Saving and verifying archive part ${partNumber}...`);
         const info=await downloadPart(staged.map(x=>x.entry),partNumber,report);
@@ -414,7 +626,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           if (remaining > 0) continue; // No chat is complete until every part is verified.
           const row=completed.get(id);
           const old=await withStore('get',id);
-          if (old && row) await withStore('put',{...old,state:row.memoryStatus==='unavailable'||row.memoryStatus==='not-checked'||!row.historyComplete?'verified-incomplete':'verified',lastVerifiedPart:info.filename});
+          if (old && row) await withStore('put',{...old,state:row.memoryStatus==='unavailable'||row.memoryStatus==='not-checked'||!row.historyComplete||!row.memoryComplete?'verified-incomplete':'verified',lastVerifiedPart:info.filename});
         }
         saved++;staged.length=0;partNumber++;
       };
@@ -441,7 +653,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         let historyError = null;
         if (!checkpoint?.history?.complete) {
           try {
-            const history=await readHistory(entry);
+            const history=await measure('historyReadTotal',()=>readHistory(entry));
             checkpoint={conversationId:entry.conversationId,entry,history,state:'staged',at:Date.now()};
           } catch (error) {
             if (cancelled) throw error;
@@ -453,8 +665,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           }
           await withStore('put',checkpoint);
         }
-        if (!historyError && (!checkpoint.memory || checkpoint.memory.status==='unavailable')) {
-          const memory=await readMemories(entry);
+        if (!historyError && memoryNeedsResume(checkpoint.memory)) {
+          const memory=await measure('memoryReadTotal',()=>readMemories(entry, checkpoint.memory, async partial => {
+            checkpoint={...checkpoint,memory:partial,state:'staged',at:Date.now()};
+            await withStore('put',checkpoint);
+          }));
           checkpoint={...checkpoint,memory,state:'staged',at:Date.now()};
           await withStore('put',checkpoint);
         }
@@ -469,7 +684,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           failed++;
           if (['auth-unavailable','auth-rejected','access-denied','unexpected-memory-format','invalid-json','not-enabled'].includes(memory.reason)) memoryAuthFailures++;
         }
-        completed.set(entry.conversationId,{conversationId:entry.conversationId,historyComplete:history.complete,memoryStatus:memory.status});
+        completed.set(entry.conversationId,{conversationId:entry.conversationId,historyComplete:history.complete,memoryStatus:memory.status,memoryComplete:!memoryNeedsResume(memory)});
         if (history.complete) completeCount++;
         memoryStatusCounts[memory.status]=(memoryStatusCounts[memory.status]||0)+1;
         // Keep unedited JSON and original message fields, including exact Markdown and timestamps.
@@ -477,21 +692,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/conversation.json`,{
           conversation:entry,history:{expected:history.expected,retrieved:history.messages.length,pages:history.pages,
             complete:history.complete,error:history.error,countWarning:history.countWarning||null,apiMetadata:history.header},
-          memoryStatus:memory.status,memoryError:memory.reason||null}));
+          memoryStatus:memory.status,memoryError:memory.reason||null,
+          memoryPaginationComplete:!memoryNeedsResume(memory)}));
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/memories.json`,{conversationId:entry.conversationId,
           source:'spicychat-native-memories',status:memory.status,reason:memory.reason||null,httpStatus:memory.httpStatus||null,
+          paginationComplete:!memoryNeedsResume(memory),pages:memory.pages|| (Array.isArray(memory.items)&&memory.items.length ? 1 : 0),
           memories:memory.items}));
-        let chunk=[],chunkBytes=0,chunkIndex=1;
-        for(const message of history.messages) {
-          chunk.push(message);chunkBytes+=jsonBytes(message).length;
-          if(chunk.length>=150 || chunkBytes>=2_000_000) {
-            fileList.push(await zippedEntry(`conversations/${entry.conversationId}/messages-${String(chunkIndex++).padStart(4,'0')}.json`,{
-              conversationId:entry.conversationId,order:'oldest-first',messages:chunk}));
-            chunk=[];chunkBytes=0;
-          }
+        let chunkIndex=1;
+        // Bound each worker handoff to 150 messages (or less). The worker
+        // serializes each message once, and can split earlier for 2 MB chunks.
+        for(let offset=0;offset<history.messages.length;offset+=150){
+          ensureNotCancelled();
+          const batch=history.messages.slice(offset,offset+150);
+          const packed=await zippedMessages(entry.conversationId,batch,chunkIndex);
+          chunkIndex=packed.nextChunkIndex;
+          fileList.push(...packed.entries);
+          await sleep(0);
         }
-        if(chunk.length || !history.messages.length) fileList.push(await zippedEntry(`conversations/${entry.conversationId}/messages-${String(chunkIndex).padStart(4,'0')}.json`,{
-          conversationId:entry.conversationId,order:'oldest-first',messages:chunk}));
+        if(!history.messages.length){
+          const packed=await zippedMessages(entry.conversationId,[],chunkIndex);
+          fileList.push(...packed.entries);
+        }
         remainingFiles.set(entry.conversationId, fileList.length);
         for (const file of fileList) {
           const projected=file.data.length+file.nameBytes.length+250;
@@ -514,7 +735,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     } catch (error) {
       update(error?.message==='cancelled' ? `Stopped. ${saved} archive parts verified; completed conversations remain locally checkpointed.` :
         `Stopped: ${error?.message||error}. ${saved} archive parts verified. Local checkpoints are preserved for Resume.`);
-    } finally {running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;cancelButton.disabled=true;setLimitDisabled(false);}
+    } finally {
+      stopArchiveWorker();
+      if (progressTimer) {clearTimeout(progressTimer); progressTimer=null;}
+      if (pendingProgress) {applyProgress(pendingProgress);pendingProgress='';}
+      console.info('[DragonScript Research Export] Archive backend:',archiveBackend,'Phase timings (ms; API phases include network pacing):', {...phaseMs});
+      running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;cancelButton.disabled=true;setLimitDisabled(false);
+    }
   }
   function setLimitDisabled(busy) {
     limitInput.disabled = busy || allBotsInput.checked;
@@ -559,7 +786,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     startButton.addEventListener('click',()=>launch('export'));
     scanButton.addEventListener('click',()=>launch('scan'));
     freshButton.addEventListener('click',()=>launch('export',true));
-    cancelButton.addEventListener('click',()=>{cancelled=true;cancelButton.disabled=true;update('Finishing the current request, then stopping...');});
+    cancelButton.addEventListener('click',()=>{cancelled=true;cancelButton.disabled=true;stopArchiveWorker('cancelled');update('Stopping export; local checkpoints are preserved...');});
     close.addEventListener('click',()=>{if(running){update('Cancel the export before closing.');return;}panel.remove();});
     document.documentElement.append(panel);
   }

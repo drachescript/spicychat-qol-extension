@@ -1172,6 +1172,92 @@
     return { ok: true, prefs: next };
   }
 
+  // Manual, read-only audit. It returns counts/sizes ONLY; never exposes
+  // saved settings, list members, credentials, or raw cloud payloads to Settings.
+  // The byte count is the current serialized value payload, not billed D1/KV
+  // storage usage or any historical sync log maintained by the server.
+  async function inspectCloudStorage() {
+    const { state, auth, prefs } = await getSyncContext();
+    if (!state.accountId || !auth.token) return { ok: false, error: "not_linked", message: "Link this device before checking cloud storage." };
+    const values = new Map();
+    let cursor = 0;
+    let revision = 0;
+    let pages = 0;
+    let complete = false;
+    try {
+      for (; pages < 40; pages++) {
+        const result = await api(`/v1/sync?since=${encodeURIComponent(cursor)}`, { token: auth.token });
+        for (const [key, value] of Object.entries(result.changes || {})) values.set(key, value);
+        for (const key of result.deletedKeys || []) values.delete(key);
+        revision = Math.max(revision, Number(result.revision || 0));
+        if (!result.hasMore) { complete = true; pages++; break; }
+        const next = Number(result.maxReturnedRevision || 0);
+        if (!Number.isFinite(next) || next <= cursor) throw new Error("Cloud audit pagination did not advance. No storage estimate was produced.");
+        cursor = next;
+      }
+      if (!complete) throw new Error("Cloud audit exceeded the safe 40-page limit. No partial estimate was reported.");
+      const encoder = new TextEncoder();
+      const byteSize = text => encoder.encode(text).byteLength;
+      const lists = {};
+      for (const scope of LIST_NAMES) lists[scope] = { cloudParts: 0, recordedOperations: 0, active: 0, removals: 0, devices: 0, payloadBytes: 0 };
+      const best = Object.fromEntries(LIST_NAMES.map(name => [name, new Map()]));
+      const devices = Object.fromEntries(LIST_NAMES.map(name => [name, new Set()]));
+      let payloadBytes = 0;
+      let settingCount = 0;
+      let settingBytes = 0;
+      let otherKeys = 0;
+      for (const [key, value] of values) {
+        const bytes = byteSize(JSON.stringify(key) + ":" + JSON.stringify(value));
+        payloadBytes += bytes;
+        const parsed = parseListDataKey(key);
+        if (!parsed) {
+          if (key.startsWith(LIST_DATA_PREFIX)) otherKeys++;
+          else { settingCount++; settingBytes += bytes; }
+          continue;
+        }
+        const summary = lists[parsed.scope];
+        summary.cloudParts++;
+        summary.payloadBytes += bytes;
+        devices[parsed.scope].add(parsed.device);
+        if (!Array.isArray(value?.entries)) continue;
+        for (const entry of value.entries) {
+          if (!Array.isArray(entry) || !validListMember(entry[0])) continue;
+          const id = String(entry[0]);
+          if (id.startsWith("name:") && parsed.scope !== "blockedBots") continue;
+          const op = [Number(entry[1]) || 0, Number(entry[2]) === 1 ? 1 : 0];
+          summary.recordedOperations++;
+          best[parsed.scope].set(id, chooseListOp(best[parsed.scope].get(id), op));
+        }
+      }
+      const localLedger = await readListLedger();
+      const localInfo = await storageGet(LIST_NAMES.map(name => LIST_SOURCES[name].storage));
+      let pendingParts = 0;
+      for (const scope of LIST_NAMES) {
+        const summary = lists[scope];
+        summary.devices = devices[scope].size;
+        const operations = [...best[scope].values()];
+        summary.active = operations.filter(op => Number(op[1]) === 1).length;
+        summary.removals = operations.length - summary.active;
+        summary.local = listIds(localInfo[LIST_SOURCES[scope].storage], scope).length;
+        summary.direction = prefs.listModes[scope] || "off";
+        summary.pendingParts = new Set(localLedger.dirty[scope] || []).size;
+        pendingParts += summary.pendingParts;
+      }
+      return {
+        ok: true, revision, pages, keyCount: values.size,
+        settingCount, settingBytes, listPayloadBytes: payloadBytes - settingBytes,
+        estimatedPayloadBytes: payloadBytes, otherKeys,
+        localLedgerBytes: byteSize(JSON.stringify(localLedger)),
+        pendingParts, lists,
+        at: now(),
+        estimateOnly: true
+      };
+    } catch (error) {
+      // A failed diagnostic must NOT alter sync state, sync cursors, lists, or alarms.
+      return { ok: false, error: "cloud_audit_failed", message: safeErrorMessage(error) };
+    }
+  }
+
   async function status() {
     const { state, auth, prefs } = await getSyncContext();
     return {
@@ -1287,6 +1373,7 @@
     const run = async () => {
       switch (type) {
         case "DS_QOL_SYNC_STATUS": return status();
+        case "DS_QOL_SYNC_INSPECT_CLOUD": return queued(() => inspectCloudStorage());
         case "DS_QOL_SYNC_CREATE_ACCOUNT": return queued(() => createAccount(message.meta || {}));
         case "DS_QOL_SYNC_LINK_ACCOUNT": return queued(() => linkAccount(message.code, message.meta || {}, message.initialOptions || {}));
         case "DS_QOL_SYNC_CREATE_LINK_CODE": return queued(() => createLinkCode());

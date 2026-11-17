@@ -184,6 +184,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     topBarProfilePillPersonaPrefix: false,
 
     showChatTopBarTools: false,
+    keepChatHeaderVisibleWhileTyping: true,
     chatTopBarInlineCreator: false,
     chatTopBarAddLaterButton: false,
     closeChatTabAfterSavingLater: false,
@@ -584,6 +585,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     personaQuickSwitchLimit: 6,
 
     hideChatPlusButton: false,
+    hideNativeChatQuickFormatting: false,
     hideChatImageButton: false,
     replaceChatImageWithOocButton: false,
     showAsteriskButton: false,

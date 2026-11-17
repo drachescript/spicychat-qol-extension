@@ -1223,8 +1223,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   // Research-only native Memory reader. Uses the captured MAIN-world session
   // already serving Chat Export, without weakening the statistics-only probe.
-  DS.researchReadConversationMemories = async (conversationId, runId) => {
+  DS.researchReadConversationMemories = async (conversationId, runId, lastId = '') => {
     const id = String(conversationId || '').toLowerCase();
+    const cursor = String(lastId || '').trim().toLowerCase();
+    const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+    if (cursor && (!cursor.startsWith(id + '.') || !uuid.test(cursor.slice(id.length + 1))))
+      return {ok:false,status:'invalid-memory-cursor'};
     if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id) ||
         location.pathname !== '/chats' ||
         new URLSearchParams(location.search).get('ds-research-export') !== '1')
@@ -1249,7 +1253,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       };
       const timer=setTimeout(()=>finish({ok:false,status:'timeout'}),22500);
       window.addEventListener(responseEvent,onResponse);
-      try {window.dispatchEvent(new CustomEvent(requestEvent,{detail:{requestId,conversationId:id,runId}}));}
+      try {window.dispatchEvent(new CustomEvent(requestEvent,{detail:{requestId,conversationId:id,runId,lastId:cursor}}));}
       catch {finish({ok:false,status:'bridge-dispatch-failure'});}
     });
   };

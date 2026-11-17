@@ -1056,6 +1056,7 @@ Testing"></textarea></label>
 <section class="card">
 <h2>Composer and draft helpers</h2>
 <label class="row"><input id="hideChatPlusButton" type="checkbox"/><span>Hide plus button in chat input</span></label>
+<label class="row"><input id="hideNativeChatQuickFormatting" type="checkbox"/><span>Hide SpicyChat's formatting shortcut beside Send (* / &quot;)</span></label>
 <label class="row"><input id="hideChatImageButton" type="checkbox"/><span>Hide image generation button</span></label>
 <label class="row"><input id="replaceChatImageWithOocButton" type="checkbox"/><span>Show OOC button in the chat input</span></label>
 <p class="hint">The OOC button inserts your selected preset. With one preset it inserts directly; with several you choose one.</p>
@@ -1722,11 +1723,19 @@ step sister" spellcheck="false"></textarea></label>
 <div class="sub-card" id="accountSyncLinked" hidden>
 <h3>Automatic sync</h3>
 <div class="account-sync-grid account-sync-grid-small">
-<div class="account-sync-stat"><strong id="accountSyncRevision">0</strong><span>Cloud revision</span></div>
+<div class="account-sync-stat"><strong id="accountSyncRevision">0</strong><span>Cloud change number (not backups)</span></div>
 <div class="account-sync-stat"><strong id="accountSyncLastSync">Never</strong><span>Last successful sync</span></div>
 </div>
 <div class="button-row"><button id="accountSyncNow" type="button">Sync now</button><button id="accountSyncPause" type="button">Pause sync</button><button id="accountSyncCreateLinkCode" type="button">Link another device</button></div>
 <p id="accountSyncReceipt" class="hint" role="status" aria-live="polite">No completed sync receipt yet.</p>
+<div class="sub-card" id="accountSyncCloudAuditCard">
+<h3>Sync coverage &amp; cloud storage</h3>
+<p id="accountSyncLiveDirections" class="hint" role="status">Checking this device's saved sync directions…</p>
+<p id="accountSyncLiveReceipt" class="hint">The last sync receipt only confirms this device, not linked devices.</p>
+<div class="button-row"><button id="accountSyncInspectCloud" type="button">Check cloud space &amp; saved lists</button></div>
+<div id="accountSyncCloudAuditResults" class="hint" role="status">Cloud usage hasn't been checked. This manual check only reads cloud data; it doesn't upload, delete, unblock, or change sync settings.</div>
+<p class="hint">Cloud change numbers are not backup counts. The check estimates the size of current JSON values, not your Cloudflare bill or server-side history. No cloud cleanup is run automatically; saved-list journals include important removals.</p>
+</div>
 <div class="sub-card" id="accountSyncDevicePreferences">
 <h3>What this device syncs</h3>
 <p class="hint">Choose sync directions per device. For example, sync blocked IDs on mobile without syncing all desktop settings.</p>
@@ -1763,7 +1772,7 @@ step sister" spellcheck="false"></textarea></label>
 <div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>
 </div>
 <div class="sub-card" id="accountSyncDevicesCard">
-<div class="account-sync-section-head"><div><h3>Linked devices</h3><p class="hint">Other linked devices can be revoked here. The current browser can be disconnected locally without deleting its settings.</p></div><button id="accountSyncRefreshDevices" type="button">Refresh</button></div>
+<div class="account-sync-section-head"><div><h3>Linked devices</h3><p class="hint">Other linked devices can be revoked here. Last seen is not proof that a device downloaded the latest lists. The current browser can be disconnected locally without deleting its settings.</p></div><button id="accountSyncRefreshDevices" type="button">Refresh</button></div>
 <div id="accountSyncDevices"><p class="hint">Link an account to see devices.</p></div>
 <div class="button-row"><button id="accountSyncDisconnectLocal" type="button">Disconnect this browser</button></div>
 </div>
