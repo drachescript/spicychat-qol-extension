@@ -202,6 +202,7 @@
       "files": [
         "content/chat-list.js",
         "content/bulk-chat-research.js",
+        "content/bulk-chat-research-worker.js",
         "content/chat-organizer.js",
         "content/chat-tags.js",
         "content/opened-chats.js",
