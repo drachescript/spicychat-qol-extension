@@ -1052,6 +1052,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (/^blocked bot(?: id)?:/.test(value) || /^blocked lorebook id:/.test(value)) return "blockedBotRejected";
     if (/^blocked creator:/.test(value) || /^blocked lorebook creator:/.test(value)) return "blockedCreatorRejected";
     if (/^blocked word:/.test(value) || /^blocked lorebook word:/.test(value)) return "blockedWordRejected";
+    if (/^community theme:/.test(value)) return "archiveThemeRejected";
     if (/^blocked tag:/.test(value) || /^blocked lorebook tag:/.test(value) || /excluded tag|missing included tag/.test(value)) return "blockedTagRejected";
     if (/^language:/.test(value)) return "languageRejected";
     if (/opened chat/.test(value)) return "openedRejected";
@@ -1078,7 +1079,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function liveListingFilterCounts() {
     const out = {
       total: 0, blockedBotRejected: 0, blockedCreatorRejected: 0, blockedWordRejected: 0,
-      blockedTagRejected: 0, languageRejected: 0, openedRejected: 0, laterRejected: 0,
+      blockedTagRejected: 0, archiveThemeRejected: 0, languageRejected: 0, openedRejected: 0, laterRejected: 0,
       notInterestedRejected: 0, smartFilterRejected: 0, otherRejected: 0
     };
     const seen = new Set();
@@ -1135,6 +1136,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const bots = sum("blockedBotRejected");
       const creators = sum("blockedCreatorRejected");
       const tagsWords = sum("blockedTagRejected") + sum("blockedWordRejected");
+      const archiveThemes = sum("archiveThemeRejected");
       const language = sum("languageRejected");
       const savedOpened = sum("openedRejected") + sum("laterRejected") + sum("notInterestedRejected");
       const smartOther = sum("smartFilterRejected") + sum("otherRejected");
@@ -1142,6 +1144,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         bots ? `${bots} blocked ${lorebooks ? `Lorebook${bots === 1 ? "" : "s"}` : `bot${bots === 1 ? "" : "s"}`}` : "",
         creators ? `${creators} creator${creators === 1 ? "" : "s"}` : "",
         tagsWords ? `${tagsWords} tag/word` : "",
+        archiveThemes ? `${archiveThemes} Archive theme${archiveThemes === 1 ? "" : "s"}` : "",
         language ? `${language} language` : "",
         savedOpened ? `${savedOpened} opened/saved` : "",
         smartOther ? `${smartOther} other` : ""
@@ -1149,7 +1152,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (parts.length) text += ` (${parts.join(", ")})`;
     }
     if (badge.textContent !== text) badge.textContent = text;
-    badge.title = "QoL-hidden cards currently on this listing plus Listing Refill candidates rejected before insertion.";
+    const archiveReasons = [];
+    if (DS.state?.settings?.archiveCommunityThemesEnabled && live.archiveThemeRejected) {
+      for (const target of document.querySelectorAll('[data-ds-reason^="card:community theme:"]')) {
+        const value = String(target.dataset?.dsReason || '').replace(/^card:community theme:/, '').trim();
+        if (value && !archiveReasons.includes(value)) archiveReasons.push(value);
+        if (archiveReasons.length >= 8) break;
+      }
+    }
+    const tooltip = "QoL-hidden cards currently on this listing plus Listing Refill candidates rejected before insertion." +
+      (archiveReasons.length ? `\nArchive evidence (reviewed/candidate labels are not interchangeable):\n${archiveReasons.join('\n')}` : "");
+    if (badge.title !== tooltip) badge.title = tooltip;
   }
 
   DS.updateListingFilterStats = updateListingFilterStats;

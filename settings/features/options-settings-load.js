@@ -605,6 +605,11 @@ async function load() {
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
   setChecked("autoBlockTagMatches", !!settings.autoBlockTagMatches);
   setChecked("filterImpliedBlockedTags", !!settings.filterImpliedBlockedTags);
+  setChecked("archiveCommunityThemesEnabled", !!settings.archiveCommunityThemesEnabled);
+  setValue("archiveCommunityThemesMode", settings.archiveCommunityThemesMode === "candidates" ? "candidates" : "reviewed");
+  setChecked("archiveCommunityThemesRiskWarnings", !!settings.archiveCommunityThemesRiskWarnings);
+  setValue("archiveCommunityThemesExtraTags", settings.archiveCommunityThemesExtraTags || "");
+  setValue("archiveCommunityThemesAllowIds", settings.archiveCommunityThemesAllowIds || "");
   setChecked("hideGroupChats", settings.hideGroupChats);
   setChecked("publicPersonalityOnly", !!settings.publicPersonalityOnly);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);

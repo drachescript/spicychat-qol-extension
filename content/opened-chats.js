@@ -502,6 +502,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.importVisibleOpenedChats = async function importVisibleOpenedChats(options = {}) {
+    if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1")
+      return { added: 0, visible: 0, skipped: "dedicated-research-export" };
     const { settings, openedChats } = DS.state;
     const force = options === true || options?.force === true;
 

@@ -21,11 +21,14 @@ import argparse
 import json
 import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'build'))
+from background_imports import parse_background_imports
 DIST = ROOT / "dist"
 BUILD_DIR = ROOT / "build"
 MODULES_PATH = BUILD_DIR / "modules.json"
@@ -308,14 +311,10 @@ def background_script_imports() -> list[str]:
     calls importScripts, which is worker-only. Load its dependencies in order.
     """
     entry = (ROOT / "background-entry.js").read_text(encoding="utf-8-sig")
-    match = re.search(r"\bimportScripts\s*\(([^;]*)\)", entry, flags=re.S)
-    if match is None:
-        raise SystemExit("background-entry.js has no static importScripts list")
-    imports = re.findall(r"[\"']([^\"']+\.js)[\"']", match.group(1))
-    if not imports:
-        raise SystemExit("background-entry.js has no JavaScript imports")
-    if len(imports) != len(set(imports)):
-        raise SystemExit("background-entry.js contains duplicate imports")
+    try:
+        imports = parse_background_imports(entry)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     if imports.count("background.js") != 1:
         raise SystemExit("background-entry.js must import background.js exactly once")
     if imports.count("background/background-events.js") != 1 or imports[-1] != "background/background-events.js":

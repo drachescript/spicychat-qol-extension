@@ -10,9 +10,109 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   let runId = crypto.randomUUID().replaceAll('-', '');
   let cancelled = false, running = false;
   let log, startButton, scanButton, freshButton, cancelButton, limitInput, allBotsInput, characterRetryInput;
+  let progressTitle, progressMeter, progressEta, progressDetail, progressState = null;
+  let lastProgressRenderAt = -Infinity;
+  let phaseTimingsLabel = null;
+  const PROGRESS_LABELS = Object.freeze({
+    discover: 'Find recent bots', conversations: 'Check additional conversations',
+    export: 'Read chats, Memories and character metadata'
+  });
+  const progressOrder = mode => mode === 'scan' ? ['discover','conversations'] : ['discover','conversations','export'];
+  function progressBegin(mode) {
+    progressState = {mode, stage:'discover', count:0, total:null, lastAt:performance.now(),
+      averageMs:0, samples:0, detail:'Starting…', done:false};
+    renderProgress(true);
+  }
+  function progressStage(stage, total = null, detail = '') {
+    if (!progressState) return;
+    const state=progressState;
+    if (state.stage!==stage) {
+      state.stage=stage; state.count=0; state.samples=0; state.averageMs=0;
+    }
+    state.total=Number.isFinite(total) && total>0 ? total : null;
+    state.lastAt=performance.now(); state.detail=detail;
+    renderProgress(true);
+  }
+  function progressTick(completed, total = null, detail = '') {
+    const state=progressState;
+    if (!state || state.done) return;
+    const now=performance.now();
+    const amount=Math.max(0, Math.floor(Number(completed)||0));
+    if (amount>state.count) {
+      const delta=now-state.lastAt, units=amount-state.count;
+      const each=delta/units;
+      // Ignore impossible clock jumps, but include network latency and API
+      // pacing: those are real elapsed time for an ETA, not CPU cost.
+      if (delta>=0 && each>=0 && each<300000) {
+        state.averageMs=state.samples ? state.averageMs*0.75+each*0.25 : each;
+        state.samples+=units;
+      }
+      state.lastAt=now;
+    }
+    state.count=amount;
+    if (Number.isFinite(total) && total>0) state.total=total;
+    if (detail) state.detail=detail;
+    renderProgress();
+  }
+  function formatDuration(milliseconds) {
+    let seconds=Math.max(0,Math.round(milliseconds/1000));
+    if (!Number.isFinite(seconds)) return 'unknown';
+    if (seconds<60) return `${seconds}s`;
+    const minutes=Math.floor(seconds/60);seconds%=60;
+    if (minutes<60) return `${minutes}m ${seconds}s`;
+    const hours=Math.floor(minutes/60),remain=minutes%60;
+    return `${hours}h ${remain}m`;
+  }
+  function renderProgress(force = false) {
+    if (!progressTitle || !progressState) return;
+    const now=performance.now();
+    // One paint per ~750 ms during a long scan, with immediate stage/finish
+    // changes. This is event-driven; no permanent timer or observer is added.
+    if (!force && now-lastProgressRenderAt < 750) return;
+    lastProgressRenderAt=now;
+    const setText=(node,text)=>{ if (node.textContent!==text) node.textContent=text; };
+    const state=progressState, steps=progressOrder(state.mode), step=Math.max(0,steps.indexOf(state.stage))+1;
+    const total=state.total, count=state.count;
+    setText(progressTitle,state.done ? 'Complete' : `Step ${step}/${steps.length} · ${PROGRESS_LABELS[state.stage]}`);
+    const percent=Math.round((total ? Math.min(1,count/total) : 0)*100);
+    if (progressMeter.style.width!==`${percent}%`) progressMeter.style.width=`${percent}%`;
+    const track=progressMeter.parentElement;
+    if(track?.getAttribute('aria-valuenow')!==String(percent))track?.setAttribute('aria-valuenow',String(percent));
+    setText(progressDetail,state.detail || (total ? `${count}/${total}` : `${count} bots`));
+    setText(progressEta,state.done ? 'Finished' : !total ? 'ETA: waiting for total count' :
+      count>=total ? 'Step complete' : state.samples<3 || !(state.averageMs>0) ?
+      'ETA: calculating from completed items…' :
+      `ETA for this step: ~${formatDuration((total-count)*state.averageMs)} (estimate)`);
+  }
+  function progressFinish() {
+    if (!progressState) return;
+    progressState.done=true; progressState.detail='All requested work finished';
+    progressState.count=progressState.total || progressState.count;
+    renderProgress(true);
+  }
+  function progressStop(reason) {
+    if (!progressState || progressState.done) return;
+    progressState.done=true;
+    renderProgress(true);
+    if (progressTitle && progressTitle.textContent!==(reason || 'Stopped')) progressTitle.textContent=reason || 'Stopped';
+    if (progressEta && progressEta.textContent!=='ETA unavailable · saved checkpoints preserved') progressEta.textContent='ETA unavailable · saved checkpoints preserved';
+  }
+
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const phaseMs = Object.create(null);
-  function addPhase(name, milliseconds) { phaseMs[name] = (phaseMs[name] || 0) + milliseconds; }
+  function addPhase(name, milliseconds) { if (Number.isFinite(milliseconds)) phaseMs[name] = (phaseMs[name] || 0) + milliseconds; }
+  function phaseTimingsSummary() {
+    // Explicit wall time: API phases include network pacing, not just CPU.
+    return Object.entries(phaseMs).filter(([,ms])=>Number.isFinite(ms) && ms>=1)
+      .sort((a,b)=>b[1]-a[1]).slice(0,9)
+      .map(([key,ms])=>`${key}: ${(ms/1000).toFixed(2)}s`).join(' · ');
+  }
+  function renderPhaseTimings() {
+    if (!phaseTimingsLabel) return;
+    const text=phaseTimingsSummary();
+    const next=text ? `Measured phase wall time (includes waits): ${text}` : 'Phase timings appear after export work completes';
+    if (phaseTimingsLabel.textContent!==next) phaseTimingsLabel.textContent=next;
+  }
   function addWorkerMetrics(metrics) {
     if (!metrics) return;
     for (const [key, value] of Object.entries(metrics)) if (Number.isFinite(value)) addPhase(key, value);
@@ -91,6 +191,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
   }
   let displayedProgress = '', pendingProgress = '', progressTimer = null, lastProgressAt = 0;
+  const STATUS_PAINT_INTERVAL_MS = 850;
   function applyProgress(value) {
     if (log && value !== displayedProgress) {
       log.textContent = value;
@@ -111,7 +212,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function update(message) {
     if (!log || message === displayedProgress || message === pendingProgress) return;
-    if (performance.now() - lastProgressAt >= 150) {
+    if (performance.now() - lastProgressAt >= STATUS_PAINT_INTERVAL_MS) {
       if (progressTimer) {clearTimeout(progressTimer); progressTimer = null;}
       pendingProgress = '';
       applyProgress(message);
@@ -122,7 +223,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         const latest = pendingProgress;
         pendingProgress = '';
         applyProgress(latest);
-      }, 150);
+      }, STATUS_PAINT_INTERVAL_MS);
     }
   }
   function ensureNotCancelled() { if (cancelled) throw new Error('cancelled'); }
@@ -209,6 +310,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     while (!done && (limit === 'all' || bots.length < limit)) {
       ensureNotCancelled();
       update(`Finding ${limit === 'all' ? 'all' : limit} recent bots: ${bots.length} found (${page} pages checked)...`);
+      progressTick(bots.length,limit === 'all' ? null : limit,`${bots.length} distinct bots · ${page} pages checked`);
       const response = await retry(() => DS.fetchConversationListPage({limit:100,lastId}), 'Finding recent bots');
       const rows = response?.data;
       if (!Array.isArray(rows)) throw Error('Conversation list returned an unexpected response');
@@ -235,6 +337,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }
     await withStore('put', {conversationId:key,limit,cursorScheme,bots,
       cursors:[...seenCursors],lastId,pages:page,state:'complete'});
+    progressTick(bots.length,bots.length,`${bots.length} bots found · ${page} pages checked`);
     return bots;
   }
   async function scanBotConversations(seed) {
@@ -288,9 +391,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       `All ${selection.entries.length} conversations selected across ${d.scannedBots} ${d.scannedBots === 1 ? 'bot' : 'bots'}.`;
   }
   async function discoverSelection(limit) {
+    progressStage('discover',limit === 'all' ? null : limit,'Finding distinct bots…');
     update(`Finding ${limit === 'all' ? 'all available' : `the newest ${limit}`} distinct bots...`);
     const bots=await newestBots(limit);
     if(!bots.length)throw Error('No conversations found');
+    progressStage('conversations',bots.length,`0/${bots.length} bots checked`);
     const groups=[];
     for(let i=0;i<bots.length;i++) {
       ensureNotCancelled();
@@ -303,6 +408,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         await withStore('put',cached);
       }
       groups.push({botId:seed.botId,botName:seed.botName,entries:cached.entries});
+      progressTick(i+1,bots.length,`${i+1}/${bots.length} bots · ${seed.botName || seed.botId}`);
       await sleep(300);
     }
     const selected=chooseAllBotConversations(groups);
@@ -417,6 +523,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
             'http-failed','request-error','rate-paced','already-reading'].includes(response?.status)) break;
         await sleep(Math.max(1000, Math.min(12000, Number(response?.retryAfterMs) || (n + 1) * 1500)));
       }
+      if (response?.status==='export-route-changed')
+        throw Error('Research Export tab navigated away from /chats; stopped safely. Reopen the exporter and Resume.');
       if (!response?.ok) return failure(response?.status || 'memory-api-not-confirmed',response?.httpStatus || null);
       if (response.conversationId !== entry.conversationId || !Array.isArray(response.memories))
         return failure('unexpected-memory-response');
@@ -450,6 +558,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   // conversations can reference it without duplicating character definitions.
   const CHARACTER_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
   let characterReadCircuit = null, lorebookReadCircuit = null;
+  // One run may reference the same public Lorebook from many bots. Keep a
+  // small, run-scoped read-through cache; never retain it after export ends.
+  const linkedLorebookRunCache = new Map();
+  const MAX_LINKED_LOREBOOK_CACHE = 8;
   const CHARACTER_FIELD_ALIASES = Object.freeze({
     botId: ['id','uuid','character_id','characterId'],
     name: ['name','character_name','characterName'],
@@ -465,7 +577,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     personality: ['personality','persona','character_personality'],
     characterDefinition: ['definition','character_definition','characterDefinition','system_prompt','systemPrompt'],
     scenario: ['scenario','world_scenario','worldScenario'],
-    exampleDialogue: ['mes_example','example_dialogue','exampleDialogue','example_dialogues','exampleDialogues','examples'],
+    exampleDialogue: ['mes_example','example_dialogue','exampleDialogue','example_dialogues','exampleDialogues','examples','dialogue','dialogue_examples','dialogueExamples'],
     officialTags: ['tags','tag_list','tagList','character_tags','characterTags','categories','tag_names','tagNames'],
     officialTagIds: ['tag_ids','tagIds','character_tag_ids','characterTagIds'],
     linkedLorebooks: ['lorebooks','lorebook_ids','lorebookIds','lorebook_id','lorebookId','lorebook'],
@@ -621,6 +733,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }
     return result;
   }
+  async function readLinkedLorebook(id) {
+    if (linkedLorebookRunCache.has(id)) return linkedLorebookRunCache.get(id);
+    const result=await collectLinkedLorebook(id);
+    if (['present','empty'].includes(result.status) && Array.isArray(result.entries) &&
+        result.entries.length<=100) {
+      if (linkedLorebookRunCache.size>=MAX_LINKED_LOREBOOK_CACHE)
+        linkedLorebookRunCache.delete(linkedLorebookRunCache.keys().next().value);
+      linkedLorebookRunCache.set(id,result);
+    }
+    return result;
+  }
+  function repairCachedCharacterFields(record) {
+    // Earlier exports retained raw API `dialogue` but accidentally marked
+    // exampleDialogue not_exposed. A checkpoint can be repaired without GETs.
+    if (!record || record.schema!=='ds-research-character-v1') return false;
+    const old=record.fields?.exampleDialogue;
+    if (!old || !['not_exposed','fetch_failed'].includes(old.status)) return false;
+    const candidate=sourceValue([
+      [record.exposedCharacterData,'character-api'],
+      [record.exposedCharacterData?.character,'character-api-nested'],
+      [record.exposedConversationCharacterData,'conversation-list-character']
+    ],CHARACTER_FIELD_ALIASES.exampleDialogue);
+    if (!candidate.present) return false;
+    record.fields.exampleDialogue=fieldOf(candidate);
+    record.normalizedAt=new Date().toISOString();
+    finishCharacterCompleteness(record);
+    return true;
+  }
   function finishCharacterCompleteness(record) {
     const statuses={};
     for (const field of Object.values(record.fields)) statuses[field.status]=(statuses[field.status]||0)+1;
@@ -641,8 +781,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const cached=await withStore('get',key);
     const age=Date.now()-Number(cached?.at||0);
     const valid=cached?.record?.schema==='ds-research-character-v1';
+    if (valid && repairCachedCharacterFields(cached.record)) {
+      await withStore('put',cached);
+    }
     const retry = mode==='retry-failed' && (cached?.record?.lastRefreshError||cached?.record?.fetchStatus==='fetch_failed'||cached?.record?.fetchStatus==='restricted'||
-      cached?.record?.linkedLorebooks?.some(b=>['restricted','fetch_failed'].includes(b.status)));
+      cached?.record?.linkedLorebooks?.some(b=>['restricted','fetch_failed'].includes(b.status) ||
+        (b.status==='present' && b.paginationComplete===false)));
     if (valid && mode!=='refresh' && !retry && (cached.record.fetchStatus!=='present' || age < CHARACTER_CACHE_MS))
       return cached.record;
     if (valid && mode==='retry-failed' && cached.record.fetchStatus==='present' && !cached.record.lastRefreshError) {
@@ -650,10 +794,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       const changed=safeRaw(cached.record);
       for (let i=0;i<changed.linkedLorebooks.length;i++) {
         const old=changed.linkedLorebooks[i];
-        if (!['restricted','fetch_failed'].includes(old.status))continue;
+        if (!['restricted','fetch_failed'].includes(old.status) && !(old.status==='present' && old.paginationComplete===false))continue;
         ensureNotCancelled();
         if (lorebookReadCircuit) break;
-        const next=await measure('linkedLorebookRead',()=>collectLinkedLorebook(old.id));
+        const next=await measure('linkedLorebookRead',()=>readLinkedLorebook(old.id));
         changed.linkedLorebooks[i]=next;
         if (next.httpStatus===429 || next.httpStatus===401)lorebookReadCircuit={reason:next.error||'Lorebook API blocked'};
         await sleep(350);
@@ -692,7 +836,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       const book = useOld ? old : lorebookReadCircuit
         ? {id,status:'fetch_failed',source:'lorebook-api',fetchedAt:new Date().toISOString(),
           entries:[],paginationComplete:false,error:`Skipped after ${lorebookReadCircuit.reason}`}
-        : await measure('linkedLorebookRead',()=>collectLinkedLorebook(id));
+        : await measure('linkedLorebookRead',()=>readLinkedLorebook(id));
       record.linkedLorebooks.push(book);
       if (!useOld && (book.httpStatus===429 || book.httpStatus===401 || /auth unavailable|rate.limit/i.test(String(book.error||''))))
         lorebookReadCircuit={reason:String(book.error||'auth/rate limited').slice(0,120)};
@@ -824,7 +968,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   async function scanOnly(limit) {
     if (running) return;
-    running=true;cancelled=false;
+    running=true;cancelled=false;progressBegin('scan');
     startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;
     cancelButton.disabled=false;setLimitDisabled(true);
     try {
@@ -833,7 +977,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if (typeof DS.fetchConversationListPage !== 'function')throw Error('Conversation reader unavailable');
       const selection=await discoverSelection(limit);
       update(selectionNote(selection)+' Start / Resume to export.');
+      progressFinish();
     } catch (error) {
+      progressStop(error?.message==='cancelled' ? 'Cancelled' : 'Stopped');
       update(error?.message==='cancelled'?'Bot scan cancelled. Completed bot scans are saved for Resume.':
         `Bot scan stopped: ${error?.message||error}. Completed scans remain saved.`);
     } finally {
@@ -843,8 +989,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   async function run(limit, fresh = false) {
     runId = crypto.randomUUID().replaceAll('-', ''); // Fresh filenames on each export, even in the same helper tab.
-    characterReadCircuit=null;lorebookReadCircuit=null;
-    running=true;cancelled=false;archiveWorkerDisabled=false;archiveBackend='not-started';for(const key of Object.keys(phaseMs))delete phaseMs[key];startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
+    characterReadCircuit=null;lorebookReadCircuit=null;linkedLorebookRunCache.clear();
+    running=true;cancelled=false;progressBegin('export');archiveWorkerDisabled=false;archiveBackend='not-started';for(const key of Object.keys(phaseMs))delete phaseMs[key];startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
     let selected=[],saved=0;const completed=new Map();let completeCount=0;const memoryStatusCounts={};
     const characterByBot=new Map(),characterPartByBot=new Map(),characterStatusCounts={},characterErrors=[];
     try {
@@ -852,16 +998,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if (typeof DS.fetchConversationListPage !== 'function' || typeof DS.fetchChatHistoryPage !== 'function' ||
           typeof DS.researchReadConversationMemories !== 'function') throw Error('Required shared chat or Memory reader is unavailable.');
       update('Checking download verification permission...');
-      if (!await DS.requestDownloadPermission?.()) throw Error('Downloads permission is needed to verify that ZIP parts actually saved.');
+      if (!await measure('downloadPermission',()=>DS.requestDownloadPermission?.())) throw Error('Downloads permission is needed to verify that ZIP parts actually saved.');
       if (fresh) {
         update('Starting a fresh download of chat history, native Memories and character metadata...');
         await clearResearchCheckpoints();
       }
-      const priorSelection = await withStore('get','__pilot_selection__');
+      const priorSelection = await measure('selectionCheckpointRead',()=>withStore('get','__pilot_selection__'));
       const selection = priorSelection?.mode==='per-bot-all-v2' && priorSelection?.limit===limit &&
         Array.isArray(priorSelection?.entries) && priorSelection?.discovery
         ? priorSelection : await measure('discovery',()=>discoverSelection(limit));
       selected=selection.entries;
+      progressStage('export',selected.length,`0/${selected.length} conversations processed`);
       if (!selected.length) throw Error('No conversations found.');
       update(selectionNote(selection));
       const staged=[];let totalMessages=0,totalMemories=0,failed=0,historyFailed=0,partNumber=1;
@@ -884,7 +1031,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
             const record=completed.get(id);return record && (!record.historyComplete||record.memoryStatus==='unavailable'||!record.memoryComplete);
           })};
         update(`Saving and verifying archive part ${partNumber}...`);
-        const info=await downloadPart(staged.map(x=>x.entry),partNumber,report);
+        const info=await measure('zipBuildAndDownloadTotal',()=>downloadPart(staged.map(x=>x.entry),partNumber,report));
+        renderPhaseTimings();
         for (const id of new Set(staged.map(x=>x.conversationId).filter(Boolean))) {
           const count = staged.filter(x=>x.conversationId===id).length;
           const remaining = (remainingFiles.get(id) || 0) - count;
@@ -1017,17 +1165,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           await flush();
           throw Error('Native Memory access failed on multiple conversations. Stopped further Memory requests; completed data is checkpointed.');
         }
+        progressTick(index+1,selected.length,`${index+1}/${selected.length} conversations · ${totalMessages} messages · ${totalMemories} Memories · ${saved} ZIP parts`);
         await sleep(350);
       }
       await flush();
+      progressFinish();
+      renderPhaseTimings();
       update(`Export finished (${selection.discovery.scannedBots} bots, ${selected.length} conversations): ${characterByBot.size} character records, ${totalMessages} messages, ${totalMemories} native Memories, ${saved} verified ZIP parts. ${characterErrors.length} character/Lorebook issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.`);
     } catch (error) {
+      progressStop(error?.message==='cancelled' ? 'Cancelled' : 'Stopped');
       update(error?.message==='cancelled' ? `Stopped. ${saved} archive parts verified; completed conversations remain locally checkpointed.` :
         `Stopped: ${error?.message||error}. ${saved} archive parts verified. Local checkpoints are preserved for Resume.`);
     } finally {
       stopArchiveWorker();
+      linkedLorebookRunCache.clear();
       if (progressTimer) {clearTimeout(progressTimer); progressTimer=null;}
       if (pendingProgress) {applyProgress(pendingProgress);pendingProgress='';}
+      renderPhaseTimings();
       console.info('[DragonScript Research Export] Archive backend:',archiveBackend,'Phase timings (ms; API phases include network pacing):', {...phaseMs});
       running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;cancelButton.disabled=true;setLimitDisabled(false);
     }
@@ -1065,8 +1219,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     allBotsInput.addEventListener('change',()=>setLimitDisabled(false));
     const charRow=document.createElement('label');charRow.style.cssText='display:flex;align-items:center;gap:6px;margin:6px 0;flex-wrap:wrap';
     charRow.append(document.createTextNode('Character metadata: '));
-    characterRetryInput=document.createElement('select');characterRetryInput.title='Reuse character checkpoints, retry failed metadata only, or refresh all bots. Successful snapshots auto-refresh after seven days.';
-    for (const [value,name] of [['reuse','Reuse cached / update stale'],['retry-failed','Retry failed/restricted'],['refresh','Refresh all character metadata']]) {
+    characterRetryInput=document.createElement('select');characterRetryInput.title='Reuse character checkpoints, retry failed or incomplete linked Lorebooks, or refresh all bots. Successful snapshots auto-refresh after seven days.';
+    for (const [value,name] of [['reuse','Reuse cached / update stale'],['retry-failed','Retry failed / incomplete'],['refresh','Refresh all character metadata']]) {
       const option=document.createElement('option');option.value=value;option.textContent=name;characterRetryInput.append(option);
     }
     characterRetryInput.style.cssText='max-width:100%;background:#343e5e;color:white;padding:4px;border-radius:5px';
@@ -1080,6 +1234,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const close=document.createElement('button');close.textContent='Close';
     for(const b of [startButton,scanButton,freshButton,cancelButton,close]) b.style.cssText='flex:0 0 auto;padding:6px 6px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:nowrap;font:12px sans-serif';
     buttons.append(startButton,scanButton,freshButton,cancelButton,close);panel.append(buttons);
+    const progressBox=document.createElement('div');
+    progressBox.style.cssText='padding:8px 0;margin:4px 0 8px;border-top:1px solid #3b4259;border-bottom:1px solid #3b4259';
+    progressTitle=document.createElement('div');progressTitle.textContent='Ready · 3 steps';
+    progressTitle.style.cssText='font-weight:600;margin-bottom:5px';
+    const track=document.createElement('div');track.setAttribute('role','progressbar');
+    track.setAttribute('aria-label','Research Export current step');track.setAttribute('aria-valuemin','0');
+    track.setAttribute('aria-valuemax','100');track.setAttribute('aria-valuenow','0');
+    track.style.cssText='height:8px;background:#323a4e;border-radius:6px;overflow:hidden';
+    progressMeter=document.createElement('div');progressMeter.style.cssText='width:0%;height:100%;background:#719bd3;transition:width .15s linear';track.append(progressMeter);
+    progressEta=document.createElement('div');progressEta.textContent='ETA appears after a few completed items';
+    progressEta.style.cssText='color:#c9d7ed;margin-top:5px';
+    progressDetail=document.createElement('div');progressDetail.style.cssText='opacity:.85;overflow-wrap:anywhere';
+    phaseTimingsLabel=document.createElement('div');
+    phaseTimingsLabel.style.cssText='opacity:.72;font-size:11px;overflow-wrap:anywhere;margin-top:5px';
+    phaseTimingsLabel.textContent='Phase timings appear after export work completes';
+    progressBox.append(progressTitle,track,progressEta,progressDetail,phaseTimingsLabel);panel.append(progressBox);
     log=document.createElement('pre');log.textContent='Ready. Check that QoL Settings has Research Export enabled.';
     log.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;font:12px/1.5 monospace';log.setAttribute('role','status');panel.append(log);
     startButton.addEventListener('click',()=>launch('export'));
