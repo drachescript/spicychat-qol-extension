@@ -14,6 +14,8 @@ on:
       - build/modules.json
       - build/sync-feature-asset-ownership.py
       - build/test_sync_feature_asset_ownership.py
+      - build/background_imports.py
+      - build/test_background_imports.py
       - .github/workflows/auto-repair-feature-ownership.yml
       - content/*-worker.js
       - content/styles/**
@@ -39,6 +41,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Test split/conditional background imports
+        run: python3 build/test_background_imports.py
 
       - name: Test reviewed worker ownership repair
         run: python3 build/test_sync_feature_asset_ownership.py

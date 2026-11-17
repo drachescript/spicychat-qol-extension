@@ -9,6 +9,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from background_imports import parse_background_imports
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL_ALIASES = {'automatic-images': 'auto-images'}
@@ -187,8 +188,7 @@ def scan(write=True):
         claimed[rel] = owner
 
     entry = (ROOT / 'background-entry.js').read_text(encoding='utf-8')
-    match = re.search(r'\bimportScripts\s*\(([^;]*)\)', entry, re.S)
-    imports = set(re.findall(r'["\']([^"\']+\.js)["\']', match.group(1))) if match else set()
+    imports = set(parse_background_imports(entry))
     for rel, owner in BACKGROUND_OWNERS.items():
         if owner not in contracts:
             raise ValueError(f'Unknown background service owner {owner}: {rel}')

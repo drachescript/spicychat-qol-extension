@@ -154,6 +154,9 @@ jobs:
           echo "Rebuild: ${{ steps.rebuild.outputs.rebuild }}"
           echo "Reason: ${{ steps.rebuild.outputs.reason }}"
 
+      - name: Test split/conditional background imports
+        run: python3 build/test_background_imports.py
+
       - name: Synchronize audited feature asset ownership
         if: steps.release.outputs.publish == 'true'
         run: python3 build/sync-feature-asset-ownership.py

@@ -10,6 +10,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from background_imports import parse_background_imports
 
 ROOT = Path(__file__).resolve().parent.parent
 ERRORS: list[str] = []
@@ -123,9 +124,11 @@ def main() -> int:
     entry_path = "background-entry.js"
     check_file(entry_path, "background entry")
     entry = (ROOT / entry_path).read_text(encoding="utf-8") if (ROOT / entry_path).is_file() else ""
-    match = re.search(r"\bimportScripts\s*\(([^;]*)\)", entry, re.S)
-    imports = re.findall(r"[\"']([^\"']+\.js)[\"']", match.group(1)) if match else []
-    if not imports: ERRORS.append("Background entry has no static importScripts list")
+    try:
+        imports = parse_background_imports(entry)
+    except ValueError as exc:
+        ERRORS.append(str(exc))
+        imports = []
     for path in imports: check_file(path, "background import")
     background_assets = assets.get("background", {})
     declared = background_assets.get("required", [])
