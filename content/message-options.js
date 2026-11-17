@@ -6,6 +6,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   const BRIDGE_ATTR = "data-ds-message-action-bridge";
   let quickActionState = new WeakMap();
+  let nativeBridgeDepth = 0;
+  let nativeBridgeResetTimer = null;
 
   function cleanText(value) {
     return String(value || "")
@@ -76,7 +78,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     button.dataset.dsMessageAction = action.label;
     button.setAttribute("aria-label", `QoL ${action.label}`);
     button.title = action.label;
-    button.textContent = action.icon;
+    if (action.label === "Delete") {
+      // Consistent monochrome trash icon, distinct from Remove Image's backspace.
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("width", "16");
+      svg.setAttribute("height", "16");
+      svg.setAttribute("fill", "none");
+      svg.setAttribute("stroke", "currentColor");
+      svg.setAttribute("stroke-width", "1.8");
+      svg.setAttribute("stroke-linecap", "round");
+      svg.setAttribute("stroke-linejoin", "round");
+      svg.innerHTML = '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6"/>';
+      button.appendChild(svg);
+    } else {
+      button.textContent = action.icon;
+    }
     return button;
   }
 
@@ -93,6 +110,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const canReport = settings.messageQuickActionReport === true && ai;
     const canCopy = settings.messageQuickActionCopy === true;
     const canEdit = settings.messageQuickActionEdit === true;
+    const canDelete = settings.messageQuickActionDelete === true;
     const canRemoveImage = settings.messageQuickActionRemoveImage === true && !ai && hasUploadedUserImage(sourceButton);
     const canResend = settings.messageQuickActionResend === true && !ai && !!getDirectCopyText(sourceButton);
 
@@ -100,10 +118,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (canReport) actions.push({ label: "Report", icon: "⚑" });
       if (canCopy) actions.push({ label: "Copy", icon: "⧉" });
       if (canEdit) actions.push({ label: "Edit", icon: "✎" });
+      if (canDelete) actions.push({ label: "Delete", icon: "⌫" });
       return actions;
     }
 
     if (canEdit) actions.push({ label: "Edit", icon: "✎" });
+    if (canDelete) actions.push({ label: "Delete", icon: "⌫" });
     if (canCopy) actions.push({ label: "Copy", icon: "⧉" });
     if (canResend) actions.push({ label: "Resend", icon: "↻" });
     if (canRemoveImage) actions.push({ label: "Remove Image", icon: "⌫" });
@@ -118,50 +138,80 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function nativeMessageEditor(root) {
-    return root?.querySelector?.("textarea, [contenteditable='true']") || null;
+    return root?.querySelector?.("[data-testid='MessageEditor-Input'] textarea, [data-testid='MessageEditor'] textarea, textarea, [contenteditable='true']") || null;
   }
 
-  function showNativeEditFallback(sourceButton) {
-    const holder = getDropdownHolder(sourceButton);
+  function currentMessageRoot(root) {
+    // React sometimes replaces the entire message when native Edit opens.
+    // Follow that exact message ID, never another message's editor.
+    if (root?.isConnected) return root;
+    return root?.id ? document.getElementById(root.id) : null;
+  }
+
+  function currentNativeTrigger(root, sourceButton) {
+    // Opening V2's React-owned menu can replace the trigger in place, even
+    // before the action is clicked. Resolve the live replacement in the same
+    // message; never fall back to another message's three-dot menu.
+    const current = currentMessageRoot(root);
+    return current?.querySelector?.("button[aria-label='message-dropdown'][data-testid='MessageMenu-Button'], button[aria-label='message-dropdown']")
+      || (sourceButton?.isConnected ? sourceButton : null);
+  }
+
+  function showNativeEditFallback(sourceButton, root = getMessageRoot(sourceButton)) {
+    const holder = getDropdownHolder(currentNativeTrigger(root, sourceButton));
     if (holder) holder.classList.add("ds-message-native-edit-fallback");
   }
 
-  function clearNativeEditFallback(sourceButton) {
-    const holder = getDropdownHolder(sourceButton);
+  function clearNativeEditFallback(sourceButton, root = getMessageRoot(sourceButton)) {
+    const holder = getDropdownHolder(currentNativeTrigger(root, sourceButton));
     holder?.classList.remove("ds-message-native-edit-fallback");
   }
 
-  async function waitForNativeEdit(root, timeoutMs = 900) {
+  async function waitForNativeEdit(root, timeoutMs = 1050) {
     const attempts = Math.ceil(timeoutMs / 60);
     for (let i = 0; i < attempts; i++) {
-      if (root?.isConnected && nativeMessageEditor(root)) return true;
+      if (nativeMessageEditor(currentMessageRoot(root))) return true;
       await DS.sleep(60);
     }
-    return !!(root?.isConnected && nativeMessageEditor(root));
+    return !!nativeMessageEditor(currentMessageRoot(root));
   }
 
-  function menuButtons(label, sourceButton, includeHidden = false) {
-    const holder = getDropdownHolder(sourceButton);
+  function menuButtons(label, sourceButton, includeHidden = false, anchorRect = null) {
+    const holder = sourceButton?.isConnected ? getDropdownHolder(sourceButton) : null;
     // SpicyChat's newer portal menu also exposes stable action test IDs.
     // Use them as a fallback if native button labels change; never click
     // another message's QoL toolbar or an unrelated dialog.
     const nativeTestId = {
       Copy: "message-action-copy",
       Edit: "message-action-edit",
+      Delete: "message-action-delete",
       Report: "message-action-report"
     }[label];
-    const exact = `button[aria-label='${CSS.escape(label)}']` +
+    const labels = label === "Delete" ? ["Delete", "Delete message", "Delete Message"] : [label];
+    const exact = labels.map(name => `button[aria-label='${CSS.escape(name)}']`).join(", ") +
       (nativeTestId ? `, button[data-testid='${nativeTestId}']` : "");
     const accept = button => {
-      if (button.closest("#ds-qol-panel, .ds-message-quick-actions")) return false;
+      if (button.closest("#ds-qol-panel, .ds-message-quick-actions, .ds-qol-message-bottom-menu")) return false;
       return includeHidden || isVisible(button);
     };
 
     const local = holder ? DS.qsa(exact, holder).filter(accept) : [];
     if (local.length) return local;
 
-    const sourceRect = sourceButton.getBoundingClientRect();
-    return DS.qsa(exact)
+    // A disconnected React trigger has a 0x0 DOMRect. Preserve the position
+    // measured before opening the menu rather than sorting/validating its
+    // actions against (0, 0) after SpicyChat replaces the button.
+    const sourceRect = anchorRect || sourceButton?.getBoundingClientRect?.();
+    if (!sourceRect?.width || !sourceRect?.height) return [];
+    const candidates = DS.qsa(exact);
+    if (label === "Delete") {
+      // Some V2 builds name native actions by their text instead of aria-label.
+      // Only consider native popover items; never a chat-delete dialog button.
+      for (const button of DS.qsa("[role='menu'] button, div.absolute.w-max button")) {
+        if (/^delete(?: message)?$/i.test(cleanText(button.textContent)) && !candidates.includes(button)) candidates.push(button);
+      }
+    }
+    return candidates
       .filter(accept)
       .sort((a, b) => {
         const ar = a.getBoundingClientRect();
@@ -173,12 +223,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function beginSilentBridge() {
+    nativeBridgeDepth += 1;
+    if (nativeBridgeResetTimer !== null) {
+      window.clearTimeout(nativeBridgeResetTimer);
+      nativeBridgeResetTimer = null;
+    }
     DS.setAttributeIfChanged?.(document.documentElement, BRIDGE_ATTR, "1");
   }
 
   function endSilentBridge(delay = 0) {
-    window.setTimeout(() => {
-      if (document.documentElement.hasAttribute(BRIDGE_ATTR)) document.documentElement.removeAttribute(BRIDGE_ATTR);
+    nativeBridgeDepth = Math.max(0, nativeBridgeDepth - 1);
+    if (nativeBridgeDepth) return;
+    if (nativeBridgeResetTimer !== null) window.clearTimeout(nativeBridgeResetTimer);
+    nativeBridgeResetTimer = window.setTimeout(() => {
+      nativeBridgeResetTimer = null;
+      if (!nativeBridgeDepth) document.documentElement.removeAttribute(BRIDGE_ATTR);
     }, delay);
   }
 
@@ -251,51 +310,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return setComposerText(text);
   }
 
+  function isNativeMenuChoice(button, anchor) {
+    if (!button?.isConnected || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
+    const menu = button.closest("[role='menu'], div.absolute.w-max, [data-testid*='MessageMenu'], div[style*='box-shadow']")
+      || (button.parentElement?.querySelector("button[aria-label='Copy'], button[data-testid='message-action-copy']") ? button.parentElement : null);
+    if (!menu || menu.closest("#ds-qol-panel, .ds-message-quick-actions, .ds-qol-message-bottom-menu")) return false;
+    const rect = button.getBoundingClientRect();
+    // Require a current, locally anchored native menu. Old portal menus from
+    // unrelated messages may remain in the DOM during React transitions.
+    return rect.width > 0 && rect.height > 0 &&
+      Math.abs(rect.top - anchor.top) < 650 && Math.abs(rect.left - anchor.left) < 650;
+  }
+
   async function runMenuAction(sourceButton, label) {
-    // Delegate all operations to SpicyChat's own menu. Do not click a stale
-    // hidden portal's Edit item or report success before the editor opens.
+    // Native Copy/Edit/Report/Delete/Remove Image: never bypass SpicyChat's
+    // own handlers. Keep the hidden three-dot anchor measurable while React
+    // mounts the menu, but do not visibly expose it unless Edit really fails.
     const edit = label === "Edit";
     const root = getMessageRoot(sourceButton);
-    if (!root?.isConnected || !sourceButton?.isConnected) return false;
-    if (!edit) beginSilentBridge();
-
-    // Quick actions hide SpicyChat's original menu trigger. For Edit, unhide
-    // it *before* opening the menu so the native portal has a valid anchor.
-    // If opening fails, leave it available as a manual fallback.
-    if (edit) showNativeEditFallback(sourceButton);
-    const previouslyVisible = edit ? new Set(menuButtons(label, sourceButton, false)) : null;
+    const holder = getDropdownHolder(sourceButton);
+    if (!root?.isConnected || !sourceButton?.isConnected || !holder) return false;
     let editOpened = false;
+    beginSilentBridge();
+    holder.classList.add("ds-message-native-bridge-anchor");
 
     try {
+      // The trigger is normally display:none while the QoL toolbar is
+      // present. First enable the invisible/measurable bridge state, then
+      // snapshot its coordinates *before* React can replace the trigger.
+      const anchorRect = sourceButton.getBoundingClientRect();
+      if (!anchorRect.width || !anchorRect.height) return false;
+      const priorButtons = new Set(menuButtons(label, sourceButton, true, anchorRect));
       if (!clickDropdown(sourceButton)) return false;
       let actionButton = null;
-      for (let i = 0; i < 16; i++) {
-        const candidates = menuButtons(label, sourceButton, !edit);
-        actionButton = edit
-          ? (candidates.find(button => {
-              if (previouslyVisible.has(button) || !button.isConnected || button.disabled) return false;
-              if (button.getAttribute("aria-disabled") === "true") return false;
-              const menu = button.closest("[role='menu'], div.absolute.w-max, [data-testid*='MessageMenu']")
-                || (button.parentElement?.querySelector("button[aria-label='Copy']") ? button.parentElement : null);
-              if (!menu) return false;
-              const sourceRect = sourceButton.getBoundingClientRect();
-              const actionRect = button.getBoundingClientRect();
-              return Math.abs(actionRect.top - sourceRect.top) < 650;
-            }) || null)
-          : (candidates[0] || null);
+      for (let i = 0; i < 17; i++) {
+        // CSS hides the intermediate portal from the user, not from this
+        // tightly scoped native-action resolver. Ignore stale menu buttons.
+        const liveButton = currentNativeTrigger(root, sourceButton);
+        const candidates = menuButtons(label, liveButton || sourceButton, true, anchorRect);
+        actionButton = candidates.find(button => !priorButtons.has(button) && isNativeMenuChoice(button, anchorRect)) || null;
         if (actionButton) break;
         await DS.sleep(60);
       }
-
       if (!actionButton) {
+        // Do not leave a half-open portal behind the shortcut toolbar.
+        try {
+          const liveButton = currentNativeTrigger(root, sourceButton);
+          if (liveButton?.isConnected) clickDropdown(liveButton);
+        } catch {}
         DS.setQuickStatus?.(edit
-          ? "Could not open Edit automatically. Use the restored three-dot menu."
-          : `${label} is not available on this message.`);
+          ? "Edit did not open automatically. Use the restored three-dot menu."
+          : `${label} is not available in this message's native menu.`);
         return false;
       }
 
-      // A single native click is sufficient. DS.realClick sends extra pointer
-      // events that can toggle React menus a second time.
       actionButton.click();
       if (edit) {
         editOpened = await waitForNativeEdit(root);
@@ -306,11 +374,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.setQuickStatus?.("Message editor opened.");
         return true;
       }
-      DS.setQuickStatus?.(`${label} clicked.`);
+      DS.setQuickStatus?.(label === "Delete"
+        ? "Native Delete selected. Confirm in SpicyChat if prompted."
+        : `${label} clicked.`);
       return true;
     } finally {
-      if (!edit) endSilentBridge(120);
-      if (edit && editOpened) clearNativeEditFallback(sourceButton);
+      holder.classList.remove("ds-message-native-bridge-anchor");
+      const liveHolder = getDropdownHolder(currentNativeTrigger(root, sourceButton));
+      if (liveHolder !== holder) liveHolder?.classList.remove("ds-message-native-bridge-anchor");
+      endSilentBridge(120);
+      if (edit && !editOpened) showNativeEditFallback(sourceButton, root);
+      if (edit && editOpened) clearNativeEditFallback(sourceButton, root);
     }
   }
 
@@ -318,15 +392,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
 
     if (action.label === "Copy") {
-      // Always invoke SpicyChat's native Copy action. Reading textContent from
-      // rendered Markdown spans loses *actions*, **emphasis**, and other
-      // original source formatting. If the native action is unavailable, do
-      // not silently copy a different/plain-text representation instead.
+      // Native Copy keeps the original message Markdown (*actions*, quotes,
+      // line breaks, etc.). Reading rendered text here removes formatting.
+      // The intermediate menu is hidden by the existing native action bridge.
       return runMenuAction(sourceButton, "Copy");
     }
 
     if (action.label === "Resend") {
       return runResend(sourceButton);
+    }
+
+    if (action.label === "Delete") {
+      // Guard a destructive shortcut even on site versions without a native
+      // delete confirmation. Native deletion still owns the actual mutation.
+      if (!window.confirm("Delete this message? This cannot be undone.")) return false;
     }
 
     if (action.label === "Remove Image" && settings.messageQuickActionConfirmRemoveImage === true) {
@@ -351,12 +430,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return host && host !== root && host.querySelectorAll("button").length <= 15 ? host : null;
   }
 
+  function bottomActionLabels(dropdownButton, settings = DS.state?.settings || {}) {
+    return isAiMessage(dropdownButton)
+      ? ["Copy", "Edit", ...(settings.messageQuickActionDelete === true ? ["Delete"] : []), "Report"]
+      : ["Copy", "Edit", ...(settings.messageQuickActionDelete === true ? ["Delete"] : []), ...(hasUploadedUserImage(dropdownButton) ? ["Remove Image"] : [])];
+  }
+
   function bottomMenuHealthy(dropdownButton, settings) {
     if (settings.messageBottomMenuShortcut !== true) return true;
     const root = dropdownButton.closest("div[id^='message-']") || getMessageRoot(dropdownButton);
     const host = bottomActionHost(dropdownButton);
+    const signature = JSON.stringify(bottomActionLabels(dropdownButton, settings));
     return !host || !![...host.querySelectorAll(":scope > .ds-qol-message-bottom-menu")]
-      .find(node => node.dataset.dsSourceMessage === root?.id && node.isConnected);
+      .find(node => node.dataset.dsSourceMessage === root?.id && node.dataset.dsItemSignature === signature && node.isConnected);
   }
 
   function ensureBottomMenu(dropdownButton) {
@@ -366,11 +452,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const host = bottomActionHost(dropdownButton);
     const existing = root.querySelector(".ds-qol-message-bottom-menu");
     if (settings.messageBottomMenuShortcut !== true || !host) { existing?.remove(); return; }
-    if (existing?.parentElement === host) return;
+    const items = bottomActionLabels(dropdownButton, settings);
+    const signature = JSON.stringify(items);
+    if (existing?.parentElement === host && existing.dataset.dsItemSignature === signature) return;
     existing?.remove();
     const wrap = document.createElement("span");
     wrap.className = "ds-qol-message-bottom-menu";
     wrap.dataset.dsSourceMessage = root.id || "";
+    wrap.dataset.dsItemSignature = signature;
     const launcher = document.createElement("button");
     launcher.type = "button"; launcher.className = "ds-qol-message-bottom-launcher";
     launcher.textContent = "⋯"; launcher.title = "Message actions";
@@ -378,17 +467,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     launcher.setAttribute("aria-expanded", "false");
     const menu = document.createElement("span"); menu.className = "ds-qol-message-bottom-menu-panel";
     menu.hidden = true; menu.setAttribute("role", "menu");
-    const items = isAiMessage(dropdownButton)
-      ? ["Copy", "Edit", "Report"]
-      : ["Copy", "Edit", ...(hasUploadedUserImage(dropdownButton) ? ["Remove Image"] : [])];
     for (const label of items) {
       const choice = document.createElement("button"); choice.type = "button";
       choice.textContent = label; choice.setAttribute("role", "menuitem");
       choice.addEventListener("click", event => {
         event.preventDefault(); event.stopPropagation();
         menu.hidden = true; launcher.setAttribute("aria-expanded", "false");
-        if (!dropdownButton.isConnected || DS.state?.chatExportLock?.active) return;
-        void runAction(dropdownButton, { label }).catch(() => DS.setQuickStatus?.(`${label} failed.`));
+        if (DS.state?.chatExportLock?.active) return;
+        const liveButton = currentNativeTrigger(getMessageRoot(wrap), dropdownButton);
+        if (!liveButton?.isConnected) return;
+        void runAction(liveButton, { label }).catch(() => DS.setQuickStatus?.(`${label} failed.`));
       });
       menu.appendChild(choice);
     }
@@ -515,18 +603,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           return;
         }
 
+        const liveButton = currentNativeTrigger(getMessageRoot(button), dropdownButton);
+        if (!liveButton?.isConnected) {
+          DS.setQuickStatus?.("Message menu changed. Refresh the chat if it does not recover.");
+          return;
+        }
         button.dataset.dsActionBusy = "1";
-        runAction(dropdownButton, action).then(success => {
+        runAction(liveButton, action).then(success => {
           if (!success || action.label !== "Remove Image") return;
 
           // SpicyChat removes the attachment asynchronously. Re-check this
           // message shortly afterwards so the image-only action disappears.
           window.setTimeout(() => {
-            delete dropdownButton.dataset.dsMessageQuickReady;
+            const current = currentNativeTrigger(getMessageRoot(button), dropdownButton);
+            if (current) delete current.dataset.dsMessageQuickReady;
             DS.applyMessageOptions?.();
           }, 250);
         }).catch(() => {
-          if (action.label === "Edit") showNativeEditFallback(dropdownButton);
+          if (action.label === "Edit") showNativeEditFallback(liveButton, getMessageRoot(button));
           DS.setQuickStatus?.(`${action.label} failed. Use the native message menu.`);
         }).finally(() => {
           delete button.dataset.dsActionBusy;
@@ -562,6 +656,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.setClassState?.(el, "ds-message-dropdown-hidden", false);
     });
     DS.qsa(".ds-message-native-edit-fallback").forEach(el => el.classList.remove("ds-message-native-edit-fallback"));
+    DS.qsa(".ds-message-native-bridge-anchor").forEach(el => el.classList.remove("ds-message-native-bridge-anchor"));
     DS.qsa("button[aria-label='message-dropdown'][data-ds-message-quick-ready]").forEach(button => {
       delete button.dataset.dsMessageQuickReady;
     });
@@ -574,6 +669,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return [
       settings.messageQuickActionCopy === true ? 1 : 0,
       settings.messageQuickActionEdit === true ? 1 : 0,
+      settings.messageQuickActionDelete === true ? 1 : 0,
       settings.messageQuickActionRemoveImage === true ? 1 : 0,
       settings.messageQuickActionResend === true ? 1 : 0,
       settings.messageQuickActionConfirmRemoveImage === true ? 1 : 0,
@@ -624,6 +720,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return (
       settings.messageQuickActionCopy === true ||
       settings.messageQuickActionEdit === true ||
+      settings.messageQuickActionDelete === true ||
       settings.messageQuickActionRemoveImage === true ||
       settings.messageQuickActionResend === true ||
       settings.messageQuickActionReport === true ||
@@ -743,6 +840,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!root?.isConnected) return;
     root.querySelectorAll('.ds-message-dropdown-hidden').forEach(holder => {
       DS.setClassState?.(holder, 'ds-message-dropdown-hidden', false);
+    });
+    // A previously failed automatic Edit may have exposed the native dots.
+    // When a manual native editor does open, clear that temporary fallback.
+    root.querySelectorAll('.ds-message-native-edit-fallback').forEach(holder => {
+      holder.classList.remove('ds-message-native-edit-fallback');
     });
     root.querySelectorAll('.ds-message-quick-actions').forEach(bar => bar.remove());
   };

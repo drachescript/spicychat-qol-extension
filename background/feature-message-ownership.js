@@ -81,6 +81,8 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_PRIVATE_ARCHIVE_SETUP_WRITE": "private-lorebook-bridge",
   "DS_PRIVATE_LOREBOOK_ENTRY_CREATE": "private-lorebook-bridge",
   "DS_NATIVE_MEMORY_PROBE": "native-memory-probe",
+  "DS_RESEARCH_MEMORY_READ": "bulk-chat-research",
+  "DS_RESEARCH_VERIFY_DOWNLOAD": "bulk-chat-research",
   "DS_QOL_TRANSLATE": "translation",
   "DS_QUICK_DISLIKE_BOT": "bot-blocking",
   "DS_QUICK_DISLIKE_CANCEL_BULK": "bot-blocking",

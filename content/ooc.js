@@ -100,7 +100,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     return [
-      { id: DS.DEFAULT_OOC_TEMPLATE_ID || "builtin-strict-no-control", name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DS.DEFAULT_OOC_TEMPLATE_ID || "builtin-strict-no-control", name: "Roleplay quality", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
       { id: DS.HARD_OOC_TEMPLATE_ID || "builtin-hard-no-control", name: "Hard no-control + formatting", text: DS.HARD_OOC_TEMPLATE, builtIn: true }
     ];
   };
@@ -612,7 +612,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const template =
       templates[safeIndex] ||
       templates[0] ||
-      { name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE };
+      { name: "Roleplay quality", text: DS.DEFAULT_OOC_TEMPLATE };
 
     const resolved = DS.resolveOocTemplate(template);
 

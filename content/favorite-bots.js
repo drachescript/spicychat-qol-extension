@@ -669,7 +669,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   // The existing selector anchors itself between the native search controls and NSFW.
   function headerHost() {
-    const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.querySelector('main') || document.body;
+    // The V2 Favorites filter sidebar has its own "Search tags" input. Always
+    // anchor the bulk action inside the native listing toolbar, not the
+    // containing flex row: a misplaced sibling can shove every card right.
+    const v2Body = document.querySelector('[data-testid="SearchClientCharacterListingBody"]');
+    const v2Toolbar = v2Body?.querySelector('[data-testid="SearchClientCharacterListingToolbar"]');
+    if (v2Body && !v2Toolbar) return null; // Wait for native toolbar to mount.
+    const root = v2Toolbar || document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.querySelector('main') || document.body;
     const nsfw = root.querySelector('[data-testid="NsfwToggle"]') ||
       [...root.querySelectorAll('label')].find(label => /\bNSFW\b/i.test(clean(label.textContent)) && label.querySelector('input[type="checkbox"]'));
     const search = root.querySelector('input[placeholder*="Dive into" i],input[placeholder*="start searching" i],input[placeholder*="search" i],input[type="search"]');
@@ -705,6 +711,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!isEnabled()) {
       const old = document.getElementById(LAUNCHER);
       if (old?.dataset.dsFavBulk === '1') old.remove();
+      const host = document.getElementById(HOST);
+      if (host?.dataset.dsOwned === '1' && !host.childElementCount) host.remove();
       return;
     }
     const host = headerHost();
@@ -1331,7 +1339,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Preserve native Favorite, creator, menu, and profile actions; only
     // ordinary card surface and direct chat links are selection targets.
     const control = event.target.closest('button,input,textarea,select,[role="button"],a[href]');
-    if (control && !(control.matches('a[href]') && /\/chat\//i.test(control.getAttribute('href') || control.href || '') &&
+    if (control && !(control.matches('a[href]') && /\/(?:chat|chatbot)\//i.test(control.getAttribute('href') || control.href || '') &&
       idFrom(control.getAttribute('href') || control.href))) return;
     let card = event.target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"],div.relative.group');
     if (!card) {

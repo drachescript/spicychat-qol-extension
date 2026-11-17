@@ -168,7 +168,7 @@ function refreshPlatformCompatibilityUi(settings = loadedSettingsSnapshot) {
   const noticeText = $("platformCompatibilityNoticeText");
   if (notice) notice.hidden = !env.android;
   if (noticeText && env.android) {
-    noticeText.textContent = "Desktop-only bulk, helper-tab and real-browser-tab controls are dimmed here. Their saved values are kept unchanged, so syncing from Android will not switch those desktop preferences off.";
+    noticeText.textContent = "Bulk actions that work in the current page are available on Android. Helper-tab, background-worker and real-browser-tab controls remain unavailable; their saved settings are preserved.";
   }
 
   clearPlatformCompatibilityMarks();
@@ -180,13 +180,9 @@ function refreshPlatformCompatibilityUi(settings = loadedSettingsSnapshot) {
     if (!compatibility.supported) markPlatformUnsupportedControl(control, compatibility, settings);
   }
 
-  // Manager bulk bars are action UI rather than persisted settings, so not all
-  // of their controls have "bulk" in the individual id. Disable the whole
-  // action surface on Android while leaving the underlying saved lists usable.
-  const bulkReason = { supported: false, reason: "Bulk operations are desktop-only in QoL for now." };
-  document.querySelectorAll(".bot-manager-bulkbar button, .bot-manager-bulkbar select, .bot-manager-bulkbar input").forEach(control => {
-    markPlatformUnsupportedControl(control, bulkReason, settings);
-  });
+  // Current-page bot manager actions (select, copy, list/folder changes) work
+  // on Android. Individual worker/helper actions are restricted by their own
+  // capability checks and handlers; do not disable an entire bulk toolbar.
 }
 
 function setupPlatformCompatibility() {

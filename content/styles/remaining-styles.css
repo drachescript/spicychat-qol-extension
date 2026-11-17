@@ -1963,6 +1963,18 @@ html.ds-chat-bubble-alpha [id^="message-"] :is(.bg-gray-3,.bg-gray-4,.bg-gray-5)
   background-color: rgb(29 31 36 / var(--ds-chat-background-bubble-opacity, .95)) !important;
 }
 
+/* Native "My messages" bubbles use bg-blumine rather than bg-gray. Keep the
+ * user's own background color (including a configured bubble theme), and tint
+ * that background only. Never fade message text, pictures or action buttons. */
+html.ds-chat-bubble-alpha [id^="message-"]
+  [data-testid="ChatBubble-Column"][data-chat-bubble-side="user"],
+html.ds-chat-bubble-alpha[data-ds-chat-bubbles="1"] [id^="message-"]
+  [data-testid="ChatBubble-Column"][data-chat-bubble-side="user"] {
+  background-color: color-mix(in srgb,
+    var(--ds-chat-background-user-native-color, #253f52)
+      var(--ds-chat-background-opacity-percent, 100%), transparent) !important;
+}
+
 /* 0.2.40 private Favorites folders and loaded-card sorting (opt-in). */
 .ds-favorite-qol-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 4px; font-size:12px; }
 .ds-favorite-qol-controls select, .ds-favorite-qol-controls button, .ds-favorite-qol-folder-action { color:inherit; background:rgba(40,42,47,.95); border:1px solid rgba(180,180,190,.35); border-radius:7px; padding:5px 9px; cursor:pointer; }
@@ -2218,3 +2230,9 @@ html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="base"]
   div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: inherit !important; }
 html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"]
   div[id^="message-"] [data-chat-bubble-side="user"] > :nth-child(2 of :not(.ds-generation-metadata)) :is(q,.ds-rp-repair-speech) { color: var(--ds-chat-bubble-user-dialogue-text) !important; }
+
+/* v0.2.84: manual, read-only native Memory quality review. */
+.ds-memory-quality-panel:not([hidden]) { margin: 8px 0; padding: 9px; border: 1px solid rgba(148,163,184,.3); border-radius: 8px; max-height: 330px; overflow: auto; }
+.ds-memory-quality-panel h4 { margin: 10px 0 5px; font-size: 12px; }
+.ds-memory-quality-panel p { margin: 4px 0; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.ds-memory-quality-panel section { padding-top: 4px; border-top: 1px solid rgba(148,163,184,.15); }

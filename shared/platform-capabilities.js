@@ -35,7 +35,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       currentPageTools: true,
       realBrowserTabs: false,
       helperTabs: false,
-      bulkOperations: false,
+      // Selection and local/current-page bulk actions do not require tabs.
+      // Helpers, real browser tabs and background workers stay restricted.
+      bulkOperations: true,
       backgroundWorkers: false
     })
   });
@@ -83,12 +85,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     creatorBotCheckMinutes: ["backgroundWorkers"],
     creatorBotBrowserNotifications: ["backgroundWorkers"],
 
-    // "Load all" is intentionally treated as a bulk operation on Android.
+    // In-page bulk listing actions can run on Android.
     quickPanelShowLoadAll: ["bulkOperations"],
     autoLoadAllOpenedChats: ["bulkOperations"],
 
     // Despite the historical "Bulk" name these are normal single-editor
     // clipboard helpers, not multi-item jobs. Keep them available on Android.
+    // Favorites bulk selection runs in the active page and uses native
+    // Favorite buttons / local lists. It needs no desktop helper tab.
+    showFavoritesBulkSelect: [],
     lorebookBulkKeywordPaste: [],
     botTagBulkPaste: []
   });
@@ -219,7 +224,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function reasonForMissing(missing) {
     const set = new Set(missing || []);
     if (set.has("helperTabs")) return "Needs a second/helper browser tab, which the Android app does not provide.";
-    if (set.has("bulkOperations")) return "Bulk operations are desktop-only in QoL for now.";
+    if (set.has("bulkOperations")) return "This bulk action is not supported on this device.";
     if (set.has("realBrowserTabs")) return "Manages real browser tabs and is unavailable in the Android app.";
     if (set.has("backgroundWorkers")) return "Relies on desktop background/browser automation and is unavailable in the Android app.";
     return "Not supported on this device.";
@@ -381,11 +386,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   root.SpicyChatQoLPlatform = Object.freeze(api);
 
-  // Android/WebView can still receive synced desktop preferences. Guard the
-  // small number of QoL actions that have no individual setting (for example
-  // Select chats / Load all) so a preserved desktop preference cannot start a
-  // bulk/helper-tab workflow on mobile. Capture phase runs before feature
-  // handlers and does no background polling or DOM observation.
+  // Android/WebView can still receive synced desktop preferences. Guard only
+  // actions requiring unavailable helper tabs, real browser tabs, or background
+  // workers; selecting bots and other in-page bulk actions remain usable.
+  // Capture phase runs before feature handlers without polling or observers.
   const initialEnvironment = detectEnvironment();
   try {
     root.document?.documentElement?.setAttribute?.("data-ds-platform", initialEnvironment.platform);

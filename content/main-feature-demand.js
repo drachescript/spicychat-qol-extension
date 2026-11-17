@@ -9,6 +9,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return !!(
       settings.messageQuickActionCopy ||
       settings.messageQuickActionEdit ||
+      settings.messageQuickActionDelete ||
       settings.messageQuickActionRemoveImage ||
       settings.messageQuickActionResend ||
       settings.messageQuickActionReport ||
@@ -27,7 +28,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function chatTopBarWanted(settings) {
     return anySetting(settings, [
-      "showChatTopBarTools", "chatTopBarInlineCreator", "chatTopBarAddLaterButton",
+      "showChatTopBarTools", "keepChatHeaderVisibleWhileTyping", "chatTopBarInlineCreator", "chatTopBarAddLaterButton",
       "showPerCharacterChatHistory", "showQuickNewChatButton", "chatAlwaysShowProfileLink",
       "chatJumpToStartShortcut", "chatOpenWindowShortcut", "chatGenerationSettingsShortcut", "showChatExportButton", "hideChatTopBarRatingButton",
       "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell",
@@ -37,7 +38,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function composerWanted(settings) {
     return anySetting(settings, [
-      "hideChatPlusButton", "hideChatImageButton", "replaceChatImageWithOocButton",
+      "hideChatPlusButton", "hideNativeChatQuickFormatting", "hideChatImageButton", "replaceChatImageWithOocButton",
       "showAsteriskButton", "autoPairAsterisks", "hideChatVoiceButton", "hideUnlockCustomVoices"
     ]);
   }

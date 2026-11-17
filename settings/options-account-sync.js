@@ -363,6 +363,7 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
   if ($("accountSyncDeviceId")) $("accountSyncDeviceId").textContent = state.deviceId || "Preparing…";
   if ($("accountSyncRevision")) $("accountSyncRevision").textContent = String(state.lastRevision || 0);
   renderSyncDevicePrefs(response?.prefs);
+  renderAccountSyncCoverage(response, state);
   if ($("accountSyncLastSync")) $("accountSyncLastSync").textContent = formatSyncTime(state.lastSyncAt);
   const syncReceipt = $("accountSyncReceipt");
   if (syncReceipt) {
@@ -434,8 +435,70 @@ async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
   return { state, linked };
 }
 
+const ACCOUNT_SYNC_LIST_LABELS = Object.freeze({
+  blockedBots: "Blocked", laterBots: "Later", favoriteBots: "Favorites",
+  notInterestedBots: "Not Interested", openedChats: "Opened"
+});
+function syncDirectionDescription(value) {
+  return ({ "off": "OFF", "two-way": "Upload + download", "upload-only": "Upload only",
+    "download-only": "Download only", "manual": "Manual only" })[value] || "OFF";
+}
+function syncBytesLabel(bytes) {
+  const n = Math.max(0, Number(bytes) || 0);
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MiB`;
+}
+function renderAccountSyncCoverage(response, state) {
+  const host = $("accountSyncLiveDirections");
+  const note = $("accountSyncLiveReceipt");
+  if (!host || !note) return;
+  if (!response?.linked) {
+    host.textContent = "This device isn't linked. No cloud syncing is active here.";
+    note.textContent = "Connect a device to see its saved Blocked and Later sync directions.";
+    return;
+  }
+  const modes = response.prefs?.listModes || {};
+  const listSummary = ["blockedBots", "laterBots"].map(name =>
+    `${ACCOUNT_SYNC_LIST_LABELS[name]}: ${syncDirectionDescription(modes[name])}`).join(" · ");
+  host.textContent = `${listSummary} · Settings: ${syncDirectionDescription(response.prefs?.mode)} · ${state.paused ? "Paused" : "Active"} · Check interval: ${Math.round(Number(response.prefs?.syncIntervalMinutes || 720) / 60)}h${accountSyncUserEditing ? " · Unsaved edits below are not applied" : ""}`;
+  const receipt = state.lastReceipt;
+  if (!receipt?.at) {
+    note.textContent = "No verified sync receipt yet. Sync now after saving your choices to check this device.";
+    return;
+  }
+  note.textContent = `Last successful local sync: ${formatSyncTime(receipt.at)} · Blocked: ${Number(receipt.localTotals?.blockedBots || 0).toLocaleString()} · Later: ${Number(receipt.localTotals?.laterBots || 0).toLocaleString()}. These are current-device counts at that time; another device must sync before its copy is verified.`;
+}
+function renderAccountSyncCloudAudit(result) {
+  const node = $("accountSyncCloudAuditResults");
+  if (!node) return;
+  if (!result?.ok) { node.textContent = `Cloud check failed: ${result?.message || result?.error || "unknown error"}. No data was modified.`; return; }
+  const lines = [
+    `Cloud snapshot (read-only, ${formatSyncTime(result.at)}): ~${syncBytesLabel(result.estimatedPayloadBytes)} of current serialized key/value data; ${Number(result.keyCount || 0).toLocaleString()} keys across ${Number(result.pages || 0)} response pages.`,
+    `${Number(result.settingCount || 0).toLocaleString()} setting keys (~${syncBytesLabel(result.settingBytes)}); saved-list keys (~${syncBytesLabel(result.listPayloadBytes)}). Local sync journal cache: ~${syncBytesLabel(result.localLedgerBytes)}.`,
+  ];
+  for (const name of ["blockedBots", "laterBots", "favoriteBots", "notInterestedBots", "openedChats"]) {
+    const row = result.lists?.[name];
+    if (!row || (!row.cloudParts && row.direction === "off" && !["blockedBots", "laterBots"].includes(name))) continue;
+    lines.push(`${ACCOUNT_SYNC_LIST_LABELS[name]}: ${syncDirectionDescription(row.direction)} · This device ${Number(row.local || 0).toLocaleString()} · Cloud journal ${Number(row.active || 0).toLocaleString()} active, ${Number(row.removals || 0).toLocaleString()} removals · ${row.cloudParts || 0} parts from ${row.devices || 0} device(s)${row.pendingParts ? ` · ${row.pendingParts} local parts pending upload` : ""}.`);
+  }
+  lines.push("Cloud totals combine published device journals; they do not prove the phone downloaded changes. Sizes exclude database overhead, revision history and Cloudflare billing overhead. No data was deleted.");
+  node.replaceChildren(...lines.map(line => { const p = document.createElement("p"); p.textContent = line; return p; }));
+}
+
 function setupAccountSyncFoundation() {
   setupAccountSyncCategorySelectionGuard();
+  $("accountSyncInspectCloud")?.addEventListener("click", async () => {
+    const node = $("accountSyncCloudAuditResults");
+    setAccountSyncBusy(true, "Reading current cloud data without changing it…");
+    if (node) node.textContent = "Reading saved cloud keys and list journals…";
+    try {
+      const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_INSPECT_CLOUD" }, 120000);
+      renderAccountSyncCloudAudit(result);
+    } catch (error) {
+      renderAccountSyncCloudAudit({ ok: false, message: error?.message || String(error) });
+    } finally { setAccountSyncBusy(false); }
+  });
   const describeSyncPlan = () => {
     const prefs = readSyncDevicePrefsUi();
     const labels = { off: "off", "two-way": "upload + download", "upload-only": "upload only", "download-only": "download only", manual: "manual only" };

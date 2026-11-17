@@ -13,6 +13,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DEFAULT_AVATAR_SIZE = 100;
   const avatarImageChecks = new Map();
   let mediaStore = kit.getStore();
+  // Avoid rebuilding multi-megabyte CSS image strings on every chat pass.
+  let lastLayerElement = null;
+  let lastLayerItem = null;
+  let lastLayerKey = '';
+  let lastLayerSignature = '';
+  function invalidateLayer() {
+    lastLayerElement = null;
+    lastLayerItem = null;
+    lastLayerKey = '';
+    lastLayerSignature = '';
+  }
   async function loadStore(force = false) { mediaStore = await kit.loadStore(force); return mediaStore; }
   async function saveStore(next) { mediaStore = await kit.saveStore(next); return mediaStore; }
   function avatarFromChatHeader() {
@@ -77,9 +88,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function removeLayer() {
+    invalidateLayer();
     document.getElementById("ds-chat-background-layer")?.remove();
     document.documentElement.classList.remove("ds-chat-custom-background", "ds-chat-bubble-alpha");
     document.documentElement.style.removeProperty("--ds-chat-background-bubble-opacity");
+    document.documentElement.style.removeProperty("--ds-chat-background-user-native-color");
+    document.documentElement.style.removeProperty("--ds-chat-background-opacity-percent");
   }
 
   function removeControl() {
@@ -105,6 +119,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       document.body?.prepend(layer);
     }
     const settings = DS.state?.settings || {};
+    const key = chatKey();
+    const isSameImage = item === lastLayerItem ||
+      (item?.avatar && lastLayerItem?.avatar && item.url === lastLayerItem.url &&
+       item.fallbackUrl === lastLayerItem.fallbackUrl);
+    const signature = JSON.stringify([
+      settings.chatBackgroundBlur, settings.chatBackgroundDim,
+      settings.chatBackgroundFit, settings.chatBackgroundPosition,
+      settings.chatBackgroundBubbleOpacity, settings.chatBackgroundAnimateAvatar,
+      mediaStore.viewModes?.[key], mediaStore.avatarSizes?.[key],
+      mediaStore.avatarSideCopies?.[key], avatarImageChecks.get(item?.url) || ''
+    ]);
+    if (lastLayerElement === layer && isSameImage && lastLayerKey === key &&
+        lastLayerSignature === signature && layer.isConnected &&
+        document.documentElement.classList.contains('ds-chat-custom-background')) return;
     const blur = Math.min(30, Math.max(0, Number(settings.chatBackgroundBlur) || 0));
     const dim = rgbaDim(settings.chatBackgroundDim ?? 45);
     const safeUrl = String(usableAvatarUrl(item)).replace(/"/g, "%22");
@@ -147,8 +175,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     layer.style.transform = blur ? `scale(${1 + Math.min(0.08, blur / 250)})` : "none";
     document.documentElement.classList.add("ds-chat-custom-background");
     const bubbleOpacity = Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
+    if (bubbleOpacity < 1) captureUserBubbleColor();
     document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
     document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
+    document.documentElement.style.setProperty("--ds-chat-background-opacity-percent", `${Math.round(bubbleOpacity * 100)}%`);
+    lastLayerElement = layer;
+    lastLayerItem = item;
+    lastLayerKey = key;
+    lastLayerSignature = signature;
+  }
+
+  // Capture the actual user-bubble color (including native appearance and
+  // optional QoL bubble themes). SpicyChat uses a blue bubble for user messages,
+  // not the gray classes covered by the older background-opacity stylesheet.
+  // A single computed-style read when the background is applied avoids walking
+  // every message or putting opacity on the text/avatars themselves.
+  function captureUserBubbleColor() {
+    const root = document.documentElement;
+    const bubble = document.querySelector('[id^="message-"] [data-testid="ChatBubble-Column"][data-chat-bubble-side="user"]');
+    if (!bubble) {
+      root.style.removeProperty("--ds-chat-background-user-native-color");
+      return;
+    }
+    // Read the unmodified color, not our own previously translucent override.
+    // This class toggle is synchronous; there is no frame with faded content.
+    const hadAlpha = root.classList.contains("ds-chat-bubble-alpha");
+    if (hadAlpha) root.classList.remove("ds-chat-bubble-alpha");
+    let nativeColor = "";
+    try { nativeColor = getComputedStyle(bubble).backgroundColor; }
+    finally { if (hadAlpha) root.classList.add("ds-chat-bubble-alpha"); }
+    if (nativeColor && nativeColor !== "transparent" && !/^rgba?\(0,\s*0,\s*0,\s*0\)$/.test(nativeColor)) {
+      root.style.setProperty("--ds-chat-background-user-native-color", nativeColor);
+    } else {
+      root.style.removeProperty("--ds-chat-background-user-native-color");
+    }
   }
 
   function fetchBackgroundUrlImage(url) {

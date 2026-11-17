@@ -29,7 +29,7 @@ function normalizeOocTemplates(input) {
 
   if (!items.length) {
     items = [
-      { id: DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DEFAULT_OOC_TEMPLATE_ID, name: "Roleplay quality", text: DEFAULT_OOC_TEMPLATE, builtIn: true },
       { id: HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: HARD_OOC_TEMPLATE, builtIn: true }
     ];
   }
@@ -52,11 +52,13 @@ function normalizeOocTemplates(input) {
 
       let text = String(item.text || item.body || item.value || "").trim();
       if (!text) return null;
-      if (text === OLD_DEFAULT_OOC_TEMPLATE) text = DEFAULT_OOC_TEMPLATE;
+      const upgradeBuiltIn = String(item.id || "") === DEFAULT_OOC_TEMPLATE_ID &&
+        (text === PREVIOUS_DEFAULT_OOC_TEMPLATE || text === OLD_DEFAULT_OOC_TEMPLATE);
+      if (upgradeBuiltIn) text = DEFAULT_OOC_TEMPLATE;
 
       return {
         id: String(item.id || `ooc-${Date.now()}-${index}`),
-        name: String(item.name || item.title || "").trim() || oocNameFromText(text, index),
+        name: upgradeBuiltIn ? "Roleplay quality" : (String(item.name || item.title || "").trim() || oocNameFromText(text, index)),
         text,
         builtIn: item.builtIn === true
       };

@@ -14,7 +14,8 @@
     "chatAlwaysShowProfileLink",
     "chatJumpToStartShortcut",
     "chatOpenWindowShortcut",
-    "chatGenerationSettingsShortcut"
+    "chatGenerationSettingsShortcut",
+    "keepChatHeaderVisibleWhileTyping"
   ],
   "requiredHelpers": [],
   "settingsIsolated": false,

@@ -1507,7 +1507,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
 
   if (!items.length) {
     items = [
-      { id: DS.DEFAULT_OOC_TEMPLATE_ID, name: "Strict no-control", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
+      { id: DS.DEFAULT_OOC_TEMPLATE_ID, name: "Roleplay quality", text: DS.DEFAULT_OOC_TEMPLATE, builtIn: true },
       { id: DS.HARD_OOC_TEMPLATE_ID, name: "Hard no-control + formatting", text: DS.HARD_OOC_TEMPLATE, builtIn: true }
     ];
   }
@@ -1527,12 +1527,16 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
 
       if (!item || typeof item !== "object") return null;
 
-      const text = String(item.text || item.body || item.value || "").trim();
-      if (!text) return null;
+      const originalText = String(item.text || item.body || item.value || "").trim();
+      if (!originalText) return null;
 
-      const name =
-        String(item.name || item.title || "").trim() ||
-        DS.oocLabelFromText(text, index);
+      // Upgrade only the unchanged built-in preset; never replace a user's edit.
+      const upgradeBuiltIn = String(item.id || "") === DS.DEFAULT_OOC_TEMPLATE_ID &&
+        originalText === DS.PREVIOUS_DEFAULT_OOC_TEMPLATE;
+      const text = upgradeBuiltIn ? DS.DEFAULT_OOC_TEMPLATE : originalText;
+      const name = upgradeBuiltIn
+        ? "Roleplay quality"
+        : (String(item.name || item.title || "").trim() || DS.oocLabelFromText(text, index));
 
       return {
         id: String(item.id || `ooc-${Date.now()}-${index}`),

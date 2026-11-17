@@ -201,6 +201,7 @@
       ],
       "files": [
         "content/chat-list.js",
+        "content/bulk-chat-research.js",
         "content/chat-organizer.js",
         "content/chat-tags.js",
         "content/opened-chats.js",
@@ -377,7 +378,8 @@
         "background/features/background-private-lorebook-archive.js",
         "background/features/background-private-archive-setup-write.js",
         "background/features/background-private-lorebook-entry-create.js",
-        "background/features/background-native-memory-probe.js"
+        "background/features/background-native-memory-probe.js",
+        "background/features/background-research-memory-export.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -432,7 +434,8 @@
         "background/features/background-private-lorebook-archive.js",
         "background/features/background-private-archive-setup-write.js",
         "background/features/background-private-lorebook-entry-create.js",
-        "background/features/background-native-memory-probe.js"
+        "background/features/background-native-memory-probe.js",
+        "background/features/background-research-memory-export.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",

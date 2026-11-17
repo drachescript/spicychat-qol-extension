@@ -626,9 +626,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     unhideReason("menu-memory");
   }
 
+  function applyNativeChatHeaderVisibility(onChat, settings) {
+    const root = document.documentElement;
+    const enabled = !!onChat && settings.keepChatHeaderVisibleWhileTyping === true;
+    if (enabled) {
+      if (!document.getElementById("ds-native-chat-header-visibility-style")) {
+        const style = document.createElement("style");
+        style.id = "ds-native-chat-header-visibility-style";
+        // The native slot uses `contents` when visible and `hidden` while composing.
+        // Do not move the header or write to its React-owned class or inline style.
+        style.textContent = `
+          html[data-ds-keep-native-chat-header="1"]
+            [data-testid="ChatTopBarSlot"][data-chat-chrome="header"].hidden {
+            display: contents !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+      if (root.getAttribute("data-ds-keep-native-chat-header") !== "1") {
+        root.setAttribute("data-ds-keep-native-chat-header", "1");
+      }
+    } else if (root.hasAttribute("data-ds-keep-native-chat-header")) {
+      root.removeAttribute("data-ds-keep-native-chat-header");
+    }
+  }
+
   DS.applyChatTopBarTools = function applyChatTopBarTools() {
     const settings = DS.state.settings || {};
     const onChat = !!settings.enabled && DS.isSingleChatPage?.();
+    applyNativeChatHeaderVisibility(onChat, settings);
     const hasTools = !!(
       settings.chatTopBarAddLaterButton ||
       settings.showPerCharacterChatHistory ||

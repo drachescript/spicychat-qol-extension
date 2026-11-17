@@ -1,0 +1,23 @@
+{
+  "id": "bulk-chat-research",
+  "primary": "content/bulk-chat-research.js",
+  "type": "content",
+  "dependencies": [],
+  "settingsKeys": [
+    "showBulkChatResearchExport"
+  ],
+  "requiredHelpers": [
+    "content/bulk-chat-research-worker.js"
+  ],
+  "settingsFiles": [
+    "settings/feature-panels/bulk-chat-research.js"
+  ],
+  "backgroundFiles": [
+    "background/features/background-research-memory-export.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

@@ -362,7 +362,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const describe = node => ({
       tag: node.tagName.toLowerCase(),
       slot: /^[a-z-]{1,40}$/i.test(node.getAttribute("data-slot") || "") ? node.getAttribute("data-slot") : "",
-      testid: /^[a-z0-9_-]{1,80}$/i.test(node.getAttribute("data-testid") || "") ? node.getAttribute("data-testid") : "",
+      testid: (() => {
+        const value = String(node.getAttribute("data-testid") || "");
+        if (!/^[a-z0-9_-]{1,80}$/i.test(value)) return "";
+        if (/^MemoryManagerCard-/i.test(value)) {
+          const match = /^MemoryManagerCard-(Pin|Edit|Delete)-/i.exec(value);
+          return match ? `MemoryManagerCard-${match[1]}-[id]` : "MemoryManagerCard-[id]";
+        }
+        return value.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "[id]");
+      })(),
       classes: String(typeof node.className === "string" ? node.className : "").split(/\s+/).filter(value => /^[a-z0-9_:-]{1,65}$/i.test(value)).slice(0, 5)
     });
     const nodes = manager ? [...manager.querySelectorAll("[data-testid], button[aria-haspopup], button[data-slot], p")].slice(0, 120) : [];
@@ -381,7 +389,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const rows = getMemoryRows(manager);
     const reportButton = toolbar.querySelector(".ds-memory-layout-report");
-    if (reportButton) reportButton.hidden = rows.length > 0 || getExportMemoryRows(manager).length > 0;
+    // A missing row match must never hide the report needed to diagnose it.
+    // This report contains only structural selectors, never Memory text.
+    if (reportButton) { reportButton.hidden = false; reportButton.title = "Copy a privacy-safe report of the Memory window layout"; }
     const available = new Set(rows.map(memoryKey));
     selectedMemories = new Set([...selectedMemories].filter(key => available.has(key)));
 
@@ -2102,6 +2112,92 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.openMemoryPackImportPreview = (rows, name) => { if (getMemoryManagerCompatibility().canImport) showMemoryImportPreview(rows, `${name} (memory pack)`); };
   DS.hasNativeMemoryManagerForPacks = () => getMemoryManagerCompatibility().canImport;
 
+  // Review-only quality hints, evaluated from currently visible native cards.
+  // No background requests, native writes, auto-selection, or inferred deletions.
+  function reviewLoadedMemoryQuality(manager, panel) {
+    const rows = getExportMemoryRows(manager);
+    panel.replaceChildren();
+    const heading = document.createElement("strong");
+    heading.textContent = `Memory quality review · ${rows.length} loaded`;
+    panel.appendChild(heading);
+    const note = document.createElement("p");
+    note.textContent = "Read-only suggestions, not confirmed errors. Nothing is edited, selected, pinned or deleted." +
+      (findLoadMoreMemoriesButton(manager) ? " Load all memories first to review older pages too." : "");
+    panel.appendChild(note);
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No readable Memory cards are loaded; use Copy layout report if the native layout changed.";
+      panel.appendChild(empty);
+      return;
+    }
+    const normalized = text => cleanText(text).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const tokens = text => new Set(normalized(text).split(/\s+/).filter(token => token.length >= 4 &&
+      !/^(?:that|this|their|there|they|them|with|from|have|has|been|were|when|what|where|would|could|about|because|into|your|hers|his|theirs)$/.test(token)));
+    const transientCue = /\b(?:blush(?:ed|es|ing)?|smirk(?:ed|s|ing)?|trembl(?:ed|es|ing)?|breath(?:es|ing)?|gasp(?:ed|s|ing)?|heart(?:beat)?|gaze|eyes?|hands?|fingers?|lips?|leans?|nods?|whispers?|sighs?|kisses?|thighs?)\b/i;
+    const persistentCue = /\b(?:promis(?:es|ed)|agre(?:ed|es)|married|dating|partner|relationship|trust|friend|family|brother|sister|mother|father|identity|job|work|secret|knows?|dislikes?|likes?|prefers?|boundary|never|always|forgav[en]|forgave|learned|rescued|betrayed|pregnant|died|dead|alive|no longer|previously)\b/i;
+    const opposites = [
+      [/\b(?:trusts?|trusted)\b/i, /\b(?:distrusts?|distrusted|does not trust|no longer trusts?)\b/i],
+      [/\b(?:likes?|enjoys?)\b/i, /\b(?:dislikes?|hates?|does not like)\b/i],
+      [/\b(?:alive|survived)\b/i, /\b(?:dead|died|killed)\b/i],
+      [/\b(?:married|spouse)\b/i, /\b(?:divorced|separated)\b/i]
+    ];
+    const values = rows.map(row => ({ text: cleanText(row.rawText || row.text), key: normalized(row.rawText || row.text) }));
+    const groups = [
+      { label: "Possible overlaps (review before merging)", records: [] },
+      { label: "Possible changed facts (may be chronology, not a conflict)", records: [] },
+      { label: "Scene-like details (may still matter)", records: [] }
+    ];
+    const seen = new Map();
+    values.forEach((item, index) => {
+      if (seen.has(item.key)) groups[0].records.push([seen.get(item.key), index]);
+      else seen.set(item.key, index);
+      if (transientCue.test(item.text) && !persistentCue.test(item.text)) groups[2].records.push([index]);
+    });
+    // Human-triggered and limited comparisons only; avoid heavy work on a
+    // large or virtualized native list, and never combine merely similar text.
+    const inspected = values.slice(0, 500).map(value => ({ ...value, words: tokens(value.text) }));
+    for (let i = 0; i < inspected.length; i++) {
+      if (groups[0].records.length >= 12 && groups[1].records.length >= 12) break;
+      const a = inspected[i].words;
+      if (a.size < 3) continue;
+      for (let j = i + 1; j < inspected.length; j++) {
+        if (groups[0].records.length >= 12 && groups[1].records.length >= 12) break;
+        if (inspected[i].key === inspected[j].key) continue;
+        const b = inspected[j].words;
+        if (b.size < 3) continue;
+        let common = 0;
+        for (const token of a) if (b.has(token)) common++;
+        const smaller = common / Math.min(a.size, b.size);
+        const jaccard = common / (a.size + b.size - common);
+        if (common >= 5 && jaccard >= 0.78 && smaller >= 0.85 && groups[0].records.length < 12) {
+          groups[0].records.push([i, j]);
+        }
+        if (common < 2 || groups[1].records.length >= 12) continue;
+        const opposing = opposites.some(([yes, no]) =>
+          (yes.test(inspected[i].text) && !no.test(inspected[i].text) && no.test(inspected[j].text) && !yes.test(inspected[j].text)) ||
+          (no.test(inspected[i].text) && !yes.test(inspected[i].text) && yes.test(inspected[j].text) && !no.test(inspected[j].text)));
+        if (opposing) groups[1].records.push([i, j]);
+      }
+    }
+    for (const group of groups) {
+      const section = document.createElement("section");
+      const title = document.createElement("h4");
+      title.textContent = `${group.label}: ${group.records.length}${group.records.length > 12 ? " (first 12 shown)" : ""}`;
+      section.appendChild(title);
+      for (const indices of group.records.slice(0, 12)) {
+        const line = document.createElement("p");
+        line.textContent = indices.map(i => values[i].text).join("  ⇄  ");
+        section.appendChild(line);
+      }
+      panel.appendChild(section);
+    }
+    if (values.length > inspected.length) {
+      const limit = document.createElement("p");
+      limit.textContent = "Pair comparisons are limited to the first 500 loaded Memories for responsiveness.";
+      panel.appendChild(limit);
+    }
+  }
+
   function makeToolbar(manager) {
     const toolbar = document.createElement("div");
     toolbar.id = "ds-memory-bulk-toolbar";
@@ -2116,7 +2212,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <button type="button" class="ds-memory-keep-selected" disabled>Keep selected</button>
         <button type="button" class="ds-memory-load-all">Load all memories</button>
         <button type="button" class="ds-memory-export-all">Export all</button>
-        <button type="button" class="ds-memory-layout-report" hidden>Copy layout report</button>
+        <button type="button" class="ds-memory-quality-review" aria-expanded="false">Review quality</button>
+        <button type="button" class="ds-memory-layout-report">Copy layout report</button>
         <button type="button" class="ds-memory-export-selected" disabled>Export selected</button>
         <button type="button" class="ds-memory-import-json">Import JSON</button>
         <button type="button" class="ds-memory-packs">Memory packs</button>
@@ -2130,6 +2227,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <span class="ds-memory-bulk-status" aria-live="polite"></span>
         <small class="ds-memory-native-lifecycle" hidden>SpicyChat starts automatic memories when a chat outgrows its context, then reviews them about every 15 exchanges. Pinned and manually added memories are kept.</small>
       </div>
+      <div class="ds-memory-quality-panel" hidden aria-live="polite"></div>
       <div class="ds-memory-pinned-order" hidden></div>
       ${DS.state.settings?.enableMemoryVault ? `<div id="ds-memory-vault-panel" class="ds-memory-vault-panel"></div>` : ""}
     `);
@@ -2192,6 +2290,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     toolbar.querySelector(".ds-memory-export-all")?.addEventListener("click", () => {
       exportMemories({ selectedOnly: false }).catch(error => setStatus(`Export failed: ${error?.message || error}`, "error"));
+    });
+
+    toolbar.querySelector(".ds-memory-quality-review")?.addEventListener("click", event => {
+      const panel = toolbar.querySelector(".ds-memory-quality-panel");
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+      if (!panel.hidden) reviewLoadedMemoryQuality(getManager() || manager, panel);
     });
 
     toolbar.querySelector(".ds-memory-layout-report")?.addEventListener("click", () => {
