@@ -6,7 +6,9 @@
   "settingsKeys": [
     "showBulkChatResearchExport"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/bulk-chat-research-worker.js"
+  ],
   "settingsFiles": [
     "settings/feature-panels/bulk-chat-research.js"
   ],
