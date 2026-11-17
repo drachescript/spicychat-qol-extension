@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.85",
+  "sourceVersion": "0.2.86",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -78,6 +78,25 @@
       "settingsStyles": [],
       "styles": [],
       "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-community-themes",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "cards"
+      ],
+      "runtime": "content/archive-community-themes.js",
+      "settings": [
+        "settings/feature-panels/archive-community-themes.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
+      "background": [
+        "background/features/background-community-themes.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },
@@ -395,6 +414,21 @@
       "styles": [
         "content/styles/character-qol-profiles.css"
       ],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "character-token-optimizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/character-token-optimizer.js",
+      "settings": [
+        "settings/feature-panels/character-token-optimizer.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
       "background": [],
       "helpers": [],
       "fullyIndependent": false

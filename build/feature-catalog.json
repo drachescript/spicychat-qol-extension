@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.85",
+  "version": "0.2.86",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 136,
+  "featureCount": 138,
   "sections": [
     "Blocking",
     "Chat List",
@@ -122,7 +122,6 @@
     "content/chat-backgrounds.js",
     "content/chat-bookmarks.js",
     "content/chat-bubbles.js",
-    "content/chat-continuation.js",
     "content/chat-format-compatibility.js",
     "content/chat-history-navigator.js",
     "content/chat-index.js",
@@ -137,7 +136,6 @@
     "content/chat-picture-override-core.js",
     "content/chat-pins.js",
     "content/chat-rulebook-metadata.js",
-    "content/chat-scene-notes.js",
     "content/chat-search.js",
     "content/chat-smart-folders.js",
     "content/chat-stability.js",
@@ -157,7 +155,6 @@
     "content/creator-favorites.js",
     "content/creator-following.js",
     "content/creator-workspace.js",
-    "content/creator-writing-assistant.js",
     "content/custom-pictures-menu.js",
     "content/daily-message-limit.js",
     "content/delete-guard.js",
@@ -182,7 +179,6 @@
     "content/listing-panel-position.js",
     "content/local-tag-matching.js",
     "content/lorebook-connections.js",
-    "content/lorebook-consistency.js",
     "content/lorebook-entries.js",
     "content/lorebook-filter.js",
     "content/lorebook-moderation-review.js",
@@ -234,8 +230,6 @@
     "content/opened-chats.js",
     "content/pagination-tools.js",
     "content/performance-mode.js",
-    "content/persona-full-backup.js",
-    "content/persona-organizer.js",
     "content/persona-pictures.js",
     "content/personas.js",
     "content/picture-library.js",
@@ -244,10 +238,8 @@
     "content/private-lorebook-archive-handoff.js",
     "content/private-lorebook-archive-setup.js",
     "content/private-lorebook-auth.js",
-    "content/private-lorebook-bridge.js",
     "content/private-lorebook-recovery.js",
     "content/private-lorebook-storage.js",
-    "content/profile-export.js",
     "content/recommendation-helpers.js",
     "content/reply-instructions.js",
     "content/rp-format-repair.js",
@@ -263,7 +255,6 @@
     "content/saved-snippets.js",
     "content/scroll-to-top.js",
     "content/selection-memory.js",
-    "content/smart-filter-presets.js",
     "content/story-day-tracker.js",
     "content/story-reading-layout.js",
     "content/tab-diagnostics.js",
@@ -275,7 +266,6 @@
     "content/translation.js",
     "content/ui-layout-fixes.js",
     "content/update-toast.js",
-    "content/wiki-lorebook-importer.js",
     "shared/platform-capabilities.js"
   ],
   "features": [
@@ -455,6 +445,46 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "archive-community-themes",
+      "label": "Archive Community Themes",
+      "description": "Adds the archive community themes tools.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [
+        "cards"
+      ],
+      "runtimeScripts": [
+        "content/archive-community-themes.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/archive-community-themes.js"
+      ],
+      "backgroundFiles": [
+        "background/features/background-community-themes.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "archiveCommunityThemesEnabled",
+        "archiveCommunityThemesMode",
+        "archiveCommunityThemesRiskWarnings",
+        "archiveCommunityThemesExtraTags",
+        "archiveCommunityThemesAllowIds"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": true,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
@@ -1113,6 +1143,38 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "character-token-optimizer",
+      "label": "Character Token Optimizer",
+      "description": "Adds the character token optimizer tools.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/character-token-optimizer.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/character-token-optimizer.js"
+      ],
+      "backgroundFiles": [],
+      "backgroundServices": [],
+      "settingKeys": [
+        "enableCharacterTokenOptimizer"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
