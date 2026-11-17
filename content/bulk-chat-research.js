@@ -9,7 +9,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const DATABASE = 'dsBulkChatResearchPilotV1', encoder = new TextEncoder();
   let runId = crypto.randomUUID().replaceAll('-', '');
   let cancelled = false, running = false;
-  let log, startButton, scanButton, freshButton, cancelButton, limitInput, allBotsInput;
+  let log, startButton, scanButton, freshButton, cancelButton, limitInput, allBotsInput, characterRetryInput;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const phaseMs = Object.create(null);
   function addPhase(name, milliseconds) { phaseMs[name] = (phaseMs[name] || 0) + milliseconds; }
@@ -445,6 +445,264 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }
     return failure('memory-page-safety-limit');
   }
+  // Character snapshots are optional API reads that run ONLY during a manual
+  // Research Export. One indexed checkpoint and one JSON file per bot; many
+  // conversations can reference it without duplicating character definitions.
+  const CHARACTER_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
+  let characterReadCircuit = null, lorebookReadCircuit = null;
+  const CHARACTER_FIELD_ALIASES = Object.freeze({
+    botId: ['id','uuid','character_id','characterId'],
+    name: ['name','character_name','characterName'],
+    publicTitle: ['title','tagline','subtitle','public_title','publicTitle'],
+    creator: ['creator_username','creatorUsername','creator','creator_name','creatorName'],
+    visibility: ['visibility','privacy','publish_status','publishStatus'],
+    createdAt: ['createdAt','created_at','created'],
+    updatedAt: ['updatedAt','updated_at','modifiedAt','modified_at'],
+    description: ['description','public_description','publicDescription'],
+    introduction: ['introduction','intro','backstory','introduction_text'],
+    greeting: ['greeting','first_mes','first_message','firstMessage','initial_message'],
+    alternateGreetings: ['alternate_greetings','alternateGreetings','greetings','alternate_messages','alternateMessages'],
+    personality: ['personality','persona','character_personality'],
+    characterDefinition: ['definition','character_definition','characterDefinition','system_prompt','systemPrompt'],
+    scenario: ['scenario','world_scenario','worldScenario'],
+    exampleDialogue: ['mes_example','example_dialogue','exampleDialogue','example_dialogues','exampleDialogues','examples'],
+    officialTags: ['tags','tag_list','tagList','character_tags','characterTags','categories','tag_names','tagNames'],
+    officialTagIds: ['tag_ids','tagIds','character_tag_ids','characterTagIds'],
+    linkedLorebooks: ['lorebooks','lorebook_ids','lorebookIds','lorebook_id','lorebookId','lorebook'],
+    linkedRulebooks: ['rulebooks','rulebook_ids','rulebookIds','rulebook_id','rulebookId','rulebook']
+  });
+  const CHARACTER_FIELD_NAMES = Object.keys(CHARACTER_FIELD_ALIASES).concat('profileUrl');
+  const characterFile = botId => `characters/${botId}.json`;
+  function sourceValue(sources, aliases) {
+    let explicitEmpty = null;
+    for (const [source, name] of sources) {
+      if (!source || typeof source !== 'object') continue;
+      for (const key of aliases) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        const value = source[key];
+        if (value === null || value === undefined) continue; // null is NOT evidence of an empty field
+        const candidate={present:true,value:safeRaw(value),source:name,sourceKey:key};
+        if (statusOf(value)==='present') return candidate;
+        if (!explicitEmpty) explicitEmpty=candidate;
+      }
+    }
+    return explicitEmpty || {present:false};
+  }
+  function statusOf(value) {
+    return value === '' || (Array.isArray(value) && value.length === 0) ||
+      (value && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)
+      ? 'empty' : 'present';
+  }
+  function fieldOf(value, unavailable = 'not_exposed') {
+    return value.present ? {status:statusOf(value.value),value:value.value,source:value.source,sourceKey:value.sourceKey} : {status:unavailable};
+  }
+  function referencedIds(field) {
+    if (!field || !['present','empty'].includes(field.status)) return [];
+    const ids = new Set();
+    const add = item => {
+      if (typeof item === 'string' && UUID.test(item)) ids.add(item.toLowerCase());
+      else if (item && typeof item === 'object' && !Array.isArray(item)) {
+        for (const key of ['id','uuid','lorebook_id','lorebookId','rulebook_id','rulebookId']) {
+          if (typeof item[key] === 'string' && UUID.test(item[key])) ids.add(item[key].toLowerCase());
+        }
+      }
+    };
+    if (Array.isArray(field.value)) field.value.forEach(add);
+    else add(field.value);
+    return [...ids];
+  }
+  function seedSources(seed) {
+    // Conversation list snapshots are legitimate current-user-visible data;
+    // never mistake a conversation title for the character's public title.
+    return [[seed?.row?.character, 'conversation-list-character'], [seed?.row, 'conversation-list']];
+  }
+  function makeCharacterSnapshot(seed, api) {
+    const at = new Date().toISOString();
+    const record = api?.ok ? safeRaw(api.record) : null;
+    const sources = record ? [[record,'character-api'], [record?.character,'character-api-nested'],
+      [record?.data?.character,'character-api-data-nested'], ...seedSources(seed)] : seedSources(seed);
+    const unavailable = api?.ok ? 'not_exposed' : (api?.status === 'restricted' ? 'restricted' : 'fetch_failed');
+    const fields = {};
+    for (const [key, aliases] of Object.entries(CHARACTER_FIELD_ALIASES)) {
+      // A conversation's embedded character object is legitimate visible
+      // metadata too. The outer conversation row's title is NOT a bot title.
+      const availableSources = sources.filter(([,_source]) => _source !== 'conversation-list' ||
+        ['botId','name','creator','createdAt','updatedAt'].includes(key));
+      fields[key] = fieldOf(sourceValue(availableSources, aliases), unavailable);
+    }
+    // Known bot ID and profile URL are derived from a verified conversation's
+    // bot ID, not guesses about any unexposed character data.
+    fields.botId = {status:'present',value:seed.botId,source:'verified-conversation-id'};
+    fields.profileUrl = {status:'present',value:`https://spicychat.ai/chatbot/${seed.botId}`,source:'verified-conversation-id'};
+    if (fields.name.status !== 'present' && seed.botName)
+      fields.name = {status:'present',value:seed.botName,source:'conversation-list'};
+    const lorebookIds = referencedIds(fields.linkedLorebooks);
+    const rulebookIds = referencedIds(fields.linkedRulebooks);
+    const tags = fields.officialTags.status === 'present' ? fields.officialTags.value : null;
+    const result = {schema:'ds-research-character-v1',botId:seed.botId,profileUrl:fields.profileUrl.value,
+      fetchedAt:at,source:api?.ok ? String(api.source || 'character-api') : 'conversation-list-only',
+      fetchStatus:api?.ok ? 'present' : unavailable,httpStatus:api?.httpStatus || null,
+      fetchError:api?.ok ? null : String(api?.reason || 'Character API unavailable').slice(0,260),
+      fields,officialTagsRaw:tags,linkedLorebookIds:lorebookIds,linkedRulebookIds:rulebookIds,
+      linkedLorebooks:[],linkedRulebooks:[],
+      // The API response is from the currently authenticated user. All
+      // exposed character fields remain verbatim except credential-like keys
+      // scrubbed recursively by safeRaw; no editor/profile scraping.
+      exposedCharacterData:record,
+      exposedConversationCharacterData:seed?.row?.character ? safeRaw(seed.row.character) : null,
+      completeness:null};
+    // Preserve the raw embedded Rulebook if exposed; a mere UUID proves only
+    // association, NOT access to its content. No speculative Rulebook endpoint.
+    if (fields.linkedRulebooks.status === 'present') {
+      const raw = fields.linkedRulebooks.value;
+      const candidates = Array.isArray(raw) ? raw : [raw];
+      result.linkedRulebooks = candidates.map(value => ({id:referencedIds({status:'present',value})[0]||null,
+        status:value && typeof value === 'object' && Object.keys(value).some(k=>!['id','uuid'].includes(k)) ? 'present' : 'not_exposed',
+        source:'character-api',metadata:value,contentStatus:
+          value && typeof value === 'object' && ['content','entries','rules','instructions','definition'].some(k=>Object.hasOwn(value,k)) ? 'present' : 'not_exposed'}));
+    }
+    return result;
+  }
+  function lorebookPayload(value) {
+    const data = value?.data && typeof value.data === 'object' ? value.data : value;
+    const book = data?.lorebook || value?.lorebook || data;
+    if (!book || typeof book !== 'object') return null;
+    return {...book,entries:book.entries ?? data?.entries ?? value?.entries ??
+      book.lorebook_entries ?? data?.lorebook_entries ?? book.lorebookEntries ?? data?.lorebookEntries};
+  }
+  async function collectLinkedLorebook(id) {
+    const result = {id,status:'not_exposed',source:'spicychat-lorebook-live-api',fetchedAt:new Date().toISOString(),
+      pages:0,paginationComplete:false,expectedEntries:null,entries:[],metadata:null,error:null};
+    if (typeof DS.fetchLorebookArchiveData !== 'function') return result;
+    let cursor = 0;
+    const seenIds = new Set(), cursors = new Set();
+    try {
+      for (let page=0;page<120;page++) {
+        ensureNotCancelled();
+        const response = await DS.fetchLorebookArchiveData(id,false,{lastSortPriority:cursor});
+        const book = lorebookPayload(response?.data);
+        if (!book) throw Error('No readable Lorebook payload');
+        const returned = String(book.id || book.uuid || book.lorebook_id || book.lorebookId || '').toLowerCase();
+        if (returned && returned !== id) throw Error('Lorebook ID mismatch');
+        const rows = book.entries;
+        if (!Array.isArray(rows)) {result.status='not_exposed';result.metadata=safeRaw(Object.fromEntries(Object.entries(book).filter(([k])=>k!=='entries')));break;}
+        result.pages++;
+        if (!result.metadata) result.metadata=safeRaw(Object.fromEntries(Object.entries(book).filter(([k])=>k!=='entries')));
+        const expected = Number(book.num_entries ?? book.numEntries ?? book.entries_count ?? book.entriesCount);
+        if (Number.isSafeInteger(expected) && expected >= 0) result.expectedEntries=expected;
+        let added=0;
+        for (const item of rows) {
+          const key = String(item?.id || item?.uuid || JSON.stringify(item));
+          if (!key || seenIds.has(key))continue;
+          seenIds.add(key);result.entries.push(safeRaw(item));added++;
+        }
+        if (result.expectedEntries !== null && result.entries.length >= result.expectedEntries) {result.paginationComplete=true;break;}
+        if (!rows.length || (!added && page>0)) {
+          // A short page is not always sufficient evidence of completeness
+          // when an explicit total says there are older pages.
+          result.paginationComplete = result.expectedEntries === null || result.entries.length >= result.expectedEntries;
+          break;
+        }
+        if (result.expectedEntries === null && rows.length < 100) {result.paginationComplete=true;break;}
+        const last=rows.at(-1);
+        const priority=last?.priority ?? last?.sortPriority ?? last?.sort_priority;
+        const next=(priority === null || priority === undefined || priority === '') ? NaN : Number(priority);
+        if (!Number.isFinite(next) || next===cursor || cursors.has(next)) break;
+        cursors.add(next);cursor=next;
+        await sleep(350);
+      }
+      result.status=result.entries.length ? 'present' : result.paginationComplete ? 'empty' : result.status;
+      if (!result.paginationComplete && result.status !== 'not_exposed') result.error='Lorebook pagination incomplete';
+    } catch (error) {
+      if (cancelled) throw error;
+      const http=Number(error?.httpStatus || String(error?.message||'').match(/HTTP\s+(\d{3})/i)?.[1] || 0);
+      result.status=[401,403].includes(http)?'restricted':'fetch_failed';
+      result.httpStatus=http||null;result.error=String(error?.message||error).slice(0,240);
+    }
+    return result;
+  }
+  function finishCharacterCompleteness(record) {
+    const statuses={};
+    for (const field of Object.values(record.fields)) statuses[field.status]=(statuses[field.status]||0)+1;
+    const errors=[];
+    if (record.fetchError) errors.push({scope:'character',status:record.fetchStatus,reason:record.fetchError});
+    for (const book of record.linkedLorebooks||[]) if (book.error)
+      errors.push({scope:'lorebook',id:book.id,status:book.status,reason:book.error});
+    record.completeness={fieldStatuses:statuses,fieldCount:CHARACTER_FIELD_NAMES.length,
+      exposedFields:(statuses.present||0)+(statuses.empty||0),
+      lorebooksDiscovered:record.linkedLorebookIds?.length||0,
+      lorebooksComplete:(record.linkedLorebooks||[]).filter(b=>b.paginationComplete).length,
+      rulebookContentAvailable:(record.linkedRulebooks||[]).filter(b=>b.contentStatus==='present').length,
+      errors};
+    return record;
+  }
+  async function readCharacter(seed, mode) {
+    const key=`__character_${seed.botId}`;
+    const cached=await withStore('get',key);
+    const age=Date.now()-Number(cached?.at||0);
+    const valid=cached?.record?.schema==='ds-research-character-v1';
+    const retry = mode==='retry-failed' && (cached?.record?.lastRefreshError||cached?.record?.fetchStatus==='fetch_failed'||cached?.record?.fetchStatus==='restricted'||
+      cached?.record?.linkedLorebooks?.some(b=>['restricted','fetch_failed'].includes(b.status)));
+    if (valid && mode!=='refresh' && !retry && (cached.record.fetchStatus!=='present' || age < CHARACTER_CACHE_MS))
+      return cached.record;
+    if (valid && mode==='retry-failed' && cached.record.fetchStatus==='present' && !cached.record.lastRefreshError) {
+      // A Lorebook-only retry should NOT refetch the character profile.
+      const changed=safeRaw(cached.record);
+      for (let i=0;i<changed.linkedLorebooks.length;i++) {
+        const old=changed.linkedLorebooks[i];
+        if (!['restricted','fetch_failed'].includes(old.status))continue;
+        ensureNotCancelled();
+        if (lorebookReadCircuit) break;
+        const next=await measure('linkedLorebookRead',()=>collectLinkedLorebook(old.id));
+        changed.linkedLorebooks[i]=next;
+        if (next.httpStatus===429 || next.httpStatus===401)lorebookReadCircuit={reason:next.error||'Lorebook API blocked'};
+        await sleep(350);
+      }
+      finishCharacterCompleteness(changed);
+      await withStore('put',{conversationId:key,record:changed,at:Date.now(),state:'complete'});
+      return changed;
+    }
+    update(`Reading character metadata · ${seed.botName || seed.botId}`);
+    const api = characterReadCircuit
+      ? {ok:false,status:'fetch_failed',reason:`Character API skipped after ${characterReadCircuit.reason}`,httpStatus:characterReadCircuit.httpStatus}
+      : typeof DS.fetchResearchCharacterMetadata==='function'
+        ? await DS.fetchResearchCharacterMetadata(seed.botId)
+        : {ok:false,status:'fetch_failed',reason:'Character API reader not loaded'};
+    if (!api.ok && (api.httpStatus===429 || api.httpStatus===401 ||
+        /auth(?:entication)?[^.;]{0,35}(?:unavailable|not ready)|rate.limit/i.test(String(api.reason||''))))
+      characterReadCircuit={reason:String(api.reason||'auth/rate limited').slice(0,120),httpStatus:api.httpStatus||0};
+    ensureNotCancelled();
+    const record=makeCharacterSnapshot(seed,api);
+    // Preserve a previously successful snapshot if a refresh hits an outage.
+    // The new failure is still recorded, never disguised as a fresh result.
+    if (!api.ok && valid && cached.record.fetchStatus==='present') {
+      const preserved=safeRaw(cached.record);
+      preserved.lastRefreshError={status:api.status||'fetch_failed',httpStatus:api.httpStatus||null,
+        reason:String(api.reason||'API refresh failed').slice(0,240),attemptedAt:new Date().toISOString()};
+      await withStore('put',{conversationId:key,record:preserved,at:Date.now(),state:'stale-retained'});
+      return preserved;
+    }
+    for (const id of record.linkedLorebookIds) {
+      ensureNotCancelled();
+      // Existing cached Lorebook content is reusable even during an explicit
+      // failed-field retry; refresh-all intentionally re-reads it.
+      const old = cached?.record?.linkedLorebooks?.find(b=>b.id===id);
+      const useOld = old && mode!=='refresh' && old.paginationComplete &&
+        !['restricted','fetch_failed'].includes(old.status) && age < CHARACTER_CACHE_MS;
+      const book = useOld ? old : lorebookReadCircuit
+        ? {id,status:'fetch_failed',source:'lorebook-api',fetchedAt:new Date().toISOString(),
+          entries:[],paginationComplete:false,error:`Skipped after ${lorebookReadCircuit.reason}`}
+        : await measure('linkedLorebookRead',()=>collectLinkedLorebook(id));
+      record.linkedLorebooks.push(book);
+      if (!useOld && (book.httpStatus===429 || book.httpStatus===401 || /auth unavailable|rate.limit/i.test(String(book.error||''))))
+        lorebookReadCircuit={reason:String(book.error||'auth/rate limited').slice(0,120)};
+      await sleep(350);
+    }
+    finishCharacterCompleteness(record);
+    await withStore('put',{conversationId:key,record,at:Date.now(),state:'complete'});
+    return record;
+  }
+
   // Cooperative legacy path, used only if the browser blocks worker creation.
   const crcTable = Array.from({length:256}, (_,n) => { let c=n; for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;return c>>>0; });
   async function crc32Yield(bytes) {
@@ -539,7 +797,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       addWorkerMetrics(result.metrics);
       return result.blob;
     }
-    const manifest={format:'ds-chat-memory-research-v1',generatedAt:new Date().toISOString(),
+    const manifest={format:'ds-chat-memory-character-research-v2',generatedAt:new Date().toISOString(),
       part:partNumber,selection:{botLimit:report.botSelection},safetyLimits:{compressedBytesPerPart:MAX_ZIP_BYTES},
       summary:report,files:entries.map(e=>({path:e.name,bytes:e.size,compressedBytes:e.data.length,crc32:e.crc}))};
     return buildZipFallback([await zippedEntry('manifest.json',manifest),...entries]);
@@ -585,8 +843,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   async function run(limit, fresh = false) {
     runId = crypto.randomUUID().replaceAll('-', ''); // Fresh filenames on each export, even in the same helper tab.
+    characterReadCircuit=null;lorebookReadCircuit=null;
     running=true;cancelled=false;archiveWorkerDisabled=false;archiveBackend='not-started';for(const key of Object.keys(phaseMs))delete phaseMs[key];startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
     let selected=[],saved=0;const completed=new Map();let completeCount=0;const memoryStatusCounts={};
+    const characterByBot=new Map(),characterPartByBot=new Map(),characterStatusCounts={},characterErrors=[];
     try {
       if (!DS.state?.settings?.enabled || !DS.state?.settings?.showBulkChatResearchExport) throw Error('Enable Research Export in QoL Settings first.');
       if (typeof DS.fetchConversationListPage !== 'function' || typeof DS.fetchChatHistoryPage !== 'function' ||
@@ -594,7 +854,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       update('Checking download verification permission...');
       if (!await DS.requestDownloadPermission?.()) throw Error('Downloads permission is needed to verify that ZIP parts actually saved.');
       if (fresh) {
-        update('Starting a fresh download of chat history and native Memories...');
+        update('Starting a fresh download of chat history, native Memories and character metadata...');
         await clearResearchCheckpoints();
       }
       const priorSelection = await withStore('get','__pilot_selection__');
@@ -611,15 +871,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         if (!staged.length) return;
         ensureNotCancelled();
         const report={discovery:selection.discovery,selectedBots:selection.discovery.scannedBots,botSelection:limit,selectedConversations:selected.length,processedConversations:completed.size,
-          conversationsInThisPart:[...new Set(staged.map(x=>x.conversationId))],messagesRead:totalMessages,memoriesRead:totalMemories,
+          conversationsInThisPart:[...new Set(staged.map(x=>x.conversationId).filter(Boolean))],messagesRead:totalMessages,memoriesRead:totalMemories,
           memoryFailures:failed,historyFailures:historyFailed,historyComplete:completeCount,
           memoryStatuses:{...memoryStatusCounts},
-          incompleteConversations:[...new Set(staged.map(x=>x.conversationId))].filter(id=>{
+          characterFilesInThisPart:staged.filter(x=>x.kind==='character').map(x=>x.entry.name),
+          characterCompleteness:{uniqueBotsCollected:characterByBot.size,fetchStatuses:{...characterStatusCounts},
+            linkedLorebooksRead:[...characterByBot.values()].reduce((n,c)=>n+c.linkedLorebooks.filter(b=>b.status==='present'||b.status==='empty').length,0),
+            fieldStatuses:[...characterByBot.values()].reduce((sum,c)=>{for(const [key,count] of Object.entries(c.completeness?.fieldStatuses||{}))sum[key]=(sum[key]||0)+count;return sum;},{}),
+            errorCount:characterErrors.length,errorsTruncated:Math.max(0,characterErrors.length-100),
+            errors:characterErrors.slice(-100)},
+          incompleteConversations:[...new Set(staged.map(x=>x.conversationId).filter(Boolean))].filter(id=>{
             const record=completed.get(id);return record && (!record.historyComplete||record.memoryStatus==='unavailable'||!record.memoryComplete);
           })};
         update(`Saving and verifying archive part ${partNumber}...`);
         const info=await downloadPart(staged.map(x=>x.entry),partNumber,report);
-        for (const id of new Set(staged.map(x=>x.conversationId))) {
+        for (const id of new Set(staged.map(x=>x.conversationId).filter(Boolean))) {
           const count = staged.filter(x=>x.conversationId===id).length;
           const remaining = (remainingFiles.get(id) || 0) - count;
           remainingFiles.set(id, remaining);
@@ -687,10 +953,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         completed.set(entry.conversationId,{conversationId:entry.conversationId,historyComplete:history.complete,memoryStatus:memory.status,memoryComplete:!memoryNeedsResume(memory)});
         if (history.complete) completeCount++;
         memoryStatusCounts[memory.status]=(memoryStatusCounts[memory.status]||0)+1;
+        // One character snapshot/file per unique bot across all archive parts.
+        // Each conversation points to its file; a later part may reference an
+        // earlier part, so also record which ZIP contains the character JSON.
+        if (!characterByBot.has(entry.botId)) {
+          const character=await measure('characterReadTotal',()=>readCharacter(entry,characterRetryInput?.value||'reuse'));
+          characterByBot.set(entry.botId,character);
+          characterStatusCounts[character.fetchStatus]=(characterStatusCounts[character.fetchStatus]||0)+1;
+          for (const err of character.completeness?.errors||[]) characterErrors.push({botId:entry.botId,...err});
+          if (character.lastRefreshError) characterErrors.push({botId:entry.botId,scope:'refresh',...character.lastRefreshError});
+          const file=await zippedEntry(characterFile(entry.botId),character);
+          const projected=file.data.length+file.nameBytes.length+250;
+          if (projected>PART_TARGET) throw Error('A character file exceeds the archive size limit');
+          if (partSize+projected>PART_TARGET && staged.length) {await flush();partSize=0;}
+          characterPartByBot.set(entry.botId,`spicychat-research-${runId}-part-${String(partNumber).padStart(3,'0')}.zip`);
+          staged.push({conversationId:null,kind:'character',entry:file});
+          partSize+=projected;
+        }
         // Keep unedited JSON and original message fields, including exact Markdown and timestamps.
         const fileList=[];
+        // Conversation-specific API metadata stays intact, while the repeated
+        // nested character object lives once in characters/<bot-id>.json.
+        const slimRow = entry.row && typeof entry.row==='object' && !Array.isArray(entry.row)
+          ? Object.fromEntries(Object.entries(entry.row).filter(([key])=>key!=='character')) : entry.row;
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/conversation.json`,{
-          conversation:entry,history:{expected:history.expected,retrieved:history.messages.length,pages:history.pages,
+          conversation:{...entry,row:slimRow},characterFile:characterFile(entry.botId),
+          characterArchivePart:characterPartByBot.get(entry.botId),
+          history:{expected:history.expected,retrieved:history.messages.length,pages:history.pages,
             complete:history.complete,error:history.error,countWarning:history.countWarning||null,apiMetadata:history.header},
           memoryStatus:memory.status,memoryError:memory.reason||null,
           memoryPaginationComplete:!memoryNeedsResume(memory)}));
@@ -731,7 +1020,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         await sleep(350);
       }
       await flush();
-      update(`Export finished (${selection.discovery.scannedBots} bots, ${selected.length} conversations): ${totalMessages} messages, ${totalMemories} native Memories, ${saved} verified ZIP parts. ${failed} Memory reads unavailable, ${historyFailed} history reads failed.`);
+      update(`Export finished (${selection.discovery.scannedBots} bots, ${selected.length} conversations): ${characterByBot.size} character records, ${totalMessages} messages, ${totalMemories} native Memories, ${saved} verified ZIP parts. ${characterErrors.length} character/Lorebook issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.`);
     } catch (error) {
       update(error?.message==='cancelled' ? `Stopped. ${saved} archive parts verified; completed conversations remain locally checkpointed.` :
         `Stopped: ${error?.message||error}. ${saved} archive parts verified. Local checkpoints are preserved for Resume.`);
@@ -746,6 +1035,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   function setLimitDisabled(busy) {
     limitInput.disabled = busy || allBotsInput.checked;
     allBotsInput.disabled = busy;
+    if(characterRetryInput) characterRetryInput.disabled=busy;
   }
   function chosenLimit() {
     if (allBotsInput.checked) return 'all';
@@ -758,25 +1048,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     let limit;
     try { limit=chosenLimit(); } catch (error) { update(error.message); return; }
     if (limit==='all' && !window.confirm('Scan all available bots and their conversations? This may take a long time and create many ZIP files. You can cancel and resume.')) return;
-    if (fresh && !window.confirm('Download all selected conversations and native Memories again from SpicyChat? This clears only the research exporter’s local checkpoints. Previously saved ZIP files are not removed.')) return;
+    if (fresh && !window.confirm('Download all selected conversations, native Memories and character metadata again? This clears only the research exporter’s local checkpoints. Previously downloaded ZIP files are not removed.')) return;
     void (action==='scan' ? scanOnly(limit) : run(limit,fresh));
   }
   function render() {
     if(document.getElementById('ds-bulk-research-panel')) return;
     const panel=document.createElement('section');panel.id='ds-bulk-research-panel';
     panel.style.cssText='position:fixed;z-index:2147483000;right:10px;top:70px;width:min(540px,calc(100vw - 20px));box-sizing:border-box;max-height:80vh;overflow-y:auto;overflow-x:hidden;padding:12px 14px;background:#181a22;color:#f5f5f5;border:1px solid #777;border-radius:12px;box-shadow:0 5px 35px #000a;font:13px/1.4 sans-serif';
-    const title=document.createElement('h3');title.textContent='Bulk Chat & Memory Research Export';title.style.cssText='margin:0 0 6px;font-size:17px;line-height:1.3';panel.append(title);
-    const hint=document.createElement('p');hint.textContent='Export every chat and native Memory for the selected bots. ZIPs split at 300 MB. Your chats are unchanged.';hint.style.cssText='margin:0 0 8px';panel.append(hint);
+    const title=document.createElement('h3');title.textContent='Bulk Chat, Memory & Character Research Export';title.style.cssText='margin:0 0 6px;font-size:17px;line-height:1.3';panel.append(title);
+    const hint=document.createElement('p');hint.textContent='Export every chat, native Memory and accessible character data once per unique bot, including permitted linked Lorebooks. ZIPs split at 300 MB. Character records are read-only and can be resumed.';hint.style.cssText='margin:0 0 8px';panel.append(hint);
     const selectors=document.createElement('div');selectors.style.cssText='display:flex;align-items:center;gap:12px;flex-wrap:wrap';
     const label=document.createElement('label');label.textContent='Recent bots to export ';label.style.whiteSpace='nowrap';
     limitInput=document.createElement('input');limitInput.type='number';limitInput.min='1';limitInput.step='1';limitInput.value=String(DEFAULT_BOTS);limitInput.style.cssText='width:65px;color:black';label.append(limitInput);selectors.append(label);
     const allLabel=document.createElement('label');allLabel.style.cssText='display:flex;align-items:center;gap:6px;white-space:nowrap';
     allBotsInput=document.createElement('input');allBotsInput.type='checkbox';allLabel.append(allBotsInput,document.createTextNode('All bots'));selectors.append(allLabel);panel.append(selectors);
     allBotsInput.addEventListener('change',()=>setLimitDisabled(false));
+    const charRow=document.createElement('label');charRow.style.cssText='display:flex;align-items:center;gap:6px;margin:6px 0;flex-wrap:wrap';
+    charRow.append(document.createTextNode('Character metadata: '));
+    characterRetryInput=document.createElement('select');characterRetryInput.title='Reuse character checkpoints, retry failed metadata only, or refresh all bots. Successful snapshots auto-refresh after seven days.';
+    for (const [value,name] of [['reuse','Reuse cached / update stale'],['retry-failed','Retry failed/restricted'],['refresh','Refresh all character metadata']]) {
+      const option=document.createElement('option');option.value=value;option.textContent=name;characterRetryInput.append(option);
+    }
+    characterRetryInput.style.cssText='max-width:100%;background:#343e5e;color:white;padding:4px;border-radius:5px';
+    charRow.append(characterRetryInput);panel.append(charRow);
+
     const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;margin:9px 0;max-width:100%;white-space:nowrap;scrollbar-width:thin';
     startButton=document.createElement('button');startButton.textContent='Start / Resume';
     scanButton=document.createElement('button');scanButton.textContent='Scan bots';scanButton.title='Scan selected bots for additional conversations';
-    freshButton=document.createElement('button');freshButton.textContent='Fresh';freshButton.title='Download chats and Memories again, clearing only research checkpoints';freshButton.setAttribute('aria-label','Download fresh');
+    freshButton=document.createElement('button');freshButton.textContent='Fresh';freshButton.title='Download all chats, Memories and character metadata again, clearing only research checkpoints';freshButton.setAttribute('aria-label','Download fresh');
     cancelButton=document.createElement('button');cancelButton.textContent='Cancel';cancelButton.disabled=true;
     const close=document.createElement('button');close.textContent='Close';
     for(const b of [startButton,scanButton,freshButton,cancelButton,close]) b.style.cssText='flex:0 0 auto;padding:6px 6px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:nowrap;font:12px sans-serif';

@@ -189,7 +189,8 @@ const OPTIONS_PERFORMANCE = {
   savedManagerRefreshBatches: 0,
   savedManagerRefreshKinds: 0,
   blockedManagerRefreshBatches: 0,
-  slowStorageReads: []
+  slowStorageReads: [],
+  slowStorageWrites: []
 };
 
 

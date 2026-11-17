@@ -132,6 +132,17 @@ async function botStatusPausedQueue(kind = "main") {
   } catch { return null; }
 }
 
+async function botStatusPausedQueues() {
+  // One read for the two independent resume queues when Settings needs their
+  // counts together. Resume itself still reads the single authoritative queue
+  // immediately before starting, and manual review still rechecks for races.
+  try {
+    const keys = [BOT_STATUS_PAUSED_QUEUE_KEY, BOT_STATUS_STALE_PAUSED_QUEUE_KEY];
+    const data = await storageGet(keys);
+    return keys.map(key => data?.[key] && Array.isArray(data[key].ids) ? data[key] : null);
+  } catch { return [null, null]; }
+}
+
 const BOT_STATUS_LAST_RUN_FEEDBACK_KEY = "botStatusLastRunFeedbackV1";
 
 function formatBotStatusLastRunFeedback(report) {
@@ -172,11 +183,29 @@ async function refreshBotStatusLastRunFeedback() {
   } catch { host.textContent = "Last scan summary unavailable; existing saved results were not changed."; }
 }
 
-// A resumed scan may contain IDs that have since left its original source.
-// Keep them until the user explicitly reviews the queue; never silently
-// recheck blocked/forgotten bots or delete their saved Bot Status records.
+// Reconcile durable resume queues locally against the current saved sources.
+// Ineligible IDs are HELD inside their original queue, not deleted or scanned.
+// They automatically become pending again when the original scope allows them.
+// No network checks, timers, new observers, or changes to saved bot records.
+function botStatusHeldEntries(queue) {
+  const seen = new Set();
+  return (Array.isArray(queue?.heldIds) ? queue.heldIds : []).filter(item => {
+    const id = String(item?.id || "").trim().toLowerCase();
+    if (!validBotId(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  }).map(item => ({
+    id: String(item.id).trim().toLowerCase(),
+    mode: String(item.mode || queue?.mode || "all"),
+    scope: String(item.scope || queue?.scope || "all"),
+    reason: String(item.reason || "No longer in the original scan scope").slice(0, 160),
+    since: Number(item.since || 0) || Date.now()
+  }));
+}
+
 function reviewBotStatusQueueEligibility(queue) {
-  const ids = (Array.isArray(queue?.ids) ? queue.ids : []).filter(validBotId);
+  const ids = [...new Set((Array.isArray(queue?.ids) ? queue.ids : [])
+    .map(id => String(id || "").trim().toLowerCase()).filter(validBotId))];
   const mode = String(queue?.mode || "all");
   const scope = String(queue?.scope || "all");
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
@@ -194,8 +223,8 @@ function reviewBotStatusQueueEligibility(queue) {
   const unavailable = ids.filter(id => !eligibleIds.has(id)).map(id => {
     let reason;
     if (botStatusIdIgnored(id)) reason = "Forgotten / excluded from Bot Status";
-    else if (mode === "outside" && blockedIds.has(id.toLowerCase())) reason = "Blocked; excluded from outside-scope scans";
-    else if (mode === "archived" && blockedIds.has(id.toLowerCase())) reason = "Blocked; excluded from archived rechecks";
+    else if (mode === "outside" && blockedIds.has(id)) reason = "Blocked; excluded from outside-scope scans";
+    else if (mode === "archived" && blockedIds.has(id)) reason = "Blocked; excluded from archived rechecks";
     else if (mode === "archived" && !archives[id]) reason = "No longer has an eligible saved recovery copy";
     else if (mode === "archived" && !isConfirmedUnavailableBotStatus(saved[id])) reason = "No longer confirmed unavailable";
     else if (mode === "outside" && elsewhere.has(id)) reason = "Now included in routine tracking";
@@ -206,61 +235,160 @@ function reviewBotStatusQueueEligibility(queue) {
   return { ids, unavailable, mode, scope };
 }
 
-async function reviewAndRemoveIneligibleBotStatusPending() {
-  if (botAvailabilityScanRunning) {
-    showSettingsToast("Stop the active Bot Status scan before reviewing its saved queue.");
-    return;
-  }
-  await ensureSavedListsDataLoaded();
-  await ensureSavedRecoveryDataLoaded();
-  const snapshots = await Promise.all([botStatusPausedQueue("main"), botStatusPausedQueue("stale")]);
-  const reports = snapshots.map(reviewBotStatusQueueEligibility);
-  const count = reports.reduce((total, report) => total + report.unavailable.length, 0);
-  if (!count) {
-    showSettingsToast("All saved pending IDs are eligible again; you can use Resume.");
-    await refreshBotStatusPauseButton();
-    return;
-  }
-  const preview = reports.flatMap((report, i) => report.unavailable.map(item =>
-    `${i === 1 ? "Stale" : "Regular"}: ${item.id} — ${item.reason}`));
-  const message = `${count} saved pending Bot Status ID${count === 1 ? " is" : "s are"} no longer eligible for the original scan.\n\n` +
-    `${preview.slice(0, 8).join("\n")}${preview.length > 8 ? `\n...and ${preview.length - 8} more` : ""}\n\n` +
-    "OK: remove ONLY these ineligible IDs from the saved resume queue.\n" +
-    "Cancel: preserve everything.\n\n" +
-    "Existing Bot Status results, saved bot copies, blocked lists, Favorites and other QoL data are not changed.";
-  if (!confirm(message)) return;
-  // Re-read before editing so an updated queue from a different Settings tab
-  // is never replaced using an old review snapshot.
-  const current = await Promise.all([botStatusPausedQueue("main"), botStatusPausedQueue("stale")]);
-  const sameQueue = (a, b) => JSON.stringify(a?.ids || []) === JSON.stringify(b?.ids || []) &&
-    String(a?.updatedAt || "") === String(b?.updatedAt || "") &&
-    String(a?.scope || "") === String(b?.scope || "") && String(a?.mode || "") === String(b?.mode || "");
-  if (current.some((queue, i) => !sameQueue(queue, snapshots[i])) || botAvailabilityScanRunning) {
-    showSettingsToast("The saved scan queue changed during review. Nothing was removed; review it again.");
-    await refreshBotStatusPauseButton();
-    return;
-  }
-  const updates = {};
-  for (let i = 0; i < current.length; i++) {
-    const queue = current[i];
-    if (!queue?.ids?.length || !reports[i].unavailable.length) continue;
-    const removeIds = new Set(reports[i].unavailable.map(item => item.id));
-    const remaining = queue.ids.filter(id => !removeIds.has(id));
-    updates[botStatusQueueKey(i === 1 ? "stale" : "main")] = remaining.length
-      ? { ...queue, ids: remaining, updatedAt: Date.now(), reason: "Remaining checks after manual pending review" }
-      : null;
-  }
-  if (!await storageSetVerified(updates)) {
-    showSettingsToast("Could not verify the saved queue update. Existing results were left alone; reload Settings before retrying.");
-    return;
-  }
-  await refreshBotStatusPauseButton();
-  renderBotAvailability({ skipRecoveryRerender: true });
-  showSettingsToast(`Removed ${count} ineligible pending ID${count === 1 ? "" : "s"} from the resume queue only. Saved bot data was preserved.`);
+// An explicit full/stale Refresh may also retry durable work which was
+// originally tracked but subsequently lost its list membership. Unlike a
+// routine scan, this is a user-initiated, one-time recovery of *saved* IDs.
+// Never retry IDs deliberately forgotten or blocked, or whose held reason is
+// a policy/recovery exclusion. No speculative ID discovery or network lookups.
+function botStatusManualHeldRetryAllowed(item, blockedIds) {
+  return !!item && validBotId(item.id) && !botStatusIdIgnored(item.id) &&
+    !blockedIds.has(item.id) &&
+    /^(?:No longer in an eligible tracked source|No longer in the original (?:.+ )?scan scope)$/i.test(String(item.reason || ""));
 }
 
+function botStatusSavedHeldScanSources(raw) {
+  const entries = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const normalized = {};
+  for (const [key, kinds] of Object.entries(entries)) {
+    const id = String(key).trim().toLowerCase();
+    if (!validBotId(id) || !Array.isArray(kinds)) continue;
+    const sources = [...new Set(kinds.filter(kind => kind === "main" || kind === "stale"))];
+    if (sources.length) normalized[id] = sources;
+  }
+  return normalized;
+}
+
+function botStatusRecoveryEntry(id, availability, archives) {
+  const previous = availability[id] || {};
+  const archive = archives[id] || {};
+  const fields = archive.fields || {};
+  return {
+    ...previous, id,
+    name: cleanAuthoritativeBotName(previous.name || fields.name || archive.name || "", id) || id,
+    creator: previous.creator || fields.creator || archive.creator || "",
+    image: previous.image || fields.image || archive.image || "",
+    profileUrl: previous.profileUrl || archive.profileUrl || `https://spicychat.ai/chatbot/${id}`,
+    chatUrl: previous.chatUrl || `https://spicychat.ai/chat/${id}`,
+    sources: uniqueClean([...(previous.sources || []), "saved-pending-recheck"])
+  };
+}
+
+// A successful check must be persisted BEFORE it may leave a held queue.
+// This touches only the small resume queue(s); saved bot/history data is never
+// removed. Active queues from another Settings tab are never rewritten.
+async function botStatusRetireCheckedHeldSources(doneIds, heldSources, currentKind) {
+  if (!doneIds.size) return;
+  for (const kind of ["main", "stale"]) {
+    if (kind === currentKind || ![...doneIds].some(id => heldSources[id]?.includes(kind))) continue;
+    try {
+      const key = botStatusQueueKey(kind);
+      const snapshot = await botStatusPausedQueue(kind);
+      if (!snapshot || snapshot.phase === "running") continue;
+      const currentHeld = botStatusHeldEntries(snapshot);
+      const nextHeld = currentHeld.filter(item => !(
+        doneIds.has(item.id) && heldSources[item.id]?.includes(kind)));
+      if (nextHeld.length === currentHeld.length) continue;
+      // Avoid overwriting another Options tab's newer resume state.
+      const latest = await botStatusPausedQueue(kind);
+      if (JSON.stringify(latest) !== JSON.stringify(snapshot) || !botAvailabilityScanRunning) continue;
+      const replacement = { ...snapshot, heldIds: nextHeld, updatedAt: Date.now() };
+      await storageSetVerified({ [key]: replacement });
+    } catch (error) {
+      // Cross-queue retirement is optional. A failed write leaves the source
+      // hold recoverable for the next explicit refresh; never fail scan finalization.
+      console.warn("[SpicyChat QoL] Could not retire a completed held Bot Status check", error);
+    }
+  }
+}
+
+function botStatusReconciledQueue(queue) {
+  if (!queue || !Array.isArray(queue.ids)) return { queue, changed: false };
+  const currentMode = String(queue.mode || "all");
+  const currentScope = String(queue.scope || "all");
+  const active = [...new Set(queue.ids.map(id => String(id || "").trim().toLowerCase()).filter(validBotId))];
+  const held = botStatusHeldEntries(queue);
+  if (!active.length && !held.length) return { queue, changed: false };
+  const sameOrigin = held.filter(item => item.mode === currentMode && item.scope === currentScope);
+  // Preserve held work from a different scan origin when a new manual scan
+  // replaces the active queue. It must never be silently scanned out of scope.
+  const otherOrigin = held.filter(item => item.mode !== currentMode || item.scope !== currentScope);
+  const pendingReview = reviewBotStatusQueueEligibility({ mode: currentMode, scope: currentScope,
+    ids: [...active, ...sameOrigin.map(item => item.id)] });
+  const recoverable = botStatusSavedHeldScanSources(queue.manualHeldScanSources);
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
+  const excluded = new Map(pendingReview.unavailable.filter(item =>
+    !recoverable[item.id] || botStatusIdIgnored(item.id) || blockedIds.has(item.id)
+  ).map(item => [item.id, item.reason]));
+  const oldHeld = new Map(sameOrigin.map(item => [item.id, item]));
+  const nextActive = pendingReview.ids.filter(id => !excluded.has(id));
+  const nextHeld = [...otherOrigin, ...pendingReview.ids.filter(id => excluded.has(id)).map(id => ({
+    id, mode: currentMode, scope: currentScope,
+    reason: excluded.get(id), since: oldHeld.get(id)?.since || Date.now()
+  }))];
+  const originalHeld = botStatusHeldEntries(queue);
+  const originalIds = Array.isArray(queue.ids) ? queue.ids : [];
+  const sameIds = originalIds.length === nextActive.length && originalIds.every((id, i) =>
+    String(id || "").trim().toLowerCase() === nextActive[i]);
+  const sameHeld = originalHeld.length === nextHeld.length && originalHeld.every((item, i) =>
+    item.id === nextHeld[i].id && item.mode === nextHeld[i].mode &&
+    item.scope === nextHeld[i].scope && item.reason === nextHeld[i].reason);
+  // An existing queue can be legacy/un-normalized; reconcile it only when
+  // eligibility or the held-state actually changes, never on every render.
+  return { queue: { ...queue, ids: nextActive, heldIds: nextHeld }, changed: !sameIds || !sameHeld };
+}
+
+async function botStatusReconcileSavedQueue(kind, snapshot) {
+  if (!snapshot || botAvailabilityScanRunning || snapshot.phase === "running") return snapshot;
+  // Verify before modifying a queue that may be updated in another Options tab.
+  // If the queue changed, leave it untouched; the next explicit refresh retries.
+  const proposed = botStatusReconciledQueue(snapshot);
+  if (!proposed.changed) return snapshot;
+  const key = botStatusQueueKey(kind);
+  const latest = await botStatusPausedQueue(kind);
+  if (JSON.stringify(latest) !== JSON.stringify(snapshot) || botAvailabilityScanRunning) return latest;
+  const replacement = { ...proposed.queue, updatedAt: Date.now(),
+    reason: proposed.queue.ids.length ? "Eligible pending checks retained" : "Out-of-scope checks safely held" };
+  if (!await storageSetVerified({ [key]: replacement })) return snapshot;
+  return replacement;
+}
+
+async function reviewAndRemoveIneligibleBotStatusPending() {
+  // Kept as the existing button handler for compatibility with saved Settings.
+  // Review is informational; automatic reconciliation never drops saved IDs.
+  await ensureSavedListsDataLoaded();
+  await ensureSavedRecoveryDataLoaded();
+  const [main, stale] = await botStatusPausedQueues();
+  const held = [...botStatusHeldEntries(main), ...botStatusHeldEntries(stale)];
+  if (!held.length) {
+    showSettingsToast("No out-of-scope Bot Status checks are being held. Pending checks will resume normally.");
+    return;
+  }
+  const totals = new Map();
+  for (const item of held) totals.set(item.reason, (totals.get(item.reason) || 0) + 1);
+  showSettingsToast(`${held.length} saved Bot Status check${held.length === 1 ? " is" : "s are"} held automatically: ${[...totals].map(([reason, count]) => `${count} ${reason}`).join("; ")}. Existing results are safe; a full or stale Refresh will also retry eligible held IDs.`);
+}
+
+let botStatusRecoverableHeldCount = 0;
+
 async function refreshBotStatusPauseButton() {
-  const [state, staleState] = await Promise.all([botStatusPausedQueue(), botStatusPausedQueue("stale")]);
+  let [state, staleState] = await botStatusPausedQueues();
+  if (!botAvailabilityScanRunning && ((state?.ids?.length || state?.heldIds?.length) || (staleState?.ids?.length || staleState?.heldIds?.length))) {
+    await ensureSavedListsDataLoaded();
+    await ensureSavedRecoveryDataLoaded();
+    [state, staleState] = await Promise.all([
+      botStatusReconcileSavedQueue("main", state),
+      botStatusReconcileSavedQueue("stale", staleState)
+    ]);
+  }
+  const allHeld = [...botStatusHeldEntries(state), ...botStatusHeldEntries(staleState)];
+  const heldCount = allHeld.length;
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
+  botStatusRecoverableHeldCount = new Set(allHeld
+    .filter(item => botStatusManualHeldRetryAllowed(item, blockedIds))
+    .map(item => item.id)).size;
+  const heldReasonCounts = new Map();
+  for (const item of allHeld) heldReasonCounts.set(item.reason, (heldReasonCounts.get(item.reason) || 0) + 1);
+  const heldReasons = [...heldReasonCounts].slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join("; ");
   const normalIds = (state?.ids || []).filter(validBotId);
   const staleIds = (staleState?.ids || []).filter(validBotId);
   botStatusPendingReviewIds = new Set([...normalIds, ...staleIds]);
@@ -286,16 +414,18 @@ async function refreshBotStatusPauseButton() {
   if (hint) hint.textContent = [
     count ? `${count} regular pending rechecks saved for Resume.` : "No regular scan pending.",
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
-    "These queues are independent; running Refresh stale bots does not resume unchecked bots or clear pending rechecks."
+    heldCount ? `${heldCount} checks held automatically: ${heldReasons}${heldReasonCounts.size > 3 ? "; more reasons available" : ""}. Nothing deleted; full/stale Refresh also retries recoverable held IDs.` : "No out-of-scope checks held.",
+    "Regular and stale queues stay independent."
   ].join(" ");
   const reviewButton = $("botStatusReviewOutOfScopePending");
   if (reviewButton) {
     // Listing scans may hold thousands of records. Keep this refresh cheap;
     // compute actual eligibility only when the user opens Review.
-    reviewButton.hidden = count + staleCount === 0;
+    reviewButton.hidden = heldCount === 0;
     reviewButton.disabled = botAvailabilityScanRunning;
-    reviewButton.textContent = `Review pending IDs (${count + staleCount})`;
+    reviewButton.textContent = `Why held (${heldCount})`;
   }
+  return { main: state, stale: staleState };
 }
 
 async function runBotAvailabilityScan(options = {}) {
@@ -310,9 +440,16 @@ async function runBotAvailabilityScan(options = {}) {
     ? (options?.queue === "stale" ? "stale" : "main")
     : (requestedMode === "stale" ? "stale" : "main");
   const queueKey = botStatusQueueKey(queueKind);
-  const pausedQueue = options?.resume ? await botStatusPausedQueue(queueKind) : null;
+  const originalQueue = await botStatusPausedQueue(queueKind);
+  const preparedQueue = await botStatusReconcileSavedQueue(queueKind, originalQueue);
+  const pausedQueue = options?.resume ? preparedQueue : null;
+  // Held work is never dropped. Explicit full/stale Refresh can retry
+  // non-excluded held IDs even after their original source was untracked.
+  const heldIds = botStatusHeldEntries(preparedQueue);
+  let manualHeldScanSources = options?.resume
+    ? botStatusSavedHeldScanSources(preparedQueue?.manualHeldScanSources) : {};
   if (!options?.resume) {
-    const unfinished = await botStatusPausedQueue(queueKind);
+    const unfinished = preparedQueue;
     if (unfinished?.ids?.length) {
       // Save the existing queue, and offer to resume only this scan type.
       const isStale = queueKind === "stale";
@@ -368,15 +505,49 @@ async function runBotAvailabilityScan(options = {}) {
     : mode === "stale"
       ? allEntries.filter(entry => Number(existingAvailability[entry.id]?.checkedAt || 0) > 0 && Number(existingAvailability[entry.id]?.checkedAt || 0) <= staleCutoff)
       : allEntries;
-  entries = sortBotStatusRefreshQueue(entries, existingAvailability, archives);
+  // Prioritize safely recoverable held checks during an explicit Refresh.
+  // Read both queues once, but do NOT consume one queue through the other:
+  // completed results retire the originating hold only after final persistence.
+  if (!options?.resume && (mode === "all" || mode === "stale")) {
+    const [mainSnapshot, staleSnapshot] = await botStatusPausedQueues();
+    const originSnapshots = { main: mainSnapshot, stale: staleSnapshot };
+    for (const kind of ["main", "stale"]) {
+      const origin = originSnapshots[kind];
+      if (!origin || origin.phase === "running") continue;
+      for (const item of botStatusHeldEntries(origin)) {
+        if (!botStatusManualHeldRetryAllowed(item, blockedIds)) continue;
+        (manualHeldScanSources[item.id] ||= []).push(kind);
+      }
+    }
+  }
+  // In an interrupted manual recovery, pending IDs must still be selectable
+  // even if they remain absent from tracked lists. No profile request is made
+  // to reconstruct the selection: saved status/archive data is sufficient.
+  const manualHeldIds = Object.keys(manualHeldScanSources).filter(id =>
+    !botStatusIdIgnored(id) && !blockedIds.has(id));
+  const sourceEntries = new Map(allEntries.map(entry => [entry.id, entry]));
+  const manualEntries = manualHeldIds.map(id =>
+    sourceEntries.get(id) || botStatusRecoveryEntry(id, existingAvailability, archives));
+  if (options?.resume) {
+    // Resume still obeys the saved pending-ID order further below.
+    allEntries.push(...manualEntries.filter(entry => !sourceEntries.has(entry.id)));
+  } else if (manualEntries.length) {
+    const manuallyQueued = new Set(manualHeldIds);
+    entries = [...manualEntries, ...entries.filter(entry => !manuallyQueued.has(entry.id))];
+  }
+  // Rescued checks go first; all remaining tracked work stays in its prior
+  // priority order. Never add duplicates or change the saved scan time caps.
+  const priorityHeld = new Set(manualHeldIds);
+  entries = [...entries.filter(entry => priorityHeld.has(entry.id)),
+    ...sortBotStatusRefreshQueue(entries.filter(entry => !priorityHeld.has(entry.id)), existingAvailability, archives)];
   if (options?.resume) {
     const pending = new Set(pausedQueue.ids.filter(validBotId));
     const order = new Map(pausedQueue.ids.map((id, position) => [id, position]));
     entries = allEntries.filter(entry => pending.has(entry.id))
       .sort((a,b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
   }
-  // IDs that are no longer in the source scope must remain in the durable
-  // queue for review, rather than disappearing from a resumed run.
+  // If membership changes between reconciliation and scan preparation,
+  // hold those IDs durably as well rather than querying or losing them.
   const unresolvablePendingIds = options?.resume
     ? pausedQueue.ids.filter(validBotId).filter(id => !entries.some(entry => entry.id === id))
     : [];
@@ -396,17 +567,28 @@ async function runBotAvailabilityScan(options = {}) {
   const maxBots = botStatusPositiveLimit("botStatusMaxBots", 100000);
   const maxMinutes = botStatusPositiveLimit("botStatusMaxMinutes", 1440);
   const maximumRuntimeMs = maxMinutes ? maxMinutes * 60 * 1000 : 0;
+  if (unresolvablePendingIds.length && pausedQueue) {
+    const reasons = new Map(reviewBotStatusQueueEligibility({ ...pausedQueue,
+      ids: unresolvablePendingIds }).unavailable.map(item => [item.id, item.reason]));
+    for (const id of unresolvablePendingIds) {
+      if (heldIds.some(item => item.id === id)) continue;
+      heldIds.push({ id, mode, scope, reason: reasons.get(id) || "No longer in the original scan scope", since: Date.now() });
+    }
+  }
   const omittedByBotLimit = [
-    ...(maxBots && entries.length > maxBots ? entries.slice(maxBots).map(item => item.id) : []),
-    ...unresolvablePendingIds
+    ...(maxBots && entries.length > maxBots ? entries.slice(maxBots).map(item => item.id) : [])
   ];
   if (maxBots && entries.length > maxBots) entries = entries.slice(0, maxBots);
 
   const status = $("botAvailabilityScanStatus");
   const archivedStatus = mode === "archived" ? $("deletedSavedBotRecheckStatus") : null;
   if (!entries.length) {
-    if (unresolvablePendingIds.length) {
-      const message = `${unresolvablePendingIds.length} saved pending IDs are no longer in the current scan scope. The queue was preserved. Check whether those bots were blocked, excluded or removed from tracked lists before retrying.`;
+    if (unresolvablePendingIds.length && pausedQueue) {
+      const saved = await storageSetVerified({ [queueKey]: { ...pausedQueue, ids: [], heldIds,
+        phase: "paused", updatedAt: Date.now(), reason: "Out-of-scope checks safely held" } });
+      const message = saved
+        ? `${unresolvablePendingIds.length} no-longer-eligible Bot Status checks were automatically held for later. Nothing was deleted or rechecked.`
+        : "Could not safely save the out-of-scope Bot Status checks; the previous queue was preserved.";
       if (status) status.textContent = message;
       if (archivedStatus) archivedStatus.textContent = message;
       await refreshBotStatusPauseButton();
@@ -496,6 +678,7 @@ async function runBotAvailabilityScan(options = {}) {
   let lastQueueCheckpointCompleted = 0;
   const runStartedAt = Date.now();
   const uniqueCheckedIds = new Set();
+  const completedCheckedIds = new Set();
   let checkAttempts = 0;
   let accessFailures = 0;
   let requestTimeMs = 0;
@@ -515,7 +698,7 @@ async function runBotAvailabilityScan(options = {}) {
     // Keep the last completed ID until final persistence has succeeded.
     try {
       const queueSaved = await storageSet({ [queueKey]: {
-        version: 1, mode, scope, ids: pending, phase: "running",
+        version: 1, mode, scope, ids: pending, heldIds, manualHeldScanSources, phase: "running",
         updatedAt: now, startedAt: runStartedAt,
         completed, total: entries.length, reason: "Saved progress"
       } });
@@ -606,7 +789,7 @@ async function runBotAvailabilityScan(options = {}) {
             break;
           }
           const remaining = botStatusPendingIds(entries, scanIndex + 1, deferredAccessIds, omittedByBotLimit);
-          const payload = { version: 1, mode, scope, ids: remaining, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
+          const payload = { version: 1, mode, scope, ids: remaining, heldIds, manualHeldScanSources, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
           const pausedSaved = await storageSet({ [queueKey]: payload });
           if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
           accessPauseTriggered = !!pausedSaved;
@@ -656,6 +839,7 @@ async function runBotAvailabilityScan(options = {}) {
         }
       }
       completed++;
+      completedCheckedIds.add(entry.id);
       nextScanIndex = scanIndex + 1;
       scanLastCheckAt = Date.now();
       if (completed % checkpointEvery === 0 || scanLastCheckAt - lastQueueCheckpointAt >= BOT_STATUS_PROGRESS_MS) {
@@ -761,14 +945,21 @@ async function runBotAvailabilityScan(options = {}) {
     // still available and may safely recheck the unfinished tail.
     if (!accessPauseTriggered && finalResultsSaved) {
       const outstanding = new Set(botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit));
+      const completedHeld = new Set([...completedCheckedIds].filter(id =>
+        manualHeldScanSources[id] && !outstanding.has(id)));
+      const outstandingHeld = heldIds.filter(item => !completedHeld.has(item.id));
+      const remainingHeldSources = Object.fromEntries(Object.entries(manualHeldScanSources)
+        .filter(([id]) => !completedHeld.has(id)));
       try {
-        const finalQueueSaved = await storageSet({ [queueKey]: outstanding.size ? {
-          version: 1, mode, scope, ids: [...outstanding], phase: "paused",
+        const finalQueueSaved = await storageSet({ [queueKey]: (outstanding.size || outstandingHeld.length) ? {
+          version: 1, mode, scope, ids: [...outstanding], heldIds: outstandingHeld,
+          manualHeldScanSources: remainingHeldSources, phase: "paused",
           updatedAt: Date.now(), startedAt: runStartedAt,
           completed, total: entries.length,
           reason: botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : omittedByBotLimit.length ? "Bot limit reached" : "Retry skipped checks"
         } : null });
         if (!finalQueueSaved) throw new Error("Could not persist Bot Status resume queue");
+        await botStatusRetireCheckedHeldSources(completedHeld, manualHeldScanSources, queueKind);
         if (outstanding.size && !terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} still pending; use Resume paused scan.`;
       } catch (error) {
         finalResultsSaved = false;
@@ -846,10 +1037,11 @@ async function runBotAvailabilityScan(options = {}) {
     });
     const manuallyStopped = !!botAvailabilityStopRequested;
     botAvailabilityStopRequested = false;
-    await refreshBotStatusPauseButton();
-    // The persisted resume queue remains authoritative; never use a guessed
-    // value to label an interrupted or limited scan as complete.
-    const pauseState = await botStatusPausedQueue(queueKind);
+    const savedQueues = await refreshBotStatusPauseButton();
+    // The persisted resume queue remains authoritative; the refresh above
+    // read both queues AFTER the final durable write. Reuse that snapshot
+    // instead of immediately re-reading the same 200+ KB queue a second time.
+    const pauseState = savedQueues[queueKind];
     const pendingCount = Array.isArray(pauseState?.ids) ? pauseState.ids.length : 0;
     const feedback = {
       at: Date.now(), mode, checked: completed,

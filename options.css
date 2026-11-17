@@ -1973,3 +1973,12 @@ details.feature-index-group:not([open]) > .feature-index-group-head::before { tr
 .ds-lorebook-settings-group legend { padding:0 5px; font-weight:650; }
 .ds-lorebook-settings-group .row { margin:4px 0 6px; }
 .ds-lorebook-settings-group .hint { margin:5px 0 3px; }
+
+/* Static v0.2.85 contextual documentation (no runtime observers). */
+.dsq-guide-link{display:inline-block;margin:.35rem 0 .65rem;font-size:.85rem;text-decoration:underline;text-underline-offset:2px;color:var(--accent-color,#75b8ff)}
+.dsq-guidance-definitions{display:grid;gap:.25rem 1rem;grid-template-columns:minmax(160px,1fr) minmax(220px,2fr);margin:12px 0}
+.dsq-guidance-definitions dt{font-weight:650}
+.dsq-guidance-definitions dd{margin:0 0 .6rem;color:var(--text-muted,#a7a7a7)}
+.dsq-backup-safety{margin:.5rem 0 1rem;padding:.85rem;border:1px solid var(--border-color,#666);border-radius:8px}
+.dsq-backup-safety p{margin:.4rem 0}
+@media(max-width:650px){.dsq-guidance-definitions{display:block}.dsq-guidance-definitions dt{margin-top:.6rem}}

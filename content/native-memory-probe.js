@@ -1,6 +1,6 @@
 // v0.2.57 opt-in, read-only Memory quality experiment; no page DOM scanner.
-// Uses existing generation-metadata completion events. 2 normal successful
-// exchanges, cooldown, no concurrent GETs, and no data transmitted to QoL logs.
+// Uses existing generation-metadata completion events. 15 normal successful
+// exchanges by default (configurable), cooldown, no concurrent GETs, and no data transmitted to QoL logs.
 if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
   'use strict';
   const SOURCE='spicychat-qol-generation-metadata';
@@ -13,16 +13,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
       return Number(claims.exp||0)*1000>Date.now()+30000;
     }catch{return false;}
   };
-  let enabled=false,route='',count=0,busy=false,lastCheck=0,blockedUntil=0,sequence=0;
-  const updateSettings=data=>{enabled=data?.nativeMemoryQualityProbe===true && data?.enabled!==false;};
+  let enabled=false,route='',count=0,busy=false,lastCheck=0,blockedUntil=0,sequence=0, everyReplies=15;
+  const normalizedCadence=value=>[5,10,15,20,30].includes(Number(value))?Number(value):15;
+  const updateSettings=data=>{enabled=data?.nativeMemoryQualityProbe===true && data?.enabled!==false;everyReplies=normalizedCadence(data?.nativeMemoryProbeEveryReplies);};
   const settingKey='dsSettingV1:nativeMemoryQualityProbe';
-  chrome.storage.local.get(['settings','dsSettingV1:enabled',settingKey],r=>{
+  const cadenceKey='dsSettingV1:nativeMemoryProbeEveryReplies';
+  chrome.storage.local.get(['settings','dsSettingV1:enabled',settingKey,cadenceKey],r=>{
     updateSettings({...(r.settings||{}),enabled:r['dsSettingV1:enabled']??r.settings?.enabled,
-      nativeMemoryQualityProbe:r[settingKey]??r.settings?.nativeMemoryQualityProbe});
+      nativeMemoryQualityProbe:r[settingKey]??r.settings?.nativeMemoryQualityProbe,
+      nativeMemoryProbeEveryReplies:r[cadenceKey]??r.settings?.nativeMemoryProbeEveryReplies});
   });
   chrome.storage.onChanged.addListener((changes,area)=>{
     if(area!=='local')return;
     if(changes[settingKey]){enabled=changes[settingKey].newValue===true;if(!enabled)++sequence;}
+    if(changes[cadenceKey])everyReplies=normalizedCadence(changes[cadenceKey].newValue);
+    if(changes.settings){updateSettings({...changes.settings.newValue,
+      enabled:changes['dsSettingV1:enabled']?.newValue??changes.settings.newValue?.enabled,
+      nativeMemoryQualityProbe:changes[settingKey]?.newValue??changes.settings.newValue?.nativeMemoryQualityProbe,
+      nativeMemoryProbeEveryReplies:changes[cadenceKey]?.newValue??changes.settings.newValue?.nativeMemoryProbeEveryReplies});}
     if(changes['dsSettingV1:enabled']&&changes['dsSettingV1:enabled'].newValue===false){enabled=false;++sequence;}
   });
   const tokenFromStorage=store=>{
@@ -154,6 +162,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
     }catch{publish({ok:false,status:'unexpected-error',lastSuccessfulCheck});}
     finally{busy=false;}
   }
+  // One explicit user-triggered check; no background interval or scanning.
+  // Preserve the same cooldown, auth, route and failure backoff protections.
+  chrome.runtime.onMessage.addListener((message,_sender,sendResponse)=>{
+    if(message?.type!=='DSQ_NATIVE_MEMORY_CHECK_NOW')return;
+    const path=location.pathname.match(/^\/chat\/([0-9a-f-]{36})\/([0-9a-f-]{36})(?:\/|$)/i);
+    const id=path?.[2]?.toLowerCase()||'';
+    if(!enabled){sendResponse({ok:false,status:'monitor-disabled'});return;}
+    if(!UUID.test(id)){sendResponse({ok:false,status:'open-a-chat'});return;}
+    if(busy){sendResponse({ok:false,status:'already-checking'});return;}
+    if(Date.now()<blockedUntil||Date.now()-lastCheck<60000){
+      sendResponse({ok:false,status:'cooldown',nextCheckAt:Math.max(blockedUntil,lastCheck+60000)});return;
+    }
+    route=id;count=0;void check(id).catch(()=>{});
+    sendResponse({ok:true,status:'started'});
+  });
   window.addEventListener('message',event=>{
     if(!enabled||Date.now()<blockedUntil||event.source!==window||event.origin!==location.origin||
        event.data?.source!==SOURCE||event.data?.type!=='DSQ_NEW_GENERATION')return;
@@ -164,7 +187,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (()=>{
     const id=path[2].toLowerCase();if(id!==String(m.conversationId).toLowerCase())return;
     if(route!==id){route=id;count=0;lastCheck=0;blockedUntil=0;++sequence;}
     count++;
-    if(count<2||busy||Date.now()-lastCheck<60000)return;
+    if(count<everyReplies||busy||Date.now()-lastCheck<60000)return;
     count=0;void check(id).catch(()=>{});
   });
 })();

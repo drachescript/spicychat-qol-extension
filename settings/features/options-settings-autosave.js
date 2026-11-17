@@ -414,6 +414,7 @@ function readSettingsFromPage() {
     blockCards: checked("blockCards"),
     autoBlockWordMatches: checked("autoBlockWordMatches"),
     autoBlockTagMatches: checked("autoBlockTagMatches"),
+    filterImpliedBlockedTags: checked("filterImpliedBlockedTags"),
     hideHomeForYouCards: checked("hideHomeForYouCards"),
     expandLongCardDescriptions: checked("expandLongCardDescriptions"),
     showCardGreetingTokenInfo: checked("showCardGreetingTokenInfo"),
@@ -913,6 +914,7 @@ function readSingleSettingFromPage(settingKey) {
     case "blockCards": return (checked("blockCards"));
     case "autoBlockWordMatches": return (checked("autoBlockWordMatches"));
     case "autoBlockTagMatches": return (checked("autoBlockTagMatches"));
+    case "filterImpliedBlockedTags": return (checked("filterImpliedBlockedTags"));
     case "hideHomeForYouCards": return (checked("hideHomeForYouCards"));
     case "expandLongCardDescriptions": return (checked("expandLongCardDescriptions"));
     case "showCardGreetingTokenInfo": return (checked("showCardGreetingTokenInfo"));

@@ -57,21 +57,45 @@ function storageKeyLabel(keys) {
   return `${list.slice(0, 4).join(", ")} +${list.length - 4} more`;
 }
 
-function recordSlowStorageRead(keys, elapsed) {
+function recordSlowStorageRead(keys, elapsed, stages = {}) {
   if (elapsed < 100) return;
-  const record = { keys: storageKeyLabel(keys), ms: Math.round(elapsed * 10) / 10, bytes: 0, at: Date.now() };
+  const round = value => Math.round(Math.max(0, Number(value || 0)) * 10) / 10;
+  // These are application-observed wall times, NOT browser-internal storage
+  // execution times. A slow Chrome callback includes IPC, queueing and disk
+  // work which a normal extension cannot separate. No new storage reads are
+  // made to collect these timings.
+  const largeMs = round(stages.largeMs);
+  const localMs = round(stages.localMs);
+  const record = {
+    keys: storageKeyLabel(keys), ms: round(elapsed), bytes: 0, at: Date.now(),
+    largeMs, localMs, otherMs: round(Math.max(0, elapsed - largeMs - localMs))
+  };
   OPTIONS_PERFORMANCE.slowStorageReads.push(record);
   OPTIONS_PERFORMANCE.slowStorageReads.sort((a, b) => Number(b.ms || 0) - Number(a.ms || 0));
   OPTIONS_PERFORMANCE.slowStorageReads = OPTIONS_PERFORMANCE.slowStorageReads.slice(0, 5);
-  // On Android, getBytesInUse can re-enumerate megabytes of storage for
-  // every slow read, precisely when support export is already under pressure.
-  // Keep the latency sample; the report separately records total storage size.
-  if (typeof isAndroidSupportWebView === "function" && isAndroidSupportWebView()) return;
+  // Additional getBytesInUse requests during heavy worker activity can add to
+  // the very queue being investigated. Keep byte attribution opt-in with the
+  // existing diagnostic trace, not on every ordinary slow read.
+  if (!optionsDiagnosticState.active || (typeof isAndroidSupportWebView === "function" && isAndroidSupportWebView())) return;
   try {
     chrome.storage.local.getBytesInUse(keys, bytes => {
       if (!chrome.runtime?.lastError) record.bytes = Math.max(0, Number(bytes || 0));
     });
   } catch {}
+}
+
+function recordSlowStorageWrite(values, elapsed) {
+  if (elapsed < 100) return;
+  const record = {
+    keys: storageKeyLabel(values),
+    ms: Math.round(Math.max(0, elapsed) * 10) / 10,
+    at: Date.now()
+  };
+  // Top five only; no payload copies, value serialization or extra browser
+  // storage requests. This is callback elapsed time, including queue waits.
+  OPTIONS_PERFORMANCE.slowStorageWrites.push(record);
+  OPTIONS_PERFORMANCE.slowStorageWrites.sort((a, b) => Number(b.ms || 0) - Number(a.ms || 0));
+  OPTIONS_PERFORMANCE.slowStorageWrites = OPTIONS_PERFORMANCE.slowStorageWrites.slice(0, 5);
 }
 
 function nextUiFrame() {
@@ -192,7 +216,10 @@ async function readLargeStorageKeyPaged(key) {
       type: "DS_LARGE_STORAGE_GET_PAGE",
       key,
       afterId,
-      limit: 250
+      // Availability rows are compact; larger pages reduce IPC round trips.
+      // Keep rich archive snapshots on the conservative size to avoid hitting
+      // extension-message payload limits on long saved bot definitions.
+      limit: key === "botAvailability" ? 400 : 250
     }, 15000);
     if (!response?.ok || !Array.isArray(response.rows)) return null;
 
@@ -252,20 +279,30 @@ async function removeLargeStorageRecords(key, ids = []) {
 }
 
 async function storageGetChecked(keys) {
-  const started = typeof performance !== "undefined" ? performance.now() : 0;
+  const clock = () => typeof performance !== "undefined" ? performance.now() : 0;
+  const started = clock();
+  const stages = { largeMs: 0, localMs: 0 };
   const finish = value => {
     const elapsed = optionsPerfFinish("read", started);
-    recordSlowStorageRead(keys, elapsed);
+    recordSlowStorageRead(keys, elapsed, stages);
     if (optionsDiagnosticState.active) {
       const requestedKeys = keys == null ? ["*"] : (typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys.map(String) : Object.keys(keys || {})));
-      optionsDiag("options-storage", "read", { keys: requestedKeys.slice(0, 24), keyCount: requestedKeys.length, durationMs: Math.round(Number(elapsed || 0) * 10) / 10, largeKeyCount: largeStorageKeysForRequest(keys).length }, { critical: Number(elapsed || 0) >= 200 });
+      optionsDiag("options-storage", "read", {
+        keys: requestedKeys.slice(0, 24), keyCount: requestedKeys.length,
+        durationMs: Math.round(Number(elapsed || 0) * 10) / 10,
+        largeStoreWallMs: Math.round(stages.largeMs * 10) / 10,
+        chromeCallbackWallMs: Math.round(stages.localMs * 10) / 10,
+        largeKeyCount: largeStorageKeysForRequest(keys).length
+      }, { critical: Number(elapsed || 0) >= 200 });
     }
     return value;
   };
 
   try {
     const wantsLarge = largeStorageKeysForRequest(keys).length > 0;
+    const largeStarted = wantsLarge ? clock() : 0;
     const largeData = wantsLarge ? await readLargeStorageForRequest(keys) : {};
+    if (wantsLarge) stages.largeMs += Math.max(0, clock() - largeStarted);
     const largeSupported = largeData !== null;
     const wantsSettings = storageRequestIncludes(keys, "settings");
     const localRequest = largeSupported ? localStorageKeysForRequest(keys) : keys;
@@ -283,7 +320,9 @@ async function storageGetChecked(keys) {
       ? null
       : [...new Set([...(requested || []), ...(wantsSettings ? [GRANULAR_SETTINGS_INDEX_KEY, GRANULAR_SETTINGS_MIGRATION_KEY] : []), ...prefetchedGranularKeys])];
 
+    const localStarted = clock();
     const data = await chromeLocalGet(firstKeys);
+    stages.localMs += Math.max(0, clock() - localStarted);
     const shouldSynthesize = wantsSettings || requested === null;
     if (shouldSynthesize) {
       const index = normalizeGranularSettingsIndex(data[GRANULAR_SETTINGS_INDEX_KEY]);
@@ -291,8 +330,13 @@ async function storageGetChecked(keys) {
       granularSettingsMigrationSeen = data[GRANULAR_SETTINGS_MIGRATION_KEY] === true;
       const granularKeys = index.map(granularSettingStorageKey);
       const missingGranularKeys = requested === null ? [] : granularKeys.filter(key => !firstKeys.includes(key));
-      const granular = missingGranularKeys.length
-        ? { ...data, ...(await chromeLocalGet(missingGranularKeys)) } : data;
+      let granular = data;
+      if (missingGranularKeys.length) {
+        const missingStarted = clock();
+        const extra = await chromeLocalGet(missingGranularKeys);
+        stages.localMs += Math.max(0, clock() - missingStarted);
+        granular = { ...data, ...extra };
+      }
 
       const hadLegacy = Object.prototype.hasOwnProperty.call(data, "settings") && data.settings && typeof data.settings === "object";
       const merged = hadLegacy ? { ...(data.settings || {}) } : {};
@@ -342,7 +386,11 @@ async function storageGet(keys) {
 function rawStorageSet(obj) {
   const started = typeof performance !== "undefined" ? performance.now() : 0;
   return new Promise(resolve => {
-    const finish = value => { optionsPerfFinish("write", started); resolve(value); };
+    const finish = value => {
+      const elapsed = optionsPerfFinish("write", started);
+      recordSlowStorageWrite(obj, elapsed);
+      resolve(value);
+    };
     try {
       chrome.storage.local.set(obj, () => finish(!chrome.runtime.lastError));
     } catch { finish(false); }

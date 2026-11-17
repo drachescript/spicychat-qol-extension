@@ -113,7 +113,7 @@ self.onmessage = async event => {
         result.entries.flatMap(e => [e.nameBytes.buffer, e.data.buffer]));
     } else if (type === 'build-zip') {
       const files = payload.entries;
-      const manifest = {format: 'ds-chat-memory-research-v1', generatedAt: new Date().toISOString(),
+      const manifest = {format: 'ds-chat-memory-character-research-v2', generatedAt: new Date().toISOString(),
         part: payload.partNumber, selection: {botLimit: payload.report.botSelection},
         safetyLimits: {compressedBytesPerPart: MAX_ZIP_BYTES}, summary: payload.report,
         files: files.map(e => ({path: e.name, bytes: e.size, compressedBytes: e.data.length, crc32: e.crc}))};

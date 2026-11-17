@@ -440,8 +440,15 @@ function renderBotAvailability(renderOptions = {}) {
   }
   const staleButton = $("scanStaleBotAvailability");
   if (staleButton && !botAvailabilityScanRunning) {
-    staleButton.disabled = staleCount === 0;
-    staleButton.textContent = staleCount ? `Refresh stale bots (${staleCount})` : "No stale bots";
+    // An explicit stale refresh also rescues recoverable held checks which
+    // left routine tracked lists. Keep the button available for those IDs
+    // even when none of the currently tracked bots are stale.
+    const heldCount = Math.max(0, Number(botStatusRecoverableHeldCount || 0));
+    staleButton.disabled = staleCount === 0 && heldCount === 0;
+    staleButton.textContent = staleCount && heldCount
+      ? `Refresh stale + held bots (${staleCount + heldCount})`
+      : staleCount ? `Refresh stale bots (${staleCount})`
+      : heldCount ? `Refresh held bot checks (${heldCount})` : "No stale or held bots";
   }
   const unavailableSummary = $("botAvailabilityUnavailableSummary");
   if (unavailableSummary) {

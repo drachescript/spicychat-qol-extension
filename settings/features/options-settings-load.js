@@ -604,6 +604,7 @@ async function load() {
   setChecked("blockCards", settings.blockCards);
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
   setChecked("autoBlockTagMatches", !!settings.autoBlockTagMatches);
+  setChecked("filterImpliedBlockedTags", !!settings.filterImpliedBlockedTags);
   setChecked("hideGroupChats", settings.hideGroupChats);
   setChecked("publicPersonalityOnly", !!settings.publicPersonalityOnly);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
@@ -679,8 +680,11 @@ async function load() {
     initializeExportScopeSelection().catch(() => {});
   }
   if (activeTab === "browser") {
-    renderTabCleanupSessions().catch(() => {});
-    loadTabCleanupTopics().catch(() => {});
+    // Stage 15: Tab Cleanup is loaded on demand.
+    ensureTabCleanupPanelLoaded().catch(error => {
+      const status = document.getElementById("tabCleanupDiagnosticStatus");
+      if (status) status.textContent = String(error?.message || error);
+    });
   }
   if (activeTab === "control") setupControlCenterView().catch(() => {});
   if (activeTab === "account") refreshAccountSyncUi().catch(() => {});

@@ -1520,6 +1520,8 @@ Testing" spellcheck="false"></textarea></label>
 <p class="hint"><strong>Both are optional.</strong> Blocking happens immediately. Less Like changes recommendation preferences; Dislike uses the native chat rating controls. Each action keeps its own history. Desktop only.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
+<label class="row"><input id="filterImpliedBlockedTags" type="checkbox"/><span>Also hide bots that clearly imply my excluded themes (experimental)</span></label>
+<p class="hint">Uses the <strong>visible title/description</strong> to recognize untagged cheating, past affairs, emotional boundary crossing, partner-stealing, NTR and cuckolding. It also recognizes strong <strong>relationship-boundary risk</strong> teasers (such as a partner’s friend circle with undisclosed sexual/romantic history), labeling these as a risk rather than confirmed cheating. The optional stricter cues look for a committed relationship plus explicit romantic or concealed third-party contact; accusations and ordinary friendship alone should not trigger hiding. Applies only when Cheating/NTR/Cuckolding is excluded in SpicyChat's current native filters, or listed in QoL's blocked tags with card blocking enabled. It <strong>only hides</strong> cards; it never adds inferred matches to permanent Blocked bots, sends dislikes, or opens profiles. Off by default. Ambiguous descriptions may remain visible or occasionally be hidden.</p>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="autoBlockWordMatches" type="checkbox"/><span>Automatically add blocked-word matches to Blocked bots</span></label>
@@ -2186,6 +2188,6 @@ step sister" spellcheck="false"></textarea></label>
 <script src="settings/feature-panels/rulebook-diagnostics.js"></script>
 <script src="settings/feature-panels/story-reading-layout.js"></script>
 <script src="settings/feature-panels/chat-list.js"></script>
-<script src="settings/options-runtime-state.js"></script><script src="settings/options-feature-presets.js"></script><script src="settings/options-bot-metadata.js"></script><script src="settings/options-saved-managers-state.js"></script><script src="settings/options-chat-bubble-config.js"></script><script src="settings/options-backup-schema.js"></script><script src="settings/options-ui-config.js"></script><script src="options.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
+<script src="settings/options-runtime-state.js"></script><script src="settings/options-feature-presets.js"></script><script src="settings/options-bot-metadata.js"></script><script src="settings/options-saved-managers-state.js"></script><script src="settings/options-chat-bubble-config.js"></script><script src="settings/options-backup-schema.js"></script><script src="settings/options-ui-config.js"></script><script src="options.js"></script><script src="settings/options-guidance.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
 </body>
 </html>
