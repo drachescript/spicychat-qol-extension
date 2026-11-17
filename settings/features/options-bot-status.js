@@ -320,10 +320,10 @@ function setupBotAvailabilityControls() {
     button.type = "button";
     button.id = "botStatusReviewOutOfScopePending";
     button.hidden = true;
-    button.textContent = "Review pending IDs";
-    button.title = "Review and optionally remove only ineligible IDs from the saved resume queue; no bot data is deleted.";
+    button.textContent = "Why held";
+    button.title = "Show why some saved checks were automatically held outside their original scan scope. Nothing is deleted.";
     button.addEventListener("click", () => reviewAndRemoveIneligibleBotStatusPending().catch(() =>
-      showSettingsToast("Could not review pending Bot Status IDs. No queue entries were removed.")));
+      showSettingsToast("Could not read the automatically held Bot Status IDs. Saved queues were not changed.")));
     pendingHint.insertAdjacentElement("afterend", button);
   }
   const scanStatus = $("botAvailabilityScanStatus");

@@ -40,6 +40,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      // Ensure route/setting-owned code exists before the regular feature lanes
+      // call its DS methods. Cached imports cost nothing on subsequent passes.
+      await DS.prepareOptionalModules?.(settings);
+
       // The chat-start/change-persona modal is a transient native surface.
       // While it is open, broad chat/listing reconciliation only competes with
       // SpicyChat's own picker rendering and can cause periodic half-second

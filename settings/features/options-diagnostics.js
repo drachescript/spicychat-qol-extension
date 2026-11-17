@@ -795,7 +795,8 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `Mobile native text-selection quieting: ${Number(runtime.mobileTextSelectionStarts || 0)} touch starts; ${Number(runtime.mobileTextSelectionChanges || 0)} selected-text changes; no native selection events blocked`,
     `Card-token request guard: MAIN bridge ${Number(runtime.cardTokenMainCircuitTrips || 0)} trips / ${Number(runtime.cardTokenMainCircuitSkips || 0)} skipped retries${Number(runtime.cardTokenMainCircuitUntil || 0) > Date.now() ? ` / cooling down ${Math.ceil((Number(runtime.cardTokenMainCircuitUntil) - Date.now()) / 1000)}s` : ""}; auth ${Number(runtime.cardTokenAuthCircuitTrips || 0)} rejected / ${Number(runtime.cardTokenAuthSkips || 0)} no-auth skips; background no-auth ${Number(runtime.cardTokenBackgroundAuthSkips || 0)} skipped`,
     `Options page: load ${OPTIONS_PERFORMANCE.loadMs.toFixed(1)} ms; DOM ${document.getElementsByTagName("*").length} nodes; storage reads ${OPTIONS_PERFORMANCE.storageReads} avg ${readAvg.toFixed(2)} ms max ${OPTIONS_PERFORMANCE.storageReadMaxMs.toFixed(2)} ms; writes ${OPTIONS_PERFORMANCE.storageWrites} avg ${writeAvg.toFixed(2)} ms max ${OPTIONS_PERFORMANCE.storageWriteMaxMs.toFixed(2)} ms`,
-    ...(OPTIONS_PERFORMANCE.slowStorageReads.length ? [`Options slow storage reads: ${OPTIONS_PERFORMANCE.slowStorageReads.map(item => `${item.keys} ${item.ms} ms${item.bytes ? ` (${(item.bytes / 1024).toFixed(1)} KB)` : ""}`).join("; ")}`] : []),
+    ...(OPTIONS_PERFORMANCE.slowStorageReads.length ? [`Options slow storage reads (wall time, not CPU or browser-internal execution time): ${OPTIONS_PERFORMANCE.slowStorageReads.map(item => `${item.keys} ${item.ms} ms${item.bytes ? ` (${(item.bytes / 1024).toFixed(1)} KB)` : ""} [large-store messaging/paging ${item.largeMs ?? "n/a"} ms; Chrome callback incl. browser queue ${item.localMs ?? "n/a"} ms; other wrapper work/wait ${item.otherMs ?? "n/a"} ms]`).join("; ")}`] : []),
+    ...(OPTIONS_PERFORMANCE.slowStorageWrites.length ? [`Options slow storage writes (Chrome callback wall time, includes browser queue; no payload serialization performed for diagnostics): ${OPTIONS_PERFORMANCE.slowStorageWrites.map(item => `${item.keys} ${item.ms} ms`).join("; ")}`] : []),
     `Options search renders: settings ${OPTIONS_PERFORMANCE.searchRenders}; feature catalogue ${OPTIONS_PERFORMANCE.featureRenders}`,
     `Options heavy UI: ${OPTIONS_PERFORMANCE.heavyManagerIdleSlices} idle slices; ${OPTIONS_PERFORMANCE.savedManagerRefreshBatches} saved-manager refresh batches covering ${OPTIONS_PERFORMANCE.savedManagerRefreshKinds} manager kinds; ${OPTIONS_PERFORMANCE.blockedManagerRefreshBatches} blocked-manager refresh batches`,
     `Warnings: ${warnings.length}`,
@@ -1248,6 +1249,7 @@ async function resetPerformanceCounters() {
   OPTIONS_PERFORMANCE.savedManagerRefreshKinds = 0;
   OPTIONS_PERFORMANCE.blockedManagerRefreshBatches = 0;
   OPTIONS_PERFORMANCE.slowStorageReads = [];
+  OPTIONS_PERFORMANCE.slowStorageWrites = [];
   if (status) status.textContent = response?.ok ? "Performance counters reset for Settings and the source SpicyChat tab." : "Settings counters reset. No reachable SpicyChat source tab responded.";
 }
 

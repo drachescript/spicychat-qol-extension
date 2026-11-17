@@ -12,6 +12,9 @@ const quickLessLikePausedBulkRuns = new Map();
 // Once SPA navigation fails in a bulk run, use a normal tab navigation for the
 // remaining bots rather than spending the same wait on each one.
 const quickDislikeSpaFallbackBulkRuns = new Set();
+// One duplicate-helper sweep per active run is enough during steady-state
+// reuse. Recovery still forces a fresh sweep, and release always scans tabs.
+const quickDislikeBulkDuplicateCheckedRuns = new Set();
 
 function quickLessLikeWorkerUrlInfo(url) {
   try {
@@ -222,6 +225,7 @@ async function releaseQuickDislikeBulkWorker(runId) {
   if (Number.isFinite(mapped)) tabIds.add(mapped);
   quickDislikeBulkWorkerTabs.delete(id);
   quickDislikeSpaFallbackBulkRuns.delete(id);
+  quickDislikeBulkDuplicateCheckedRuns.delete(id);
   for (const tab of await tabsQuery({})) {
     const info = quickDislikeWorkerUrlInfo(tab?.url || tab?.pendingUrl || "");
     if (info?.bulkRunId === id && tab?.id) tabIds.add(Number(tab.id));
@@ -350,7 +354,11 @@ async function prepareQuickDislikeWorkerTab(url, bulkRunId = "", job = {}) {
       quickDislikeWorkerTabIds.add(existingId);
       quickDislikePersistentWorkerTabId = existingId;
       if (runId) quickDislikeBulkWorkerTabs.set(runId, existingId);
-      const duplicateClosed = runId ? await closeDuplicateQuickDislikeWorkers(runId, existingId) : 0;
+      let duplicateClosed = 0;
+      if (runId && (recovered || !quickDislikeBulkDuplicateCheckedRuns.has(runId))) {
+        duplicateClosed = await closeDuplicateQuickDislikeWorkers(runId, existingId);
+        quickDislikeBulkDuplicateCheckedRuns.add(runId);
+      }
       if (recovered) await recordHelperLifecycle("quickDislikeHelperRecovered", { bulkRunId: runId, jobId, tabId: existingId });
       if (reusedWithoutReload) await recordHelperLifecycle("quickDislikeSpaReused", { bulkRunId: runId, jobId, botId, tabId: existingId });
       return {

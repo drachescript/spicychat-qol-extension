@@ -1258,6 +1258,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   };
 
+  // Manual Research Export: the same authenticated character endpoint used by
+  // Creation Audit, without opening profile/editor pages or exposing auth data.
+  // Return the API object AS EXPOSED to the signed-in/current user; the export
+  // layer applies a recursive credential scrub before writing any archive.
+  DS.fetchResearchCharacterMetadata = async function fetchResearchCharacterMetadata(botId) {
+    const id = String(botId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id))
+      return {ok:false,status:'fetch_failed',reason:'invalid-character-id',httpStatus:0};
+    try {
+      window.DSCardTokenBridgeLoader?.ensure?.();
+      const record = await fetchAuditCharacter(id, false);
+      const returned = String(record?.id || record?.uuid || record?.character_id || record?.characterId || '').toLowerCase();
+      if (returned && returned !== id)
+        return {ok:false,status:'fetch_failed',reason:'character-id-mismatch',httpStatus:200};
+      if (!record || typeof record !== 'object' || Array.isArray(record))
+        return {ok:false,status:'fetch_failed',reason:'invalid-character-payload',httpStatus:200};
+      const meaningful = ['id','uuid','character_id','name','character_name','description','greeting',
+        'persona','personality','scenario','title','tags','creator_username','visibility'];
+      const nested = record.character && typeof record.character === 'object' ? record.character : null;
+      if (!meaningful.some(key => record[key] !== undefined || nested?.[key] !== undefined))
+        return {ok:false,status:'fetch_failed',reason:'character-api-empty-record',httpStatus:200};
+      return {ok:true,status:'present',source:'spicychat-character-api-v2',fetchedAt:new Date().toISOString(),record};
+    } catch (error) {
+      const reason = String(error?.message || error || 'character-api-error').slice(0,260);
+      const httpStatus = Number(error?.httpStatus || reason.match(/HTTP\s+(\d{3})/i)?.[1] || 0);
+      return {ok:false,status:[401,403].includes(httpStatus)?'restricted':'fetch_failed',
+        reason,httpStatus,retryAfterMs:Number(error?.retryAfterMs || 0)};
+    }
+  };
+
   DS.fetchCharacterArchiveData = async function fetchCharacterArchiveData(botId) {
     const id = String(botId || "").trim().toLowerCase();
     if (!id) return null;
@@ -1369,7 +1399,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.diagNetworkEnd?.(backgroundNet, { status: Number(response?.httpStatus || 0), ok: response?.ok === true, outcome: String(response?.status || (response?.ok ? "success" : "no-response")) });
     if (!response?.ok) {
       if (Number(response?.httpStatus || 0) === 401) noteCharacterAuthRejected();
-      throw new Error(String(mainError?.message || mainError || response?.status || "character data unavailable"));
+      const error = new Error(String(mainError?.message || mainError || response?.status || "character data unavailable"));
+      error.httpStatus = Number(response?.httpStatus || mainError?.httpStatus || 0);
+      throw error;
     }
     state.characterAuthRejectedUntil = 0;
     const sc = characterPayload(response.data);

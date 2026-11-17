@@ -605,6 +605,7 @@ async function load() {
   setChecked("blockCards", settings.blockCards);
   setChecked("autoBlockWordMatches", !!settings.autoBlockWordMatches);
   setChecked("autoBlockTagMatches", !!settings.autoBlockTagMatches);
+  setChecked("filterImpliedBlockedTags", !!settings.filterImpliedBlockedTags);
   setChecked("hideGroupChats", settings.hideGroupChats);
   setChecked("publicPersonalityOnly", !!settings.publicPersonalityOnly);
   setChecked("showLorebookFilters", !!settings.showLorebookFilters);
@@ -684,8 +685,13 @@ async function load() {
     initializeExportScopeSelection().catch(() => {});
   }
   if (activeTab === "browser") {
-    renderTabCleanupSessions().catch(() => {});
-    loadTabCleanupTopics().catch(() => {});
+    // Stage 15: the Tab Cleanup implementation is no longer a startup script.
+    // The on-demand loader initializes both panels after the module registers.
+    // Calling their functions directly here races its script load on #browser.
+    ensureTabCleanupPanelLoaded().catch(error => {
+      const status = document.getElementById("tabCleanupDiagnosticStatus");
+      if (status) status.textContent = String(error?.message || error);
+    });
   }
   if (activeTab === "control") setupControlCenterView().catch(() => {});
   if (activeTab === "account") refreshAccountSyncUi().catch(() => {});

@@ -1,6 +1,17 @@
+## 0.2.85
+- Improved startup performance by loading more optional features only when needed.
+- Added guides and clearer explanations for Memory, Context Keeper, Lorebooks, Rulebooks, and creator tools.
+- Added adjustable native Memory checks and a manual Check now action.
+- Made backup, import, Replace, and cloud sync safety information clearer.
+- Improved Creation Audit explanations and browser/platform support guidance.
+- Added Implied Blocked Themes for bots with untagged cheating, emotional affairs, NTR, cuckolding, or suspicious relationship dynamics.
+- Improved implied-theme detection using audited examples, including wedding-weekend and hidden relationship-history scenarios, while reducing false positives.
+- Expanded bulk research exports with separate character metadata files, accessible linked content, and better retry and completeness reporting.
+- Fixed Tab Cleanup Settings failing to load after startup optimizations.
+
 ## 0.2.84
 - Kept SpicyChat's native chat header visible while typing by default, with an independent option to restore native hiding.
-- Added an option to hide SpicyChat's new * / quote formatting shortcut beside Send
+- Added an option to hide SpicyChat's new * / quote formatting shortcut beside Send, without hiding Send or the + menu.
 - Added more selective, balanced Context Keeper continuity capture
 - Added matching chat background opacity for user messages while keeping their original bubble color.
 - Added cloud sync storage estimates and clearer Blocked/Later sync status, including local and cloud list counts.

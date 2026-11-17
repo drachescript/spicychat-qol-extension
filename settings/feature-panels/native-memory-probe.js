@@ -11,16 +11,38 @@
   const intro=document.createElement('p');intro.className='hint';intro.textContent='Works without Context Keeper. This is a read-only experiment: QoL checks for changes and possible problems, but doesn\'t edit native Memories or save their text.';memoryCard.append(intro);
   const memoryRow=document.createElement('label');memoryRow.className='row';
   const memoryInput=document.createElement('input');memoryInput.id='nativeMemoryQualityProbe';memoryInput.type='checkbox';
-  const memoryLabel=document.createElement('span');memoryLabel.textContent='Check native Memories after every two normal replies (OFF by default)';
+  const memoryLabel=document.createElement('span');memoryLabel.textContent='Monitor native Memories after normal replies (OFF by default)';
   memoryRow.append(memoryInput,memoryLabel);
   memoryCard.append(memoryRow);
+  const cadenceLabel=document.createElement('label');cadenceLabel.textContent='Check after this many successful normal replies';
+  const cadence=document.createElement('select');cadence.id='nativeMemoryProbeEveryReplies';
+  for(const value of [5,10,15,20,30]){const option=document.createElement('option');option.value=String(value);option.textContent=`${value} replies${value===15?' (recommended)':''}`;cadence.append(option);}
+  cadence.value='15';cadenceLabel.append(cadence);memoryCard.append(cadenceLabel);
+  const manual=document.createElement('button');manual.id='nativeMemoryProbeCheckNow';manual.type='button';manual.textContent='Check now in open chat';memoryCard.append(manual);
   const memoryHelp=document.createElement('p');memoryHelp.className='hint';
-  memoryHelp.textContent='Checks after two normal back-and-forth messages, at least a minute apart. Regenerating or continuing a reply doesn\'t count. Failed checks back off automatically. The Memory text stays out of QoL storage and reports.';
+  memoryHelp.textContent='Checks after the selected number of successful normal replies, with at least a minute between attempts. This interval does not control when SpicyChat creates Memories. Regenerations and continuations do not count. Failed checks back off automatically. No native Memory text is saved to QoL logs.';
   memoryCard.append(memoryHelp);
   const memoryStatus=document.createElement('p');memoryStatus.className='hint';memoryStatus.setAttribute('role','status');
   memoryStatus.textContent='Memory check: no results yet.';
   memoryCard.append(memoryStatus);
   const note=document.createElement('p');note.className='hint';note.textContent='This shows whether QoL checked the Memory list, not whether SpicyChat created a Memory. Background checks may not appear in Inspector. Still experimental.';memoryCard.append(note);
+  manual.addEventListener('click',()=>{
+    manual.disabled=true;
+    memoryStatus.textContent='Looking for an open SpicyChat conversation…';
+    chrome.tabs.query({url:['https://spicychat.ai/chat/*','https://www.spicychat.ai/chat/*']},tabs=>{
+      if(chrome.runtime.lastError){memoryStatus.textContent='Cannot locate chat tabs: '+chrome.runtime.lastError.message;manual.disabled=false;return;}
+      const chat=(tabs||[]).filter(tab=>/\/chat\/[0-9a-f-]{36}\/[0-9a-f-]{36}/i.test(tab.url||''))
+        .sort((a,b)=>(Number(b.active)-Number(a.active))||(Number(b.lastAccessed||0)-Number(a.lastAccessed||0)))[0];
+      if(!chat?.id){memoryStatus.textContent='Open a conversation on SpicyChat first.';manual.disabled=false;return;}
+      chrome.tabs.sendMessage(chat.id,{type:'DSQ_NATIVE_MEMORY_CHECK_NOW'},response=>{
+        const err=chrome.runtime.lastError;
+        if(err)memoryStatus.textContent='Chat monitor unavailable. Reload that chat after updating QoL.';
+        else if(response?.ok)memoryStatus.textContent='Manual check started; results will appear here.';
+        else memoryStatus.textContent='Check not started: '+(response?.status||'unknown')+(response?.nextCheckAt?' · retry after '+new Date(response.nextCheckAt).toLocaleTimeString():'');
+        manual.disabled=false;
+      });
+    });
+  });
   function renderMemoryStatus(raw){
     if(!raw?.checkedAt){memoryStatus.textContent='Memory check: no results yet.';return;}
     const when=new Date(raw.checkedAt).toLocaleString();
@@ -40,5 +62,7 @@
   const readers=window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null);
   const loaders=window.__DSQ_FEATURE_SETTINGS_LOADERS__ ||= Object.create(null);
   readers.nativeMemoryQualityProbe=()=>!!document.getElementById('nativeMemoryQualityProbe')?.checked;
+  readers.nativeMemoryProbeEveryReplies=()=>Number(document.getElementById('nativeMemoryProbeEveryReplies')?.value)||15;
   loaders.nativeMemoryQualityProbe=settings=>{const el=document.getElementById('nativeMemoryQualityProbe');if(el)el.checked=settings.nativeMemoryQualityProbe===true;};
+  loaders.nativeMemoryProbeEveryReplies=settings=>{const el=document.getElementById('nativeMemoryProbeEveryReplies');if(el)el.value=String([5,10,15,20,30].includes(Number(settings.nativeMemoryProbeEveryReplies))?Number(settings.nativeMemoryProbeEveryReplies):15);};
 })();

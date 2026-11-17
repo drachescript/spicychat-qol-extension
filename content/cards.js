@@ -144,15 +144,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : target.classList.contains("ds-hidden");
     if (wasHidden && hasVisualHide) return false;
 
-    target.dataset.dsHidden = "1";
+    if (!wasHidden) target.dataset.dsHidden = "1";
     if (!wasHidden || !target.dataset.dsReason) target.dataset.dsReason = reason;
     if (dim) {
-      target.classList.remove("ds-hidden");
-      target.classList.add("ds-dimmed");
+      if (target.classList.contains("ds-hidden")) target.classList.remove("ds-hidden");
+      if (!target.classList.contains("ds-dimmed")) target.classList.add("ds-dimmed");
       DS.addDebugBadge(target, reason);
     } else {
-      target.classList.remove("ds-dimmed");
-      target.classList.add("ds-hidden");
+      if (target.classList.contains("ds-dimmed")) target.classList.remove("ds-dimmed");
+      if (!target.classList.contains("ds-hidden")) target.classList.add("ds-hidden");
     }
 
     return true;
@@ -422,6 +422,192 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
+
+  // Local, explainable inference for content themes creators often leave
+  // untagged. No network calls, NLP services, observers or persistent blocks.
+  // Only invoked for a changed card after a matching user tag exclusion.
+  const IMPLIED_CHEATING = 1;
+  const IMPLIED_CUCKOLD = 2;
+  let nativeExclusionSearch = null;
+  let nativeExclusionMask = 0;
+  const impliedCardCache = new WeakMap();
+
+  function impliedTagCategory(tag) {
+    const clean = String(tag || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (/^(?:cheating|cheat|infidelity|adultery|emotional cheating|emotional affair)$/.test(clean)) return IMPLIED_CHEATING | IMPLIED_CUCKOLD;
+    if (/^(?:ntr|netorare|netorase)$/.test(clean)) return IMPLIED_CHEATING | IMPLIED_CUCKOLD;
+    if (/^(?:cuckold|cuckolding|cuckquean|cuckqueaning|hotwife|hotwifing)$/.test(clean)) return IMPLIED_CUCKOLD;
+    return 0;
+  }
+
+  DS.getActiveImpliedBlockedThemes = function getActiveImpliedBlockedThemes(settings = DS.state?.settings || {}) {
+    if (!settings.enabled || !settings.filterImpliedBlockedTags) return 0;
+    const search = String(location.search || "");
+    if (search !== nativeExclusionSearch) {
+      nativeExclusionSearch = search;
+      nativeExclusionMask = 0;
+      // Native SpicyChat negative tag chips are encoded as
+      // ...[refinementList][tags][0]=-Cheating. Never infer a block from
+      // positive filters, and never treat a generic URL word as an exclusion.
+      for (const [key, value] of new URLSearchParams(search)) {
+        if (!/\[refinementList\]\[tags\](?:\[\d+\])?$/i.test(key)) continue;
+        if (!value.startsWith("-")) continue;
+        nativeExclusionMask |= impliedTagCategory(value.slice(1));
+      }
+    }
+    let result = nativeExclusionMask;
+    if (settings.blockCards) for (const rule of settings.blockedTags || []) result |= impliedTagCategory(rule);
+    return result;
+  };
+
+  // Text-only, explainable theme classifier. Runs for an enabled filter on a
+  // changed listing card, not for a full-page scan or a remote profile fetch.
+  const sceneText = value => String(value || "").normalize("NFKC").toLowerCase()
+    .replace(/[\u2019\u2018]/g, "'").replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+  const has = (pattern, text) => pattern.test(text);
+  const RELATIONSHIP = /\b(?:your|his|her|my|their|the|a|an)\s+(?:(?:ex|former)\s+)?(?:wife|husband|girlfriend|boyfriend|spouse|fiancee?|fiance|partner|bride|groom)\b|\b(?:married|engaged|long term partner|romantic partner|newlyweds|wedding day|marriage|in a relationship|dating you|dating him|dating her)\b/;
+  const THIRD_PERSON = /\b(?:co worker|coworker|colleague|boss|manager|neighbor|neighbour|male friend|female friend|best friend|close friend|her ex|his ex|your friend|another (?:man|woman|guy|girl|person)|someone else|other (?:man|woman|guy|girl)|old flame|stranger|new guy|new man|new woman|the other man|the other woman|a (?:male|female) (?:friend|colleague))\b/;
+  const SUSPICIOUS_CLOSENESS = /\b(?:grown|growing|getting|became|become|becoming|got|is|seems|feels|has gotten|has become)\s+(?:(?:unusually|suspiciously|too|very|increasingly|emotionally|far too|a little too|much too|much|dangerously)\s+){1,3}(?:close|attached|intimate)\s+(?:to|with)\b/;
+  const DEVELOPING_FEELINGS = /\b(?:develop(?:ed|ing)?\s+(?:romantic\s+)?feelings\s+for|fall(?:s|en|ing)?\s+(?:in\s+love\s+)?(?:for|with)|romantic feelings for|secretly in love with|flirt(?:s|ed|ing)? with|stolen kisses with|romantically interested in|crush on|attracted to another|feelings for another)\b/;
+  const SECRET_BEHAVIOR = /\b(?:secret(?:ly)?\s+(?:texts|texting|meeting|dating|seeing|flirting|sleeping|spending nights|sneaking|kissing)|hiding\s+(?:her|his|their|the)\s+(?:texts|messages|relationship|meetings)|late night\s+(?:texts|messages|calls|meetings)|behind (?:your|his|her|their|my) back|sneak(?:s|ing)? around with|secret meetings with|secret rendezvous with)\b/;
+  const CONFIRMED_AFFAIR = /\b(?:emotional affair|emotional cheating|sexual affair|secret affair|illicit affair|extramarital affair|marital infidelity|having an affair|has an affair|had an affair|affair with|affair partner|unfaithful|infidelity|adultery|adulterous|two timing|secret lover|other lover)\b/;
+  const CHEATING_RELATIONSHIP = /\b(?:cheating (?:wife|husband|girlfriend|boyfriend|spouse|partner)|unfaithful (?:wife|husband|girlfriend|boyfriend|spouse|partner)|(?:wife|husband|girlfriend|boyfriend|spouse|fiancee?|fiance|partner|ex wife|ex husband|ex girlfriend|ex boyfriend|she|he|you|they)\s+(?:has |had |have |was |were |is |been )?(?:cheat(?:s|ed|ing)?(?:\s+on\b|\s+with\b|\s+behind\b|\b))|cheat(?:s|ed|ing)?\s+on\s+(?:you|him|her|his|her|their|your|my|wife|husband|boyfriend|girlfriend|partner))\b/;
+  const EXPLICIT_THEME_TITLE = /\b(?:imaginary cheating|your cheating (?:wife|husband|girlfriend|boyfriend)|cheating (?:wife|husband|girlfriend|boyfriend)|the cheating (?:wife|husband|girlfriend|boyfriend)|unfaithful (?:spouse|wife|husband|girlfriend|boyfriend)|marital infidelity|emotional affair)\b/;
+  const CUCK_TITLE = /\b(?:ntr|netorare|netorase|cuck|cucky|cuckold|cuckolded|cuckolding|cuckoldry|cuckquean|cuckqueaning|cuckqueen)\b/;
+  const CUCK_SCENE = /\b(?:ntr|netorare|netorase|cuckold|cuckolded|cuckolding|cuckoldry|cuckquean|cuckqueaning|cuckqueen|hotwife|hotwifing|wife sharing|husband sharing|sharing your wife|sharing your husband|sharing his wife|sharing her husband|partner swapping|partner swap|wife swap|husband swap|bull for (?:your|his|her) wife)\b/;
+  const WATCH_BETRAYAL = /\b(?:watch|watches|watching|forced to watch|made to watch)\b.{0,95}\b(?:wife|husband|girlfriend|boyfriend|partner|spouse)\b.{0,95}\b(?:kissing|kiss|sleeping|sex|intimate|making love|with another)\b|\b(?:wife|husband|girlfriend|boyfriend|spouse)\b.{0,85}\b(?:another (?:man|woman)|stranger|lover)\b.{0,65}\b(?:while you watch|as you watch|in front of you|humiliat(?:e|ing) you)\b/;
+  const PHYSICAL_BETRAYAL = /\b(?:caught|found|discover(?:ed|s)?)\b.{0,85}\b(?:wife|husband|girlfriend|boyfriend|spouse|fiancee?|fiance|partner|bride|groom|her|him)\b.{0,100}\b(?:kissing|kiss(?:ing)?|in bed|making out|having sex|sleeping with|intimate with|another (?:man|woman)|a stranger)\b|\b(?:wife|husband|girlfriend|boyfriend|partner|fiancee?|fiance|spouse)\b.{0,90}\b(?:kiss(?:ed|es|ing)?|slept with|sleeping with|having sex with|in bed with|making out with|intimate with)\b.{0,60}\b(?:another|other|stranger|co worker|coworker|friend|boss|neighbor|neighbour|lover)\b/;
+  const BEHIND_BACK_BETRAYAL = /\b(?:kiss(?:ed|es|ing)?|sleep(?:s|ing)? with|slept with|dating|dated|seeing|met|meeting|having sex with|in bed with)\b.{0,100}\b(?:another (?:man|woman)|other (?:man|woman)|coworker|co worker|colleague|friend|stranger|lover|boss|neighbor|neighbour|someone else)\b.{0,90}\b(?:behind (?:your|his|her|their|my) back|without (?:your|his|her|their) knowledge|in secret|secretly)\b|\b(?:behind (?:your|his|her|their|my) back|without (?:your|his|her|their) knowledge)\b.{0,105}\b(?:dating|kissing|seeing|sleeping with|having sex with)\b/;
+  const PARTNER_REPLACEMENT = /\b(?:wife|husband|girlfriend|boyfriend|spouse|fiancee?|fiance|partner|she|he)\b.{0,70}\b(?:left|leaves|leaving|chose|chooses|choosing|dumped|abandoned)\b.{0,75}\b(?:for|over)\b.{0,50}\b(?:(?:his|her|their|your|my) )?(?:another (?:man|woman)|someone else|coworker|co worker|colleague|lover|best friend|other (?:man|woman))\b|\b(?:steal(?:s|ing)?|stole|lure(?:d|s|ing)?)\b.{0,65}\b(?:wife|husband|girlfriend|boyfriend|partner|women away from their boyfriends|men away from their girlfriends)\b/;
+  const SECRETLY_DATING_OTHERS = /\b(?:secretly dating|dating in secret|secret relationship|secretly seeing)\b.{0,85}\b(?:while|despite)\b.{0,60}\b(?:dating|her boyfriend|his girlfriend|husband|wife|partner)\b|\b(?:dating|married to|engaged to)\b.{0,90}\b(?:while|but)\b.{0,50}\b(?:secretly dating|secretly seeing|secret lover)\b/;
+  const PARTNER_CHOSE_RIVAL = /\b(?:wife|husband|girlfriend|boyfriend|spouse|partner|she|he)\b.{0,80}\b(?:chose|chooses|choosing|picked|picks|prefers?)\b.{0,75}\b(?:her |his |their |my |your )?(?:coworker|co worker|colleague|boss|best friend|another (?:man|woman)|other (?:man|woman)|lover)\b.{0,45}\b(?:over|instead of|rather than) (?:you|me|him|her|their (?:wife|husband|partner))\b/;
+  const PATERNITY_BETRAYAL = /\b(?:pregnant by|pregnant with (?:another|someone else)|child (?:isn t|is not) (?:yours|his|mine)|baby (?:isn t|is not) (?:yours|his|mine)|not the (?:real|biological) father|paternity fraud)\b/;
+  const EMOTIONAL_DEPENDENCE = /\b(?:understands? (?:me|her|him) (?:better|more) than|makes? (?:me|her|him) feel (?:seen|understood|loved)|share(?:s|d|ing)? (?:personal|intimate|private|deepest) (?:secrets|feelings|thoughts|problems|details)|can(?:not| t)? talk to (?:my|her|his) (?:wife|husband|partner|spouse) about|emotionally dependent on|emotionally attached to|emotional intimacy with|more than just friends|something more than friendship|work (?:husband|wife))\b/;
+  const PARTNER_COMPARISON = /\b(?:better than (?:you|her husband|his wife|her boyfriend|his girlfriend)|compares? (?:you|her husband|his wife|her boyfriend|his girlfriend) (?:to|with)|unlike (?:you|her husband|his wife|her boyfriend|his girlfriend)|instead of (?:her|his|your) (?:wife|husband|partner|spouse))\b/;
+  const PRIVATE_CONTACT = /\b(?:hide(?:s|ing)? (?:her|his|their) (?:phone|messages|texts|calls)|delet(?:es|ed|ing) (?:her|his|their) (?:messages|texts|chat)|secret (?:texts|messages|calls|meetings)|late night (?:texts|messages|calls|meetings)|changed (?:her|his|their) (?:phone )?password|spend(?:s|ing)? (?:more|a lot of) time (?:alone )?with|stays? late (?:at work )?with|spend(?:s|ing)? (?:late )?nights with)\b/;
+  // Some ensemble bots advertise a committed partner while making concealed
+  // romantic/sexual history and new concurrent attractions the main premise.
+  // This is *not evidence of cheating*. We expose a distinct, lower-certainty
+  // "boundary risk" reason for users who opt into implied-theme hiding.
+  // A vague "wedding", "old friends", "drama" or "secret" ALONE is insufficient.
+  const PARTNER_FRIENDS = /\b(?:girlfriend|boyfriend|wife|husband|spouse|partner) s (?:old |longtime |closest |close )?friends?\b|\b(?:your|user s) (?:new )?(?:girlfriend|boyfriend|partner)\b.{0,90}\b(?:old friends|friendship circle|friend group)\b/;
+  const HIDDEN_GROUP_HISTORY = /\b(?:more history than (?:you|they|he|she) know|more (?:secrets|history|past) than (?:you|they) (?:know|realize)|(?:private|secret|hidden|untold|undisclosed) (?:romantic |sexual )?(?:history|hookups|affairs|flings|past)|hookups relationships (?:and )?secrets|friendships hookups relationships (?:and )?secrets|old friends with (?:sexual|romantic) secrets)\b/;
+  const ENSEMBLE_ROMANTIC_ROUTES = /\b(?:new attraction adds rather than replaces|existing relationships (?:and )?(?:hookups|continue)|attraction information (?:and )?consequences spread|attraction (?:and )?(?:new )?connections? develop|overlapping (?:friendships|relationships|hookups)|relationship(?:s)? (?:and )?hookups|private hookups|sexual history|sexual connections|fwb|friends with benefits|route freedom|connect with any several or none|other (?:romantic|sexual) partners?)\b/;
+  const SOCIAL_SECRETS_CUE = /\b(?:wedding weekend|wedding guests|old friends|friendship circle|friend group|girlfriend s friends|boyfriend s friends|partner s friends|group of friends)\b/;
+  const ROMANTIC_SETTING_CUE = /\b(?:wedding weekend|all kinks|hookups|romantic|private hookups|partner)\b/;
+
+  function impliedBoundaryRisk(titleText, descriptionText, tagContext, extendedText) {
+    const intro = (titleText + ' ' + descriptionText).trim();
+    const tags = sceneText(tagContext);
+    const detailed = sceneText(String(extendedText || '').slice(0, 16000));
+    const full = (intro + ' ' + detailed).trim();
+    // Titles/descriptions often expose the *teaser* even when character
+    // definitions are not public. Require three complementary title clues;
+    // no API fetch or creator-editor probing is performed.
+    if (has(PARTNER_FRIENDS, intro) && has(HIDDEN_GROUP_HISTORY, intro)
+      && (has(ROMANTIC_SETTING_CUE, intro) || has(/\b(?:romantic|partner)\b/, tags))) {
+      return { category: 'Relationship-boundary risk', evidence: "partner's friend circle and hinted undisclosed history in a romantic/drama setting", certainty: 'risk-not-confirmed' };
+    }
+    // If an authorized caller already has the public definition, inspect its
+    // more specific promises. NEVER infer betrayal from a past fling alone.
+    if (detailed && has(/\b(?:your|user s) (?:new )?(?:girlfriend|boyfriend|partner)\b/, full)
+      && has(SOCIAL_SECRETS_CUE, full)
+      && has(HIDDEN_GROUP_HISTORY, full)
+      && has(ENSEMBLE_ROMANTIC_ROUTES, detailed)
+      && /\b(?:attraction|romantic|sexual|fwb|hookups?)\b/.test(detailed)) {
+      return { category: 'Relationship-boundary risk', evidence: 'partner-centered friend group combines concealed sexual history and ongoing romantic routes', certainty: 'risk-not-confirmed' };
+    }
+    return null;
+  }
+  const DENIAL_ONLY = /\b(?:never (?:actually )?cheat(?:ed|s|ing)?|has never cheated|have never cheated|did not cheat|didn t cheat|hasn t cheated|wasn t cheating|isn t cheating|not cheating|no affair|there (?:was|is) no affair|no infidelity|false (?:accusation|rumor|rumour) (?:of|about) cheating|falsely accused of cheating|wrongly accused of cheating|didn t have an affair|not having an affair)\b/;
+  const MISUNDERSTANDING = /\b(?:misunderstanding|false accusation|false rumor|false rumour|only a (?:rumor|rumour)|not actually cheating|wasn t cheating|never cheated|wrongly accused|falsely accused|innocent|thinks? (?:you|she|he|they) cheat(?:ed|s|ing)?|suspect(?:s|ed)? (?:you|she|he|they) cheat(?:ed|s|ing)?|(?:no proof|no evidence|unproven|supposedly cheating|suspect(?:s|ed)? .{0,55}(?:cheat|affair)|accus(?:e|ed|ation) .{0,55}(?:cheat|affair))|secret (?:anniversary|birthday|surprise) (?:party|gift|plan)?|audio (?:acting|recording|roleplay)|manga|comic con)\b/;
+  const NON_ROMANTIC_CHEAT = /\b(?:cheat(?:s|ed|ing)?|cheater)\s+(?:at|on|with|during)\s+(?:(?:an?|the|her|his|your|my|their) )?(?:(?:math|school|final|college|university|history|science|board) )?(?:exam|test|quiz|chess|cards|card game|game|video game|homework|assignment|schoolwork|contest|puzzle|race)\b/;
+  const AFFAIR_UNRELATED = /\b(?:political|business|state|diplomatic|foreign|legal|public|current) affairs?\b/;
+
+  // Priority: indisputable theme > direct betrayal > clustered emotional
+  // boundary crossing. Suspicion, accusations and denials alone never hide.
+  // The source bundle is a classification guide; its grades are NOT evidence
+  // that particular unexposed character fields exist.
+  DS.inferImpliedBlockedThemeText = function inferImpliedBlockedThemeText(title, description, themeMask, tagContext = "", availableProfileText = "") {
+    const mask = Number(themeMask) || 0;
+    if (!mask) return null;
+    const titleText = sceneText(String(title || "").slice(0, 240));
+    const descriptionText = sceneText(String(description || "").slice(0, 1200));
+    const text = (titleText + " " + descriptionText).trim();
+    if (!text) return null;
+    const committed = has(RELATIONSHIP, text) || /\bmarried partner\b/.test(sceneText(tagContext));
+    const third = has(THIRD_PERSON, text);
+    const denial = has(DENIAL_ONLY, text);
+    const misunderstanding = has(MISUNDERSTANDING, text);
+
+    // Risk-based *hide*, not a finding that an affair happened. The old
+    // classifier remains authoritative for established infidelity and NTR.
+    const boundaryRisk = (mask & IMPLIED_CHEATING)
+      ? impliedBoundaryRisk(titleText, descriptionText, tagContext, availableProfileText) : null;
+
+    if (mask & IMPLIED_CUCKOLD) {
+      if (has(CUCK_TITLE, titleText)) {
+        return { category: "NTR/Cuckolding", evidence: "explicit NTR/cuck theme in title" };
+      }
+      if ((has(CUCK_SCENE, descriptionText) || (committed && has(WATCH_BETRAYAL, text))) && !denial) {
+        return { category: "NTR/Cuckolding", evidence: "partner-sharing or humiliation premise" };
+      }
+    }
+    if (!(mask & IMPLIED_CHEATING)) return null;
+
+    // Negated or disputed cheating should not be reinterpreted as confirmed.
+    // Direct independently described betrayal still counts even when a
+    // character tries to minimize it elsewhere in the same synopsis.
+    const directBetrayal = committed && (has(PHYSICAL_BETRAYAL, text) || has(BEHIND_BACK_BETRAYAL, text)
+      || has(PARTNER_REPLACEMENT, text) || has(PARTNER_CHOSE_RIVAL, text) || has(PATERNITY_BETRAYAL, text)
+      || has(SECRETLY_DATING_OTHERS, text));
+    if (directBetrayal) {
+      return { category: "Cheating", evidence: "direct romantic betrayal in the premise" };
+    }
+    if (!denial && !misunderstanding && !has(NON_ROMANTIC_CHEAT, text) && !has(AFFAIR_UNRELATED, text)) {
+      if (has(EXPLICIT_THEME_TITLE, titleText) || has(CONFIRMED_AFFAIR, text) || (committed && has(CHEATING_RELATIONSHIP, text))) {
+        return { category: "Cheating", evidence: "explicit affair or infidelity theme" };
+      }
+    }
+    if (committed && third && !denial && !misunderstanding) {
+      if (has(SUSPICIOUS_CLOSENESS, text)) {
+        return { category: "Cheating", evidence: "partner becoming unusually close to a third party" };
+      }
+      if (has(DEVELOPING_FEELINGS, text) && (has(SECRET_BEHAVIOR, text) || has(PRIVATE_CONTACT, text) || has(PARTNER_COMPARISON, text) || has(EMOTIONAL_DEPENDENCE, text)
+        || /\b(?:meeting|seeing|texting|dating) (?:him|her|them) secretly\b/.test(text))) {
+        return { category: "Cheating", evidence: "romantic feelings and concealed emotional intimacy" };
+      }
+      if (has(SECRET_BEHAVIOR, text) && (has(DEVELOPING_FEELINGS, text) || has(EMOTIONAL_DEPENDENCE, text) || has(PARTNER_COMPARISON, text))) {
+        return { category: "Cheating", evidence: "secret contact crossing relationship boundaries" };
+      }
+      // Preserve the prior strict filter's treatment of an explicitly
+      // clandestine exchange involving the committed partner and a third party.
+      // A bare mention of texting or working late is not enough.
+      if (/\bsecret(?:ly)?\s+(?:texts|texting|meeting|dating|seeing|flirting|kissing)\b/.test(text)) {
+        return { category: "Cheating", evidence: "partner's secret contact with a third party" };
+      }
+      if (has(EMOTIONAL_DEPENDENCE, text) && (has(PRIVATE_CONTACT, text) || has(PARTNER_COMPARISON, text))) {
+        return { category: "Cheating", evidence: "emotional dependency plus concealed contact or comparison" };
+      }
+    }
+    return boundaryRisk;
+  };
+
+  DS.getImpliedBlockedThemeMatch = function getImpliedBlockedThemeMatch(card, mask = DS.getActiveImpliedBlockedThemes()) {
+    if (!card || !mask) return null;
+    const title = DS.getCardTitle?.(card) || "";
+    const description = DS.getCardDescriptionText?.(card) || "";
+    if (!description && !title) return null;
+    // Relationship tags are only context, never independent proof of cheating.
+    const tags = card.querySelector?.('[data-testid="CharacterCardTagRow"]')?.textContent || "";
+    const signature = `${mask}|${title}|${description}|${tags}`;
+    const cached = impliedCardCache.get(card);
+    if (cached?.signature === signature) return cached.match;
+    const match = DS.inferImpliedBlockedThemeText(title, description, mask, tags);
+    impliedCardCache.set(card, { signature, match });
+    return match;
+  };
+
   // The automatic block queue waits for storage and can outlive a React card
   // rerender. Re-check the live card against the *current* rules immediately
   // before performing any persistent block action.
@@ -683,6 +869,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (creatorMatch) return `blocked creator: ${creatorMatch.raw}`;
     }
 
+    // Native excluded tags also count. Unlike explicit verified tag/word
+    // auto-blocks, an inferred theme is reversible and NEVER written to storage.
+    if (settings.filterImpliedBlockedTags && favoritePrefs.ignoreTagWordFilters !== true) {
+      const themes = DS.getActiveImpliedBlockedThemes(settings);
+      const implied = themes && DS.getImpliedBlockedThemeMatch(card, themes);
+      if (implied) return `blocked tag: ${implied.category} (implied: ${implied.evidence})`;
+    }
+
     return null;
   };
 
@@ -704,7 +898,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       creators: fields.creatorCandidates || [],
       word: word?.raw || "",
       creator: creator?.raw || "",
-      tag: tag?.raw || ""
+      tag: tag?.raw || "",
+      implied: DS.getActiveImpliedBlockedThemes?.() && DS.getImpliedBlockedThemeMatch?.(card)?.category || ""
     };
   };
 
