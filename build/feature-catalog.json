@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.82",
+  "version": "0.2.84",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 135,
+  "featureCount": 136,
   "sections": [
     "Blocking",
     "Chat List",
@@ -110,6 +110,7 @@
     "content/bot-organizer.js",
     "content/build-profile.js",
     "content/bulk-blocking.js",
+    "content/bulk-chat-research.js",
     "content/card-token-auth-loader.js",
     "content/card-token-info.js",
     "content/card-token-main.js",
@@ -910,6 +911,42 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "bulk-chat-research",
+      "label": "Bulk Chat Research",
+      "description": "Adds the bulk chat research tools.",
+      "section": "Chat List",
+      "group": "chatList",
+      "requiredFeatures": [],
+      "runtimeScripts": [
+        "content/bulk-chat-research.js"
+      ],
+      "requiredHelpers": [
+        "content/bulk-chat-research-worker.js"
+      ],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/bulk-chat-research.js"
+      ],
+      "backgroundFiles": [
+        "background/features/background-research-memory-export.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "showBulkChatResearchExport"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -1850,7 +1887,8 @@
         "chatAlwaysShowProfileLink",
         "chatJumpToStartShortcut",
         "chatOpenWindowShortcut",
-        "chatGenerationSettingsShortcut"
+        "chatGenerationSettingsShortcut",
+        "keepChatHeaderVisibleWhileTyping"
       ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
@@ -3116,6 +3154,7 @@
         "showMessageQuickActions",
         "messageQuickActionCopy",
         "messageQuickActionEdit",
+        "messageQuickActionDelete",
         "messageQuickActionRemoveImage",
         "messageQuickActionResend",
         "messageQuickActionConfirmRemoveImage",

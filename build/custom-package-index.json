@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.82",
+  "sourceVersion": "0.2.84",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -300,6 +300,25 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bulk-chat-research",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bulk-chat-research.js",
+      "settings": [
+        "settings/feature-panels/bulk-chat-research.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
+      "background": [
+        "background/features/background-research-memory-export.js"
+      ],
+      "helpers": [
+        "content/bulk-chat-research-worker.js"
+      ],
       "fullyIndependent": false
     },
     {
