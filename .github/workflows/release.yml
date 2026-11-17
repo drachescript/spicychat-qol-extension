@@ -26,11 +26,12 @@ concurrency:
 jobs:
   release:
     name: Build and publish stable release
+    # Validated push builds and repair-dispatched dev builds may publish stable releases.
     if: >-
       github.event_name != 'workflow_run' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push' &&
+        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
         github.event.workflow_run.head_branch == 'main'
       )
     runs-on: ubuntu-latest
