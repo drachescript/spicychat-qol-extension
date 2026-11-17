@@ -117,4 +117,4 @@ jobs:
 
           # Merges made with GITHUB_TOKEN do not automatically trigger push workflows.
           # Explicitly dispatch the usual development build and downstream releases.
-          gh workflow run dev-build.yml --ref main
+          gh workflow run dev-build.yml --ref main -f repair_triggered=true

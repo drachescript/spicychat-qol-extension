@@ -5,8 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      repair_triggered:
+        description: "Run stable publishing after an audited auto-repair dispatch"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -272,3 +279,30 @@ jobs:
               error("Missing Chrome or Firefox development ZIP on dev-build release")
             end
           '
+
+      # A workflow_dispatch started by GITHUB_TOKEN may not generate the
+      # workflow_run event relied on by normal push builds. Explicitly dispatch
+      # stable publishing only after the fully validated dev build finishes.
+      - name: Continue stable publishing after audited auto-repair
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_triggered }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$head_sha" != "$GITHUB_SHA" ]]; then
+            echo "::notice::A newer main commit superseded this repaired build."
+            exit 0
+          fi
+
+          version="$(python3 -c 'import json; print(json.load(open("manifest.json", encoding="utf-8"))["version"])')"
+          tag="v${version}"
+          if gh release view "$tag" >/dev/null 2>&1 ||
+             gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "Existing ${tag}; dispatching the safe current-stable rebuild."
+            gh workflow run rebuild-current-release.yml --ref main
+          else
+            echo "New ${tag}; dispatching normal stable publishing."
+            gh workflow run release.yml --ref main -f version="$version"
+          fi
