@@ -8,6 +8,10 @@
 - Improved implied-theme detection using audited examples, including wedding-weekend and hidden relationship-history scenarios, while reducing false positives.
 - Expanded bulk research exports with separate character metadata files, accessible linked content, and better retry and completeness reporting.
 - Fixed Tab Cleanup Settings failing to load after startup optimizations.
+- Reduced unnecessary Bot Status storage reads and improved storage performance diagnostics without changing saved checkpoints.
+- Reduced repeat Dislike helper checks and unnecessary chatbot card updates while preserving native rating verification.
+- Improved Favorites scanning and browsing by avoiding repeated filtering, imports and unchanged history writes.
+- Clarified Favorites listing, account and locally saved counts, with authenticated verification when available.
 
 ## 0.2.84
 - Kept SpicyChat's native chat header visible while typing by default, with an independent option to restore native hiding.

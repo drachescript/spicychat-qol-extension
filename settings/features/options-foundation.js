@@ -216,7 +216,10 @@ async function readLargeStorageKeyPaged(key) {
       type: "DS_LARGE_STORAGE_GET_PAGE",
       key,
       afterId,
-      limit: 250
+      // Availability rows are compact; larger pages reduce IPC round trips.
+      // Keep rich archive snapshots on the conservative size to avoid hitting
+      // extension-message payload limits on long saved bot definitions.
+      limit: key === "botAvailability" ? 400 : 250
     }, 15000);
     if (!response?.ok || !Array.isArray(response.rows)) return null;
 

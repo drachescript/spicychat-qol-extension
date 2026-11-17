@@ -55,6 +55,9 @@ if (!(() => { try {
   const CONTROL_EVENT = "ds-qol-card-token-bridge-control-v1";
   const FEEDBACK_REQUEST_EVENT = "ds-qol-character-feedback-request-v1";
   const FEEDBACK_RESPONSE_EVENT = "ds-qol-character-feedback-response-v1";
+  const FAVORITES_ACCOUNT_REQUEST = "ds-qol-favorites-account-request-v1";
+  const FAVORITES_ACCOUNT_RESPONSE = "ds-qol-favorites-account-response-v1";
+  const FAVORITES_NATIVE_OBSERVED = "ds-qol-favorites-native-observed-v1";
   const RECOMMENDATION_WORKER_PROBE_REQUEST_EVENT = "ds-qol-recommendation-worker-probe-request-v1";
   const RECOMMENDATION_WORKER_PROBE_RESPONSE_EVENT = "ds-qol-recommendation-worker-probe-response-v1";
   const API_BASE = "https://prod.nd-api.com/v2/characters/";
@@ -401,6 +404,70 @@ if (!(() => { try {
   let active = true;
   let hooksInstalled = false;
 
+  // Favorited IDs are taken ONLY from a successful native authenticated
+  // settings response. This does not guess endpoints, scrape profile pages or
+  // issue any extra account requests. Never expose the settings response itself.
+  let nativeFavoriteIds = null;
+  let nativeFavoriteObservedAt = 0;
+  const favoriteIdPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  function isNativeFavoritesSettingsRead(input, method) {
+    if (String(method || 'GET').toUpperCase() !== 'GET') return false;
+    try {
+      const url = new URL(input instanceof Request ? input.url : String(input || ''), location.href);
+      return url.origin === 'https://prod.nd-api.com' && /^\/(?:v2\/)?users\/settings\/?$/i.test(url.pathname);
+    } catch { return false; }
+  }
+  function captureNativeFavoritesSettings(data) {
+    const root = data && typeof data === 'object' ? data : null;
+    if (!root) return;
+    const containers = [root, root.data, root.settings, root.data?.settings, root.user?.settings];
+    const keys = ['favorite_characters', 'favorite_character_ids', 'favorite_characters_ids',
+      'favoriteCharacters', 'favoriteCharacterIds', 'favoriteCharactersIds'];
+    let candidate = null;
+    for (const obj of containers) {
+      if (!obj || typeof obj !== 'object') continue;
+      for (const key of keys) {
+        if (Array.isArray(obj[key])) { candidate = obj[key]; break; }
+      }
+      if (candidate) break;
+    }
+    if (!candidate) return; // Unknown response schema is not zero favorites.
+    const ids = [];
+    for (const item of candidate) {
+      const raw = typeof item === 'string' ? item : item && typeof item === 'object'
+        ? (item.character_id || item.characterId || item.id) : '';
+      const id = String(raw || '').toLowerCase();
+      if (!favoriteIdPattern.test(id)) return; // Partial/unknown = unavailable.
+      ids.push(id);
+    }
+    nativeFavoriteIds = [...new Set(ids)];
+    nativeFavoriteObservedAt = Date.now();
+    try { window.dispatchEvent(new CustomEvent(FAVORITES_NATIVE_OBSERVED)); } catch {}
+  }
+  window.addEventListener(FAVORITES_ACCOUNT_REQUEST, event => {
+    if (!active || !/^\/favorite-bots\/?$/i.test(location.pathname)) return;
+    const requestId = clean(event?.detail?.requestId);
+    if (!requestId || !['read', 'read-fresh'].includes(String(event?.detail?.action || ''))) return;
+    if (event.detail.action === 'read-fresh') {
+      // The last observed native settings GET is not a fresh verification.
+      // Never claim it proves a just-submitted unfavorite persisted.
+      try { window.dispatchEvent(new CustomEvent(FAVORITES_ACCOUNT_RESPONSE, {
+        detail: { requestId, ok: false, status: 'fresh-account-verification-unavailable' }
+      })); } catch {}
+      return;
+    }
+    const valid = Array.isArray(nativeFavoriteIds) && nativeFavoriteObservedAt &&
+      Date.now() - nativeFavoriteObservedAt < 10 * 60 * 1000;
+    try {
+      window.dispatchEvent(new CustomEvent(FAVORITES_ACCOUNT_RESPONSE, {
+        detail: valid
+          ? { requestId, ok: true, ids: [...nativeFavoriteIds], observedAt: nativeFavoriteObservedAt,
+              status: 'authenticated-native-observation' }
+          : { requestId, ok: false, status: 'native-observation-needed' }
+      }));
+    } catch {}
+  });
+
   function observedFetch(input, init) {
     let historySeq = 0;
     let historyStartedAt = 0;
@@ -416,15 +483,20 @@ if (!(() => { try {
       }
     } catch {}
 
+    const favoritesSettings = active && isNativeFavoritesSettingsRead(input, init?.method || (input instanceof Request ? input.method : 'GET'));
     const pending = nativeFetch(input, init);
-    if (!historySeq) return pending;
+    if (!historySeq && !favoritesSettings) return pending;
     return pending.then(
       response => {
-        try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
+        if (historySeq) try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
+        if (favoritesSettings && response?.ok) {
+          // Clone asynchronously; never delay or consume the page's Response.
+          try { void response.clone().json().then(captureNativeFavoritesSettings).catch(() => {}); } catch {}
+        }
         return response;
       },
       error => {
-        try { noteNativeHistoryResponse(historySeq, 0, input, "fetch", historyStartedAt); } catch {}
+        if (historySeq) try { noteNativeHistoryResponse(historySeq, 0, input, "fetch", historyStartedAt); } catch {}
         throw error;
       }
     );
@@ -436,10 +508,12 @@ if (!(() => { try {
       this.__dsCardTokenApi = active && urlIsApi(url);
       this.__dsCardTokenUrl = this.__dsCardTokenApi ? String(url || "") : "";
       this.__dsCardTokenHistoryApi = this.__dsCardTokenApi && urlIsNativeHistoryApi(url);
+      this.__dsCardTokenFavoritesSettings = active && isNativeFavoritesSettingsRead(url, method);
     } catch {
       this.__dsCardTokenApi = false;
       this.__dsCardTokenUrl = "";
       this.__dsCardTokenHistoryApi = false;
+      this.__dsCardTokenFavoritesSettings = false;
     }
     return nativeOpen.call(this, method, url, ...rest);
   }
@@ -451,6 +525,15 @@ if (!(() => { try {
 
   function observedSend(...args) {
     try {
+      if (active && this.__dsCardTokenFavoritesSettings && typeof this.addEventListener === 'function') {
+        this.addEventListener('loadend', () => {
+          if (this.status < 200 || this.status >= 300) return;
+          try {
+            const data = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
+            captureNativeFavoritesSettings(data);
+          } catch {}
+        }, { once: true });
+      }
       if (active && this.__dsCardTokenHistoryApi) {
         const historyStartedAt = Date.now();
         const historySeq = noteNativeHistoryRequest(this.__dsCardTokenUrl, "xhr");

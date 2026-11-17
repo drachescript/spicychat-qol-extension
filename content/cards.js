@@ -932,7 +932,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (
       Array.isArray(DS.state?.cardCache) &&
       DS.state.cardCacheRevision === revision &&
-      DS.state.cardCacheUrl === url
+      DS.state.cardCacheUrl === url &&
+      DS.state.cardCache.every(item => item.card?.isConnected && item.anchor?.isConnected)
     ) {
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       perf.cardCollectionCacheHits = (perf.cardCollectionCacheHits || 0) + 1;
@@ -989,10 +990,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return DS.normalizeTextForMatching(text).replace(/\s+/g, " ").trim();
   }
 
-  function normalizeCardDisplayElement(el) {
+  // WeakMap values do not keep detached native cards alive after pagination.
+  // Covers unchanged ASCII as well as already-normalized text; React text or
+  // settings changes invalidate the decision without retaining a card list.
+  const displayNormalizationCache = new WeakMap();
+  function normalizeCardDisplayElement(el, configurationKey) {
     if (!el || el.closest?.("button, input, textarea, select")) return;
 
     const current = String(el.textContent || "");
+    const cached = displayNormalizationCache.get(el);
+    if (cached?.key === configurationKey && cached.text === current) return;
     const previousApplied = String(el.dataset.dsNormalizedApplied || "");
     let source = el.dataset.dsNormalizedOriginal;
 
@@ -1007,6 +1014,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (normalized === source) {
       delete el.dataset.dsNormalizedOriginal;
       delete el.dataset.dsNormalizedApplied;
+      displayNormalizationCache.set(el, { key: configurationKey, text: current });
       return;
     }
 
@@ -1016,6 +1024,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (el.dataset.dsNormalizedOriginal !== source) el.dataset.dsNormalizedOriginal = source;
     if (el.dataset.dsNormalizedApplied !== normalized) el.dataset.dsNormalizedApplied = normalized;
     if (current !== normalized) el.textContent = normalized;
+    displayNormalizationCache.set(el, { key: configurationKey, text: normalized });
   }
 
   function restoreCardDisplayElement(el) {
@@ -1026,6 +1035,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     delete el.dataset.dsNormalizedOriginal;
     delete el.dataset.dsNormalizedApplied;
+    displayNormalizationCache.delete(el);
   }
 
   function botNameTitleFromTarget(target) {
@@ -1113,15 +1123,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    const settings = DS.state.settings || {};
+    const config = [settings.normalizeFancyUnicode, settings.normalizePunctuation,
+      settings.normalizeInvisibleCharacters, settings.normalizeDecorativeSymbols,
+      settings.normalizeEmojis].map(Boolean).map(Number).join('');
     for (const { card } of cards) {
       const title = card.querySelector?.("a[aria-label^='chat-with-'][title], a[aria-label^='chat-with-'], a[href*='/chat/'][title]");
-      if (title) normalizeCardDisplayElement(title);
+      if (title) normalizeCardDisplayElement(title, config);
 
       const descriptionBlock = findDescriptionBlock(card);
       if (descriptionBlock) {
         const leaves = DS.qsa?.("p, span", descriptionBlock).filter(el => !el.querySelector?.("p, span")) || [];
-        if (leaves.length) leaves.forEach(normalizeCardDisplayElement);
-        else normalizeCardDisplayElement(descriptionBlock);
+        if (leaves.length) leaves.forEach(el => normalizeCardDisplayElement(el, config));
+        else normalizeCardDisplayElement(descriptionBlock, config);
       }
     }
   };
@@ -1606,6 +1620,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    // The Favorites default is to keep all favorites visible. If no display
+    // normalization is requested, there is no reason to enumerate those cards
+    // in either the critical or settled filter pass. Preserve cleanup if an
+    // older filter left card markers behind.
+    if (DS.isFavoriteBotsPage?.() && DS.state.settings.neverHideFavorites !== false &&
+        !DS.state.settings.publicPersonalityOnly &&
+        !(DS.state.settings.textNormalizationEnabled && (
+          DS.state.settings.normalizeFancyUnicode || DS.state.settings.normalizePunctuation ||
+          DS.state.settings.normalizeInvisibleCharacters || DS.state.settings.normalizeDecorativeSymbols ||
+          DS.state.settings.normalizeEmojis)) &&
+        !document.querySelector('[data-ds-normalized-original], [data-ds-hidden]')) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.favoriteCardFilterBypasses = Number(perf.favoriteCardFilterBypasses || 0) + 1;
+      return;
+    }
     const passKey = cardHidingPassKey();
     const pendingLanguagePass = hasPendingLanguageUnhideVerification();
     const filterKey = cardFilterKey();

@@ -360,11 +360,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!groups.has(item.target.parentElement)) groups.set(item.target.parentElement, []);
       groups.get(item.target.parentElement).push(item);
       if (item.target.dataset.dsFavOldOrder === undefined) item.target.dataset.dsFavOldOrder = item.target.style.order || "";
-      item.target.dataset.dsFavPageManaged = "1";
+      if (item.target.dataset.dsFavPageManaged !== "1") item.target.dataset.dsFavPageManaged = "1";
       const memberships = orgMeta[item.id]?.collections || [];
       const visible = !folders || favoritePageFolderFilter === "all" ||
         (favoritePageFolderFilter === "__unfoldered__" ? !memberships.length : memberships.includes(favoritePageFolderFilter));
-      item.target.classList.toggle("ds-favorite-qol-filter-hidden", !visible);
+      if (item.target.classList.contains("ds-favorite-qol-filter-hidden") === visible) item.target.classList.toggle("ds-favorite-qol-filter-hidden", !visible);
       const oldButton = item.card.querySelector(".ds-favorite-qol-folder-action");
       if (folders && names.length && !oldButton) {
         const btn = document.createElement("button");
@@ -383,7 +383,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     for (const group of groups.values()) {
       if (favoritePageSort === "native" || !sorting) {
-        for (const item of group) item.target.style.order = item.target.dataset.dsFavOldOrder || "";
+        for (const item of group) { const original = item.target.dataset.dsFavOldOrder || ""; if (item.target.style.order !== original) item.target.style.order = original; }
       } else {
         group.sort((a,b) => {
           if(favoritePageSort==='added-new'||favoritePageSort==='added-old'){
@@ -395,7 +395,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             ? (a.savedAt || Number.MAX_SAFE_INTEGER) - (b.savedAt || Number.MAX_SAFE_INTEGER) || a.index-b.index
             : (b.savedAt || 0) - (a.savedAt || 0) || a.index-b.index;
         });
-        group.forEach((item, i) => { item.target.style.order = String(i); });
+        group.forEach((item, i) => { const order = String(i); if (item.target.style.order !== order) item.target.style.order = order; });
       }
     }
   }
@@ -487,39 +487,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return 0;
     }
 
-    const store = getStore();
-    let changed = false;
-    let seen = 0;
-
-    for (const { card, anchor } of DS.collectCards?.() || []) {
+    if (DS.state.favoriteNativeScanActive) return 0; // Scan itself checkpoints each native page.
+    const revision = Number(DS.state.domRevision || 0);
+    const saved = DS.state.favoriteBots;
+    if (DS.state.favoriteImportRevision === revision &&
+        DS.state.favoriteImportUrl === location.href &&
+        DS.state.favoriteImportStore === saved) {
+      return 0;
+    }
+    const entries = DS.collectCards?.() || [];
+    const missing = [];
+    const knownIds = DS.state.favoriteBotIdSet || new Set(saved?.ids || []);
+    if (!DS.state.favoriteBotIdSet) DS.state.favoriteBotIdSet = knownIds;
+    for (const { card, anchor } of entries) {
       const id = DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref?.(anchor?.href || "");
       if (!id) continue;
-
-      seen++;
-      const known = DS.state.favoriteBotIdSet?.has(id);
-      if (!known) {
-        store.ids.push(id);
-        DS.state.favoriteBotIdSet?.add(id);
-        changed = true;
-      }
-
-      const previous = store.meta[id] || {};
-      if (!previous.cardMetaCaptured) {
-        const nextMeta = makeMeta(card, anchor, id);
-        store.meta[id] = {
-          ...previous,
-          ...nextMeta,
-          savedAt: previous.savedAt || nextMeta.savedAt
-        };
-        changed = true;
-      }
+      if (!knownIds.has(id) || !saved?.meta?.[id]?.cardMetaCaptured) missing.push({ card, anchor, id });
     }
-
-    if (changed) {
-      await DS.saveFavoriteBots?.(store);
+    if (missing.length) {
+      const store = getStore();
+      let changed = false;
+      for (const { card, anchor, id } of missing) {
+        if (!knownIds.has(id)) { store.ids.push(id); knownIds.add(id); changed = true; }
+        const previous = store.meta[id] || {};
+        if (!previous.cardMetaCaptured) {
+          const nextMeta = makeMeta(card, anchor, id);
+          store.meta[id] = { ...previous, ...nextMeta, savedAt: previous.savedAt || nextMeta.savedAt };
+          changed = true;
+        }
+      }
+      if (changed && await DS.saveFavoriteBots?.(store) === false) return entries.length;
     }
-
-    return seen;
+    DS.state.favoriteImportRevision = revision;
+    DS.state.favoriteImportUrl = location.href;
+    DS.state.favoriteImportStore = DS.state.favoriteBots;
+    return entries.length;
   };
 })();
 
@@ -611,8 +613,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function selectionCards() {
     const found = cards();
     for (const [id, card] of found) {
-      card.dataset.dsFavBulkSelected = state.active && selected.has(id) ? '1' : '0';
-      card.classList.toggle('ds-favorites-bulk-selected', state.active && selected.has(id));
+      const selectedNow = state.active && selected.has(id);
+      const selectedValue = selectedNow ? '1' : '0';
+      if (card.dataset.dsFavBulkSelected !== selectedValue) card.dataset.dsFavBulkSelected = selectedValue;
+      if (card.classList.contains('ds-favorites-bulk-selected') !== selectedNow) card.classList.toggle('ds-favorites-bulk-selected', selectedNow);
       let badge = card.querySelector('.ds-favorites-bulk-select');
       if (state.active && selected.has(id)) {
         if (!badge) {
@@ -937,9 +941,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return saved;
   }
   async function rememberFavorites(entries) {
+    if (!entries?.length) return;
+    const now = Date.now();
+    // A scan can revisit 2,500+ already-saved favorites. Only write the full
+    // history when metadata or membership actually changed, or its last native
+    // confirmation is older than one hour. Fresh discoveries are never skipped.
+    const inMemory = DS.state.favoriteBots || {};
+    const priorIds = new Set(inMemory.ids || []);
+    const unchanged = entries.every(meta => {
+      const old = inMemory.meta?.[meta.id];
+      return old && priorIds.has(meta.id) && old.favoriteMembership === 'current' &&
+        old.cardMetaCaptured === true && Number(old.lastConfirmedFavoriteAt || 0) >= now - 3600000 &&
+        String(old.name || '') === String(meta.name || '') &&
+        String(old.creator || '') === String(meta.creator || '') &&
+        String(old.image || '') === String(meta.image || '') &&
+        String(old.description || '') === String(meta.description || '');
+    });
+    if (unchanged) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.favoritesUnchangedPageWritesAvoided = Number(perf.favoritesUnchangedPageWritesAvoided || 0) + 1;
+      return;
+    }
     const key = DS.FAVORITE_BOTS_KEY || 'favoriteBots';
     const store = snapshot(await getStored(key) || DS.state.favoriteBots);
-    const now = Date.now();
     for (const meta of entries) {
       if (!meta?.id) continue;
       if (!store.ids.includes(meta.id)) store.ids.push(meta.id);
@@ -953,17 +977,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   async function syncVisibleFavorites() {
     if (state.autoSyncing || state.busy || state.scanning || !isPage() || setting('trackFavoriteBots') === false) return;
-    const visible = [...cards()].filter(([,card]) => !unfilled(heartButton(card))).map(([id, card]) => cardMeta(card, id)).filter(Boolean);
-    const signature = visible.map(e => e.id).sort().join(',');
-    if (!signature || signature === state.visibleSignature) return;
-    state.visibleSignature = signature;
+    // Native hearts and IDs are enough to detect a changed page. Extracting
+    // every image/description on every 300ms reconciliation is expensive.
+    const visible = [...cards()].filter(([,card]) => !unfilled(heartButton(card)));
+    const signature = visible.map(([id]) => id).sort().join(',');
+    if (!signature) return;
     const store = DS.state.favoriteBots || { ids: [], meta: {} };
-    const missing = visible.filter(e => !store.ids?.includes(e.id) || store.meta?.[e.id]?.favoriteMembership !== 'current');
-    if (!missing.length) return;
+    if (signature === state.visibleSignature && state.visibleStore === store) return;
+    const known = new Set(store.ids || []);
+    const missing = visible.filter(([id]) => !known.has(id) || store.meta?.[id]?.favoriteMembership !== 'current')
+      .map(([id, card]) => cardMeta(card, id)).filter(Boolean);
+    state.visibleSignature = signature;
+    if (!missing.length) { state.visibleStore = store; return; }
     state.autoSyncing = true;
-    try { await rememberFavorites(missing); }
-    catch (error) { state.visibleSignature = ''; console.warn('[SpicyChat QoL] Favorites page sync failed', error); }
-    finally { state.autoSyncing = false; }
+    try {
+      await rememberFavorites(missing);
+      state.visibleStore = DS.state.favoriteBots;
+    } catch (error) {
+      state.visibleSignature = '';
+      state.visibleStore = null;
+      console.warn('[SpicyChat QoL] Favorites page sync failed', error);
+    } finally { state.autoSyncing = false; }
   }
   async function markFormer(ids, reason) {
     if (!ids.length) return;
@@ -1089,13 +1123,58 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const limit = Number(match[2].replace(/,/g, ''));
     return Number.isSafeInteger(count) && Number.isSafeInteger(limit) ? { count, limit } : null;
   }
-  function countComparison(listing, account) {
-    if (!account) return '';
-    if (listing === null) return ` · Account ${account.count}/${account.limit} (listing count unavailable)`;
-    const hidden = account.count - listing;
-    return ` · Account ${account.count}/${account.limit}` +
-      (hidden > 0 ? ` · ${hidden} not returned by the Chatbots listing` :
-       hidden < 0 ? ' · listing count exceeds account counter' : ' · account count agrees');
+  // Use the same read-only native Favorites bridge as Full Favorites recovery.
+  // A response must contain actual UUID IDs. A DOM counter alone cannot prove
+  // which favorites were missed. Run only after an explicit scan, not on a timer.
+  function readObservedAccountFavorites() {
+    if (!isPage() || state.cancelScan) return Promise.resolve({ ids: null, reason: 'scan interrupted' });
+    return new Promise(resolve => {
+      const requestId = 'dsfav-count-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      let settled = false;
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener('ds-qol-favorites-account-response-v1', receive);
+        resolve(result);
+      };
+      const receive = event => {
+        const data = event?.detail;
+        if (data?.requestId !== requestId) return;
+        if (data.ok !== true || !Array.isArray(data.ids)) {
+          finish({ ids: null, reason: data.status || 'account response not available' });
+          return;
+        }
+        const normalized = data.ids.map(id => String(id || '').toLowerCase());
+        const ids = unique(normalized.filter(safeId));
+        if (ids.length !== normalized.length || ids.some(id => !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(id))) {
+          finish({ ids: null, reason: 'incomplete account ID response' });
+        } else finish({ ids, reason: '', observedAt: Number(data.observedAt || 0) || null });
+      };
+      const timer = setTimeout(() => finish({ ids: null, reason: 'authenticated account snapshot unavailable' }), 2200);
+      window.addEventListener('ds-qol-favorites-account-response-v1', receive);
+      window.DSCardTokenBridgeLoader?.ensure?.();
+      window.dispatchEvent(new CustomEvent('ds-qol-favorites-account-request-v1', { detail: { requestId, action: 'read' } }));
+    });
+  }
+  function countComparison(listing, account, accountIds, listedIds, snapshotIsCurrent = false) {
+    const local = Number(DS.state.favoriteBots?.ids?.length || 0);
+    let label = ` · QoL saved ${local}`;
+    if (accountIds) {
+      const accountSet = new Set(accountIds);
+      const absent = listedIds && [...accountSet].filter(id => !listedIds.has(id)).length;
+      const count = accountIds.length;
+      label = ` · Account observed ${count}${account?.limit ? `/${account.limit}` : ''}${label}`;
+      if (listedIds) label += snapshotIsCurrent
+        ? ` · ${absent} observed account IDs absent from listing`
+        : ` · ${absent} IDs absent from listing in older snapshot (not verified)`;
+      if (account && account.count !== count) label += ' · native count differs; verify again';
+    } else if (account) {
+      label = ` · Native account counter ${account.count}/${account.limit}${label} · account IDs not verified`;
+    } else {
+      label += ' · account membership unavailable';
+    }
+    return label;
   }
   function unfilteredFavorites() {
     const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document;
@@ -1134,8 +1213,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let stable = 0;
     while (Date.now() < deadline && !state.cancelScan && isPage()) {
       const page = currentPage();
-      const signature = pageSignature();
-      if (page && page !== previousPage && signature && signature !== previousSignature && !loading()) {
+      // A native page still displaying its old page number cannot have completed.
+      // Avoid querying and sorting every card while the paginator has not moved.
+      const ready = page && page !== previousPage && !loading();
+      const signature = ready ? pageSignature() : '';
+      if (ready && signature && signature !== previousSignature) {
         if (++stable >= 2) return page;
       } else stable = 0;
       await sleep(120);
@@ -1144,10 +1226,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   function scanStatusLabel(message) {
     const value = String(message || '');
-    const seen = value.match(/^Listing verified: ([\d,]+)\s*\/\s*([\d,]+)/i);
-    const missing = value.match(/ · ([\d,]+) not returned by the Chatbots listing/i);
-    if (seen) return `Listing checked ${seen[1]}/${seen[2]}` +
-      (missing ? ` · ${missing[1]} account favorites not listed` : ' · account total not verified');
+    // Preserve independent native listing, account membership and local
+    // history counts; a shortened summary previously hid the useful detail.
     return value;
   }
   function setScanStatus(message, announce = false) {
@@ -1159,6 +1239,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function scanFavorites() {
     if (state.scanning || state.cleanupRunning || !scanEnabled() || document.visibilityState === 'hidden') return;
     state.scanning = true;
+    DS.state.favoriteNativeScanActive = true;
     state.cancelScan = false;
     const button = document.getElementById('ds-favorites-scan');
     if (button) button.textContent = 'Cancel scan';
@@ -1166,6 +1247,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const visited = new Set();
     let complete = false, expected = null, stopReason = '';
     let initialResultCount = null, initialAccount = null;
+    let scanStartedAt = 0;
     try {
       if (!unfilteredFavorites()) {
         throw new Error('Clear native filters and turn on NSFW before scanning all favorites.');
@@ -1186,6 +1268,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!paginator) throw new Error('Native page controls disappeared.');
       }
       if (paginator.page !== 1) throw new Error('Could not confirm page 1.');
+      scanStartedAt = Date.now();
       initialResultCount = nativeCount();
       initialAccount = accountFavoriteCount();
       // A scan can span many page switches. Never classify missing IDs as
@@ -1235,19 +1318,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         (initialResultCount === null || initialResultCount === expected);
       const accountStable = !!initialAccount && !!finalAccount &&
         initialAccount.count === finalAccount.count && initialAccount.limit === finalAccount.limit;
-      if (!listingStable || (initialAccount && !accountStable)) {
+      if (!listingStable) {
         complete = false;
-        stopReason = !listingStable ? 'SpicyChat listing count changed during scan' : 'account Favorites counter changed during scan';
+        stopReason = 'SpicyChat listing count changed during scan';
       }
       const listingVerified = complete && !state.cancelScan && entries.size === expected;
-      const accountVerified = listingVerified && accountStable && finalAccount.count === entries.size;
+      // Snapshot membership is optional: a missing native counter or bridge
+      // must never turn a complete listing into an apparent failure.
+      const accountSnapshot = listingVerified
+        ? await readObservedAccountFavorites()
+        : { ids: null, reason: 'listing incomplete' };
+      const accountIds = accountSnapshot.ids;
+      const listedIds = listingVerified ? new Set(entries.keys()) : null;
+      const currentAccountSnapshot = !!accountIds && Number(accountSnapshot.observedAt || 0) >= scanStartedAt;
+      const accountMembershipMatches = currentAccountSnapshot && accountIds.length === entries.size &&
+        accountIds.every(id => listedIds.has(id));
+      // Native count stability + exact authenticated membership are required
+      // before any subsequent cleanup uses accountVerified.
+      const accountVerified = listingVerified && accountStable && accountMembershipMatches &&
+        finalAccount.count === entries.size;
       // A verified searchable listing is useful for Later actions, but it is
       // NOT proof that absent account-wide favorites were removed.
       if (listingVerified) {
         await DS.storageSet?.({ [SCAN_STATE_KEY]: {
           lastCompleteAt: Date.now(), count: entries.size, pages: visited.size,
           ids: [...entries.keys()], listingCount: expected, listingVerified: true,
-          accountCount: finalAccount?.count ?? null, accountLimit: finalAccount?.limit ?? null,
+          accountCount: accountIds?.length ?? finalAccount?.count ?? null,
+          accountLimit: finalAccount?.limit ?? null,
+          accountSource: accountIds ? 'authenticated-native-observation' : finalAccount ? 'native-counter' : 'unavailable',
+          accountMembershipVerified: currentAccountSnapshot && (!finalAccount || finalAccount.count === accountIds.length),
           accountVerified
         } }, { immediate: true });
         // Reconcile pending native unfavorites only when the full ACCOUNT is
@@ -1263,14 +1362,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           await storeCleanupJob();
         }
       }
-      const description = listingVerified ? (accountVerified ? 'Verified account' : 'Listing verified') : state.cancelScan ? 'Stopped' : 'Partial';
-      const detail = listingVerified ? (finalAccount && !accountVerified ? ' · Account-wide scan not verified; missing bots kept in history' : '') :
-        ` · ${stopReason || 'not all pages were verified'}`;
-      setScanStatus(`${description}: ${entries.size}${expected === null ? '' : ` / ${expected}`} visible favorites across ${visited.size} page${visited.size === 1 ? '' : 's'}${countComparison(expected, finalAccount)}${detail}.`, true);
+      const description = listingVerified ? 'Listing checked' : state.cancelScan ? 'Stopped' : 'Partial';
+      const detail = listingVerified
+        ? (accountVerified ? ' · account membership agrees' : ` · no automatic removal${accountSnapshot.reason ? ` (${accountSnapshot.reason})` : ''}`)
+        : ` · ${stopReason || 'not all pages were verified'}`;
+      setScanStatus(`${description}: ${entries.size}${expected === null ? '' : `/${expected}`} favorites across ${visited.size} page${visited.size === 1 ? '' : 's'}${countComparison(expected, finalAccount, accountIds, listedIds, currentAccountSnapshot)}${detail}.`, true);
     } catch (error) {
       setScanStatus(`Favorites scan stopped: ${error?.message || error}`, true);
     } finally {
       state.scanning = false;
+      DS.state.favoriteNativeScanActive = false;
+      DS.state.favoriteImportRevision = -1; // Refresh visible metadata once after scan.
       if (button) button.textContent = 'Scan Favorites';
       // Preserve the user's current scroll position; don't force scrolling.
     }
