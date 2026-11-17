@@ -66,6 +66,7 @@
         "content/main-blocked-refresh.js",
         "content/main-route-change.js",
         "content/main-storage-dirty-groups.js",
+        "content/on-demand-modules.js",
         "content/main-feature-demand.js",
         "content/main-chat-message-count.js",
         "content/main-message-lane-runtime.js",
@@ -591,6 +592,7 @@
         "settings/options-backup-schema.js",
         "settings/options-ui-config.js",
         "options.js",
+        "settings/options-guidance.js",
         "background/bot-status-storage-cleanup.js",
         "shared/storage-metrics.js",
         "platform-capabilities.css"
