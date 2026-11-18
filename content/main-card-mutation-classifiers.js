@@ -30,7 +30,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     return mutations.some(mutation => {
       if (elementMayBelongToCardArea(mutation.target)) return true;
-
+      if (mutation.type !== "childList") return false;
+      // Native grid pagination can replace entire card groups. Inspect only
+      // structurally inserted/removed subtrees; class changes never need a
+      // descendant query of the whole listing.
       return [...mutation.addedNodes, ...mutation.removedNodes].some(node => {
         if (!(node instanceof Element)) return false;
         if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;

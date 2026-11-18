@@ -26,6 +26,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   "tags-nsfw": ["autoTags", "showTagTemplateButton", "includeTags", "excludeTags"],
   "tag-aliases": ["enableTagAliases", "tagAliasRules", "tagAliasShowDisplay"],
   "local-tag-matching": ["localTagMatchEnabled", "localTagMatchRules", "localTagMatchFetchPublic"],
+  "archive-blocking-presets": ["archiveBlockingPresetsEnabled", "archiveBlockingPresetsSelection"],
   "archive-community-themes": ["archiveCommunityThemesEnabled", "archiveCommunityThemesMode", "archiveCommunityThemesRiskWarnings", "archiveCommunityThemesExtraTags", "archiveCommunityThemesAllowIds"],
   "language-filter": ["enableLanguageFilter", "languageFilterLorebooks", "languageFilterRulebooks", "languageSelectionMode", "languageAutoDetectUntagged", "languageShowDetectedBadge", "languageFilterMode"],
   "message-options": ["stackChatMessages", "showMessageQuickActions", "messageQuickActionCopy", "messageQuickActionEdit", "messageQuickActionDelete", "messageQuickActionRemoveImage", "messageQuickActionResend", "messageQuickActionConfirmRemoveImage", "messageQuickActionReport", "messageBottomMenuShortcut"],

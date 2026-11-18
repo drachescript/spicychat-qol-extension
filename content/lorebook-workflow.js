@@ -1422,9 +1422,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
   }
 
-  // The native Entries editor initially mounts only 100 cards. Its Load More
-  // button appends the next batch (100 -> 200 -> 250 in the captured test).
-  // Only a user-requested full export runs this; normal snapshots stay cheap.
+  // The native Entries editor mounts a limited first batch. Older builds used
+  // Load More, while newer builds use an IntersectionObserver sentinel to append
+  // additional entries as the user scrolls. Only explicit full export invokes
+  // this crawler; ordinary page and settings passes remain unchanged.
   function nativeLoadMoreEntriesButton() {
     const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
     return [...(root?.querySelectorAll("button[type='button']") || [])].find(button =>
@@ -1449,33 +1450,109 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function nativeEntryScrollTarget() {
+    // SpicyChat 4.11.4 uses this exact one-pixel native sentinel instead of
+    // a Load More button. Do not select an arbitrary page footer or button.
+    const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
+    const sentinel = root?.querySelector("[data-testid='EntriesListServer-Sentinel']");
+    return sentinel?.isConnected && sentinel.closest("[data-testid='EntriesListServer']") === root
+      ? sentinel : null;
+  }
+
+  function rememberNativeScrollPosition(sentinel) {
+    // Only during a user-requested full export. Capture scroll positions before
+    // advancing native infinite scroll, then restore them after the last batch.
+    const nodes = [];
+    for (let element = sentinel?.parentElement; element; element = element.parentElement) {
+      try {
+        const css = getComputedStyle(element);
+        if (/(?:auto|scroll|overlay)/i.test(css.overflowY) && element.scrollHeight > element.clientHeight + 2) {
+          nodes.push({ element, top: element.scrollTop });
+        }
+      } catch { /* Detached/hidden nodes are not reliable scroll containers. */ }
+    }
+    const root = document.scrollingElement;
+    if (root && !nodes.some(item => item.element === root)) nodes.push({ element: root, top: root.scrollTop });
+    return nodes;
+  }
+
+  function advanceNativeEntryScroll(sentinel) {
+    // Hidden background-helper tabs may not fire the site's intersection
+    // callback on the first scrollIntoView. Advance the real native scrolling
+    // element as well, without synthetic events, private API calls or polling.
+    sentinel.scrollIntoView({ behavior: "auto", block: "end", inline: "nearest" });
+    for (let el = sentinel.parentElement; el; el = el.parentElement) {
+      try {
+        const style = getComputedStyle(el);
+        if (/(?:auto|scroll|overlay)/i.test(style.overflowY) && el.scrollHeight > el.clientHeight + 2) {
+          el.scrollTop = el.scrollHeight;
+        }
+      } catch { /* Cross-realm or detached container. */ }
+    }
+  }
+
+  function restoreNativeScrollPosition(positions, route) {
+    const active = lorebookRoute();
+    if (!active || active.id !== route.id || active.page !== route.page) return;
+    for (const item of positions || []) {
+      try { if (item.element?.isConnected) item.element.scrollTop = item.top; } catch {}
+    }
+  }
+
   async function loadAllNativeEntries(route, statedTotal, progress) {
-    // A conservative upper bound protects against a stuck or looping page.
-    // SpicyChat currently serves batches of 100, but don't assume this size.
+    // Each native batch may add 50, 100 or another amount. Bounds prevent
+    // infinite retries if a site update breaks both native loading strategies.
     const maxLoads = Math.min(502, Math.ceil(statedTotal / 10) + 2);
     let rows = findEntryRows();
-    for (let step = 0; rows.length < statedTotal && step < maxLoads; step += 1) {
-      if (rows.length > 5000) throw new Error("Lorebook editor returned over 5,000 entries; refusing the export.");
-      let more = nativeLoadMoreEntriesButton();
-      if (!more) {
-        throw new Error(`SpicyChat shows ${statedTotal} entries but only ${rows.length} are loaded, and Load More is unavailable. No backup was replaced.`);
+    let restorePositions = null;
+    try {
+      for (let step = 0; rows.length < statedTotal && step < maxLoads; step += 1) {
+        const liveRoute = lorebookRoute();
+        if (!liveRoute || liveRoute.id !== route.id || liveRoute.page !== route.page) {
+          throw new Error("Lorebook page changed during entry collection. No backup was replaced.");
+        }
+        if (rows.length > 5000) throw new Error("Lorebook editor returned over 5,000 entries; refusing the export.");
+        const before = rows.length;
+        progress?.({ current: before, total: statedTotal, message: `Loading Lorebook entries ${before}/${statedTotal}…` });
+        const more = nativeLoadMoreEntriesButton();
+        if (more) {
+          if (!more.disabled) more.click();
+        } else {
+          const sentinel = nativeEntryScrollTarget();
+          if (!sentinel) {
+            throw new Error(`Only ${before}/${statedTotal} Lorebook entries are loaded. Native Load More and scrolling sentinel are unavailable; previous backup kept.`);
+          }
+          if (!restorePositions) restorePositions = rememberNativeScrollPosition(sentinel);
+          // Trigger SpicyChat's own IntersectionObserver, never click another
+          // control, dispatch synthetic scroll events or scrape private APIs.
+          advanceNativeEntryScroll(sentinel);
+        }
+        try {
+          rows = await waitForNativeEntryIncrease(before, route, 15000);
+        } catch (error) {
+          if (more || !/did not load any more entries/i.test(String(error?.message || ""))) throw error;
+          // One bounded second attempt for browsers that defer a hidden tab's
+          // native IntersectionObserver. Never fabricate an entry count.
+          const retrySentinel = nativeEntryScrollTarget();
+          if (!retrySentinel) throw new Error(`Only ${before}/${statedTotal} Lorebook entries loaded. Open the Entries editor in a foreground tab and retry; previous backup kept.`);
+          advanceNativeEntryScroll(retrySentinel);
+          try { rows = await waitForNativeEntryIncrease(before, route, 10000); }
+          catch { throw new Error(`Only ${before}/${statedTotal} Lorebook entries loaded after two native scroll attempts. Open the Entries editor in a foreground tab and retry; previous backup kept.`); }
+        }
+        // The native list appends rows rather than virtualizing older ones in
+        // the tested 100 -> 200 layout. A shrinking list cannot be certified.
+        if (rows.length > statedTotal) {
+          throw new Error(`Lorebook list grew beyond its reported ${statedTotal} entries. Previous backup kept.`);
+        }
+        progress?.({ current: rows.length, total: statedTotal, message: `Loaded ${rows.length}/${statedTotal} Lorebook entries.` });
       }
-      // React disables its button while a batch is already in flight.
-      // Don't force a second click until it is ready again.
-      if (more.disabled) {
-        rows = await waitForNativeEntryIncrease(rows.length, route);
-        continue;
+      if (rows.length !== statedTotal) {
+        throw new Error(`Only ${rows.length}/${statedTotal} Lorebook entries loaded. No partial backup was accepted.`);
       }
-      const before = rows.length;
-      progress?.({ current: before, total: statedTotal, message: `Loading Lorebook entries ${before}/${statedTotal}…` });
-      more.click();
-      rows = await waitForNativeEntryIncrease(before, route);
-      progress?.({ current: rows.length, total: statedTotal, message: `Loaded ${rows.length}/${statedTotal} Lorebook entries.` });
+      return rows;
+    } finally {
+      restoreNativeScrollPosition(restorePositions, route);
     }
-    if (rows.length !== statedTotal) {
-      throw new Error(`Only ${rows.length}/${statedTotal} Lorebook entries loaded. No partial backup was accepted.`);
-    }
-    return rows;
   }
 
   // SpicyChat renders full entry content in the list's text node even when

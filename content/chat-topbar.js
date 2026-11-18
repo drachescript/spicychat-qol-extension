@@ -637,8 +637,57 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // Do not move the header or write to its React-owned class or inline style.
         style.textContent = `
           html[data-ds-keep-native-chat-header="1"]
-            [data-testid="ChatTopBarSlot"][data-chat-chrome="header"].hidden {
+            :is([data-testid="ChatTopBarSlot"], [data-chat-chrome="header"]):is(.hidden, [hidden]) {
             display: contents !important;
+            visibility: visible !important;
+          }
+          @media (max-width: 900px) and (pointer: coarse) {
+            /* SpicyChat's V2 composer-focus mode does not add .hidden to the
+               latest AI reply action row: the DOM still contains its native
+               Regenerate/Continue buttons. Restore only that LAST message's
+               existing controls, not unrelated messages or menus. The focus
+               marker and these data-testid values were verified against both
+               Android HTML captures from the Counter Test Bot. */
+            html[data-ds-keep-native-chat-header="1"]
+              [data-chat-composer-focus="true"]
+              [data-testid="ChatMessageList"] > [data-testid="ChatMessageItem"]:last-child:has(button[data-testid="ReplyActionRow-RegenerateButton"])
+              :is([data-testid="ReplyActionRow"], [data-testid="ReplyActionRow-Controls"], [data-testid="ReplyActionRow-Actions"]) {
+              display: flex !important;
+              visibility: visible !important;
+              opacity: 1 !important;
+              max-height: none !important;
+              overflow: visible !important;
+              pointer-events: auto !important;
+            }
+            /* Allow the last native action strip to be scrolled above the
+               focused composer/keyboard, rather than cut off by the footer.
+               Applies only while composing on a narrow touch-screen view. */
+            html[data-ds-keep-native-chat-header="1"]
+              [data-chat-composer-focus="true"] [data-testid="ChatMessageList"] {
+              padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px)) !important;
+            }
+            /* SpicyChat may hide its AI reply action strip when the composer
+               receives focus. Preserve the native buttons and click handlers;
+               never fabricate regenerate/continue actions or unhide menus. */
+            html[data-ds-keep-native-chat-header="1"] div[id^="message-"]
+              :is(div.hidden, div[hidden]):has(> :is(
+                button[aria-label*="regenerat" i],button[aria-label*="continu" i],
+                button[title*="regenerat" i],button[title*="continu" i],
+                button[data-testid*="regenerat" i],button[data-testid*="continu" i]
+              )) {
+              display: flex !important;
+              visibility: visible !important;
+              opacity: 1 !important;
+            }
+            html[data-ds-keep-native-chat-header="1"] div[id^="message-"]
+              :is(div.opacity-0,div.invisible):has(> :is(
+                button[aria-label*="regenerat" i],button[aria-label*="continu" i],
+                button[title*="regenerat" i],button[title*="continu" i],
+                button[data-testid*="regenerat" i],button[data-testid*="continu" i]
+              )) {
+              visibility: visible !important;
+              opacity: 1 !important;
+            }
           }
         `;
         (document.head || document.documentElement).appendChild(style);

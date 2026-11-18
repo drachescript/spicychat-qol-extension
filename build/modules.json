@@ -26,7 +26,8 @@
     "Stage 8: text-normalization emoji removal has its own disabled-by-default setting; Firefox account sync uses a dedicated statically loaded background service in generated Firefox builds (with legacy fallback). Full and Custom Lite isolation still require browser verification.",
     "Stage 9: creator-profile startup quieting and blocked-card refresh batching are separate Core factories; both register without starting optional work, and the Full runtime keeps their prior delays and callbacks.",
     "Stage 9: critical, slow and message runtime lanes are registered as separate Core factories sharing one scheduler state object. Full runtime and load order are retained; Custom Lite lifecycle independence remains unverified.",
-    "Stage 16: Archive Community Themes is an optional bot-ID-only evidence adapter. Its on-demand content resource and background handler are feature owned; omission must not change local Implied Themes. Browser/Lite combinations require live verification."
+    "Stage 16: Archive Community Themes is an optional bot-ID-only evidence adapter. Its on-demand content resource and background handler are feature owned; omission must not change local Implied Themes. Browser/Lite combinations require live verification.",
+    "v0.2.87: 18 additional route/setting-owned modules defer to the existing content/on-demand-modules.js loader; Full manifest and Lite ownership remain authoritative. No arbitrary Lite combination is certified."
   ],
   "bundles": {
     "core": {

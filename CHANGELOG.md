@@ -1,3 +1,43 @@
+## 0.2.87
+- Inspector follow-up batch (same version): moved Later buttons to dirty-card reconciliation using the existing main page observer and a per-card WeakMap; only the initial route scan enumerates all bot links.
+- Reduced Later-button synchronous stalls by yielding after at most eight cards or roughly 6 ms of work, skipping unchanged saved-state/tooltip/ARIA writes, and performing cleanup only when leaving an enabled listing.
+- Kept Later button saved-state changes in sync with other tabs and storage updates; added dedicated Inspector v2 reconciliation timing with trigger, reason, phase, active-slice metrics and bounded event counts, without another observer or polling.
+- Added an explicit Research Export Quick scan that refreshes the global bot list, checks the newest 120 bots and uncached bots, and reuses older complete bot scans. The original Scan bots still rechecks every bot; Quick scan reports that older reused conversation lists may be stale.
+- Removed the fixed 300ms wait after cached per-bot scan reads; actual bot API reads retain the existing pacing, cancellation and checkpoint safeguards.
+- Improved character metadata cache handling: reuse HTTP 200 empty-record responses for seven days instead of refetching every run, retry transient failed reads after 12 hours, and retain manual Retry failed / incomplete selection.
+- Counted only pagination-complete linked Lorebooks as fully read, added explicit pagination stop reasons, and included up to 500 actionable character/Lorebook errors plus grouped error types in ZIP manifest summaries.
+- Retained worker-based Research Export packing, verified downloads, per-chat history catch-up, Memory handling, diagnostics protocol v2, and the exact existing clean manifest.json (no version bump).
+- Updated Lorebook full backups and JSON import/merge preflight for SpicyChat’s sentinel-based infinite scrolling after native Load More was removed; verify all existing entries before saving or merging, restore backup scroll position, and refuse partial or stalled captures.
+- Dismissed verified Home/Chats promotional banners using SpicyChat's own X button first, allowing native dismissal persistence; retained a one-shot reversible CSS fallback and excluded unrelated close buttons.
+- Kept the latest AI reply action strip accessible when typing in the native Android mobile chat, using the existing composer-focus marker and native controls rather than looking only for hidden containers; added focused-only scroll clearance.
+- Restored the last Research Export bot-selection scope on reopening the exporter, so Start / Resume cannot accidentally fall back to the default 50 bots after an extension reload.
+- Waited for Research Export IndexedDB write transactions to commit before treating history, Memory or selection checkpoints as saved, improving reload safety without clearing any existing data.
+- Expanded manual Bulk Research Export to include separate Rulebook state, Story Moments, and explicit OOC/Director Mode directive indexes for each conversation, using existing downloaded history metadata without extra API requests.
+- Preserved native Rulebook definitions, initial state, per-message snapshots, Story Moments journal receipts and message attribution; unknown/hidden state stays explicitly unverified.
+- Kept complete original messages and resumable checkpoints intact; included new research file references and coverage counts in conversation and ZIP manifests.
+- Avoided sending Android WebView a helper-tab release message after successful same-page Lorebook captures, preventing a bridge callback hang.
+- Prevented optional chat UI hiding from targeting the root/native conversation container even before the first message mounts.
+- Added a fail-open mobile-chat safeguard: when native SpicyChat mounts neither messages nor a composer, QoL skips optional chat-layout passes and resumes after native content appears, without hiding errors or reloading.
+- Scoped mobile native regenerate/continue restoration to the actual action strip to avoid exposing unrelated hidden message containers.
+- Fixed Android Lorebook backups falling back to unavailable background tabs when the live API repeats its first entry page; the native Entries editor can now verify and capture every loaded page with fresh API metadata.
+- Fixed JSON Lorebook merge/import failing when the optional Wiki importer is disabled by loading the native entry writer only for approved imports.
+- Made Lorebook JSON merge controls readable and usable on narrow Android screens without changing duplicate or safety-backup checks.
+- Expanded mobile chat-header preservation to newer hidden native slots and restored native regenerate/continue action strips when SpicyChat hides their existing controls during typing.
+- Fixed native Memory Manager V2 JSON imports recognizing the inline New memory editor, including layouts with separated labels and deeper wrappers.
+- Made Research Export Start / Resume fetch only newer history pages when a verified saved message boundary is found, while keeping full ZIP exports and saved checkpoints.
+- Added fresh-head checks, full reconciliation if the last saved message disappears, historical ZIP copies of missing checkpoint messages and explicit stale-export warnings on API failure.
+- Made the manual Scan bots button actually refresh bot/conversation discovery, while Start / Resume reuses the saved selection.
+- Improved Inspector tracing with clearer feature, trigger, reason, phase, outcome, timing and parent-operation details.
+- Added richer Favorites, card-filtering, chat runtime, Persona and Research Export operation summaries.
+- Separated measured synchronous work, queue delays and total wall time where available, without treating API waits as CPU time.
+- Reduced repetitive successful Normal traces while retaining slow operations, failures and detailed Deep tracing.
+- Added clearer storage ownership and background-worker queue and network attribution, without exposing private content.
+- Preserved existing scheduling, saved data, recovery checkpoints and Inspector v1/v2 compatibility.
+- Reduced startup work by deferring 18 more optional chat, creator, Lorebook and saved-list tools until their feature and page are active.
+- Improved large-listing filtering with reusable card metadata and shorter bounded batches while preserving native card changes.
+- Reduced unnecessary card-mutation discovery work without adding observers or changing saved data.
+- Preserved private editor safeguards for creator tools loaded after initial startup.
+
 ## 0.2.86
 - Improved Research Export responsiveness with fewer progress redraws and a dedicated lightweight export tab.
 - Fixed Example Dialogue metadata availability and repaired previously saved character records without extra profile requests.

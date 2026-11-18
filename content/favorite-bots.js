@@ -496,6 +496,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return 0;
     }
     const entries = DS.collectCards?.() || [];
+    const traceToken = DS.isDiagnosticTraceActive?.('normal') ? DS.diagOperationStart?.(
+      'favorites', 'import-visible-favorite-cards', {
+        trigger: 'favorite-listing-change', reason: 'preserve-new-or-changed-favorites',
+        phase: 'compare-and-save-visible-page',
+        parentOperationId: String(DS.state.diagCriticalOperationId || DS.state.diagSlowOperationId || '')
+      }) : null;
+    let imported = 0;
+    try {
     const missing = [];
     const knownIds = DS.state.favoriteBotIdSet || new Set(saved?.ids || []);
     if (!DS.state.favoriteBotIdSet) DS.state.favoriteBotIdSet = knownIds;
@@ -504,6 +512,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!id) continue;
       if (!knownIds.has(id) || !saved?.meta?.[id]?.cardMetaCaptured) missing.push({ card, anchor, id });
     }
+    imported = missing.length;
     if (missing.length) {
       const store = getStore();
       let changed = false;
@@ -522,6 +531,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.favoriteImportUrl = location.href;
     DS.state.favoriteImportStore = DS.state.favoriteBots;
     return entries.length;
+    } finally {
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: imported ? 'updated' : 'unchanged',
+        counts: { scanned: entries.length, changed: imported,
+          skipped: Math.max(0, entries.length - imported) },
+        meta: { phase: 'compare-and-save-visible-page',
+          wroteCheckpoint: imported > 0 }
+      });
+    }
   };
 })();
 
@@ -1248,6 +1266,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let complete = false, expected = null, stopReason = '';
     let initialResultCount = null, initialAccount = null;
     let scanStartedAt = 0;
+    let accountVerified = false, scanOutcome = 'completed';
+    const scanToken = DS.isDiagnosticTraceActive?.('normal') ? DS.diagOperationStart?.(
+      'favorites', 'scan-native-favorites-pages', {
+        trigger: 'user-click', reason: 'verify-native-listing-membership',
+        phase: 'pagination-and-checkpoint', parentOperationId: ''
+      }) : null;
     try {
       if (!unfilteredFavorites()) {
         throw new Error('Clear native filters and turn on NSFW before scanning all favorites.');
@@ -1335,7 +1359,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         accountIds.every(id => listedIds.has(id));
       // Native count stability + exact authenticated membership are required
       // before any subsequent cleanup uses accountVerified.
-      const accountVerified = listingVerified && accountStable && accountMembershipMatches &&
+      accountVerified = listingVerified && accountStable && accountMembershipMatches &&
         finalAccount.count === entries.size;
       // A verified searchable listing is useful for Later actions, but it is
       // NOT proof that absent account-wide favorites were removed.
@@ -1368,8 +1392,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         : ` · ${stopReason || 'not all pages were verified'}`;
       setScanStatus(`${description}: ${entries.size}${expected === null ? '' : `/${expected}`} favorites across ${visited.size} page${visited.size === 1 ? '' : 's'}${countComparison(expected, finalAccount, accountIds, listedIds, currentAccountSnapshot)}${detail}.`, true);
     } catch (error) {
+      scanOutcome = state.cancelScan ? 'cancelled' : 'failed';
+      DS.diagError?.('favorites', 'scan-native-favorites-pages', error, { phase: 'pagination-and-checkpoint', parentOperationId: scanToken?.id || '' });
       setScanStatus(`Favorites scan stopped: ${error?.message || error}`, true);
     } finally {
+      if (scanToken) DS.diagOperationEnd?.(scanToken, {
+        outcome: scanOutcome === 'completed' && !complete ? 'partial' : scanOutcome,
+        counts: { scanned: entries.size, changed: entries.size, skipped: 0 },
+        meta: { pagesVisited: visited.size, listingVerified: complete && !state.cancelScan,
+          accountMembershipVerified: accountVerified,
+          accountStatus: accountVerified ? 'verified' : 'unavailable-or-unverified' }
+      });
       state.scanning = false;
       DS.state.favoriteNativeScanActive = false;
       DS.state.favoriteImportRevision = -1; // Refresh visible metadata once after scan.

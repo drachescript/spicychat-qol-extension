@@ -225,6 +225,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.scheduleRun?.({ priority: "both", source });
   }
 
+  // Optional creator/Lorebook modules can register after the startup guard
+  // retry window. Re-apply the existing wrappers immediately upon import,
+  // before the next runtime pass can read private editor fields.
+  DS.installCreatorEditorPrivacyGuards = installGuards;
   installGuards();
   [0, 50, 250, 1000, 3000].forEach(delay => {
     setTimeout(installGuards, delay);

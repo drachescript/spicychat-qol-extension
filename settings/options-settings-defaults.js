@@ -277,6 +277,8 @@ const DEFAULT_SETTINGS = {
   autoBlockWordMatches: false,
   autoBlockTagMatches: false,
   filterImpliedBlockedTags: false,
+  archiveBlockingPresetsEnabled: false,
+  archiveBlockingPresetsSelection: {franchises:{},characters:[],groups:[],themes:[]},
   archiveCommunityThemesEnabled: false,
   archiveCommunityThemesMode: "reviewed",
   archiveCommunityThemesRiskWarnings: false,

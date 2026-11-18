@@ -66,16 +66,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function runChatMessageLane() {
+    if (DS.state?.nativeMobileChatShellUnavailable === true) return;
     if (laneState.messageLaneRunning) { laneState.messageLanePending = true; DS.diagScheduler?.("coalesced", { lane: "message", reason: "already-running" }); return; }
     const laneStartedAt = typeof performance !== "undefined" ? performance.now() : 0;
-    const laneToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("message-lane", "run", {
-      source: String(DS.state?.diagMessageLaneSource || "message-mutation"),
+    const laneToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("message-lane", "process-dirty-message-roots", {
+      trigger: String(DS.state?.diagMessageLaneSource || "message-mutation"),
+      reason: "new-or-changed-message-content",
+      phase: "incremental-message-enhancement",
       queueDelayMs: Math.max(0, Date.now() - Number(DS.state?.diagMessageLaneScheduledAt || Date.now())),
       parentOperationId: ""
     }) : null;
     DS.state.diagMessageLaneOperationId = laneToken?.id || "";
     laneState.messageLaneRunning = true;
     const counters = runtimeCounters();
+    const laneDirtyStart = Number(DS.state?.messageDirtyRoots?.size || 0);
+    const laneProcessedStart = Number(counters.messageLaneChunkedRoots || 0);
     counters.messageLaneRuns = Number(counters.messageLaneRuns || 0) + 1;
     try {
       const settings = DS.state?.settings || {};
@@ -176,7 +181,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
     } finally {
-      if (laneToken) DS.diagOperationEnd?.(laneToken, { outcome: "ok", meta: { durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 } });
+      if (laneToken) DS.diagOperationEnd?.(laneToken, {
+        outcome: 'completed',
+        counts: { scanned: laneDirtyStart, changed: Math.max(0, Number(counters.messageLaneChunkedRoots || 0) - laneProcessedStart) },
+        meta: { phase: 'incremental-message-enhancement',
+          wallMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 }
+      });
       DS.diagScheduler?.("finished", { lane: "message", source: String(DS.state?.diagMessageLaneSource || ""), durationMs: laneStartedAt ? Math.round((performance.now() - laneStartedAt) * 10) / 10 : 0 });
       DS.state.messageLaneRoots = null;
       DS.state.lastMessageLaneFinishedAt = Date.now();

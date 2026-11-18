@@ -391,7 +391,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ""
     );
     const diagToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime-step", String(name || "step"), {
-      trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
+      trigger: String(DS.state?.lastRunTrigger || "runtime-scheduled"),
+      reason: "route-and-setting-enabled-feature",
+      phase: "execute-feature-step",
       bundle: String(DS.runtimeTaskGroupForName?.(name) || "core"),
       parentOperationId: laneParentOperationId
     }) : null;
@@ -436,7 +438,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return result;
     } catch (error) {
       diagOutcome = "error";
-      DS.diagError?.("runtime-step", String(name || "step"), error, { trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120) });
+      DS.diagError?.("runtime-step", String(name || "step"), error, {
+        trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
+        parentOperationId: diagToken?.id || ""
+      });
       DS.runtimeLog?.("error", "runStep", `${name} failed`, error);
       if (debug) {
         console.warn(`[${DS.EXT_NAME}] ${name} skipped`, error);
@@ -467,7 +472,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       if (diagToken) DS.diagOperationEnd?.(diagToken, {
         outcome: diagOutcome,
-        ...(initialSyncCallMs >= 24 ? { meta: { initialSyncCallMs: Math.round(initialSyncCallMs * 10) / 10 } } : {})
+        meta: { initialSyncCallMs: Math.round(initialSyncCallMs * 100) / 100,
+          activeMeasurement: "initial-synchronous-call-only" }
       });
       await maybeYieldSlowSlice(name);
     }
@@ -893,6 +899,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           // storage changes still refresh immediately.
           const blockedChange = changes[DS.BLOCKED_BOTS_KEY];
           const blockedStats = blockedChange ? blockedStoreChangeStats(blockedChange) : { added: 0, removed: 0 };
+          if (changes[DS.LATER_BOTS_KEY]) DS.markLaterButtonsSavedStateDirty?.();
           const changedKeys = Object.keys(changes || {});
           const blockBatchCompatibleKeys = new Set([DS.BLOCKED_BOTS_KEY, DS.OPENED_KEY, DS.OPENED_META_KEY]);
           const onlyBlockRelated = changedKeys.length > 0 && changedKeys.every(key => blockBatchCompatibleKeys.has(key));

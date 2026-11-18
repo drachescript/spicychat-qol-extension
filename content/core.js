@@ -885,6 +885,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
+  function diagnosticStorageOwner(keys = []) {
+    const items = (Array.isArray(keys) ? keys : [keys]).map(key => String(key || ''));
+    const groups = new Set(items.map(key => {
+      if (/^(?:quickDislike|quickLessLike|bulkDislike|bulkLessLike)/i.test(key)) return 'rating-queue';
+      if (/^botStatus/i.test(key)) return 'bot-status';
+      if (/^(?:favoriteBots|fav|favoriteCreators)/i.test(key)) return 'favorites';
+      if (/^(?:opened|chatIndex|savedChat)/i.test(key)) return 'chat-list';
+      if (/^(?:botArchive|botAvailability|botUnavailable)/i.test(key)) return 'saved-bot-archive';
+      if (/^(?:settings|dsSettingV1:)/i.test(key)) return 'settings';
+      return 'general-storage';
+    }));
+    return groups.size === 1 ? [...groups][0] : 'mixed-storage';
+  }
+
   async function flushStorageWriteQueue() {
     clearTimeout(storageWriteQueue.timer);
     storageWriteQueue.timer = null;
@@ -964,7 +978,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         backend: keys.some(key => LARGE_STORAGE_KEYS.has(key)) ? (keys.some(key => !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
         keyCount: keys.length,
         largeKeyCount: keys.filter(key => LARGE_STORAGE_KEYS.has(key)).length,
-        keys: keys.slice(0, 24),
+        feature: diagnosticStorageOwner(keys), ownerAttribution: 'storage-key-category-inferred', trigger: 'queued-storage-flush',
+        reason: 'persist-batched-saved-state', phase: 'browser-callback-wait',
         approxBytes: diagnosticApproxBytes(payload),
         durationMs: Math.round((performance.now() - diagWriteStarted) * 10) / 10,
         ok: !!ok,
@@ -1034,7 +1049,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.diagStorage?.("read", {
         backend: wantsLarge ? (requestedKeys.some(key => key !== "*" && !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
         keyCount: requestedKeys.length,
-        keys: requestedKeys.slice(0, 24),
+        feature: diagnosticStorageOwner(requestedKeys), ownerAttribution: 'storage-key-category-inferred', trigger: 'feature-state-read',
+        reason: 'load-required-saved-state', phase: wantsLarge ? 'large-store-paging-and-callback' : 'browser-callback-wait',
         largeRecords,
         approxBytes: diagnosticApproxBytes(finalResult),
         durationMs: Math.round((performance.now() - diagReadStarted) * 10) / 10
@@ -1053,7 +1069,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (DS.isDiagnosticTraceActive?.("normal")) {
       DS.diagStorage?.("write-queued", {
         keyCount: keys.length,
-        keys: keys.slice(0, 24),
+        feature: diagnosticStorageOwner(keys), ownerAttribution: 'storage-key-category-inferred', trigger: 'feature-save-request',
+        reason: 'coalescible-storage-checkpoint', phase: 'write-queued',
         largeKeyCount: keys.filter(key => LARGE_STORAGE_KEYS.has(key)).length,
         immediate: !!options?.immediate
       });

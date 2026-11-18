@@ -216,7 +216,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const target = String(matcher?.compact || "").toLocaleLowerCase();
     if (!preparedHaystack || target.length < 3) return false;
 
-    const hayTokens = String(preparedHaystack).toLocaleLowerCase().split(" ").filter(Boolean);
+    const hayTokens = Array.isArray(preparedHaystack)
+      ? preparedHaystack
+      : String(preparedHaystack).toLocaleLowerCase().split(" ").filter(Boolean);
     if (!hayTokens.length) return false;
 
     // Compare joined token windows instead of doing a raw substring check. This
@@ -242,14 +244,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const normalizedHaystack = String(preparedHaystack).toLocaleLowerCase();
     const padded = ` ${normalizedHaystack} `;
+    // The same card description may be compared against hundreds of blocked
+    // words. Split into tokens only once per field, not once per matcher.
+    let hayTokens = null;
     for (const matcher of matchers) {
       const variants = [matcher?.needle, matcher?.flexibleNeedle].filter(Boolean).map(value => String(value).toLocaleLowerCase());
       if (variants.some(needle => padded.includes(` ${needle} `))) {
         return matcher;
       }
 
-      if (compactTokenWindowMatch(normalizedHaystack, matcher)) {
-        return matcher;
+      if (String(matcher?.compact || "").length >= 3) {
+        hayTokens ||= normalizedHaystack.split(" ").filter(Boolean);
+        if (compactTokenWindowMatch(hayTokens, matcher)) return matcher;
       }
     }
 
@@ -286,6 +292,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
+  // Weak references permit React's old pagination cards to be collected.
+  // Compare native text *and* filter settings before reusing expensive tag,
+  // creator and description extraction. Dirty cards invalidate on mutation.
+  const preparedMetadataCache = new WeakMap();
+  function cachedPreparedCardFields(card) {
+    const settings = DS.state?.settings || {};
+    const nativeText = String(card?.textContent || "");
+    const context = [location.pathname, DS.state?.cardFilterStateRevision || 0,
+      settings.blockCards === true, settings.autoBlockTagMatches === true,
+      settings.autoBlockWordMatches === true].join("|");
+    const cached = preparedMetadataCache.get(card);
+    if (cached?.context === context && cached.nativeText === nativeText) {
+      const metrics = DS.state?.runtimePerformance;
+      if (metrics) metrics.cardMetadataCacheHits = (metrics.cardMetadataCacheHits || 0) + 1;
+      return cached.fields;
+    }
+    const fields = preparedCardFields(card, DS.searchableTextForMatching?.(nativeText) || DS.normalize(nativeText));
+    preparedMetadataCache.set(card, { context, nativeText, fields });
+    return fields;
+  }
   function preparedCardFields(card, fallbackPreparedText = "") {
     // Keep both spellings for blocked-word matching. A user who blocks
     // "TF141" or "TF 141" should match "TF141's Omega", while a rule that
@@ -614,6 +640,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.getVerifiedCardAutoBlockMatches = function getVerifiedCardAutoBlockMatches(card) {
     const settings = DS.state?.settings || {};
     if (!card || !settings.enabled || !settings.blockCards) return { word: null, tag: null };
+    // Persistent auto-block confirmation must always reread live metadata.
+    // The weak cache is only for reversible card hiding and presentation.
     const fields = preparedCardFields(card);
     const wordMatchers = DS.state?.preparedMatchers?.blockedWords || [];
     return {
@@ -640,7 +668,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!blockedNameMatchers.length) return null;
     const fields = typeof preparedFields === "function"
       ? preparedFields()
-      : (preparedFields || preparedCardFields(card, preparedText));
+      : (preparedFields || cachedPreparedCardFields(card));
     const match = findPreparedMatchInFields(
       fields.nameCandidates.length ? fields.nameCandidates : [fields.title, fields.all],
       blockedNameMatchers
@@ -717,8 +745,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (preparedFields) return preparedFields;
       // Preserve the established search-normalization rules while calculating
       // the potentially large card text only if a name/word/tag rule needs it.
-      const preparedText = DS.searchableTextForMatching?.(card.textContent || "") || DS.normalize(card.textContent);
-      return (preparedFields = preparedCardFields(card, preparedText));
+      return (preparedFields = cachedPreparedCardFields(card));
     };
 
     if (!discoveryContext && DS.isBotProfilePage()) {
@@ -869,6 +896,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (creatorMatch) return `blocked creator: ${creatorMatch.raw}`;
     }
 
+    // Title-only Archive preferences are independent of native Block, auto-block,
+    // Community Themes and Smart Filter Presets. This path never persists an ID.
+    if (settings.archiveBlockingPresetsEnabled &&
+        !(settings.protectFavoritesFromBlocking && id && DS.state.favoriteBotIdSet?.has(id))) {
+      const preset = DS.getArchiveBlockingPresetMatch?.(card, settings);
+      if (preset?.hide) return `Archive preset: ${preset.reason}`;
+      // Load on demand if settings became enabled before the lazy module ran.
+      DS.ensureArchiveBlockingPresets?.();
+    }
+
     // Archive evidence is separate, reversible and cannot trigger auto-blocks.
     // Preserve native and QoL tag rules, creator exceptions and saved favorites.
     if (settings.archiveCommunityThemesEnabled && favoritePrefs.ignoreTagWordFilters !== true &&
@@ -891,8 +928,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getCardBlockingDiagnostic = function getCardBlockingDiagnostic(card, anchor) {
     if (!card || !anchor) return null;
-    const preparedText = DS.searchableTextForMatching?.(card.textContent || "") || DS.normalize(card.textContent || "");
-    const fields = preparedCardFields(card, preparedText);
+    const fields = preparedCardFields(card);
     const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
     const wordFields = fields.nameDescriptionCandidates.length
       ? fields.nameDescriptionCandidates
@@ -1473,6 +1509,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       Number(DS.state?.domRevision || 0),
       Number(DS.state?.cardFilterStateRevision || 0),
       Number(DS.state?.archiveThemeRevision || 0),
+      Number(DS.state?.archiveBlockingRevision || 0),
+      DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,
       DS.state?.settings?.archiveCommunityThemesEnabled ? 1 : 0,
       DS.state?.settings?.archiveCommunityThemesMode || 'reviewed',
       DS.state?.settings?.archiveCommunityThemesRiskWarnings ? 1 : 0,
@@ -1493,6 +1531,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return [
       Number(DS.state?.cardFilterStateRevision || 0),
       Number(DS.state?.archiveThemeRevision || 0),
+      Number(DS.state?.archiveBlockingRevision || 0),
+      DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,
       DS.state?.settings?.archiveCommunityThemesEnabled ? 1 : 0,
       DS.state?.settings?.archiveCommunityThemesMode || 'reviewed',
       DS.state?.settings?.archiveCommunityThemesRiskWarnings ? 1 : 0,
@@ -1595,6 +1635,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // A changed child or mounted card already identifies exactly one bot.
         // Do not query all descendant chat links inside that card again.
         dirty.add(direct);
+        preparedMetadataCache.delete(direct);
         return;
       }
 
@@ -1603,7 +1644,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       el.querySelectorAll?.("a[href*='/chat/'], a[href*='/chatbot/']").forEach(anchor => anchors.push(anchor));
       for (const anchor of anchors) {
         const card = DS.getCardFromChatLink?.(anchor);
-        if (card?.isConnected) dirty.add(card);
+        if (card?.isConnected) { dirty.add(card); preparedMetadataCache.delete(card); }
       }
     };
 
@@ -1611,7 +1652,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
       if (target) {
         const nearestCard = target.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
-        if (nearestCard && DS.isRecommendationCardRoot?.(nearestCard)) dirty.add(nearestCard);
+        if (nearestCard && DS.isRecommendationCardRoot?.(nearestCard)) {
+          dirty.add(nearestCard);
+          preparedMetadataCache.delete(nearestCard);
+        }
         // Only scan the mutation target itself when it is an anchor. Scanning
         // all descendant anchors of a grid/container dirtied every card after
         // unrelated React list and sidebar changes.
@@ -1693,6 +1737,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.state.listingDirtyNeedsFullPass = false;
     }
 
+    const traceActive = !!DS.isDiagnosticTraceActive?.('normal');
+    const traceStartedAt = traceActive ? performance.now() : 0;
+    const traceToken = traceActive ? DS.diagOperationStart?.('card-filtering', 'hide-cards', {
+      trigger: String(options.source || DS.state.lastRunTrigger || 'listing-mutation'),
+      reason: canUseDirty ? 'changed-card-reconciliation' : 'listing-filter-or-page-change',
+      phase: 'filter-and-hide',
+      parentOperationId: String(DS.state.diagCriticalOperationId || DS.state.diagSlowOperationId || '')
+    }) : null;
+    let traceYieldMs = 0, traceHidden = 0, traceProcessed = 0, traceSkipped = 0, traceOutcome = 'completed';
+    try {
     const normalizationStarted = cardTimingStart();
     DS.applyCardDisplayNormalization?.(cards);
     // Queues at most one 80-ID request from this already-collected card set.
@@ -1712,14 +1766,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let processed = 0;
     let alreadyBlockedSkips = 0;
     const chunkLargeListing = cards.length >= 32;
+    let lastCardYieldAt = chunkLargeListing ? performance.now() : 0;
 
     for (const { card, anchor } of cards) {
       processed += 1;
-      if (chunkLargeListing && processed > 1 && processed % 16 === 0) {
+      if (chunkLargeListing && processed > 1 &&
+          (processed % 16 === 0 || (processed % 4 === 0 && performance.now() - lastCardYieldAt >= 9))) {
         // Typical 48-card creator pages also benefit from short paint/input
         // breaks. Critical hide decisions still run before cosmetic passes.
         const yieldStarted = filterStarted ? performance.now() : 0;
         await new Promise(resolve => setTimeout(resolve, 0));
+        lastCardYieldAt = performance.now();
         if (yieldStarted) filterYieldMs += performance.now() - yieldStarted;
       }
       const target = DS.getBestHideTarget(card);
@@ -1832,6 +1889,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } else {
       DS.state.cardHidingLastPassKey = "";
       DS.state.cardHidingHasFullPass = false;
+    }
+    traceYieldMs = filterYieldMs;
+    traceHidden = hidden;
+    traceProcessed = processed;
+    traceSkipped = alreadyBlockedSkips;
+    } catch (error) {
+      traceOutcome = 'failed';
+      DS.diagError?.('card-filtering', 'hide-cards', error, { phase: 'filter-and-hide', parentOperationId: traceToken?.id || '' });
+      throw error;
+    } finally {
+      if (traceToken) DS.diagOperationEnd?.(traceToken, {
+        outcome: traceOutcome,
+        counts: { scanned: cards.length, changed: traceHidden, skipped: traceSkipped,
+          reused: canUseDirty ? cards.length : 0, errors: traceOutcome === 'failed' ? 1 : 0 },
+        meta: { activeMs: Math.max(0, performance.now() - traceStartedAt - traceYieldMs),
+          yieldMs: traceYieldMs, fullPass: !canUseDirty, phase: 'filter-and-hide' }
+      });
     }
   };
 })();

@@ -16,6 +16,64 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const CHAT_STARTUP_LONG_TASK_IDLE_MS = 1500;
     const CHAT_STARTUP_WARMUP_MS = 25000;
     const DISCARDED_WAKE_VISIBLE_QUIET_MS = 8000;
+    const NATIVE_MOBILE_SHELL_SETTLE_MS = 3500;
+    let shellRoute = "";
+    let shellMissingSince = 0;
+    let shellWasUnavailable = false;
+
+    function nativeMobileChatShellUnavailable() {
+      const state = DS.state || (DS.state = {});
+      // Desktop viewport simulation can reproduce the native mobile renderer
+      // failure too. Do not affect a normal desktop chat or another route.
+      const mobile = /Android|iPhone|iPad|Mobile/i.test(String(navigator.userAgent || "")) ||
+        ((window.innerWidth || 1024) <= 760 && !!window.matchMedia?.("(pointer: coarse)")?.matches);
+      const route = String(location.pathname || "");
+      if (!mobile || !DS.isSingleChatPage?.() || document.hidden) {
+        shellRoute = "";
+        shellMissingSince = 0;
+        shellWasUnavailable = false;
+        state.nativeMobileChatShellUnavailable = false;
+        return false;
+      }
+      if (route !== shellRoute) {
+        shellRoute = route;
+        shellMissingSince = 0;
+        shellWasUnavailable = false;
+        state.nativeMobileChatShellUnavailable = false;
+      }
+      // No text or message identifiers are collected. A valid brand-new chat
+      // can have zero messages, but it still has a native composer.
+      const nativeReady = !!document.querySelector(
+        'div[id^="message-"], textarea[placeholder*="Message"], ' +
+        '[data-testid="ChatV2MessageBox-Textarea-Input"], [data-testid="ChatMessages"]'
+      );
+      if (nativeReady) {
+        shellMissingSince = 0;
+        if (shellWasUnavailable) {
+          DS.diagPerformance?.("native-mobile-chat-shell-restored", { source: "native-dom-mounted" });
+        }
+        shellWasUnavailable = false;
+        state.nativeMobileChatShellUnavailable = false;
+        return false;
+      }
+      if (!shellMissingSince) shellMissingSince = Date.now();
+      if (Date.now() - shellMissingSince < NATIVE_MOBILE_SHELL_SETTLE_MS) return false;
+      state.nativeMobileChatShellUnavailable = true;
+      if (!shellWasUnavailable) {
+        shellWasUnavailable = true;
+        // Do not change SpicyChat-owned nodes, hide site errors, or reload the
+        // page. Suspend QoL's optional chat layout changes until native mount.
+        document.documentElement.removeAttribute("data-ds-keep-native-chat-header");
+        const counters = state.runtimePerformance || (state.runtimePerformance = {});
+        counters.nativeMobileChatShellMissing = Number(counters.nativeMobileChatShellMissing || 0) + 1;
+        DS.diagPerformance?.("native-mobile-chat-shell-unavailable", {
+          trigger: "runtime-pass", reason: "native-message-and-composer-missing",
+          elapsedMs: Date.now() - shellMissingSince
+        });
+      }
+      return true;
+    }
+    DS.nativeMobileChatShellUnavailable = nativeMobileChatShellUnavailable;
 
     function discardedWakeSessionActive() {
       return !!(DS.state?.discardedWakeActive && DS.isSingleChatPage?.());
@@ -189,7 +247,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       discardedWakeSessionActive, noteDiscardedWakeVisible, finishDiscardedWake,
       startChatStartupQuietWindow, chatStartupQuietActive,
       scheduleChatStartupQuietResume, chatStartupWarmupActive,
-      chatStartupWarmupRemainingMs
+      chatStartupWarmupRemainingMs, nativeMobileChatShellUnavailable
     });
   };
 

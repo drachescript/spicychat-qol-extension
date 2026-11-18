@@ -21,7 +21,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const PRESENCE_INTERVAL_MS = 60000;
   const ACTIVE_TTL_MS = 30 * 60 * 1000;
   const MODULE_HASHES = Object.freeze({
-    main: "sha256-371e87f8723a9678",
+    main: "sha256-22edc904da8aeec8",
     chatExport: "sha256-a915b9a4154e4613",
     performanceMode: "sha256-ada42fe35568ff31",
     failedMessageHelper: "sha256-3ef0a4001b7b450c",
@@ -30,9 +30,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     composer: "sha256-3dfe6a03ed53d28b",
     quickDislikePage: "sha256-4d6511d16af0d917",
     background: "sha256-f4d2a2005d6bd60c",
-    listings: "sha256-6f962e90cff0f8ea",
+    listings: "sha256-d2ccbb38a48b2533",
     sidebar: "sha256-5da9ff3689094626",
-    core: "sha256-431d9df59ff729ba",
+    core: "sha256-6d3844b3cdbd551c",
     messageOptions: "sha256-31b04492a9aeeeaf",
     generationMetadata: "sha256-2ea2eeaf12f7cda0",
     exactMessageCounts: "sha256-15fe59ecf8e0f621",
@@ -52,7 +52,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     translation: "sha256-4da617738c52b5bb",
     lorebookBackup: "sha256-2e6c579a8ef94337",
     botBackup: "sha256-97332168dc5a61d5",
-    personas: "sha256-36591f179bd2083e",
+    personas: "sha256-44cd09942198794c",
     featureRegistry: "sha256-99e0d66674c43758",
     runtimeImprovements: "sha256-2935f06569916433",
     modelSelector: "sha256-019827b2425c2069",
@@ -98,6 +98,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     maxDetailed: 50000,
     aggregate: new Map(),
     operationStack: [],
+    normalOperationThresholdMs: 100,
     routeTimer: null,
     lastRoute: `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`,
     userActionInstalled: false,
@@ -144,15 +145,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function sensitiveKey(key = "") {
-    return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
+    return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|^(?:text|value|title|input|output|payload)$|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
   }
 
   function summarizeSensitive(value) {
     if (value == null) return value;
-    if (typeof value === "string") return { changed: true, chars: value.length, fingerprint: `fnv1a-${fnv1a(value)}` };
+    if (typeof value === "string") return { redacted: true, chars: value.length };
     if (Array.isArray(value)) return { changed: true, count: value.length };
     if (typeof value === "object") return { changed: true, keys: Object.keys(value).length };
     return { changed: true, kind: typeof value };
+  }
+
+  // Attribution labels are fixed vocabulary, never free-form chat or creator text.
+  function traceLabel(value, fallback = "unspecified") {
+    const text = String(value || "").trim().toLowerCase();
+    if (!text || text.length > 100 || /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text) || !/^[a-z][a-z0-9 _.-]*$/.test(text)) return fallback;
+    return text.replace(/[ ._]+/g, "-").slice(0, 80);
+  }
+
+  function operationContext(meta = {}) {
+    return {
+      trigger: traceLabel(meta?.trigger || meta?.source, "unspecified"),
+      reason: traceLabel(meta?.reason, "unspecified"),
+      phase: traceLabel(meta?.phase, "execute"),
+    };
+  }
+
+  function metricMs(value) {
+    return Number.isFinite(Number(value)) && Number(value) >= 0
+      ? Math.round(Number(value) * 100) / 100 : null;
   }
 
   function safeTraceValue(value, depth = 0, keyHint = "") {
@@ -164,6 +185,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (typeof value === "number") return Number.isFinite(value) ? value : null;
     if (typeof value === "string") {
       if (/url$/i.test(keyHint) || /^url$/i.test(keyHint)) return sanitizedEndpoint(value);
+      if (/^(?:trigger|reason|phase|source|outcome)$/i.test(keyHint))
+        return traceLabel(value, 'unspecified');
       return value.slice(0, 180);
     }
     if (depth >= 4) return undefined;
@@ -200,7 +223,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       runtimeSessionId: sessionId,
       worker: worker.worker,
       workerSessionId: worker.workerSessionId,
-      payload: safeTraceValue(payload) || {}
+      // trace-batch events are already individually sanitized by queueTrace.
+      // Sanitizing them AGAIN at the envelope level used to truncate nested
+      // counts/meta/aggregate rows at depth 4, defeating attribution.
+      payload: type === "trace-batch" && Array.isArray(payload.events)
+        ? { ...(safeTraceValue({ ...payload, events: [] }) || {}),
+            events: payload.events.slice(0, 250) }
+        : (safeTraceValue(payload) || {})
     };
   }
 
@@ -217,6 +246,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const row = v2State.aggregate.get(key) || { type: event.type, feature, name, count: 0, firstTs: event.ts, lastTs: event.ts };
     row.count += 1;
     row.lastTs = event.ts;
+    if (Number.isFinite(event.durationMs)) {
+      row.wallMsTotal = (row.wallMsTotal || 0) + event.durationMs;
+      row.wallMsMax = Math.max(row.wallMsMax || 0, event.durationMs);
+    }
+    if (Number.isFinite(event.activeProcessingMs)) {
+      row.activeMsTotal = (row.activeMsTotal || 0) + event.activeProcessingMs;
+      row.activeMsMax = Math.max(row.activeMsMax || 0, event.activeProcessingMs);
+    }
+    if (Number.isFinite(event.queueWaitMs)) row.queueWaitMsTotal = (row.queueWaitMsTotal || 0) + event.queueWaitMs;
     v2State.aggregate.set(key, row);
     v2State.coalesced += 1;
   }
@@ -246,16 +284,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function queueTrace(type, payload = {}, { level = "normal", critical = false } = {}) {
     if (!v2Active(level)) return false;
-    const seq = ++v2State.traceSeq;
     const event = {
-      seq,
       ts: Date.now(),
       monoMs: Math.round((performance?.now?.() || 0) * 1000) / 1000,
       type: String(type || "event").slice(0, 80),
       pageSessionId: sessionId,
       ...safeTraceValue(payload || {})
     };
-    const preserve = critical || event.type === "error" || event.type === "performance-mode-change" || Number(event.durationMs || 0) >= 50;
+    const outlierThreshold = ["storage", "performance", "worker"].includes(event.type) ? 200 : 50;
+    const preserve = critical || event.type === "error" || event.type === "performance-mode-change" ||
+      Number(event.durationMs || 0) >= outlierThreshold || event.outcome === "failed" || event.outcome === "cancelled";
+    // Repetitive success counters are summarized in Normal, not transmitted as
+    // hundreds of individual events per listing pass. Deep keeps substeps.
+    if (v2State.traceLevel !== "deep" && !preserve &&
+        (["storage", "performance"].includes(event.type) ||
+         (event.type === "worker" && /^(?:ready|checkpoint|heartbeat|progress|worker-ready|job-progress)$/.test(String(event.action || ""))))) {
+      aggregateTrace(event);
+      return false;
+    }
     if (v2State.emitted >= v2State.maxDetailed && !preserve) {
       aggregateTrace(event);
       return false;
@@ -264,6 +310,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       v2State.dropped += 1;
       return false;
     }
+    event.seq = ++v2State.traceSeq;
     v2State.emitted += 1;
     v2State.queued.push(event);
     if (critical || v2State.queued.length >= 200) flushTraceBatch(true);
@@ -285,8 +332,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function safeSettingSummary(value) {
     if (value == null || typeof value === "boolean" || typeof value === "number") return value;
     if (typeof value === "string") return value.length <= 40 && !/[\n\r]/.test(value) ? value : summarizeSensitive(value);
-    if (Array.isArray(value)) return { count: value.length, fingerprint: `fnv1a-${fnv1a(JSON.stringify(value).slice(0, 20000))}` };
-    if (typeof value === "object") return { keys: Object.keys(value).length, fingerprint: `fnv1a-${fnv1a(JSON.stringify(value).slice(0, 20000))}` };
+    if (Array.isArray(value)) return { count: value.length };
+    if (typeof value === "object") return { keys: Object.keys(value).length };
     return { kind: typeof value };
   }
 
@@ -356,7 +403,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = event.target instanceof Element ? event.target.closest("[data-ds-owned='1'],[data-ds-owner='qol'],[id^='ds-'],[class*='ds-']") : null;
       if (!target) return;
       const feature = String(target.dataset?.dsFeature || target.closest?.("[data-ds-feature]")?.dataset?.dsFeature || "qol-ui").slice(0, 80);
-      const action = String(target.id || [...(target.classList || [])].find(name => String(name).startsWith("ds-")) || target.getAttribute?.("role") || target.tagName || "click").slice(0, 100);
+      const action = traceLabel(target.id || [...(target.classList || [])].find(name => String(name).startsWith("ds-")) || target.getAttribute?.("role") || target.tagName || "click", "qol-control-click");
       queueTrace("user-action", { feature, action, inputType: String(target.getAttribute?.("type") || "").slice(0, 30) });
     }, true);
   }
@@ -1057,18 +1104,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (v2State.peerSupportsV2 && !v2State.recording) return null;
     const token = legacyDiagOperationStart?.(feature, operation, meta);
     if (!token) return token;
+    const context = operationContext(meta);
+    token.wallStartedAt = Date.now();
+    token.trigger = context.trigger;
+    token.reason = context.reason;
+    token.phase = context.phase;
+    // Concurrent async work can interleave even within a few milliseconds.
+    // Only explicitly propagated parent IDs count as confirmed attribution.
     token.parentOperationId = Object.prototype.hasOwnProperty.call(meta || {}, "parentOperationId")
-      ? String(meta?.parentOperationId || "")
-      : String(currentParentOperationId() || "");
+      ? String(meta?.parentOperationId || "") : "";
     token.heapBefore = Number(performance?.memory?.usedJSHeapSize || 0);
+    token.eagerStart = [
+      'research-export:run-resumable-archive',
+      'favorites:scan-native-favorites-pages',
+      'card-filtering:hide-cards',
+      'runtime:critical-pass', 'runtime:slow-pass'
+    ].includes(`${token.feature}:${token.operation}`);
     v2State.operationStack.push(token.id);
-    queueTrace("operation-start", {
-      id: token.id,
-      parentOperationId: token.parentOperationId,
-      attribution: "confirmed-qol",
-      feature: token.feature,
-      operation: token.operation,
-      heapBefore: token.heapBefore || 0,
+    // In Normal, defer short successful start/end pairs to a single summary.
+    // Outliers, state changes, failures and Deep tracing retain both events.
+    if (v2State.traceLevel === "deep" || token.eagerStart) queueTrace("operation-start", {
+      id: token.id, parentOperationId: token.parentOperationId,
+      feature: token.feature, operation: token.operation, ...context,
+      attribution: "confirmed-qol", heapBefore: token.heapBefore || 0,
       meta: safeTraceValue(meta || {})
     });
     return token;
@@ -1081,13 +1139,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
       const heapAfter = Number(performance?.memory?.usedJSHeapSize || 0);
       const safeResult = safeTraceValue(result || {}) || {};
-      queueTrace("operation-end", {
+      const extras = result?.meta && typeof result.meta === "object" ? result.meta : {};
+      const activeProcessingMs = metricMs(extras.activeMs ?? extras.activeProcessingMs);
+      const initialSyncCallMs = metricMs(extras.initialSyncCallMs);
+      const queueWaitMs = metricMs(extras.queueDelayMs ?? extras.queueWaitMs);
+      // Wall minus measured active is NOT necessarily pure wait: it can contain
+      // uninstrumented async continuations and browser work.
+      const unattributedWallMs = activeProcessingMs == null ? null : metricMs(Math.max(0, durationMs - activeProcessingMs));
+      const ended = {
         id: token.id,
         parentOperationId: String(token.parentOperationId || ""),
         attribution: "confirmed-qol",
         feature: String(token.feature || "unknown").slice(0, 80),
         operation: String(token.operation || "run").slice(0, 80),
-        outcome: String(result?.outcome || "ok").slice(0, 60),
+        trigger: token.trigger, reason: token.reason, phase: token.phase,
+        outcome: traceLabel(result?.outcome || "completed", "completed"),
+        activeProcessingMs, initialSyncCallMs, queueWaitMs, unattributedWallMs,
         counts: safeTraceValue(result?.counts || {}) || {},
         meta: safeTraceValue(result?.meta || {}) || {},
         durationMs: Math.round(durationMs * 10) / 10,
@@ -1095,7 +1162,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         heapAfter,
         heapDelta: token.heapBefore && heapAfter ? heapAfter - token.heapBefore : 0,
         result: safeResult
-      }, { critical: durationMs >= 200 });
+      };
+      const important = durationMs >= v2State.normalOperationThresholdMs ||
+        !["completed", "ok", "unchanged", "skipped"].includes(ended.outcome) ||
+        (queueWaitMs != null && queueWaitMs >= 100);
+      if (v2State.traceLevel === "deep" || important || token.eagerStart) {
+        if (v2State.traceLevel !== "deep" && !token.eagerStart) queueTrace("operation-start", {
+          id: token.id, parentOperationId: token.parentOperationId,
+          ts: token.wallStartedAt, monoMs: token.startedAt,
+          feature: token.feature, operation: token.operation,
+          trigger: token.trigger, reason: token.reason, phase: token.phase,
+          attribution: "confirmed-qol", meta: { summary: "slow-or-state-transition" }
+        }, { critical: important });
+        queueTrace("operation-end", ended, { critical: durationMs >= 200 || ended.outcome === "failed" });
+      } else {
+        aggregateTrace({ ...ended, type: "operation-summary", event: token.operation, ts: Date.now() });
+      }
     }
     return legacyDiagOperationEnd?.(token, result) || false;
   };
@@ -1104,16 +1186,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (v2State.peerSupportsV2 && !v2State.recording) return null;
     const token = legacyDiagNetworkStart?.(feature, method, url, meta);
     if (!token) return token;
-    token.parentOperationId = token.triggerOperationId || currentParentOperationId();
-    queueTrace("network-start", {
-      requestId: token.id,
-      parentOperationId: token.parentOperationId,
-      attribution: "confirmed-qol",
-      feature: token.feature,
-      method: token.method,
-      endpoint: token.endpoint,
-      fingerprint: token.fingerprint,
-      meta: safeTraceValue(meta || {})
+    token.parentOperationId = String(meta?.parentOperationId || "");
+    token.wallStartedAt = Date.now();
+    token.trigger = traceLabel(meta?.trigger, "api-request");
+    token.reason = traceLabel(meta?.reason, "retrieve-required-data");
+    if (v2State.traceLevel === "deep") queueTrace("network-start", {
+      requestId: token.id, parentOperationId: token.parentOperationId,
+      attribution: "confirmed-qol", feature: token.feature,
+      trigger: token.trigger, reason: token.reason, phase: "request",
+      method: token.method, endpoint: token.endpoint,
+      fingerprint: token.fingerprint, meta: safeTraceValue(meta || {})
     });
     return token;
   };
@@ -1121,19 +1203,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.diagNetworkEnd = function diagNetworkEndV2(token, result = {}) {
     if (token) {
       const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
-      queueTrace("network-end", {
+      const networkEnd = {
         requestId: token.id,
         parentOperationId: String(token.parentOperationId || token.triggerOperationId || ""),
         attribution: "confirmed-qol",
-        feature: token.feature,
-        method: token.method,
-        endpoint: token.endpoint,
+        feature: token.feature, trigger: token.trigger, reason: token.reason,
+        phase: "response", method: token.method, endpoint: token.endpoint,
         fingerprint: token.fingerprint,
         durationMs: Math.round(durationMs * 10) / 10,
         status: Number(result?.status || 0),
         ok: result?.ok === true,
-        outcome: String(result?.outcome || (result?.ok ? "ok" : "failed")).slice(0, 60)
-      }, { critical: !result?.ok || durationMs >= 1000 });
+        outcome: traceLabel(result?.outcome || (result?.ok ? "completed" : "failed"), "unknown")
+      };
+      if (v2State.traceLevel === "deep" || !networkEnd.ok || durationMs >= 1000) {
+        if (v2State.traceLevel !== "deep") queueTrace("network-start", {
+          requestId: token.id, parentOperationId: token.parentOperationId,
+          ts: token.wallStartedAt, monoMs: token.startedAt,
+          feature: token.feature, trigger: token.trigger, reason: token.reason,
+          phase: "request", method: token.method, endpoint: token.endpoint
+        }, { critical: !networkEnd.ok });
+        queueTrace("network-end", networkEnd, { critical: !networkEnd.ok || durationMs >= 1000 });
+      } else aggregateTrace({ ...networkEnd, type: "network-summary", event: token.endpoint, ts: Date.now() });
     }
     return legacyDiagNetworkEnd?.(token, result) || false;
   };
@@ -1156,11 +1246,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.diagStorage = function diagStorage(action, meta = {}) {
-    return queueTrace("storage", { feature: "storage", action: String(action || "event").slice(0, 80), parentOperationId: currentParentOperationId(), ...safeTraceValue(meta || {}) });
+    return queueTrace("storage", {
+      feature: traceLabel(meta?.feature, "storage"), operation: traceLabel(action, "storage-action"),
+      trigger: traceLabel(meta?.trigger, "storage-request"), reason: traceLabel(meta?.reason, "persist-or-retrieve-state"),
+      phase: traceLabel(meta?.phase, "browser-storage"),
+      parentOperationId: String(meta?.parentOperationId || ""),
+      ...safeTraceValue(meta || {})
+    });
   };
 
   DS.diagWorker = function diagWorker(action, meta = {}) {
-    return queueTrace("worker", { feature: String(meta?.feature || "worker").slice(0, 80), action: String(action || "event").slice(0, 80), ...safeTraceValue(meta || {}) }, { critical: /crash|lost|replace|error/i.test(String(action || "")) });
+    return queueTrace("worker", {
+      feature: traceLabel(meta?.feature, "worker"), operation: traceLabel(action, "worker-action"),
+      trigger: traceLabel(meta?.trigger, "worker-job"), reason: traceLabel(meta?.reason, "scheduled-work"),
+      phase: traceLabel(meta?.phase, "execute"),
+      ...safeTraceValue(meta || {})
+    }, { critical: /crash|lost|replace|error|rate-limit|cancel/i.test(String(action || "")) });
   };
 
   DS.diagUserAction = function diagUserAction(feature, action, meta = {}) {
@@ -1174,7 +1275,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.diagError = function diagError(feature, operation, error, meta = {}) {
-    const message = String(error?.message || error || "error").slice(0, 180);
+    // Error messages sometimes contain user-provided profile or chat text.
+    // Retain category and stack location, not unreviewed message contents.
+    const message = traceLabel(error?.name || "error", "error");
     const stack = String(error?.stack || "").split("\n").slice(0, 6).map(line => line.replace(/https?:\/\/[^\s)]+/g, match => sanitizedEndpoint(match))).join("\n");
     return queueTrace("error", {
       feature: String(feature || "qol").slice(0, 80),
@@ -1182,7 +1285,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       class: String(error?.name || "Error").slice(0, 80),
       message,
       stack,
-      parentOperationId: currentParentOperationId(),
+      parentOperationId: String(meta?.parentOperationId || ""),
       meta: safeTraceValue(meta || {})
     }, { critical: true });
   };
