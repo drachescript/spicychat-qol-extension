@@ -5,21 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - manifest.json
-      - options.html
-      - background-entry.js
-      - background/background-*.js
-      - build/features/**
-      - build/modules.json
-      - build/sync-feature-asset-ownership.py
-      - build/test_sync_feature_asset_ownership.py
-      - build/background_imports.py
-      - build/test_background_imports.py
-      - .github/workflows/auto-repair-feature-ownership.yml
-      - content/*-worker.js
-      - content/styles/**
-      - settings/feature-panels/**
 
 permissions:
   actions: write
@@ -45,7 +30,7 @@ jobs:
       - name: Test split/conditional background imports
         run: python3 build/test_background_imports.py
 
-      - name: Test reviewed worker ownership repair
+      - name: Test audited automatic module registration
         run: python3 build/test_sync_feature_asset_ownership.py
 
       - name: Synchronize explicitly reviewed feature ownership

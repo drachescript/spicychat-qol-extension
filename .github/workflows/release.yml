@@ -192,6 +192,9 @@ jobs:
       - name: Test split/conditional background imports
         run: python3 build/test_background_imports.py
 
+      - name: Test audited automatic module registration
+        run: python3 build/test_sync_feature_asset_ownership.py
+
       - name: Synchronize audited feature asset ownership
         if: steps.release.outputs.publish == 'true'
         run: python3 build/sync-feature-asset-ownership.py

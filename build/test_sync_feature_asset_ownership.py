@@ -182,5 +182,137 @@ class SharedSettingsAssetRepairTests(unittest.TestCase):
             sync.sync_shared_options_assets(self.modules)
 
 
+class ReviewedOnDemandPrimaryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.old_root = sync.ROOT
+        self.addCleanup(setattr, sync, "ROOT", self.old_root)
+        sync.ROOT = Path(self.temp.name)
+        (sync.ROOT / "content").mkdir()
+        self.primary = "content/archive-blocking-presets.js"
+        (sync.ROOT / self.primary).write_text("/* optional */", encoding="utf-8")
+        (sync.ROOT / "content/on-demand-modules.js").write_text(
+            'const MODULES = {"archive-blocking-presets": "content/archive-blocking-presets.js"};',
+            encoding="utf-8",
+        )
+        self.contracts = {
+            "cards": (None, {"id": "cards", "primary": "content/cards.js"}),
+            "archive-blocking-presets": (None, {
+                "id": "archive-blocking-presets", "primary": self.primary,
+                "type": "content", "dependencies": ["cards"], "browserVerified": False,
+            }),
+        }
+        self.manifest = {"web_accessible_resources": [{"resources": [self.primary]}]}
+        self.modules = {"bundles": {"listings": {"files": ["content/cards.js"]},
+                                    "chat": {"files": []}}}
+
+    def repair(self):
+        return sync.sync_reviewed_dynamic_primaries(
+            self.contracts, self.manifest, self.modules
+        )
+
+    def test_dependency_owned_primary_and_idempotence(self):
+        self.assertEqual(self.repair(), [self.primary])
+        self.assertIn(self.primary, self.modules["bundles"]["listings"]["files"])
+        self.assertEqual(self.repair(), [])
+        self.assertIs(self.contracts["archive-blocking-presets"][1]["browserVerified"], False)
+
+    def test_explicit_reviewed_bundle(self):
+        contract = self.contracts["archive-blocking-presets"][1]
+        contract["dependencies"] = []
+        contract["bundle"] = "chat"
+        self.assertEqual(self.repair(), [self.primary])
+        self.assertIn(self.primary, self.modules["bundles"]["chat"]["files"])
+
+    def test_multiple_dependency_bundles_not_guessed(self):
+        self.contracts["chat-list"] = (None, {
+            "id": "chat-list", "primary": "content/chat-list.js"
+        })
+        self.modules["bundles"]["chat"]["files"].append("content/chat-list.js")
+        self.contracts["archive-blocking-presets"][1]["dependencies"] = [
+            "cards", "chat-list"
+        ]
+        self.assertEqual(self.repair(), [])
+
+    def test_unknown_bundle_not_assumed_core(self):
+        self.contracts["archive-blocking-presets"][1]["bundle"] = "unknown"
+        with self.assertRaisesRegex(ValueError, "Invalid reviewed bundle"):
+            self.repair()
+
+    def test_unreviewed_feature_not_registered(self):
+        del self.contracts["archive-blocking-presets"]
+        self.assertEqual(self.repair(), [])
+
+    def test_no_manifest_resource_not_registered(self):
+        self.manifest["web_accessible_resources"] = []
+        self.assertEqual(self.repair(), [])
+
+    def test_no_loader_reference_not_registered(self):
+        (sync.ROOT / "content/on-demand-modules.js").write_text(
+            "const MODULES = {};", encoding="utf-8"
+        )
+        self.assertEqual(self.repair(), [])
+
+
+class ReviewedGatedBackgroundTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.old_root = sync.ROOT
+        self.addCleanup(setattr, sync, "ROOT", self.old_root)
+        sync.ROOT = Path(self.temp.name)
+        (sync.ROOT / "background/features").mkdir(parents=True)
+        self.rel = "background/features/background-blocking-presets.js"
+        (sync.ROOT / self.rel).write_text("/* optional handler */", encoding="utf-8")
+        self.contracts = {
+            "archive-blocking-presets": (None, {
+                "id": "archive-blocking-presets",
+                "backgroundFiles": [self.rel], "backgroundIsolated": True,
+            })
+        }
+        self.entry = (
+            'importScripts("background.js");\n'
+            'if (dsqBackgroundHasFeature("archive-blocking-presets")) '
+            'importScripts("background/features/background-blocking-presets.js");\n'
+            'importScripts("background/background-events.js");'
+        )
+        self.modules = {"runtimeAssets": {"background": {
+            "required": ["background.js"], "helperModules": [],
+        }}}
+
+    def repair(self):
+        return sync.sync_reviewed_background_assets(
+            self.contracts, self.entry, self.modules
+        )
+
+    def test_gated_handler_repaired_and_idempotent(self):
+        self.assertEqual(self.repair(), [self.rel])
+        self.assertIn(self.rel, self.modules["runtimeAssets"]["background"]["required"])
+        self.assertIn(self.rel, self.modules["runtimeAssets"]["background"]["helperModules"])
+        self.assertEqual(self.repair(), [])
+
+    def test_ungated_import_not_assumed_optional(self):
+        self.entry = 'importScripts("background.js", "background/features/background-blocking-presets.js");'
+        self.assertEqual(self.repair(), [])
+
+    def test_missing_isolation_not_assumed(self):
+        self.contracts["archive-blocking-presets"][1]["backgroundIsolated"] = False
+        self.assertEqual(self.repair(), [])
+
+    def test_conflicting_owner_rejected(self):
+        self.contracts["other"] = (None, {
+            "id": "other", "backgroundFiles": [self.rel],
+            "backgroundIsolated": True,
+        })
+        with self.assertRaisesRegex(ValueError, "Ambiguous background asset"):
+            self.repair()
+
+    def test_missing_file_rejected(self):
+        (sync.ROOT / self.rel).unlink()
+        with self.assertRaisesRegex(ValueError, "Missing reviewed background asset"):
+            self.repair()
+
+
 if __name__ == "__main__":
     unittest.main()
