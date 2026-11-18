@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.86",
+  "sourceVersion": "0.2.87",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -78,6 +78,25 @@
       "settingsStyles": [],
       "styles": [],
       "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-blocking-presets",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "cards"
+      ],
+      "runtime": "content/archive-blocking-presets.js",
+      "settings": [
+        "settings/feature-panels/archive-blocking-presets.js"
+      ],
+      "settingsStyles": [],
+      "styles": [],
+      "background": [
+        "background/features/background-blocking-presets.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },

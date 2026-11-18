@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.86",
+  "version": "0.2.87",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 138,
+  "featureCount": 139,
   "sections": [
     "Blocking",
     "Chat List",
@@ -105,9 +105,7 @@
     "content/bot-backup.js",
     "content/bot-blocking.js",
     "content/bot-editor-actions.js",
-    "content/bot-editor-history.js",
     "content/bot-editor-memory.js",
-    "content/bot-editor-snippets.js",
     "content/bot-organizer.js",
     "content/build-profile.js",
     "content/bulk-blocking.js",
@@ -129,15 +127,10 @@
     "content/chat-lorebook-manager.js",
     "content/chat-lorebook-recall.js",
     "content/chat-lorebook-suggestions.js",
-    "content/chat-nudges.js",
-    "content/chat-organizer.js",
     "content/chat-picture-core.js",
     "content/chat-picture-editor-core.js",
     "content/chat-picture-override-core.js",
-    "content/chat-pins.js",
     "content/chat-rulebook-metadata.js",
-    "content/chat-search.js",
-    "content/chat-smart-folders.js",
     "content/chat-stability.js",
     "content/chat-tags.js",
     "content/chat-topbar.js",
@@ -166,7 +159,6 @@
     "content/favorite-bots.js",
     "content/feature-build-map.js",
     "content/feature-lifecycle.js",
-    "content/focus-mode.js",
     "content/footer-manager.js",
     "content/formatting-toolbar.js",
     "content/generation-metadata-loader.js",
@@ -178,14 +170,11 @@
     "content/list-fill.js",
     "content/listing-panel-position.js",
     "content/local-tag-matching.js",
-    "content/lorebook-connections.js",
     "content/lorebook-entries.js",
     "content/lorebook-filter.js",
-    "content/lorebook-moderation-review.js",
     "content/lorebook-public-qol.js",
     "content/lorebook-search-filter.js",
     "content/lorebook-tags.js",
-    "content/lorebook-workflow.js",
     "content/main-blocked-refresh.js",
     "content/main-card-mutation-classifiers.js",
     "content/main-chat-history-batches.js",
@@ -218,10 +207,8 @@
     "content/mobile-listing-overflow.js",
     "content/model-quick-access.js",
     "content/model-selector.js",
-    "content/moderation-warnings.js",
     "content/my-chatbot-card-shortcuts.js",
     "content/my-creations-auto-load.js",
-    "content/my-creations-filters.js",
     "content/my-creations-view-memory.js",
     "content/native-rating-helpers.js",
     "content/on-demand-modules.js",
@@ -243,8 +230,6 @@
     "content/recommendation-helpers.js",
     "content/reply-instructions.js",
     "content/rp-format-repair.js",
-    "content/rp-state-tracker.js",
-    "content/rulebook-diagnostics.js",
     "content/rulebook-filter.js",
     "content/rulebook-public-qol.js",
     "content/runtime-improvements.js",
@@ -252,10 +237,7 @@
     "content/runtime-plan.js",
     "content/saved-chat-actions.js",
     "content/saved-lists-overlay.js",
-    "content/saved-snippets.js",
     "content/scroll-to-top.js",
-    "content/selection-memory.js",
-    "content/story-day-tracker.js",
     "content/story-reading-layout.js",
     "content/tab-diagnostics.js",
     "content/tab-state-control.js",
@@ -445,6 +427,43 @@
         "settings": false,
         "styles": false,
         "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "archive-blocking-presets",
+      "label": "Archive Blocking Presets",
+      "description": "Adds the archive blocking presets tools.",
+      "section": "Discovery",
+      "group": "listings",
+      "requiredFeatures": [
+        "cards"
+      ],
+      "runtimeScripts": [
+        "content/archive-blocking-presets.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/archive-blocking-presets.js"
+      ],
+      "backgroundFiles": [
+        "background/features/background-blocking-presets.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "archiveBlockingPresetsEnabled",
+        "archiveBlockingPresetsSelection"
+      ],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": true,
+        "styles": true,
+        "background": true,
         "browserVerified": false
       }
     },
