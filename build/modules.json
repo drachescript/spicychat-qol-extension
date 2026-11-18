@@ -254,7 +254,8 @@
         "content/saved-lists-overlay.js",
         "content/smart-filter-presets.js",
         "content/tags-nsfw.js",
-        "content/archive-community-themes.js"
+        "content/archive-community-themes.js",
+        "content/archive-blocking-presets.js"
       ]
     },
     "creator": {
@@ -386,7 +387,8 @@
         "background/features/background-private-lorebook-entry-create.js",
         "background/features/background-native-memory-probe.js",
         "background/features/background-research-memory-export.js",
-        "background/features/background-community-themes.js"
+        "background/features/background-community-themes.js",
+        "background/features/background-blocking-presets.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -443,7 +445,8 @@
         "background/features/background-private-lorebook-entry-create.js",
         "background/features/background-native-memory-probe.js",
         "background/features/background-research-memory-export.js",
-        "background/features/background-community-themes.js"
+        "background/features/background-community-themes.js",
+        "background/features/background-blocking-presets.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",
