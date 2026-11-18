@@ -12,9 +12,13 @@ class CustomSeventyThree(unittest.TestCase):
         manifest=json.loads(read("manifest.json"))
         self.assertGreaterEqual(tuple(int(part) for part in manifest["version"].split(".")), (0, 2, 73))
         js={path for row in manifest["content_scripts"] for path in row.get("js",[])}
-        for p in ["content/chat-pins.js","content/chat-bookmarks.js",
-                  "content/language-filter.js","content/rulebook-public-qol.js",
-                  "content/lorebook-public-qol.js"]:
+        # The Stage 16+ loader moved Chat Pins out of eager manifest scripts.
+        # Its registered on-demand import remains the correct runtime inclusion.
+        loader=read("content/on-demand-modules.js")
+        self.assertTrue("content/chat-pins.js" in js or
+                        '"chat-pins": "content/chat-pins.js"' in loader)
+        for p in ["content/chat-bookmarks.js", "content/language-filter.js",
+                  "content/rulebook-public-qol.js", "content/lorebook-public-qol.js"]:
             self.assertIn(p,js)
     def test_custom_panels_and_legacy_readers_are_not_duplicated(self):
         html=read("options.html")
