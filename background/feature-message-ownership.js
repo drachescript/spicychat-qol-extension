@@ -20,6 +20,7 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_CARD_TOKEN_BRIDGE_DIAG": "card-token-info",
   "DS_CARD_TOKEN_FETCH": "card-token-info",
   "DS_CHARACTER_INDEX_METADATA_FETCH": "core",
+  "DS_ARCHIVE_BLOCK_PRESET_CATALOG": "archive-blocking-presets",
   "DS_ARCHIVE_COMMUNITY_CATALOG": "archive-community-themes",
   "DS_ARCHIVE_COMMUNITY_LOOKUP": "archive-community-themes",
   "DS_CHAT_NUDGE_SCAN_NOW": "chat-nudges",

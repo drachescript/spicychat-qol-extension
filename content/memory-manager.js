@@ -1691,6 +1691,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .filter(field => isVisible(field) && !isMemoryImportOwnedNode(field));
   }
 
+  function hasNativeNewMemoryCaption(manager, field) {
+    // A native inline form can leave the textarea unlabelled while putting
+    // "New memory" in a sibling element.  Avoid assuming the caption is a
+    // direct child or that React preserves a particular number of wrappers.
+    const hasCaption = root => [...root.querySelectorAll('label, h2, h3, h4, h5, span, p, div')]
+      .some(node => !isMemoryImportOwnedNode(node) && node.children.length === 0 &&
+        /^(?:new|add) memory$/i.test(cleanText(node.textContent)));
+    for (let parent = field.parentElement, depth = 0;
+         parent && parent !== manager && depth < 9;
+         parent = parent.parentElement, depth++) {
+      if (parent.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]').length > 1) break;
+      if (hasCaption(parent)) return true;
+    }
+    // Newer MemoryManagerV2 renders the heading and composer as siblings,
+    // sometimes more than nine React wrappers apart. The single-form guard
+    // below prevents matching the Memories search box or a QoL import editor.
+    return !!manager?.querySelector('[data-testid="MemoryManagerV2-List"]') &&
+      hasCaption(manager);
+  }
+
   function isNativeMemoryCreateField(field) {
     if (!field) return false;
     const key = nodeTranslationKey(field).toLowerCase();
@@ -1700,24 +1720,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         /add (?:a )?new memory/.test(placeholder) ||
         /add (?:a )?new memory/.test(aria)) return true;
 
-    // SpicyChat's inline composer now has an unlabelled textarea beneath a
-    // separate "New memory" caption. Match only this local card; do not infer
-    // a create control from the word "memories" elsewhere in the dialog.
-    if (!field.matches?.("textarea")) return false;
+    // Only accept an unlabelled field if it is the SINGLE visible native
+    // create field (the search box is a different input, not a textarea) and
+    // the actual native "New memory" caption is present. Never choose a
+    // field just because the surrounding modal says "Memories".
+    if (!field.matches?.('textarea, [contenteditable="true"]')) return false;
     const manager = getManager();
     if (!manager?.contains(field)) return false;
-    const fields = memoryCreateFields(manager).filter(node => node.matches("textarea"));
-    if (fields.length !== 1 || fields[0] !== field) return false;
-    for (let parent = field.parentElement, depth = 0;
-         parent && parent !== manager && depth < 5;
-         parent = parent.parentElement, depth++) {
-      // Stop before reaching the entire native memory list.
-      if (parent.querySelectorAll("textarea").length > 1) return false;
-      const captions = parent.querySelectorAll("label, h2, h3, h4, span, p, div");
-      if ([...captions].some(node => node.children.length === 0 &&
-          /^(?:new|add) memory$/i.test(cleanText(node.textContent)))) return true;
-    }
-    return false;
+    const eligible = memoryCreateFields(manager).filter(node =>
+      node.matches?.('textarea, [contenteditable="true"]'));
+    return eligible.length === 1 && eligible[0] === field &&
+      hasNativeNewMemoryCaption(manager, field);
   }
 
   function findNativeMemorySubmitButton(field, manager = getManager()) {
@@ -1916,7 +1929,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         ok: false,
         reason: looksLikeBrandNewChat()
           ? newChatMemoryImportHelp()
-          : "QoL could not open SpicyChat's Add New Memory control. Close and reopen Memories, then try the import again."
+          : "QoL could not identify SpicyChat's native New memory editor and Add button. Confirm the inline editor is visible, then reopen Memories and retry; nothing was added."
       };
     }
 

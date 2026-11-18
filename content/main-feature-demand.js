@@ -63,7 +63,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // filters are off. The dirty-card cache keeps repeated passes inexpensive.
     if (DS.state?.blockedBotIdSet?.size || document.querySelector('[data-ds-reason*="personality not public"]')) return true;
     if (settings.filterImpliedBlockedTags && DS.getActiveImpliedBlockedThemes?.(settings)) return true;
-    if (settings.archiveCommunityThemesEnabled) return true;
+    if (settings.archiveCommunityThemesEnabled || settings.archiveBlockingPresetsEnabled) return true;
     return anySetting(settings, [
       "blockCards", "hideOpenedChats", "hideLaterBotsFromListings", "hideHomeForYouCards",
       "hideGroupChats", "enableLanguageFilter", "publicPersonalityOnly"

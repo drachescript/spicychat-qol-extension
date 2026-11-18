@@ -74,7 +74,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.runSlow = async function runSlow(options = {}) {
-    if (DS.isQolPausedForTab?.()) return;
+    if (DS.isQolPausedForTab?.() || DS.state?.nativeMobileChatShellUnavailable === true) return;
     // Manual export helper needs data readers, not normal chat/listing UI work.
     if (location.pathname === "/chats" && new URLSearchParams(location.search).get("ds-research-export") === "1") return;
     if (laneState.slowRunning) {
@@ -113,7 +113,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const slowQueueDelayMs = Math.max(0, Date.now() - Number(DS.state?.diagSlowScheduledAt || Date.now()));
     const slowToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "slow-pass", {
-      trigger: String(DS.state?.diagSlowSource || DS.state?.lastRunTrigger || "").slice(0, 120),
+      trigger: String(DS.state?.diagSlowSource || DS.state?.lastRunTrigger || "scheduled-runtime"),
+      reason: options.force ? "explicit-reconciliation" : "noncritical-dirty-feature-groups",
+      phase: "yielding-slow-steps",
       force: !!options.force,
       queueDelayMs: slowQueueDelayMs,
       parentOperationId: ""

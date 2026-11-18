@@ -132,6 +132,111 @@ def sync_manifest_content_modules(manifest, modules):
     return added
 
 
+def sync_reviewed_dynamic_primaries(contracts, manifest, modules):
+    """Register only explicitly named, feature-owned on-demand content modules.
+
+    Require an exact contract, loader entry and manifest resource declaration.
+    A reviewed bundle or a unanimous single-bundle dependency establishes the
+    owner; otherwise stop at the ordinary Full validator. Never default Core.
+    """
+    dynamic = {
+        rel for item in manifest.get('web_accessible_resources', [])
+        for rel in item.get('resources', [])
+    }
+    loader = (ROOT / 'content/on-demand-modules.js').read_text(encoding='utf-8')
+    owners = {}
+    for bundle, details in modules['bundles'].items():
+        for rel in details.get('files', []):
+            owners.setdefault(rel, set()).add(bundle)
+    added = []
+    for owner, (_, contract) in sorted(contracts.items()):
+        primary = contract.get('primary')
+        if (not isinstance(primary, str) or primary not in dynamic
+                or primary in owners or contract.get('type') != 'content'
+                or not re.fullmatch(r'content/[a-z0-9-]+\.js', primary)
+                or primary != f'content/{owner}.js' or contract.get('id') != owner):
+            continue
+        if sum(c.get('primary') == primary for _, c in contracts.values()) != 1:
+            raise ValueError(f'Ambiguous on-demand primary ownership: {primary}')
+        if not re.search(
+            r'["\x27]' + re.escape(owner) + r'["\x27]\s*:\s*["\x27]'
+            + re.escape(primary) + r'["\x27]', loader
+        ):
+            continue
+        target = contract.get('bundle')
+        if target is not None:
+            if not isinstance(target, str) or target not in modules['bundles']:
+                raise ValueError(f'Invalid reviewed bundle for {owner}: {target}')
+        else:
+            deps = contract.get('dependencies', [])
+            if not isinstance(deps, list) or not deps:
+                continue
+            dep_owners = []
+            for dep_id in deps:
+                dep = contracts.get(dep_id)
+                if dep is None:
+                    break
+                found = owners.get(dep[1].get('primary'), set())
+                if len(found) != 1:
+                    break
+                dep_owners.append(next(iter(found)))
+            if len(dep_owners) != len(deps) or len(set(dep_owners)) != 1:
+                continue
+            target = dep_owners[0]
+        if not (ROOT / primary).is_file():
+            raise ValueError(f'Missing reviewed on-demand primary: {primary}')
+        modules['bundles'][target]['files'].append(primary)
+        owners[primary] = {target}
+        added.append(primary)
+    return added
+
+
+def sync_reviewed_background_assets(contracts, entry, modules):
+    """Register clearly feature-gated background imports with known owners.
+
+    Requires a single existing owner contract, backgroundIsolated=true, and
+    a literal if(dsqBackgroundHasFeature(owner)) importScripts(path) guard.
+    No load-order inference or Custom Lite isolation changes are performed.
+    """
+    imported = set(parse_background_imports(entry))
+    background = modules['runtimeAssets']['background']
+    required = background['required']
+    helpers = background['helperModules']
+    claims = {}
+    for owner, (_, contract) in contracts.items():
+        for rel in contract.get('backgroundFiles', []):
+            claims.setdefault(rel, []).append(owner)
+    added = []
+    for rel, owners in sorted(claims.items()):
+        if rel in required and rel in helpers:
+            continue
+        if len(owners) != 1:
+            raise ValueError(f'Ambiguous background asset ownership: {rel}: {owners}')
+        owner = owners[0]
+        contract = contracts[owner][1]
+        if (contract.get('id') != owner or contract.get('backgroundIsolated') is not True
+                or not re.fullmatch(r'background/features/[a-z0-9-]+\.js', rel)
+                or rel not in imported):
+            continue
+        gated = (
+            r'\bif\s*\(\s*dsqBackgroundHasFeature\s*\(\s*["\x27]'
+            + re.escape(owner)
+            + r'["\x27]\s*\)\s*\)\s*importScripts\s*\(\s*["\x27]'
+            + re.escape(rel)
+            + r'["\x27]\s*\)\s*;'
+        )
+        if not re.search(gated, entry):
+            continue
+        if not (ROOT / rel).is_file():
+            raise ValueError(f'Missing reviewed background asset: {rel}')
+        if rel not in required:
+            required.append(rel)
+        if rel not in helpers:
+            helpers.append(rel)
+        added.append(rel)
+    return added
+
+
 def sync_shared_options_assets(modules):
     """Register real, unconditionally loaded Settings JS (never feature panels)."""
     html = (ROOT / 'options.html').read_text(encoding='utf-8')
@@ -203,7 +308,10 @@ def scan(write=True):
     added_modules = sync_reviewed_worker_helpers(contracts, manifest, modules)
     added_content_modules = sync_manifest_content_modules(manifest, modules)
     added_options_assets = sync_shared_options_assets(modules)
-    if write and (added_modules or added_content_modules or added_options_assets):
+    added_dynamic_primaries = sync_reviewed_dynamic_primaries(contracts, manifest, modules)
+    added_background_assets = sync_reviewed_background_assets(contracts, entry, modules)
+    if write and (added_modules or added_content_modules or added_options_assets or
+                  added_dynamic_primaries or added_background_assets):
         modules_path.write_text(json.dumps(modules, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
     for owner, (path, contract) in contracts.items():
@@ -222,6 +330,8 @@ def scan(write=True):
         'addedModuleWorkers': added_modules,
         'addedContentModules': added_content_modules,
         'addedOptionsAssets': added_options_assets,
+        'addedDynamicPrimaries': added_dynamic_primaries,
+        'addedBackgroundAssets': added_background_assets,
         'remainingSharedCss': sorted(
             loaded_css
             - {p for p in claimed if p.startswith('content/styles/')}
@@ -238,11 +348,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     result = scan(write=not args.verify)
     if args.verify and (result['changedContracts'] or result['addedModuleWorkers'] or
-                        result['addedContentModules'] or result['addedOptionsAssets']):
+                        result['addedContentModules'] or result['addedOptionsAssets'] or
+                        result['addedDynamicPrimaries'] or result['addedBackgroundAssets']):
         raise SystemExit('Ownership declarations out of sync: contracts=' +
                          ', '.join(result['changedContracts']) +
                          '; moduleWorkers=' + ', '.join(result['addedModuleWorkers']) +
                          '; contentModules=' + ', '.join(result['addedContentModules']) +
                          '; optionsAssets=' + ', '.join(result['addedOptionsAssets']) +
+                         '; dynamicPrimaries=' + ', '.join(result['addedDynamicPrimaries']) +
+                         '; backgroundAssets=' + ', '.join(result['addedBackgroundAssets']) +
                          '\nRun python3 build/sync-feature-asset-ownership.py and commit its output.')
     print(json.dumps(result, indent=2))

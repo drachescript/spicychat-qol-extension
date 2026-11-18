@@ -15,6 +15,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let bannerSettingState = null;
   let cachedBannerRoots = new Set();
   const processedBannerState = new WeakMap();
+  // A native dismissal may be persisted by SpicyChat across page visits.
+  // Never click the same banner shell twice; do not install an observer or poll.
+  const nativeDismissAttempts = new WeakSet();
 
   function routeKey() {
     return `${location.pathname || ""}${location.search || ""}`;
@@ -524,6 +527,62 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function hideBannerRoot(root, reason) {
+    if (!root?.isConnected || root.dataset.dsHidden === "1") return false;
+    if (typeof DS.hideElement === "function") {
+      DS.hideElement(root, reason);
+    } else {
+      if (!root.classList.contains("ds-hidden")) root.classList.add("ds-hidden");
+      if (root.dataset.dsHidden !== "1") root.dataset.dsHidden = "1";
+      if (root.dataset.dsReason !== reason) root.dataset.dsReason = reason;
+    }
+    cachedBannerRoots.add(root);
+    return true;
+  }
+
+  function nativeBannerDismissButton(root) {
+    // An X SVG alone is not a safe selector. Only the verified SpicyChat
+    // Home/Chats promo shell may receive a synthetic click.
+    const path = String(location.pathname || "/").replace(/\/+$/, "") || "/";
+    if (path !== "/" && path !== "/chats") return null;
+    if (!root?.isConnected || isProtectedArea(root)) return null;
+    const images = root.querySelectorAll?.(NATIVE_BANNER_IMAGE_SELECTOR) || [];
+    if (![...images].some(image => nativeBannerRoot(image) === root)) return null;
+    const buttons = [...root.querySelectorAll('button[aria-label="X-button"]')]
+      .filter(button => button.isConnected && !button.disabled &&
+        button.querySelector("svg.lucide-x") &&
+        !isProtectedArea(button));
+    return buttons.length === 1 ? buttons[0] : null;
+  }
+
+  function clickNativeBannerClose(root, reason) {
+    if (nativeDismissAttempts.has(root)) return false;
+    const button = nativeBannerDismissButton(root);
+    if (!button || !isVisible(button)) return false;
+    nativeDismissAttempts.add(root);
+    const clickedRoute = routeKey();
+    try {
+      button.click(); // Use SpicyChat's own React dismissal, never remove its DOM.
+    } catch {
+      return false;
+    }
+    // If native dismissal did not work (older site layout/Android WebView),
+    // retain the existing reversible CSS hide as a single delayed fallback.
+    // This timer is one-shot per banner and does not trigger another scan.
+    setTimeout(() => {
+      if (window.__DSQ_TAB_GATE__?.paused || !settingEnabled() ||
+          routeKey() !== clickedRoute || !root.isConnected ||
+          root.dataset.dsHidden === "1" || !isVisible(root)) return;
+      if (!nativeBannerDismissButton(root)) return;
+      if (hideBannerRoot(root, reason)) {
+        DS.traceEvent?.("advert-banners", "native-close-fallback", {
+          trigger: "native-close-remained-visible", outcome: "css-hidden"
+        }, { level: "deep" });
+      }
+    }, 650);
+    return true;
+  }
+
   function reasonForRoot(root) {
     const text = normalized(root?.textContent || "");
     const imageText = DS.qsa("img", root)
@@ -554,6 +613,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let changed = 0;
     let skipped = 0;
     let cacheHit = false;
+    let nativeCloseClicks = 0;
 
     try {
       if (!bannerDirty) {
@@ -598,15 +658,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!settingChanged && processedBannerState.get(root) === revision) { skipped += 1; continue; }
         processedBannerState.set(root, revision);
         const reason = `ad-banner:${reasonForRoot(root)}`;
-        if (typeof DS.hideElement === "function") {
-          DS.hideElement(root, reason);
-        } else {
-          if (!root.classList.contains("ds-hidden")) root.classList.add("ds-hidden");
-          if (root.dataset.dsHidden !== "1") root.dataset.dsHidden = "1";
-          if (root.dataset.dsReason !== reason) root.dataset.dsReason = reason;
+        if (clickNativeBannerClose(root, reason)) {
+          nativeCloseClicks += 1;
+          changed += 1;
+          continue;
         }
-        cachedBannerRoots.add(root);
-        changed += 1;
+        if (hideBannerRoot(root, reason)) changed += 1;
       }
 
       bannerRouteKey = currentRoute;
@@ -617,12 +674,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } finally {
       const durationMs = started ? Math.round((performance.now() - started) * 10) / 10 : 0;
       DS.traceEvent?.("advert-banners", "refresh-summary", {
-        trigger, nodesChecked, rootsChecked, changed, skipped, cacheHit, durationMs
+        trigger, nodesChecked, rootsChecked, changed, skipped, cacheHit, nativeCloseClicks, durationMs
       }, { level: "deep" });
       if (traceToken) DS.diagOperationEnd?.(traceToken, {
         outcome: cacheHit ? "skipped" : "ok",
         counts: { scanned: nodesChecked, changed, skipped, errors: 0 },
-        meta: { trigger, rootsChecked, cacheHit, durationMs }
+        meta: { trigger, rootsChecked, cacheHit, nativeCloseClicks, durationMs }
       });
     }
   };

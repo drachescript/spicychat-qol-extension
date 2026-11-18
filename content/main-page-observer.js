@@ -459,6 +459,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (cardListing) DS.hideBlockedCardMounts?.(mutations);
       const affectsCards = cardListing ? mutationsMayAffectCards(mutations) : false;
       if (cardListing && affectsCards) DS.markListingDirtyCards?.(mutations);
+      if (cardListing && affectsCards) DS.markLaterButtonDirtyCards?.(mutations);
       if (chatLocal) {
         if (messageRootsChanged) DS.bumpDomRevision?.();
       } else if (!cardListing || affectsCards) {

@@ -1,0 +1,25 @@
+{
+  "id": "archive-blocking-presets",
+  "primary": "content/archive-blocking-presets.js",
+  "type": "content",
+  "dependencies": [
+    "cards"
+  ],
+  "settingsKeys": [
+    "archiveBlockingPresetsEnabled",
+    "archiveBlockingPresetsSelection"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/archive-blocking-presets.js"
+  ],
+  "backgroundFiles": [
+    "background/features/background-blocking-presets.js"
+  ],
+  "settingsMarkupIsolated": true,
+  "settingsIsolated": true,
+  "stylesIsolated": true,
+  "backgroundIsolated": true,
+  "browserVerified": false,
+  "notes": "On-demand title/name-only module and opt-in manifest/catalog cache. Keep OFF and omit its background handler and Settings panel when excluded. Verify Custom Lite dependency closure in a browser before marking as verified."
+}

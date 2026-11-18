@@ -8,7 +8,7 @@ function qolDiagnosticLevelRank(level) {
 }
 
 function qolDiagnosticSensitiveKey(key = "") {
-  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
+  return /(authorization|cookie|token|secret|password|webhook|request.?body|response.?body|headers?|^(?:text|value|title|input|output|payload)$|chat.?text|message.?text|prompt|ooc|persona.?description|lorebook.?content|keywords?|definition|personality|scenario|example.?dialog|greeting|description|content|raw|html|^(?:bot|chat|job|run|account|persona|user|workerSession|helperSession)Id$)/i.test(String(key || ""));
 }
 
 function qolDiagnosticFingerprint(value) {
@@ -28,7 +28,7 @@ function qolDiagnosticSafe(value, depth = 0, keyHint = "") {
     return { redacted: true };
   }
   if (qolDiagnosticSensitiveKey(keyHint)) {
-    if (typeof value === "string") return { changed: true, chars: value.length, fingerprint: `fnv1a-${qolDiagnosticFingerprint(value)}` };
+    if (typeof value === "string") return { redacted: true, chars: value.length };
     if (Array.isArray(value)) return { changed: true, count: value.length };
     if (value && typeof value === "object") return { changed: true, keys: Object.keys(value).length };
     return value == null ? value : { changed: true, kind: typeof value };
@@ -99,6 +99,22 @@ function qolDiagnosticEndpoint(value) {
   }
 }
 
+// No extra timers: compact routine successful network work on its existing
+// completion path; flush remainders when Inspector unsubscribes.
+const qolBackgroundNetworkSummaries = new Map();
+function qolFlushNetworkSummaries(force = false) {
+  for (const [key, row] of qolBackgroundNetworkSummaries) {
+    if (!force && row.count < 24) continue;
+    qolBackgroundNetworkSummaries.delete(key);
+    qolBackgroundTrace('network-summary', row.feature, {
+      operation: 'api-requests', trigger: 'worker-queue', reason: 'required-background-data',
+      phase: 'http-response', endpoint: row.endpoint, method: row.method,
+      count: row.count, totalWallMs: row.totalMs, maxWallMs: row.maxMs,
+      outcome: 'completed'
+    });
+  }
+}
+
 function qolBackgroundNetworkStart(feature, method, url, meta = {}) {
   if (!qolDiagnosticHasSubscribers("normal")) return null;
   const token = {
@@ -106,32 +122,54 @@ function qolBackgroundNetworkStart(feature, method, url, meta = {}) {
     feature: String(feature || "background-network").slice(0, 80),
     method: String(method || "GET").toUpperCase().slice(0, 12),
     endpoint: qolDiagnosticEndpoint(url),
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    tracedStart: qolDiagnosticHasSubscribers('deep')
   };
-  qolBackgroundTrace("network-start", token.feature, {
-    requestId: token.requestId, method: token.method, endpoint: token.endpoint, ...meta
-  });
+  if (token.tracedStart) qolBackgroundTrace("network-start", token.feature, {
+    requestId: token.requestId, method: token.method, endpoint: token.endpoint,
+    operation: 'api-request', trigger: 'background-worker',
+    reason: 'fetch-worker-required-data', phase: 'request', ...meta
+  }, { level: 'deep' });
   return token;
 }
 
 function qolBackgroundNetworkEnd(token, result = {}) {
   if (!token || token.ended) return;
   token.ended = true;
+  const durationMs = Math.max(0, Date.now() - Number(token.startedAt || Date.now()));
+  const ok = result?.ok === true;
+  if (!token.tracedStart && ok && durationMs < 1000) {
+    const key = `${token.feature}|${token.method}|${token.endpoint}`;
+    const row = qolBackgroundNetworkSummaries.get(key) || {
+      feature: token.feature, endpoint: token.endpoint, method: token.method,
+      count: 0, totalMs: 0, maxMs: 0
+    };
+    row.count += 1;
+    row.totalMs += durationMs;
+    row.maxMs = Math.max(row.maxMs, durationMs);
+    qolBackgroundNetworkSummaries.set(key, row);
+    qolFlushNetworkSummaries();
+    return;
+  }
+  if (!token.tracedStart) qolBackgroundTrace('network-start', token.feature, {
+    requestId: token.requestId, operation: 'api-request', trigger: 'background-worker',
+    reason: 'fetch-worker-required-data', phase: 'request',
+    method: token.method, endpoint: token.endpoint, startedAt: token.startedAt
+  }, { critical: !ok });
   qolBackgroundTrace("network-end", token.feature, {
-    requestId: token.requestId,
-    method: token.method,
-    endpoint: token.endpoint,
-    durationMs: Math.max(0, Date.now() - Number(token.startedAt || Date.now())),
-    status: Number(result?.status || 0),
-    ok: result?.ok === true,
-    outcome: String(result?.outcome || (result?.ok ? "ok" : "failed")).slice(0, 80)
-  }, { critical: result?.ok === false });
+    requestId: token.requestId, method: token.method, endpoint: token.endpoint,
+    operation: 'api-request', trigger: 'http-response',
+    reason: 'finish-worker-required-request', phase: 'response',
+    durationMs, status: Number(result?.status || 0), ok,
+    outcome: String(result?.outcome || (ok ? 'completed' : 'failed')).slice(0, 80)
+  }, { critical: !ok || durationMs >= 1000 });
 }
 
 function qolDiagnosticSubscribe(sender, message) {
   const tabId = Number(sender?.tab?.id || 0);
   if (!tabId) return { ok: false, error: "No sender tab." };
   if (message?.active === false) {
+    qolFlushNetworkSummaries(true);
     qolDiagnosticSubscribers.delete(tabId);
     return { ok: true, active: false, latestSeq: qolDiagnosticBackgroundSeq };
   }
@@ -201,13 +239,30 @@ async function withBackgroundJob(jobType, options, callback) {
   const requestedAt = Date.now();
   const lease = await acquireBackgroundJob(jobType, options);
   const startedAt = Date.now();
-  qolBackgroundTrace("operation-start", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", waitMs: Number(lease?.waitMs || 0), ownerTabId: Number(options?.ownerTabId || 0), detail: String(options?.detail || "").slice(0, 120) });
+  qolBackgroundTrace('operation-start', String(jobType || 'background-job'), {
+    operationId: lease?.leaseId || '', operation: 'execute-background-job',
+    trigger: 'queue-granted', reason: 'scheduled-feature-task', phase: 'execute',
+    leaseId: lease?.leaseId || '', queueWaitMs: Number(lease?.waitMs || 0),
+    queueDepth: backgroundJobQueue.length
+  });
   try {
     const result = await callback(lease);
-    qolBackgroundTrace("operation-end", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", outcome: "ok", durationMs: Date.now() - startedAt, totalMs: Date.now() - requestedAt });
+    qolBackgroundTrace('operation-end', String(jobType || 'background-job'), {
+      operationId: lease?.leaseId || '', operation: 'execute-background-job',
+      trigger: 'queue-granted', reason: 'scheduled-feature-task', phase: 'finished',
+      leaseId: lease?.leaseId || '', outcome: 'completed',
+      durationMs: Date.now() - startedAt, queueWaitMs: Number(lease?.waitMs || 0),
+      totalMs: Date.now() - requestedAt
+    });
     return result;
   } catch (error) {
-    qolBackgroundTrace("error", String(jobType || "background-job"), { operationId: lease?.leaseId || "", operation: "background-job", leaseId: lease?.leaseId || "", class: String(error?.name || "Error"), message: String(error?.message || error || "").slice(0, 180), durationMs: Date.now() - startedAt }, { critical: true });
+    // Do not publish arbitrary error text: it can contain bot titles or input.
+    qolBackgroundTrace('error', String(jobType || 'background-job'), {
+      operationId: lease?.leaseId || '', operation: 'execute-background-job',
+      trigger: 'queue-granted', reason: 'background-job-failed', phase: 'failed',
+      class: String(error?.name || 'Error'), outcome: 'failed',
+      durationMs: Date.now() - startedAt, queueWaitMs: Number(lease?.waitMs || 0)
+    }, { critical: true });
     throw error;
   } finally {
     releaseBackgroundJob(lease?.leaseId);

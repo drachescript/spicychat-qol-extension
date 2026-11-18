@@ -396,6 +396,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       error.code = "incomplete-lorebook";
       error.expectedEntries = expected;
       error.receivedEntries = entries.length;
+      // A live, ID-checked details response is useful on mobile even when
+      // SpicyChat's priority pagination repeats the first 100 entries. Keep
+      // ONLY that metadata in memory for the native Entries-tab fallback;
+      // never treat the partial API entries as complete or save them as such.
+      if (meta?.id && clean(meta.id).toLowerCase() === id) {
+        error.partialLorebook = { ...meta, entryCount: expected };
+      }
       throw error;
     }
 
@@ -417,7 +424,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } catch (apiError) {
       if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") throw apiError;
       try {
-        return await DS.getCurrentOwnLorebookBackupDataFromEditor(lorebookId);
+        return await DS.getCurrentOwnLorebookBackupDataFromEditor(lorebookId, {
+          partialLorebook: apiError?.partialLorebook || null
+        });
       } catch (editorError) {
         const apiMessage = clean(apiError?.message || apiError, 500);
         const editorMessage = clean(editorError?.message || editorError, 500);

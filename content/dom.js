@@ -376,9 +376,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // hide the whole conversation with the shared .ds-hidden class.
     // Check only at the point where an optional feature requests a hide;
     // don't add observers, scans or automatic history repairs.
-    if (/^\/chat\/[^/]+/i.test(String(location.pathname || "")) &&
+    if ((DS.isSingleChatPage?.() || /^\/(?:[a-z]{2}\/)?chat\/[^/]+/i.test(String(location.pathname || ""))) &&
         el instanceof Element &&
-        (el.matches?.("div[id^='message-']") || el.querySelector?.("div[id^='message-']"))) {
+        // #root and the native chat's main region must remain accessible even
+        // before React mounts the first message. Otherwise a broad selector
+        // could hide a still-loading chat and the later messages would inherit
+        // that hidden ancestor. Respect intentional small-control hides.
+        (el.matches?.("#root,main,[role='main'],[data-testid='ChatMessages']") ||
+         el.matches?.("div[id^='message-']") ||
+         el.querySelector?.("div[id^='message-'],textarea[placeholder*='Message'],[data-testid='ChatV2MessageBox-Textarea-Input']"))) {
       const perf = DS.state?.runtimePerformance;
       if (perf) perf.preventedChatContainerHides = Number(perf.preventedChatContainerHides || 0) + 1;
       return;

@@ -1,3 +1,19 @@
+## 0.2.87
+- Improved Later buttons on Home and listings by updating only changed cards and processing large updates in small batches.
+- Reduced startup and large-listing slowdowns by loading more optional tools on demand and reusing card information.
+- Added optional Archive Blocking Presets for franchises, characters, and themes, with customizable exceptions.
+- Added Research Export Quick scan for recent and uncached bots; the original Scan bots still performs a full scan.
+- Made Research Export restore its previous bot selection and download only newer chat history when possible, with safe recovery if history changes.
+- Improved Research Export checkpoints, resume reliability, download verification, and warnings for incomplete data.
+- Expanded research ZIPs with Rulebook state, Story Moments, and OOC/Director Mode directive records.
+- Improved character and Lorebook metadata caching, retry options, and reporting of failed or incomplete records.
+- Updated Lorebook backups for SpicyChat's new infinite scrolling and added checks against incomplete backups or merges.
+- Fixed Android Lorebook backup and JSON import issues, with easier-to-use merge controls on smaller screens.
+- Restored native mobile chat headers and reply actions while typing, and avoided hiding chats before native content loads.
+- Fixed Memory Manager V2 JSON imports with SpicyChat's updated inline memory editor.
+- Improved Inspector v2 timing details for slow features and Research Export while reducing repetitive diagnostics.
+- Improved Home and Chats promotional-banner dismissal using SpicyChat's native close button when available.
+
 ## 0.2.86
 - Improved Research Export responsiveness with fewer progress redraws and a dedicated lightweight export tab.
 - Fixed Example Dialogue metadata availability and repaired previously saved character records without extra profile requests.

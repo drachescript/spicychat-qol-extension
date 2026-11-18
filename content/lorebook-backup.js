@@ -473,8 +473,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const info = routeInfo();
     if (!info?.id || info.page !== "entries") return false;
     const op = DS.diagOperationStart?.("lorebook-backup", "capture-full-entries", { lorebookId: info.id, exportJob: !!exportToken });
+    if (typeof DS.captureLorebookEntriesFully !== "function") {
+      // Stage 17 can load Lorebook Workflow on demand. An explicit Save or
+      // Download request must not race the optional module's initialization.
+      await DS.optionalModuleLoader?.ensure?.("lorebook-workflow");
+    }
     const capture = DS.captureLorebookEntriesFully;
-    if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not ready yet.");
+    if (typeof capture !== "function") throw new Error("Lorebook entry crawler is not available. Enable Lorebook Workflow tools or reload this editor.");
     let result = null;
     let progressWrite = Promise.resolve();
     let lastProgressAt = 0;
@@ -732,11 +737,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Shared only while a verified live capture is in progress; never reuse a
   // historical backup or a previous complete result as if it were current.
   const liveLorebookCapturesInFlight = new Map();
-  async function captureCurrentLorebookThroughEditors(lorebookId) {
+  async function captureCurrentLorebookThroughEditors(lorebookId, { partialLorebook = null } = {}) {
     const id = clean(lorebookId, 200).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
     if (liveLorebookCapturesInFlight.has(id)) return liveLorebookCapturesInFlight.get(id);
     const task = async () => {
+      let helperRequested = false;
+      const requestHelper = (...args) => {
+        helperRequested = true;
+        return requestEditorPageCapture(...args);
+      };
       try {
       // This fallback used to read from the persistent Lorebook backup store,
       // accidentally merging an older entry into a supposedly fresh export.
@@ -746,15 +756,56 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // The captured route and full entry count are still verified below.
       const here = routeInfo();
       const sameBook = here?.id?.toLowerCase() === id;
+      // Android WebView cannot open Chrome background helper tabs. If the
+      // user is already in the native Entries editor, SpicyChat's own Load
+      // More UI can supply all pages. Combine those entries ONLY with fresh
+      // metadata returned by the same live, ID-checked API request. This does
+      // not reuse stale automatic snapshots or partial API entry lists.
+      if (sameBook && here.page === "entries" && partialLorebook?.id &&
+          String(partialLorebook.id).toLowerCase() === id) {
+        const expected = Number(partialLorebook.entryCount);
+        if (!Number.isSafeInteger(expected) || expected < 0 || expected > 5000) {
+          throw new Error("The live Lorebook entry count could not be verified. Previous backup kept.");
+        }
+        setStatus(`Reading all ${expected} entries from the open native editor…`);
+        const native = await captureFullEntriesHere("", { persist: false });
+        if (native?.complete !== true || !Array.isArray(native.entries) ||
+            native.entries.length !== expected ||
+            routeInfo()?.id?.toLowerCase() !== id || routeInfo()?.page !== "entries") {
+          throw new Error(`The editor did not verify all ${expected} live entries. Previous backup kept.`);
+        }
+        return {
+          schema: "spicychat-qol-lorebook-recovery-copy",
+          version: 1,
+          savedAt: Date.now(), fetchedAt: new Date().toISOString(),
+          source: "current-live-api-and-native-editor",
+          completeness: { details: true, entries: true, entryCountVerified: true,
+            entryMetadata: "name-keywords-content-from-native-editor" },
+          lorebook: { ...partialLorebook, id, entryCount: expected },
+          entries: native.entries.map((entry, index) => ({
+            id: `editor:${index + 1}`, name: clean(entry.name, 500),
+            keywords: unique(entry.keywords || [], 12), secondaryKeywords: [],
+            content: clean(entry.content, 24000), version: "", createdAt: "", updatedAt: "",
+            priority: "", status: "", enabled: true, constant: false, selective: false,
+            caseSensitive: false, probability: null, depth: null, role: "", isNsfw: false
+          }))
+        };
+      }
+      if (navigator.userAgent?.includes("; wv)") || /Android/i.test(navigator.userAgent || "")) {
+        // A mobile same-tab capture needs the API's current details and the
+        // native Entries page. Do not open an unavailable background helper,
+        // and do not imply that the first 100 API entries are a full backup.
+        throw new Error("Android cannot open Lorebook helper tabs. Open this Lorebook's Entries tab and choose Save backup now or Download Lorebook there. If the live API cannot provide details, the previous backup remains unchanged.");
+      }
       const localDetails = sameBook && here.page === "details" ? currentCapture()?.details : null;
       const details = localDetails?.name
         ? { id, page: "details", data: localDetails }
-        : await requestEditorPageCapture(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
+        : await requestHelper(id, "details", { statusPrefix: "Bulk Lorebook backup: " });
       const localEntries = sameBook && here.page === "entries"
         ? await captureFullEntriesHere("", { persist: false }) : null;
       const entries = localEntries?.complete === true
         ? { id, page: "entries", complete: true, data: localEntries.entries }
-        : await requestEditorPageCapture(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
+        : await requestHelper(id, "entries", { statusPrefix: "Bulk Lorebook backup: " });
       if (!details || details.page !== "details" || details.id !== id || !details.data?.name) {
         throw new Error("Lorebook editor did not confirm fresh details; refusing historical data.");
       }
@@ -794,7 +845,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // The background worker is no longer needed after the two verified
         // captures, including when a failed operation must be cleaned up.
         // Cleanup is best effort and never changes backup completeness.
-        await releaseEditorCaptureHelper(id);
+        // Android same-page capture has never created a background helper.
+        // Some WebView runtime shims cannot answer a helper-release message;
+        // waiting for that callback would hang a successful full backup.
+        if (helperRequested) await releaseEditorCaptureHelper(id);
       }
     };
     const queued = currentEditorFallbackQueue.then(task, task);
@@ -1477,8 +1531,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const heading = document.createElement("strong");
     heading.textContent = `QoL: Merge JSON into this private Lorebook (${rec.payload.entries.length} entries)`;
     const status = document.createElement("p");
+    status.className = "ds-lorebook-merge-status";
     status.textContent = "Current name, description, tags, and picture stay unchanged unless you choose an action below.";
     const controls = document.createElement("div");
+    controls.className = "ds-lorebook-merge-actions";
     controls.style.cssText = "display:flex;flex-wrap:wrap;gap:8px";
     const makeButton = (label, fn) => {
       const btn = document.createElement("button"); btn.type = "button"; btn.textContent = label;
@@ -1531,6 +1587,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const box = document.createElement("section");box.id=MERGE_PANEL_ID;
     box.style.cssText = "padding:9px;border:1px solid #8192ac;border-radius:8px;margin:9px 0;font:13px/1.5 system-ui";
     const status = document.createElement("span");
+    status.className = "ds-lorebook-merge-status";
+    status.setAttribute("role", "status");
     status.textContent = `JSON merge ready: ${record.payload.entries.length} entries. Existing entries will be kept by default.`;
     const choice = document.createElement("select");
     choice.setAttribute("aria-label","How to handle existing Lorebook entries");
@@ -1567,7 +1625,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }catch(error){status.textContent=error?.message||String(error);proceed.disabled=false;}
     });
     const cancel=document.createElement("button");cancel.type="button";cancel.textContent="Discard merge";cancel.addEventListener("click",clearMerge);
-    box.append(status,choice,proceed,cancel);
+    const actions = document.createElement("div");
+    actions.className = "ds-lorebook-merge-actions";
+    actions.append(choice, proceed, cancel);
+    box.append(status, actions);
     document.getElementById(PANEL_ID)?.insertAdjacentElement("afterend",box);
   }
 
@@ -2155,7 +2216,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function runLorebookImport(payload, info, { confirmed = false, duplicatePolicy = "skip" } = {}) {
     if (importRunning) return false;
     if (info?.page !== "entries") throw new Error("Open the Lorebook Entries tab before importing.");
-    if (typeof DS.importLorebookEntryBatch !== "function") throw new Error("The Lorebook entry importer is not available on this page.");
     const count = payload.entries.length;
     if (!count) { setStatus("This file has no entries; nothing to import into this Lorebook."); return true; }
     if (!confirmed) {
@@ -2165,6 +2225,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (duplicatePolicy !== "skip") {
         if (!await verifyBeforeImportingOverExisting(info)) return false;
       }
+    }
+    // Wiki/web crawling stays disabled unless separately enabled. Only the
+    // existing native entry writer is needed for a user-approved JSON import.
+    if (typeof DS.importLorebookEntryBatch !== "function") {
+      await DS.optionalModuleLoader?.ensure?.("wiki-lorebook-importer");
+    }
+    if (typeof DS.importLorebookEntryBatch !== "function") {
+      throw new Error("The native Lorebook entry importer could not load. Nothing was changed. In an Android app, update the optional-module bridge before retrying.");
     }
 
     // An Entries-tab import must use the existing native entry importer.
@@ -2573,6 +2641,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       #${PANEL_ID} .ds-lorebook-backup-actions{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
       #${PANEL_ID} button{appearance:none;border:1px solid rgba(148,163,184,.32);border-radius:6px;background:rgba(55,65,81,.58);color:inherit;padding:4px 7px;cursor:pointer;font:600 11px/1.15 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #${PANEL_ID} button:hover{background:rgba(75,85,99,.82)}
+      /* The merge action lives OUTSIDE the compact backup toolbar. Android
+         WebView otherwise renders an unstyled grey select and near-invisible
+         buttons on the site's dark background. Keep everything wrap-safe. */
+      #${MERGE_PANEL_ID}{box-sizing:border-box;width:100%;max-width:100%;overflow-wrap:anywhere;
+        background:var(--card,rgba(25,28,34,.97));color:inherit;line-height:1.5}
+      #${MERGE_PANEL_ID} select,#${MERGE_PANEL_ID} button,#${MERGE_PANEL_ID} input[type=file]{
+        box-sizing:border-box;max-width:100%;min-height:34px;border:1px solid rgba(148,163,184,.55);
+        border-radius:7px;background:#293341;color:#f5f7fb;padding:7px 9px;
+        font:500 13px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      #${MERGE_PANEL_ID} select{width:100%;min-width:0}
+      #${MERGE_PANEL_ID} button{cursor:pointer;touch-action:manipulation}
+      #${MERGE_PANEL_ID} button:disabled{opacity:.55;cursor:wait}
+      #${MERGE_PANEL_ID} input[type=file]{width:100%;font-size:12px}
+      #${MERGE_PANEL_ID} .ds-lorebook-merge-status{display:block;margin:0 0 10px;white-space:normal}
+      #${MERGE_PANEL_ID} .ds-lorebook-merge-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      @media(max-width:600px){
+        #${MERGE_PANEL_ID}{padding:12px!important;margin:10px 0!important}
+        #${MERGE_PANEL_ID} .ds-lorebook-merge-actions>*{flex:1 1 155px;min-width:0}
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }

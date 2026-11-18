@@ -4,6 +4,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   "use strict";
 
   const DS = window.DragonScriptQoL;
+  // Reuse the existing listing MutationObserver (main-page-observer.js). Never
+  // enumerate every card, probe layout, or write attributes on every slow pass.
+  const laterWork = {
+    route: '', active: false, cleanedRoute: '', needsFullScan: true,
+    dirty: new Set(), byCard: new WeakMap(), rendered: new Set(),
+    savedSet: null, savedStateDirty: false, running: false, scheduled: false,
+    generation: 0
+  };
+  const LATER_CARD_SELECTOR = "div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target";
+  const waitForNextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+  function laterEnabled() {
+    const settings = DS.state?.settings || {};
+    return !!(settings.enabled && settings.showLaterBotButtons &&
+      !DS.isSingleChatPage?.() && !DS.isChatListPage?.() && !DS.isBotProfilePage?.() &&
+      !DS.isLaterFavoritesTabActive?.());
+  }
+  function noteLaterDirtyCard(card) {
+    if (!card?.isConnected || !DS.isRecommendationCardRoot?.(card)) return;
+    laterWork.dirty.add(card);
+    if (laterWork.dirty.size > 160) {
+      laterWork.dirty.clear();
+      laterWork.needsFullScan = true;
+    }
+  }
+  function prepareLaterRoute() {
+    if (laterWork.route === location.href) return;
+    laterWork.route = location.href;
+    laterWork.generation++;
+    laterWork.needsFullScan = true;
+    laterWork.dirty.clear();
+    laterWork.byCard = new WeakMap();
+    laterWork.rendered.clear();
+    laterWork.savedStateDirty = false;
+    laterWork.savedSet = null;
+  }
+  function scheduleLaterWork() {
+    if (laterWork.scheduled || laterWork.running || !laterEnabled()) return;
+    laterWork.scheduled = true;
+    setTimeout(() => {
+      laterWork.scheduled = false;
+      if (laterEnabled()) void drainLaterWork();
+    }, 0);
+  }
 
   function cleanText(value) {
     return String(value || "")
@@ -118,6 +161,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     await DS.saveLaterBots?.(store);
     await DS.recordLocalChange?.(`Changed Later list: ${store.meta?.[id]?.name || id}`, { [DS.LATER_BOTS_KEY]: beforeStore }, { [DS.LATER_BOTS_KEY]: JSON.parse(JSON.stringify(DS.state.laterBots || store)) });
+    DS.markLaterButtonsSavedStateDirty?.();
     DS.updateLaterBotButtons?.();
     DS.applyCardHiding?.();
   }
@@ -317,67 +361,209 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return button;
   }
 
-  DS.removeLaterBotButtons = function removeLaterBotButtons() {
-    DS.qsa(".ds-later-bot-button").forEach(button => button.remove());
+  function syncLaterButton(button, id) {
+    const saved = isSaved(id) ? "1" : "0";
+    const label = saved === "1" ? "Saved for later" : "Save for later";
+    // DOM writes here used to trigger React/MutationObserver work for every
+    // unchanged card; attribute writes must be conditional.
+    if (button.dataset.dsSaved !== saved) button.dataset.dsSaved = saved;
+    if (button.title !== label) button.title = label;
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+  }
 
-    // Clean up the bad host class left behind by older builds if the
-    // extension is reloaded while My Creations is still open. A normal
-    // page refresh would recreate this DOM anyway, but fixing it here
-    // makes the patch take effect immediately.
-    DS.qsa(".ds-card-top-left-actions").forEach(host => {
+  function updateOneLaterCard(card, anchor) {
+    if (!card?.isConnected || !DS.isRecommendationCardRoot?.(card)) return;
+    const cached = laterWork.byCard.get(card);
+    if (!anchor?.isConnected) anchor = cached?.anchor?.isConnected ? cached.anchor :
+      card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']");
+    if (!anchor) return;
+    const href = anchor.getAttribute('href') || '';
+    if (cached?.anchor === anchor && cached.href === href && cached.button?.isConnected &&
+        card.contains(cached.button)) {
+      syncLaterButton(cached.button, cached.id);
+      return;
+    }
+    const id = DS.botIdFromHref?.(anchor.href || href) || DS.chatIdFromHref(anchor.href || href);
+    if (!id) return;
+    let button = cached?.button?.isConnected && card.contains(cached.button)
+      ? cached.button : card.querySelector('.ds-later-bot-button');
+    if (button && button.dataset.dsBotId !== id) {
+      laterWork.rendered.delete(button);
+      button.remove();
+      button = null;
+    }
+    if (!button) {
+      const { host, after } = findButtonHost(card);
+      if (!host) return;
+      button = makeButton(card, anchor, id);
+      if (after?.parentElement === host) after.insertAdjacentElement('afterend', button);
+      else host.appendChild(button);
+    }
+    syncLaterButton(button, id);
+    laterWork.byCard.set(card, { anchor, href, id, button });
+    laterWork.rendered.add(button);
+  }
+
+  // Attribute changes on the Later button itself are deliberately ignored,
+  // avoiding self-triggered reconciliation. The parent observer already gates
+  // this hook to native card-related mutation batches.
+  DS.markLaterButtonDirtyCards = function markLaterButtonDirtyCards(mutations) {
+    if (!laterEnabled()) return;
+    prepareLaterRoute();
+    for (const mutation of mutations || []) {
+      if (mutation.type === 'attributes') {
+        if (mutation.target?.closest?.('.ds-later-bot-button')) continue;
+        if (mutation.attributeName !== 'href' && mutation.attributeName !== 'class') continue;
+      }
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+      const near = target?.closest?.(LATER_CARD_SELECTOR);
+      if (near) noteLaterDirtyCard(near);
+      if (mutation.type !== 'childList') continue;
+      for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        if (!(node instanceof Element)) continue;
+        // Our newly inserted button is already in the card cache.
+        if (node.matches?.('.ds-later-bot-button')) continue;
+        if (!node.isConnected) continue;
+        const root = node.closest?.(LATER_CARD_SELECTOR);
+        if (root) noteLaterDirtyCard(root);
+        else if (node.matches?.(LATER_CARD_SELECTOR)) noteLaterDirtyCard(node);
+        else if (node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']")) {
+          // Large React grid mounts are handled by one bounded full pass.
+          laterWork.needsFullScan = true;
+        }
+      }
+    }
+  };
+
+  DS.markLaterButtonsSavedStateDirty = function markLaterButtonsSavedStateDirty() {
+    if (!laterEnabled()) return;
+    laterWork.savedStateDirty = true;
+    scheduleLaterWork();
+  };
+
+  async function drainLaterWork() {
+    if (laterWork.running || !laterEnabled()) return;
+    laterWork.running = true;
+    const route = location.href, generation = laterWork.generation;
+    const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    const initialFullScan = laterWork.needsFullScan;
+    const trace = DS.isDiagnosticTraceActive?.('normal') ? DS.diagOperationStart?.('later-buttons', 'reconcile-listing', {
+      trigger: initialFullScan ? 'route-or-initial-pass' : laterWork.savedStateDirty ? 'storage-change' : 'dom-mutation',
+      reason: initialFullScan ? 'initial-listing-cards' : laterWork.savedStateDirty ? 'saved-state-invalidated' : 'changed-listing-cards',
+      phase: 'bounded-card-updates',
+      parentOperationId: String(DS.state.diagSlowOperationId || '')
+    }) : null;
+    let processed = 0, skipped = 0, slices = 0, activeMs = 0;
+    let activeSliceStart = performance.now(), largestActiveSlice = 0, outcome = 'completed';
+    const yieldLaterSlice = async () => {
+      const elapsed = Math.max(0, performance.now() - activeSliceStart);
+      activeMs += elapsed; largestActiveSlice = Math.max(largestActiveSlice,elapsed);
+      slices++;
+      await waitForNextTask();
+      activeSliceStart = performance.now();
+    };
+    try {
+      // Bounded finite follow-up batches, never a permanent poll or observer.
+      // A mounted card or changed save set queues work through existing hooks.
+      for (let pass = 0; pass < 6; pass++) {
+        if (generation !== laterWork.generation || route !== location.href || !laterEnabled()) return;
+        const full = laterWork.needsFullScan;
+        const entries = full ? [...document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")].map(anchor => ({card: null, anchor})) :
+          [...laterWork.dirty].filter(card => card?.isConnected).map(card => ({
+            card, anchor: laterWork.byCard.get(card)?.anchor ||
+              card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']")
+          }));
+        laterWork.needsFullScan = false;
+        laterWork.dirty.clear();
+        // A storage sync changes the in-memory Set even when no card mutates.
+        const updateAllSaved = laterWork.savedStateDirty;
+        laterWork.savedStateDirty = false;
+        if (updateAllSaved) {
+          const buttons = [...laterWork.rendered];
+          let sliceStart = performance.now(), sliceCount = 0;
+          for (const button of buttons) {
+            if (generation !== laterWork.generation || !laterEnabled()) return;
+            if (!button.isConnected) laterWork.rendered.delete(button);
+            else syncLaterButton(button, button.dataset.dsBotId || '');
+            if (++sliceCount >= 10 || performance.now() - sliceStart >= 6) {
+              await yieldLaterSlice(); sliceCount = 0; sliceStart = performance.now();
+            }
+          }
+        }
+        let sliceStart = performance.now(), sliceCount = 0;
+        const visited = new Set();
+        for (const item of entries) {
+          if (generation !== laterWork.generation || route !== location.href || !laterEnabled()) return;
+          if (full && item.anchor.closest?.('#ds-favorites-later-panel')) continue;
+          const card = item.card || DS.getCardFromChatLink?.(item.anchor);
+          if (!card?.isConnected || visited.has(card)) {skipped++; continue;}
+          visited.add(card);
+          updateOneLaterCard(card,item.anchor);
+          processed++;
+          if (++sliceCount >= 8 || performance.now() - sliceStart >= 6) {
+            await yieldLaterSlice(); sliceCount = 0; sliceStart = performance.now();
+          }
+        }
+        if (!laterWork.needsFullScan && !laterWork.dirty.size && !laterWork.savedStateDirty) break;
+      }
+    } catch (error) {
+      outcome = 'failed';
+      // A card can be unmounted between slices. Never break the native site.
+      perf.laterButtonReconcileErrors = (perf.laterButtonReconcileErrors || 0) + 1;
+      console.warn('[DragonScript QoL] Later button reconciliation skipped:', error);
+    } finally {
+      const elapsed = Math.max(0, performance.now() - activeSliceStart);
+      activeMs += elapsed; largestActiveSlice = Math.max(largestActiveSlice, elapsed);
+      laterWork.running = false;
+      perf.laterButtonCardsProcessed = (perf.laterButtonCardsProcessed || 0) + processed;
+      perf.laterButtonCardsSkipped = (perf.laterButtonCardsSkipped || 0) + skipped;
+      perf.laterButtonYieldSlices = (perf.laterButtonYieldSlices || 0) + slices;
+      perf.laterButtonActiveMs = (perf.laterButtonActiveMs || 0) + activeMs;
+      perf.laterButtonMaxActiveSliceMs = Math.max(Number(perf.laterButtonMaxActiveSliceMs || 0), largestActiveSlice);
+      if (trace) DS.diagOperationEnd?.(trace, {
+        outcome, counts: {scanned:processed + skipped,changed:processed,skipped,errors:outcome==='failed' ? 1 : 0},
+        meta: {activeMs:Math.round(activeMs),maxActiveSliceMs:Math.round(largestActiveSlice),yieldSlices:slices,
+          scanMode:initialFullScan ? 'initial' : 'dirty'}
+      });
+      if (laterEnabled() && (laterWork.needsFullScan || laterWork.dirty.size || laterWork.savedStateDirty)) scheduleLaterWork();
+    }
+  }
+
+  DS.removeLaterBotButtons = function removeLaterBotButtons() {
+    // Cleanup once per disabled route, not on each slow scheduler pass.
+    if (!laterWork.active && laterWork.cleanedRoute === location.href) return;
+    laterWork.generation++;
+    laterWork.active = false;
+    laterWork.cleanedRoute = location.href;
+    laterWork.dirty.clear();
+    laterWork.rendered.clear();
+    laterWork.byCard = new WeakMap();
+    laterWork.savedSet = null;
+    laterWork.savedStateDirty = false;
+    laterWork.needsFullScan = true;
+    DS.qsa('.ds-later-bot-button').forEach(button => button.remove());
+    DS.qsa('.ds-card-top-left-actions').forEach(host => {
       const containsTitle = !!host.querySelector?.("a[aria-label^='chat-with-'][title]");
       const containsCreator = !!host.querySelector?.("a[href*='/creator/']");
-      const isDedicatedOverlay = host.classList?.contains("ds-card-fallback-actions");
-
-      if (!isDedicatedOverlay && containsTitle && containsCreator) {
-        host.classList.remove("ds-card-top-left-actions");
-      }
+      if (!host.classList?.contains('ds-card-fallback-actions') && containsTitle && containsCreator)
+        host.classList.remove('ds-card-top-left-actions');
     });
   };
 
   DS.updateLaterBotButtons = function updateLaterBotButtons() {
-    const settings = DS.state.settings || {};
-
-    const shouldShowButton = !!settings.showLaterBotButtons;
-
-    if (
-      !settings.enabled ||
-      !shouldShowButton ||
-      DS.isSingleChatPage?.() ||
-      DS.isChatListPage?.() ||
-      DS.isBotProfilePage?.()
-    ) {
+    if (!laterEnabled()) {
       DS.removeLaterBotButtons();
       return;
     }
-
-    const cards = DS.collectCards?.() || [];
-
-    for (const { card, anchor } of cards) {
-      if (!DS.isRecommendationCardRoot?.(card)) continue;
-
-      const id = DS.botIdFromHref?.(anchor?.href || "") || DS.chatIdFromHref(anchor?.href || "");
-      if (!id) continue;
-      const existing = (DS.qsa?.(".ds-later-bot-button", card) || [])
-        .find(button => button.dataset.dsBotId === id);
-
-      if (existing) {
-        existing.dataset.dsSaved = isSaved(id) ? "1" : "0";
-        existing.title = existing.dataset.dsSaved === "1" ? "Saved for later" : "Save for later";
-        existing.setAttribute("aria-label", existing.title);
-        continue;
-      }
-
-      const { host, after } = findButtonHost(card);
-      if (!host) continue;
-
-      const button = makeButton(card, anchor, id);
-      if (after && after.parentElement === host) {
-        after.insertAdjacentElement("afterend", button);
-      } else {
-        host.appendChild(button);
-      }
+    prepareLaterRoute();
+    laterWork.active = true;
+    if (laterWork.savedSet !== DS.state.laterBotIdSet) {
+      laterWork.savedSet = DS.state.laterBotIdSet;
+      laterWork.savedStateDirty = true;
     }
+    // Only changed cards or the initial route scan need work.
+    if (laterWork.needsFullScan || laterWork.dirty.size || laterWork.savedStateDirty)
+      scheduleLaterWork();
   };
 })();
 

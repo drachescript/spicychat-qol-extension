@@ -9,7 +9,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const DATABASE = 'dsBulkChatResearchPilotV1', encoder = new TextEncoder();
   let runId = crypto.randomUUID().replaceAll('-', '');
   let cancelled = false, running = false;
-  let log, startButton, scanButton, freshButton, cancelButton, limitInput, allBotsInput, characterRetryInput;
+  let log, startButton, scanButton, quickScanButton, freshButton, cancelButton, limitInput, allBotsInput, characterRetryInput;
   let progressTitle, progressMeter, progressEta, progressDetail, progressState = null;
   let lastProgressRenderAt = -Infinity;
   let phaseTimingsLabel = null;
@@ -100,7 +100,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const phaseMs = Object.create(null);
-  function addPhase(name, milliseconds) { if (Number.isFinite(milliseconds)) phaseMs[name] = (phaseMs[name] || 0) + milliseconds; }
+  const phaseCount = Object.create(null);
+  const phaseMaxMs = Object.create(null);
+  function addPhase(name, milliseconds) {
+    if (!Number.isFinite(milliseconds)) return;
+    phaseMs[name] = (phaseMs[name] || 0) + milliseconds;
+    phaseCount[name] = (phaseCount[name] || 0) + 1;
+    phaseMaxMs[name] = Math.max(phaseMaxMs[name] || 0, milliseconds);
+  }
+  const operationLabels = Object.freeze({
+    downloadPermission: 'check-download-permission',
+    selectionCheckpointRead: 'read-selection-checkpoint',
+    discovery: 'discover-conversations',
+    historyReadTotal: 'retrieve-history',
+    memoryReadTotal: 'retrieve-native-memories',
+    characterReadTotal: 'retrieve-character-metadata',
+    storyStateIndex: 'index-rulebook-story-and-ooc',
+    linkedLorebookRead: 'retrieve-linked-lorebook',
+    zipBuildAndDownloadTotal: 'assemble-and-verify-zip',
+    downloadVerification: 'verify-download',
+    zipAssemblyTotal: 'prepare-zip-worker-or-fallback',
+    downloadDispatchSync: 'dispatch-blob-download-main-thread'
+  });
+  function phaseAttribution(name, durationMs, outcome = 'completed') {
+    if (!DS.isDiagnosticTraceActive?.('normal')) return;
+    // Routine successes are represented by one summary at export completion.
+    // Only slow outliers and failures need a separate detailed marker.
+    if (durationMs < 1000 && outcome === 'completed') return;
+    DS.traceEvent?.('research-export', 'phase-outlier', {
+      operation: operationLabels[name] || String(name), trigger: 'manual-research-export',
+      reason: 'complete-resumable-export', phase: String(name), outcome,
+      durationMs: Math.round(durationMs * 100) / 100,
+      activeProcessingMs: null, waitAttribution: name === 'downloadPermission' ?
+        'browser-permission-or-api-wait-not-cpu' : 'not-isolated'
+    }, { critical: outcome === 'failed' || durationMs >= 2000 });
+  }
   function phaseTimingsSummary() {
     // Explicit wall time: API phases include network pacing, not just CPU.
     return Object.entries(phaseMs).filter(([,ms])=>Number.isFinite(ms) && ms>=1)
@@ -115,11 +149,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function addWorkerMetrics(metrics) {
     if (!metrics) return;
-    for (const [key, value] of Object.entries(metrics)) if (Number.isFinite(value)) addPhase(key, value);
+    for (const [key, value] of Object.entries(metrics)) if (Number.isFinite(value)) addPhase(`worker-${key}`, value);
   }
   async function measure(name, task) {
     const start = performance.now();
-    try { return await task(); } finally { addPhase(name, performance.now() - start); }
+    let outcome = 'completed';
+    try { return await task(); }
+    catch (error) { outcome = error?.message === 'cancelled' ? 'cancelled' : 'failed'; throw error; }
+    finally {
+      const wallMs = performance.now() - start;
+      addPhase(name, wallMs);
+      phaseAttribution(name, wallMs, outcome);
+    }
   }
   // The worker is created only after the user starts an export and is terminated
   // at the end; normal browsing pays zero worker/observer cost.
@@ -243,12 +284,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         const tx = db.transaction('conversations', method === 'get' ? 'readonly' : 'readwrite');
         const store = tx.objectStore('conversations');
         const request = method === 'get' ? store.get(data) : store.put(data);
-        request.onsuccess = () => resolve(request.result);
+        // A successful IDB put request is not the same as a committed write.
+        // Do not let the next export phase start (or claim a checkpoint saved)
+        // until the write transaction has finished. Reloads can otherwise
+        // interrupt a request that succeeded but has not committed yet.
+        let result;
+        request.onsuccess = () => {
+          result = request.result;
+          if (method === 'get') resolve(result);
+        };
         request.onerror = () => reject(request.error);
+        if (method !== 'get') tx.oncomplete = () => resolve(result);
         tx.onerror = () => reject(tx.error || Error('Checkpoint failed'));
-        if (method !== 'get') tx.onabort = () => reject(tx.error || Error('Checkpoint aborted'));
+        tx.onabort = () => reject(tx.error || Error('Checkpoint aborted'));
       });
-    } finally { db.close(); addPhase(method === 'get' ? 'checkpointRead' : 'checkpointWrite', performance.now() - start); }
+    } finally {
+      db.close();
+      const wallMs = performance.now() - start;
+      addPhase(method === 'get' ? 'checkpointRead' : 'checkpointWrite', wallMs);
+      if (wallMs >= 500) phaseAttribution(method === 'get' ? 'checkpointRead' : 'checkpointWrite', wallMs);
+    }
   }
   async function clearResearchCheckpoints() {
     // Only this research pilot's own IndexedDB records are cleared.
@@ -289,7 +344,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       botName: String(row?.character?.name || row?.character_name || row?.title || fallback?.botName || '').slice(0, 150),
       expectedMessages: Number(row?.num_messages ?? row?.message_count) || null, row: safeRaw(row) };
   }
-  async function newestBots(limit) {
+  async function newestBots(limit, refresh = false) {
     // An All-bots scan follows pagination until the API ends. Checkpoint page
     // progress to avoid starting from page one after cancellation or reload.
     const key = '__recent_bot_scan__';
@@ -300,7 +355,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     // downloaded per-conversation histories and Memories untouched.
     const cursorScheme = 'global-character-id-v1';
     const resume = prior?.limit === limit && prior?.cursorScheme === cursorScheme &&
-      Array.isArray(prior?.bots);
+      Array.isArray(prior?.bots) && (!refresh || prior.state === 'scanning');
     const bots = resume ? prior.bots : [];
     const seenBots = new Set(bots.map(b => b.botId));
     const seenCursors = new Set(resume && Array.isArray(prior.cursors) ? prior.cursors : []);
@@ -390,44 +445,75 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       `${d.multipleBots.length} ${d.multipleBots.length === 1 ? 'bot has' : 'bots have'} multiple chats${multi.length?`: ${multi.join(', ')}`:''}. `+
       `All ${selection.entries.length} conversations selected across ${d.scannedBots} ${d.scannedBots === 1 ? 'bot' : 'bots'}.`;
   }
-  async function discoverSelection(limit) {
+  async function discoverSelection(limit, refresh = false, quick = false) {
     progressStage('discover',limit === 'all' ? null : limit,'Finding distinct bots…');
     update(`Finding ${limit === 'all' ? 'all available' : `the newest ${limit}`} distinct bots...`);
-    const bots=await newestBots(limit);
+    const bots=await newestBots(limit, refresh);
     if(!bots.length)throw Error('No conversations found');
     progressStage('conversations',bots.length,`0/${bots.length} bots checked`);
+    // Quick Scan still refreshes the global bot list and discovers previously
+    // unseen bots. It rechecks the newest 120 known bots but reuses older
+    // complete per-bot scans; Full Scan remains the exhaustive choice.
+    const QUICK_SCAN_RECENT_BOTS = 120;
+    let rechecked = 0, reused = 0;
     const groups=[];
     for(let i=0;i<bots.length;i++) {
       ensureNotCancelled();
       const seed=bots[i],key=`__bot_scan_${seed.botId}`;
       update(`Checking bot ${i+1}/${bots.length} for additional conversations · ${seed.botName||seed.botId}`);
       let cached=await withStore('get',key);
-      if (!cached || cached.state!=='complete' || !Array.isArray(cached.entries)) {
+      const mustRefresh = refresh && (!quick || i < QUICK_SCAN_RECENT_BOTS);
+      if (mustRefresh || !cached || cached.state!=='complete' || !Array.isArray(cached.entries)) {
         const entries=await scanBotConversations(seed);
         cached={conversationId:key,state:'complete',entries,createdAt:Date.now()};
         await withStore('put',cached);
-      }
+        rechecked++;
+        // Keep the existing request pacing for actual network reads only.
+        // Cache hits must not incur thousands of unnecessary 300ms sleeps.
+        await sleep(300);
+      } else reused++;
       groups.push({botId:seed.botId,botName:seed.botName,entries:cached.entries});
-      progressTick(i+1,bots.length,`${i+1}/${bots.length} bots · ${seed.botName || seed.botId}`);
-      await sleep(300);
+      progressTick(i+1,bots.length,`${i+1}/${bots.length} bots · ${rechecked} checked live · ${reused} reused`);
     }
     const selected=chooseAllBotConversations(groups);
     const discovery={mode:'per-bot-all-v2',scannedBots:groups.length,
+      scanStrategy: quick ? 'quick-newest-120-plus-uncached' : refresh ? 'full-refresh' : 'cached-when-available',
+      liveBotChecks: rechecked, reusedBotScans: reused,
+      olderBotConversationListsMayBeStale: !!(quick && reused),
       discoveredConversations:selected.length,
       multipleBots:groups.filter(g=>g.entries.length>1).map(g=>({botId:g.botId,name:g.botName,conversations:g.entries.length}))};
     const selection={conversationId:'__pilot_selection__',mode:'per-bot-all-v2',limit,entries:selected,discovery,createdAt:Date.now()};
     await withStore('put',selection);
     return selection;
   }
-  async function readHistory(entry) {
+  // The persisted checkpoint is the history high-water mark. Start at the
+  // newest API page and stop as soon as its last saved message is observed.
+  // No new API endpoint is needed; a fresh first page is required to see new
+  // replies even when the shared page cache contains a recent result.
+  function verifiedHistoryAnchor(history) {
+    if (history?.complete !== true || !Array.isArray(history.messages) ||
+        history.messages.length === 0) return '';
+    const seen = new Set();
+    for (const row of history.messages) {
+      const id = typeof row?.id === 'string' ? row.id : String(row?.id || '');
+      if (!id || seen.has(id)) return '';
+      seen.add(id);
+    }
+    return String(history.messages.at(-1).id);
+  }
+  async function readHistory(entry, previous = null) {
     let lastId = '', pageSize = 100, first = true, complete = false, pages = 0;
     let expected = entry.expectedMessages, header = null;
+    const anchor = verifiedHistoryAnchor(previous);
     const byId = new Map(), seenCursors = new Set();
+    let anchorFound = false;
     while (pages < 2000) {
       ensureNotCancelled();
       let res;
-      try { res = await retry(() => (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(entry.botId, entry.conversationId, {limit:pageSize,lastId}), 'Chat history'); }
-      catch (error) {
+      try {
+        res = await retry(() => (DS.fetchChatHistoryPageShared || DS.fetchChatHistoryPage)(
+          entry.botId, entry.conversationId, {limit:pageSize,lastId,forceRefresh:first}), 'Chat history');
+      } catch (error) {
         if (first && [400, 413, 422].includes(Number(error?.httpStatus || 0)) && pageSize > 50) {
           pageSize = 50; continue;
         }
@@ -438,6 +524,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if (first) {
         header = safeRaw(Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'messages')));
         expected = Number(data?.num_messages ?? expected) || expected;
+        // An unexpectedly empty first page must not erase an existing backup.
+        if (anchor && rows.length === 0) throw Error('History API returned an empty page for a saved chat; existing checkpoint kept');
       }
       const parseStart = performance.now();
       for (let i = 0; i < rows.length; i++) {
@@ -446,12 +534,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         if (!id) throw Error('A message has no ID; cannot safely verify its order');
         const clean = safeRaw(message);
         if (byId.has(id)) {
-          if (JSON.stringify(byId.get(id)) !== JSON.stringify(clean)) throw Error('Conflicting message content under one ID');
+          if (JSON.stringify(byId.get(id)) !== JSON.stringify(clean))
+            throw Error('Conflicting message content under one ID');
         } else byId.set(id, clean);
+        if (anchor && id === anchor) { anchorFound = true; break; }
         if (i && i % 25 === 0) await sleep(0);
       }
       addPhase('historyParsing', performance.now() - parseStart);
       pages++; first = false;
+      if (anchorFound) { complete = true; break; }
       const oldest = rows.at(-1);
       if (!rows.length || (oldest && Object.hasOwn(oldest, 'prev_id') && !oldest.prev_id) || rows.length < pageSize) {
         complete = true; break;
@@ -461,13 +552,56 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       seenCursors.add(next); lastId = next;
       await sleep(260);
     }
-    const messages = [...byId.values()].reverse(); // API pages return newest first.
-    // Native counts can include deleted and regenerated messages. Reaching
-    // the API's normal pagination end, not equality with that counter,
-    // determines whether the currently available history was read in full.
-    return { messages, header, pages, expected, complete,
-      countWarning: expected && expected !== messages.length ? `Listed ${expected}; API returned ${messages.length}` : null,
-      error: !complete ? 'History page limit reached' : null };
+    if (!complete) throw Error('History exceeded safe page limit; saved checkpoint kept');
+    const fetched = [...byId.values()].reverse(); // API pages are newest-first.
+    const checkedAt = Date.now();
+    if (anchorFound && previous) {
+      const oldIds = new Map(previous.messages.map((row, i) => [String(row.id), i]));
+      const current = [...previous.messages];
+      const added = [];
+      let changedCount = 0;
+      for (const message of fetched) {
+        const index = oldIds.get(String(message.id));
+        if (index === undefined) added.push(message);
+        else if (JSON.stringify(current[index]) !== JSON.stringify(message)) {
+          current[index] = message; changedCount++;
+        }
+      }
+      current.push(...added);
+      return {
+        ...previous, messages: current, header, expected, complete: true, error: null,
+        newestMessageId: String(current.at(-1)?.id || ''), lastCheckedAt: checkedAt,
+        countWarning: expected && expected !== current.length ? `Listed ${expected}; API returned ${current.length}` : null,
+        sync: { mode: 'catch-up', checkedAt, fetchedPages: pages,
+          added: added.length, updated: changedCount, anchorFound: true }
+      };
+    }
+    // The previously saved newest ID disappeared (deleted/regenerated) or
+    // history was never completed. Finish the normal full read, never stitch
+    // mismatched pagination chains together or silently mark an old history
+    // as current. Preserve orphaned checkpoint records separately so nothing
+    // saved locally is erased by a full reconciliation.
+    const fetchedIds = anchor && previous ? new Set(fetched.map(message => String(message.id))) : null;
+    const orphaned = fetchedIds ? previous.messages.filter(message => !fetchedIds.has(String(message.id))) : [];
+    const savedIds = anchor && previous ? new Set(previous.messages.map(message => String(message.id))) : null;
+    const savedOrphans = previous?.orphanedMessages || [];
+    const orphanIds = new Set(fetched.map(message => String(message.id)));
+    const orphanedMessages = [];
+    for (const message of [...savedOrphans, ...orphaned]) {
+      const id = String(message?.id || '');
+      if (!id || orphanIds.has(id)) continue;
+      orphanIds.add(id); orphanedMessages.push(message);
+    }
+    return {
+      messages: fetched, header, pages, expected, complete: true,
+      newestMessageId: String(fetched.at(-1)?.id || ''), lastCheckedAt: checkedAt,
+      orphanedMessages, // not included in the current-history ZIP
+      sync: {mode: anchor ? 'full-reconcile-missing-anchor' : 'initial-full',
+        checkedAt, fetchedPages: pages, added: savedIds ? fetched.filter(m => !savedIds.has(String(m.id))).length : fetched.length,
+        updated: 0, anchorFound: !anchor},
+      countWarning: expected && expected !== fetched.length ? `Listed ${expected}; API returned ${fetched.length}` : null,
+      error: null
+    };
   }
   function wasLegacyCountOnlyMismatch(checkpoint) {
     // v0.2.83 originally called a fully paginated history incomplete when
@@ -485,6 +619,123 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         history.countWarning !== `Listed ${expected}; API returned ${retrieved}`) return false;
     return new Set(history.messages.map(message => String(message?.id || ''))).size === retrieved &&
       history.messages.every(message => message && message.id);
+  }
+  // Research Export read-only state index. SpicyChat already includes a
+  // Rulebook HUD/initial state in some history response headers and per-turn
+  // Rulebook state in some history messages. Preserve the raw messages above;
+  // make these existing fields discoverable without guessing private endpoints.
+  // This only runs inside a manually started Research Export, never on chats.
+  function researchObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+  function researchStorySources(entry, history) {
+    const header = researchObject(history?.header) ? history.header : {};
+    const row = researchObject(entry?.row) ? entry.row : {};
+    const hud = researchObject(header.rulebook_hud) ? header.rulebook_hud :
+      researchObject(row.rulebook_hud) ? row.rulebook_hud : null;
+    const definition = researchObject(hud?.rulebook) ? hud.rulebook :
+      researchObject(header.rulebook) ? header.rulebook :
+      researchObject(row.rulebook) ? row.rulebook : null;
+    const initialState = researchObject(hud?.initial_state) ? hud.initial_state :
+      researchObject(header.rulebook?.initial_state) ? header.rulebook.initial_state : null;
+    return {
+      definition, initialState,
+      definitionSource: researchObject(hud?.rulebook) ? 'history-api.rulebook_hud.rulebook' :
+        researchObject(header.rulebook) ? 'history-api.rulebook' :
+        researchObject(row.rulebook) ? 'conversation-list.rulebook' : 'not-exposed',
+      initialStateSource: researchObject(hud?.initial_state) ? 'history-api.rulebook_hud.initial_state' :
+        researchObject(header.rulebook?.initial_state) ? 'history-api.rulebook.initial_state' : 'not-exposed'
+    };
+  }
+  function researchOocLines(message) {
+    if (message?.role !== 'user' || typeof message.content !== 'string') return [];
+    const matches = [];
+    for (const line of message.content.split(/\r?\n/)) {
+      const leading = /^\s*(\/cmd\b(?::|\s|$)|[[(]?\s*ooc\s*:)/i.exec(line);
+      if (leading) {
+        // Preserve the entire explicit line (up to the index safety cap); the
+        // original untruncated message remains in messages-*.json.
+        matches.push({format:/^\s*\/cmd\b/i.test(line) ? 'slash-cmd' : 'ooc-prefix',
+          text:line.slice(0,16000),textTruncated:line.length>16000});
+      } else {
+        // Some mobile composers insert [OOC: ...] after normal roleplay text
+        // on the same line. Count only explicitly delimited directives, never
+        // ordinary prose merely mentioning the word OOC.
+        const bracketed = /[[(]\s*ooc\s*:\s*([^\]\)]*)[\])]/gi;
+        for (const match of line.matchAll(bracketed)) {
+          matches.push({format:'ooc-inline-bracket',text:match[0].slice(0,16000),
+            textTruncated:match[0].length>16000});
+          if (matches.length>=128) break;
+        }
+      }
+      if (matches.length>=128) break;
+    }
+    return matches;
+  }
+  async function collectResearchStoryData(entry, history) {
+    const messages = Array.isArray(history?.messages) ? history.messages : [];
+    const source = researchStorySources(entry, history);
+    const perMessage = [], journalSnapshots = [], oocDirectives = [];
+    const completeHistory = history?.complete === true && history?.sync?.mode !== 'catch-up-failed';
+    const definition = source.definition ? safeRaw(source.definition) : null;
+    const initialState = source.initialState ? safeRaw(source.initialState) : null;
+    const meterDefinitions = Array.isArray(definition?.meters) ? definition.meters : [];
+    const momentDefinition = meterDefinitions.find(m => m?.id === 'story-moments' ||
+      (m?.journal === true && /story[ -]?moments?/i.test(String(m?.label || '')))) || null;
+    let lastMessageId = null;
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index];
+      const messageId = String(message?.id || '');
+      if (researchObject(message?.rulebook)) {
+        // A snapshot is not necessarily a full, authoritative server state.
+        // Store exactly what the history API exposed for the corresponding turn.
+        const state = safeRaw(message.rulebook);
+        perMessage.push({ messageId, messageNumber: index + 1,
+          createdAt: message.createdAt || null, role: message.role || null, state });
+        lastMessageId = messageId;
+        const meters = researchObject(state.meters) ? state.meters : {};
+        for (const [meterId, meter] of Object.entries(meters)) {
+          if (meterId !== 'story-moments' && !(/story[ -]?moments?/i.test(meterId) && meter?.journal === true)) continue;
+          journalSnapshots.push({ messageId, messageNumber: index + 1,
+            createdAt: message.createdAt || null, meterId, state: safeRaw(meter),
+            journalReceipts: Array.isArray(state.creator?.deltas) ?
+              safeRaw(state.creator.deltas.flatMap(delta => delta?.meter_id === meterId &&
+                Array.isArray(delta.journal_receipts) ? delta.journal_receipts : [])) : [] });
+        }
+      }
+      for (const directive of researchOocLines(message)) {
+        oocDirectives.push({messageId, messageNumber:index+1,
+          createdAt:message.createdAt || null, source:'user-message-text', ...directive});
+      }
+      // Bound the main-thread work for long chats, keeping all output in ZIP.
+      if (index && index % 200 === 0) { ensureNotCancelled(); await sleep(0); }
+    }
+    const rulebookStatus = definition || initialState || perMessage.length ? 'present' : 'not-exposed';
+    const storyStatus = momentDefinition || researchObject(initialState?.meters?.['story-moments']) || journalSnapshots.length
+      ? 'present' : 'not-exposed';
+    return {
+      rulebook: { schema:'ds-research-rulebook-states-v1',conversationId:entry.conversationId,
+        status:rulebookStatus,definitionStatus:definition ? 'present':'not-exposed',
+        definitionSource:source.definitionSource,definition,
+        initialStateStatus:initialState ? 'present':'not-exposed',
+        initialStateSource:source.initialStateSource,initialState,
+        messageStateStatus:perMessage.length ? 'present':'not-exposed',
+        messageStateCount:perMessage.length,latestObservedMessageId:lastMessageId,
+        perMessage,
+        historyComplete:completeHistory,
+        coverage:'Only Rulebook metadata and snapshots exposed in the conversation/history API. No separate private Rulebook endpoint or reconstructed state.' },
+      moments: { schema:'ds-research-story-moments-v1',conversationId:entry.conversationId,
+        status:storyStatus,definition:momentDefinition ? safeRaw(momentDefinition):null,
+        initialState:initialState?.meters?.['story-moments'] || null,
+        snapshots:journalSnapshots,observedSnapshots:journalSnapshots.length,
+        historyComplete:completeHistory,
+        coverage:'Journal snapshots embedded in API messages; missing events are unknown, not proof that no moments occurred.' },
+      ooc: { schema:'ds-research-ooc-directives-v1',conversationId:entry.conversationId,
+        status:oocDirectives.length ? 'found' : completeHistory ? 'no-explicit-directives-found':'history-unavailable-or-stale',
+        source:'explicit-user-message-text',directives:oocDirectives,found:oocDirectives.length,
+        historyComplete:completeHistory,
+        coverage:'Only user message lines explicitly starting with /cmd or OOC:. Native hidden directives and QoL saved templates are not inferred. Full original messages remain in messages-*.json.' }
+    };
   }
   // SpicyChat Memory Manager V2 loads 50 Memories per page. The native
   // "Load More Memories" control passes the last Memory's full ID as last_id.
@@ -557,6 +808,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   // Research Export. One indexed checkpoint and one JSON file per bot; many
   // conversations can reference it without duplicating character definitions.
   const CHARACTER_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
+  // Do not preserve failed API snapshots forever. A transient outage can be
+  // retried after 12h; successful snapshots still retain the 7-day window.
+  const CHARACTER_FAILED_CACHE_MS = 12 * 60 * 60 * 1000;
+  // A 200 with no usable character record is not the same as a transient
+  // network failure. Cache it for a normal week; manual Retry overrides it.
+  const CHARACTER_EMPTY_RECORD_CACHE_MS = CHARACTER_CACHE_MS;
   let characterReadCircuit = null, lorebookReadCircuit = null;
   // One run may reference the same public Lorebook from many bots. Keep a
   // small, run-scoped read-through cache; never retain it after export ends.
@@ -684,7 +941,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   async function collectLinkedLorebook(id) {
     const result = {id,status:'not_exposed',source:'spicychat-lorebook-live-api',fetchedAt:new Date().toISOString(),
-      pages:0,paginationComplete:false,expectedEntries:null,entries:[],metadata:null,error:null};
+      pages:0,paginationComplete:false,paginationStopReason:null,expectedEntries:null,entries:[],metadata:null,error:null};
     if (typeof DS.fetchLorebookArchiveData !== 'function') return result;
     let cursor = 0;
     const seenIds = new Set(), cursors = new Set();
@@ -710,6 +967,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         }
         if (result.expectedEntries !== null && result.entries.length >= result.expectedEntries) {result.paginationComplete=true;break;}
         if (!rows.length || (!added && page>0)) {
+          if (result.expectedEntries !== null && result.entries.length < result.expectedEntries)
+            result.paginationStopReason = !rows.length ? 'early-empty-page' : 'repeated-page-no-new-entries';
           // A short page is not always sufficient evidence of completeness
           // when an explicit total says there are older pages.
           result.paginationComplete = result.expectedEntries === null || result.entries.length >= result.expectedEntries;
@@ -719,12 +978,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         const last=rows.at(-1);
         const priority=last?.priority ?? last?.sortPriority ?? last?.sort_priority;
         const next=(priority === null || priority === undefined || priority === '') ? NaN : Number(priority);
-        if (!Number.isFinite(next) || next===cursor || cursors.has(next)) break;
+        if (!Number.isFinite(next) || next===cursor || cursors.has(next)) {
+          result.paginationStopReason = !Number.isFinite(next) ? 'no-usable-priority-cursor' : 'repeated-priority-cursor';
+          break;
+        }
         cursors.add(next);cursor=next;
         await sleep(350);
       }
       result.status=result.entries.length ? 'present' : result.paginationComplete ? 'empty' : result.status;
-      if (!result.paginationComplete && result.status !== 'not_exposed') result.error='Lorebook pagination incomplete';
+      if (!result.paginationComplete && result.status !== 'not_exposed') {
+        result.paginationStopReason ||= 'page-safety-limit-or-early-stop';
+        result.error = `Lorebook pagination incomplete (${result.paginationStopReason})`;
+      }
     } catch (error) {
       if (cancelled) throw error;
       const http=Number(error?.httpStatus || String(error?.message||'').match(/HTTP\s+(\d{3})/i)?.[1] || 0);
@@ -784,12 +1049,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     if (valid && repairCachedCharacterFields(cached.record)) {
       await withStore('put',cached);
     }
-    const retry = mode==='retry-failed' && (cached?.record?.lastRefreshError||cached?.record?.fetchStatus==='fetch_failed'||cached?.record?.fetchStatus==='restricted'||
+    const staleIncomplete = mode==='reuse' && age >= CHARACTER_FAILED_CACHE_MS &&
+      cached?.record?.fetchStatus === 'present' &&
+      cached?.record?.linkedLorebooks?.some(b => ['restricted','fetch_failed'].includes(b.status) ||
+        (b.status === 'present' && b.paginationComplete === false));
+    const retry = (mode==='retry-failed' || staleIncomplete) && (cached?.record?.lastRefreshError||cached?.record?.fetchStatus==='fetch_failed'||cached?.record?.fetchStatus==='restricted'||
       cached?.record?.linkedLorebooks?.some(b=>['restricted','fetch_failed'].includes(b.status) ||
         (b.status==='present' && b.paginationComplete===false)));
-    if (valid && mode!=='refresh' && !retry && (cached.record.fetchStatus!=='present' || age < CHARACTER_CACHE_MS))
+    const failureCacheMs = cached?.record?.fetchError === 'character-api-empty-record' &&
+      cached?.record?.httpStatus === 200 ? CHARACTER_EMPTY_RECORD_CACHE_MS : CHARACTER_FAILED_CACHE_MS;
+    if (valid && mode!=='refresh' && !retry &&
+        age < (cached.record.fetchStatus === 'present' ? CHARACTER_CACHE_MS : failureCacheMs))
       return cached.record;
-    if (valid && mode==='retry-failed' && cached.record.fetchStatus==='present' && !cached.record.lastRefreshError) {
+    if (valid && (mode==='retry-failed' || staleIncomplete) && cached.record.fetchStatus==='present' && !cached.record.lastRefreshError) {
       // A Lorebook-only retry should NOT refetch the character profile.
       const changed=safeRaw(cached.record);
       for (let i=0;i<changed.linkedLorebooks.length;i++) {
@@ -953,10 +1225,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
   }
   async function downloadPart(entries, partNumber, report) {
-    const blob=await archiveBlob(entries,partNumber,report);
+    const blob=await measure('zipAssemblyTotal',()=>archiveBlob(entries,partNumber,report));
     const filename=`spicychat-research-${runId}-part-${String(partNumber).padStart(3,'0')}.zip`;
-    const after=Date.now();const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.download=filename;a.href=url;a.style.display='none';document.body.append(a);a.click();a.remove();
+    const after=Date.now();
+    // Measure only the synchronous main-thread dispatch separately. The ZIP
+    // worker and permission/download verification waits are not CPU time.
+    const dispatchStart=performance.now();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.download=filename;a.href=url;a.style.display='none';document.body.append(a);
+    try { a.click(); } finally { a.remove(); }
+    const dispatchMs=performance.now()-dispatchStart;
+    addPhase('downloadDispatchSync',dispatchMs);
+    phaseAttribution('downloadDispatchSync',dispatchMs);
     let result={ok:false,status:'download-not-found'};
     for (let i=0;i<40;i++) {
       await sleep(1000);result=await measure('downloadVerification',()=>verifyRequest(filename,blob.size,after));
@@ -966,38 +1246,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     if (!result.ok) throw Error(`Part ${partNumber} download not verified (${result.status}). Check Downloads; the checkpoint remains resumable.`);
     return {filename,bytes:blob.size};
   }
-  async function scanOnly(limit) {
+  async function scanOnly(limit, quick = false) {
     if (running) return;
     running=true;cancelled=false;progressBegin('scan');
-    startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;
+    startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;quickScanButton.disabled=true;
     cancelButton.disabled=false;setLimitDisabled(true);
     try {
       if (!DS.state?.settings?.enabled || !DS.state?.settings?.showBulkChatResearchExport)
         throw Error('Enable Research Export in QoL Settings first.');
       if (typeof DS.fetchConversationListPage !== 'function')throw Error('Conversation reader unavailable');
-      const selection=await discoverSelection(limit);
-      update(selectionNote(selection)+' Start / Resume to export.');
+      // An explicit Scan bots is a real refresh, not just a replay of old
+      // complete scan checkpoints. Start / Resume stays cheap by reusing the
+      // latest saved selection until the user asks for another bot scan.
+      const selection=await discoverSelection(limit, true, quick);
+      update((quick ? 'Quick Scan (older complete bot scans reused): ' : 'Full Scan: ') +
+        selectionNote(selection)+' Start / Resume to export.');
       progressFinish();
     } catch (error) {
       progressStop(error?.message==='cancelled' ? 'Cancelled' : 'Stopped');
       update(error?.message==='cancelled'?'Bot scan cancelled. Completed bot scans are saved for Resume.':
         `Bot scan stopped: ${error?.message||error}. Completed scans remain saved.`);
     } finally {
-      running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;
+      running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;quickScanButton.disabled=false;
       cancelButton.disabled=true;setLimitDisabled(false);
     }
   }
   async function run(limit, fresh = false) {
     runId = crypto.randomUUID().replaceAll('-', ''); // Fresh filenames on each export, even in the same helper tab.
     characterReadCircuit=null;lorebookReadCircuit=null;linkedLorebookRunCache.clear();
-    running=true;cancelled=false;progressBegin('export');archiveWorkerDisabled=false;archiveBackend='not-started';for(const key of Object.keys(phaseMs))delete phaseMs[key];startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
+    running=true;cancelled=false;progressBegin('export');archiveWorkerDisabled=false;archiveBackend='not-started';
+    for (const key of Object.keys(phaseMs)) { delete phaseMs[key]; delete phaseCount[key]; delete phaseMaxMs[key]; }
+    const exportOp = DS.isDiagnosticTraceActive?.('normal') ? DS.diagOperationStart?.('research-export','run-resumable-archive', {
+      trigger: 'user-start', reason: fresh ? 'explicit-fresh-export' : 'resume-or-rebuild-export',
+      phase: 'discover-retrieve-pack-verify', parentOperationId: ''
+    }) : null;
+    let exportOutcome = 'completed';
+    startButton.disabled=true;freshButton.disabled=true;scanButton.disabled=true;quickScanButton.disabled=true;cancelButton.disabled=false;setLimitDisabled(true);
     let selected=[],saved=0;const completed=new Map();let completeCount=0;const memoryStatusCounts={};
     const characterByBot=new Map(),characterPartByBot=new Map(),characterStatusCounts={},characterErrors=[];
     try {
       if (!DS.state?.settings?.enabled || !DS.state?.settings?.showBulkChatResearchExport) throw Error('Enable Research Export in QoL Settings first.');
       if (typeof DS.fetchConversationListPage !== 'function' || typeof DS.fetchChatHistoryPage !== 'function' ||
           typeof DS.researchReadConversationMemories !== 'function') throw Error('Required shared chat or Memory reader is unavailable.');
-      update('Checking download verification permission...');
+      update('Checking Downloads permission (a browser permission prompt can make this wait; it is not ZIP CPU time)...');
       if (!await measure('downloadPermission',()=>DS.requestDownloadPermission?.())) throw Error('Downloads permission is needed to verify that ZIP parts actually saved.');
       if (fresh) {
         update('Starting a fresh download of chat history, native Memories and character metadata...');
@@ -1012,6 +1303,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if (!selected.length) throw Error('No conversations found.');
       update(selectionNote(selection));
       const staged=[];let totalMessages=0,totalMemories=0,failed=0,historyFailed=0,partNumber=1;
+      let rulebookStateChats=0,storyMomentChats=0,oocDirectiveCount=0;
       let memoryAuthFailures=0;
       const remainingFiles = new Map();
       const flush=async () => {
@@ -1021,12 +1313,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           conversationsInThisPart:[...new Set(staged.map(x=>x.conversationId).filter(Boolean))],messagesRead:totalMessages,memoriesRead:totalMemories,
           memoryFailures:failed,historyFailures:historyFailed,historyComplete:completeCount,
           memoryStatuses:{...memoryStatusCounts},
+          storyExport:{rulebookStateChats,storyMomentChats,oocDirectiveCount,
+            coverage:'Only data returned by existing conversation/history APIs and explicit user OOC lines; missing private state is not inferred'},
           characterFilesInThisPart:staged.filter(x=>x.kind==='character').map(x=>x.entry.name),
           characterCompleteness:{uniqueBotsCollected:characterByBot.size,fetchStatuses:{...characterStatusCounts},
-            linkedLorebooksRead:[...characterByBot.values()].reduce((n,c)=>n+c.linkedLorebooks.filter(b=>b.status==='present'||b.status==='empty').length,0),
+            linkedLorebooksRead:[...characterByBot.values()].reduce((n,c)=>n+(c.linkedLorebooks||[]).filter(b=>
+              (b.status==='present'||b.status==='empty') && b.paginationComplete===true).length,0),
             fieldStatuses:[...characterByBot.values()].reduce((sum,c)=>{for(const [key,count] of Object.entries(c.completeness?.fieldStatuses||{}))sum[key]=(sum[key]||0)+count;return sum;},{}),
-            errorCount:characterErrors.length,errorsTruncated:Math.max(0,characterErrors.length-100),
-            errors:characterErrors.slice(-100)},
+            errorCount:characterErrors.length,
+            issueBreakdown:characterErrors.reduce((counts,error)=>{
+              const key=error.scope==='lorebook' && /pagination incomplete/i.test(String(error.reason||''))
+                ? 'lorebook-pagination-incomplete'
+                : error.scope==='character' && error.status==='fetch_failed'
+                  ? 'character-metadata-fetch-failed'
+                  : `${String(error.scope||'other')}:${String(error.status||'unknown')}`;
+              counts[key]=(counts[key]||0)+1;return counts;
+            },{}),
+            errorsTruncated:Math.max(0,characterErrors.length-500),
+            // Keep full actionable per-bot failure details for typical exports,
+            // bounded for extremely large exports. No IDs are sent to Inspector.
+            errors:characterErrors.slice(-500)},
           incompleteConversations:[...new Set(staged.map(x=>x.conversationId).filter(Boolean))].filter(id=>{
             const record=completed.get(id);return record && (!record.historyComplete||record.memoryStatus==='unavailable'||!record.memoryComplete);
           })};
@@ -1040,7 +1346,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           if (remaining > 0) continue; // No chat is complete until every part is verified.
           const row=completed.get(id);
           const old=await withStore('get',id);
-          if (old && row) await withStore('put',{...old,state:row.memoryStatus==='unavailable'||row.memoryStatus==='not-checked'||!row.historyComplete||!row.memoryComplete?'verified-incomplete':'verified',lastVerifiedPart:info.filename});
+          if (old && row) await withStore('put',{...old,
+            history:old.history && row.historyComplete ? {...old.history,
+              lastVerifiedMessageId:String(old.history.messages?.at(-1)?.id||''),
+              lastVerifiedAt:Date.now()} : old.history,
+            state:row.memoryStatus==='unavailable'||row.memoryStatus==='not-checked'||!row.historyComplete||!row.memoryComplete?'verified-incomplete':'verified',lastVerifiedPart:info.filename});
         }
         saved++;staged.length=0;partNumber++;
       };
@@ -1056,25 +1366,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           await withStore('put',checkpoint);
           update(`Reusing saved chat data for ${index+1}/${selected.length}; correcting a message-count warning`);
         }
-        if (checkpoint?.state === 'verified' && checkpoint?.history?.complete &&
-            Array.isArray(checkpoint.history.messages) &&
-            ['retrieved', 'empty-confirmed'].includes(checkpoint?.memory?.status)) {
-          // Rebuild EVERY requested archive from the locally saved verified
-          // records. Download verification only proves an earlier ZIP saved;
-          // it does not mean that file is still on the user's device.
-          update(`Rebuilding ${index+1}/${selected.length} from saved chat data...`);
-        }
+        // Start / Resume always checks the newest history page. A valid
+        // history checkpoint stops pagination at its most recently saved ID;
+        // only Fresh explicitly clears and downloads every old page again.
         let historyError = null;
-        if (!checkpoint?.history?.complete) {
-          try {
-            const history=await measure('historyReadTotal',()=>readHistory(entry));
-            checkpoint={conversationId:entry.conversationId,entry,history,state:'staged',at:Date.now()};
-          } catch (error) {
-            if (cancelled) throw error;
-            historyError=error;
-            // Never claim missing data is a zero-message conversation.
-            checkpoint={conversationId:entry.conversationId,entry,history:{messages:[],header:null,pages:0,
-              expected:entry.expectedMessages,complete:false,error:'History API failed: '+String(error?.status || error?.message || 'unknown').slice(0,120)},
+        const savedHistory = checkpoint?.history;
+        try {
+          const history=await measure('historyReadTotal',()=>readHistory(entry,savedHistory));
+          const sync=history.sync || {};
+          if (sync.mode === 'catch-up') {
+            update(`Caught up conversation ${index+1}/${selected.length}: +${sync.added||0} messages, ${sync.updated||0} refreshed · ${sync.fetchedPages||0} pages checked`);
+          } else if (sync.mode === 'full-reconcile-missing-anchor') {
+            update(`Re-read conversation ${index+1}/${selected.length}: previous latest message no longer exists; saved missing records retained locally`);
+          }
+          checkpoint={...checkpoint,conversationId:entry.conversationId,entry,history,
+            state:'staged',at:Date.now()};
+          await withStore('put',checkpoint);
+        } catch (error) {
+          if (cancelled) throw error;
+          historyError=error;
+          if (savedHistory?.complete && Array.isArray(savedHistory.messages)) {
+            // Never discard a successful earlier snapshot if a catch-up
+            // request fails. Record its stale status in the ZIP metadata,
+            // and retry on the next Start / Resume.
+            checkpoint={...checkpoint,entry,history:{...savedHistory,
+              sync:{mode:'catch-up-failed',checkedAt:Date.now(),error:
+                String(error?.message||error).slice(0,160)}},state:'staged',at:Date.now()};
+            update(`History catch-up failed for ${index+1}/${selected.length}; preserving ${savedHistory.messages.length} previously saved messages`);
+          } else {
+            checkpoint={...checkpoint,conversationId:entry.conversationId,entry,
+              history:{messages:[],header:null,pages:0,expected:entry.expectedMessages,
+                complete:false,error:'History API failed: '+String(error?.status || error?.message || 'unknown').slice(0,120)},
               state:'failed-history',at:Date.now()};
           }
           await withStore('put',checkpoint);
@@ -1088,7 +1410,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           await withStore('put',checkpoint);
         }
         if (historyError) {
-          checkpoint.memory={status:'not-checked',reason:'history-read-failed',items:null};
+          // Catch-up failures must not erase previously saved native Memories.
+          if (!checkpoint.memory) checkpoint.memory={status:'not-checked',reason:'history-read-failed',items:null};
           ++historyFailed;
         }
         const history=checkpoint.history,memory=checkpoint.memory;
@@ -1098,8 +1421,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           failed++;
           if (['auth-unavailable','auth-rejected','access-denied','unexpected-memory-format','invalid-json','not-enabled'].includes(memory.reason)) memoryAuthFailures++;
         }
-        completed.set(entry.conversationId,{conversationId:entry.conversationId,historyComplete:history.complete,memoryStatus:memory.status,memoryComplete:!memoryNeedsResume(memory)});
-        if (history.complete) completeCount++;
+        completed.set(entry.conversationId,{conversationId:entry.conversationId,historyComplete:history.complete && history.sync?.mode!=='catch-up-failed',memoryStatus:memory.status,memoryComplete:!memoryNeedsResume(memory)});
+        if (history.complete && history.sync?.mode!=='catch-up-failed') completeCount++;
         memoryStatusCounts[memory.status]=(memoryStatusCounts[memory.status]||0)+1;
         // One character snapshot/file per unique bot across all archive parts.
         // Each conversation points to its file; a later part may reference an
@@ -1118,6 +1441,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           staged.push({conversationId:null,kind:'character',entry:file});
           partSize+=projected;
         }
+        // These files are derived from already-fetched history/metadata only;
+        // adding them never triggers more network requests or invalidates a
+        // completed history/Memory checkpoint.
+        const storyResearch=await measure('storyStateIndex',()=>collectResearchStoryData(entry,history));
+        if(storyResearch.rulebook.status==='present') rulebookStateChats++;
+        if(storyResearch.moments.status==='present') storyMomentChats++;
+        oocDirectiveCount+=storyResearch.ooc.found;
         // Keep unedited JSON and original message fields, including exact Markdown and timestamps.
         const fileList=[];
         // Conversation-specific API metadata stays intact, while the repeated
@@ -1128,9 +1458,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           conversation:{...entry,row:slimRow},characterFile:characterFile(entry.botId),
           characterArchivePart:characterPartByBot.get(entry.botId),
           history:{expected:history.expected,retrieved:history.messages.length,pages:history.pages,
-            complete:history.complete,error:history.error,countWarning:history.countWarning||null,apiMetadata:history.header},
+            complete:history.complete && history.sync?.mode!=='catch-up-failed',
+            error:history.sync?.mode==='catch-up-failed' ? 'Catch-up API unavailable; saved snapshot reused' : history.error,
+            countWarning:history.countWarning||null,apiMetadata:history.header,
+            newestSavedMessageId:history.newestMessageId||String(history.messages.at(-1)?.id||''),
+            sync:history.sync||null,orphanedCheckpointMessages:history.orphanedMessages?.length||0},
           memoryStatus:memory.status,memoryError:memory.reason||null,
-          memoryPaginationComplete:!memoryNeedsResume(memory)}));
+          memoryPaginationComplete:!memoryNeedsResume(memory),
+          storyResearchFiles:{rulebookStates:'rulebook-states.json',storyMoments:'story-moments.json',
+            oocDirectives:'ooc-directives.json'},
+          storyResearchStatus:{rulebook:storyResearch.rulebook.status,moments:storyResearch.moments.status,
+            ooc:storyResearch.ooc.status,historyComplete:storyResearch.rulebook.historyComplete}}));
+        fileList.push(await zippedEntry(`conversations/${entry.conversationId}/rulebook-states.json`,storyResearch.rulebook));
+        fileList.push(await zippedEntry(`conversations/${entry.conversationId}/story-moments.json`,storyResearch.moments));
+        fileList.push(await zippedEntry(`conversations/${entry.conversationId}/ooc-directives.json`,storyResearch.ooc));
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/memories.json`,{conversationId:entry.conversationId,
           source:'spicychat-native-memories',status:memory.status,reason:memory.reason||null,httpStatus:memory.httpStatus||null,
           paginationComplete:!memoryNeedsResume(memory),pages:memory.pages|| (Array.isArray(memory.items)&&memory.items.length ? 1 : 0),
@@ -1149,6 +1490,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         if(!history.messages.length){
           const packed=await zippedMessages(entry.conversationId,[],chunkIndex);
           fileList.push(...packed.entries);
+        }
+        // A deleted/regenerated latest message requires a full live-history
+        // reconcile. Preserve any previously exported records that disappeared
+        // from that API snapshot as separate, clearly historical ZIP entries.
+        // Never mix them with the current conversation timeline or silently
+        // discard them from the local checkpoint.
+        const orphaned = Array.isArray(history.orphanedMessages) ? history.orphanedMessages : [];
+        for (let offset=0;offset<orphaned.length;offset+=150) {
+          ensureNotCancelled();
+          fileList.push(await zippedEntry(
+            `conversations/${entry.conversationId}/previously-saved-unavailable-${String(1+Math.floor(offset/150)).padStart(4,'0')}.json`,
+            {conversationId:entry.conversationId,status:'previously-saved-not-in-current-api-history',
+             note:'Historical backup copy only. Do not treat these records as currently available messages.',
+             messages:orphaned.slice(offset,offset+150)}));
+          await sleep(0);
         }
         remainingFiles.set(entry.conversationId, fileList.length);
         for (const file of fileList) {
@@ -1171,8 +1527,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       await flush();
       progressFinish();
       renderPhaseTimings();
-      update(`Export finished (${selection.discovery.scannedBots} bots, ${selected.length} conversations): ${characterByBot.size} character records, ${totalMessages} messages, ${totalMemories} native Memories, ${saved} verified ZIP parts. ${characterErrors.length} character/Lorebook issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.`);
+      const failedCharacters=characterStatusCounts.fetch_failed||0;
+      const incompleteLorebooks=characterErrors.filter(error=>error.scope==='lorebook' &&
+        /pagination incomplete/i.test(String(error.reason||''))).length;
+      update(`Export finished (${selection.discovery.scannedBots} bots, ${selected.length} conversations): ${characterByBot.size} character records, ${totalMessages} messages, ${totalMemories} native Memories, Rulebook data for ${rulebookStateChats} chats, Story Moments data for ${storyMomentChats}, ${oocDirectiveCount} explicit OOC directives, ${saved} verified ZIP parts. ${failedCharacters} character fetch failures, ${incompleteLorebooks} incomplete Lorebooks, ${characterErrors.length} total metadata issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.`);
     } catch (error) {
+      exportOutcome = error?.message === 'cancelled' ? 'cancelled' : 'failed';
       progressStop(error?.message==='cancelled' ? 'Cancelled' : 'Stopped');
       update(error?.message==='cancelled' ? `Stopped. ${saved} archive parts verified; completed conversations remain locally checkpointed.` :
         `Stopped: ${error?.message||error}. ${saved} archive parts verified. Local checkpoints are preserved for Resume.`);
@@ -1183,7 +1543,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if (pendingProgress) {applyProgress(pendingProgress);pendingProgress='';}
       renderPhaseTimings();
       console.info('[DragonScript Research Export] Archive backend:',archiveBackend,'Phase timings (ms; API phases include network pacing):', {...phaseMs});
-      running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;cancelButton.disabled=true;setLimitDisabled(false);
+      if (exportOp) DS.diagOperationEnd?.(exportOp, {
+        outcome: exportOutcome, counts: { scanned: selected.length, changed: completed.size, skipped: selected.length - completed.size },
+        meta: { archiveBackend, verifiedParts: saved,
+          phases: Object.fromEntries(Object.entries(phaseMs).map(([name, ms]) => [name, {
+            wallMs: Math.round(ms), count: phaseCount[name] || 0,
+            maxWallMs: Math.round(phaseMaxMs[name] || 0)
+          }])), activeMeasurement: 'phase-wall-includes-api-and-download-waits' }
+      });
+      running=false;startButton.disabled=false;freshButton.disabled=false;scanButton.disabled=false;quickScanButton.disabled=false;cancelButton.disabled=true;setLimitDisabled(false);
     }
   }
   function setLimitDisabled(busy) {
@@ -1203,14 +1571,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     try { limit=chosenLimit(); } catch (error) { update(error.message); return; }
     if (limit==='all' && !window.confirm('Scan all available bots and their conversations? This may take a long time and create many ZIP files. You can cancel and resume.')) return;
     if (fresh && !window.confirm('Download all selected conversations, native Memories and character metadata again? This clears only the research exporter’s local checkpoints. Previously downloaded ZIP files are not removed.')) return;
-    void (action==='scan' ? scanOnly(limit) : run(limit,fresh));
+    void (action==='scan' ? scanOnly(limit, false) : action==='quick-scan' ? scanOnly(limit, true) : run(limit,fresh));
   }
   function render() {
     if(document.getElementById('ds-bulk-research-panel')) return;
     const panel=document.createElement('section');panel.id='ds-bulk-research-panel';
     panel.style.cssText='position:fixed;z-index:2147483000;right:10px;top:70px;width:min(540px,calc(100vw - 20px));box-sizing:border-box;max-height:80vh;overflow-y:auto;overflow-x:hidden;padding:12px 14px;background:#181a22;color:#f5f5f5;border:1px solid #777;border-radius:12px;box-shadow:0 5px 35px #000a;font:13px/1.4 sans-serif';
     const title=document.createElement('h3');title.textContent='Bulk Chat, Memory & Character Research Export';title.style.cssText='margin:0 0 6px;font-size:17px;line-height:1.3';panel.append(title);
-    const hint=document.createElement('p');hint.textContent='Export every chat, native Memory and accessible character data once per unique bot, including permitted linked Lorebooks. ZIPs split at 300 MB. Character records are read-only and can be resumed.';hint.style.cssText='margin:0 0 8px';panel.append(hint);
+    const hint=document.createElement('p');hint.textContent='Start / Resume checks each chat for new messages and reuses saved histories. Quick scan refreshes the bot list and checks the newest 120 known bots plus newly discovered bots; older per-bot lists are reused and may miss new chats. Scan bots performs the exhaustive check. Fresh clears checkpoints and re-downloads all histories. Memories and Lorebooks are handled separately.';hint.style.cssText='margin:0 0 8px';panel.append(hint);
     const selectors=document.createElement('div');selectors.style.cssText='display:flex;align-items:center;gap:12px;flex-wrap:wrap';
     const label=document.createElement('label');label.textContent='Recent bots to export ';label.style.whiteSpace='nowrap';
     limitInput=document.createElement('input');limitInput.type='number';limitInput.min='1';limitInput.step='1';limitInput.value=String(DEFAULT_BOTS);limitInput.style.cssText='width:65px;color:black';label.append(limitInput);selectors.append(label);
@@ -1228,12 +1596,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
 
     const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;margin:9px 0;max-width:100%;white-space:nowrap;scrollbar-width:thin';
     startButton=document.createElement('button');startButton.textContent='Start / Resume';
-    scanButton=document.createElement('button');scanButton.textContent='Scan bots';scanButton.title='Scan selected bots for additional conversations';
+    scanButton=document.createElement('button');scanButton.textContent='Scan bots';scanButton.title='Exhaustive bot scan: recheck every selected bot for additional conversations';
+    quickScanButton=document.createElement('button');quickScanButton.textContent='Quick scan';quickScanButton.title='Refresh global bot list and newest 120 known bots; reuse older per-bot scans, which can miss new older-bot chats';
     freshButton=document.createElement('button');freshButton.textContent='Fresh';freshButton.title='Download all chats, Memories and character metadata again, clearing only research checkpoints';freshButton.setAttribute('aria-label','Download fresh');
     cancelButton=document.createElement('button');cancelButton.textContent='Cancel';cancelButton.disabled=true;
     const close=document.createElement('button');close.textContent='Close';
-    for(const b of [startButton,scanButton,freshButton,cancelButton,close]) b.style.cssText='flex:0 0 auto;padding:6px 6px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:nowrap;font:12px sans-serif';
-    buttons.append(startButton,scanButton,freshButton,cancelButton,close);panel.append(buttons);
+    // Restore the previous scan scope before accepting Start / Resume.
+    // Without this guard the UI defaults to 50 after a reload, even if the
+    // saved checkpoint covered thousands of bots or All bots.
+    startButton.disabled=true;scanButton.disabled=true;quickScanButton.disabled=true;freshButton.disabled=true;
+    for(const b of [startButton,quickScanButton,scanButton,freshButton,cancelButton,close]) b.style.cssText='flex:0 0 auto;padding:6px 6px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:nowrap;font:12px sans-serif';
+    buttons.append(startButton,quickScanButton,scanButton,freshButton,cancelButton,close);panel.append(buttons);
     const progressBox=document.createElement('div');
     progressBox.style.cssText='padding:8px 0;margin:4px 0 8px;border-top:1px solid #3b4259;border-bottom:1px solid #3b4259';
     progressTitle=document.createElement('div');progressTitle.textContent='Ready · 3 steps';
@@ -1250,14 +1623,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     phaseTimingsLabel.style.cssText='opacity:.72;font-size:11px;overflow-wrap:anywhere;margin-top:5px';
     phaseTimingsLabel.textContent='Phase timings appear after export work completes';
     progressBox.append(progressTitle,track,progressEta,progressDetail,phaseTimingsLabel);panel.append(progressBox);
-    log=document.createElement('pre');log.textContent='Ready. Check that QoL Settings has Research Export enabled.';
+    log=document.createElement('pre');log.textContent='Loading saved Research Export selection…';
     log.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;font:12px/1.5 monospace';log.setAttribute('role','status');panel.append(log);
     startButton.addEventListener('click',()=>launch('export'));
     scanButton.addEventListener('click',()=>launch('scan'));
+    quickScanButton.addEventListener('click',()=>launch('quick-scan'));
     freshButton.addEventListener('click',()=>launch('export',true));
     cancelButton.addEventListener('click',()=>{cancelled=true;cancelButton.disabled=true;stopArchiveWorker('cancelled');update('Stopping export; local checkpoints are preserved...');});
     close.addEventListener('click',()=>{if(running){update('Cancel the export before closing.');return;}panel.remove();});
     document.documentElement.append(panel);
+    setLimitDisabled(true);
+    // This is a single IndexedDB read on panel creation, not polling or a
+    // background scan. If no completed selection exists, recover the scope
+    // of an interrupted bot discovery from its checkpoint instead.
+    void (async () => {
+      try {
+        const selection = await withStore('get','__pilot_selection__');
+        const savedScan = selection?.limit == null ? await withStore('get','__recent_bot_scan__') : null;
+        if (!panel.isConnected) return;
+        const priorLimit = selection?.limit ?? savedScan?.limit;
+        if (priorLimit === 'all') allBotsInput.checked = true;
+        else if (Number.isSafeInteger(priorLimit) && priorLimit > 0) limitInput.value = String(priorLimit);
+        setLimitDisabled(false);
+        const count = Array.isArray(selection?.entries) ? selection.entries.length : null;
+        applyProgress(count !== null
+          ? `Restored selection: ${count} conversations. Start / Resume checks new replies; Scan bots discovers new conversations.`
+          : 'Ready. Start / Resume uses saved checkpoints; Scan bots discovers new conversations.');
+        startButton.disabled=false;scanButton.disabled=false;quickScanButton.disabled=false;freshButton.disabled=false;
+      } catch (error) {
+        if (!panel.isConnected) return;
+        applyProgress('Could not read saved Research Export checkpoints. Start and Fresh are disabled to avoid changing data. Check browser storage and reopen the exporter.');
+      }
+    })();
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',render,{once:true});else render();
 })();

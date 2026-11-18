@@ -11,7 +11,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.runCritical = async function runCritical() {
     if (DS.isQolPausedForTab?.()) return;
     const passToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "critical-pass", {
-      trigger: String(DS.state?.lastRunTrigger || "").slice(0, 120),
+      trigger: String(DS.state?.lastRunTrigger || "scheduled-runtime"),
+      reason: "critical-route-and-dom-reconciliation",
+      phase: "critical-feature-dispatch",
       parentOperationId: ""
     }) : null;
     if (laneState.criticalRunning) {
@@ -25,6 +27,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try {
       const settings = DS.state?.settings || {};
+      if (settings.enabled !== false && DS.nativeMobileChatShellUnavailable?.()) {
+        // A SpicyChat-native failure is not a QoL recovery opportunity. Avoid
+        // piling optional DOM modifications on an unmounted chat; the same
+        // existing scheduler resumes them when the native composer appears.
+        return;
+      }
 
       // A dedicated Research Export tab must not run /chats import,
       // card reconciliation or cosmetic feature passes in the foreground.

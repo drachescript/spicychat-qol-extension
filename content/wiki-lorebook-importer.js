@@ -693,10 +693,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const load = [...(root?.querySelectorAll("button[type='button']") || [])].find(button =>
         /^load more(?: entries)?$/i.test(textOf(button, 80)) && button.offsetParent !== null
       );
-      if (!load) throw new Error(`Only ${rows.length}/${expected} existing entries are loaded. No import started to avoid duplicates.`);
+      const sentinel = !load ? root?.querySelector("[data-testid='EntriesListServer-Sentinel']") : null;
+      if (!load && (!sentinel?.isConnected || sentinel.closest("[data-testid='EntriesListServer']") !== root)) {
+        throw new Error(`Only ${rows.length}/${expected} existing entries are loaded. Native pagination is unavailable; no import started to avoid duplicates.`);
+      }
       const previous = rows.length;
       onProgress?.({ loadingExisting: true, current: previous, totalExisting: expected, completed: 0 });
-      if (!load.disabled) load.click();
+      if (load && !load.disabled) load.click();
+      else if (sentinel) {
+        // SpicyChat replaced Load More with an intersection sentinel. Advance
+        // its own list, never assume the first 100 rows are the full book.
+        sentinel.scrollIntoView({ behavior: "auto", block: "end", inline: "nearest" });
+      }
       const deadline = Date.now() + 20000;
       while (existingEntryRows().length <= previous) {
         if (operation.cancelled) return false;

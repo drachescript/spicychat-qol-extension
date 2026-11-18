@@ -26,11 +26,12 @@ concurrency:
 jobs:
   release:
     name: Build and publish stable release
+    # Validated push builds and repair-dispatched dev builds may publish stable releases.
     if: >-
       github.event_name != 'workflow_run' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push' &&
+        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
         github.event.workflow_run.head_branch == 'main'
       )
     runs-on: ubuntu-latest
@@ -187,6 +188,16 @@ jobs:
           echo "Version: ${{ steps.release.outputs.version }}"
           echo "Publish: ${{ steps.release.outputs.publish }}"
           echo "Reason: ${{ steps.release.outputs.reason }}"
+
+      - name: Test split/conditional background imports
+        run: python3 build/test_background_imports.py
+
+      - name: Test audited automatic module registration
+        run: python3 build/test_sync_feature_asset_ownership.py
+
+      - name: Synchronize audited feature asset ownership
+        if: steps.release.outputs.publish == 'true'
+        run: python3 build/sync-feature-asset-ownership.py
 
       - name: Verify Full modular build metadata
         if: steps.release.outputs.publish == 'true'

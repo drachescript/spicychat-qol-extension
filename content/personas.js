@@ -673,7 +673,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const name = cleanPersonaName(nameField.value || "");
     const description = String(highlightField?.value || "").trim();
     if (!name) return null;
-    const op = DS.diagOperationStart?.("personas", "capture-edit", { personaId: id });
+    const op = DS.diagOperationStart?.('personas', 'capture-editor-fields', {
+      trigger: 'persona-editor-change', reason: 'preserve-visible-persona-locally',
+      phase: 'capture-and-deduplicate', parentOperationId: ''
+    });
 
     const preview = form.querySelector("img[src]");
     const avatar = String(preview?.currentSrc || preview?.src || "");
@@ -718,14 +721,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ]) || [];
       await DS.savePersonas?.(next);
     }
-    DS.diagOperationEnd?.(op, { outcome: changed ? "updated" : "unchanged", hasText: !!nextDescription, hasLocalAvatar: !!avatarDataUrl });
+    DS.diagOperationEnd?.(op, { outcome: changed ? 'updated' : 'unchanged',
+      counts: { scanned: 1, changed: changed ? 1 : 0, skipped: changed ? 0 : 1 },
+      meta: { hasText: !!nextDescription, hasLocalAvatar: !!avatarDataUrl } });
     return nextPersona;
   };
 
   DS.scanPersonasFromPage = async function scanPersonasFromPage() {
     const { settings } = DS.state;
     if (!settings.enabled || !settings.savePersonasFromPages) return;
-    const op = DS.diagOperationStart?.("personas", "scan-page", { route: location.pathname.startsWith("/personas") ? "personas" : "picker" });
+    const op = DS.diagOperationStart?.('personas', 'scan-visible-personas', {
+      trigger: location.pathname.startsWith('/personas') ? 'persona-page-navigation' : 'native-persona-picker-change',
+      reason: 'synchronize-locally-visible-personas', phase: 'scan-and-compare'
+    });
 
     let found = [];
     const onPersonasPage =
@@ -750,7 +758,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (removedBadSavedPersonas) {
         await DS.savePersonas(DS.cleanPersonas(cleanedExisting));
       }
-      DS.diagOperationEnd?.(op, { outcome: removedBadSavedPersonas ? "cleaned" : "empty", found: 0, saved: cleanedExisting.length });
+      DS.diagOperationEnd?.(op, { outcome: removedBadSavedPersonas ? 'updated' : 'unchanged',
+        counts: { scanned: 0, changed: removedBadSavedPersonas ? 1 : 0, skipped: cleanedExisting.length } });
       return;
     }
 
@@ -802,13 +811,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     );
 
     if (hash === DS.state.lastPersonaSaveHash) {
-      DS.diagOperationEnd?.(op, { outcome: "unchanged", found: found.length, saved: next.length });
+      DS.diagOperationEnd?.(op, { outcome: 'unchanged',
+        counts: { scanned: found.length, changed: 0, skipped: found.length },
+        meta: { retained: next.length } });
       return;
     }
 
     DS.state.lastPersonaSaveHash = hash;
     await DS.savePersonas(next);
-    DS.diagOperationEnd?.(op, { outcome: "updated", found: found.length, saved: next.length });
+    DS.diagOperationEnd?.(op, { outcome: 'updated',
+      counts: { scanned: found.length, changed: found.length, skipped: 0 }, meta: { retained: next.length } });
   };
 
   DS.acceptPersonaChangeModal = function acceptPersonaChangeModal() {
