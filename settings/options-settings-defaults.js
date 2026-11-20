@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
   tabCleanupProtectPinnedOnClose: true,
 
   autoTags: false,
+  showTagExplanations: false,
   enableTagAliases: false,
   tagAliasRules: "",
   tagAliasShowDisplay: true,
@@ -310,6 +311,8 @@ const DEFAULT_SETTINGS = {
   favoriteBotFolderFilter: "all",
   favoriteBotCreatorFilter: "",
   showLaterFavoritesTab: false,
+  laterPageHideOpenedBots: false,
+  laterPageHideBlockedBots: false,
   favoriteBotStateFilter: "all",
   showLaterBotButtons: false,
   enableSavedListsOverlay: false,

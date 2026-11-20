@@ -286,6 +286,7 @@ setupSettingsToast();
 setupSettingDependencies();
 setupPlatformCompatibility();
 setupAccountSyncFoundation();
+setupGithubBackupFoundation();
 setupFeaturesIndex();
 setupMessageQuickActionGroupToggle();
 setupPageIntros();

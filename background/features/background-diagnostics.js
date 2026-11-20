@@ -57,6 +57,21 @@ function qolDiagnosticHasSubscribers(level = "normal") {
   return false;
 }
 
+// A single tab forwards global background events to Inspector. Otherwise
+// every open chat and each helper tab amplifies the same worker events.
+function qolDiagnosticPrimaryTab(level = "normal") {
+  const needed = qolDiagnosticLevelRank(level);
+  let winner = null;
+  for (const [tabId, sub] of qolDiagnosticSubscribers) {
+    if (!sub?.active || sub.helper || qolDiagnosticLevelRank(sub.traceLevel) < needed) continue;
+    if (!winner || (sub.tabActive && !winner.sub.tabActive) ||
+        (sub.tabActive === winner.sub.tabActive && sub.subscribedAt > winner.sub.subscribedAt)) {
+      winner = { tabId, sub };
+    }
+  }
+  return winner?.tabId || 0;
+}
+
 function qolDiagnosticForwardToTab(tabId, event) {
   try {
     chrome.tabs.sendMessage(Number(tabId), { type: "DS_QOL_DIAGNOSTIC_BACKGROUND_EVENT", event }, () => {
@@ -70,6 +85,7 @@ function qolBackgroundTrace(type, feature = "background", meta = {}, options = {
   if (!qolDiagnosticHasSubscribers(level)) return null;
   const row = {
     seq: ++qolDiagnosticBackgroundSeq,
+    streamId: qolDiagnosticBackgroundStreamId,
     ts: Date.now(),
     type: String(type || "background-event").slice(0, 80),
     feature: String(feature || "background").slice(0, 80),
@@ -79,9 +95,11 @@ function qolBackgroundTrace(type, feature = "background", meta = {}, options = {
   };
   qolDiagnosticBackgroundBuffer.push(row);
   if (qolDiagnosticBackgroundBuffer.length > QOL_DIAG_BACKGROUND_BUFFER_MAX) qolDiagnosticBackgroundBuffer.splice(0, qolDiagnosticBackgroundBuffer.length - QOL_DIAG_BACKGROUND_BUFFER_MAX);
-  const needed = qolDiagnosticLevelRank(level);
-  for (const [tabId, sub] of qolDiagnosticSubscribers.entries()) {
-    if (!sub?.active || qolDiagnosticLevelRank(sub.traceLevel) < needed) continue;
+  // Emit each sequence number to just one non-helper content page. Even if
+  // many tabs are recording, background work is global rather than per-tab.
+  const tabId = qolDiagnosticPrimaryTab(level);
+  if (tabId && row.seq > qolDiagnosticBackgroundForwardedThrough) {
+    qolDiagnosticBackgroundForwardedThrough = row.seq;
     qolDiagnosticForwardToTab(tabId, row);
   }
   return row;
@@ -168,22 +186,36 @@ function qolBackgroundNetworkEnd(token, result = {}) {
 function qolDiagnosticSubscribe(sender, message) {
   const tabId = Number(sender?.tab?.id || 0);
   if (!tabId) return { ok: false, error: "No sender tab." };
-  if (message?.active === false) {
-    qolFlushNetworkSummaries(true);
+  const streamId = qolDiagnosticBackgroundStreamId;
+  if (message?.active === false || message?.helper === true) {
+    // Flush on the final active subscriber BEFORE unregistering it.
+    if (qolDiagnosticSubscribers.size === 1 && qolDiagnosticSubscribers.has(tabId)) qolFlushNetworkSummaries(true);
     qolDiagnosticSubscribers.delete(tabId);
-    return { ok: true, active: false, latestSeq: qolDiagnosticBackgroundSeq };
+    return { ok: true, active: false, streamId, latestSeq: qolDiagnosticBackgroundSeq };
   }
   const traceLevel = String(message?.traceLevel || "normal") === "deep" ? "deep" : "normal";
-  const afterSeq = Math.max(0, Number(message?.afterSeq || 0));
+  const sameStream = message?.backgroundStreamId === streamId;
+  const afterSeq = sameStream ? Math.max(0, Number(message?.afterSeq || 0)) : 0;
   qolDiagnosticSubscribers.set(tabId, {
-    active: true,
-    traceLevel,
+    active: true, traceLevel, helper: false,
+    tabActive: sender?.tab?.active === true,
     pageSessionId: String(message?.pageSessionId || "").slice(0, 120),
     subscribedAt: Date.now()
   });
-  const replay = qolDiagnosticBackgroundBuffer.filter(row => Number(row.seq || 0) > afterSeq && qolDiagnosticLevelRank(row.level) <= qolDiagnosticLevelRank(traceLevel)).slice(-QOL_DIAG_BACKGROUND_BUFFER_MAX);
-  for (const row of replay) qolDiagnosticForwardToTab(tabId, row);
-  return { ok: true, active: true, traceLevel, replayed: replay.length, latestSeq: qolDiagnosticBackgroundSeq };
+  // Replay only events which have not ALREADY been handed to another tab.
+  // A new page with afterSeq=0 must not replay the same 5,000 events again.
+  const replay = [];
+  if (qolDiagnosticPrimaryTab(traceLevel) === tabId) {
+    const from = Math.max(afterSeq, qolDiagnosticBackgroundForwardedThrough);
+    for (const row of qolDiagnosticBackgroundBuffer) {
+      if (row.seq > from && qolDiagnosticLevelRank(row.level) <= qolDiagnosticLevelRank(traceLevel)) replay.push(row);
+    }
+    for (const row of replay) {
+      qolDiagnosticBackgroundForwardedThrough = row.seq;
+      qolDiagnosticForwardToTab(tabId, row);
+    }
+  }
+  return { ok: true, active: true, traceLevel, streamId, replayed: replay.length, latestSeq: qolDiagnosticBackgroundSeq };
 }
 
 function grantNextBackgroundJob() {

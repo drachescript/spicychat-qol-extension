@@ -15,6 +15,8 @@ import sys
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
+
+from build_extension import FIREFOX_SHARED_BACKGROUND_SCRIPTS, allowed_package_relative_path
 from urllib.parse import urlsplit, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,9 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
             problems.append('corrupt ZIP member: ' + bad_member)
         names = archive.namelist()
         available = set(names)
+        for name in names:
+            if not allowed_package_relative_path(Path(name)):
+                problems.append(f'non-runtime file in extension ZIP: {name}')
         if len(names) != len(available):
             problems.append('duplicate ZIP entries')
 
@@ -137,10 +142,11 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
             declared = manifest.get('background', {}).get('scripts')
             # Firefox loads the shared sync service after the worker imports.
             # Keep this in sync with firefox_manifest() in build_extension.py.
-            expected_firefox_scripts = import_order + ['shared/sync-service.js']
+            expected_firefox_scripts = import_order + list(FIREFOX_SHARED_BACKGROUND_SCRIPTS)
             if declared != expected_firefox_scripts:
                 problems.append(f'Firefox background scripts wrong/order mismatch: {declared!r} != {expected_firefox_scripts!r}')
-            require('shared/sync-service.js', 'Firefox background script')
+            for shared_script in FIREFOX_SHARED_BACKGROUND_SCRIPTS:
+                require(shared_script, 'Firefox background script')
             if not manifest.get('browser_specific_settings', {}).get('gecko', {}).get('id'):
                 problems.append('Firefox Gecko extension ID missing')
         else:

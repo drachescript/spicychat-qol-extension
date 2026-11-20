@@ -969,6 +969,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.collectCards = function collectCards() {
+    // Chat message DOM often contains dozens of /chat/ and /chatbot/ links.
+    // Those are NOT listing cards; walking their ancestors can become an
+    // expensive full-chat traversal. Chat-list discovery still works on /chats.
+    if (DS.getPageState?.()?.isSingleChatPage) return [];
     const started = cardTimingStart();
     const revision = Number(DS.state?.domRevision || 0);
     const url = location.href;

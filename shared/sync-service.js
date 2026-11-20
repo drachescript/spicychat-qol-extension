@@ -339,7 +339,17 @@
     return { settings, index, localRevision: Number(first[REVISION_KEY] || 0) || 0 };
   }
 
+  // GitHub-only is a separate provider. Cloud remains configured and its
+  // existing backups are untouched, but automatic Cloud writes pause here.
+  async function cloudProviderSelected() {
+    const selection = await storageGet(['dsGithubBackupPrefsV1']);
+    return selection.dsGithubBackupPrefsV1?.provider !== 'github';
+  }
   async function ensureSyncAlarm() {
+    if (!await cloudProviderSelected()) {
+      try { await chrome.alarms.clear(ALARM_NAME); } catch {}
+      return;
+    }
     const { state, auth, prefs } = await getSyncContext();
     if (!state.accountId || !auth.token || state.paused || state.automatic === false ||
       (prefs.mode === "manual" && !anyListsActive(prefs)) ||
@@ -876,6 +886,7 @@
   }
 
   async function syncNowCore({ forceFullRecovery = false, explicit = false } = {}) {
+    if (!await cloudProviderSelected()) return { ok: true, skipped: true, reason: 'GitHub-only provider selected' };
     // A bulk update can write lists repeatedly for minutes. Wait for its
     // quiet period rather than merging partially updated lists mid-operation.
     if (!explicit) {
@@ -934,6 +945,8 @@
   }
 
   async function syncNowInternal(options = {}) {
+    // GitHub-only pauses automatic Cloud activity; explicit Cloud controls still work.
+    if (!options.explicit && !(await cloudProviderSelected())) return { ok:true, skipped:true, reason:"github_only" };
     // Sync calls are serialized through queued(). A receipt is published only
     // after the entire settings + list synchronization succeeds.
     const receipt = { at: 0, downloaded: {}, uploaded: {}, localTotals: {},
@@ -1282,6 +1295,7 @@
       pendingLocalDeleted.clear();
       queued(async () => {
         const { state, prefs } = await getSyncContext();
+        if (!await cloudProviderSelected()) return;
         if (state.paused) {
           // Keep lastLocalStorageRevision behind while paused so Resume can
           // detect that local settings changed and perform a recovery sync.
@@ -1316,6 +1330,7 @@
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
+    if (changes.dsGithubBackupPrefsV1) ensureSyncAlarm().catch(() => {});
 
     let localRevision = Number(changes?.[REVISION_KEY]?.newValue || 0) || 0;
     let sawLocalSettingChange = false;

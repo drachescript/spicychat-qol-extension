@@ -20,3 +20,22 @@ try {
   console.warn("[SpicyChat QoL] Sync service failed to load", error);
 }
 }
+
+// GitHub App backup is opt-in and never replaces the existing Cloud loader.
+function registerQolGithubBackupBootstrap() {
+  try {
+    if (typeof importScripts === 'function') {
+      importScripts('shared/github-backup-service.js');
+    } else if (typeof document !== 'undefined') {
+      const alreadyLoaded = chrome.runtime.getManifest?.()?.background?.scripts?.includes('shared/github-backup-service.js');
+      if (alreadyLoaded) return;
+      const script = document.createElement('script');
+      script.src = chrome.runtime.getURL('shared/github-backup-service.js');
+      script.async = false;
+      script.onerror = () => console.warn('[DragonScript QoL] Optional GitHub backup module failed to load');
+      (document.head || document.documentElement).appendChild(script);
+    }
+  } catch (error) {
+    console.warn('[DragonScript QoL] Experimental GitHub backup unavailable', error);
+  }
+}

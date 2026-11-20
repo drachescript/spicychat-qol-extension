@@ -175,6 +175,9 @@ const QOL_DIAG_BACKGROUND_BUFFER_MAX = 5000;
 const qolDiagnosticSubscribers = new Map();
 const qolDiagnosticBackgroundBuffer = [];
 let qolDiagnosticBackgroundSeq = 0;
+// One authoritative QoL background stream per service-worker lifetime.
+const qolDiagnosticBackgroundStreamId = `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+let qolDiagnosticBackgroundForwardedThrough = 0;
 
 
 

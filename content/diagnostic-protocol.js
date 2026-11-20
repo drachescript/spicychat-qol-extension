@@ -105,6 +105,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     settingsListenerInstalled: false,
     backgroundListenerInstalled: false,
     backgroundLastSeq: 0,
+    backgroundStreamId: "",
+    backgroundSeen: new Map(),
+    lastBackgroundSubscription: "",
+    lastBackgroundSubscriptionAt: 0,
+    lastRequestSignature: "",
+    lastRequestAt: 0,
     domSummaryTimer: null,
     domSummary: null,
     performanceMode: "",
@@ -428,14 +434,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } catch {}
   }
 
+  function subscribeBackgroundTrace(shouldRecord = false, force = false) {
+    // Helper tabs may still report their own page-level diagnostics, but they
+    // must never relay global background history into the Inspector recorder.
+    const helper = !!workerContext().worker || new URLSearchParams(location.search).get("ds-research-export") === "1";
+    if (helper) shouldRecord = false;
+    const level = shouldRecord ? v2State.traceLevel : "off";
+    const key = shouldRecord ? `on:${level}` : "off";
+    const now = Date.now();
+    // Inspector announces v1 + v2 concurrently. Avoid duplicate subscriptions,
+    // while allowing a low-frequency refresh if a background worker restarted.
+    if (!force && key === v2State.lastBackgroundSubscription &&
+        now - v2State.lastBackgroundSubscriptionAt < PRESENCE_INTERVAL_MS) return;
+    // Always unsubscribe once on a new page/session, even when tracing starts
+    // OFF. A tab ID may have been reused by a navigated helper page and the
+    // worker can still hold its prior content-page subscription.
+    if (!shouldRecord && v2State.lastBackgroundSubscription === "off" && !force) return;
+    try {
+      chrome.runtime?.sendMessage?.({
+        type: "DS_QOL_DIAGNOSTIC_SUBSCRIBE", active: !!shouldRecord,
+        pageSessionId: sessionId, helper,
+        ...(shouldRecord ? { traceLevel: level,
+          backgroundStreamId: v2State.backgroundStreamId,
+          afterSeq: Number(v2State.backgroundLastSeq || 0) } : {})
+      }, response => {
+        try { void chrome.runtime?.lastError; } catch {}
+        if (response?.streamId && response.streamId !== v2State.backgroundStreamId) {
+          v2State.backgroundStreamId = String(response.streamId);
+          v2State.backgroundLastSeq = 0;
+          v2State.backgroundSeen.clear();
+        }
+      });
+      v2State.lastBackgroundSubscription = key;
+      v2State.lastBackgroundSubscriptionAt = now;
+    } catch {}
+  }
+
   function installBackgroundTraceListener() {
     if (v2State.backgroundListenerInstalled) return;
     v2State.backgroundListenerInstalled = true;
     try {
       chrome.runtime?.onMessage?.addListener(message => {
-        if (message?.type !== "DS_QOL_DIAGNOSTIC_BACKGROUND_EVENT") return;
+        if (message?.type !== "DS_QOL_DIAGNOSTIC_BACKGROUND_EVENT" || !v2Active("normal")) return;
         const row = message.event && typeof message.event === "object" ? message.event : {};
-        v2State.backgroundLastSeq = Math.max(v2State.backgroundLastSeq, Number(row.seq || 0));
+        const seq = Number(row.seq || 0);
+        const incomingStream = String(row.streamId || "");
+        if (incomingStream && incomingStream !== v2State.backgroundStreamId) {
+          v2State.backgroundStreamId = incomingStream;
+          v2State.backgroundLastSeq = 0;
+          v2State.backgroundSeen.clear();
+        }
+        // Monotonic checkpoint is stronger than a small LRU when a worker
+        // resends a batch after re-subscribe. The stream ID isolates restarts.
+        if (seq > 0 && seq <= v2State.backgroundLastSeq) return;
+        v2State.backgroundLastSeq = Math.max(v2State.backgroundLastSeq, seq);
         const eventType = String(row.type || "background").slice(0, 80);
         const safeMeta = safeTraceValue(row.meta || {}) || {};
         const payload = {
@@ -459,15 +511,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const peer = data?.payload && typeof data.payload === "object" ? { ...data, ...data.payload } : data;
     const requestedLevel = String(peer.traceLevel || peer.level || (peer.recording === false ? "off" : "normal")).toLowerCase();
     const incomingV2 = data?.protocol === PROTOCOL_V2 || Number(peer.protocolVersion || 0) >= 2;
-    // A newer Inspector may still emit legacy v1 discovery/ping messages for
-    // compatibility. Do not let those messages silently turn an active v2
-    // recording back off.
+    // Inspector can keep *general* recording enabled while turning Detailed QoL
+    // internals OFF. Its v2 hello then has recording:true, traceLevel:"off".
+    // Treat that as a real unsubscribe, never silently turn it into Normal.
     if (incomingV2) {
       v2State.peerSupportsV2 = true;
       v2State.peerProtocol = PROTOCOL_V2;
-      if (peer.recording === false) v2State.recording = false;
-      else if (peer.recording === true || data?.type === "recording-start" ||
-        (peer.traceLevel && requestedLevel !== "off" && !["recording-stop", "stop"].includes(data?.type))) {
+      if (peer.recording === false || requestedLevel === "off") {
+        stopTracePeer(); // drain only already collected events, cancel timers, unsubscribe
+        return;
+      }
+      if (peer.recording === true || data?.type === "recording-start" ||
+        (peer.traceLevel && !["recording-stop", "stop"].includes(data?.type))) {
         // Inspector builds that negotiate a traceLevel but omit the optional
         // recording boolean are requesting traces; discovery alone is not.
         v2State.recording = true;
@@ -482,27 +537,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     installUserActionTrace();
     installSettingTrace();
     installBackgroundTraceListener();
-    try {
-      chrome.runtime?.sendMessage?.({
-        type: "DS_QOL_DIAGNOSTIC_SUBSCRIBE",
-        active: !!v2State.recording,
-        traceLevel: v2State.traceLevel,
-        pageSessionId: sessionId,
-        afterSeq: Number(v2State.backgroundLastSeq || 0)
-      });
-    } catch {}
+    subscribeBackgroundTrace(!!v2State.recording);
   }
 
   function stopTracePeer() {
-    flushTraceAggregates();
-    flushTraceBatch(true);
+    // Inspector's Detailed QoL switch is independent of general recording.
+    // Do not spend CPU serializing pending optional traces after it is disabled.
     v2State.recording = false;
     v2State.traceLevel = "off";
+    v2State.queued.length = 0;
+    v2State.aggregate.clear();
+    v2State.operationStack.length = 0;
+    state.activeOperations.clear();
+    clearTimeout(v2State.flushTimer);
+    v2State.flushTimer = null;
     clearInterval(v2State.routeTimer);
     v2State.routeTimer = null;
     clearInterval(state.metricsTimer);
     state.metricsTimer = null;
-    try { chrome.runtime?.sendMessage?.({ type: "DS_QOL_DIAGNOSTIC_SUBSCRIBE", active: false, pageSessionId: sessionId }); } catch {}
+    subscribeBackgroundTrace(false);
+    v2State.backgroundSeen.clear();
     configureOwnershipObserver();
   }
 
@@ -553,6 +607,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return emitV2Control("handshake", v2HandshakePayload(reason), { force: true });
   }
 
+  function diagnosticRouteLabel(value) {
+    // Route queries, fragments and dynamic path segments may contain private
+    // search text, creator handles, chat IDs or share tokens. Only emit a
+    // coarse, non-identifying route shape to Inspector.
+    try {
+      const path = new URL(String(value || "/"), location.origin).pathname;
+      const fixed = new Set(["chat", "chats", "chatbot", "bots", "creator", "creators", "profile", "personas", "lorebooks", "rulebooks", "explore", "settings", "favorites", "my", "search", "home", "tags", "library", "characters", "create", "edit"]);
+      return "/" + path.split("/").filter(Boolean).slice(0, 5)
+        .map(segment => fixed.has(segment.toLowerCase()) ? segment.toLowerCase() : ":id").join("/");
+    } catch { return "/other"; }
+  }
+
   function startV2RouteMonitor() {
     if (v2State.routeTimer || !v2State.recording) return;
     v2State.routeTimer = setInterval(() => {
@@ -561,7 +627,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (route !== v2State.lastRoute) {
         const previous = v2State.lastRoute;
         v2State.lastRoute = route;
-        queueTrace("route-change", { feature: "runtime", from: previous.slice(0, 220), to: route.slice(0, 220), routeType: pageState().routeType }, { critical: true });
+        queueTrace("route-change", { feature: "runtime", from: diagnosticRouteLabel(previous), to: diagnosticRouteLabel(route), routeType: pageState().routeType }, { critical: true });
       }
       const mode = String(DS.state?.runtimePerformance?.mode || document.documentElement?.dataset?.dsQolAutoPerformanceTier || DS.state?.settings?.runtimePerformanceMode || "adaptive");
       if (mode && mode !== v2State.performanceMode) {
@@ -1133,6 +1199,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.diagOperationEnd = function diagOperationEndV2(token, result = {}) {
+    if (!active() || (v2State.peerSupportsV2 && !v2State.recording)) {
+      if (token && state.activeOperations.get(token.feature) === token.id) state.activeOperations.delete(token.feature);
+      return false;
+    }
     if (token) {
       const index = v2State.operationStack.lastIndexOf(token.id);
       if (index >= 0) v2State.operationStack.splice(index, 1);
@@ -1201,6 +1271,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.diagNetworkEnd = function diagNetworkEndV2(token, result = {}) {
+    if (!active() || (v2State.peerSupportsV2 && !v2State.recording)) return false;
     if (token) {
       const durationMs = Math.max(0, performance.now() - Number(token.startedAt || performance.now()));
       const networkEnd = {
@@ -1329,6 +1400,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!data || !SUPPORTED_PROTOCOLS.includes(data.protocol) || data.source !== INSPECTOR_SOURCE) return;
     const type = String(data.type || "");
     const isV2 = data.protocol === PROTOCOL_V2 || Number(data?.protocolVersion || data?.payload?.protocolVersion || 0) >= 2;
+    const peer = data.payload && typeof data.payload === "object" ? data.payload : data;
+    // Inspector sends the *same request* through postMessage and CustomEvent
+    // for compatibility. Processing both replays worker history, resubscribes
+    // background collection and sends duplicate metrics/handshakes.
+    const signature = `${data.protocol}|${type}|${Number(data.ts || 0)}|${String(peer.inspectorSessionId || "").slice(0, 120)}`;
+    const now = Date.now();
+    if (Number(data.ts || 0) > 0 && v2State.lastRequestSignature === signature &&
+        now - v2State.lastRequestAt < 3000) return;
+    v2State.lastRequestSignature = signature;
+    v2State.lastRequestAt = now;
     activatePeer(data);
     if (type === "recording-stop" || type === "stop" || data?.recording === false || data?.payload?.recording === false) {
       stopTracePeer();
@@ -1337,15 +1418,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
     if (type === "hello" || type === "ping" || type === "recording-start") {
-      if (isV2) {
-        sendV2Handshake(type);
-        emitMetrics(type);
-      } else if (sendHandshake(type)) {
-        emitMetrics(type);
-      }
+      if (isV2) sendV2Handshake(type);
+      else sendHandshake(type);
+      // Keep discovery/handshakes available when detailed recording is OFF,
+      // without collecting expensive performance snapshots.
+      if (!v2State.peerSupportsV2 || v2State.recording) emitMetrics(type);
       return;
     }
     if (type === "request-metrics" || type === "snapshot") {
+      if (v2State.peerSupportsV2 && !v2State.recording) return;
       emitMetrics(type);
       if (isV2) flushTraceBatch(true);
       return;
@@ -1409,6 +1490,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (document.visibilityState !== "visible") return;
     publishDiscoveryMarkers();
     sendDiscoveryHandshake("visible");
+    // Re-elect the foreground diagnostic relay on an existing visibility event.
+    // This does not start any new timer or observer.
+    if (v2State.recording) subscribeBackgroundTrace(true, true);
   }, false);
 
   publishDiscoveryMarkers();

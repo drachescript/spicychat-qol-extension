@@ -315,6 +315,7 @@ async function load() {
 
   setChecked("showChatListTools", settings.showChatListTools);
   setChecked("enableChatOrganizer", !!settings.enableChatOrganizer);
+
   setChecked("chatAlwaysShowProfileLink", !!settings.chatAlwaysShowProfileLink);
   setChecked("chatJumpToStartShortcut", !!settings.chatJumpToStartShortcut);
   setChecked("chatOpenWindowShortcut", !!settings.chatOpenWindowShortcut);
@@ -392,6 +393,9 @@ async function load() {
   setValue("favoriteBotFolderFilter", settings.favoriteBotFolderFilter || "all");
   setValue("favoriteBotCreatorFilter", settings.favoriteBotCreatorFilter || "");
   setValue("favoriteBotStateFilter", settings.favoriteBotStateFilter || "all");
+  setChecked("showLaterFavoritesTab", !!settings.showLaterFavoritesTab);
+  setChecked("laterPageHideOpenedBots", !!settings.laterPageHideOpenedBots);
+  setChecked("laterPageHideBlockedBots", !!settings.laterPageHideBlockedBots);
   setChecked("showLaterBotButtons", !!settings.showLaterBotButtons);
   setChecked("enableSavedListsOverlay", !!settings.enableSavedListsOverlay);
   setChecked("protectLaterBotsFromFiltering", !!settings.protectLaterBotsFromFiltering);
@@ -649,6 +653,7 @@ async function load() {
   setValue("blockedTags", arrayToLines(settings.blockedTags));
   setValue("blockedWords", arrayToLines(settings.blockedWords));
   setValue("blockedCreators", arrayToLines(settings.blockedCreators));
+
   setChecked("lorebookBlockingEnabled", settings.lorebookBlockingEnabled === true);
   setChecked("applyBotBlockingToLorebooks", settings.applyBotBlockingToLorebooks === true);
   setChecked("showLorebookBlockButtons", settings.showLorebookBlockButtons === true);

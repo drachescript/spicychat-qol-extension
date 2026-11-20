@@ -227,16 +227,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const card of [...candidates].slice(0, 10000)) {
       const id = card.getAttribute?.('data-testid') || '';
       if (!id.startsWith('MemoryManagerCard-')) continue;
-      const textNode = card.querySelector('p.text-paragraph-sm.break-words') ||
-        [...card.querySelectorAll('p')].find(p => p.classList.contains('break-words'));
-      const rawText = String(textNode?.textContent || '').trim();
+      // Only read from a native, uniquely identified V2 card. SpicyChat has
+      // shipped variants without the original p.break-words class or action
+      // buttons. Those are still real memory rows, not failed native saves.
+      const textNode = card.querySelector('[data-testid^="MemoryManagerCard-Text"], [data-testid^="MemoryManagerCard-Content"], [data-testid^="MemoryManagerCard-Body"]') ||
+        card.querySelector('p.text-paragraph-sm.break-words') ||
+        [...card.querySelectorAll('p, blockquote')].find(node =>
+          !node.closest('button, [role="button"], [data-testid^="MemoryManagerCard-Actions"]') &&
+          cleanText(node.textContent).length >= 2 && [...cleanText(node.textContent)].length <= 250);
+      const rawText = String(textNode?.textContent || nativeMemoryText(card) || '').trim();
       if (!rawText || [...rawText].length > 250) continue;
       const pinButton = card.querySelector('button[data-testid^="MemoryManagerCard-Pin-"]');
       const editButton = card.querySelector('button[data-testid^="MemoryManagerCard-Edit-"]');
       const deleteButton = card.querySelector('button[data-testid^="MemoryManagerCard-Delete-"]');
-      // Read-only operations can still use a card when permissions hide one
-      // of its actions; mutations independently require their native button.
-      if (!pinButton && !editButton && !deleteButton) continue;
       results.push({ row: card, trigger: null, textNode, rawText,
         text: cleanText(rawText), nativeCard: true, nativeId: id,
         pinButton, editButton, deleteButton });
@@ -1733,34 +1736,57 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       hasNativeNewMemoryCaption(manager, field);
   }
 
+  function isMemoryCreateLauncher(button) {
+    if (!button) return true;
+    const testId = cleanText(button.getAttribute?.('data-testid')).toLowerCase();
+    const aria = cleanText(button.getAttribute?.('aria-label')).toLowerCase();
+    const text = cleanText(button.textContent).toLowerCase();
+    // This V2 button opens the editor. It must never be used as the submit
+    // action, even if its text changes to "Add" in a responsive layout.
+    if (testId === 'memorymanagerv2-addbutton') return true;
+    if (button.getAttribute?.('aria-haspopup') || button.getAttribute?.('aria-expanded') === 'true') return true;
+    return /^(?:new memory|add new memory|create new memory)$/.test(text) &&
+      !/^(?:save|submit|confirm)/.test(aria);
+  }
+
+  function isMemorySubmitButton(button) {
+    if (!button || !isVisible(button) || isMemoryImportOwnedNode(button) || isMemoryCreateLauncher(button)) return false;
+    if (button.closest?.('[data-testid^="MemoryManagerCard-"][role="group"]')) return false;
+    const key = nodeTranslationKey(button).toLowerCase();
+    const label = cleanText(button.textContent).toLowerCase();
+    const aria = cleanText(button.getAttribute?.('aria-label')).toLowerCase();
+    const testId = cleanText(button.getAttribute?.('data-testid')).toLowerCase();
+    return key === 'chat:modal.memories.cta.add' ||
+      /^(?:add|save|create|confirm|submit)(?: memory)?$/.test(label) ||
+      /^(?:add|save|create|confirm|submit)(?: memory)?$/.test(aria) ||
+      (/memory/.test(testId) && /(?:submit|save|confirm|create)/.test(testId));
+  }
+
   function findNativeMemorySubmitButton(field, manager = getManager()) {
     if (!field) return null;
-    const roots = [];
-    let node = field.closest?.("form") || field.parentElement;
-    while (node && node !== document.body) {
-      roots.push(node);
+    let node = field.closest?.('form') || field.parentElement;
+    let depth = 0;
+    while (node && node !== document.body && depth < 12) {
+      const buttons = [...node.querySelectorAll?.('button') || []].filter(isMemorySubmitButton);
+      // Prefer a button in the editor's own form/section. Never choose a
+      // manager-wide generic Add button over an editor-local save.
+      if (buttons.length === 1 && (node !== manager || node.matches?.('form'))) return buttons[0];
+      const keyed = buttons.filter(button =>
+        nodeTranslationKey(button).toLowerCase() === 'chat:modal.memories.cta.add' ||
+        /(?:submit|save|confirm)/.test(cleanText(button.getAttribute('data-testid')).toLowerCase()));
+      if (keyed.length === 1 && (node !== manager || buttons.length === 1)) return keyed[0];
       if (node === manager) break;
       node = node.parentElement;
-      if (roots.length >= 6) break;
+      depth++;
     }
-    if (manager && !roots.includes(manager)) roots.push(manager);
-
-    for (const root of roots) {
-      const buttons = [...root.querySelectorAll?.("button") || []]
-        .filter(button => isVisible(button) && !isMemoryImportOwnedNode(button));
-      const translated = buttons.find(button => nodeTranslationKey(button).toLowerCase() === "chat:modal.memories.cta.add");
-      if (translated) return translated;
-      const exact = buttons.find(button => {
-        const text = cleanText(button.textContent).toLowerCase();
-        const aria = cleanText(button.getAttribute("aria-label")).toLowerCase();
-        const testId = cleanText(button.getAttribute("data-testid")).toLowerCase();
-        return text === "add" || text === "add memory" ||
-          aria === "add" || aria === "add memory" ||
-          (testId.includes("memory") && testId.includes("add"));
-      });
-      if (exact) return exact;
-    }
-    return null;
+    // A portal can place the actual submit button outside the editor subtree.
+    // Accept this only when exactly one explicit native save action exists;
+    // never fall back to the V2 AddButton launcher or an unrelated "Add".
+    const explicit = [...manager?.querySelectorAll?.('button') || []].filter(button =>
+      isMemorySubmitButton(button) &&
+      (nodeTranslationKey(button).toLowerCase() === 'chat:modal.memories.cta.add' ||
+        /(?:submit|save|confirm)/.test(cleanText(button.getAttribute('data-testid')).toLowerCase())));
+    return explicit.length === 1 ? explicit[0] : null;
   }
 
   function inlineMemoryCreateEditor(manager = getManager()) {
@@ -1788,12 +1814,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       });
       if (!field) continue;
       const buttons = [...root.querySelectorAll("button")].filter(button => isVisible(button) && !isMemoryImportOwnedNode(button));
-      const save = buttons.find(button => {
-        const key = nodeTranslationKey(button).toLowerCase();
-        const text = cleanText(button.textContent).toLowerCase();
-        return key === "chat:modal.memories.cta.add" ||
-          /^(save|add|create|update)( memory)?$/.test(text);
-      });
+      const save = buttons.find(isMemorySubmitButton);
       if (save) return { root, field, save, inline: false };
     }
     return null;
@@ -1908,6 +1929,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  const MEMORY_IMPORT_RESULT_KEY = 'dsMemoryImportLastResultV1';
+  function recordMemoryImportResult(stage, outcome, manager = getManager()) {
+    // Never store source JSON, memory text, chat IDs, browser paths, native
+    // error messages, or DOM element IDs in a support record.
+    const safeStages = ['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed'];
+    if (!safeStages.includes(stage)) return;
+    try {
+      const list = manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
+      chrome.storage.local.set({ [MEMORY_IMPORT_RESULT_KEY]: {
+        schema: 1, at: Date.now(), outcome: outcome === 'ok' ? 'ok' : 'failed',
+        stage, ui: detectMemoryManagerVersion(manager),
+        nativeCards: Math.min(10000, list?.querySelectorAll('[data-testid^="MemoryManagerCard-"][role="group"]').length || 0),
+        recognizedRows: Math.min(10000, getMemoryRows(manager).length)
+      } });
+    } catch {}
+  }
+
   function countMemoryRowsByText(text, manager = getManager()) {
     const wanted = cleanText(text);
     if (!wanted || !manager) return 0;
@@ -1925,23 +1963,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const beforeCount = countMemoryRowsByText(wanted, manager);
     const editor = await openMemoryCreateEditor(manager);
     if (!editor) {
+      recordMemoryImportResult('editor-missing', 'failed', manager);
       return {
         ok: false,
         reason: looksLikeBrandNewChat()
           ? newChatMemoryImportHelp()
-          : "QoL could not identify SpicyChat's native New memory editor and Add button. Confirm the inline editor is visible, then reopen Memories and retry; nothing was added."
+          : "QoL could not identify SpicyChat's native New memory editor and Save control. No memory was submitted."
       };
     }
 
     setMemoryEditorValue(editor.field, wanted);
+    // A React controlled input can reject an externally dispatched value.
+    // Confirm the live field still contains the value before submitting.
+    await DS.sleep?.(60);
+    const liveField = editor.field?.isConnected ? editor.field : visibleMemoryCreateEditor()?.field;
+    const liveValue = liveField?.matches?.('[contenteditable="true"]')
+      ? cleanText(liveField.textContent) : cleanText(liveField?.value);
+    if (liveValue !== wanted) {
+      recordMemoryImportResult('editor-value-rejected', 'failed', manager);
+      return { ok: false, reason: "SpicyChat's New memory editor did not retain the text. No memory was submitted." };
+    }
     const save = await waitFor(() => {
       const candidate = editor.save?.isConnected ? editor.save : findNativeMemorySubmitButton(editor.field, getManager());
       return candidate && isVisible(candidate) && !candidate.disabled ? candidate : null;
     }, 1800, 45);
-    if (!save) return {
-      ok: false,
-      reason: looksLikeBrandNewChat() ? newChatMemoryImportHelp() : "SpicyChat's Add button did not become available."
-    };
+    if (!save) {
+      recordMemoryImportResult('save-unavailable', 'failed', manager);
+      return {
+        ok: false,
+        reason: looksLikeBrandNewChat() ? newChatMemoryImportHelp() :
+          "SpicyChat's New memory Save button did not become available. No memory was submitted."
+      };
+    }
 
     await DS.sleep?.(50);
     try { save.click(); } catch { DS.realClick?.(save); }
@@ -1959,9 +2012,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // second time, which could create a duplicate if the first request won.
       await DS.sleep?.(250);
       if (countMemoryRowsByText(wanted, getManager()) <= beforeCount) {
+        recordMemoryImportResult('unconfirmed', 'failed');
         return {
           ok: false,
-          reason: looksLikeBrandNewChat() ? newChatMemoryImportHelp() : "SpicyChat did not confirm the new memory."
+          saveUnconfirmed: true,
+          // Never click Save again automatically: the first request might have
+          // succeeded on the server while React failed to render a new card.
+          reason: looksLikeBrandNewChat() ? newChatMemoryImportHelp() :
+            "SpicyChat did not show the saved memory after submission. QoL did not submit it twice."
         };
       }
     }
@@ -2002,7 +2060,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!key || (!allowDuplicates && existing.has(key))) { skipped += 1; continue; }
         setStatus(`Importing memory ${index + 1} of ${ordered.length}…`);
         const result = await createNativeMemory(row.text);
-        if (!result.ok) throw new Error(result.reason || "Memory import failed.");
+        if (!result.ok) {
+          const error = new Error(result.reason || "Memory import failed.");
+          error.saveUnconfirmed = result.saveUnconfirmed === true;
+          throw error;
+        }
         existing.add(key);
         imported += 1;
         if (row.pinned) {
@@ -2011,10 +2073,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         await DS.sleep?.(100);
       }
+      if (imported) recordMemoryImportResult('confirmed', 'ok');
       setStatus(`Imported ${imported} ${imported === 1 ? "memory" : "memories"}${skipped ? `; skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""}.`, "ok");
       closeMemoryImportPreview();
     } catch (error) {
-      setStatus(`Import stopped after ${imported}: ${error?.message || error} You can retry; memories already added will be skipped by default.`, "error");
+      const retryNote = error?.saveUnconfirmed
+        ? "A save was attempted but not confirmed. Check SpicyChat's memories before retrying to avoid duplicates."
+        : "You can retry; recognized memories already added are skipped by default.";
+      setStatus(`Import stopped after ${imported}: ${error?.message || error} ${retryNote}`, "error");
     } finally {
       importingMemories = false;
       updateToolbar(getManager() || manager);

@@ -9,6 +9,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const OUTPUT_CLASS = "ds-rp-repair-output";
   const ORIGINAL_HIDDEN_CLASS = "ds-rp-repair-original-hidden";
   const BUTTON_CLASS = "ds-rp-repair-toggle";
+  const EDIT_BUTTON_CLASS = "ds-rp-repair-edit";
+  const NATIVE_FORMAT_CLASS = "ds-rp-native-format";
   const MESSAGE_SELECTOR = "div[id^='message-']";
 
   let observer = null;
@@ -25,7 +27,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "swallows", "freezes", "steps", "walks", "moves", "crosses", "leans", "reaches", "folds", "raises", "lowers",
     "shifts", "tilts", "grips", "clutches", "taps", "stomps", "pushes", "pulls", "sits", "stands", "kneels",
     "paces", "watches", "studies", "blinks", "winces", "shrugs", "gestures", "points", "whips", "throws",
-    "rubs", "bites", "presses", "runs", "slams", "opens", "closes", "enters", "leaves", "lingers", "hovers"
+    "rubs", "bites", "presses", "runs", "slams", "opens", "closes", "enters", "leaves", "lingers", "hovers",
+    "says", "asks", "replies", "whispers", "murmurs", "speaks", "shouts", "mutters",
+    "looked", "glanced", "stared", "nodded", "shook", "sighed", "smiled", "grinned", "laughed",
+    "leaned", "reached", "stepped", "walked", "moved", "turned", "took", "gave", "placed",
+    "picked", "set", "said", "asked", "replied", "whispered", "murmured", "watched", "noticed", "sat", "stood"
   ];
 
   function settings() {
@@ -101,6 +107,117 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     return false;
+  }
+
+  // Convert plain Markdown in SpicyChat's native editor. This is deliberately
+  // conservative and never saves or sends a message on its own. A user reviews
+  // the before/after text before inserting the proposed edit into React's field.
+  function prepareRpMarkdown(raw, s) {
+    const original = String(raw || "");
+    const strength = ["conservative", "balanced", "aggressive"].includes(s?.rpFormatDetection)
+      ? s.rpFormatDetection : "balanced";
+    let changedLines = 0, inFence = false;
+    const lines = original.split(/(\r?\n)/);
+    const formatted = lines.map(line => {
+      if (/^\r?\n$/.test(line)) return line;
+      if (/^\s*```/.test(line)) { inFence = !inFence; return line; }
+      if (inFence || !line.trim() || /^(?:\s*[-*_]{3,}\s*|\s*#|\s*>|\s*\[(?:OOC|SYSTEM|META|DIRECTOR)\b)/i.test(line)) return line;
+      // Speaker prefixes and dash-led dialogue are not narration. Do not
+      // convert them even when a verb or name resembles a scene action.
+      if (/^\s*(?:[\p{L}][\p{L}0-9_' -]{0,35}\s*:\s+|[—–]\s+)/u.test(line)) return line;
+      const quoteOrMarkup = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|"[^"\n]*"|“[^”\n]*”)/g;
+      let match, cursor = 0, parts = [];
+      let changed = false;
+      const maybeNarration = (fragment) => {
+        const cleaned = fragment.trim();
+        if (!cleaned || /^\p{P}+$/u.test(cleaned)) return fragment;
+        const narration = looksLikeNarration(cleaned, strength) ||
+          /^(?:she|he|they|it|[A-Z][\p{L}'-]{1,30})\s+(?:said|asked|replied|whispered|murmured|says|asks|laugh(?:ed|s)|thought|answered|added|continued)\b/iu.test(cleaned) ||
+          (strength === 'aggressive' && /^[A-Z][^.!?]{15,}[.!?]?$/.test(cleaned) && !/^["“'‘]/.test(cleaned));
+        if (!narration) return fragment;
+        const leading = /^\s*/.exec(fragment)?.[0] || '';
+        const trailing = /\s*$/.exec(fragment)?.[0] || '';
+        changed = true;
+        return `${leading}*${cleaned}*${trailing}`;
+      };
+      while ((match = quoteOrMarkup.exec(line))) {
+        if (match.index > cursor) parts.push(maybeNarration(line.slice(cursor, match.index)));
+        parts.push(match[0]); // preserve existing Markdown/quotes verbatim
+        cursor = match.index + match[0].length;
+      }
+      if (cursor < line.length) parts.push(maybeNarration(line.slice(cursor)));
+      const result = parts.length ? parts.join('') : maybeNarration(line);
+      if (changed && result !== line) changedLines++;
+      return result;
+    }).join('');
+    return {original, formatted, changedLines};
+  }
+
+  function nativeEditor(root) {
+    return root?.querySelector?.("[data-testid='MessageEditor-Input'] textarea, [data-testid='MessageEditor'] textarea, textarea") || null;
+  }
+
+  function insertIntoNativeEditor(field, text) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (setter) setter.call(field, text); else field.value = text;
+    try { field.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertReplacementText', data:text})); }
+    catch { field.dispatchEvent(new Event('input', {bubbles:true})); }
+    field.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+
+  function reviewNativeFormatting(root, field) {
+    if (!root?.isConnected || !field?.isConnected || !root.contains(field)) return;
+    const suggestion = prepareRpMarkdown(field.value, settings());
+    if (!suggestion.changedLines) {
+      DS.setQuickStatus?.('RP formatting: no clear missing narration markers. Original text left untouched.');
+      return;
+    }
+    const dialog = document.createElement('dialog');
+    dialog.className = 'ds-rp-native-preview';
+    const title = document.createElement('h3'); title.textContent = `RP formatting preview · ${suggestion.changedLines} lines changed`;
+    const note = document.createElement('p');
+    note.textContent = 'Review carefully. This only places text in SpicyChat’s native editor; you must click SpicyChat Save yourself.';
+    const beforeLabel = document.createElement('label'); beforeLabel.textContent = 'Original';
+    const before = document.createElement('textarea'); before.rows = 5; before.readOnly = true; before.value = suggestion.original;
+    const afterLabel = document.createElement('label'); afterLabel.textContent = 'Proposed edit (editable)';
+    const after = document.createElement('textarea'); after.rows = 9; after.value = suggestion.formatted;
+    const actions = document.createElement('div'); actions.className = 'ds-rp-native-preview-actions';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+    const use = document.createElement('button'); use.type = 'button'; use.textContent = 'Insert into native editor';
+    const status = document.createElement('p'); status.setAttribute('role', 'status');
+    cancel.addEventListener('click', () => dialog.close());
+    use.addEventListener('click', () => {
+      if (!field.isConnected || !root.isConnected || !root.contains(field)) { status.textContent = 'Native editor closed. Nothing was changed.'; return; }
+      if (field.value !== suggestion.original) { status.textContent = 'The native text changed while reviewing. Reopen the preview; nothing was replaced.'; return; }
+      if (!after.value.trim()) { status.textContent = 'Empty edits are not allowed.'; return; }
+      insertIntoNativeEditor(field, after.value);
+      dialog.close();
+      field.focus({preventScroll:true});
+      DS.setQuickStatus?.('RP text inserted. Review it, then click SpicyChat Save (not saved yet).');
+    });
+    actions.append(cancel, use); beforeLabel.append(before); afterLabel.append(after);
+    dialog.append(title, note, beforeLabel, afterLabel, actions, status);
+    document.body.append(dialog);
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    try { dialog.showModal(); } catch { dialog.open = true; }
+  }
+
+  function ensureNativeFormatAction(root) {
+    const s = settings();
+    if (!s.enabled || !s.enableRpFormatRepair || !isAiMessage(root)) return;
+    const field = nativeEditor(root);
+    if (!(field instanceof HTMLTextAreaElement) || !field.isConnected) return;
+    if (root.querySelector(`.${NATIVE_FORMAT_CLASS}`)) return;
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = NATIVE_FORMAT_CLASS;
+    button.textContent = 'Format RP text…';
+    button.title = 'Preview Markdown action markers, then insert into this message editor';
+    button.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation();
+      const live = nativeEditor(root);
+      if (live instanceof HTMLTextAreaElement) reviewNativeFormatting(root, live);
+    });
+    field.insertAdjacentElement('afterend', button);
   }
 
   function appendSegment(segments, segment) {
@@ -342,6 +459,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let button = message.querySelector(`.${BUTTON_CLASS}`);
     if (s.rpFormatShowMessageButtons === false) {
       button?.remove();
+      message.querySelector(`.${EDIT_BUTTON_CLASS}`)?.remove();
       return;
     }
     if (!button) {
@@ -370,6 +488,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       holder.insertBefore(button, dropdown);
     }
     updateButton(button, !output.hidden);
+    let editButton = message.querySelector(`.${EDIT_BUTTON_CLASS}`);
+    if (!editButton) {
+      const dropdown = message.querySelector('button[aria-label="message-dropdown"]');
+      const holder = dropdown?.parentElement;
+      if (holder && message.contains(holder)) {
+        editButton = document.createElement('button'); editButton.type = 'button';
+        editButton.className = `${BUTTON_CLASS} ${EDIT_BUTTON_CLASS}`;
+        editButton.textContent = 'RP✎';
+        editButton.title = 'Open the native AI message editor to format and save RP text';
+        editButton.setAttribute('aria-label', editButton.title);
+        editButton.addEventListener('click', event => {
+          event.preventDefault(); event.stopPropagation();
+          if (typeof DS.openNativeMessageEditorForRoot !== 'function') {
+            DS.setQuickStatus?.('Use the native message menu → Edit, then choose Format RP text.');
+            return;
+          }
+          void Promise.resolve(DS.openNativeMessageEditorForRoot(message)).then(ok => {
+            if (ok) ensureNativeFormatAction(message);
+            else DS.setQuickStatus?.('Open Edit from SpicyChat’s native message menu, then choose Format RP text.');
+          }).catch(() => DS.setQuickStatus?.('Could not open native Edit; use the message menu.'));
+        });
+        holder.insertBefore(editButton, dropdown);
+      }
+    }
   }
 
   function processMessage(message, force = false) {
@@ -467,7 +609,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const targetElement = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
         if (targetElement?.closest?.(`.${OUTPUT_CLASS}, .${BUTTON_CLASS}`)) continue;
         const ownMessage = messageFromNode(targetElement);
-        if (ownMessage) queueMessage(ownMessage);
+        if (ownMessage) {
+          if (ownMessage.dataset.dsEditSavePending === '1' || nativeEditor(ownMessage)) {
+            ensureNativeFormatAction(ownMessage);
+          } else queueMessage(ownMessage);
+        }
         mutation.addedNodes.forEach(node => {
           if (!(node instanceof Element) || DS.isQolOwnedNode?.(node) || node.closest?.(`.${OUTPUT_CLASS}, .${BUTTON_CLASS}`)) return;
           const direct = messageFromNode(node);
@@ -500,7 +646,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function cleanupMessage(message) {
     message.querySelectorAll(`.${OUTPUT_CLASS}`).forEach(el => el.remove());
-    message.querySelectorAll(`.${BUTTON_CLASS}`).forEach(el => el.remove());
+    message.querySelectorAll(`.${BUTTON_CLASS}, .${NATIVE_FORMAT_CLASS}`).forEach(el => el.remove());
     message.querySelectorAll(`.${ORIGINAL_HIDDEN_CLASS}`).forEach(el => el.classList.remove(ORIGINAL_HIDDEN_CLASS));
     delete message.dataset.dsRpReady;
     delete message.dataset.dsRpView;
@@ -550,7 +696,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
-  DS.prepareRpFormatRepairMessageForEdit = cleanupMessage;
+  DS.prepareRpFormatRepairMessageForEdit = function(root) {
+    cleanupMessage(root);
+    ensureNativeFormatAction(root);
+  };
+  // Pure text transform is exposed for local regression tests only; no reads,
+  // storage writes or chat network calls occur here.
+  DS.previewRpMarkdown = prepareRpMarkdown;
   DS.removeRpFormatRepair = cleanup;
 })();
 

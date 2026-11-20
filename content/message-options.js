@@ -388,6 +388,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  // Shared native-editor entry point. RP formatting can open the same message
+  // editor without inventing a second menu bridge or touching the chat API.
+  DS.openNativeMessageEditorForRoot = async function(root) {
+    if (!root?.isConnected || !DS.isSingleChatPage?.()) return false;
+    const sourceButton = currentNativeTrigger(root, root.querySelector('button[aria-label="message-dropdown"]'));
+    if (!sourceButton?.isConnected) return false;
+    return runMenuAction(sourceButton, 'Edit');
+  };
+
   async function runAction(sourceButton, action) {
     const settings = DS.state?.settings || {};
 

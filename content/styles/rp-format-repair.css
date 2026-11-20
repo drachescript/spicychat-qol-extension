@@ -41,3 +41,24 @@ div.ds-rp-repair-original-hidden:not(:has(+ .ds-rp-repair-output:not([hidden])))
   background: rgba(48,110,190,.24);
 }
 
+
+.ds-rp-repair-edit { min-width: 39px; }
+.ds-rp-native-format {
+  display: inline-block; padding: 5px 10px; margin: 5px 0;
+  border: 1px solid currentColor; border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.ds-rp-native-preview {
+  box-sizing: border-box; width: min(760px, calc(100vw - 30px)); max-height: 88vh;
+  overflow-y: auto; padding: 18px; background: #1e2331; color: #f4f6fa;
+  border: 1px solid #8593ac; border-radius: 12px;
+}
+.ds-rp-native-preview::backdrop { background: rgba(0,0,0,.68); }
+.ds-rp-native-preview label { display: block; margin: 10px 0; font-weight: 600; }
+.ds-rp-native-preview textarea {
+  display: block; width: 100%; box-sizing: border-box; resize: vertical;
+  margin-top: 5px; padding: 8px; font: 12px/1.5 monospace;
+  background: #111725; color: #f4f6fa; border: 1px solid #68758a;
+}
+.ds-rp-native-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: end; }
+.ds-rp-native-preview-actions button { padding: 7px 10px; cursor: pointer; }

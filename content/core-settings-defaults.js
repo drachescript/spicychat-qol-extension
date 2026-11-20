@@ -37,6 +37,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     duplicateTabKeepMode: "new",
 
     autoTags: false,
+  showTagExplanations: false,
   enableTagAliases: false,
   tagAliasRules: "",
   tagAliasShowDisplay: true,

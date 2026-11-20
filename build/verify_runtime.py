@@ -136,7 +136,7 @@ def main() -> int:
     for path in declared: check_file(path, "registered background asset")
     for path in imports + [entry_path]:
         if path not in declared: ERRORS.append(f"Background imported but unregistered: {path}")
-    special = {"background/bot-status-storage-cleanup.js", "shared/sync-service.js"}
+    special = {"background/bot-status-storage-cleanup.js", "shared/sync-service.js", "shared/github-backup-service.js"}
     for path in declared:
         if path not in imports and path != entry_path and path not in special:
             ERRORS.append(f"Registered background import not loaded by entry: {path}")

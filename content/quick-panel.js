@@ -883,7 +883,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               <option value="20">20 native pages</option>
             </select>
             <button id="ds-qol-load-native-chats" type="button" title="Manually click SpicyChat's native Load More, in bounded batches. This adds actual page cards and can slow large chat lists.">Load native cards</button>
-            <button id="ds-qol-chat-message-index" type="button" title="Search previously indexed message text. Indexing is manual and opt-in.">Search messages</button>
+            <button id="ds-qol-chat-message-index" type="button" title="Search previously indexed message text. Indexing starts only when requested.">Search messages</button>
           </div>
           <div id="ds-qol-load-all-status" class="ds-qol-small-note" role="status" aria-live="polite" style="display:none;"></div>
         </div>
@@ -1596,7 +1596,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     setShown(optionsButton, showOptions);
     setShown(fillButton, showFill);
-    if (fillButton) {
+    // A hidden Fill now button still exists on chat pages. Never calculate
+    // listing statistics unless the listing action is actually available:
+    // getListingAutoFillStatus used to collect every /chat/ link twice even
+    // during a pure storage-change Mini Panel refresh.
+    if (fillButton && showFill) {
       const refill = DS.getListingAutoFillStatus?.() || {};
       if (refill.running) {
         setText(fillButton, refill.stopping ? "Stopping..." : "Stop refill");

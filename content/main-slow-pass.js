@@ -187,6 +187,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runFeatureStep("swipe navigation", !!settings.showSwipeJumpButtons || !!settings.showSwipeJumpToNumber || !!settings.restoreFirstSwipeOnLoad || !!document.querySelector(".ds-qol-swipe-jump"), () => DS.applySwipeNavigation?.());
       await runFeatureStep("soundscapes", !!settings.enableSoundscapes || !!document.querySelector("[data-ds-soundscape],#ds-soundscape-player,.ds-chat-soundscape-wrapper"), () => DS.applySoundscapes?.());
       await runFeatureStep("tag aliases", !!settings.enableTagAliases || !!document.querySelector("[data-ds-tag-alias-original]"), () => DS.applyTagAliases?.());
+      await runFeatureStep("tag explanations", !!settings.showTagExplanations || !!DS.isTagExplanationsActive?.(), () => DS.applyTagExplanations?.());
       await runFeatureStep("local tag matching", !!settings.localTagMatchEnabled, () => DS.applyLocalTagMatching?.());
       await runFeatureStep("persona full backup button", !!settings.personaFullBackupEnabled || !!document.getElementById("ds-full-persona-backup"), () => DS.applyPersonaFullBackup?.());
       await runFeatureStep("profile export", !!settings.enableProfileExport || !!document.getElementById("ds-profile-export-button"), () => DS.applyProfileExport?.());

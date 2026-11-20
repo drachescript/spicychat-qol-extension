@@ -100,6 +100,42 @@ UNUSED_PACKAGE_FILES = {
     "icons/icon96.jpg",
 }
 
+# Source code is not a package directory. Only these known runtime roots and
+# runtime asset directories are allowed in browser ZIPs. Development helpers,
+# repository documentation and accidental root files are never copied.
+PACKAGE_ROOT_FILES = {
+    "manifest.json",
+    "background-entry.js",
+    "background.js",
+    "content.css",
+    "options.html",
+    "options.css",
+    "options-overhaul.css",
+    "options.js",
+    "platform-capabilities.css",
+    "popup.html",
+    "popup.js",
+    "modules.json",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+}
+PACKAGE_RUNTIME_DIRECTORIES = {
+    "background", "content", "custom", "icons", "popup", "settings", "shared",
+}
+PACKAGE_RUNTIME_SUFFIXES = {
+    ".js", ".css", ".html", ".json",
+    ".png", ".jpg", ".jpeg", ".svg", ".webp",
+    ".ico", ".woff", ".woff2", ".ttf", ".otf",
+}
+# Firefox's classic background loads these after the worker import list.
+# Share the declaration with the ZIP validator to avoid drifting release checks.
+FIREFOX_SHARED_BACKGROUND_SCRIPTS = (
+    "shared/sync-service.js",
+    "shared/github-backup-service.js",
+)
+
+
 FIREFOX_SETTINGS = {
     "gecko": {
         "id": "spicychat-qol-dev@drache.uk",
@@ -275,24 +311,37 @@ def filter_manifest_for_profile(
     return manifest
 
 
+def allowed_package_relative_path(rel: Path) -> bool:
+    """Only browser assets belong in a ZIP, never build tools or source extras.
+
+    Root-level files are allowlisted individually; recognized runtime
+    directories permit extension asset types. A future tool dropped anywhere
+    in the checkout cannot become an extension package member accidentally.
+    """
+    if not rel.parts or any(part.startswith(".") for part in rel.parts):
+        return False
+    if rel.suffix.lower() in (FORBIDDEN_TOOL_SUFFIXES | EXCLUDED_SUFFIXES):
+        return False
+    if len(rel.parts) == 1:
+        return rel.name in PACKAGE_ROOT_FILES
+    return (
+        rel.parts[0] in PACKAGE_RUNTIME_DIRECTORIES
+        and rel.suffix.lower() in PACKAGE_RUNTIME_SUFFIXES
+    )
+
+
 def should_include(path: Path, tracked_runtime: set[str], selected_runtime: set[str]) -> bool:
+    if not path.is_file() or path.is_symlink():
+        return False
     rel = path.relative_to(ROOT)
     rel_posix = rel.as_posix()
-
-    if not rel.parts:
-        return False
-    if rel.parts[0] in EXCLUDED_TOP_LEVEL:
-        return False
-    if len(rel.parts) == 1 and rel.name in EXCLUDED_ROOT_FILES:
-        return False
-    if path.suffix.lower() in EXCLUDED_SUFFIXES:
+    if not allowed_package_relative_path(rel):
         return False
     if rel_posix in UNUSED_PACKAGE_FILES:
         return False
     if rel_posix in tracked_runtime and rel_posix not in selected_runtime:
         return False
-
-    return path.is_file()
+    return True
 
 
 def common_png_icons() -> dict:
@@ -347,7 +396,7 @@ def firefox_manifest(source: dict, dev: bool, profile: dict) -> dict:
         profile.get("devExtensionName" if dev else "extensionName")
         or ("SpicyChat QoL DEV" if dev else "SpicyChat QoL")
     )
-    manifest["background"] = {"scripts": background_script_imports() + ["shared/sync-service.js"]}
+    manifest["background"] = {"scripts": background_script_imports() + list(FIREFOX_SHARED_BACKGROUND_SCRIPTS)}
     manifest["browser_specific_settings"] = FIREFOX_SETTINGS
     manifest["icons"] = common_png_icons()
     manifest.setdefault("action", {})["default_icon"] = common_png_icons()
@@ -386,6 +435,10 @@ def verify_package_contents(stage: Path) -> None:
 
         rel = path.relative_to(stage)
         rel_posix = rel.as_posix()
+
+        if not allowed_package_relative_path(rel):
+            problems.append(rel_posix)
+            continue
 
         if rel.parts and rel.parts[0] in FORBIDDEN_PACKAGE_PREFIXES:
             problems.append(rel_posix)

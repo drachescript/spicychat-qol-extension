@@ -122,6 +122,7 @@ function readSettingsFromPage() {
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
+
     chatListTwoColumns: checked("chatListTwoColumns"),
     chatListPopoutShortcut: checked("chatListPopoutShortcut"),
     chatListRenameShortcut: checked("chatListRenameShortcut"),
@@ -194,6 +195,9 @@ function readSettingsFromPage() {
     favoriteBotFolderFilter: value("favoriteBotFolderFilter", "all"),
     favoriteBotCreatorFilter: value("favoriteBotCreatorFilter", ""),
     favoriteBotStateFilter: value("favoriteBotStateFilter", "all"),
+    showLaterFavoritesTab: checked("showLaterFavoritesTab"),
+    laterPageHideOpenedBots: checked("laterPageHideOpenedBots"),
+    laterPageHideBlockedBots: checked("laterPageHideBlockedBots"),
     showLaterBotButtons: checked("showLaterBotButtons"),
     enableSavedListsOverlay: checked("enableSavedListsOverlay"),
     protectLaterBotsFromFiltering: checked("protectLaterBotsFromFiltering"),
@@ -467,6 +471,7 @@ function readSettingsFromPage() {
     blockedTags: linesToArray(value("blockedTags")),
     blockedWords: linesToArray(value("blockedWords")),
     blockedCreators: linesToArray(value("blockedCreators")),
+
     lorebookBlockingEnabled: checked("lorebookBlockingEnabled", false),
     applyBotBlockingToLorebooks: checked("applyBotBlockingToLorebooks", false),
     showLorebookBlockButtons: checked("showLorebookBlockButtons", false),
@@ -639,6 +644,7 @@ function readSingleSettingFromPage(settingKey) {
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
     case "chatListPopoutShortcut": return checked("chatListPopoutShortcut");
     case "chatListRenameShortcut": return checked("chatListRenameShortcut");
+
     case "chatListTwoColumns": return checked("chatListTwoColumns");
     case "chatCollections": return (value("chatCollections", ""));
     case "showSavedChatQuickActions": return (checked("showSavedChatQuickActions"));
@@ -708,6 +714,9 @@ function readSingleSettingFromPage(settingKey) {
     case "favoriteBotFolderFilter": return (value("favoriteBotFolderFilter", "all"));
     case "favoriteBotCreatorFilter": return (value("favoriteBotCreatorFilter", ""));
     case "favoriteBotStateFilter": return (value("favoriteBotStateFilter", "all"));
+    case "showLaterFavoritesTab": return (checked("showLaterFavoritesTab"));
+    case "laterPageHideOpenedBots": return (checked("laterPageHideOpenedBots"));
+    case "laterPageHideBlockedBots": return (checked("laterPageHideBlockedBots"));
     case "showLaterBotButtons": return (checked("showLaterBotButtons"));
     case "enableSavedListsOverlay": return (checked("enableSavedListsOverlay"));
     case "protectLaterBotsFromFiltering": return (checked("protectLaterBotsFromFiltering"));
@@ -968,6 +977,7 @@ function readSingleSettingFromPage(settingKey) {
     case "blockedTags": return (linesToArray(value("blockedTags")));
     case "blockedWords": return (linesToArray(value("blockedWords")));
     case "blockedCreators": return (linesToArray(value("blockedCreators")));
+
     case "lorebookBlockingEnabled": return (checked("lorebookBlockingEnabled", false));
     case "applyBotBlockingToLorebooks": return (checked("applyBotBlockingToLorebooks", false));
     case "showLorebookBlockButtons": return (checked("showLorebookBlockButtons", false));

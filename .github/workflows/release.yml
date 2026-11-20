@@ -189,6 +189,9 @@ jobs:
           echo "Publish: ${{ steps.release.outputs.publish }}"
           echo "Reason: ${{ steps.release.outputs.reason }}"
 
+      - name: Test safe extension packaging rules
+        run: python3 scripts/test_build_package_selection.py
+
       - name: Test split/conditional background imports
         run: python3 build/test_background_imports.py
 

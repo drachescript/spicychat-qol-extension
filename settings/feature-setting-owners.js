@@ -24,7 +24,7 @@ window.__DSQ_FEATURE_SETTING_OWNERS__ = Object.freeze({
   "recommendation-helpers": ["enableRecommendationHelpers", "recommendationHideFavoriteBots", "recommendationHideOwnBots", "recommendationOnlyUnopened", "recommendationOnlyLorebook", "recommendationSessionHideButtons", "recommendationRandomButton", "recommendationHideLaterBots", "recommendationHideNotInterested", "recommendationPreferFavoriteCreators", "recommendationShowReasonBadges", "recommendationPreferredTags", "recommendationAvoidTags", "recommendationAvoidWords"],
   "saved-snippets": ["enableSavedTextSnippets"],
   "tags-nsfw": ["autoTags", "showTagTemplateButton", "includeTags", "excludeTags"],
-  "tag-aliases": ["enableTagAliases", "tagAliasRules", "tagAliasShowDisplay"],
+  "tag-aliases": ["showTagExplanations", "enableTagAliases", "tagAliasRules", "tagAliasShowDisplay"],
   "local-tag-matching": ["localTagMatchEnabled", "localTagMatchRules", "localTagMatchFetchPublic"],
   "archive-blocking-presets": ["archiveBlockingPresetsEnabled", "archiveBlockingPresetsSelection"],
   "archive-community-themes": ["archiveCommunityThemesEnabled", "archiveCommunityThemesMode", "archiveCommunityThemesRiskWarnings", "archiveCommunityThemesExtraTags", "archiveCommunityThemesAllowIds"],
