@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -7,6 +6,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const frozen = new Map();
   const onceTimers = new WeakMap();
   const onceTimerImages = new Set();
+  const pendingImages = new WeakSet();
   const videoState = new Map();
   let animationVisibilityGuardInstalled = false;
   let animationVisibilityGuardRaf = 0;
@@ -81,6 +81,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // avatar WebPs as candidates. Freezing a static WebP is visually identical,
     // while this makes animated WebP cards obey the same setting as GIF cards.
     return /cdn\.nd-api\.com\/avatars\/.*\.webp(?:$|[?#])/i.test(src);
+  }
+
+  function isChatMessageAvatar(el) {
+    return !!el?.closest?.("div[id^='message-']") &&
+      !!el?.closest?.("button[data-testid='Avatar-Button']");
   }
 
   function isMessageMedia(el) {
@@ -158,7 +163,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!settings.enabled || !settings.reduceAnimatedBotImages || !eligible(img, settings)) return;
 
     if (!img.complete || !img.naturalWidth) {
-      img.addEventListener("load", () => freezeImage(img, mode), { once: true });
+      if (!pendingImages.has(img)) {
+        pendingImages.add(img);
+        img.addEventListener("load", () => {
+          pendingImages.delete(img);
+          freezeImage(img, mode);
+        }, { once: true });
+      }
       return;
     }
 
@@ -178,11 +189,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     img.style.display = "none";
     img.dataset.dsAnimationFrozen = "1";
 
-    const state = { canvas, originalDisplay, mode, enter: null, leave: null, source: imageSource(img), hovering: false };
+    const state = {
+      canvas, originalDisplay, mode, enter: null, leave: null,
+      host: canvas.parentElement || canvas, source: imageSource(img), hovering: false
+    };
     frozen.set(img, state);
 
     if (mode === "hover") {
-      const host = canvas.parentElement || canvas;
+      const host = state.host;
       state.enter = () => {
         state.hovering = true;
         if (!foregroundAnimationAllowed(canvas)) {
@@ -208,7 +222,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const state = frozen.get(img);
     if (!state) return;
     try {
-      const host = state.canvas?.parentElement;
+      const host = state.host;
       if (host && state.enter) host.removeEventListener("mouseenter", state.enter);
       if (host && state.leave) host.removeEventListener("mouseleave", state.leave);
       state.canvas?.remove();
@@ -315,8 +329,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // images permanently frozen or auto-play them in the background.
     const mode = "hover";
 
-    for (const img of [...frozen.keys()]) {
-      if (!document.contains(img) || !eligible(img, settings)) unfreezeImage(img);
+    for (const [img, state] of frozen) {
+      if (!document.contains(img) || !eligible(img, settings)) {
+        unfreezeImage(img);
+        continue;
+      }
+      // Message avatars can be reused or re-rendered without replacing the img.
+      // Reconcile them here instead of adding another observer or timer.
+      if (!isChatMessageAvatar(img)) continue;
+      if (state.host !== img.parentElement || state.source !== imageSource(img)) {
+        unfreezeImage(img);
+        continue;
+      }
+      if (state.canvas.parentElement !== state.host || state.canvas.previousSibling !== img) {
+        img.after(state.canvas);
+      }
+      if (state.hovering &&
+          (!foregroundAnimationAllowed(img) || !state.host.matches?.(":hover"))) {
+        state.leave?.();
+      }
+      if (!state.hovering) {
+        if (img.style.display !== "none") img.style.display = "none";
+        if (state.canvas.style.display === "none") state.canvas.style.display = "";
+      }
     }
     for (const video of [...videoState.keys()]) {
       if (!document.contains(video) || !eligible(video, settings)) restoreVideo(video);

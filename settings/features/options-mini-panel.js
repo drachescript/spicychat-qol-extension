@@ -1,5 +1,3 @@
-// Feature-owned options helpers: mini-panel. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function previewClamp(number, min, max) {
   return Math.max(min, Math.min(max, Number(number) || 0));

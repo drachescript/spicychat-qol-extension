@@ -20,7 +20,7 @@
 <section class="first-run-notice" hidden="" id="firstRunNotice">
 <div>
 <strong>Please configure SpicyChat QoL</strong>
-<p>The main switch is on, but optional features start off. Pick what you want below or use one of the Quick setup presets.</p>
+<p>The main switch is on. Choose your features below, or start with a Quick setup preset.</p>
 </div>
 <div class="button-row">
 <button id="startFirstRunSetup" type="button">Start configuring</button>
@@ -115,7 +115,7 @@
 <section class="card" id="controlSupportCard">
 <h2>Performance & support</h2>
 <p class="hint">Save a performance snapshot to compare later, or download one report if something is broken. Your chat messages aren't included.</p>
-<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include exact enabled feature names in shared support reports (optional; OFF by default)</label>
+<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include enabled feature names in support reports (off by default)</label>
 <div class="button-row"><button id="savePerformanceBaseline" type="button">Save performance baseline</button><button id="comparePerformanceBaseline" type="button">Compare to baseline</button><button id="controlCopySupport" type="button">Copy full support check</button><button id="controlDownloadSupport" type="button">Download full support check</button></div>
 <p class="hint" id="controlSupportStatus"></p>
 <div class="control-performance-diff" id="controlPerformanceDiff"></div>
@@ -154,13 +154,13 @@
 </section>
 <section class="card" id="quickSetupCard">
 <h2>Quick setup</h2>
-<p class="hint">New installs start with optional features off. Choose a preset to get started, or turn on only what you want. You can change everything later.</p>
+<p class="hint">New installs start with extra features off. Choose a preset or enable them yourself. You can change this later.</p>
 <div class="button-row">
 <button id="applyMinimalPreset" type="button">Apply minimal</button>
 <button id="applyRecommendedPreset" type="button">Apply recommended</button>
 <button id="applyCreatorPreset" type="button">Apply creator setup</button>
 <button id="startCustomSetup" type="button">Run easy setup</button>
-<button id="disableOptionalFeatures" type="button">Turn optional features off</button>
+<button id="disableOptionalFeatures" type="button">Turn extra features off</button>
 </div>
 <p class="hint">Creator setup turns on the editing, backup and My Creations tools. It won't publish bots, change their visibility or enable community wording warnings for you.</p>
 <p class="hint" id="presetStatus"></p>
@@ -168,12 +168,12 @@
 <dialog id="firstRunSetupDialog" class="first-run-setup-dialog" aria-labelledby="firstRunSetupTitle">
 <div class="first-run-setup-shell">
 <h2 id="firstRunSetupTitle">What are you using SpicyChat QoL for?</h2>
-<p>Fresh installs start with optional features off. Pick a starting setup, or keep everything off and enable features yourself later.</p>
+<p>Fresh installs start with extra features off. Pick a starting setup, or turn on features yourself later.</p>
 <div class="first-run-setup-grid">
 <button type="button" data-first-run-choice="chatting"><strong>Chatting / roleplay</strong><span>Useful chat navigation, draft protection, Later/Favorites and a few everyday helpers.</span></button>
 <button type="button" data-first-run-choice="creator"><strong>Creating bots &amp; Lorebooks</strong><span>Creator/editor, Lorebook, My Creations and backup tools.</span></button>
 <button type="button" data-first-run-choice="both"><strong>Both</strong><span>Combine the chatting and creator starting setups.</span></button>
-<button type="button" data-first-run-choice="off"><strong>Start clean</strong><span>Leave user-facing optional features off. You can turn on exactly what you want later.</span></button>
+<button type="button" data-first-run-choice="off"><strong>Start clean</strong><span>Leave extra features off and choose what you want later.</span></button>
 </div>
 <div class="button-row first-run-setup-footer"><button id="firstRunCustomize" type="button">Choose manually</button></div>
 <p class="hint">Nothing is published or sent anywhere by these setup choices. They only change local QoL settings.</p>
@@ -578,7 +578,7 @@ Testing"></textarea></label>
 <label class="row"><input id="protectFavoriteCreatorsFromFiltering" type="checkbox"/><span>Keep all favorite creators visible (global master override)</span></label>
 <div class="manager-add-row">
 <input id="favoriteCreatorAddHandle" placeholder="Creator handle or /creator/link" type="text"/>
-<input id="favoriteCreatorAddName" placeholder="Optional name" type="text"/>
+<input id="favoriteCreatorAddName" placeholder="Name (if known)" type="text"/>
 <button id="addFavoriteCreator" type="button">Add favorite creator</button>
 </div>
 <div class="bot-manager-toolbar">
@@ -625,7 +625,7 @@ Testing"></textarea></label>
 </fieldset>
 <div class="manager-add-row">
 <input id="followedCreatorAddHandle" placeholder="Consent-approved creator handle or /creator/link" type="text"/>
-<input id="followedCreatorAddName" placeholder="Optional name" type="text"/>
+<input id="followedCreatorAddName" placeholder="Name (if known)" type="text"/>
 <button id="addFollowedCreator" type="button">Add followed creator</button>
 </div>
 <div class="bot-manager-toolbar">
@@ -770,7 +770,7 @@ Testing"></textarea></label>
 </fieldset>
 <fieldset class="bot-status-creator-watch">
 <legend>Followed creator new-bot watch</legend>
-<p class="hint">Shows the background status for the optional followed-creator notification feature below. New detections are also added to Saved Bots Hub as a separate local source.</p>
+<p class="hint">Shows followed-creator notification status. New public bots also appear in Saved Bots Hub.</p>
 <p class="hint" id="creatorBotWatchStatusCenter">New-bot watch is disabled.</p>
 <div class="button-row"><button id="creatorBotStatusCenterCheckNow" type="button">Check approved followed creators now</button></div>
 </fieldset>
@@ -1094,7 +1094,7 @@ Testing"></textarea></label>
             <textarea id="formatToolbarCustomWrappers" placeholder="Whisper | (( | ))
 Meta | &lt; | &gt;" spellcheck="false"></textarea>
 </label>
-<p class="hint">Optional custom buttons: one per line as <code>Label | before | after</code>. Up to 5 buttons are shown; labels are kept short and the wrapper text is inserted literally.</p>
+<p class="hint">Custom buttons: one per line as <code>Label | before | after</code>. Up to 5 buttons are shown; labels are kept short and the wrapper text is inserted literally.</p>
 </div>
 <p class="hint">Wrap selected text, or insert matching formatting marks at the cursor. Supports native and Toolkit editors.</p>
 <label class="row"><input id="hideChatVoiceButton" type="checkbox"/><span>Hide voice recording button</span></label>
@@ -1204,9 +1204,9 @@ Testing" spellcheck="false"></textarea></label>
 <button type="button" id="refreshPerformanceTroubleshooter">Show measured feature activity</button>
 <pre id="performanceTroubleshooterResults" class="diagnostic-output" style="white-space:pre-wrap">No performance snapshot requested.</pre>
 </div>
-<p class="hint">Adaptive is a good default. Stronger presets delay optional work on slow devices or very long chats.</p>
+<p class="hint">Adaptive is a good default. Stronger presets delay extra work on slow devices or very long chats.</p>
 </section></div>
-<div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Everything is optional.</p>
+<div class="tab-page" data-page="custom-pictures"><p class="page-intro">Backgrounds, per-chat Character and Persona pictures, local Picture Library, and native image controls. Enable only the tools you want.</p>
 <section class="card" id="customPicturesCard">
 <h2>Custom Pictures</h2>
 <p class="hint">Manage per-conversation pictures here. These are local visual overrides and do not change the bot, the persona profile, or the image-generation model's reference.</p>
@@ -1234,7 +1234,7 @@ Testing" spellcheck="false"></textarea></label>
 </section>
 </div>
 <div class="tab-page" data-page="chat-ui"><p class="page-intro">Controls used inside an open conversation: top-bar tools, search, bookmarks, navigation, message actions, export, and text display helpers.</p>
-<section class="card" id="qol72ChatShortcuts"><h2>Optional chat shortcuts</h2>
+<section class="card" id="qol72ChatShortcuts"><h2>Chat shortcuts</h2>
 <label class="row"><input id="chatAlwaysShowProfileLink" type="checkbox"/><span>Always show a Profile button in chats</span></label>
 <label class="row"><input id="chatJumpToStartShortcut" type="checkbox"/><span>Show a Start button to jump toward the first message</span></label>
 <label class="row"><input id="chatOpenWindowShortcut" type="checkbox"/><span>Show an Open window button for the current chat</span></label>
@@ -1313,7 +1313,7 @@ Testing" spellcheck="false"></textarea></label>
 </fieldset>
 <p class="hint">Existing Lorebooks can import entries only, or use the reviewed merge workflow. Private-copy creation won't change the original Lorebook.</p>
 </div>
-<p class="hint">Bot backups are optional. Automatic backups start on initially; existing backups remain manageable when editor tools are off.</p>
+<p class="hint">Automatic bot backups start enabled, and you can manage saved copies even with editor tools turned off.</p>
 </section>
 <div id="ds-feature-panel-profile-export" data-dsq-feature-panel="profile-export"></div>
 <section class="card" id="creatorBackupManagerCard">
@@ -1358,7 +1358,7 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="lorebookEntryShowHiddenKeywordCount" type="checkbox"/><span>Show hidden keyword count (+N hidden keywords)</span></label>
 <label class="row"><input id="lorebookEntryShowNoKeywordsWarning" type="checkbox"/><span>Show no-keywords warning</span></label>
 <label class="row"><input id="lorebookEntryShowCharacterCount" type="checkbox"/><span>Show character-count warning near SpicyChat's 2,000-character entry limit</span></label>
-<label class="row"><input id="lorebookEntryQuickToggle" type="checkbox"/><span>Show optional individual entry Enable / Disable shortcut (edits the actual shared Lorebook, not per chat)</span></label>
+<label class="row"><input id="lorebookEntryQuickToggle" type="checkbox"/><span>Show individual entry Enable / Disable shortcut (edits the actual shared Lorebook, not per chat)</span></label>
 <label class="row"><input id="lorebookEntryRenameButton" type="checkbox"/><span>Show Rename</span></label>
 <label class="row"><input id="lorebookEntryCopyButton" type="checkbox"/><span>Show Copy</span></label>
 <label class="row"><input id="lorebookEntryDuplicateButton" type="checkbox"/><span>Show Duplicate</span></label>
@@ -1449,7 +1449,7 @@ Testing" spellcheck="false"></textarea></label>
 <h2>My Creations backup &amp; shortcuts</h2>
 <label class="row"><input id="enableMyCreationsBulkBackup" type="checkbox"/><span>Show bulk backup controls on My Creations</span></label>
 <label class="row"><input id="enableAccountMigrationAssistant" type="checkbox"/><span>Show Account Migration Assistant alongside My Creations backups</span></label>
-<p class="hint">Optionally combine verified chatbot and Lorebook backup ZIPs into one migration package. Import still requires review and saving on the new account. Enable bulk backups above first.</p>
+<p class="hint">Combine verified chatbot and Lorebook backup ZIPs into one migration package. Import still requires review and saving on the new account. Enable bulk backups above first.</p>
 <p class="hint">Adds Backup all chatbots / Backup all Lorebooks on your My Creations pages. Bulk backup always fetches the current live version from SpicyChat when you start it; local QoL revision/history copies are not used as the source.</p>
 <label class="row"><input id="showMyLorebookEditButtons" type="checkbox"/><span>Show an Edit button on my Lorebook cards</span></label>
 <label class="row"><input id="showMyChatbotEditButtons" type="checkbox"/><span>Show a small Edit button on my Chatbot cards</span></label>
@@ -1499,7 +1499,7 @@ Testing" spellcheck="false"></textarea></label>
 </section>
 <section class="card" id="botBlockingDislikesCard">
 <h2>Bot Blocking &amp; Dislikes</h2>
-<p class="hint">Keep local bot blocking, bulk blocking, and optional dislike behavior together here. Blocking and disliking are separate actions.</p>
+<p class="hint">Keep local bot blocking, bulk blocking, and Dislike actions together here. Blocking and disliking are separate actions.</p>
 <label class="row"><input id="blockCards" type="checkbox"/><span>Block character cards by tag / word / creator rules</span></label>
 <div class="sub-card" id="listingFilterStatsSettings">
 <h3>Listing filter stats</h3>
@@ -1520,13 +1520,13 @@ Testing" spellcheck="false"></textarea></label>
 <label class="row"><input id="quickLessLikeOnBlock" type="checkbox"/><span>Also use Less Like This after I block it (desktop browsers only)</span></label>
 <label class="row"><input id="quickDislikeOnBlock" type="checkbox"/><span>Also dislike a bot after I block it (desktop browsers only)</span></label>
 <label>Automatic dislike cooldown (minutes)<input id="quickDislikeIdleMinutes" min="1" max="60" step="1" type="number" value="5"/></label>
-<p class="hint"><strong>Both are optional.</strong> Blocking happens immediately. Less Like changes recommendation preferences; Dislike uses the native chat rating controls. Each action keeps its own history. Desktop only.</p>
+<p class="hint">Blocking happens immediately. Less Like changes recommendation preferences; Dislike uses the native chat rating controls. Each action keeps its own history. Desktop only.</p>
 <label>Blocked tags, one per line<textarea id="blockedTags" placeholder="Low Quality
 Anime" spellcheck="false"></textarea></label>
 <label class="row"><input id="filterImpliedBlockedTags" type="checkbox"/><span>Also hide bots that clearly imply my excluded themes (experimental)</span></label>
 <div id="ds-feature-panel-archive-blocking-presets" data-dsq-feature-panel="archive-blocking-presets"></div>
 <div id="ds-feature-panel-archive-community-themes" data-dsq-feature-panel="archive-community-themes"></div>
-<p class="hint">Uses the <strong>visible title/description</strong> to recognize untagged cheating, past affairs, emotional boundary crossing, partner-stealing, NTR and cuckolding. It also recognizes strong <strong>relationship-boundary risk</strong> teasers (such as a partner’s friend circle with undisclosed sexual/romantic history), labeling these as a risk rather than confirmed cheating. The optional stricter cues look for a committed relationship plus explicit romantic or concealed third-party contact; accusations and ordinary friendship alone should not trigger hiding. Applies only when Cheating/NTR/Cuckolding is excluded in SpicyChat's current native filters, or listed in QoL's blocked tags with card blocking enabled. It <strong>only hides</strong> cards; it never adds inferred matches to permanent Blocked bots, sends dislikes, or opens profiles. Off by default. Ambiguous descriptions may remain visible or occasionally be hidden.</p>
+<p class="hint">Uses the <strong>visible title/description</strong> to recognize untagged cheating, past affairs, emotional boundary crossing, partner-stealing, NTR and cuckolding. It also recognizes strong <strong>relationship-boundary risk</strong> teasers (such as a partner’s friend circle with undisclosed sexual/romantic history), labeling these as a risk rather than confirmed cheating. Stricter cues look for a committed relationship plus explicit romantic or concealed third-party contact; accusations and ordinary friendship alone should not trigger hiding. Applies only when Cheating/NTR/Cuckolding is excluded in SpicyChat's current native filters, or listed in QoL's blocked tags with card blocking enabled. It <strong>only hides</strong> cards; it never adds inferred matches to permanent Blocked bots, sends dislikes, or opens profiles. Off by default. Ambiguous descriptions may remain visible or occasionally be hidden.</p>
 <label>Blocked words in name/description, one per line<textarea id="blockedWords" placeholder="high school
 step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="autoBlockWordMatches" type="checkbox"/><span>Automatically add blocked-word matches to Blocked bots</span></label>
@@ -1546,12 +1546,12 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="applyBotBlockingToRulebooks" type="checkbox"/><span>Use my normal blocked words, tags, and creators for Rulebooks too</span></label>
 <label class="row"><input id="showRulebookBlockButtons" type="checkbox"/><span>Show a quick Block × on Rulebook cards</span></label>
 <label>Blocked Rulebook UUIDs, one per line<textarea id="rulebookBlockedIds" spellcheck="false" placeholder="12f13d54-5738-5c46-b7a7-9ac6dd00b52f"></textarea></label>
-<p class="hint">Optional local Rulebook blocking by ID, blocked words or creator. Meter names are not treated as tags.</p>
+<p class="hint">Local Rulebook blocking by ID, blocked words or creator. Meter names are not treated as tags.</p>
 </div>
-<p class="hint"><strong>Public Lorebooks:</strong> Optional local filters for names, descriptions, tags, creators and exact Lorebook IDs.</p>
+<p class="hint"><strong>Public Lorebooks:</strong> Local filters for names, descriptions, tags, creators and exact Lorebook IDs.</p>
 <details class="sub-card blocker-test-card">
 <summary>Advanced: test blocking rules</summary>
-<p class="hint">Optional troubleshooting tool. Paste a sample only when you want to check exactly why a word, creator, or tag rule does or does not match. It is not needed for normal blocking.</p>
+<p class="hint">Paste a sample to check why a word, creator, or tag rule does or does not match. It is not needed for normal blocking.</p>
 <label>Name / description sample<textarea id="blockerTestText" placeholder="Simon “Ghost” Riley" rows="3" spellcheck="false"></textarea></label>
 <label>Creator sample<input id="blockerTestCreator" placeholder="@creatorname" spellcheck="false" type="text"/></label>
 <label>Tags sample<input id="blockerTestTags" placeholder="Military, COD" spellcheck="false" type="text"/></label>
@@ -1564,7 +1564,7 @@ step sister" spellcheck="false"></textarea></label>
 <p class="hint">Bots here are hidden from listings. Profiles still stay normal if you open the profile page directly.</p>
 <div class="manager-add-row">
 <input id="blockedAddId" placeholder="Bot/chat ID" type="text"/>
-<input id="blockedAddName" placeholder="Optional name" type="text"/>
+<input id="blockedAddName" placeholder="Name (if known)" type="text"/>
 <button id="addBlockedBot" type="button">Add blocked</button>
 </div>
 <div class="bot-manager-toolbar">
@@ -1652,8 +1652,8 @@ step sister" spellcheck="false"></textarea></label>
 <section class="card">
 <h2>Text normalization</h2>
 <p class="hint">Uses the same normalization for displayed bot-card titles/descriptions and for filtering, search, and language checks. QoL only changes the local display; it never edits the bot itself.</p>
-<label class="row"><input id="textNormalizationEnabled" type="checkbox"/><span>Use text normalization for bot-card text, filters, search, and language detection</span></label>
-<label class="row"><input id="normalizeFancyUnicode" type="checkbox"/><span>Convert fancy Unicode letters/numbers to normal text (including displayed bot cards)</span></label>
+<label class="row"><input id="textNormalizationEnabled" type="checkbox"/><span>Normalize text in bot cards, chat messages, filters, search and language detection</span></label>
+<label class="row"><input id="normalizeFancyUnicode" type="checkbox"/><span>Convert fancy Unicode letters and numbers to normal text, including chat messages</span></label>
 <label class="row"><input id="normalizePunctuation" type="checkbox"/><span>Normalize curly quotes, long dashes, dots, and similar punctuation</span></label>
 <label class="row"><input id="normalizeInvisibleCharacters" type="checkbox"/><span>Remove invisible/zero-width characters while matching</span></label>
 <label class="row"><input id="normalizeDecorativeSymbols" type="checkbox"/><span>Remove decorative ornaments (stars, borders, symbols), keeping emojis</span></label>
@@ -1673,7 +1673,7 @@ step sister" spellcheck="false"></textarea></label>
 <p class="hint">Softer than blocking. Useful for hiding recommendations without treating it as a full block.</p>
 <div class="manager-add-row">
 <input id="notInterestedAddId" placeholder="Bot/chat ID" type="text"/>
-<input id="notInterestedAddName" placeholder="Optional name" type="text"/>
+<input id="notInterestedAddName" placeholder="Name (if known)" type="text"/>
 <button id="addNotInterestedBot" type="button">Add not interested</button>
 </div>
 <div class="bot-manager-toolbar">
@@ -1758,7 +1758,7 @@ step sister" spellcheck="false"></textarea></label>
 <label>Settings (all syncable preferences) <select id="accountSyncSettingsMode">
 <option value="off">Off on this device</option><option value="two-way">Upload and download (merge)</option><option value="upload-only">Upload only</option><option value="download-only">Download only</option><option value="manual">Manual only</option>
 </select></label>
-<p class="hint">Individual settings can also be selected using the optional filter below. Existing device-only settings stay local.</p>
+<p class="hint">Use the filter below to choose individual settings. Existing device-only settings stay local.</p>
 <label class="row"><input id="accountSyncLimitSettings" type="checkbox"/><span>Only sync selected settings</span></label>
 <details id="accountSyncSettingChoices" class="sub-card account-sync-setting-choices"><summary>Choose individual settings (expand to search and edit)</summary><div id="accountSyncSettingSelection" hidden><input id="accountSyncSearchSetting" placeholder="Find a setting by name" type="search"/><div id="accountSyncSettingsChecklist" class="account-sync-selectable-settings"></div></div></details>
 <h4>Saved lists (ID-only)</h4>
@@ -1839,6 +1839,7 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="ghBackupCategory_other" type="checkbox" checked/>Other supported QoL data</label><input id="ghBackupPlain_other" aria-label="Unencrypted QoL data" type="checkbox"/>
 <label class="row"><input id="ghBackupCategory_media" type="checkbox"/>Local media (large)</label><input id="ghBackupPlain_media" aria-label="Unencrypted media" type="checkbox"/>
 <label class="row"><input id="ghBackupCategory_research" type="checkbox"/>Verified Research Export data (incremental)</label><input id="ghBackupPlain_research" aria-label="Unencrypted research" type="checkbox"/>
+<p class="hint">Research ZIPs download locally. To upload the verified records, choose GitHub or Both, enable this category and save. If you already finished an export, open Research Export and click Send saved research to GitHub. Uploads run in small batches; check the snapshot status here.</p>
 </div>
 <label class="row"><input id="ghBackupAuto" type="checkbox"/><span>Automatic GitHub sync every 12 hours while a SpicyChat tab is open</span></label>
 <label class="row"><input id="ghBackupPause" type="checkbox"/><span>Pause GitHub backups on this device</span></label>
@@ -1864,7 +1865,7 @@ step sister" spellcheck="false"></textarea></label>
 <div class="sub-card">
 <h3>Research data recovery (Experimental)</h3>
 <p class="hint">Recover verified chat and character export records from a selected snapshot into QoL’s private local research cache. This does not modify SpicyChat conversations or native research checkpoints. Six records per action to avoid browser stalls.</p>
-<label>Optional exact record key (leave blank to recover in batches) <input id="ghBackupResearchKey" type="text" spellcheck="false" placeholder="conversation:UUID or character:UUID"/></label>
+<label>Exact record key (leave blank to recover in batches) <input id="ghBackupResearchKey" type="text" spellcheck="false" placeholder="conversation:UUID or character:UUID"/></label>
 <label class="row"><input id="ghBackupResearchReplace" type="checkbox"/>Replace a conflicting local research record (explicit)</label>
 <div class="button-row"><button id="ghBackupResearchRecover" type="button">Recover research (next six)</button></div>
 <p class="hint" id="ghBackupResearchState"></p>
@@ -2041,7 +2042,7 @@ step sister" spellcheck="false"></textarea></label>
 <img alt="SpicyChat QoL icon" class="about-project-icon" src="https://spicychatqol.drache.uk/assets/icons/full_icon.jpg"/>
 <div><strong>SpicyChat QoL</strong><p class="hint">Developed under DragonScript by DragonGRaf.</p></div>
 </div>
-<p>An independent quality-of-life project for SpicyChat focused on optional tools, local-first data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>
+<p>An independent quality-of-life project for SpicyChat focused on local-first tools and data, creator helpers, chat utilities, filtering, organization, and interface cleanup.</p>
 <p class="hint">The extension uses normal SpicyChat pages/actions or information already available to the signed-in user. It does not unlock private character fields or publish creations automatically.</p>
 <a class="help-link piper-help-link" href="https://spicychat.ai/chatbot/98ebe0d7-625d-4196-a7a5-ebfd4f262367" rel="noopener noreferrer" target="_blank" title="Open Piper on SpicyChat">
 <span class="piper-help-avatar piper-help-avatar-fallback" aria-hidden="true">P</span>
@@ -2050,7 +2051,7 @@ step sister" spellcheck="false"></textarea></label>
 <a class="help-link" href="https://github.com/drachescript/spicychat-qol-extension" rel="noopener noreferrer" target="_blank"><span><strong>Project &amp; source</strong><small>Source code, releases, issues and project updates.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://spicychatqol.drache.uk/" rel="noopener noreferrer" target="_blank"><span><strong>Project website</strong><small>Feature information, releases and install links.</small></span><span class="help-arrow">&gt;</span></a>
 <a class="help-link" href="https://discord.gg/XTMdWvuVSU" rel="noopener noreferrer" target="_blank"><span><strong>SpicyChat QoL Discord server</strong><small>Join the project server for help, ideas, suggestions and feedback.</small></span><span class="help-arrow">&gt;</span></a>
-<a class="help-link" href="https://paypal.me/dragongraf" rel="noopener noreferrer" target="_blank"><span><strong>Support the project via PayPal</strong><small>Optional support for continued development and project costs.</small></span><span class="help-arrow">&gt;</span></a></section><section class="card help-card" id="developerCard">
+<a class="help-link" href="https://paypal.me/dragongraf" rel="noopener noreferrer" target="_blank"><span><strong>Support the project via PayPal</strong><small>Help with development and project costs.</small></span><span class="help-arrow">&gt;</span></a></section><section class="card help-card" id="developerCard">
 <h2>About the developer</h2>
 <p>SpicyChat QoL is developed and maintained by dragonGRaf under DragonScript.</p>
 <p class="hint">I'm building and maintaining QoL myself, with a lot of ideas and reports coming from the community. Feel free to share bugs or suggestions on Discord or GitHub.</p>
@@ -2062,7 +2063,7 @@ step sister" spellcheck="false"></textarea></label>
 <section class="card help-card" id="simpleFeatureGuideCard">
 <h2>Simple feature guide</h2>
 <p>Not sure what a setting does? Here’s the short version. The full Features tab has more detail.</p>
-<p class="hint"><strong>Local</strong> means data is saved in this browser, not on SpicyChat. Most extras are optional; experimental features need testing.</p>
+<p class="hint"><strong>Local</strong> means data is saved in this browser, not on SpicyChat. You choose which features to enable; experimental features need testing.</p>
 <div class="eli5-guide">
 <details open><summary>Finding bots</summary><div class="eli5-grid">
 <div><strong>Bot blocking</strong><span>Hide bots you don’t want to see. Quick Block only hides them after the block is saved.</span></div>
@@ -2071,12 +2072,12 @@ step sister" spellcheck="false"></textarea></label>
 <div><strong>Language filter</strong><span>Show or hide bots by language, even when the creator forgot a language tag.</span></div>
 <div><strong>Smart Filter Presets</strong><span>Save a group of filters and switch between them without setting everything up again.</span></div>
 <div><strong>Listing Refill</strong><span>When filtering leaves gaps, look at later SpicyChat result pages for more matching bots.</span></div>
-<div><strong>Listing filter stats</strong><span>See how many bot cards QoL filtered and, optionally, why.</span></div>
+<div><strong>Listing filter stats</strong><span>See how many bot cards QoL filtered and why.</span></div>
 <div><strong>Opened history</strong><span>Remember which bots you opened so you can find or filter them later.</span></div>
 <div><strong>Favorites history</strong><span>Keep track of bots you favorited, even if you later unfavorite them.</span></div>
 <div><strong>Later</strong><span>Keep a separate list of bots you might want to try later.</span></div>
 <div><strong>Recently Seen</strong><span>Find a bot card you just scrolled past.</span></div>
-<div><strong>Favorite / Follow creators</strong><span>Save creators locally and optionally check for new public bots.</span></div>
+<div><strong>Favorite / Follow creators</strong><span>Save creators locally and check for new public bots.</span></div>
 <div><strong>Bot Organizer (bot folders &amp; labels)</strong><span>Organize bot profiles with local folders and labels.</span></div>
 <div><strong>Saved Bots Hub</strong><span>Search all the bots QoL already knows about in one place.</span></div>
 <div><strong>Bot Status Center</strong><span>Check saved bot links and keep available profile information for recovery. Private bots aren’t automatically treated as deleted.</span></div>
@@ -2088,7 +2089,7 @@ step sister" spellcheck="false"></textarea></label>
 <div><strong>Reply Instructions</strong><span>Add guidance for how the bot should answer. It’s visible chat text, not a hidden system prompt.</span></div>
 <div><strong>Formatting toolbar</strong><span>Shortcuts for *actions*, bold, backticks and other text formatting.</span></div>
 <div><strong>Typing while the AI responds</strong><span>Write your next message while a reply is generating. QoL won’t force Send while SpicyChat is busy.</span></div>
-<div><strong>Message quick actions</strong><span>Use Copy, Edit and Report more easily, with optional Remove Image and Resend.</span></div>
+<div><strong>Message quick actions</strong><span>Use Copy, Edit and Report more easily, with Remove Image and Resend controls.</span></div>
 <div><strong>Scroll &amp; swipe navigation</strong><span>Jump to the top, bottom or another generated reply; loading older replies can take time.</span></div>
 <div><strong>Search Inside Current Chat</strong><span>Search loaded messages and jump to matches. You can choose to load older messages too.</span></div>
 <div><strong>Message bookmarks</strong><span>Save important messages and jump back to them later.</span></div>
@@ -2096,7 +2097,7 @@ step sister" spellcheck="false"></textarea></label>
 <div><strong>Smart Conversation Folders — experimental</strong><span>Preview folder suggestions before applying them.</span></div>
 <div><strong>Model quick menu &amp; generation profiles</strong><span>Favorite models or save a model’s generation settings for later.</span></div>
 <div><strong>Chat Export</strong><span>Download conversations as text, Markdown, HTML or JSON.</span></div>
-<div><strong>Chat Nudges</strong><span>Get optional reminders about selected chats you haven’t visited. No fake message is sent.</span></div>
+<div><strong>Chat Nudges</strong><span>Get reminders about selected chats you haven’t visited. No fake message is sent.</span></div>
 <div><strong>Translation</strong><span>Translate messages while keeping the original text visible.</span></div>
 <div><strong>RP format repair</strong><span>Clean up how action/dialogue text is displayed locally without changing saved replies.</span></div>
 <div><strong>RP context warning &amp; meter</strong><span>See when a long chat may be approaching its context limit. Estimates cannot tell which exact message the AI forgot.</span></div>
@@ -2119,10 +2120,10 @@ step sister" spellcheck="false"></textarea></label>
 <div><strong>Creator backups</strong><span>Keep local copies of your own bots and Lorebooks so you can recover earlier versions.</span></div>
 <div><strong>Bot Version History</strong><span>Compare meaningful changes to your bot’s writing. Restore into the editor for review, not automatic publishing.</span></div>
 <div><strong>Chatbot Editor Draft History</strong><span>Keep earlier draft text while editing a bot.</span></div>
-<div><strong>Lorebook Entry Manager</strong><span>Add quick entry actions, keyword information, sorting and optional bulk tools.</span></div>
+<div><strong>Lorebook Entry Manager</strong><span>Add quick entry actions, keyword information, sorting and bulk tools.</span></div>
 <div><strong>Wiki / Web Lorebook Importer</strong><span>Turn supported wiki pages or pasted text into Lorebook entries you can review.</span></div>
 <div><strong>Creation Audit</strong><span>Check your bots for missing or unusual fields and other things worth looking at.</span></div>
-<div><strong>Community wording warnings</strong><span>Optional warnings based on community reports. They are not an official moderation list.</span></div>
+<div><strong>Community wording warnings</strong><span>Warnings based on community reports. They are not an official moderation list.</span></div>
 <div><strong>My Creations helpers</strong><span>Filter, sort, load more and back up your own creations.</span></div>
 <div><strong>Remember image prompt</strong><span>Keep the last chatbot image-generation prompt if SpicyChat clears it.</span></div>
 <div><strong>Bot editor shortcuts</strong><span>Insert {{char}}, {{user}} and your own snippets without typing them every time.</span></div>
@@ -2162,7 +2163,7 @@ step sister" spellcheck="false"></textarea></label>
 <section class="card" id="diagnosticsCard">
 <h2>Quick diagnostics</h2>
 <p class="hint">Copy version, browser, enabled features and storage counts for support. No chat text, memories or private lists.</p>
-<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include exact enabled feature names in shared support reports (optional; OFF by default)</label>
+<label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include enabled feature names in support reports (off by default)</label>
 <div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
 <p class="hint">Use Copy all or Download all for a complete support report, or export individual parts. Chat text is excluded.</p>
 <p class="hint">Support history survives updates. Copy never clears it; downloads clear only successfully saved records when confirmed.</p>

@@ -1,5 +1,3 @@
-// Feature-owned options helpers: diagnostics. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function performancePageFamily(path) {
   const value = String(path || "");

@@ -7,6 +7,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS) return;
   DS.createMainMessageLaneRuntime = (ctx) => {
+    const originalChatText = new WeakMap();
+    let chatTextNormalizationSignature = null;
+    let restoreChatTextPending = false;
+    const chatTextConfig = settings => [
+      settings.textNormalizationEnabled, settings.normalizeFancyUnicode,
+      settings.normalizePunctuation, settings.normalizeInvisibleCharacters,
+      settings.normalizeDecorativeSymbols, settings.normalizeEmojis
+    ].map(Boolean).join(":");
+
+    function normalizeRenderedChatText(roots, settings) {
+      const enabled = settings.textNormalizationEnabled === true &&
+        typeof DS.normalizeTextForMatching === "function";
+      for (const root of roots) {
+        if (!root?.isConnected) continue;
+        for (const content of root.querySelectorAll('[data-testid="ChatMessageContentV2"]')) {
+          if (content.closest('[contenteditable="true"], [data-ds-qol-owned="1"]')) continue;
+          const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            const parent = node.parentElement;
+            if (!parent || parent.closest('button, a, textarea, input, code, pre, kbd, samp, script, style, [contenteditable="true"], [data-ds-qol-owned="1"]')) continue;
+            const previous = originalChatText.get(node);
+            if (!enabled) {
+              if (previous && node.nodeValue === previous.display) node.nodeValue = previous.raw;
+              originalChatText.delete(node);
+              continue;
+            }
+            // Preserve original line breaks and inter-element spaces in RP text.
+            const raw = previous && node.nodeValue === previous.display ? previous.raw : node.nodeValue;
+            if (!raw.trim()) continue;
+            const display = DS.normalizeTextForMatching(raw);
+            if (display !== raw) {
+              originalChatText.set(node, {raw, display});
+              if (node.nodeValue !== display) node.nodeValue = display;
+            } else originalChatText.delete(node);
+          }
+        }
+      }
+    }
     const { androidWebViewPerformanceGuardActive, applyRuntimePerformancePresentation, chatStartupQuietActive, desktopAppPerformanceGuardActive, generationMetadataWanted, loadedChatMessageCount, messageQuickActionsEnabled, runFeatureStep, runStep, runtimeCounters, runtimeProfile, scheduleChatStartupQuietResume, shouldPauseHiddenTab, laneState } = ctx;
   function takeIncrementalMessageLaneRoots(limit = 10) {
     const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
@@ -124,6 +163,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      const signature = chatTextConfig(settings);
+      if (signature !== chatTextNormalizationSignature) {
+        const previous = chatTextNormalizationSignature;
+        chatTextNormalizationSignature = signature;
+        if (previous !== null && settings.textNormalizationEnabled !== true) restoreChatTextPending = true;
+        if (previous !== null || settings.textNormalizationEnabled === true) {
+          const roots = DS.getLoadedMessageRoots?.() || [];
+          const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
+          for (const root of roots) dirty.add(root);
+        }
+      }
       const profile = runtimeProfile();
       const chunkLimit = profile === "maximum" ? 6 : profile === "aggressive" ? 8 : 10;
       const laneBatch = takeIncrementalMessageLaneRoots(chunkLimit);
@@ -132,6 +182,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.messageLaneDirtyRoots = Number(counters.messageLaneDirtyRoots || 0) + laneRoots.length;
       counters.lastMessageLaneDirtyRoots = laneRoots.length;
 
+      if (settings.textNormalizationEnabled === true || restoreChatTextPending) {
+        await runStep("normalize chat text", () => normalizeRenderedChatText(laneRoots, settings));
+        if (!settings.textNormalizationEnabled && !laneBatch.remaining) restoreChatTextPending = false;
+      }
       await runStep("performance mode", () => DS.applyPerformanceMode?.());
       if (messageQuickActionsEnabled(settings) || DS.state.messageOptionsWasActive) await runStep("message options", () => DS.applyMessageOptions?.());
       if (generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning")) await runStep("generation metadata", () => DS.applyGenerationMetadata?.());

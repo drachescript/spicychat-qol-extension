@@ -1,3 +1,31 @@
+## 0.2.89
+- Fixed RP Format Repair missing most narration in long greetings and mixed dialogue, with safer full-message edit previews.
+- Kept the RP edit shortcut separate from the display toggle and removed RP controls when the feature is disabled.
+- Improved RP Format Repair for unformatted greetings and mixed narration/dialogue; kept bold inner thoughts intact.
+- Fixed GitHub Research progress resetting each batch and added bounded retries after temporary upload failures.
+- Extended text normalization to displayed chat messages, using the existing changed-message updates without editing saved replies.
+- Fixed GitHub repository verification hiding successful results behind old errors and resetting encryption unlocks on repeated verification.
+- Replaced raw repository-list output with a clear selection message.
+- Fixed Rulebook cards not opening in new tabs with Ctrl+click, middle-click or the right-click menu.
+- Added a way to send completed Research Export checkpoints to GitHub without re-exporting chats.
+- Made GitHub Research upload status and setup requirements clearer; syncing still follows the saved backup categories.
+- Reduced Research Export panel startup checkpoint reads and narrowed Later-button updates to changed listing cards.
+- Fixed chat-message avatars sometimes animating after SpicyChat re-renders them or replaces their frozen frame.
+- Reused verified unchanged Research Export histories instead of rebuilding every message file or writing the full checkpoint again.
+- Exported changed chats as incremental ZIP parts; Fresh still makes a complete archive. Earlier ZIP parts remain necessary for reused chats.
+- Avoided retransferring already-staged GitHub research records and protected research scans from duplicate helper-tab runs where supported.
+- Added Research Export tests for unchanged and updated chats, archive verification and GitHub staging.
+- Reduced repeated listing-card collection by reusing the changed-card queue and shared card cache.
+- Moved animation controls, exact message counts and previously chatted indicators into the existing on-demand loader.
+- Improved route-change handling and reduced idle fallback checks without adding observers or timers.
+- Avoided unnecessary Memory Manager row updates and inactive-manager cleanup work.
+- Reduced unrelated background alarm updates when changing individual settings.
+- Made automatic GitHub backups less disruptive during active chats and reduced research staging overhead.
+- Split Research Export fallback work into smaller chunks to keep the page more responsive.
+- Added source regression checks for changed-card batching, background setting wakeups and build assets.
+- Cleaned up repetitive source comments and shortened Settings and feature descriptions.
+- Kept QoL Cloud, GitHub backups, Inspector tracing, saved data and existing feature settings intact.
+
 ## 0.2.88
 - Restored a clear Add device control for QoL Cloud and added GitHub backup device-connection guidance.
 - Added unofficial hover explanations for chatbot tags in search filters and character creation without changing native tags.

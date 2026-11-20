@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: lorebook-export. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 async function setLorebookExportJob(token, value) {
   const safe = String(token || "").trim().slice(0, 140);

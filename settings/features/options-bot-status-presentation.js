@@ -1,6 +1,4 @@
 // Bot Status identity, avatar lookup, status cards and status list rendering.
-// Feature-owned options helpers: bot-status. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 // Unfinished scan work is separate from checkedAt and previous availability results.
 // Kept as a lightweight cache of the durable resume queue for the review UI.

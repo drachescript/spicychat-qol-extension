@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: browser-tabs. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function storageSessionGet(keys) {
   return new Promise(resolve => {

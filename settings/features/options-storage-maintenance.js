@@ -1,5 +1,3 @@
-// Feature-owned options helpers: storage-maintenance. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 async function renderLocalChangeHistory() {
   const host = $("localChangeHistory");

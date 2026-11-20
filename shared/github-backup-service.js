@@ -76,6 +76,33 @@
       tx.onabort=()=>reject(tx.error||Error('Private storage transaction aborted'));
     });}finally{database.close();}
   }
+  // Complete a staged research record with one IndexedDB read transaction and
+  // one cleanup transaction. The older per-part reads opened hundreds of DB
+  // connections for large histories.
+  async function readResearchParts(job,key,total){
+    const database=await db();
+    try{return await new Promise((resolve,reject)=>{
+      const values=new Array(total),tx=database.transaction('secrets','readonly');
+      const store=tx.objectStore('secrets');
+      for(let i=0;i<total;i++){
+        const index=i,req=store.get(`research-part:${job}:${key}:${i}`);
+        req.onsuccess=()=>{values[index]=req.result;};
+      }
+      tx.oncomplete=()=>resolve(values);
+      tx.onerror=()=>reject(tx.error||Error('Research staging read failed'));
+      tx.onabort=()=>reject(tx.error||Error('Research staging read cancelled'));
+    });}finally{database.close();}
+  }
+  async function clearResearchParts(job,key,total){
+    const database=await db();
+    try{return await new Promise((resolve,reject)=>{
+      const tx=database.transaction('secrets','readwrite'),store=tx.objectStore('secrets');
+      for(let i=0;i<total;i++)store.delete(`research-part:${job}:${key}:${i}`);
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error||Error('Research staging cleanup failed'));
+      tx.onabort=()=>reject(tx.error||Error('Research staging cleanup cancelled'));
+    });}finally{database.close();}
+  }
   async function researchStage(message){
     const key=String(message.recordKey||'');
     if(!/^(?:conversation|character):[0-9a-f-]{36}$/.test(key))throw Error('Invalid research record key');
@@ -89,12 +116,9 @@
     const temp=`${job}:${key}:${part}`;
     await privateValue(`research-part:${temp}`,payload);
     if(part!==total-1)return {ok:true,staged:false};
-    const strings=[];
-    for(let i=0;i<total;i++){
-      const value=await privateValue(`research-part:${job}:${key}:${i}`);
-      if(typeof value!=='string')return {ok:true,staged:false,message:'Waiting for missing transfer chunks'};
-      strings.push(value);
-    }
+    const strings=await readResearchParts(job,key,total);
+    if(strings.some(value=>typeof value!=='string'))
+      return {ok:true,staged:false,message:'Waiting for missing transfer chunks'};
     const raw=strings.join('');
     if(raw.length>80_000_000)throw Error('Research record exceeds the 80 MB safe limit');
     const record=JSON.parse(raw);
@@ -119,7 +143,7 @@
         tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
       });
     }finally{database.close();}
-    for(let i=0;i<total;i++)await privateValue(`research-part:${job}:${key}:${i}`,null,true);
+    await clearResearchParts(job,key,total);
     return {ok:true,staged:existing?.sha!==sha,unchanged:existing?.sha===sha};
   }
   async function researchRows(){
@@ -264,9 +288,16 @@
     const accessible=await repositories();
     if(!accessible.some(item=>item.fullName.toLowerCase()===repo.toLowerCase()))
       throw Error('This private repository is not available to your GitHub App installation. Install the app with selected repository access first.');
-    const p=await prefs();unlocked=null;await storeSet({[PREF_KEY]:{...p,repository:repo}});
-    await patchState({repository:repo,base:{},lastSnapshot:'',lastSyncedAt:0,conflicts:[],lastError:''});
-    return {ok:true,repository:repo};
+    const p=await prefs();
+    if(p.repository.toLowerCase()===repo.toLowerCase()) {
+      // Re-verifying the current repository must not reset snapshots or keys.
+      return {ok:true,repository:p.repository,alreadySelected:true};
+    }
+    unlocked=null;
+    await storeSet({[PREF_KEY]:{...p,repository:repo}});
+    await patchState({repository:repo,base:{},lastSnapshot:'',lastSyncedAt:0,conflicts:[],lastError:'',
+      researchBackupProgress:null,researchRetryCount:0,researchRetryAt:0});
+    return {ok:true,repository:repo,alreadySelected:false};
   }
   async function fileRead(repo,filepath){
     try{
@@ -496,6 +527,7 @@
     let merged={...(remote?.categories||{})}, changed=[], downloads=[], conflicts=[];
     let alreadyUploadedResearch=0;
     let remainingResearch=0;
+    let researchSnapshotProgress=null;
     const pendingUploads=[];
     for(const category of p.categories){
       checkCancelled();
@@ -553,7 +585,11 @@
       if(catalog.schema!=='dsq-research-catalog-v1'||!catalog.records||typeof catalog.records!=='object')
         throw Error('Unknown Research Export catalog; existing backup was preserved');
       const rows=await researchRows();
+      const valid=rows.filter(row=>row.complete&&row.sha);
+      const total=valid.length;
+      const alreadyOnGithub=valid.filter(row=>catalog.records[row.key]?.sha===row.sha).length;
       let uploaded=0;
+      update('research','Checking verified Research Export records',alreadyOnGithub,total);
       const started=Date.now();
       for(const row of rows){
         checkCancelled();
@@ -570,12 +606,15 @@
         const prior=catalog.records[row.key];
         catalog.records[row.key]={sha:row.sha,ref:stored};
         uploaded++;
-        update('research',`Uploaded ${uploaded} changed research records`,uploaded,rows.length);
+        update('research',`Uploading batch: ${uploaded} records; ${alreadyOnGithub} already indexed`,alreadyOnGithub,total);
         if(uploaded%5===0)await sleep(150);
         if(uploaded>=RESEARCH_RECORDS_PER_BATCH)break;
       }
-      remainingResearch=rows.filter(row=>row.complete&&row.sha&&catalog.records[row.key]?.sha!==row.sha).length;
+      remainingResearch=valid.filter(row=>catalog.records[row.key]?.sha!==row.sha).length;
       alreadyUploadedResearch=uploaded;
+      // Display only committed counts from snapshots. A record isn't safely on
+      // GitHub until its catalog and the snapshot index are both verified.
+      researchSnapshotProgress={total,completed:total-remainingResearch,remaining:remainingResearch};
       if(uploaded){
         merged.research=await chunks(repo,catalog,keys,false);
         changed.push('research');
@@ -595,7 +634,8 @@
     const needsContinuation=pendingUploads.some(x=>x.category==='research-continuation');
     const realUploads=pendingUploads.filter(x=>x.category!=='research-continuation');
     if(!realUploads.length && !force){
-      await patchState({base:merged,lastSyncedAt:Date.now(),lastError:'',conflicts:[]});
+      await patchState({base:merged,lastSyncedAt:Date.now(),lastError:'',conflicts:[],
+        ...(researchSnapshotProgress?{researchBackupProgress:{...researchSnapshotProgress,updatedAt:Date.now()},researchRetryCount:0,researchRetryAt:0}:{})});
       if(needsContinuation)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
       return {ok:true,unchanged:true,uploaded:0,downloaded:downloads.length,snapshots:index.value.snapshots?.length||0,pendingResearch:needsContinuation};
     }
@@ -612,7 +652,8 @@
     }
     const check=await readIndex(repo);
     if(check.value.latest!==newSnapshot.snapshotId)throw Error('Snapshot index verification failed');
-    await patchState({base:merged,lastSyncedAt:Date.now(),lastSnapshot:newSnapshot.snapshotId,lastError:'',conflicts:[],deviceId:newSnapshot.deviceId});
+    await patchState({base:merged,lastSyncedAt:Date.now(),lastSnapshot:newSnapshot.snapshotId,lastError:'',conflicts:[],deviceId:newSnapshot.deviceId,
+      ...(researchSnapshotProgress?{researchBackupProgress:{...researchSnapshotProgress,updatedAt:Date.now()},researchRetryCount:0,researchRetryAt:0}:{})});
     if(needsContinuation)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
     return {ok:true,uploaded:realUploads.length,downloaded:downloads.length,snapshot:newSnapshot.snapshotId,snapshots:nextIndex.snapshots.length,pendingResearch:needsContinuation};
   }
@@ -762,7 +803,16 @@
     const p=await prefs();if(!isActive(p)||!p.automatic||p.paused||!p.repository)return;
     const tabs=await chrome.tabs.query({url:['https://spicychat.ai/*','https://www.spicychat.ai/*']});
     if(!tabs.length)return; // Backup only while QoL is actively present.
-    const current=await state();if(Date.now()-(current.lastSyncedAt||0)<11*3600000)return;
+    const current=await state();
+    const age=Date.now()-Number(current.lastSyncedAt||0);
+    if(age<11*3600000)return;
+    const busyChat=tabs.some(tab=>tab.active && !tab.discarded &&
+      /^https:\/\/(?:www\.)?spicychat\.ai\/chat\/[0-9a-f-]{36}/i.test(String(tab.url||'')));
+    if(busyChat && current.lastSyncedAt && age<14*3600000){
+      // Try again later, but don't postpone a verified backup indefinitely.
+      try{chrome.alarms.create(ALARM,{when:Date.now()+15*60000});}catch{}
+      return;
+    }
     if(p.provider==='both'){
       try{await new Promise(resolve=>chrome.runtime.sendMessage({type:'DS_QOL_SYNC_NOW'},response=>resolve(response)));}catch{}
     }
@@ -776,7 +826,8 @@
       remembered:!!remember?.aes && remember.repository===p.repository,
       unlocked:(!!unlocked?.aes && unlocked.repository===p.repository)||(!!remember?.aes && remember.repository===p.repository),
       lastSyncedAt:s.lastSyncedAt||0,lastError:s.lastError||'',conflicts:s.conflicts||[],
-      pendingResearchRestore:s.pendingRestore||null,progress};
+      pendingResearchRestore:s.pendingRestore||null,researchBackupProgress:s.researchBackupProgress||null,
+      researchRetryAt:s.researchRetryAt||0,researchRetryCount:s.researchRetryCount||0,progress};
   }
   async function run(type,message){
     switch(type){
@@ -789,17 +840,22 @@
       case 'UNLOCK':return unlock(String(message.password||''),!!message.remember);
       case 'LOCK':unlocked=null;await privateValue('remembered',null,true);return {ok:true};
       case 'CANCEL':cancelled=true;await patchState({pendingRestore:null});return {ok:true,cancelled:true};
-      case 'BACKUP':cancelled=false;return backup({mode:'backup'});
+      case 'BACKUP':{
+        cancelled=false;
+        try {return await backup({mode:'backup'});}
+        finally {update('idle','');}
+      }
       case 'SYNC':{
         cancelled=false;
-        const p=await prefs();
-        if(p.provider==='both'){
-          // Wait for the existing cloud service to settle before reading local data.
-          const cloud=await new Promise(resolve=>chrome.runtime.sendMessage({type:'DS_QOL_SYNC_NOW'},r=>resolve(chrome.runtime.lastError?{ok:false,message:chrome.runtime.lastError.message}:r)));
-          const github=await backup({mode:'sync'});
-          return {...github,cloudOk:!!cloud?.ok,...(!cloud?.ok?{warning:`QoL Cloud needs attention: ${cloud?.message||cloud?.error||'unavailable'}`}:{} )};
-        }
-        return backup({mode:'sync'});
+        try {
+          const p=await prefs();
+          if(p.provider==='both'){
+            const cloud=await new Promise(resolve=>chrome.runtime.sendMessage({type:'DS_QOL_SYNC_NOW'},r=>resolve(chrome.runtime.lastError?{ok:false,message:chrome.runtime.lastError.message}:r)));
+            const github=await backup({mode:'sync'});
+            return {...github,cloudOk:!!cloud?.ok,...(!cloud?.ok?{warning:`QoL Cloud needs attention: ${cloud?.message||cloud?.error||'unavailable'}`}:{} )};
+          }
+          return await backup({mode:'sync'});
+        } finally {update('idle','');}
       }
       case 'SNAPSHOTS':return listSnapshots();
       case 'RESTORE':cancelled=false;return restore(String(message.snapshotId||''),message.categories||[],message.merge!==false);
@@ -807,10 +863,17 @@
       case 'RESEARCH_STAGE':return researchStage(message);
       case 'RESEARCH_FINISH':{
         const p=await prefs();
-        if(p.categories.includes('research')&&isActive(p)&&p.repository){
-          try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+20000});}catch{}
-        }
-        return {ok:true,queued:!!p.repository};
+        const enabled=p.categories.includes('research')&&isActive(p)&&!!p.repository&&!p.paused;
+        const authorized=enabled && !!(await privateValue('oauth'))?.accessToken;
+        let unlockedNow=false;
+        if(enabled&&authorized)try{await getKeys(p.repository);unlockedNow=true;}catch{}
+        const queued=!!(enabled&&authorized&&unlockedNow);
+        if(queued)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+20000});}catch{}
+        return {ok:true,queued,reason:queued?'GitHub research upload scheduled':
+          !isActive(p)?'Choose GitHub or Both as backup provider':
+          !p.categories.includes('research')?'Enable Verified Research Export data in backup categories':
+          !p.repository?'Choose a private GitHub repository':p.paused?'GitHub backup is paused':
+          !authorized?'Authorize GitHub Device Flow on this browser':'Unlock your GitHub backup password'};
       }
       case 'DISCONNECT':unlocked=null;await privateValue('oauth',null,true);await privateValue('remembered',null,true);return {ok:true};
       default:throw Error('Unsupported GitHub backup command');
@@ -845,7 +908,31 @@
       cancelled=false;await recoverResearchBatch(s.pendingRestore);
     }:alarm.name===RESEARCH_ALARM?async()=>{
       const p=await prefs();if(!isActive(p)||!p.repository||!p.categories.includes('research')||p.paused)return;
-      await backup({mode:'sync'});
+      // Keep a fallback wakeup in case the service worker is stopped while
+      // a large encrypted object is being uploaded. A successful batch moves
+      // this alarm to its normal short continuation delay.
+      try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+15*60000});}catch{}
+      try {
+        const result=await backup({mode:'sync'});
+        if(!result?.pendingResearch)try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}
+      } catch(error) {
+        // One-time alarms disappear when fired. Recover from temporary GitHub
+        // throttling/network errors without losing the last indexed snapshot.
+        const message=cleanError(error);
+        const transient=[403,408,429,500,502,503,504].includes(error?.code) ||
+          error?.name==='AbortError' || /network|fetch failed|timed out/i.test(message);
+        const previous=await state(),attempt=Math.max(0,Number(previous.researchRetryCount)||0)+1;
+        if(transient && attempt<=5){
+          const delay=Math.max(Number(error?.retryAfter||0)*1000,Math.min(3*60000*2**(attempt-1),45*60000));
+          const when=Date.now()+delay;
+          chrome.alarms.create(RESEARCH_ALARM,{when});
+          await patchState({researchRetryCount:attempt,researchRetryAt:when,
+            lastError:`GitHub research upload paused after a temporary error (${message}). Automatic retry ${attempt}/5 scheduled.`,lastErrorAt:Date.now()});
+          return;
+        }
+        try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}
+        throw error;
+      } finally {update('idle','');}
     }:autoRun;
     chain=chain.then(work,work).catch(async e=>{try{await patchState({lastError:cleanError(e),lastErrorAt:Date.now()});}catch{}});
   });

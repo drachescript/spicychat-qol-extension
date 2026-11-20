@@ -1,5 +1,3 @@
-// Feature-owned options helpers: bulk-feedback. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function optionsLooksMobile() {
   if (navigator.userAgentData?.mobile) return true;

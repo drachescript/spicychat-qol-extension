@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: notifications. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeChatNudgeSubscriptions(value) {
   const rows = Array.isArray(value) ? value : [];

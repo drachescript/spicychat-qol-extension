@@ -1,5 +1,3 @@
-// Feature-owned options helpers: foundation. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function optionsDiagLevelRank(level) {
   return String(level || "normal") === "deep" ? 2 : 1;

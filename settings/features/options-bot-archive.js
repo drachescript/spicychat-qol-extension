@@ -1,5 +1,3 @@
-// Feature-owned options helpers: bot-archive. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeBotStore(store) {
   const raw = store && typeof store === "object" ? store : {};

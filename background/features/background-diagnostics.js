@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: diagnostics. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function qolDiagnosticLevelRank(level) {
   return String(level || "normal") === "deep" ? 2 : 1;

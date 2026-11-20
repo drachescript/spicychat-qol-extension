@@ -1,5 +1,3 @@
-// Feature-owned options helpers: settings-controls. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function setBlockedBotNameRepairStatus(text = "") {
   const status = $("blockedBotNameRepairStatus");

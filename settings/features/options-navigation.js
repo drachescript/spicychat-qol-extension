@@ -1,5 +1,3 @@
-// Feature-owned options helpers: navigation. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizePendingOptionsNavigation(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

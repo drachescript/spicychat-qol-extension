@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: worker-less-like. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 // A bulk run that hits a rejected or ambiguous rating request must not
 // continue issuing POSTs through the same worker. The user can explicitly

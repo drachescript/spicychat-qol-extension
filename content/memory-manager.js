@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -401,8 +400,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const item of rows) {
       const selected = selectedMemories.has(memoryKey(item));
       const box = item.row.querySelector("input.ds-memory-select-box");
-      if (box) box.checked = selected;
-      item.row.classList.toggle("ds-memory-selected", selected);
+      if (box && box.checked !== selected) box.checked = selected;
+      if (item.row.classList.contains("ds-memory-selected") !== selected)
+        item.row.classList.toggle("ds-memory-selected", selected);
     }
 
     const count = selectedMemories.size;
@@ -417,20 +417,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const nativeV2 = managerVersion === "v2";
     const versionLabel = toolbar.querySelector(".ds-memory-manager-version");
     if (versionLabel) {
-      versionLabel.textContent = `Memory UI: ${nativeV2 ? "New V2" : managerVersion === "legacy" ? "Legacy" : "Unknown"}`;
+      const label = `Memory UI: ${nativeV2 ? "New V2" : managerVersion === "legacy" ? "Legacy" : "Unknown"}`;
+      if (versionLabel.textContent !== label) versionLabel.textContent = label;
       versionLabel.title = managerVersion === "unknown"
         ? "QoL cannot identify this memory interface yet. Import and destructive actions are unavailable to avoid using the wrong layout."
         : "Detected from SpicyChat's visible native memory controls, not from the QoL version.";
     }
-    if (countEl) countEl.textContent = nativeV2
-      ? `${count} selected · ${rows.length} shown (SpicyChat Memories)`
-      : `${count} selected`;
+    if (countEl) {
+      const label = nativeV2 ? `${count} selected · ${rows.length} shown (SpicyChat Memories)` : `${count} selected`;
+      if (countEl.textContent !== label) countEl.textContent = label;
+    }
     if (deleteButton) {
-      deleteButton.textContent = count ? `Delete selected (${count})` : "Delete selected";
+      const label = count ? `Delete selected (${count})` : "Delete selected";
+      if (deleteButton.textContent !== label) deleteButton.textContent = label;
       deleteButton.disabled = busy || count === 0;
     }
     if (pinButton) {
-      pinButton.textContent = count ? `Pin selected (${count})` : "Pin selected";
+      const label = count ? `Pin selected (${count})` : "Pin selected";
+      if (pinButton.textContent !== label) pinButton.textContent = label;
       pinButton.disabled = busy || count === 0;
     }
 
@@ -2624,6 +2628,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyMemoryManagerTools = function applyMemoryManagerTools() {
     const settings = DS.state?.settings || {};
     const manager = getManager();
+    // Nothing to clean up until the manager has actually been opened.
+    if (!manager && !lastManager &&
+        !document.querySelector("#ds-memory-bulk-toolbar,.ds-memory-select-control,.ds-memory-row,.ds-memory-copy-action,.ds-memory-copy-menuitem")) return;
     if (manager && settings.enabled) {
       rememberObservedMemoryManager(manager);
       applyMemoryLayout(manager);

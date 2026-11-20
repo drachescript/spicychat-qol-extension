@@ -32,6 +32,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     "soundscapes": "content/soundscapes.js",
     "sidebar": "content/sidebar.js",
     "quick-panel": "content/quick-panel.js",
+    "animation-control": "content/animation-control.js",
+    "exact-message-counts": "content/exact-message-counts.js",
+    "previously-chatted-indicator": "content/previously-chatted-indicator.js",
     "native-memory-probe": "content/native-memory-probe.js",
     "memory-manager": "content/memory-manager.js",
     "memory-packs": "content/memory-packs.js",
@@ -101,7 +104,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }).catch(error => {
       const info=String(error?.message||error).slice(0,180);
       failed.set(name,info);
-      console.warn(`[DragonScript QoL] Optional module unavailable: ${name}: ${info}`);
+      console.warn(`[DragonScript QoL] Could not load module: ${name}: ${info}`);
       DS.diagEvent?.("feature-loader", "module-failed", { feature: name });
       return false;
     });
@@ -133,6 +136,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("sidebar",!!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
       !!settings.restorePersonasSidebarPosition || Object.keys(settings).some(k => k.startsWith("hideSidebar") && !!settings[k]));
     add("soundscapes",!!settings.enableSoundscapes);
+    add("animation-control", any(settings, ["reduceAnimatedBotImages", "animatedImagesListings",
+      "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"]));
+    add("exact-message-counts", (LISTING.test(path) || path === "/" || myCreations || PROFILES.test(path)) &&
+      any(settings, ["showExactMessageCounts", "showBotCreationDates", "showNewBotBadge"]));
+    add("previously-chatted-indicator", settings.enablePreviouslyChattedIndicator === true &&
+      (chat || CHATS.test(path) || LISTING.test(path) || path === "/" || myCreations));
     add("native-memory-probe", chat && settings.nativeMemoryQualityProbe === true);
     const memory = chat && any(settings,["enableBulkMemoryManager", "showCopyMemoryAction", "memoryAutoLoadAll"]);
     add("memory-manager",memory);
@@ -196,6 +205,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const names = wanted(settings);
     const key=location.href+"|"+names.join(",");
     if(key === lastWantedKey) return;
+    // The key includes active features, not unrelated DOM revisions.
     lastWantedKey = key;
     // Independent optional modules can load concurrently. The existing
     // de-duplicated ensure() promises and dependency map enforce safe ordering.

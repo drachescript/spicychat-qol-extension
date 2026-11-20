@@ -1,5 +1,3 @@
-// Feature-owned options helpers: backup-import. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function replaceSettingsForImport(importedSettings) {
   const imported = importedSettings && typeof importedSettings === "object" ? importedSettings : {};

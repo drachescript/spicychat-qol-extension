@@ -1,4 +1,3 @@
-// Settings panel owned by rp-state-tracker. Optional feature code, with no HTML parsing.
 (() => {
   'use strict';
   const profile = window.__DSQ_BUILD_PROFILE__;

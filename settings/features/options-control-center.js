@@ -1,5 +1,3 @@
-// Feature-owned options helpers: control-center. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function jumpToOptionsSearch(tabName, query = "") {
   setActiveTab(tabName);

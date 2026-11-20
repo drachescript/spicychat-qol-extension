@@ -1,5 +1,4 @@
 // Opt-in Chat Index, launched from chat-list tools in its own readable window.
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
