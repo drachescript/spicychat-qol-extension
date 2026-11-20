@@ -226,6 +226,7 @@ const SETTING_DEPENDENCY_GROUPS = [
   { parent: "enableBulkMemoryManager", name: "Memory Manager", children: ["enableMemoryVault"] },
   { parent: "enableBotOrganizer", name: "Bot Organizer", children: ["botOrganizerExplorerFolders", "botOrganizerShowCardMeta", "botOrganizerBulkTools"] },
   { parent: "enableCreatorWritingAssistant", name: "Creator Writing Assistant", children: ["creatorWritingUseBrowserAi", "creatorWritingTargetLanguage", "creatorWritingDictionary"] },
+  { parent: "showTagExplanations", name: "Tag explanations on hover", children: [] },
   { parent: "enableTagAliases", name: "Local tag aliases", children: ["tagAliasRules", "tagAliasShowDisplay"] },
   { parent: "localTagMatchEnabled", name: "Personal tag matches", children: ["localTagMatchRules", "localTagMatchFetchPublic"] },
   { parent: "archiveBlockingPresetsEnabled", name: "Archive Blocking Presets", children: ["archiveBlockingPresetsSelection"] },

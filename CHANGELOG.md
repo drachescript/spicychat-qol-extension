@@ -1,7 +1,24 @@
+## 0.2.88
+- Restored a clear Add device control for QoL Cloud and added GitHub backup device-connection guidance.
+- Added unofficial hover explanations for chatbot tags in search filters and character creation without changing native tags.
+- Added experimental GitHub backups alongside QoL Cloud, with built-in Device Flow login, repository selection and refreshed tokens.
+- Added encrypted backups with password unlock, remembered-device keys, and explicit category-level plaintext exceptions.
+- Added incremental, integrity-checked backup snapshots with five recent recovery points and safe cross-device conflict detection.
+- Added selective restore for settings, saved lists, other QoL data and selected media without clearing unselected data.
+- Added Research Export backup and recovery of verified histories, Memories, Rulebook data and character metadata, reusing unchanged records.
+- Added manual Backup Now / Sync Now actions, backup progress, and 12-hour active-tab synchronization.
+- Improved Inspector v0.1.7 tracing and background-event replay handling, avoiding duplicate events and private route details.
+- Fixed Mini Panel refreshes scanning listing cards on chat pages and reduced repeated listing status work.
+- Fixed the separate Later sidebar/Favorites shortcut and Later-page filters reverting to off instead of saving their settings.
+- Fixed New V2 Memory JSON imports choosing the actual save control and recognizing updated memory cards, with clearer private diagnostics.
+- Improved RP Format Repair with a reviewed native-message edit preview for missing action markers; messages save only through SpicyChat.
+- Changed Research Export Scan bots to check recent bots and reuse older verified chat lists; Full scan remains available.
+- Preserved existing QoL Cloud accounts, manual research ZIP exports, checkpoints and existing user data.
+
 ## 0.2.87
 - Improved Later buttons on Home and listings by updating only changed cards and processing large updates in small batches.
-- Reduced startup and large-listing slowdowns by loading more optional tools on demand and reusing card information.
-- Added optional Archive Blocking Presets for franchises, characters, and themes, with customizable exceptions.
+- Reduced startup and large-listing slowdowns by loading more tools on demand and reusing card information.
+- Added Archive Blocking Presets for franchises, characters, and themes, with customizable exceptions.
 - Added Research Export Quick scan for recent and uncached bots; the original Scan bots still performs a full scan.
 - Made Research Export restore its previous bot selection and download only newer chat history when possible, with safe recovery if history changes.
 - Improved Research Export checkpoints, resume reliability, download verification, and warnings for incomplete data.
@@ -19,17 +36,17 @@
 - Fixed Example Dialogue metadata availability and repaired previously saved character records without extra profile requests.
 - Added retries for partially retrieved linked Lorebooks and clearer export phase timings and API diagnostics.
 - Added clearer initial synchronous-call timing for runtime steps without changing chat scheduling or recovery.
-- Added an optional Character Token Optimizer to chatbot creation, with per-field estimates, reviewable suggestions and manual Apply actions.
+- Added a Character Token Optimizer to chatbot creation, with per-field estimates, reviewable suggestions and manual Apply actions.
 - Added step-by-step Bulk Research Export progress with a live, stage-specific ETA for bot discovery, conversation scanning, and export.
-- Improved startup performance by deferring more optional creator, Persona, chat, Lorebook, and Smart Filter tools until needed.
-- Reduced delays from loading independent optional modules while preserving their required dependencies.
+- Improved startup performance by deferring more creator, Persona, chat, Lorebook, and Smart Filter tools until needed.
+- Reduced delays from loading independent modules while preserving their required dependencies.
 - Delayed the heavy Diagnostics/Support Settings code until those tools are used.
 - Kept saved export checkpoints, enabled-feature behavior, and native rating/recovery safeguards unchanged.
-- Added optional Archive Community Themes with reviewed/candidate trust choices, historical-only warnings, per-bot exceptions and batched, version-cached public bot-ID lookups.
+- Added Archive Community Themes with reviewed/candidate trust choices, historical-only warnings, per-bot exceptions and batched, version-cached public bot-ID lookups.
 - Kept local Implied Themes independent and added explicit human-review suggestions without uploading private data.
 
 ## 0.2.85
-- Improved startup performance by loading more optional features only when needed.
+- Improved startup performance by loading more features only when needed.
 - Added guides and clearer explanations for Memory, Context Keeper, Lorebooks, Rulebooks, and creator tools.
 - Added adjustable native Memory checks and a manual Check now action.
 - Made backup, import, Replace, and cloud sync safety information clearer.

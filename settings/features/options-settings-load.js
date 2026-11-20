@@ -393,6 +393,9 @@ async function load() {
   setValue("favoriteBotFolderFilter", settings.favoriteBotFolderFilter || "all");
   setValue("favoriteBotCreatorFilter", settings.favoriteBotCreatorFilter || "");
   setValue("favoriteBotStateFilter", settings.favoriteBotStateFilter || "all");
+  setChecked("showLaterFavoritesTab", !!settings.showLaterFavoritesTab);
+  setChecked("laterPageHideOpenedBots", !!settings.laterPageHideOpenedBots);
+  setChecked("laterPageHideBlockedBots", !!settings.laterPageHideBlockedBots);
   setChecked("showLaterBotButtons", !!settings.showLaterBotButtons);
   setChecked("enableSavedListsOverlay", !!settings.enableSavedListsOverlay);
   setChecked("protectLaterBotsFromFiltering", !!settings.protectLaterBotsFromFiltering);

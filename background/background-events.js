@@ -36,3 +36,4 @@ initializeHelperLifecycleRecovery();
 // both Chromium and Firefox packages. Chromium imports it here; Firefox runs
 // shared/sync-service.js as a static script after the other background scripts.
 registerQolBackgroundSyncBootstrap();
+registerQolGithubBackupBootstrap();

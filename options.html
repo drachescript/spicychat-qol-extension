@@ -593,7 +593,7 @@ Testing"></textarea></label>
 </section>
 <section class="card" id="followedCreatorsCard">
 <h2>Followed creators</h2>
-<p class="hint">A local QoL follow list. This does not follow the creator through SpicyChat itself. Following and notifications are opt-in for the QoL user and only use public creator/bot listings.</p>
+<p class="hint">A local QoL follow list. This does not follow the creator through SpicyChat itself. Following and notifications run only when enabled and use public creator/bot listings.</p>
 <label class="row"><input id="showFollowCreatorButtons" type="checkbox"/><span>Show Follow / Following buttons for public creators</span></label>
 <fieldset class="creator-bot-watch-settings">
 <legend>New bot notifications</legend>
@@ -1696,6 +1696,8 @@ step sister" spellcheck="false"></textarea></label>
 <div class="tab-page" data-page="account"><p class="page-intro">Link this browser to a simple QoL account and keep compatible settings in sync across devices. Sync starts automatically after linking.</p>
 <section class="card" id="accountSyncCard">
 <h2>QoL Account &amp; Sync</h2>
+<div class="button-row"><button type="button" id="accountSyncAddDevice">Add device</button><span class="hint">Generate a one-use QoL Cloud link code for another device. New devices enter the code under Link existing account.</span></div>
+<p id="accountSyncAddDeviceStatus" class="hint" role="status" aria-live="polite"></p>
 <p class="hint">QoL uses the QoL Cloudflare sync service at <strong id="accountSyncApiBase">https://syncqol.drache.uk</strong>. Device credentials stay local and are not included in normal QoL backups.</p>
 <div class="account-sync-grid" id="accountSyncSummary">
 <div class="account-sync-stat"><strong id="accountSyncLinkState">Not linked</strong><span>Account</span></div>
@@ -1731,7 +1733,9 @@ step sister" spellcheck="false"></textarea></label>
 <div class="account-sync-stat"><strong id="accountSyncRevision">0</strong><span>Cloud change number (not backups)</span></div>
 <div class="account-sync-stat"><strong id="accountSyncLastSync">Never</strong><span>Last successful sync</span></div>
 </div>
-<div class="button-row"><button id="accountSyncNow" type="button">Sync now</button><button id="accountSyncPause" type="button">Pause sync</button><button id="accountSyncCreateLinkCode" type="button">Link another device</button></div>
+<div class="button-row"><button id="accountSyncNow" type="button">Sync now</button><button id="accountSyncPause" type="button">Pause sync</button><button id="accountSyncCreateLinkCode" type="button">Generate device link code</button></div>
+<div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>
+<p id="accountSyncLinkCodeStatus" class="hint" role="status" aria-live="polite"></p>
 <p id="accountSyncReceipt" class="hint" role="status" aria-live="polite">No completed sync receipt yet.</p>
 <div class="sub-card" id="accountSyncCloudAuditCard">
 <h3>Sync coverage &amp; cloud storage</h3>
@@ -1774,7 +1778,7 @@ step sister" spellcheck="false"></textarea></label>
 <p class="hint">Phone presets sync IDs and blocked names, not chat data or images. Sync runs after changes and at the chosen periodic interval when its sync service is available.</p>
 <p class="hint">Cloud revisions count changes, not full stored backups. Unchanged ID lists are not reuploaded each check.</p>
 </div>
-<div class="account-sync-code-box" id="accountSyncGeneratedCodeBox" hidden><div><strong id="accountSyncGeneratedCode" class="account-sync-link-code"></strong><span class="hint" id="accountSyncGeneratedCodeExpiry"></span></div><button id="accountSyncCopyLinkCode" type="button">Copy code</button></div>
+
 </div>
 <div class="sub-card" id="accountSyncDevicesCard">
 <div class="account-sync-section-head"><div><h3>Linked devices</h3><p class="hint">Other linked devices can be revoked here. Last seen is not proof that a device downloaded the latest lists. The current browser can be disconnected locally without deleting its settings.</p></div><button id="accountSyncRefreshDevices" type="button">Refresh</button></div>
@@ -1790,6 +1794,86 @@ step sister" spellcheck="false"></textarea></label>
 <p class="hint account-sync-error" id="accountSyncError" hidden></p>
 <p class="hint" id="accountSyncActionStatus"></p>
 </section>
+<section class="card" id="githubBackupCard">
+<h2>GitHub Backup <span style="font-size:12px;opacity:.8">Experimental</span></h2>
+<p class="hint">Private repository backups using the <a href="https://github.com/apps/dragongraf-qol-backup" target="_blank" rel="noopener noreferrer">dragonGRaf QoL Backup GitHub App</a>. No additional server. GitHub is separate from the existing QoL Cloud account and never replaces it automatically.</p>
+<label>Backup provider <select id="ghBackupProvider"><option value="cloud">QoL Cloud (existing)</option><option value="github">GitHub (experimental)</option><option value="both">Both — QoL Cloud + GitHub</option></select></label>
+<div class="sub-card">
+<h3>Connect your GitHub account</h3>
+<p class="hint" id="ghBackupAccount">GitHub not authorized</p>
+<div class="button-row"><button type="button" id="ghBackupAddDevice" aria-expanded="false" aria-controls="ghBackupAddDeviceHelp">Add device to GitHub backup</button></div>
+<div class="sub-card" id="ghBackupAddDeviceHelp" hidden role="region" aria-label="Connect another device to GitHub backup">
+<strong>Connect another device</strong>
+<ol><li>Install DragonScript QoL on the other browser or device.</li><li>Open Account &amp; Sync and authorize that device with the same GitHub account using Device Flow. Installing the GitHub App alone does not authorize a browser.</li><li>Select the same private backup repository and use the same backup password to unlock its encrypted snapshots.</li><li>Load existing snapshots, review the categories, and use Safe merge before uploading changes from the new device. Choose GitHub or Both and save the provider preferences when ready.</li></ol>
+<p class="hint">GitHub does not use QoL Cloud's one-use pairing codes. Each browser authorizes separately. Neither provider transfers private keys or passwords from an existing device.</p>
+</div>
+<label>GitHub App OAuth Client ID (public · preconfigured)
+<input id="ghBackupClientId" value="Iv23liKyoFU1H2F46kEE" readonly aria-readonly="true" autocomplete="off" spellcheck="false"/></label>
+<p class="hint">This public ID is bundled with QoL; you do not need to enter it. Authorization uses GitHub Device Flow, without a client secret, PAT, or GitHub password.</p>
+<div class="button-row"><button type="button" id="ghBackupConnect">Authorize with GitHub Device Flow</button><button type="button" id="ghBackupStopAuth">Stop checking</button><button type="button" id="ghBackupInstall">Install / grant app access</button></div>
+<div id="ghBackupAuthInstructions" hidden class="sub-card"><p>Enter code <strong id="ghBackupDeviceCode"></strong> at <a id="ghBackupDeviceLink" href="https://github.com/login/device" target="_blank" rel="noopener noreferrer">github.com/login/device</a>. QoL checks only while this Settings tab remains open.</p></div>
+</div>
+<div class="sub-card">
+<h3>Private repository</h3>
+<div class="button-row"><button id="ghBackupRepositories" type="button">List accessible private repositories</button><button id="ghBackupNewRepo" type="button">Create a new private repository</button></div>
+<select id="ghBackupRepoSelect" aria-label="Accessible GitHub repositories" hidden></select>
+<label>Selected repository <input id="ghBackupRepoInput" type="text" spellcheck="false" autocomplete="off" placeholder="owner/my-private-qol-backups"/></label>
+<button id="ghBackupChoose" type="button">Verify &amp; select repository</button>
+<p class="hint">Create the repository as <strong>Private</strong> in GitHub, install the app with access to it, then select it here. The extension writes only inside <code>dragonscript-qol-backup/v1/</code>.</p>
+</div>
+<div class="sub-card">
+<h3>Client-side encryption &amp; unlock</h3>
+<p class="hint" id="ghBackupUnlockState">Backup password required</p>
+<label>Backup password <input id="ghBackupPassword" type="password" autocomplete="new-password" placeholder="At least 10 characters"/></label>
+<label class="row"><input id="ghBackupRemember" type="checkbox"/><span>Remember unlock on this browser profile (non-extractable WebCrypto key in local IndexedDB)</span></label>
+<div class="button-row"><button id="ghBackupUnlock" type="button">Set / unlock password</button><button id="ghBackupLock" type="button">Forget remembered unlock</button></div>
+<p class="hint">The password is never uploaded. Keep it somewhere safe: GitHub cannot recover data encrypted with a forgotten password. A remembered unlock protects against accidental disclosure, not malware or anyone with full access to the running browser profile.</p>
+</div>
+<div class="sub-card">
+<h3>Backup categories &amp; schedule</h3>
+<p class="hint">Encrypted by default. Each category can be selectively restored. Storing a category as plaintext makes it readable to anyone with access to the repository.</p>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;max-width:550px">
+<strong>Include</strong><strong>Store plaintext?</strong>
+<label class="row"><input id="ghBackupCategory_settings" type="checkbox" checked/>QoL settings</label><input id="ghBackupPlain_settings" aria-label="Unencrypted settings" type="checkbox"/>
+<label class="row"><input id="ghBackupCategory_lists" type="checkbox" checked/>Blocked, Favorites, Later and saved lists</label><input id="ghBackupPlain_lists" aria-label="Unencrypted saved lists" type="checkbox"/>
+<label class="row"><input id="ghBackupCategory_other" type="checkbox" checked/>Other supported QoL data</label><input id="ghBackupPlain_other" aria-label="Unencrypted QoL data" type="checkbox"/>
+<label class="row"><input id="ghBackupCategory_media" type="checkbox"/>Local media (large)</label><input id="ghBackupPlain_media" aria-label="Unencrypted media" type="checkbox"/>
+<label class="row"><input id="ghBackupCategory_research" type="checkbox"/>Verified Research Export data (incremental)</label><input id="ghBackupPlain_research" aria-label="Unencrypted research" type="checkbox"/>
+</div>
+<label class="row"><input id="ghBackupAuto" type="checkbox"/><span>Automatic GitHub sync every 12 hours while a SpicyChat tab is open</span></label>
+<label class="row"><input id="ghBackupPause" type="checkbox"/><span>Pause GitHub backups on this device</span></label>
+<div class="button-row"><button id="ghBackupSave" type="button">Save provider preferences</button><button id="ghBackupNow" type="button">Backup Now</button><button id="ghBackupSync" type="button">Sync Now</button><button id="ghBackupCancel" type="button">Cancel operation</button><button id="ghBackupRefresh" type="button">Check status</button></div>
+<p id="ghBackupProgress" class="hint" role="status" aria-live="polite"></p>
+<p class="hint" id="ghBackupLast">No GitHub snapshot yet</p>
+
+<p class="hint" id="ghBackupConflicts"></p>
+<p class="hint">No implicit deletions: missing or unreadable local categories do not remove existing GitHub objects. If different devices modify the same category, sync stops and asks you to resolve it.</p>
+</div>
+<div class="sub-card">
+<h3>Snapshot recovery</h3>
+<div class="button-row"><button id="ghBackupSnapshots" type="button">Load last five snapshots</button></div>
+<select id="ghBackupSnapshotSelect" aria-label="GitHub backup snapshot"></select>
+<p class="hint">Choose the categories to restore:</p>
+<label class="row"><input id="ghBackupRestore_settings" type="checkbox"/>Settings</label>
+<label class="row"><input id="ghBackupRestore_lists" type="checkbox"/>Saved bot lists</label>
+<label class="row"><input id="ghBackupRestore_other" type="checkbox"/>Other QoL data</label>
+<label class="row"><input id="ghBackupRestore_media" type="checkbox"/>Local media</label>
+<label class="row"><input id="ghBackupRestore_research" type="checkbox"/>Verified Research Export records (local recovery cache)</label>
+<label>Restore method <select id="ghBackupRestoreMode"><option value="merge">Safe merge: fill missing items and combine list IDs</option><option value="replace">Replace selected local values (confirmation required)</option></select></label>
+<div class="button-row"><button id="ghBackupRestore" type="button">Restore selected</button><button id="ghBackupDisconnect" type="button">Disconnect this device</button></div>
+<div class="sub-card">
+<h3>Research data recovery (Experimental)</h3>
+<p class="hint">Recover verified chat and character export records from a selected snapshot into QoL’s private local research cache. This does not modify SpicyChat conversations or native research checkpoints. Six records per action to avoid browser stalls.</p>
+<label>Optional exact record key (leave blank to recover in batches) <input id="ghBackupResearchKey" type="text" spellcheck="false" placeholder="conversation:UUID or character:UUID"/></label>
+<label class="row"><input id="ghBackupResearchReplace" type="checkbox"/>Replace a conflicting local research record (explicit)</label>
+<div class="button-row"><button id="ghBackupResearchRecover" type="button">Recover research (next six)</button></div>
+<p class="hint" id="ghBackupResearchState"></p>
+</div>
+<p class="hint">Restored research records are stored in a local verified cache, not silently inserted into live SpicyChat chats. Snapshots use reusable encrypted chunks. The index retains the five latest successful snapshots; older Git objects remain untouched to avoid deleting unverified data. Plaintext exceptions are never enabled by default.</p>
+</div>
+<p id="ghBackupStatus" class="hint" role="status" aria-live="polite">GitHub backup starts off by default.</p>
+</section>
+
 </div>
 
 <div class="tab-page" data-page="data"><p class="page-intro">Back up, restore, inspect, and clean data stored by QoL in this browser.</p>
@@ -1801,7 +1885,7 @@ step sister" spellcheck="false"></textarea></label>
 <legend>Include in export</legend>
 <div class="button-row export-scope-actions"><button id="selectActiveUsedExportScopes" type="button">Active / Used</button><button id="selectAllExportScopes" type="button">Everything</button><button id="clearExportScopes" type="button">Clear</button></div>
 <div class="button-row export-scope-actions" id="backupQuickPresets"><button type="button" data-backup-preset="settings">Settings only</button><button type="button" data-backup-preset="lists">Saved lists</button><button type="button" data-backup-preset="creator">Creator data</button><button type="button" data-backup-preset="pictures">Pictures &amp; media</button></div>
-<p class="hint">Active / Used selects setting groups that differ from their defaults plus saved-data categories that currently contain data. Large local media stays opt-in even when present.</p>
+<p class="hint">Active / Used selects setting groups that differ from their defaults plus saved-data categories that currently contain data. Large local media is excluded unless selected.</p>
 <p><strong>Settings</strong></p>
 <div class="export-scope-grid">
 <label class="row"><input data-export-scope="settingsGeneral" type="checkbox"/><span>General &amp; Control Center <span class="hint" data-export-count-for="settingsGeneral"></span></span></label>
@@ -2117,7 +2201,7 @@ step sister" spellcheck="false"></textarea></label>
 <span id="settingsToastText"></span>
 <button id="settingsToastUndo" type="button">Undo</button>
 </div>
-<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="settings/feature-panels/archive-website-link.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup-core.js"></script><script src="settings/options-lazy-tab-cleanup.js"></script><script type="application/x-ds-lazy" src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
+<script src="content/build-profile.js"></script><script src="settings/feature-panels/character-pictures.js"></script><script src="settings/feature-panels/persona-pictures.js"></script><script src="settings/feature-panels/personas.js"></script><script src="settings/feature-panels/picture-library.js"></script><script src="settings/feature-panels/automatic-images.js"></script><script src="settings/feature-panels/chat-backgrounds.js"></script><script src="settings/feature-panels/command-palette.js"></script><script src="settings/feature-panels/translation.js"></script><script src="settings/feature-panels/daily-message-limit.js"></script><script src="settings/feature-panels/rp-format-repair.js"></script><script src="settings/feature-panels/chat-scene-notes.js"></script><script src="settings/feature-panels/reply-instructions.js"></script><script src="settings/feature-panels/context-keeper.js"></script><script src="settings/feature-panels/selection-memory.js"></script><script src="settings/feature-panels/native-memory-probe.js"></script><script src="settings/feature-panels/story-day-tracker.js"></script><script src="settings/feature-panels/rp-state-tracker.js"></script><script src="settings/feature-panels/chat-nudges.js"></script><script src="settings/feature-panels/character-qol-profiles.js"></script><script src="settings/feature-panels/alternate-dialogue.js"></script><script src="settings/feature-panels/soundscapes.js"></script><script src="settings/feature-panels/animation-control.js"></script><script src="settings/feature-panels/chat-smart-folders.js"></script><script src="settings/feature-panels/chat-topbar.js"></script><script src="settings/feature-panels/chat-search.js"></script><script src="settings/feature-panels/chat-bookmarks.js"></script><script src="settings/feature-panels/chat-continuation.js"></script><script src="settings/feature-panels/focus-mode.js"></script><script src="settings/feature-panels/native-rating-helpers.js"></script><script src="settings/feature-panels/profile-export.js"></script><script src="settings/feature-panels/creator-writing-assistant.js"></script><script src="settings/feature-panels/card-workflow.js"></script><script src="settings/feature-panels/archive-website-link.js"></script><script src="shared/platform-capabilities.js"></script><script src="shared/feature-registry.js"></script><script src="settings/options-feature-availability.js"></script><script src="settings/options-settings-defaults.js"></script><script src="settings/options-reading-accessibility.js"></script><script src="settings/options-section-navigation.js"></script><script src="settings/options-tab-cleanup-core.js"></script><script src="settings/options-lazy-tab-cleanup.js"></script><script type="application/x-ds-lazy" src="settings/options-tab-cleanup.js"></script><script src="settings/options-soundscapes.js"></script><script src="settings/options-platform-compatibility.js"></script><script src="settings/options-account-sync.js"></script><script src="settings/options-github-backup.js"></script><script src="settings/options-ooc.js"></script><script src="settings/features/options-foundation.js"></script>
 <script src="settings/features/options-bot-editor-snippets.js"></script>
 <script src="settings/features/options-bot-archive.js"></script>
 <script src="settings/features/options-lorebook-status.js"></script>

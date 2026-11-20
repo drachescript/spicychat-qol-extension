@@ -434,6 +434,20 @@ function setupSupportFeaturePrivacyControls() {
 }
 
 const DS_MEMORY_MANAGER_UI_OBSERVATION_KEY = "dsMemoryManagerUiObservationV1";
+const DS_MEMORY_IMPORT_RESULT_KEY = "dsMemoryImportLastResultV1";
+
+function formatNativeMemoryImportResult(value) {
+  const stages = new Set(['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed']);
+  if (!value || value.schema !== 1 || !stages.has(value.stage) ||
+      !['ok', 'failed'].includes(value.outcome)) return 'Native Memory import: no recorded attempt.';
+  const nativeCards = Math.max(0, Math.min(10000, Math.floor(Number(value.nativeCards) || 0)));
+  const recognizedRows = Math.max(0, Math.min(10000, Math.floor(Number(value.recognizedRows) || 0)));
+  const date = Number(value.at);
+  const at = Number.isFinite(date) && date > 0 && date <= Date.now() + 60000
+    ? new Date(date).toISOString() : 'unknown';
+  return `Native Memory import (last attempt): ${value.outcome}; stage ${value.stage}; UI ${value.ui === 'v2' ? 'New V2' : value.ui === 'legacy' ? 'Legacy' : 'Unknown'}; native cards ${nativeCards}; recognized cards ${recognizedRows}; at ${at}. No memory text or chat IDs included.`;
+}
+
 
 function formatMemoryManagerUiStatus(live, last) {
   const kind = value => value === "v2" ? "New V2" : value === "legacy" ? "Legacy" : "Unknown";
@@ -473,7 +487,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     SAI_TOOLKIT_PRESENCE_KEY,
     SPICYCHAT_BETA_CAPABILITIES_KEY,
     "cardTokenFetchDiagnosticsV1",
-    DS_MEMORY_MANAGER_UI_OBSERVATION_KEY
+    DS_MEMORY_MANAGER_UI_OBSERVATION_KEY,
+    DS_MEMORY_IMPORT_RESULT_KEY
   ];
 
   // Support diagnostics must degrade per source instead of losing the whole
@@ -512,6 +527,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     formatMemoryManagerUiStatus(context?.runtimeAvailable ? context?.pageDiagnostics?.memoryManager : null, result[DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]),
+    formatNativeMemoryImportResult(result[DS_MEMORY_IMPORT_RESULT_KEY]),
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
     ...(context?.probe ? [`Runtime check: ${Number(context.probe.pingsAnswered || 0)}/${Number(context.probe.tabsPinged || 0)} tab pings answered; lightweight runtime ${context.probe.lightRuntimeAnswered ? "answered" : "unavailable"}; full snapshot ${context.probe.snapshotsAnswered ? "answered" : "unavailable"}.` ] : []),
     (() => { const q = context?.probe; return q ? `Runtime probe: ping ${Number(q.pingsAnswered || 0)}/${Number(q.tabsPinged || 0)} replied; current-version ${Number(q.currentVersionPings ?? q.pingsAnswered ?? 0)}; lightweight ${Number(q.lightProbesAnswered || 0)}/${Number(q.lightProbesAttempted || 0)}; snapshots ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)}; ${Number(q.tabsFlaggedStale || 0)} stored stale markers (not confirmed failures), ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no result"; })(),
@@ -558,7 +574,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
       return [`Message bookmarks: ${total} across ${values.length} chats; current chat: ${currentText}`];
     })(),
     `Enabled optional features: ${enabledFeatures.length} of ${OPTIONAL_FEATURE_KEYS.length} available; ${supportFeatureCounts(enabledFeatures)}`,
-    ...(supportIncludeFeatureNames() ? [`Enabled feature names (explicit opt-in): ${enabledFeatures.join(", ") || "none"}`] : []),
+    ...(supportIncludeFeatureNames() ? [`Enabled feature names (sharing enabled): ${enabledFeatures.join(", ") || "none"}`] : []),
     ...(partialSources.length ? [`Partial diagnostics: ${partialSources.join(", ")} timed out or were unavailable; the rest of this section is still valid.`] : [])
   ];
 
@@ -869,7 +885,7 @@ async function buildPerformanceSelfCheckText() {
 async function buildFastSupportSnapshot() {
   const manifest = chrome.runtime.getManifest?.() || {};
   const [quickStored, bytesValue, largeStatsValue, liveTabValue] = await Promise.all([
-    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY, DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]), 1500, null),
+    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY, DS_MEMORY_MANAGER_UI_OBSERVATION_KEY, DS_MEMORY_IMPORT_RESULT_KEY]), 1500, null),
     promiseWithValueTimeout(storageBytesInUse(null), 1500, null),
     promiseWithValueTimeout(readLargeStorageStats(), 1500, null),
     promiseWithValueTimeout(runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1200), 1400, null)
@@ -895,6 +911,7 @@ async function buildFastSupportSnapshot() {
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `Memory Manager UI: ${formatMemoryManagerUiStatus(null, stored[DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]).replace(/^Memory Manager UI: /, "")}`,
+    formatNativeMemoryImportResult(stored[DS_MEMORY_IMPORT_RESULT_KEY]),
     `Options DOM: ${document.getElementsByTagName("*").length} nodes`,
     `chrome.storage.local: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,

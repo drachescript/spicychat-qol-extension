@@ -266,6 +266,7 @@ const OPTIONAL_FEATURE_KEYS = [
   "enableRpStateTracker",
   "enableSavedListsOverlay",
   "enableStoryDayTracker",
+  "showTagExplanations",
   "enableTagAliases",
   "lorebookTrackHistory",
   "quickDislikeIdleEnabled",

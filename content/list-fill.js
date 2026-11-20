@@ -1808,9 +1808,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getListingAutoFillStatus = function getListingAutoFillStatus() {
     const stats = runStats();
+    // Defensive route guard: the Mini Panel and other status consumers must
+    // not launch native card discovery on a single-chat page.
+    const route = DS.getPageState?.() || {};
+    const offListing = !!(route.isSingleChatPage || route.isChatListPage);
+    // Build one target set per status update instead of collecting twice.
+    const targets = offListing ? [] : uniqueTargets();
     return {
-      visible: visibleCardCount(),
-      hidden: hiddenCardCount(),
+      visible: targets.filter(isVisible).length,
+      hidden: targets.filter(target => target.dataset?.dsHidden === "1" || target.classList?.contains("ds-hidden")).length,
       clicks: DS.state.autoFillClicks || 0,
       target: Math.max(1, Math.min(200, Number(DS.state.settings?.autoFillTargetCards || 50))),
       maxAttempts: Math.max(1, Math.min(30, Number(DS.state.settings?.autoFillMaxClicks || 8))),

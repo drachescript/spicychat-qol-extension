@@ -328,17 +328,31 @@ function renderAccountSyncDevices(devices = [], currentDeviceId = "") {
   }
 }
 
+function parseAccountSyncLinkExpiry(response) {
+  const raw = response?.expiresAt ?? response?.expires_at ?? response?.expires ?? null;
+  let milliseconds = typeof raw === "string" && /[TZ:-]/i.test(raw) ? Date.parse(raw) : Number(raw);
+  if (Number.isFinite(milliseconds) && milliseconds > 0 && milliseconds < 1e11) milliseconds *= 1000;
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+    const ttl = Number(response?.expiresIn ?? response?.expires_in ?? 0);
+    milliseconds = ttl > 0 ? Date.now() + ttl * 1000 : 0;
+  }
+  return milliseconds;
+}
+
 function renderAccountSyncLinkCode() {
   const box = $("accountSyncGeneratedCodeBox");
   const code = $("accountSyncGeneratedCode");
   const expiry = $("accountSyncGeneratedCodeExpiry");
   if (!box || !code || !expiry) return;
   const value = accountSyncLastLinkCode;
-  const valid = !!(value?.code && Number(value.expiresAt || 0) > Date.now());
+  const expiresAt = parseAccountSyncLinkExpiry(value);
+  const valid = !!(value?.code && (!expiresAt || expiresAt > Date.now()));
   box.hidden = !valid;
   if (!valid) return;
   code.textContent = value.code;
-  expiry.textContent = `Expires ${formatSyncTime(value.expiresAt)} · one use only`;
+  expiry.textContent = expiresAt
+    ? `Expires ${formatSyncTime(expiresAt)} · one use only`
+    : "One-use code · expiry not provided by server; use immediately";
 }
 
 async function refreshAccountSyncUi({ refreshDevices = false } = {}) {
@@ -812,18 +826,51 @@ function setupAccountSyncFoundation() {
     await refreshAccountSyncUi({ refreshDevices: false });
   });
 
-  $("accountSyncCreateLinkCode")?.addEventListener("click", async () => {
-    setAccountSyncBusy(true, "Creating one-use link code…");
-    const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_LINK_CODE" }, 16000);
-    setAccountSyncBusy(false);
-    if (!result?.ok) {
-      $("accountSyncActionStatus").textContent = result?.message || "Could not create a link code.";
-      return;
+  // Both controls share one request and one error path. The previous link
+  // code was displayed below a long preferences form, making a successful
+  // click look like a no-op. Keep feedback next to the clicked button.
+  const requestDeviceLinkCode = async source => {
+    if (accountSyncBusy) return;
+    const shortStatus = $(source === "top" ? "accountSyncAddDeviceStatus" : "accountSyncLinkCodeStatus");
+    const report = message => {
+      if (shortStatus) shortStatus.textContent = message;
+      const main = $("accountSyncActionStatus");
+      if (main) main.textContent = message;
+    };
+    report("Checking QoL Cloud account link…");
+    try {
+      const status = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_STATUS" }, 8000);
+      if (!status?.ok || !status.linked) {
+        report(status?.message || "This browser is not linked to QoL Cloud. Create an account or enter an existing device's link code first.");
+        $("accountSyncSetup")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        return;
+      }
+      setAccountSyncBusy(true, "Creating one-use link code…");
+      report("Creating one-use link code…");
+      const result = await runtimeMessageWithTimeout({ type: "DS_QOL_SYNC_CREATE_LINK_CODE" }, 16000);
+      if (!result?.ok) {
+        report(result?.message || result?.error || "Could not create a link code. Try again after checking the connection.");
+        return;
+      }
+      accountSyncLastLinkCode = {
+        ...result,
+        code: String(result.code || result.linkCode || result.link_code || "").trim()
+      };
+      renderAccountSyncLinkCode();
+      if ($("accountSyncGeneratedCodeBox")?.hidden) {
+        report("QoL Cloud returned no valid link code or expiry. No device was linked. Please download support info.");
+        return;
+      }
+      report("Link code ready. Enter it under Link existing account on the other device before it expires.");
+      $("accountSyncGeneratedCodeBox")?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    } catch (error) {
+      report(`Unable to generate link code: ${error?.message || String(error)}`);
+    } finally {
+      setAccountSyncBusy(false);
     }
-    accountSyncLastLinkCode = result;
-    renderAccountSyncLinkCode();
-    $("accountSyncActionStatus").textContent = "Link code ready. Enter it on the other device before it expires.";
-  });
+  };
+  $("accountSyncAddDevice")?.addEventListener("click", () => { void requestDeviceLinkCode("top"); });
+  $("accountSyncCreateLinkCode")?.addEventListener("click", () => { void requestDeviceLinkCode("linked"); });
 
   $("accountSyncCopyLinkCode")?.addEventListener("click", async () => {
     if (!accountSyncLastLinkCode?.code) return;

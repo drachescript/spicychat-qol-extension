@@ -679,7 +679,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch (error) { textScanMessage = `Clear stopped: ${error?.message || error}. Retry to finish removing samples.`; }
       scheduleRender();
     });
-    const help = el("p", "ds-qol-ci-hint", "Message search is opt-in. Index or refresh up to 300 recent messages per conversation (not full history). Each locally saved message excerpt is limited to 450 characters. Open the conversation for its complete messages. No background requests. Avoid indexing private chats on shared devices.");
+    const help = el("p", "ds-qol-ci-hint", "Message search starts when you choose to index. Index or refresh up to 300 recent messages per conversation (not full history). Each locally saved message excerpt is limited to 450 characters. Open the conversation for its complete messages. No background requests. Avoid indexing private chats on shared devices.");
     textTools.append(textToggle, batchSelect, nextButton, refreshButton, stopButton, clearButton);
     panel.append(textTools, help);
     const results = el("div", "ds-qol-ci-results"); results.id = "ds-qol-ci-results"; panel.append(results);

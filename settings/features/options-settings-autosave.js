@@ -195,6 +195,9 @@ function readSettingsFromPage() {
     favoriteBotFolderFilter: value("favoriteBotFolderFilter", "all"),
     favoriteBotCreatorFilter: value("favoriteBotCreatorFilter", ""),
     favoriteBotStateFilter: value("favoriteBotStateFilter", "all"),
+    showLaterFavoritesTab: checked("showLaterFavoritesTab"),
+    laterPageHideOpenedBots: checked("laterPageHideOpenedBots"),
+    laterPageHideBlockedBots: checked("laterPageHideBlockedBots"),
     showLaterBotButtons: checked("showLaterBotButtons"),
     enableSavedListsOverlay: checked("enableSavedListsOverlay"),
     protectLaterBotsFromFiltering: checked("protectLaterBotsFromFiltering"),
@@ -714,6 +717,9 @@ function readSingleSettingFromPage(settingKey) {
     case "favoriteBotFolderFilter": return (value("favoriteBotFolderFilter", "all"));
     case "favoriteBotCreatorFilter": return (value("favoriteBotCreatorFilter", ""));
     case "favoriteBotStateFilter": return (value("favoriteBotStateFilter", "all"));
+    case "showLaterFavoritesTab": return (checked("showLaterFavoritesTab"));
+    case "laterPageHideOpenedBots": return (checked("laterPageHideOpenedBots"));
+    case "laterPageHideBlockedBots": return (checked("laterPageHideBlockedBots"));
     case "showLaterBotButtons": return (checked("showLaterBotButtons"));
     case "enableSavedListsOverlay": return (checked("enableSavedListsOverlay"));
     case "protectLaterBotsFromFiltering": return (checked("protectLaterBotsFromFiltering"));
