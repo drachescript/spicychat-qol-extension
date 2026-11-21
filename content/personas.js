@@ -329,8 +329,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return ids.size;
   }
 
-  // The exact account quota wins. Internal API role strings such as
-  // "paid_premium" do not identify a published plan on their own.
+  // The exact account quota wins. The subscription portal's verified plan
+  // identifiers use paid_minimal/basic/premium (also inside purchase-option
+  // IDs such as sc-usd-1y-paid_basic-199.95). Only exact tier tokens or
+  // those structured plan IDs are recognized; generic paid roles are not.
   const PERSONA_PLAN_LIMITS = Object.freeze({
     free: 3,
     getataste: 10,
@@ -351,16 +353,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let personaAccountLimitChecked = false;
   let personaAccountLimitPending = null;
 
+  const PERSONA_ROLE_LIMITS = Object.freeze({
+    paid_minimal: 10,
+    paid_basic: 50,
+    paid_premium: 100
+  });
   function planLimitFromLabel(raw) {
     const clean = cleanText(raw).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]/g, "");
-    return PERSONA_PLAN_LIMITS[clean] || 0;
+    // Visible portal plan names append the billing cadence, but a monthly
+    // and annual plan of the same tier have the same persona quota.
+    return PERSONA_PLAN_LIMITS[clean] || PERSONA_PLAN_LIMITS[clean.replace(/(?:annual|monthly|yearly)$/, "")] || 0;
+  }
+  function planLimitFromVerifiedCode(raw) {
+    if (typeof raw !== "string") return 0;
+    const code = raw.trim().toLowerCase();
+    if (Object.hasOwn(PERSONA_ROLE_LIMITS, code)) return PERSONA_ROLE_LIMITS[code];
+    // Price/billing details can change; require the exact bounded paid tier
+    // component in a formatted SpicyChat plan code, not a fuzzy substring.
+    const match = /^sc-[a-z]{3}-(?:1[mwy]|[0-9]+[dmy])-((?:paid_minimal|paid_basic|paid_premium))(?:-[0-9]+(?:\.[0-9]+)?)?$/.exec(code);
+    return match ? PERSONA_ROLE_LIMITS[match[1]] : 0;
   }
 
-  // An explicit account quota or named plan is usable; an undocumented role
-  // alias, generic paid badge, navigation advert, or number of created personas
-  // is not. Do not keep the account record itself in QoL storage.
+  // Explicit quota > verified account subscription code > human plan name.
+  // Do not infer account tiers from a public advert or save the user record.
   function accountPersonaLimit(response) {
-    const user = response?.user;
+    const user = response?.user || response?.data?.user ||
+      (response?.data?.subscription || response?.data?.role ? response.data : null);
     if (!user || typeof user !== "object") return 0;
     const subscription = user.subscription && typeof user.subscription === "object" ? user.subscription : {};
     const sources = [user, subscription, user.limits, subscription.limits].filter(value => value && typeof value === "object");
@@ -374,6 +392,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     const status = cleanText(subscription.status).toLowerCase();
     if (status && !["active", "trialing", "trial", "grace_period"].includes(status)) return 0;
+    for (const source of [subscription, user]) {
+      for (const key of ["role", "subscription_role", "subscriptionRole", "plan_id", "planId", "plan_code", "planCode", "subscription_plan_id", "subscriptionPlanId"]) {
+        const limit = planLimitFromVerifiedCode(source[key]);
+        if (limit) return limit;
+      }
+    }
     for (const source of [subscription, user]) {
       for (const key of ["plan_name", "planName", "tier_name", "tierName", "subscription_plan", "subscriptionPlan"]) {
         const limit = planLimitFromLabel(source[key]);

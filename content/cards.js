@@ -927,7 +927,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getCardBlockingDiagnostic = function getCardBlockingDiagnostic(card, anchor) {
     if (!card || !anchor) return null;
-    const fields = preparedCardFields(card);
+    const fields = cachedPreparedCardFields(card);
     const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
     const wordFields = fields.nameDescriptionCandidates.length
       ? fields.nameDescriptionCandidates

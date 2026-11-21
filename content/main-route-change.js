@@ -16,6 +16,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.state.openedImportRevision = -1;
     DS.state.lastMarkedChatId = "";
     DS.state.messageDirtyRoots?.clear?.();
+    if (DS.state.messageDirtyQueue) DS.state.messageDirtyQueue.length = 0;
+    DS.state.messageLaneWaitingForEdit = false;
     clearEssentialChatDirtyRoots();
     DS.state.messageLaneRoots = null;
     DS.state.chatEnhancerQuietUntil = 0;

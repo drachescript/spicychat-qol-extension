@@ -24,7 +24,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   const granularChanges = Object.entries(changes || {})
     .map(([key, change]) => [settingNameFromStorageKey(key), change])
     .filter(([name]) => !!name);
-  if (!changes.settings && !granularChanges.length) return;
+  // Most setting writes are unrelated to these background alarms. Avoid
+  // reading the entire saved settings object for those granular updates.
+  const alarmSettingKeys = new Set([
+    "enabled", "autoAfkEnabled", "autoAfkMinutes", "autoAfkAction",
+    "lowMemoryProtectionEnabled", "maxAwakeSpicyTabs",
+    "duplicateTabGuardEnabled", "enableChatNudges", "chatNudgeCheckMinutes",
+    "enableCreatorBotNotifications", "creatorBotCheckMinutes"
+  ]);
+  if (!changes.settings && !granularChanges.some(([key]) => alarmSettingKeys.has(key))) return;
 
   (async () => {
     let beforeSettings = {};
@@ -46,7 +54,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       }
     }
     const touched = new Set(granularChanges.map(([name]) => name));
-    const changedAny = (...keys) => !!changes.settings || keys.some(key => touched.has(key));
+    // A full settings save shouldn't reconfigure every alarm if only an
+    // unrelated appearance/chat preference changed.
+    const changedAny = (...keys) => changes.settings
+      ? keys.some(key => beforeSettings[key] !== afterSettings[key])
+      : keys.some(key => touched.has(key));
 
     const before = { ...AUTO_AFK_DEFAULTS, ...beforeSettings };
     const after = { ...AUTO_AFK_DEFAULTS, ...afterSettings };

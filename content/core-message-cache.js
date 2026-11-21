@@ -176,6 +176,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wasDirty = dirty.has(root);
     dirty.add(root);
     if (!wasDirty) {
+      // Keep insertion order once, so message-lane chunks don't have to
+      // rebuild and sort the entire dirty set on every pass.
+      (DS.state.messageDirtyQueue || (DS.state.messageDirtyQueue = [])).push(root);
       const revisions = DS.state.messageRootRevisions || (DS.state.messageRootRevisions = new WeakMap());
       revisions.set(root, Number(revisions.get(root) || 0) + 1);
     }

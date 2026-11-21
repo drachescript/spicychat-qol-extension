@@ -1,3 +1,39 @@
+## 0.2.90
+- Reduced Research Export Start / Resume to new and changed conversations plus a rotating check of older histories, instead of processing every saved chat.
+- Kept the full saved conversation catalog and verified ZIP, Memory, and GitHub backups intact when older chats are deferred.
+- Added a compact backup index that builds automatically from existing completed Research Export checkpoints and resumes after interruptions.
+- Detected older conversations that become active again and reduced unnecessary repeated bot discovery.
+- Added Verify all to recheck every saved conversation without clearing downloads; Fresh still rebuilds a complete standalone archive.
+- Improved Research Export progress and startup diagnostics to distinguish the active work queue from the full saved catalog.
+- Retained retries for unfinished histories, older-history audits, and safe fallback when local or GitHub backups are incomplete or unavailable.
+- Made Start / Resume discover recent bots and conversations automatically instead of relying only on saved selections.
+- Used verified GitHub Research summaries and fresh conversation information to skip unnecessary downloads of unchanged histories.
+- Reused verified GitHub-only histories when available without incorrectly reporting them as newly downloaded local ZIP files.
+- Kept normal history checks when GitHub backup is disabled, locked, or unavailable.
+- Updated older GitHub Research summaries incrementally without reuploading full conversation histories.
+- Preserved private message content outside the lightweight GitHub summary index.
+- Kept Bot Organizer's search and Select bots toolbar off Story Mode pages, including after in-app navigation.
+- Improved automatic persona-limit detection for SpicyChat's paid_minimal, paid_basic, and paid_premium plans, preferring explicit account quotas and retaining manual selection.
+- Added clearer Research Export startup timing for discovery, GitHub lookups, lock waits, and message processing.
+- Reused one IndexedDB connection during Research Export checkpoint reads and writes to reduce repeated database opening.
+- Improved native Lorebook entry-count detection for changed editor layouts and thousands separators, without accepting incomplete backups.
+- Reduced Settings startup work by finding Reset controls once per section rather than repeatedly scanning every possible setting.
+- Delayed Features catalogue creation until its tab opens, and avoided rebuilding it when unrelated settings change.
+- Kept Settings Reset buttons, feature search, saved category states, and autosave behavior unchanged.
+- Reduced Research Export stalls by breaking large GitHub backup records into smaller serialization chunks.
+- Fixed GitHub Research staging to include Rulebook state, Story Moments, and OOC directives before uploading conversation records.
+- Reduced repeated verification work when building Research Export ZIP parts.
+- Deferred Bot Status scanning and Bulk Dislike/Less Like engines until the relevant Settings tools are opened.
+- Kept deferred-module loading retryable while preserving scanning checkpoints, rate limits, and pending feedback states.
+- Reused compiled name, tag, word, and creator blocking matchers when Favorites and Later membership changes.
+- Reused prepared card information for blocking diagnostics and processed added or changed listing cards only once per update.
+- Avoided unnecessary background alarm updates when unrelated saved settings change.
+- Reduced repeated chat-message processing with a newest-first changed-message queue and cached text normalization.
+- Cleared pending message work on route changes or history resets, and avoided unnecessary edit retries.
+- Reduced Listing Refill and My Creations Load More work by ignoring unrelated page mutations and using faster duplicate-card checks.
+- Improved optional-module diagnostics by showing the failing module and error.
+- Preserved existing export formats, GitHub encryption, saved settings, and other QoL features.
+
 ## 0.2.89
 - Fixed RP Format Repair missing most narration in long greetings and mixed dialogue, with safer full-message edit previews.
 - Kept the RP edit shortcut separate from the display toggle and removed RP controls when the feature is disabled.

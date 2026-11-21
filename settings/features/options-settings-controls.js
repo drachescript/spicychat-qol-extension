@@ -668,20 +668,36 @@ function setupFeaturesIndex() {
     host.replaceChildren(...groups);
   }
 
-  const renderFeatureIndexDebounced = debounceCallback(() => { OPTIONS_PERFORMANCE.featureRenders += 1; render(); }, 120);
+  // The catalogue is a separate Settings tab. Building every feature card at
+  // startup (or after a switch changes on another tab) delays unrelated work.
+  // setActiveTab("features") requests a fresh render, including deep links and
+  // Settings search results that jump to a feature.
+  const featurePage = host.closest(".tab-page");
+  const isVisible = () => !!featurePage?.classList.contains("active");
+  const renderIfVisible = () => {
+    if (isVisible()) render();
+  };
+  const renderFeatureIndexDebounced = debounceCallback(() => {
+    if (!isVisible()) return;
+    OPTIONS_PERFORMANCE.featureRenders += 1;
+    render();
+  }, 120);
   search.addEventListener("input", renderFeatureIndexDebounced);
-  category.addEventListener("change", render);
-  status?.addEventListener("change", render);
-  platformFilter?.addEventListener("change", render);
-  sortMode?.addEventListener("change", render);
+  category.addEventListener("change", renderIfVisible);
+  status?.addEventListener("change", renderIfVisible);
+  platformFilter?.addEventListener("change", renderIfVisible);
+  sortMode?.addEventListener("change", renderIfVisible);
   document.addEventListener("change", event => {
+    if (!isVisible() || event.target?.closest?.(".feature-index-toolbar")) return;
     if (event.target?.matches?.("input[type='checkbox'], input[type='radio'], select")) render();
   });
 
-  window.addEventListener("pagehide", () => rememberRenderedFeatureGroups({ persist: true }), { once: true });
+  window.addEventListener("pagehide", () => {
+    if (isVisible()) rememberRenderedFeatureGroups({ persist: true });
+  }, { once: true });
 
-  DS_FEATURE_INDEX_REFRESH = render;
-  render();
+  DS_FEATURE_INDEX_REFRESH = renderIfVisible;
+  renderIfVisible();
 }
 
 async function refreshPersonalUsageSummary() {

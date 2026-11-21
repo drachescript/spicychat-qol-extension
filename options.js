@@ -367,7 +367,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[QUICK_DISLIKE_BULK_STATE_KEY]) {
     quickDislikeBulkState = normalizeQuickDislikeBulkState(changes[QUICK_DISLIKE_BULK_STATE_KEY].newValue);
-    updateBlockedBulkResumeControls();
+    if (activeOptionsTab() === "blocking") updateBlockedBulkResumeControls();
   }
 
   if (changes[QUICK_LESS_LIKE_HISTORY_KEY]) {
@@ -377,7 +377,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (changes[QUICK_LESS_LIKE_BULK_STATE_KEY]) {
     quickLessLikeBulkState = normalizeQuickLessLikeBulkState(changes[QUICK_LESS_LIKE_BULK_STATE_KEY].newValue);
-    updateBlockedLessLikeResumeControls();
+    if (activeOptionsTab() === "blocking") updateBlockedLessLikeResumeControls();
   }
 
   if (changes[BLOCKED_BOTS_KEY] && blockingDataLoaded) {

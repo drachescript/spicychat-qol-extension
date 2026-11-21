@@ -1932,6 +1932,8 @@ function setActiveTab(tabName) {
   if (tabName === "browser" && optionsDataLoaded) {
     ensureTabCleanupPanelLoaded().catch(() => {});
   }
+  // Route-specific scan engines remain absent from ordinary Settings startup.
+  if (optionsDataLoaded) dsqRefreshHeavyToolsForTab(tabName);
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
   if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);

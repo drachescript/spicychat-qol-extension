@@ -103,6 +103,78 @@
       tx.onabort=()=>reject(tx.error||Error('Research staging cleanup cancelled'));
     });}finally{database.close();}
   }
+  // Only the most recent ID, native count and verification time are used for
+  // remote freshness checks. Message bodies and account details never leave
+  // the encrypted Research catalog as metadata.
+  function researchSummary(record) {
+    if (!record?.complete || !record?.history?.complete ||
+        !Array.isArray(record.history.messages) || !record.history.messages.length) return null;
+    const messages = record.history.messages;
+    const newest = String(messages.at(-1)?.id || '');
+    const count = Number(record.history.expected ?? messages.length);
+    if (!newest || !Number.isSafeInteger(count) || count < 1 || count !== messages.length) return null;
+    return {messageCount: count, newestMessageId: newest, verifiedAt: Date.now()};
+  }
+  async function researchRemoteIndex(ids) {
+    const p = await prefs();
+    if (!isActive(p) || p.paused || !p.repository || !p.categories.includes('research'))
+      return {ok: false, reason: 'not-configured'};
+    if (!Array.isArray(ids) || ids.length > 10000) return {ok: false, reason: 'invalid-selection'};
+    const wanted = new Set(ids.filter(id => /^[0-9a-f-]{36}$/i.test(String(id))).map(id => `conversation:${String(id).toLowerCase()}`));
+    if (!wanted.size) return {ok: true, records: {}, indexed: 0};
+    const keys = await getKeys(p.repository);
+    const index = await readIndex(p.repository);
+    const latest = index.value.snapshots?.[0];
+    if (!latest?.manifest) return {ok: true, records: {}, indexed: 0};
+    const snapshot = await readSnapshot(p.repository, latest.manifest, keys);
+    if (!snapshot?.categories?.research) return {ok: true, records: {}, indexed: 0};
+    const catalog = await readChunks(p.repository, snapshot.categories.research, keys);
+    if (catalog?.schema !== 'dsq-research-catalog-v1' || !catalog.records || typeof catalog.records !== 'object')
+      throw Error('Unsupported verified Research catalog');
+    const found = {};
+    let legacyRepaired = 0;
+    const legacyStart = Date.now();
+    for (const key of wanted) {
+      const row = catalog.records[key];
+      if (!row?.sha || !row?.ref) continue;
+      let summary = row.summary;
+      // Older GitHub research snapshots stored verified conversation records
+      // without the tiny count/newest-ID summary. Recover that summary from
+      // the matching private local staged record, not from the page or an
+      // unverified network result. Store the small derived value separately so
+      // a later index check does not parse giant chat records again.
+      if (!summary) {
+        const cacheKey=`research-summary:${key}`;
+        const cached=await privateValue(cacheKey);
+        if (cached?.sha===row.sha && (cached.summary || Date.now()-Number(cached.at||0)<6*3600000))
+          summary=cached.summary;
+        else if (legacyRepaired < 20 && Date.now()-legacyStart < 2500) {
+          const local=await researchRecord(key);
+          if (local?.complete && local?.sha===row.sha && local.record &&
+              local.record.length < 80_000_000) {
+            try {
+              const actual=hashHex(await crypto.subtle.digest('SHA-256',enc.encode(local.record)));
+              if (actual===row.sha) {
+                summary=researchSummary(JSON.parse(local.record));
+                if (summary) await privateValue(cacheKey,{sha:row.sha,summary,at:Date.now()});
+              }
+            } catch { /* Invalid legacy records never count as verified. */ }
+          } else await privateValue(cacheKey,{sha:row.sha,summary:null,at:Date.now()});
+          legacyRepaired++;
+          if (legacyRepaired%5===0) await sleep(0);
+        }
+      }
+      if (!summary || !Number.isSafeInteger(summary.messageCount) || summary.messageCount < 1 ||
+          typeof summary.newestMessageId !== 'string' || !summary.newestMessageId ||
+          !Number.isSafeInteger(summary.verifiedAt)) continue;
+      found[key.slice('conversation:'.length)] = {
+        messageCount: summary.messageCount, newestMessageId: summary.newestMessageId,
+        verifiedAt: summary.verifiedAt
+      };
+    }
+    return {ok: true, records: found, indexed: Object.keys(found).length,
+      legacySummariesChecked: legacyRepaired};
+  }
   async function researchStage(message){
     const key=String(message.recordKey||'');
     if(!/^(?:conversation|character):[0-9a-f-]{36}$/.test(key))throw Error('Invalid research record key');
@@ -137,9 +209,10 @@
         const req=database.transaction('research','readonly').objectStore('research').get(key);
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
       });
-      if(existing?.sha!==sha)await new Promise((resolve,reject)=>{
+      const summary = key.startsWith('conversation:') ? researchSummary(record) : null;
+      if(existing?.sha!==sha || (summary && !existing?.summary))await new Promise((resolve,reject)=>{
         const tx=database.transaction('research','readwrite');
-        tx.objectStore('research').put({key,sha,record:raw,updatedAt:Date.now(),complete:true});
+        tx.objectStore('research').put({key,sha,record:raw,updatedAt:Date.now(),complete:true,summary});
         tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
       });
     }finally{database.close();}
@@ -155,7 +228,7 @@
         const cur=req.result;
         if(!cur)return;
         // Keep only tiny metadata in RAM, never all conversation histories.
-        rows.push({key:cur.value.key,sha:cur.value.sha,complete:cur.value.complete});
+        rows.push({key:cur.value.key,sha:cur.value.sha,complete:cur.value.complete,summary:cur.value.summary||null});
         cur.continue();
       };
       req.onerror=()=>reject(req.error);
@@ -588,13 +661,26 @@
       const valid=rows.filter(row=>row.complete&&row.sha);
       const total=valid.length;
       const alreadyOnGithub=valid.filter(row=>catalog.records[row.key]?.sha===row.sha).length;
-      let uploaded=0;
+      let uploaded=0, catalogMetadataChanged=false;
       update('research','Checking verified Research Export records',alreadyOnGithub,total);
       const started=Date.now();
       for(const row of rows){
         checkCancelled();
         if(!row.complete||!row.sha)continue;
-        if(catalog.records[row.key]?.sha===row.sha)continue;
+        if(catalog.records[row.key]?.sha===row.sha) {
+          let summary=row.summary;
+          if (!summary && !catalog.records[row.key].summary) {
+            const cached=await privateValue(`research-summary:${row.key}`);
+            if (cached?.sha===row.sha) summary=cached.summary;
+          }
+          if (summary && !catalog.records[row.key].summary) {
+            // Metadata-only migration: the same verified Research object
+            // stays on GitHub; no chat history is uploaded again.
+            catalog.records[row.key].summary = summary;
+            catalogMetadataChanged = true;
+          }
+          continue;
+        }
         // Bound each background event to keep large initial imports resumable.
         // Every committed subset becomes a verified snapshot, never a partial replacement.
         if(uploaded>=RESEARCH_RECORDS_PER_BATCH || (uploaded>0 && Date.now()-started>70000))break;
@@ -604,7 +690,7 @@
         // unchanged chats and character metadata are not uploaded again.
         const stored=await chunks(repo,JSON.parse(record.record),keys,p.plaintext.includes('research'));
         const prior=catalog.records[row.key];
-        catalog.records[row.key]={sha:row.sha,ref:stored};
+        catalog.records[row.key]={sha:row.sha,ref:stored,...(row.summary ? {summary:row.summary} : {})};
         uploaded++;
         update('research',`Uploading batch: ${uploaded} records; ${alreadyOnGithub} already indexed`,alreadyOnGithub,total);
         if(uploaded%5===0)await sleep(150);
@@ -615,7 +701,7 @@
       // Display only committed counts from snapshots. A record isn't safely on
       // GitHub until its catalog and the snapshot index are both verified.
       researchSnapshotProgress={total,completed:total-remainingResearch,remaining:remainingResearch};
-      if(uploaded){
+      if(uploaded || catalogMetadataChanged){
         merged.research=await chunks(repo,catalog,keys,false);
         changed.push('research');
         pendingUploads.push({category:'research',alreadyUploaded:true});
@@ -860,6 +946,7 @@
       case 'SNAPSHOTS':return listSnapshots();
       case 'RESTORE':cancelled=false;return restore(String(message.snapshotId||''),message.categories||[],message.merge!==false);
       case 'RESTORE_RESEARCH':return restoreResearch(String(message.snapshotId||''),String(message.recordKey||''),message.offset,!!message.replace);
+      case 'RESEARCH_INDEX':return researchRemoteIndex(message.conversationIds);
       case 'RESEARCH_STAGE':return researchStage(message);
       case 'RESEARCH_FINISH':{
         const p=await prefs();
@@ -887,12 +974,12 @@
     const ownExtension=origin.startsWith(chrome.runtime.getURL(''));
     const trustedResearchSender=/^https:\/\/(?:www\.)?spicychat\.ai\/chats(?:\?|$)/.test(origin) &&
       origin.includes('ds-research-export=1') && !!sender.tab;
-    if(!ownExtension && !(trustedResearchSender && ['RESEARCH_STAGE','RESEARCH_FINISH'].includes(action))){
+    if(!ownExtension && !(trustedResearchSender && ['RESEARCH_INDEX','RESEARCH_STAGE','RESEARCH_FINISH'].includes(action))){
       sendResponse({ok:false,error:'GitHub controls require a trusted extension page'});return false;
     }
     const task=()=>run(action,message);
     // Poll/Status are read-only and should not starve behind large uploads.
-    const promise=['STATUS','POLL','CANCEL'].includes(action)?task():(chain=chain.then(task,task));
+    const promise=['STATUS','POLL','CANCEL','RESEARCH_INDEX'].includes(action)?task():(chain=chain.then(task,task));
     promise.then(sendResponse).catch(async error=>{
       const safe=cleanError(error);
       if(!['STATUS','POLL','AUTHORIZE'].includes(action))try{await patchState({lastError:safe,lastErrorAt:Date.now()});}catch{}

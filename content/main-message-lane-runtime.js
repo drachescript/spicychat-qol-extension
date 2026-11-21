@@ -8,6 +8,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (!DS) return;
   DS.createMainMessageLaneRuntime = (ctx) => {
     const originalChatText = new WeakMap();
+    const normalizedChatNodeCache = new WeakMap();
     let chatTextNormalizationSignature = null;
     let restoreChatTextPending = false;
     const chatTextConfig = settings => [
@@ -32,15 +33,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             if (!enabled) {
               if (previous && node.nodeValue === previous.display) node.nodeValue = previous.raw;
               originalChatText.delete(node);
+              normalizedChatNodeCache.delete(node);
               continue;
             }
-            // Preserve original line breaks and inter-element spaces in RP text.
-            const raw = previous && node.nodeValue === previous.display ? previous.raw : node.nodeValue;
+            const current = node.nodeValue;
+            const cached = normalizedChatNodeCache.get(node);
+            if (cached?.signature === chatTextNormalizationSignature && cached.display === current) continue;
+            // Use the original text when settings change, rather than normalizing
+            // the previous display result again.
+            const raw = previous && current === previous.display ? previous.raw : current;
             if (!raw.trim()) continue;
             const display = DS.normalizeTextForMatching(raw);
+            normalizedChatNodeCache.set(node, {signature: chatTextNormalizationSignature, display});
             if (display !== raw) {
               originalChatText.set(node, {raw, display});
-              if (node.nodeValue !== display) node.nodeValue = display;
+              if (current !== display) node.nodeValue = display;
             } else originalChatText.delete(node);
           }
         }
@@ -49,45 +56,57 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const { androidWebViewPerformanceGuardActive, applyRuntimePerformancePresentation, chatStartupQuietActive, desktopAppPerformanceGuardActive, generationMetadataWanted, loadedChatMessageCount, messageQuickActionsEnabled, runFeatureStep, runStep, runtimeCounters, runtimeProfile, scheduleChatStartupQuietResume, shouldPauseHiddenTab, laneState } = ctx;
   function takeIncrementalMessageLaneRoots(limit = 10) {
     const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
-    const dirtyRoots = [...dirtySet].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
-    if (!dirtyRoots.length) {
-      dirtySet.clear();
+    const queue = DS.state.messageDirtyQueue || (DS.state.messageDirtyQueue = []);
+    const max = Math.max(4, Math.min(20, Number(limit) || 10));
+    if (!dirtySet.size) {
+      queue.length = 0;
       return { roots: [], remaining: 0, chunked: false };
     }
 
-    const max = Math.max(4, Math.min(20, Number(limit) || 10));
-    if (dirtyRoots.length <= max) {
-      dirtySet.clear();
-      return { roots: dirtyRoots, remaining: 0, chunked: false };
+    // Other paths can add roots directly during a settings-wide refresh.
+    // Adopt those once; the usual path queues each root when it becomes dirty.
+    if (queue.length < dirtySet.size) {
+      const queued = new Set(queue);
+      for (const root of dirtySet) if (!queued.has(root)) queue.push(root);
     }
-
-    // Prioritize the newest messages first. This keeps a freshly-arrived reply
-    // responsive while older startup/history decoration drains in tiny idle
-    // chunks behind it.
-    const dirty = new Set(dirtyRoots);
-    const ordered = (DS.getLoadedMessageRoots?.() || []).filter(root => dirty.has(root));
-    const orderedSet = new Set(ordered);
-    for (const root of dirtyRoots) {
-      if (!orderedSet.has(root)) {
-        ordered.push(root);
-        orderedSet.add(root);
+    const roots = [];
+    const editing = [];
+    while (queue.length && roots.length < max) {
+      const root = queue.pop();
+      if (!dirtySet.has(root)) continue;
+      if (!root?.isConnected) {
+        dirtySet.delete(root);
+        continue;
       }
+      if (DS.isMessageEditPending?.(root)) {
+        editing.push(root);
+        continue;
+      }
+      dirtySet.delete(root);
+      roots.push(root);
     }
+    // Keep in-progress native edits for a later pass, not the current one.
+    if (editing.length) queue.unshift(...editing.reverse());
+    // Selection is newest-first, but enhancers expect their small batch in
+    // document order (for example when choosing its last visible message).
+    if (roots.length > 1) roots.sort((left, right) => {
+      if (typeof left.compareDocumentPosition !== "function") return 0;
+      const position = left.compareDocumentPosition(right);
+      return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 :
+        position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
+    });
 
-    const roots = ordered.slice(-max);
-    const selected = new Set(roots);
-    dirtySet.clear();
-    for (const root of ordered) {
-      if (!selected.has(root) && root?.isConnected && !DS.isMessageEditPending?.(root)) dirtySet.add(root);
+    const remaining = dirtySet.size;
+    const chunked = remaining > 0;
+    if (chunked) {
+      const counters = runtimeCounters();
+      counters.messageLaneChunkedPasses = Number(counters.messageLaneChunkedPasses || 0) + 1;
+      counters.messageLaneChunkedRoots = Number(counters.messageLaneChunkedRoots || 0) + roots.length;
+      counters.messageLaneDeferredRoots = Number(counters.messageLaneDeferredRoots || 0) + remaining;
+      counters.lastMessageLaneChunkSize = roots.length;
+      counters.lastMessageLaneDeferredRoots = remaining;
     }
-
-    const counters = runtimeCounters();
-    counters.messageLaneChunkedPasses = Number(counters.messageLaneChunkedPasses || 0) + 1;
-    counters.messageLaneChunkedRoots = Number(counters.messageLaneChunkedRoots || 0) + roots.length;
-    counters.messageLaneDeferredRoots = Number(counters.messageLaneDeferredRoots || 0) + dirtySet.size;
-    counters.lastMessageLaneChunkSize = roots.length;
-    counters.lastMessageLaneDeferredRoots = dirtySet.size;
-    return { roots, remaining: dirtySet.size, chunked: true };
+    return { roots, remaining, chunked, editingOnly: !roots.length && editing.length > 0 };
   }
 
   function scheduleNextMessageLaneChunk(source = "incremental-message-chunk") {
@@ -171,13 +190,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (previous !== null || settings.textNormalizationEnabled === true) {
           const roots = DS.getLoadedMessageRoots?.() || [];
           const dirty = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
-          for (const root of roots) dirty.add(root);
+          const queue = DS.state.messageDirtyQueue || (DS.state.messageDirtyQueue = []);
+          for (const root of roots) {
+            if (!dirty.has(root)) {
+              dirty.add(root);
+              queue.push(root);
+            }
+          }
         }
       }
       const profile = runtimeProfile();
       const chunkLimit = profile === "maximum" ? 6 : profile === "aggressive" ? 8 : 10;
       const laneBatch = takeIncrementalMessageLaneRoots(chunkLimit);
       const laneRoots = laneBatch.roots;
+      // Native editing will schedule its own completion pass. Do not keep
+      // spinning idle callbacks while every pending root is still being edited.
+      DS.state.messageLaneWaitingForEdit = !!laneBatch.editingOnly;
       DS.state.messageLaneRoots = laneRoots;
       counters.messageLaneDirtyRoots = Number(counters.messageLaneDirtyRoots || 0) + laneRoots.length;
       counters.lastMessageLaneDirtyRoots = laneRoots.length;
@@ -249,7 +277,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (laneState.messageLanePending) {
         laneState.messageLanePending = false;
         DS.scheduleMessageLane?.("pending");
-      } else if (DS.state?.messageDirtyRoots?.size) {
+      } else if (DS.state?.messageDirtyRoots?.size && !DS.state.messageLaneWaitingForEdit) {
         scheduleNextMessageLaneChunk();
       }
     }

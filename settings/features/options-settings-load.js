@@ -676,8 +676,9 @@ async function load() {
     loadFeatureSetting(settings);
   }
   settingsAutosaveReady = true;
+  dsqRefreshHeavyToolsForTab(activeOptionsTab());
   initializeMaximumPerformancePreset();
-  updateBlockedBulkResumeControls();
+  // Blocking actions are hydrated only after that tab is selected.
   updateSettingDependencies();
   refreshPlatformCompatibilityUi(settings);
   DS_FEATURE_INDEX_REFRESH?.();

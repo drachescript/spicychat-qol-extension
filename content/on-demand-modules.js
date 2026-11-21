@@ -215,8 +215,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   };
   DS.optionalModuleLoader = Object.freeze({
     names: Object.freeze(Object.keys(MODULES)),
-    getStatus: () => ({ loaded: [...jobs.keys()].filter(k=>!failed.has(k)),
-      failed: [...failed.keys()] }),
+    // Keep the existing loaded/failed arrays for current Inspector consumers.
+    // Module paths and error text make Android/Custom Lite failures actionable,
+    // without assuming that an APK's native loader can execute every module.
+    getStatus: () => ({
+      loaded: [...jobs.keys()].filter(k => !failed.has(k)),
+      failed: [...failed.keys()],
+      failedDetails: [...failed].map(([name, error]) => ({ name, path: MODULES[name], error })),
+      requested: [...jobs.keys()],
+      availablePaths: Object.values(MODULES).filter(path => !!path)
+    }),
     ensure,
     wanted
   });

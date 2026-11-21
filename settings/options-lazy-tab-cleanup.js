@@ -128,3 +128,123 @@ async function runOptionsDiagnosticsAction(name,...args) {
     return false;
   }
 }
+
+// Heavy Settings scan engines are not needed for the General, Chat or Appearance tabs.
+// Keep the original functions and storage formats; this only delays evaluation
+// until a matching tab or an existing action actually needs a module.
+let botStatusRecoverableHeldCount = 0;
+const dsqHeavySettingsModules = Object.create(null);
+function dsqLoadSettingsTool(group, path, readyName) {
+  if (typeof window[readyName] === "function" &&
+      window[readyName] !== dsqHeavySettingsStubs[readyName]) return Promise.resolve(true);
+  if (dsqHeavySettingsModules[group]) return dsqHeavySettingsModules[group];
+  dsqHeavySettingsModules[group] = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = path;
+    script.async = false;
+    script.onload = () => {
+      if (typeof window[readyName] !== "function" ||
+          window[readyName] === dsqHeavySettingsStubs[readyName]) {
+        script.remove();
+        dsqHeavySettingsModules[group] = null;
+        reject(new Error(`${path} did not register its functions`));
+        return;
+      }
+      resolve(true);
+    };
+    script.onerror = () => {
+      script.remove();
+      dsqHeavySettingsModules[group] = null;
+      reject(new Error(`Could not load ${path}`));
+    };
+    document.head.appendChild(script);
+  });
+  return dsqHeavySettingsModules[group];
+}
+const dsqHeavySettingsStubs = Object.create(null);
+function ensureBotStatusScanTools() {
+  return dsqLoadSettingsTool("status", "settings/features/options-bot-status-scan.js", "runBotAvailabilityScan");
+}
+function ensureBulkFeedbackTools() {
+  return dsqLoadSettingsTool("feedback", "settings/features/options-bulk-feedback.js", "runBlockedBulkDislike");
+}
+function dsqHeavyToolStub(group, fnName, ...args) {
+  const loader = group === "status" ? ensureBotStatusScanTools : ensureBulkFeedbackTools;
+  return loader().then(() => {
+    const fn = window[fnName];
+    if (typeof fn !== "function" || fn === dsqHeavySettingsStubs[fnName]) {
+      throw new Error(`Settings tool ${fnName} did not register`);
+    }
+    return fn(...args);
+  }).catch(error => {
+    const statusId = group === "status" ? "botAvailabilityScanStatus" : "blockedBotDislikeStatus";
+    const el = document.getElementById(statusId);
+    if (el) el.textContent = String(error?.message || error);
+    throw error;
+  });
+}
+function waitForBotStatusPace(...args) { return dsqHeavyToolStub("status", "waitForBotStatusPace", ...args); }
+dsqHeavySettingsStubs["waitForBotStatusPace"] = waitForBotStatusPace;
+function waitForRecommendationPace(...args) { return dsqHeavyToolStub("status", "waitForRecommendationPace", ...args); }
+dsqHeavySettingsStubs["waitForRecommendationPace"] = waitForRecommendationPace;
+function waitForRecommendationSteadyPace(...args) { return dsqHeavyToolStub("status", "waitForRecommendationSteadyPace", ...args); }
+dsqHeavySettingsStubs["waitForRecommendationSteadyPace"] = waitForRecommendationSteadyPace;
+function refreshBotStatusLastRunFeedback(...args) { return dsqHeavyToolStub("status", "refreshBotStatusLastRunFeedback", ...args); }
+dsqHeavySettingsStubs["refreshBotStatusLastRunFeedback"] = refreshBotStatusLastRunFeedback;
+function reviewAndRemoveIneligibleBotStatusPending(...args) { return dsqHeavyToolStub("status", "reviewAndRemoveIneligibleBotStatusPending", ...args); }
+dsqHeavySettingsStubs["reviewAndRemoveIneligibleBotStatusPending"] = reviewAndRemoveIneligibleBotStatusPending;
+function refreshBotStatusPauseButton(...args) { return dsqHeavyToolStub("status", "refreshBotStatusPauseButton", ...args); }
+dsqHeavySettingsStubs["refreshBotStatusPauseButton"] = refreshBotStatusPauseButton;
+function runBotAvailabilityScan(...args) { return dsqHeavyToolStub("status", "runBotAvailabilityScan", ...args); }
+dsqHeavySettingsStubs["runBotAvailabilityScan"] = runBotAvailabilityScan;
+function updateBotStatusScanEstimate(...args) { return dsqHeavyToolStub("status", "updateBotStatusScanEstimate", ...args).catch(() => false); }
+dsqHeavySettingsStubs["updateBotStatusScanEstimate"] = updateBotStatusScanEstimate;
+function runBlockedBulkDislike(...args) { return dsqHeavyToolStub("feedback", "runBlockedBulkDislike", ...args); }
+dsqHeavySettingsStubs["runBlockedBulkDislike"] = runBlockedBulkDislike;
+function bulkDislikeBlockedBots(...args) { return dsqHeavyToolStub("feedback", "bulkDislikeBlockedBots", ...args); }
+dsqHeavySettingsStubs["bulkDislikeBlockedBots"] = bulkDislikeBlockedBots;
+function resetAndRedoBlockedDislikes(...args) { return dsqHeavyToolStub("feedback", "resetAndRedoBlockedDislikes", ...args); }
+dsqHeavySettingsStubs["resetAndRedoBlockedDislikes"] = resetAndRedoBlockedDislikes;
+function clearBlockedDislikeHistory(...args) { return dsqHeavyToolStub("feedback", "clearBlockedDislikeHistory", ...args); }
+dsqHeavySettingsStubs["clearBlockedDislikeHistory"] = clearBlockedDislikeHistory;
+function runBlockedBulkLessLike(...args) { return dsqHeavyToolStub("feedback", "runBlockedBulkLessLike", ...args); }
+dsqHeavySettingsStubs["runBlockedBulkLessLike"] = runBlockedBulkLessLike;
+function bulkLessLikeBlockedBots(...args) { return dsqHeavyToolStub("feedback", "bulkLessLikeBlockedBots", ...args); }
+dsqHeavySettingsStubs["bulkLessLikeBlockedBots"] = bulkLessLikeBlockedBots;
+function resetAndRedoBlockedLessLikes(...args) { return dsqHeavyToolStub("feedback", "resetAndRedoBlockedLessLikes", ...args); }
+dsqHeavySettingsStubs["resetAndRedoBlockedLessLikes"] = resetAndRedoBlockedLessLikes;
+function clearBlockedLessLikeHistory(...args) { return dsqHeavyToolStub("feedback", "clearBlockedLessLikeHistory", ...args); }
+dsqHeavySettingsStubs["clearBlockedLessLikeHistory"] = clearBlockedLessLikeHistory;
+function updateBlockedBulkResumeControls(...args) { return dsqHeavyToolStub("feedback", "updateBlockedBulkResumeControls", ...args).catch(() => false); }
+dsqHeavySettingsStubs["updateBlockedBulkResumeControls"] = updateBlockedBulkResumeControls;
+function updateBlockedLessLikeResumeControls(...args) { return dsqHeavyToolStub("feedback", "updateBlockedLessLikeResumeControls", ...args).catch(() => false); }
+dsqHeavySettingsStubs["updateBlockedLessLikeResumeControls"] = updateBlockedLessLikeResumeControls;
+// One-time work is performed only when the corresponding tab becomes visible.
+let dsqBotStatusRateLoaded = false;
+function dsqRefreshHeavyToolsForTab(tabName) {
+  if (tabName === "saved" && document.getElementById("scanBotAvailability")) {
+    ensureBotStatusScanTools().then(() => {
+      if (typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
+        refreshBotStatusPauseButton().then(() => renderBotAvailability({ skipRecoveryRerender: true })).catch(() => {});
+        refreshBotStatusLastRunFeedback().catch(() => {});
+        if (!dsqBotStatusRateLoaded) {
+          dsqBotStatusRateLoaded = true;
+          storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
+            const rate = Number(result?.[BOT_STATUS_LAST_RATE_KEY] || 0);
+            if (rate >= 100 && rate <= 120000) botStatusPreviousScanRateMs = rate;
+            if (typeof updateBotStatusScanEstimate === "function") updateBotStatusScanEstimate();
+          }).catch(() => { dsqBotStatusRateLoaded = false; });
+        }
+        updateBotStatusScanEstimate();
+      }
+    }).catch(error => { const el = document.getElementById("botAvailabilityScanStatus"); if (el) el.textContent = String(error.message || error); });
+  } else if (tabName === "blocking" &&
+             (document.getElementById("bulkDislikeBlockedBots") || document.getElementById("bulkLessLikeBlockedBots"))) {
+    ensureBulkFeedbackTools().then(() => {
+      if (typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
+        updateBlockedBulkResumeControls();
+        updateBlockedLessLikeResumeControls();
+      }
+    }).catch(error => { const el = document.getElementById("blockedBotDislikeStatus"); if (el) el.textContent = String(error.message || error); });
+  }
+}
