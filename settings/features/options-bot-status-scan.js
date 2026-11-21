@@ -368,7 +368,7 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
   showSettingsToast(`${held.length} saved Bot Status check${held.length === 1 ? " is" : "s are"} held automatically: ${[...totals].map(([reason, count]) => `${count} ${reason}`).join("; ")}. Existing results are safe; a full or stale Refresh will also retry eligible held IDs.`);
 }
 
-let botStatusRecoverableHeldCount = 0;
+// Defined by the lightweight Settings loader so the read-only summary works before scan tools load.
 
 async function refreshBotStatusPauseButton() {
   let [state, staleState] = await botStatusPausedQueues();

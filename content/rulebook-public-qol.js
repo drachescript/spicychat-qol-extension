@@ -7,6 +7,68 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   window.__DSQ_RULEBOOK_CARD_BLOCKING__ = true;
 
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const MY_RULEBOOK_CARDS = '[data-testid="RulebookDraftsList"] article[data-rulebook-id]';
+  const TAB_LINK = '[data-ds-rulebook-tab-link="1"]';
+  const OPEN_REQUEST = 'dsQolOpenRulebook';
+  let handledOpenRequest = '';
+
+  // Use SpicyChat's own Open button after the new tab loads. This avoids
+  // guessing the private editor URL, which may change between site releases.
+  DS.syncMyRulebookCardLinks = function syncMyRulebookCardLinks() {
+    if (!/^\/my-creations\/rulebooks\/?$/i.test(location.pathname)) return;
+    const cards = document.querySelectorAll(MY_RULEBOOK_CARDS);
+    for (const card of cards) {
+      const id = String(card.getAttribute('data-rulebook-id') || '').toLowerCase();
+      if (!UUID.test(id)) continue;
+      const nativeOpen = card.querySelector('[data-testid$="-OpenButton"]');
+      if (!nativeOpen) continue;
+      const url = new URL('/my-creations/rulebooks', location.origin);
+      url.searchParams.set(OPEN_REQUEST, id);
+      let link = card.querySelector(TAB_LINK);
+      if (!link) {
+        link = document.createElement('a');
+        link.dataset.dsRulebookTabLink = '1';
+        link.dataset.dsOwned = '1';
+        link.tabIndex = -1; // The native Open button already handles keyboard access.
+        link.setAttribute('aria-label', 'Open Rulebook in another tab');
+        Object.assign(link.style, {
+          position: 'absolute', inset: '0', zIndex: '1',
+          borderRadius: 'inherit', cursor: 'pointer',
+          background: 'transparent'
+        });
+        // Ordinary clicks still go through SpicyChat. Modified clicks,
+        // middle-clicks and the context menu use the real anchor link.
+        link.addEventListener('click', event => {
+          event.stopPropagation();
+          if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          const button = card.querySelector('[data-testid$="-OpenButton"]');
+          if (button) button.click();
+          else location.assign(link.href);
+        });
+        link.addEventListener('auxclick', event => event.stopPropagation());
+        link.addEventListener('contextmenu', event => event.stopPropagation());
+        card.appendChild(link);
+      }
+      if (link.href !== url.href) link.href = url.href;
+      const menu = card.querySelector('[data-testid="RulebookListCard-Menu"]');
+      if (menu && menu.style.zIndex !== '2') {
+        // Keep the three-dot menu above the transparent link.
+        menu.style.zIndex = '2';
+      }
+    }
+    const requestedId = new URLSearchParams(location.search).get(OPEN_REQUEST);
+    if (!requestedId || !UUID.test(requestedId)) return;
+    const requestKey = location.pathname + '?' + requestedId;
+    if (handledOpenRequest === requestKey) return;
+    const target = Array.from(cards).find(card =>
+      card.getAttribute('data-rulebook-id')?.toLowerCase() === requestedId.toLowerCase());
+    const openButton = target?.querySelector('[data-testid$="-OpenButton"]');
+    if (!openButton) return; // The list may not have loaded yet.
+    handledOpenRequest = requestKey;
+    openButton.click();
+  };
+
   const EXPLORE_CARD = '[data-testid="RulebookListCard"][data-rulebook-id]';
   const PICKER_CARD = '[data-testid^="RulebookDiscoverTab-Card-"][data-rulebook-id]';
   const PICKER = '[data-testid="ConversationRulebookPicker-Modal"] [data-testid="RulebookDiscoverTab"]';

@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -2290,6 +2289,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.setClassState?.(document.documentElement, "ds-qol-history-loading", false);
         DS.state.bulkChatHistoryLoadNeedsRefresh = false;
         DS.state.messageDirtyRoots?.clear?.();
+        if (DS.state.messageDirtyQueue) DS.state.messageDirtyQueue.length = 0;
 
         const counters = DS.state?.runtimePerformance || (DS.state.runtimePerformance = {});
         counters.chatExportHistoryCatchupSkips = Number(counters.chatExportHistoryCatchupSkips || 0) + 1;

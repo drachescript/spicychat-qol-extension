@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: update-recovery. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 async function readStaleRuntimeTabs() {
   const result = await storageGet([STALE_RUNTIME_TABS_KEY]);

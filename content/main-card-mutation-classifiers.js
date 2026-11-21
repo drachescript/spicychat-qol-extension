@@ -25,30 +25,52 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return !!node.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
   }
 
+  // Cache per observer batch. The ordinary changed-card check must still
+  // stop at its first match; searching for added cards is only needed during
+  // the quiet period after a block operation.
+  const batchCache = new WeakMap();
+  const cardLinkSelector = "a[href*='/chat/'], a[href*='/chatbot/']";
+  function cachedBatch(mutations) {
+    let cache = batchCache.get(mutations);
+    if (!cache) {
+      cache = { affects: null, added: null, nodeMatches: new WeakMap() };
+      batchCache.set(mutations, cache);
+    }
+    return cache;
+  }
+  function nodeHasCardLink(node, cache) {
+    if (!(node instanceof Element)) return false;
+    if (cache.nodeMatches.has(node)) return cache.nodeMatches.get(node);
+    const matches = !!(node.matches?.(cardLinkSelector) || node.querySelector?.(cardLinkSelector));
+    cache.nodeMatches.set(node, matches);
+    return matches;
+  }
   function mutationsMayAffectCards(mutations) {
     if (!isCardListingContext()) return false;
-
-    return mutations.some(mutation => {
-      if (elementMayBelongToCardArea(mutation.target)) return true;
-      if (mutation.type !== "childList") return false;
-      // Native grid pagination can replace entire card groups. Inspect only
-      // structurally inserted/removed subtrees; class changes never need a
-      // descendant query of the whole listing.
-      return [...mutation.addedNodes, ...mutation.removedNodes].some(node => {
-        if (!(node instanceof Element)) return false;
-        if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-        return !!node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
-      });
-    });
+    const cache = cachedBatch(mutations);
+    if (cache.affects !== null) return cache.affects;
+    for (const mutation of mutations) {
+      if (elementMayBelongToCardArea(mutation.target)) return (cache.affects = true);
+      if (mutation.type !== "childList") continue;
+      for (const nodes of [mutation.addedNodes, mutation.removedNodes]) {
+        for (const node of nodes || []) {
+          if (nodeHasCardLink(node, cache)) return (cache.affects = true);
+        }
+      }
+    }
+    return (cache.affects = false);
   }
-
   function mutationsAddBotCards(mutations) {
     if (!isCardListingContext()) return false;
-    return mutations.some(mutation => [...(mutation.addedNodes || [])].some(node => {
-      if (!(node instanceof Element)) return false;
-      if (node.matches?.("a[href*='/chat/'], a[href*='/chatbot/']")) return true;
-      return !!node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
-    }));
+    const cache = cachedBatch(mutations);
+    if (cache.added !== null) return cache.added;
+    for (const mutation of mutations) {
+      if (mutation.type !== "childList") continue;
+      for (const node of mutation.addedNodes || []) {
+        if (nodeHasCardLink(node, cache)) return (cache.added = true);
+      }
+    }
+    return (cache.added = false);
   }
 
   DS.mainCardMutationClassifiers = Object.freeze({

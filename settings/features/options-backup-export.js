@@ -1,5 +1,3 @@
-// Feature-owned options helpers: backup-export. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeSmartFilterPresets(value) {
   if (!Array.isArray(value)) return [];

@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -1412,14 +1411,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!header) return null;
     // Never scan the whole header's text: its "up to 5,000 entries" hint
     // can appear before the actual count and cause a false 5000-entry total.
-    const counter = header.querySelector('[data-translate-key="lorebook:entries.count"]') ||
-      header.querySelector("[data-testid='EntriesList-SortDropdown']")?.parentElement?.querySelector("p");
-    const text = String(counter?.textContent || "").replace(/\u00a0/g, " ").trim();
-    const fraction = /^([\d,]+)\s*\/\s*([\d,]+)\s+entries\s*$/i.exec(text);
-    const simple = !fraction && /^(?:([\d,]+)\s+entries|entries\s*\(\s*([\d,]+)\s*\))$/i.exec(text);
-    const raw = fraction?.[1] || simple?.[1] || simple?.[2] || "";
-    const count = raw ? Number(raw.replace(/,/g, "")) : null;
-    return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
+    const root = header.closest("[data-testid='EntriesListServer']") || header.parentElement;
+    const preferred = root?.querySelector('[data-translate-key="lorebook:entries.count"]') ||
+      header.querySelector('[data-translate-key="lorebook:entries.count"]');
+    const candidates = [preferred, ...header.querySelectorAll("p,span")];
+    // Recent React builds put the count beside the header rather than in it.
+    // Look only in the editor's shallow heading area: a full recursive scan
+    // would revisit hundreds of entry cards during ordinary page updates.
+    if (root && root !== header) candidates.push(...root.querySelectorAll(
+      ":scope > p, :scope > span, :scope > div > p, :scope > div > span"));
+    // Match whole text so the capacity hint "up to 5,000 entries" cannot
+    // accidentally authorize a partial backup.
+    for (const node of candidates) {
+      if (!node || node.closest?.("[id^='ds-']")) continue;
+      const text = String(node.textContent || "").replace(/\u00a0/g, " ").trim();
+      const fraction = /^([\d,.]+)\s*\/\s*([\d,.]+)\s+entries\s*$/i.exec(text);
+      const simple = !fraction && /^(?:([\d,.]+)\s+entries|entries\s*\(\s*([\d,.]+)\s*\))$/i.exec(text);
+      const raw = fraction?.[1] || simple?.[1] || simple?.[2] || "";
+      const count = raw ? Number(raw.replace(/[,.]/g, "")) : null;
+      if (Number.isSafeInteger(count) && count >= 0 && count <= 5000) return count;
+    }
+    return null;
   }
 
   // The native Entries editor mounts a limited first batch. Older builds used

@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -31,8 +30,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "says", "asks", "replies", "whispers", "murmurs", "speaks", "shouts", "mutters",
     "looked", "glanced", "stared", "nodded", "shook", "sighed", "smiled", "grinned", "laughed",
     "leaned", "reached", "stepped", "walked", "moved", "turned", "took", "gave", "placed",
-    "picked", "set", "said", "asked", "replied", "whispered", "murmured", "watched", "noticed", "sat", "stood"
+    "picked", "set", "said", "asked", "replied", "whispered", "murmured", "watched", "noticed", "sat", "stood",
+    "opened", "closed", "echoed", "appeared", "followed", "darted", "flinched", "flickered", "flushed", "curled", "breathed", "lingered", "widened"
   ];
+  const ACTION_VERB_PATTERN = ACTION_VERBS.join('|');
+  const ACTOR_ACTION_RE = new RegExp(`^(?:[A-Z][\\p{L}'-]{1,30}|she|he|they|it|you)\\s+(?:${ACTION_VERB_PATTERN})\\b`, 'iu');
+  const ANY_ACTION_RE = new RegExp(`\\b(?:${ACTION_VERB_PATTERN})\\b`, 'iu');
 
   function settings() {
     return DS.getEffectiveRpFormatSettings?.() || DS.state?.settings || {};
@@ -48,17 +51,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function isAiMessage(message) {
-    return !!message?.querySelector?.("a[href*='/chatbot/']");
+    return !!message?.querySelector?.('[data-chat-bubble-side="bot"], [data-chat-side="bot"]') ||
+      !!message?.querySelector?.("a[href*='/chatbot/']");
   }
 
   function getMessageParts(message) {
-    const anchor = message?.querySelector?.("a[href*='/chatbot/']");
-    const bubble = anchor?.closest?.("div[class*='max-w-[650px]']") || null;
+    const content = message?.querySelector?.('[data-chat-side="bot"][data-testid="ChatMessageContentV2"]');
+    const bubble = content?.closest?.('[data-testid="ChatBubble-Column"]') ||
+      message?.querySelector?.('[data-chat-bubble-side="bot"]');
     const body = bubble?.children?.[1] || null;
-    if (!(body instanceof HTMLElement)) return {};
-    const firstSpan = body.querySelector("span.leading-6") || body.querySelector("span");
-    const contentHost = firstSpan?.parentElement || body.firstElementChild || null;
-    return { bubble, body, contentHost };
+    // SpicyChat mounts greetings and generated replies in the same V2 content
+    // element. Select that element, not the first unrelated span in the bubble.
+    const contentHost = content || body?.querySelector?.('[data-chat-side="bot"]') || null;
+    if (!(body instanceof HTMLElement) || !(contentHost instanceof HTMLElement)) return {};
+    return {bubble, body, contentHost};
   }
 
   function stripVisibleMarkdown(text) {
@@ -90,67 +96,79 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function looksLikeNarration(text, strength) {
     const value = String(text || "").replace(/\s+/g, " ").trim();
     if (!value) return false;
+    if (/^["“‘`]|^(?:[—–-]\s+|(?:OOC|SYSTEM|META)\s*:)/i.test(value)) return false;
     const lower = value.toLowerCase();
+    if (ACTOR_ACTION_RE.test(value)) return true;
+    if (/^(?:from|outside|inside|across|nearby|meanwhile|elsewhere|a beat|silence|footsteps|the doorbell|the door|the room|the hallway|the night|the air)\b/i.test(value)) return true;
+    if (strength === 'conservative') return false;
 
-    if (/^(from|outside|inside|across|nearby|meanwhile|elsewhere|a beat|silence|footsteps|the doorbell|the door|the room|the hallway|the night|the air)\b/i.test(value)) {
-      return true;
-    }
-
-    const verbPattern = ACTION_VERBS.join("|");
-    const namedActor = new RegExp(`^(?:[A-Z][\\p{L}'-]{1,30}|she|he|they|it)\\s+(?:${verbPattern})\\b`, "iu");
-    if (namedActor.test(value)) return true;
-
-    if (strength === "aggressive") {
-      const containsAction = new RegExp(`\\b(?:${verbPattern})\\b`, "iu");
-      if (containsAction.test(value) && !/[?!]\s*$/.test(value)) return true;
+    // Openings like "One quiet evening" and "At Maple Court" are common in
+    // greetings, even when the author forgot the Markdown action markers.
+    if (/^(?:one (?:quiet|late|cold|warm|rainy|sunny|ordinary|early) (?:morning|evening|night|afternoon|day)|\b(?:moments?|minutes?|hours?|days?) later\b|the moment\b|as soon as\b|meanwhile\b|suddenly\b|for a moment\b)/i.test(value)) return true;
+    if (/^(?:at|in|by|behind|beside|near|outside|inside|under|across)\s+(?:the\s+)?[A-Z][\p{L}'-]{2,}/u.test(value) && /[.,]|\b(?:was|were|stood|sat|lay)\b/i.test(value)) return true;
+    if (/^(?:her|his|their|its|my|your|the|a|an)\s+[\p{L}'-]{2,}(?:\s+[\p{L}'-]{2,}){0,2}\s+(?:was|were|had|has|began|started|rose|fell|moved|stopped|shifted|twitched|raced|ached|fluttered|snapped|tightened|trembled|lifted|dropped|swung|opened|closed|caught|brushed|rested|turned|paused|widened|narrowed|slid|grew|echoed|lingered|followed)\b/iu.test(value)) return true;
+    if (/^(?:a|the)\s+(?:sudden|sharp|quiet|loud|soft|faint)\s+(?:knock|noise|sound|footstep|voice|cry|sigh|bang|crash)\b/iu.test(value)) return true;
+    if (/^(?:she|he|they|[A-Z][\p{L}'-]{1,30})\s+(?:had|has|was|were)\s+(?:been\s+)?(?:waiting|standing|sitting|walking|watching|looking|leaning|moving|fidgeting|staring|holding|shaking|turning|resting|wearing|smiling|trembling|blushing|trying)\b/iu.test(value)) return true;
+    if (strength === 'aggressive') {
+      if (ANY_ACTION_RE.test(value) && !/[?!]\s*$/.test(value) && !/^(?:i|we)\b/i.test(value)) return true;
       if (/^[A-Z][\p{L}'-]{1,30}\b/u.test(value) && /\b(?:her|his|their|the|toward|across|against|beside|behind|near)\b/i.test(lower)) return true;
     }
-
     return false;
   }
 
   // Convert plain Markdown in SpicyChat's native editor. This is deliberately
   // conservative and never saves or sends a message on its own. A user reviews
   // the before/after text before inserting the proposed edit into React's field.
+  function looksLikeSceneProse(text, strength) {
+    const v = String(text || '').replace(/\s+/g,' ').trim();
+    if (!v || /^(?:["“‘`]|[—–-]\s+|(?:OOC|SYSTEM|META)\s*:|(?:I|we)\b)/i.test(v)) return false;
+    if (looksLikeNarration(v,strength)) return true;
+    if (/^[,;:]?\s*(?:she|he|they|you|it|[A-Z][\p{L}'-]{1,30})\s+(?:said|says|say|asked|asks|ask|replied|replies|reply|whispered|whispers|whisper|added|adds|add|answered|answers|answer|muttered|mutters|mutter|continued|continues|continue|laughed|laughs|laugh)\b/iu.test(v)) return true;
+    if (/^(?:you(?:'re|'ve|'d|'ll)?|you\s+(?:are|were|have|had|find|found|look|take|took|walk|move|approach|knock|notice|turn|open|pull)\b)/i.test(v) && v.length>40 && /\b(?:been|walking|shopping|house|door|street|bag|garden|inside|outside|find|take|look|walk|approach|knock|turn|open|pull|you)\b/i.test(v)) return true;
+    if (/^(?:not wanting|without|as (?:you|she|he|they)|when (?:you|she|he|they)|after (?:you|she|he|they))\b/i.test(v)) return true;
+    if (/^(?:her|his|their|your|the|a|an)\s+[\p{L}'-]+(?:\s+[\p{L}'-]+){0,3}\s+(?:[\p{L}'-]+s|[\p{L}'-]+ed|was|were|had|is|are|has|began|started|shows|lights|looks|falls|opens|stands)\b/iu.test(v) && v.length>20) return true;
+    if (/^[A-Z][\p{L}'-]{1,30}(?:\s+[A-Z][\p{L}'-]{1,30})?\s+(?:[\p{L}'-]{3,}s|[\p{L}'-]{3,}ed|is|was|has|had|looks|took|gave|found|went|stood|sat|came)\b/iu.test(v) && !/^[A-Z][\p{L}'-]{1,30},/.test(v)) return true;
+    if (/^(?:it(?:'s| is| was)|there(?:'s| is| was)|the moment|a moment|the address|the photo)\b/i.test(v) && v.length>38) return true;
+    return strength==='aggressive' && v.length>110 && (v.match(/[.!?](?=\s|$)/g)||[]).length>=2;
+  }
+
   function prepareRpMarkdown(raw, s) {
-    const original = String(raw || "");
-    const strength = ["conservative", "balanced", "aggressive"].includes(s?.rpFormatDetection)
-      ? s.rpFormatDetection : "balanced";
+    const original = String(raw || '');
+    const strength = ['conservative','balanced','aggressive'].includes(s?.rpFormatDetection)
+      ? s.rpFormatDetection : 'balanced';
     let changedLines = 0, inFence = false;
-    const lines = original.split(/(\r?\n)/);
-    const formatted = lines.map(line => {
+    const formatted = original.split(/(\r?\n)/).map(line => {
       if (/^\r?\n$/.test(line)) return line;
       if (/^\s*```/.test(line)) { inFence = !inFence; return line; }
       if (inFence || !line.trim() || /^(?:\s*[-*_]{3,}\s*|\s*#|\s*>|\s*\[(?:OOC|SYSTEM|META|DIRECTOR)\b)/i.test(line)) return line;
-      // Speaker prefixes and dash-led dialogue are not narration. Do not
-      // convert them even when a verb or name resembles a scene action.
       if (/^\s*(?:[\p{L}][\p{L}0-9_' -]{0,35}\s*:\s+|[—–]\s+)/u.test(line)) return line;
-      const quoteOrMarkup = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|"[^"\n]*"|“[^”\n]*”)/g;
-      let match, cursor = 0, parts = [];
-      let changed = false;
-      const maybeNarration = (fragment) => {
-        const cleaned = fragment.trim();
-        if (!cleaned || /^\p{P}+$/u.test(cleaned)) return fragment;
-        const narration = looksLikeNarration(cleaned, strength) ||
-          /^(?:she|he|they|it|[A-Z][\p{L}'-]{1,30})\s+(?:said|asked|replied|whispered|murmured|says|asks|laugh(?:ed|s)|thought|answered|added|continued)\b/iu.test(cleaned) ||
-          (strength === 'aggressive' && /^[A-Z][^.!?]{15,}[.!?]?$/.test(cleaned) && !/^["“'‘]/.test(cleaned));
-        if (!narration) return fragment;
-        const leading = /^\s*/.exec(fragment)?.[0] || '';
-        const trailing = /\s*$/.exec(fragment)?.[0] || '';
-        changed = true;
-        return `${leading}*${cleaned}*${trailing}`;
-      };
-      while ((match = quoteOrMarkup.exec(line))) {
-        if (match.index > cursor) parts.push(maybeNarration(line.slice(cursor, match.index)));
-        parts.push(match[0]); // preserve existing Markdown/quotes verbatim
-        cursor = match.index + match[0].length;
+      const tokens=[];
+      const re=/(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|"[^"\n]*"|“[^”\n]*”)/g;
+      let m,cursor=0;
+      while ((m=re.exec(line))) {
+        if (m.index>cursor) tokens.push({fixed:false,text:line.slice(cursor,m.index)});
+        tokens.push({fixed:true,text:m[0]});
+        cursor=m.index+m[0].length;
       }
-      if (cursor < line.length) parts.push(maybeNarration(line.slice(cursor)));
-      const result = parts.length ? parts.join('') : maybeNarration(line);
-      if (changed && result !== line) changedLines++;
+      if(cursor<line.length) tokens.push({fixed:false,text:line.slice(cursor)});
+      if(!tokens.length) tokens.push({fixed:false,text:line});
+      const unquoted=tokens.filter(t=>!t.fixed).map(t=>t.text).join(' ');
+      const lineIsScene=looksLikeSceneProse(unquoted,strength);
+      let changed=false;
+      const result=tokens.map(t=>{
+        if(t.fixed || !t.text.trim() || /^[\p{P}\p{S}]+$/u.test(t.text.trim())) return t.text;
+        if(!lineIsScene && !looksLikeSceneProse(t.text,strength)) return t.text;
+        const prefix=/^\s*[,;:]?\s*/.exec(t.text)?.[0]||'';
+        const suffix=/\s*$/.exec(t.text)?.[0]||'';
+        const content=t.text.slice(prefix.length,t.text.length-suffix.length);
+        if(!content.trim()) return t.text;
+        changed=true;
+        return prefix+'*'+content+'*'+suffix;
+      }).join('');
+      if(changed && result!==line) changedLines++;
       return result;
     }).join('');
-    return {original, formatted, changedLines};
+    return {original,formatted,changedLines};
   }
 
   function nativeEditor(root) {
@@ -204,7 +222,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function ensureNativeFormatAction(root) {
     const s = settings();
-    if (!s.enabled || !s.enableRpFormatRepair || !isAiMessage(root)) return;
+    if (!s.enabled || !s.enableRpFormatRepair || !isAiMessage(root)) {
+      root?.querySelector?.(`.${NATIVE_FORMAT_CLASS}`)?.remove();
+      return;
+    }
     const field = nativeEditor(root);
     if (!(field instanceof HTMLTextAreaElement) || !field.isConnected) return;
     if (root.querySelector(`.${NATIVE_FORMAT_CLASS}`)) return;
@@ -234,6 +255,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     segments.push(segment);
   }
 
+  function appendPlainSegments(segments, value, strength) {
+    const raw = stripVisibleMarkdown(value);
+    // Quoted speech is distinct from the surrounding narration, even if the
+    // model put both into one unformatted text node.
+    const pattern = /("[^"\n]+"|“[^”\n]+”)/g;
+    let cursor = 0, match;
+    const addOutside = fragment => {
+      if (!fragment.trim()) return;
+      const type = looksLikeSceneProse(fragment, strength) ? 'action' : 'speech';
+      appendSegment(segments, type === 'action' ? {type, text: fragment} : {type, sourceText: fragment});
+    };
+    while ((match = pattern.exec(raw))) {
+      if (match.index > cursor) addOutside(raw.slice(cursor, match.index));
+      const inner = match[0].slice(1,-1);
+      appendSegment(segments,{type:'speech',sourceText:inner});
+      cursor=match.index+match[0].length;
+    }
+    addOutside(raw.slice(cursor));
+  }
+
   function extractSegments(span, s) {
     const children = [...span.childNodes];
     const strength = ["conservative", "balanced", "aggressive"].includes(s.rpFormatDetection) ? s.rpFormatDetection : "balanced";
@@ -241,10 +282,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     for (const node of children) {
       if (node.nodeType === Node.TEXT_NODE) {
-        const raw = stripVisibleMarkdown(node.nodeValue || "");
-        if (!raw.trim()) continue;
-        const type = looksLikeNarration(raw, strength) ? "action" : "speech";
-        appendSegment(segments, type === "action" ? { type, text: raw } : { type, sourceText: raw });
+        appendPlainSegments(segments,node.nodeValue || '',strength);
         continue;
       }
 
@@ -275,15 +313,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         continue;
       }
 
-      if (tag === "STRONG" && s.rpFormatConvertBoldActions !== false) {
-        appendSegment(segments, { type: "action", text: node.textContent || "" });
+      if (tag === "STRONG") {
+        const text = node.textContent || '';
+        // Bold is also used for inner thoughts. Don't turn those into actions.
+        if (s.rpFormatConvertBoldActions !== false && looksLikeNarration(text,strength)) {
+          appendSegment(segments,{type:'action',text});
+        } else {
+          segments.push({type:'bold',sourceNode:node});
+        }
         continue;
       }
 
-      const raw = stripVisibleMarkdown(node.textContent || "");
-      if (!raw.trim()) continue;
-      const type = looksLikeNarration(raw, strength) ? "action" : "speech";
-      appendSegment(segments, type === "action" ? { type, text: raw } : { type, sourceText: raw });
+      appendPlainSegments(segments,node.textContent || '',strength);
     }
 
     return segments;
@@ -326,7 +367,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function firstVisibleChar(segment, s) {
     if (segment.type === "action") return cleanActionText(segment.text, s).charAt(0);
-    if (segment.type === "alternate") return String(segment.sourceNode?.textContent || "").trim().charAt(0);
+    if (segment.type === "alternate" || segment.type === "bold") return String(segment.sourceNode?.textContent || "").trim().charAt(0);
     if (segment.sourceText) return stripVisibleMarkdown(segment.sourceText).trim().charAt(0);
     return String(segment.sourceNode?.textContent || "").trim().charAt(0);
   }
@@ -368,6 +409,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         continue;
       }
 
+      if (segment.type === 'bold') {
+        const strong = document.createElement('strong');
+        strong.textContent=segment.sourceNode?.textContent || '';
+        output.appendChild(strong);
+        continue;
+      }
+
       if (segment.type === "alternate") {
         const code = document.createElement("code");
         code.className = "ds-rp-repair-alternate";
@@ -393,14 +441,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function buildOutput(contentHost, s) {
+    // Rich media and links must remain native. We can't rebuild those without
+    // dropping behavior, so leave the entire message alone in that case.
+    if (contentHost.querySelector('a, img, picture, video, audio, iframe, button, input, textarea, pre, table, ul, ol, svg, canvas')) return null;
     const output = document.createElement("div");
     output.className = `${OUTPUT_CLASS} flex flex-col w-full [overflow-wrap:anywhere]`;
-
-    for (const child of [...contentHost.children]) {
+    for (const child of [...contentHost.childNodes]) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        if (child.nodeValue?.trim()) return null;
+        continue;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
       if (child.tagName === "SPAN") output.appendChild(renderSpan(child, s));
       else if (child.tagName === "HR") output.appendChild(document.createElement("hr"));
+      else if (child.textContent?.trim()) return null;
     }
-
     return output;
   }
 
@@ -409,7 +464,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // A layout with nested DIV/P nodes previously produced empty blue bubbles
   // showing only the RP✓ toggle.
   function safeReplacement(body, contentHost, output) {
-    if (!(body instanceof HTMLElement) || !(contentHost instanceof HTMLElement)) return false;
+    if (!(body instanceof HTMLElement) || !(contentHost instanceof HTMLElement) || !(output instanceof HTMLElement)) return false;
     if (contentHost.closest(`.${OUTPUT_CLASS}`) || contentHost.querySelector(`.${BUTTON_CLASS}, .${OUTPUT_CLASS}`)) return false;
     const nativeText = (body.textContent || "").replace(/\s+/g, " ").trim();
     const sourceText = (contentHost.textContent || "").replace(/\s+/g, " ").trim();
@@ -452,42 +507,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const repaired = !!validOutput && isRepairedView(message, s);
     contentHost.classList.toggle(ORIGINAL_HIDDEN_CLASS, repaired);
     output.hidden = !repaired;
-    updateButton(message.querySelector(`.${BUTTON_CLASS}`), repaired);
+    updateButton(message.querySelector(`.${BUTTON_CLASS}:not(.${EDIT_BUTTON_CLASS})`), repaired);
   }
 
-  function ensureToggleButton(message, contentHost, output, s) {
-    let button = message.querySelector(`.${BUTTON_CLASS}`);
-    if (s.rpFormatShowMessageButtons === false) {
-      button?.remove();
+  function ensureEditShortcut(message, s) {
+    if (!s.enabled || !s.enableRpFormatRepair) {
       message.querySelector(`.${EDIT_BUTTON_CLASS}`)?.remove();
       return;
     }
-    if (!button) {
-      const dropdown = message.querySelector('button[aria-label="message-dropdown"]');
-      // Never climb to a page-level .relative ancestor. SpicyChat V2's header
-      // may have no message-local .relative node; that previously inserted
-      // page-wide RP✓ bars OUTSIDE the chat message.
-      const holder = dropdown?.parentElement || null;
-      if (!holder || !message.contains(holder) || !message.contains(dropdown)) return;
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = BUTTON_CLASS;
-      button.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        // Messages can stream/edit and rebuild their rendered replacement.
-        // Resolve the live nodes instead of keeping the original output
-        // reference captured when this button was first created.
-        const liveOutput = message.querySelector(`.${OUTPUT_CLASS}`);
-        const liveContentHost = getMessageParts(message).contentHost;
-        if (!(liveOutput instanceof HTMLElement) || !(liveContentHost instanceof HTMLElement)) return;
-        const currentlyRepaired = !liveOutput.hidden;
-        message.dataset.dsRpView = currentlyRepaired ? "original" : "repaired";
-        applyView(message, liveContentHost, liveOutput, settings());
-      });
-      holder.insertBefore(button, dropdown);
-    }
-    updateButton(button, !output.hidden);
     let editButton = message.querySelector(`.${EDIT_BUTTON_CLASS}`);
     if (!editButton) {
       const dropdown = message.querySelector('button[aria-label="message-dropdown"]');
@@ -500,6 +527,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         editButton.setAttribute('aria-label', editButton.title);
         editButton.addEventListener('click', event => {
           event.preventDefault(); event.stopPropagation();
+          if (!settings().enabled || !settings().enableRpFormatRepair) { cleanupMessage(message); return; }
           if (typeof DS.openNativeMessageEditorForRoot !== 'function') {
             DS.setQuickStatus?.('Use the native message menu → Edit, then choose Format RP text.');
             return;
@@ -512,6 +540,39 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         holder.insertBefore(editButton, dropdown);
       }
     }
+  }
+
+  function ensureToggleButton(message, contentHost, output, s) {
+    ensureEditShortcut(message, s);
+    let button = message.querySelector(`.${BUTTON_CLASS}:not(.${EDIT_BUTTON_CLASS})`);
+    if (!s.enabled || !s.enableRpFormatRepair || s.rpFormatShowMessageButtons === false) {
+      button?.remove();
+      return;
+    }
+    if (!button) {
+      const dropdown = message.querySelector('button[aria-label="message-dropdown"]');
+      const holder = dropdown?.parentElement || null;
+      if (!holder || !message.contains(holder) || !message.contains(dropdown)) return;
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = BUTTON_CLASS;
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!settings().enabled || !settings().enableRpFormatRepair) {
+          cleanupMessage(message);
+          return;
+        }
+        const liveOutput = message.querySelector(`.${OUTPUT_CLASS}`);
+        const liveContentHost = getMessageParts(message).contentHost;
+        if (!(liveOutput instanceof HTMLElement) || !(liveContentHost instanceof HTMLElement)) return;
+        const currentlyRepaired = !liveOutput.hidden;
+        message.dataset.dsRpView = currentlyRepaired ? 'original' : 'repaired';
+        applyView(message, liveContentHost, liveOutput, settings());
+      });
+      holder.insertBefore(button, dropdown);
+    }
+    updateButton(button, !output.hidden);
   }
 
   function processMessage(message, force = false) {
@@ -541,7 +602,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const output = buildOutput(contentHost, s);
     if (!safeReplacement(body, contentHost, output)) {
       // Unsupported/partial native markup: keep the untouched SpicyChat body.
-      message.querySelector(`.${BUTTON_CLASS}`)?.remove();
+      message.querySelectorAll(`.${BUTTON_CLASS}:not(.${EDIT_BUTTON_CLASS})`).forEach(el => el.remove());
+      ensureEditShortcut(message, s);
       delete message.dataset.dsRpReady;
       delete message.dataset.dsRpView;
       return;
@@ -697,6 +759,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.prepareRpFormatRepairMessageForEdit = function(root) {
+    if (!settings().enabled || !settings().enableRpFormatRepair) return;
     cleanupMessage(root);
     ensureNativeFormatAction(root);
   };

@@ -1,5 +1,3 @@
-// Feature-owned options helpers: release-notes. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 async function markUpdatesSeen() {
   const version = chrome.runtime.getManifest?.().version || "";

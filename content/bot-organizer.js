@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -1327,7 +1326,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (count) count.textContent = `${selectedIds.size} selected`;
   }
 
+  function isStoryModeRoute() {
+    // Story pages contain native /chat/ links inside their header. They are
+    // not listing cards; treating those links as cards inserts the organiser
+    // toolbar directly over the Story composer at desktop widths.
+    return /^\/(?:[a-z]{2}\/)?story(?:\/|$)/i.test(location.pathname);
+  }
+
   function stableOrganizerListingRoute() {
+    if (isStoryModeRoute()) return false;
     const page = DS.getPageState?.() || {};
     if (page.isSingleChatPage || page.isBotProfilePage || page.isBotEditor || page.isLorebookEditor || page.isPersonaPage || page.isChatListPage) return false;
     if (page.routeType === "listing" || page.routeType === "creator-listing") return true;
@@ -1438,6 +1445,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyBotOrganizer = function applyBotOrganizer() {
     const settings = DS.state.settings || {};
+    // Explicit negative route guard wins over stale SPA page-state and
+    // generic card-link fallbacks. Removal also clears a toolbar left behind
+    // when navigation switches from a real listing to Story Mode.
+    if (isStoryModeRoute()) {
+      if (DS.state.botOrganizerWasActive || mobileBulkListenerAttached ||
+          document.querySelector("#ds-bot-organizer-toolbar, #ds-bot-organizer-context-button, #ds-bot-organizer-explorer, [data-ds-bot-organizer-card]")) {
+        DS.removeBotOrganizer?.();
+      }
+      return;
+    }
     const contextPage = !!(DS.isSingleChatPage?.() || DS.isBotProfilePage?.());
     const hasCards = !!DS.qs?.("a[href*='/chat/'], a[href*='/chatbot/']");
     // Keep the organizer alive across temporary React listing remounts. During

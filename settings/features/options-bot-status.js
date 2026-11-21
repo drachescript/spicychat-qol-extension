@@ -354,7 +354,7 @@ function setupBotAvailabilityControls() {
   $("scanUnknownBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unknown" }));
   $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "main" }));
   $("resumePausedStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "stale" }));
-  void refreshBotStatusPauseButton().then(() => renderBotAvailability({ skipRecoveryRerender: true })).catch(() => {});
+  // Scan engine status loads when Saved Bots is opened, not on every Settings launch.
   $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
   $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
   $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
@@ -440,13 +440,7 @@ function setupBotAvailabilityControls() {
     $(id)?.addEventListener("change", () => { save().catch(() => {}); updateBotStatusScanEstimate(); });
     $(id)?.addEventListener("input", updateBotStatusScanEstimate);
   }
-  refreshBotStatusLastRunFeedback().catch(() => {});
-  storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
-    const rate = Number(result?.[BOT_STATUS_LAST_RATE_KEY] || 0);
-    if (rate >= 100 && rate <= 120000) botStatusPreviousScanRateMs = rate;
-    updateBotStatusScanEstimate();
-  }).catch(() => {});
-  updateBotStatusScanEstimate();
+  // The saved scan rate/estimate is loaded when Saved Bots becomes active.
   $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability(); });
   $("botAvailabilityScope")?.addEventListener("change", () => {
     invalidateDuplicateCache();

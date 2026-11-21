@@ -1,5 +1,3 @@
-// Feature-owned options helpers: archive-sync. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeArchiveUploadState(value) {
   const raw = value && typeof value === "object" ? value : {};

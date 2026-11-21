@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: creator-watch. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeCreatorHandle(value) {
   let text = String(value || "").trim();

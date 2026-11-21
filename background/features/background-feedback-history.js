@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: feedback-history. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeQuickDislikeHistory(raw) {
   const source = raw && typeof raw === "object" ? raw : {};

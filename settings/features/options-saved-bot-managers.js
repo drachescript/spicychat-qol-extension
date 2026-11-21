@@ -1,5 +1,3 @@
-// Feature-owned options helpers: saved-bot-managers. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function botEntriesFromStore(store, includeNames = true, kindlessOpenedStore = false) {
   const entries = [];

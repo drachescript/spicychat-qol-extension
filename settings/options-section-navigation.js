@@ -353,6 +353,9 @@ function expandSettingsCardForTarget(target) {
 }
 
 function setupCollapsibleSettingsCards() {
+  // Scan each card's controls once rather than running one selector for every
+  // setting key. Large Custom Lite builds can have hundreds of both.
+  const resettableSettings = new Set(Object.keys(DEFAULT_SETTINGS));
   document.querySelectorAll(".tab-page").forEach(page => {
     const tabName = String(page.dataset.page || "");
     if (SETTINGS_SECTION_COLLAPSE_EXCLUDED_TABS.has(tabName)) return;
@@ -402,10 +405,10 @@ function setupCollapsibleSettingsCards() {
       });
       tools.appendChild(pin);
 
-      const canReset = Object.keys(DEFAULT_SETTINGS).some(key => {
-        try { return !!card.querySelector(`#${CSS.escape(key)}, input[type="radio"][name="${CSS.escape(key)}"]`); }
-        catch { return false; }
-      });
+      const canReset = Array.from(card.querySelectorAll("[id], input[type='radio'][name]")).some(control =>
+        resettableSettings.has(control.id) ||
+        (control.matches("input[type='radio'][name]") && resettableSettings.has(control.name))
+      );
       if (canReset) {
         const reset = document.createElement("button");
         reset.type = "button";

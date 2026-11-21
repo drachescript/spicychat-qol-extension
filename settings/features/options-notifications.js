@@ -1,5 +1,3 @@
-// Feature-owned options helpers: notifications. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeChatNudgeStore(value) {
   const rows = Array.isArray(value) ? value : [];

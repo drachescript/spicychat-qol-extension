@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: diagnostic-profile. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function diagnosticPageType(url) {
   try {

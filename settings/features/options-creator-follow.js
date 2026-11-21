@@ -1,5 +1,3 @@
-// Feature-owned options helpers: creator-follow. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeCreatorHandle(value) {
   let text = String(value || "").trim();

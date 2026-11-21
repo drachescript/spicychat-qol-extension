@@ -228,6 +228,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
       await runFeatureStep("notifications", notificationsWanted(settings) || !!document.querySelector("[data-ds-reason='notifications'], [data-ds-reason='notifications:release-popup']"), () => DS.handleNotifications?.());
+      if (page.isMyCreationsRulebooksPage) {
+        await runFeatureStep("Rulebook tab links", true, () => DS.syncMyRulebookCardLinks?.());
+      }
 
       await runRoutedFeatureStep(plan, "chat", "generation profiles", () => !!settings.enableGenerationProfiles || !!document.querySelector("[data-ds-generation-profile]"), () => DS.applyGenerationProfileTools?.());
       await runRoutedFeatureStep(plan, "personaTools", "persona page", personaToolsWanted(settings), () => DS.applyPersonaPageTools?.());
@@ -289,6 +292,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           (!!settings.enableLanguageFilter && !!settings.languageFilterLorebooks) ||
           !!document.querySelector("[data-ds-reason^='lorebook:block'], [data-ds-reason^='lorebook:language:'], .ds-lorebook-block-button"),
           () => DS.applyPublicLorebookQoL?.());
+      }
+
+      if (/^\/my-creations\/rulebooks\/?$/i.test(String(location.pathname || ''))) {
+        await runFeatureStep('Rulebook new-tab links', true, () => DS.syncMyRulebookCardLinks?.());
       }
 
       // Rulebooks Explore uses its own route, not the normal bot listing route.

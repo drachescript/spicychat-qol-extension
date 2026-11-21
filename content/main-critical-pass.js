@@ -133,6 +133,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const dirtySet = DS.state.messageDirtyRoots || (DS.state.messageDirtyRoots = new Set());
         const laneRoots = [...dirtySet].filter(root => root?.isConnected && !DS.isMessageEditPending?.(root));
         dirtySet.clear();
+        // Normal profile handles these roots immediately; release queued refs.
+        if (DS.state.messageDirtyQueue) DS.state.messageDirtyQueue.length = 0;
         DS.state.messageLaneRoots = laneRoots;
         const counters = runtimeCounters();
         counters.messageLaneDirtyRoots = Number(counters.messageLaneDirtyRoots || 0) + laneRoots.length;

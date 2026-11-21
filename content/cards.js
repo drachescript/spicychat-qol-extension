@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -928,7 +927,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.getCardBlockingDiagnostic = function getCardBlockingDiagnostic(card, anchor) {
     if (!card || !anchor) return null;
-    const fields = preparedCardFields(card);
+    const fields = cachedPreparedCardFields(card);
     const wordMatchers = DS.state.preparedMatchers?.blockedWords || [];
     const wordFields = fields.nameDescriptionCandidates.length
       ? fields.nameDescriptionCandidates
@@ -986,6 +985,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       perf.cardCollectionCacheHits = (perf.cardCollectionCacheHits || 0) + 1;
       return DS.state.cardCache;
+    }
+
+    // The shared page observer already reports changed card shells. Reconcile
+    // those directly instead of enumerating every native anchor again.
+    const cachedCards = DS.state?.cardCache;
+    const dirtyCards = DS.state?.listingDirtyCards;
+    if (Array.isArray(cachedCards) && DS.state.cardCacheUrl === url &&
+        !DS.state.listingDirtyNeedsFullPass && dirtyCards instanceof Set &&
+        dirtyCards.size > 0 && dirtyCards.size < 96) {
+      const byCard = new Map();
+      for (const item of cachedCards) {
+        if (item.card?.isConnected && item.anchor?.isConnected) byCard.set(item.card, item);
+      }
+      const fresh = [];
+      for (const changedCard of dirtyCards) {
+        byCard.delete(changedCard);
+        if (!changedCard?.isConnected) continue;
+        const anchor = changedCard.matches?.("a[href*='/chat/'], a[href*='/chatbot/']") ? changedCard :
+          changedCard.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
+        if (!anchor || !anchor.isConnected || anchor.closest?.('#ds-favorites-later-panel')) continue;
+        const id = DS.botIdFromHref?.(anchor.href) || DS.chatIdFromHref?.(anchor.href);
+        if (!id) continue;
+        const card = DS.getCardFromChatLink(anchor);
+        if (!card?.isConnected) continue;
+        const entry = { card, anchor };
+        byCard.set(card, entry);
+        fresh.push(entry);
+      }
+      const reused = [...byCard.values()];
+      DS.state.cardCache = reused;
+      DS.state.cardCacheRevision = revision;
+      DS.state.cardCacheUrl = url;
+      if (fresh.length) DS.rememberListedBotCards?.(fresh);
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.incrementalCardCollections = (perf.incrementalCardCollections || 0) + 1;
+      perf.incrementalCardChanges = (perf.incrementalCardChanges || 0) + dirtyCards.size;
+      recordCardPhase("collection-incremental", started, dirtyCards.size);
+      return reused;
     }
 
     const cards = [];
@@ -1720,6 +1757,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     let cards;
     if (canUseDirty) {
+      // Other listing features share this cache after the dirty queue clears.
+      if (dirty.size) DS.collectCards();
       cards = [...dirty]
         .filter(card => card?.isConnected)
         .map(card => ({

@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 /* DS_QOL14_HOTFIX_START
  * QoL 14 / v0.2.20 hotfix

@@ -24,7 +24,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   const granularChanges = Object.entries(changes || {})
     .map(([key, change]) => [settingNameFromStorageKey(key), change])
     .filter(([name]) => !!name);
-  if (!changes.settings && !granularChanges.length) return;
+  // Most setting writes are unrelated to these background alarms. Avoid
+  // reading the entire saved settings object for those granular updates.
+  const alarmSettingKeys = new Set([
+    "enabled", "autoAfkEnabled", "autoAfkMinutes", "autoAfkAction",
+    "lowMemoryProtectionEnabled", "maxAwakeSpicyTabs",
+    "duplicateTabGuardEnabled", "enableChatNudges", "chatNudgeCheckMinutes",
+    "enableCreatorBotNotifications", "creatorBotCheckMinutes"
+  ]);
+  if (!changes.settings && !granularChanges.some(([key]) => alarmSettingKeys.has(key))) return;
 
   (async () => {
     let beforeSettings = {};
@@ -33,35 +41,51 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       beforeSettings = changes.settings.oldValue || {};
       afterSettings = changes.settings.newValue || {};
     } else {
-      afterSettings = (await storageGet(["settings"])).settings || {};
+      const legacy = (await storageGet(["settings"])).settings || {};
+      afterSettings = { ...legacy };
+      for (const [name, change] of granularChanges) {
+        if (change?.newValue === undefined) delete afterSettings[name];
+        else afterSettings[name] = change.newValue;
+      }
       beforeSettings = { ...afterSettings };
       for (const [name, change] of granularChanges) {
         if (change?.oldValue === undefined) delete beforeSettings[name];
         else beforeSettings[name] = change.oldValue;
       }
     }
+    const touched = new Set(granularChanges.map(([name]) => name));
+    // A full settings save shouldn't reconfigure every alarm if only an
+    // unrelated appearance/chat preference changed.
+    const changedAny = (...keys) => changes.settings
+      ? keys.some(key => beforeSettings[key] !== afterSettings[key])
+      : keys.some(key => touched.has(key));
 
     const before = { ...AUTO_AFK_DEFAULTS, ...beforeSettings };
     const after = { ...AUTO_AFK_DEFAULTS, ...afterSettings };
     const justEnabled = (!before.autoAfkEnabled && !!after.autoAfkEnabled) ||
       (!before.lowMemoryProtectionEnabled && !!after.lowMemoryProtectionEnabled);
-    configureAutoAfkAlarm(justEnabled);
+    if (changedAny("enabled", "autoAfkEnabled", "autoAfkMinutes", "autoAfkAction", "lowMemoryProtectionEnabled", "maxAwakeSpicyTabs"))
+      configureAutoAfkAlarm(justEnabled);
 
     const duplicateBefore = { ...DUPLICATE_TAB_DEFAULTS, ...beforeSettings };
     const duplicateAfter = { ...DUPLICATE_TAB_DEFAULTS, ...afterSettings };
     const duplicateJustEnabled = !duplicateBefore.duplicateTabGuardEnabled && !!duplicateAfter.duplicateTabGuardEnabled;
-    if (duplicateAfter.enabled !== false && duplicateAfter.duplicateTabGuardEnabled && duplicateJustEnabled) {
+    if (changedAny("enabled", "duplicateTabGuardEnabled") &&
+        duplicateAfter.enabled !== false && duplicateAfter.duplicateTabGuardEnabled && duplicateJustEnabled) {
       queueDuplicateTabScan({ focusExisting: false });
     }
 
     const nudgeJustEnabled = !before.enableChatNudges && !!after.enableChatNudges;
-    if (nudgeJustEnabled) runChatNudgeScan();
-    configureChatNudgeAlarm(nudgeJustEnabled);
+    if (changedAny("enabled", "enableChatNudges", "chatNudgeCheckMinutes")) {
+      if (nudgeJustEnabled) runChatNudgeScan();
+      configureChatNudgeAlarm(nudgeJustEnabled);
+    }
 
     const creatorWatchJustEnabled = !before.enableCreatorBotNotifications && !!after.enableCreatorBotNotifications;
     const creatorWatchIntervalChanged = Number(before.creatorBotCheckMinutes || 60) !== Number(after.creatorBotCheckMinutes || 60);
     if (creatorWatchJustEnabled) queueCreatorBotScan({ force: true, reason: "enabled" });
-    if (creatorWatchJustEnabled || creatorWatchIntervalChanged || before.enabled !== after.enabled) {
+    if (changedAny("enabled", "enableCreatorBotNotifications", "creatorBotCheckMinutes") &&
+        (creatorWatchJustEnabled || creatorWatchIntervalChanged || before.enabled !== after.enabled)) {
       configureCreatorBotWatchAlarm(creatorWatchJustEnabled);
     }
   })().catch(() => {});

@@ -1,5 +1,3 @@
-// Feature-owned options helpers: settings-load. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 async function load() {
   settingsAutosaveReady = false;
@@ -675,8 +673,9 @@ async function load() {
     loadFeatureSetting(settings);
   }
   settingsAutosaveReady = true;
+  dsqRefreshHeavyToolsForTab(activeOptionsTab());
   initializeMaximumPerformancePreset();
-  updateBlockedBulkResumeControls();
+  // Blocking actions are hydrated only after that tab is selected.
   updateSettingDependencies();
   refreshPlatformCompatibilityUi(settings);
   DS_FEATURE_INDEX_REFRESH?.();

@@ -1,5 +1,3 @@
-// Feature-owned options helpers: lorebook-status. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeLorebookStatusRow(rawValue) {
   const raw = rawValue && typeof rawValue === "object" ? rawValue : {};

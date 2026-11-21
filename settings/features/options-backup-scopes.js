@@ -1,5 +1,3 @@
-// Feature-owned options helpers: backup-scopes. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function settingBackupScopeForKey(key) {
   if (SETTINGS_BACKUP_OVERRIDES[key]) return SETTINGS_BACKUP_OVERRIDES[key];

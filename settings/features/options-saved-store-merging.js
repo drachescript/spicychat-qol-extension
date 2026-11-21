@@ -1,5 +1,3 @@
-// Feature-owned options helpers: saved-store-merging. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeMetaStore(raw) {
   return raw && typeof raw === "object" ? { ...raw } : {};

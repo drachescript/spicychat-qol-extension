@@ -1,4 +1,3 @@
-// text-replacements: optional feature-owned Settings, including its saved-setting handlers.
 (() => {
   'use strict';
   const profile = window.__DSQ_BUILD_PROFILE__;

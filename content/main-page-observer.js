@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -317,6 +316,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // native memory-card mounts/removals without registering another observer.
       if (DS.memoryManagerMutationsRelevant?.(mutations)) DS.wakeMemoryManagerUi?.();
 
+      if (/^\/my-creations\/rulebooks\/?$/i.test(String(location.pathname || '')) &&
+          mutations.some(m => Array.from(m.addedNodes || []).some(n => n instanceof Element &&
+            (n.matches?.('[data-rulebook-id], [data-testid="RulebookDraftsList"]') ||
+             n.querySelector?.('[data-rulebook-id]'))))) {
+        DS.syncMyRulebookCardLinks?.();
+      }
       const isChatPage = !!DS.isSingleChatPage?.();
       // Baseline early exit for keystroke/contenteditable changes. The native
       // header/shortcut repair and message-edit guards already ran above; no
@@ -558,6 +563,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // SPA navigation normally changes the DOM and is caught above. An
     // unfocused tab does not need route polling every 2s: its observer still
     // handles real DOM navigation, and main.js checks the route on visibility.
+    window.addEventListener("popstate", checkRouteChange, { passive: true });
+    window.addEventListener("hashchange", checkRouteChange, { passive: true });
     setInterval(() => {
       if (document.hidden || DS.isQolPausedForTab?.()) {
         const perf = DS.state?.runtimePerformance;
@@ -565,7 +572,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
       checkRouteChange();
-    }, 2000);
+    }, 6000);
   };
   };
 })();

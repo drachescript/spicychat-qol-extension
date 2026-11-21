@@ -1,5 +1,3 @@
-// Feature-owned options helpers: backup-recovery. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function openRecoverySnapshotDb() {
   return new Promise((resolve, reject) => {

@@ -1,5 +1,3 @@
-// Feature-owned options helpers: design. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function hexRgb(value) {
   const match = /^#([0-9a-f]{6})$/i.exec(String(value || "").trim());

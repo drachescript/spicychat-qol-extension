@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -427,9 +426,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const root = node.closest?.(LATER_CARD_SELECTOR);
         if (root) noteLaterDirtyCard(root);
         else if (node.matches?.(LATER_CARD_SELECTOR)) noteLaterDirtyCard(node);
-        else if (node.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']")) {
-          // Large React grid mounts are handled by one bounded full pass.
-          laterWork.needsFullScan = true;
+        else if (node.querySelector?.(LATER_CARD_SELECTOR)) {
+          // A new React fragment can contain many listing cards. Queue only
+          // the cards in that fragment, not every chat link on the page.
+          for (const card of node.querySelectorAll(LATER_CARD_SELECTOR)) noteLaterDirtyCard(card);
         }
       }
     }
@@ -485,7 +485,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             if (generation !== laterWork.generation || !laterEnabled()) return;
             if (!button.isConnected) laterWork.rendered.delete(button);
             else syncLaterButton(button, button.dataset.dsBotId || '');
-            if (++sliceCount >= 10 || performance.now() - sliceStart >= 6) {
+            if (++sliceCount >= 8 || performance.now() - sliceStart >= 4) {
               await yieldLaterSlice(); sliceCount = 0; sliceStart = performance.now();
             }
           }
@@ -500,7 +500,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           visited.add(card);
           updateOneLaterCard(card,item.anchor);
           processed++;
-          if (++sliceCount >= 8 || performance.now() - sliceStart >= 6) {
+          if (++sliceCount >= 6 || performance.now() - sliceStart >= 4) {
             await yieldLaterSlice(); sliceCount = 0; sliceStart = performance.now();
           }
         }

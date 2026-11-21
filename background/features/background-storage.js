@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: storage. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function alarmName(tabId) {
   return `${LOAD_ALL_ALARM_PREFIX}${tabId}`;

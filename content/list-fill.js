@@ -1,4 +1,3 @@
-// No optional feature initialization on a tab whose QoL switch is paused.
 if (!window.__DSQ_TAB_GATE__?.paused) {
 (() => {
   "use strict";
@@ -1867,6 +1866,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function waitForListingGrowth(beforeCount, timeoutMs = 4800) {
     return new Promise(resolve => {
       let settled = false;
+      let timer;
+      const kind = listingKindForUrl();
+      const selector = listingLinkSelector(kind);
+      // One initial ID snapshot. Unrelated React/button mutations should not
+      // recount every listing card while a native Load More request is running.
+      const knownIds = currentListingIds(kind);
       const finish = result => {
         if (settled) return;
         settled = true;
@@ -1874,13 +1879,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         clearTimeout(timer);
         resolve(result);
       };
-      const observer = new MutationObserver(() => {
+      const observer = new MutationObserver(mutations => {
+        let newLinkSeen = false;
+        for (const mutation of mutations) {
+          if (settled) break;
+          for (const node of mutation.addedNodes || []) {
+            if (!(node instanceof Element) || !node.isConnected) continue;
+            const links = node.matches?.(selector) ? [node] : node.querySelectorAll?.(selector);
+            for (const link of links || []) {
+              const id = listingIdFromLink(link, kind);
+              if (id && !knownIds.has(id)) {
+                knownIds.add(id);
+                newLinkSeen = true;
+              }
+            }
+          }
+        }
+        if (!newLinkSeen) return;
         const count = uniqueTargets().length;
         if (count > beforeCount) finish({ grew: true, count });
-        else if (!DS.findListingLoadMoreButton?.()) finish({ grew: false, count });
       });
       observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
-      const timer = setTimeout(() => {
+      const initialCount = uniqueTargets().length;
+      if (initialCount > beforeCount) {
+        finish({ grew: true, count: initialCount });
+        return;
+      }
+      timer = setTimeout(() => {
         const count = uniqueTargets().length;
         finish({ grew: count > beforeCount, count });
       }, timeoutMs);
@@ -2089,15 +2114,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function myCreationsFingerprint() {
     if (!isMyCreationsChatbotsPage()) return "";
-    const ids = [];
+    const ids = new Set();
     for (const anchor of document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
       const id = botIdFromLink(anchor);
-      if (!id || ids.includes(id)) continue;
-      ids.push(id);
+      if (id) ids.add(id);
     }
-    const head = ids.slice(0, 4).join(",");
-    const tail = ids.slice(-2).join(",");
-    return `${ids.length}|${head}|${tail}|${findMyCreationsLoadMoreButton() ? "more" : "end"}`;
+    const ordered = [...ids];
+    const head = ordered.slice(0, 4).join(",");
+    const tail = ordered.slice(-2).join(",");
+    return `${ordered.length}|${head}|${tail}|${findMyCreationsLoadMoreButton() ? "more" : "end"}`;
   }
 
   function resetMyCreationsAutoLoadState() {
@@ -2110,6 +2135,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function waitForMyCreationsGrowth(beforeCount, timeoutMs = 6500) {
     return new Promise(resolve => {
       let settled = false;
+      let timer;
+      const knownIds = currentBotIds();
+      const selector = "a[href*='/chat/'], a[href*='/chatbot/']";
       const finish = result => {
         if (settled) return;
         settled = true;
@@ -2117,15 +2145,32 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         clearTimeout(timer);
         resolve(result);
       };
-      const observer = new MutationObserver(() => {
+      const observer = new MutationObserver(mutations => {
+        let newLinkSeen = false;
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes || []) {
+            if (!(node instanceof Element) || !node.isConnected) continue;
+            const links = node.matches?.(selector) ? [node] : node.querySelectorAll?.(selector);
+            for (const link of links || []) {
+              const id = botIdFromLink(link);
+              if (id && !knownIds.has(id)) {
+                knownIds.add(id);
+                newLinkSeen = true;
+              }
+            }
+          }
+        }
+        if (!newLinkSeen) return;
         const count = currentBotIds().size;
-        // SpicyChat can temporarily remove/disable Load More while its native
-        // request is in flight. Do not mistake that loading state for the end
-        // of the list; growth or the timeout decides the result.
         if (count > beforeCount) finish({ grew: true, count });
       });
       observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
-      const timer = setTimeout(() => {
+      const initialCount = currentBotIds().size;
+      if (initialCount > beforeCount) {
+        finish({ grew: true, count: initialCount });
+        return;
+      }
+      timer = setTimeout(() => {
         const count = currentBotIds().size;
         finish({ grew: count > beforeCount, count });
       }, timeoutMs);

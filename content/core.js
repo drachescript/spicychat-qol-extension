@@ -558,6 +558,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return output;
   }
 
+  // Favorite/Later toggles refresh the membership sets, but shouldn't recompile
+  // the unrelated blocked-word/tag/name rules each time. Compare the actual
+  // arrays, not their identity: imports can replace arrays and editors can mutate
+  // an existing array in place.
+  const matcherLookupCache = new Map();
+  function preparedMatcherCache(name, values, signature) {
+    const safeValues = Array.isArray(values) ? values : [];
+    const fingerprint = `${signature}|${JSON.stringify(safeValues)}`;
+    const cached = matcherLookupCache.get(name);
+    if (cached?.fingerprint === fingerprint) {
+      const metrics = DS.state?.runtimePerformance;
+      if (metrics) metrics.preparedMatcherReuse = Number(metrics.preparedMatcherReuse || 0) + 1;
+      return cached.matchers;
+    }
+    const matchers = prepareMatcherList(safeValues);
+    matcherLookupCache.set(name, { fingerprint, matchers });
+    return matchers;
+  }
+
   DS.refreshFastLookupCaches = function refreshFastLookupCaches() {
     const settings = DS.state?.settings || {};
     const blocked = DS.state?.blockedBots || { ids: [], names: [] };
@@ -565,16 +584,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const favorites = DS.state?.favoriteBots || { ids: [] };
     const later = DS.state?.laterBots || { ids: [] };
 
+    // These sets are also updated optimistically during user actions. Rebuild
+    // them as before to reconcile storage rather than caching a stale Set.
     DS.state.blockedBotIdSet = new Set(blocked.ids || []);
     DS.state.blockedBotNormalizedNameSet = new Set((blocked.names || []).map(value => DS.normalize?.(value) || "").filter(Boolean));
     DS.state.notInterestedBotIdSet = new Set(notInterested.ids || []);
     DS.state.favoriteBotIdSet = new Set(favorites.ids || []);
     DS.state.laterBotIdSet = new Set(later.ids || []);
+    const normalizeSignature = [settings.textNormalizationEnabled,
+      settings.normalizeFancyUnicode, settings.normalizePunctuation,
+      settings.normalizeInvisibleCharacters, settings.normalizeDecorativeSymbols,
+      settings.normalizeEmojis].map(Boolean).join(":");
     DS.state.preparedMatchers = {
-      blockedNames: prepareMatcherList(blocked.names || []),
-      blockedTags: prepareMatcherList(settings.blockedTags || []),
-      blockedWords: prepareMatcherList(settings.blockedWords || []),
-      blockedCreators: prepareMatcherList(settings.blockedCreators || [])
+      blockedNames: preparedMatcherCache("names", blocked.names, normalizeSignature),
+      blockedTags: preparedMatcherCache("tags", settings.blockedTags, normalizeSignature),
+      blockedWords: preparedMatcherCache("words", settings.blockedWords, normalizeSignature),
+      blockedCreators: preparedMatcherCache("creators", settings.blockedCreators, normalizeSignature)
     };
   };
 

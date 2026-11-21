@@ -1,7 +1,6 @@
 "use strict";
 
 // Feature-owned background helpers: discovery. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function normalizeRandomChatId(value) {
   const id = String(value || "").trim().toLowerCase();

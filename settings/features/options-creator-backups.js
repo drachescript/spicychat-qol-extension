@@ -1,5 +1,3 @@
-// Feature-owned options helpers: creator-backups. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function portableBotProfileJson(archiveValue) {
   const raw = archiveValue && typeof archiveValue === "object" ? archiveValue : null;

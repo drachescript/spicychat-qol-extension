@@ -1,5 +1,3 @@
-// Feature-owned options helpers: foundation. Full QoL and Custom use the same source.
-// Shared storage/settings state remains in the core controller for now.
 
 function optionsDiagLevelRank(level) {
   return String(level || "normal") === "deep" ? 2 : 1;
@@ -1934,6 +1932,8 @@ function setActiveTab(tabName) {
   if (tabName === "browser" && optionsDataLoaded) {
     ensureTabCleanupPanelLoaded().catch(() => {});
   }
+  // Route-specific scan engines remain absent from ordinary Settings startup.
+  if (optionsDataLoaded) dsqRefreshHeavyToolsForTab(tabName);
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
   if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);

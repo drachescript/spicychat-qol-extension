@@ -26,26 +26,45 @@ function setupGithubBackupFoundation() {
     $g('ghBackupLast').textContent=s.lastSyncedAt?`Last successful operation: ${new Date(s.lastSyncedAt).toLocaleString()}`:'No GitHub snapshot yet';
     if(s.conflicts?.length)$g('ghBackupConflicts').textContent=`Conflicts: ${s.conflicts.join(', ')}. Use Restore / Merge to resolve; no data was overwritten.`;
     else $g('ghBackupConflicts').textContent='';
-    if(s.progress?.phase && s.progress.phase!=='idle'){
-      const count=s.progress.total?` · ${s.progress.done}/${s.progress.total}`:'';
-      $g('ghBackupProgress').textContent=`${s.progress.phase}: ${s.progress.message||''}${count}`;
-    }
-    if(s.progress && s.progress.phase!=='idle') {
-      const text=s.progress.total>0?`${s.progress.done}/${s.progress.total}`:'';
-      $g('ghBackupProgress').textContent=`${s.progress.phase}: ${s.progress.message||''} ${text}`;
-    } else $g('ghBackupProgress').textContent='';
+    const active=s.progress?.phase && s.progress.phase!=='idle' &&
+      Number(s.progress.at)>Date.now()-180000;
+    const saved=s.researchBackupProgress;
+    if(active){
+      const suffix=s.progress.total?` · ${s.progress.done}/${s.progress.total}`:'';
+      $g('ghBackupProgress').textContent=`${s.progress.phase}: ${s.progress.message||''}${suffix}`;
+    }else if(saved && Number.isFinite(saved.total) && saved.total>0){
+      const remaining=Math.max(0,Number(saved.remaining)||0);
+      const completed=Math.max(0,Math.min(saved.total,Number(saved.completed)||0));
+      const last=saved.updatedAt?new Date(saved.updatedAt).toLocaleString():'';
+      const paused=!s.categories?.includes('research')||s.paused;
+      $g('ghBackupProgress').textContent=`Research snapshot: ${completed}/${saved.total} records committed · ${remaining} remaining`+
+        (remaining?(paused?' · paused (Research disabled or backups paused)':
+          s.researchRetryAt>Date.now()?` · retry ${new Date(s.researchRetryAt).toLocaleTimeString()}`:
+          ' · continuing in batches'):' · complete')+
+        (last?` · checked ${last}`:'');
+    }else $g('ghBackupProgress').textContent='';
     if(s.lastError)output(s.lastError,true);
+    else if ($g('ghBackupStatus')?.textContent?.trim()==='GitHub backup starts off by default.') {
+      if(s.provider==='cloud')output('GitHub backup is not selected. Choose GitHub or Both and save provider preferences.');
+      else if(!s.connected)output('Authorize this browser with GitHub Device Flow first.');
+      else if(!s.repository)output('Choose your private GitHub backup repository.');
+      else if(!s.unlocked)output('Unlock the GitHub backup password before uploading.');
+      else if(s.paused)output('GitHub backups are paused on this device.');
+      else if(!s.lastSyncedAt)output('Connected, but no successful GitHub snapshot yet. Use Backup Now or Sync Now to create one.');
+    }
     return s;
   };
   async function run(name,args={},success){
     output(`${name.replace(/_/g,' ').toLowerCase()}…`);
     const longOperation=['BACKUP','SYNC','RESTORE'].includes(name);
     const ticker=longOperation?setInterval(()=>{void call('STATUS').then(s=>{if(s.ok){const pr=s.progress;
-      if(pr?.phase)$g('ghBackupProgress').textContent=`${pr.phase}: ${pr.message||''}${pr.total?` · ${pr.done}/${pr.total}`:''}`;} });},1800):null;
+      if(pr?.phase && pr.phase!=='idle')$g('ghBackupProgress').textContent=`${pr.phase}: ${pr.message||''}${pr.total?` · ${pr.done}/${pr.total}`:''}`;} });},1800):null;
     let r;try{r=await call(name,args);}finally{if(ticker)clearInterval(ticker);}
-    if(!r.ok)output(r.message||r.error||'Operation failed',true);
-    else output(success||JSON.stringify(r).slice(0,500));
     if(r.ok&&name!=='STATUS')await status();
+    // Show the outcome after refreshing status, not an older saved error.
+    if(!r.ok)output(r.message||r.error||'Operation failed',true);
+    else if(success)output(typeof success==='function'?success(r):success);
+    else if(name!=='REPOSITORIES')output(r.message||'Done.');
     return r;
   }
   const permission=()=>new Promise(resolve=>{
@@ -91,11 +110,21 @@ function setupGithubBackupFoundation() {
     const r=await run('REPOSITORIES');if(!r.ok)return;
     const target=$g('ghBackupRepoSelect');target.replaceChildren();
     for(const repo of r.repositories||[]){const opt=document.createElement('option');opt.value=repo.fullName;opt.textContent=repo.fullName;target.append(opt);}
-    if(!target.children.length)output('No private repositories accessible to this GitHub App. Install it and grant access to a private repository.');
-    else {target.hidden=false;$g('ghBackupRepoInput').value=target.value;}
+    if(!target.children.length){output('No private repositories accessible to this GitHub App. Check the installation repository access.',true);return;}
+    const chosen=$g('ghBackupRepoInput').value.trim();
+    if(chosen&&Array.from(target.options).some(option=>option.value.toLowerCase()===chosen.toLowerCase()))target.value=chosen;
+    target.hidden=false;
+    if(!chosen)$g('ghBackupRepoInput').value=target.value;
+    output(`${target.options.length} private repositories available. Select one, then click Verify & select repository.`);
   });
   $g('ghBackupRepoSelect').addEventListener('change',()=>{$g('ghBackupRepoInput').value=$g('ghBackupRepoSelect').value;});
-  $g('ghBackupChoose').addEventListener('click',()=>run('CHOOSE_REPO',{repository:$g('ghBackupRepoInput').value.trim()},'Private repository verified. Set a backup password before the first backup.'));
+  $g('ghBackupChoose').addEventListener('click',async()=>{
+    const repository=$g('ghBackupRepoInput').value.trim()||$g('ghBackupRepoSelect').value.trim();
+    if(!repository){output('Choose a repository or enter owner/repository first.',true);return;}
+    await run('CHOOSE_REPO',{repository},result=>result.alreadySelected
+      ?`${result.repository} verified. Existing backup state and encryption unlock kept.`
+      :`${result.repository} selected. Unlock the backup password, then use Backup Now.`);
+  });
   $g('ghBackupUnlock').addEventListener('click',async()=>{
     const password=$g('ghBackupPassword').value;
     if(!password){output('Enter your backup password.',true);return;}
