@@ -1,5 +1,5 @@
 
-function botManagerCardElement(entry, kind) {
+function botManagerCardElement(entry, kind, membership = null) {
   const card = makeElement("div", {
     className: "bot-manager-card",
     dataset: { kind, type: entry.type, id: entry.id, name: entry.name }
@@ -92,10 +92,10 @@ function botManagerCardElement(entry, kind) {
     uniqueClean(organizer.collections || []).forEach(folder => chips.push(`Folder: ${folder}`));
     uniqueClean(organizer.tags || []).forEach(tag => chips.push(`#${tag}`));
     if (organizer.status) chips.push(organizer.status.replace(/-/g, " "));
-    if (kind === "favorite" && (laterBotState?.ids || []).includes(entry.id)) chips.push("Later");
-    if (kind === "later" && (favoriteBotState?.ids || []).includes(entry.id)) chips.push("Favorite history");
-    if (managerEntryBlocked(entry)) chips.push("Blocked");
-    else if (managerEntryOpened(entry)) chips.push("Opened");
+    if (kind === "favorite" && (membership ? membership.laterIds.has(entry.id) : (laterBotState?.ids || []).includes(entry.id))) chips.push("Later");
+    if (kind === "later" && (membership ? membership.favoriteIds.has(entry.id) : (favoriteBotState?.ids || []).includes(entry.id))) chips.push("Favorite history");
+    if (managerEntryBlocked(entry, membership)) chips.push("Blocked");
+    else if (managerEntryOpened(entry, membership)) chips.push("Opened");
     else chips.push("Unopened");
 
     if (chips.length) {
@@ -110,7 +110,7 @@ function botManagerCardElement(entry, kind) {
   if (entry.chatUrl) actions.appendChild(makeElement("a", { text: "Open chat", attrs: { href: entry.chatUrl, target: "_blank", rel: "noopener noreferrer" } }));
   if (entry.profileUrl) actions.appendChild(makeElement("a", { text: "Open profile", attrs: { href: entry.profileUrl, target: "_blank", rel: "noopener noreferrer" } }));
   if (kind === "favorite" && entry.id) {
-    const inLater = (laterBotState?.ids || []).includes(entry.id);
+    const inLater = membership ? membership.laterIds.has(entry.id) : (laterBotState?.ids || []).includes(entry.id);
     actions.appendChild(makeElement("button", {
       className: "bot-manager-later-toggle",
       text: inLater ? "Remove from Later" : "Add to Later",
@@ -155,7 +155,8 @@ function renderBotManager(kind) {
   if (!host) return;
 
   const allEntries = botEntriesFromStore(storeForManagerKind(kind), isBlocked, kind === "opened");
-  const entries = getBotManagerEntries(kind, allEntries);
+  const membership = createBotManagerMembershipFrame();
+  const entries = getBotManagerEntries(kind, allEntries, membership);
   const ui = botManagerUiState[kind] || { visible: 10, collapsed: true, query: "" };
   const hasSearch = !!getBotManagerSearch(kind);
 
@@ -208,7 +209,7 @@ function renderBotManager(kind) {
     return;
   }
 
-  host.replaceChildren(...shownEntries.map(entry => botManagerCardElement(entry, kind)));
+  host.replaceChildren(...shownEntries.map(entry => botManagerCardElement(entry, kind, membership)));
   if (kind === "opened") hydrateOpenedArchiveProfiles(shownEntries).catch(() => {});
   updateBotManagerBulkCount(kind);
 

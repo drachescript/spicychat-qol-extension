@@ -53,6 +53,7 @@ jobs:
           add-paths: |
             build/features/*.json
             build/modules.json
+            manifest.json
           title: 'build: synchronize audited feature asset ownership'
           commit-message: 'build: synchronize audited feature asset ownership'
           body: |
@@ -61,6 +62,9 @@ jobs:
             Synchronizes explicitly referenced shared Settings scripts and
             manifest content scripts flanked by the same known bundle, as well
             as reviewed feature panels, CSS, background services and workers.
+            Explicitly reviewed early/on-demand assets can also be registered,
+            and a known idempotent early compatibility script may be
+            deduplicated for identical injection scopes.
             Unknown or shared resources must be reviewed manually.
 
             This does not mark Custom Lite features as browser-verified or
@@ -97,7 +101,7 @@ jobs:
             exit 1
           fi
           while IFS=$'\t' read -r file status; do
-            if [[ ( ! "$file" =~ ^build/features/[A-Za-z0-9_-]+\.json$ && "$file" != "build/modules.json" ) || "$status" != "modified" ]]; then
+            if [[ ( ! "$file" =~ ^build/features/[A-Za-z0-9_-]+\.json$ && "$file" != "build/modules.json" && "$file" != "manifest.json" ) || "$status" != "modified" ]]; then
               echo "::error::Refusing to merge unexpected repair change: $file ($status)"
               exit 1
             fi

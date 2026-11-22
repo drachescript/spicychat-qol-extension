@@ -2281,3 +2281,33 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
 .ds-qol-message-bottom-menu-panel > button:hover { background: #3a4557; }
 
 .ds-bot-new-badge { display: inline-block; width: fit-content; background: #2c6248; border: 1px solid #4c9b71; color: #ecfff1; font: 600 11px/1.4 system-ui,sans-serif; padding: 2px 6px; border-radius: 5px; margin: 3px 0; }
+
+/* Report-link collector: small, always-accessible icon at the bottom-right of
+   the native bot picture. Sibling of the native profile link, never nested in
+   it; this is independent from blocking, Archive uploads, or native reports. */
+.ds-report-link-image-host { position: relative !important; }
+.ds-report-link-image-host > .ds-report-link-button {
+  position: absolute !important;
+  right: 7px !important;
+  bottom: 7px !important;
+  z-index: 35 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255,255,255,.65) !important;
+  border-radius: 8px !important;
+  background: rgba(10,12,17,.86) !important;
+  color: white !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+.ds-report-link-image-host > .ds-report-link-button:hover,
+.ds-report-link-image-host > .ds-report-link-button:focus-visible { background: rgba(53,89,160,.96) !important; }
+.ds-report-link-image-host > .ds-report-link-button.ds-report-link-saved { background: rgba(28,95,65,.92) !important; font-size: 17px !important; }
+.ds-report-link-image-host > .ds-report-link-button:disabled { opacity: .72 !important; cursor: progress !important; }

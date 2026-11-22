@@ -1,10 +1,97 @@
 "use strict";
+// Report-link collector: separate from Archive uploads and native reporting.
+// Serializing mutations in this background context prevents concurrent cards,
+// tabs and the popup from overwriting one another's saved lists.
+const DS_REPORT_LINKS_KEY = "dsReportBotLinksV1";
+const DS_REPORT_UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+let dsReportLinksWrites = Promise.resolve();
+function dsReportCanonicalLink(value) {
+  const id = String(value || "").trim().toLowerCase();
+  return DS_REPORT_UUID.test(id) ? `https://spicychat.ai/chatbot/${id}` : "";
+}
+function dsReportStorageCall(method, value) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout = 0;
+    const finish = (result, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error instanceof Error ? error : new Error(String(error)));
+      else resolve(result || {});
+    };
+    timeout = setTimeout(() => finish(null, new Error("Collector storage timed out")), 10000);
+    try {
+      const api = chrome.storage?.local?.[method];
+      if (typeof api !== "function") throw new Error("Storage API unavailable");
+      const callback = result => finish(result, chrome.runtime?.lastError?.message || "");
+      let pending;
+      try { pending = api.call(chrome.storage.local, value, callback); }
+      catch (error) {
+        // Promise-only APIs such as partial iOS WebExtensions may reject
+        // callback arguments; retry once with a Promise, never poll.
+        pending = api.call(chrome.storage.local, value);
+      }
+      if (pending && typeof pending.then === "function") pending.then(result => finish(result), error => finish(null, error));
+    } catch (error) { finish(null, error); }
+  });
+}
+async function dsReportLinksRead() {
+  const result = await dsReportStorageCall("get", DS_REPORT_LINKS_KEY);
+  const stored = result?.[DS_REPORT_LINKS_KEY];
+  if (!Array.isArray(stored)) return [];
+  const links = new Set();
+  for (const value of stored) {
+    const match = /^https:\/\/spicychat\.ai\/chatbot\/([0-9a-f-]{36})$/i.exec(String(value || ""));
+    const link = match ? dsReportCanonicalLink(match[1]) : "";
+    if (link) links.add(link);
+  }
+  return [...links];
+}
+function dsReportLinkMessage(message, sender, sendResponse) {
+  const type = String(message?.type || "");
+  const operation = async () => {
+    if (type === "DS_REPORT_LINK_ADD") {
+      // No remote websites can write this list directly, and non-SpicyChat
+      // extension pages cannot masquerade as a bot card.
+      const url = String(sender?.url || sender?.tab?.url || "");
+      if (!/^https:\/\/(?:www\.)?spicychat\.ai\//i.test(url)) return { ok: false, error: "Not a SpicyChat page" };
+      const link = dsReportCanonicalLink(message.id);
+      if (!link) return { ok: false, error: "Invalid bot ID" };
+      const links = await dsReportLinksRead();
+      if (links.includes(link)) return { ok: true, added: false, count: links.length, link };
+      if (links.length >= 20000) return { ok: false, error: "Collector full; copy and clear your saved links first" };
+      links.push(link);
+      await dsReportStorageCall("set", { [DS_REPORT_LINKS_KEY]: links });
+      return { ok: true, added: true, count: links.length, link };
+    }
+    if (type === "DS_REPORT_LINK_CLEAR") {
+      // Clearing is an explicit popup action, never a content-page action.
+      const senderUrl = String(sender?.url || "");
+      const popupUrl = String(chrome.runtime?.getURL?.("popup.html") || "");
+      if (!popupUrl || senderUrl !== popupUrl) return { ok: false, error: "Open the QoL popup to clear links" };
+      await dsReportStorageCall("set", { [DS_REPORT_LINKS_KEY]: [] });
+      return { ok: true, count: 0 };
+    }
+    const links = await dsReportLinksRead();
+    return { ok: true, count: links.length, links };
+  };
+  // Reads wait for queued writes; writes are independently serialized.
+  const pending = dsReportLinksWrites.then(operation);
+  if (type !== "DS_REPORT_LINK_GET") dsReportLinksWrites = pending.then(() => {}, () => {});
+  pending.then(sendResponse, error => sendResponse({ ok: false, error: String(error?.message || error) }));
+  return true;
+}
+
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundRuntimeMessages() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!dsqBackgroundMessageAllowed(message?.type)) {
     sendResponse({ ok: false, error: "This feature is not installed in this build." });
     return false;
+  }
+  if (["DS_REPORT_LINK_ADD", "DS_REPORT_LINK_GET", "DS_REPORT_LINK_CLEAR"].includes(message?.type)) {
+    return dsReportLinkMessage(message, sender, sendResponse);
   }
   const ownedMessageHandler = dsqBackgroundFeatureMessageHandlers[String(message?.type || "")];
   if (ownedMessageHandler) return ownedMessageHandler(message, sender, sendResponse);

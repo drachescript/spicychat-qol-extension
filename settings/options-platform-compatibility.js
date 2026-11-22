@@ -145,7 +145,7 @@ function markPlatformUnsupportedControl(control, compatibility, settings = loade
   const saved = typeof desired === "boolean" ? desired : settingIsCustomizedForPlatform(control.id, settings);
   badge.classList.toggle("is-inactive", saved);
   badge.textContent = saved ? "Desktop only · saved" : "Desktop only";
-  badge.title = compatibility.reason || "Saved here but inactive on Android.";
+  badge.title = compatibility.reason || "Saved here but inactive on this device.";
 }
 
 function clearPlatformCompatibilityMarks() {
@@ -166,13 +166,15 @@ function refreshPlatformCompatibilityUi(settings = loadedSettingsSnapshot) {
   document.documentElement.dataset.dsPlatform = env.platform || (env.android ? "android" : "desktop");
   const notice = $("platformCompatibilityNotice");
   const noticeText = $("platformCompatibilityNoticeText");
-  if (notice) notice.hidden = !env.android;
-  if (noticeText && env.android) {
-    noticeText.textContent = "Bulk actions that work in the current page are available on Android. Helper-tab, background-worker and real-browser-tab controls remain unavailable; their saved settings are preserved.";
+  if (notice) notice.hidden = !(env.android || env.platform === "ios");
+  if (noticeText && (env.android || env.platform === "ios")) {
+    noticeText.textContent = env.platform === "ios"
+      ? "iOS WebKit/Orion: current-page QoL features remain available. Helper-tab and background-worker actions are conservatively unavailable; saved settings are preserved."
+      : "Bulk actions that work in the current page are available on Android. Helper-tab, background-worker and real-browser-tab controls remain unavailable; their saved settings are preserved.";
   }
 
   clearPlatformCompatibilityMarks();
-  if (!env.android) return;
+  if (!env.android && env.platform !== "ios") return;
 
   const controls = [...document.querySelectorAll("input[id], select[id], textarea[id], button[id]")];
   for (const control of controls) {

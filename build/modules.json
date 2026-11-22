@@ -85,7 +85,8 @@
         "content/main-startup.js",
         "content/main-scheduler-utils.js",
         "content/main-message-mutations.js",
-        "icons/icon128.png"
+        "icons/icon128.png",
+        "content/browser-api-compat.js"
       ]
     },
     "interface": {
@@ -255,7 +256,8 @@
         "content/smart-filter-presets.js",
         "content/tags-nsfw.js",
         "content/archive-community-themes.js",
-        "content/archive-blocking-presets.js"
+        "content/archive-blocking-presets.js",
+        "content/report-link-collector.js"
       ]
     },
     "creator": {

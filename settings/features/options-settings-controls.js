@@ -307,7 +307,14 @@ function setupFollowedCreatorControls() {
 
 function revealSettingsTarget(targetId, options = {}) {
   const target = $(targetId);
-  if (!target) return false;
+  if (!target) {
+    const tab = window.dsqDeferredFeaturePanelTabForControl?.(targetId);
+    if (!tab) return false;
+    setActiveTab(tab);
+    window.dsqHydrateFeaturePanelsForTab?.(tab).then(() => revealSettingsTarget(targetId, options))
+      .catch(error => console.warn("[QoL Settings] Could not open deferred control:", error));
+    return true;
+  }
   const page = target.closest(".tab-page");
   if (!page?.dataset?.page) return false;
   setActiveTab(page.dataset.page);
@@ -444,6 +451,16 @@ function setupFeaturesIndex() {
   const build = window.__DSQ_BUILD_PROFILE__;
   const installedFeatures = build?.generated && Array.isArray(build.features) ? new Set(build.features) : null;
   const settingOwners = window.__DSQ_FEATURE_SETTING_OWNERS__ || {};
+  // Build a reverse index ONCE rather than scanning every feature owner for
+  // each catalogue entry. Selected Lite builds still filter only proven owners.
+  const ownersForSetting = new Map();
+  for (const [owner, keys] of Object.entries(settingOwners)) {
+    if (!Array.isArray(keys)) continue;
+    for (const key of keys) {
+      if (!ownersForSetting.has(key)) ownersForSetting.set(key, new Set());
+      ownersForSetting.get(key).add(owner);
+    }
+  }
   // An omitted feature should not appear as a broken Settings result. Only
   // filter entries with a confirmed owner: older catalogue entries sometimes
   // use aliases and should not be hidden based on their display name.
@@ -451,10 +468,9 @@ function setupFeaturesIndex() {
     if (!installedFeatures || entry.builtIn || entry.planned) return true;
     const keys = [entry.setting, ...(Array.isArray(entry.settings) ? entry.settings : [])].filter(Boolean);
     if (!keys.length) return true;
-    const owners = Object.entries(settingOwners)
-      .filter(([, owned]) => Array.isArray(owned) && owned.some(key => keys.includes(key)))
-      .map(([owner]) => owner);
-    return !owners.length || owners.some(owner => installedFeatures.has(owner));
+    const owners = new Set();
+    for (const key of keys) for (const owner of ownersForSetting.get(key) || []) owners.add(owner);
+    return !owners.size || [...owners].some(owner => installedFeatures.has(owner));
   };
   const registry = Array.isArray(window.SpicyChatQoLFeatureRegistry)
     ? window.SpicyChatQoLFeatureRegistry.filter(entry => entry && entry.id && entry.name && entry.category && hasInstalledOwner(entry)).map(entry => ({ ...entry }))
@@ -516,13 +532,15 @@ function setupFeaturesIndex() {
   );
 
   function featureSearchText(entry) {
-    const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || {};
     return clean(entry.name).toLowerCase();
   }
 
+  // Filled for each visible render; no stale setting status after autosave.
+  let renderStates = new Map();
+  let renderCompatibility = new Map();
   function renderFeature(entry) {
-    const state = featureRegistryState(entry);
-    const compatibility = PLATFORM_API?.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || { supported: true, fullySupported: true, partial: false, label: entry.platform || "" };
+    const state = renderStates.get(entry.id) || featureRegistryState(entry);
+    const compatibility = renderCompatibility.get(entry.id) || { supported: true, fullySupported: true, partial: false, label: entry.platform || "" };
     const card = makeElement("article", {
       className: `feature-index-item feature-catalog-item${compatibility.fullySupported === false && !compatibility.partial ? " is-platform-unavailable" : ""}`,
       dataset: { featureId: entry.id }
@@ -570,11 +588,17 @@ function setupFeaturesIndex() {
     const wantedStatus = status?.value || "all";
     const wantedPlatform = platformFilter?.value || "all";
     const platformEnvironment = PLATFORM_API?.detectEnvironment?.();
+    // One feature-state and platform decision per entry per render, reused for
+    // filtering, counts and individual cards. No extra storage reads.
+    renderStates = new Map(registry.map(entry => [entry.id, featureRegistryState(entry)]));
+    renderCompatibility = new Map(registry.map(entry => [entry.id,
+      PLATFORM_API?.featureCompatibility?.(entry, platformEnvironment) ||
+      { fullySupported: true, partial: false, kind: "all", androidSupported: true }]));
     const filtered = registry.filter(entry => {
       if (wantedCategory !== "all" && entry.category !== wantedCategory) return false;
-      const state = featureRegistryState(entry);
+      const state = renderStates.get(entry.id);
       if (wantedStatus !== "all" && state.key !== wantedStatus) return false;
-      const compatibility = PLATFORM_API?.featureCompatibility?.(entry, platformEnvironment) || { fullySupported: true, partial: false, kind: "all", androidSupported: true };
+      const compatibility = renderCompatibility.get(entry.id);
       if (wantedPlatform === "here" && compatibility.fullySupported === false && !compatibility.partial) return false;
       if (wantedPlatform === "desktop-only" && compatibility.kind !== "desktop-only") return false;
       if (wantedPlatform === "android" && compatibility.androidSupported !== true) return false;
@@ -592,11 +616,11 @@ function setupFeaturesIndex() {
     });
 
     const optional = registry.filter(entry => !entry.planned && !entry.builtIn && (entry.setting || entry.settings));
-    const enabled = optional.filter(entry => featureRegistryState(entry).key === "on").length;
+    const enabled = optional.filter(entry => renderStates.get(entry.id)?.key === "on").length;
     const planned = registry.filter(entry => entry.planned).length;
     const unavailableHere = PLATFORM_API
       ? registry.filter(entry => {
-          const compatibility = PLATFORM_API.featureCompatibility?.(entry, PLATFORM_API.detectEnvironment?.()) || {};
+          const compatibility = renderCompatibility.get(entry.id) || {};
           return compatibility.fullySupported === false && !compatibility.partial;
         }).length
       : 0;
@@ -775,7 +799,9 @@ function updateSettingDependencies() {
 
 function setupSettingDependencies() {
   const parents = new Set(SETTING_DEPENDENCY_GROUPS.map(group => group.parent));
-  for (const id of parents) $(id)?.addEventListener("change", updateSettingDependencies);
+  document.addEventListener("change", event => {
+    if (event.target?.id && parents.has(event.target.id)) updateSettingDependencies();
+  });
   updateSettingDependencies();
 }
 

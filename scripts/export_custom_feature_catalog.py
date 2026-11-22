@@ -22,7 +22,8 @@ ORGANIZING = {"bot-organizer", "chat-organizer", "chat-tags", "chat-index",
               "favorite-bots", "later-bots", "saved-lists-overlay", "saved-chat-actions",
               "opened-chats", "persona-organizer", "persona-full-backup"}
 DISCOVERY = {"cards", "card-workflow", "recommendation-helpers", "list-fill",
-             "pagination-tools", "card-token-info", "creator-favorites", "creator-following"}
+             "pagination-tools", "card-token-info", "creator-favorites", "creator-following",
+             "report-link-collector"}
 PICTURES = {"chat-backgrounds", "character-pictures", "persona-pictures",
             "picture-library", "auto-images"}
 LABELS = {
@@ -37,6 +38,7 @@ LABELS = {
     "lorebook-search-filter":"Lorebook Search",
     "ooc":"OOC Presets & Composer Button",
     "bot-status":"Bot Status Center",
+    "report-link-collector":"Report Link Collector",
     "chat-index":"Chat Index",
     "opened-chats":"Opened Chat Tracking",
     "chat-search":"Chat Search",
@@ -65,6 +67,7 @@ DESCRIPTIONS = {
     "smart-filter-presets":"Save and reuse filtering choices.",
     "ooc":"Manage OOC presets and insert them from the chat composer.",
     "bot-status":"Check and manage the status of saved bots.",
+    "report-link-collector":"Collect bot links from listing pictures for later copying. Never submits reports automatically.",
     "chat-index":"Organize and search your imported conversation index.",
     "opened-chats":"Remember which chats or bots u already opened.",
     "chat-search":"Search messages inside a conversation.",

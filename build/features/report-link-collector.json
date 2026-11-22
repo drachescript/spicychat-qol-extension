@@ -1,0 +1,16 @@
+{
+  "id": "report-link-collector",
+  "primary": "content/report-link-collector.js",
+  "type": "content",
+  "label": "Report Link Collector",
+  "dependencies": [],
+  "settingsKeys": [
+    "enableReportLinkCollector"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [],
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false
+}

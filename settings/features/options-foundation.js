@@ -1944,7 +1944,11 @@ function setActiveTab(tabName) {
   // Lightweight pages can become usable before the large saved-data load is
   // finished. Heavy managers render only after their tab is actually opened.
   if (tabName === "changelog") loadChangelog();
-  if (tabName === "features") DS_FEATURE_INDEX_REFRESH?.();
+  if (tabName === "features") {
+    window.dsqHydrateAllFeaturePanels?.().then(() => DS_FEATURE_INDEX_REFRESH?.()).catch(error => console.warn("[QoL Settings] Feature panels unavailable:", error));
+  } else {
+    window.dsqHydrateFeaturePanelsForTab?.(tabName).catch(error => console.warn("[QoL Settings] Feature panel unavailable:", error));
+  }
   if (tabName === "bot-tools") loadCreatorBackupManager().catch(() => {});
   if (tabName === "control" && optionsDataLoaded) setupControlCenterView().catch(() => {});
   if (tabName === "account" && optionsDataLoaded) refreshAccountSyncUi().catch(() => {});
@@ -2128,7 +2132,13 @@ function setupSettingsSearch() {
       if (input.dataset.dsSearchActivating === "1") return;
       input.dataset.dsSearchActivating = "1";
       setSettingsSearchExpanded(true, { focus: true });
-      window.setTimeout(() => { delete input.dataset.dsSearchActivating; setupSettingsSearch(); }, 0);
+      window.setTimeout(async () => {
+        try { await window.dsqHydrateAllFeaturePanels?.(); }
+        catch (error) { console.warn("[QoL Settings] Some deferred panels could not load:", error); }
+        delete input.dataset.dsSearchActivating;
+        setupSettingsSearch();
+        if (input.value.trim()) input.dispatchEvent(new Event("input", { bubbles: true }));
+      }, 0);
     };
     toggle?.addEventListener("click", activate, { once: true });
     input.addEventListener("focus", activate, { once: true });

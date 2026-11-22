@@ -29,6 +29,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       bulkOperations: true,
       backgroundWorkers: true
     }),
+    ios: Object.freeze({
+      styling: true,
+      editing: true,
+      currentPageTools: true,
+      // Orion's preliminary iOS WebExtensions support does not guarantee
+      // helper tabs or persistent background workers. Fail closed for jobs
+      // that depend on them; keep all saved preferences untouched.
+      realBrowserTabs: false,
+      helperTabs: false,
+      bulkOperations: true,
+      backgroundWorkers: false
+    }),
     android: Object.freeze({
       styling: true,
       editing: true,
@@ -150,16 +162,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       /;\s*wv\)/i.test(ua) ||
       /Version\/4\.0.*Chrome\/\d+.*Mobile Safari/i.test(ua)
     );
-    const platform = android ? "android" : "desktop";
+    const ios = !android && (/iPhone|iPad|iPod/i.test(ua) ||
+      (/Macintosh/i.test(ua) && Number(root.navigator?.maxTouchPoints || 0) > 1));
+    const platform = android ? "android" : ios ? "ios" : "desktop";
     const capabilities = PLATFORM_CAPABILITIES[platform];
     return {
       schemaVersion,
       platform,
       android,
+      ios,
+      mobile: android || ios,
       webview,
-      desktop: !android,
+      desktop: !android && !ios,
       capabilities: { ...capabilities },
-      label: android ? (webview ? "Android app / WebView" : "Android browser") : "Desktop browser"
+      label: android ? (webview ? "Android app / WebView" : "Android browser") :
+        ios ? "iOS/iPadOS WebKit browser" : "Desktop browser"
     };
   }
 
@@ -289,12 +306,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const base = compatibilityFromRule({ requires }, env);
     const androidSupport = compatibilityFromRule({ requires }, { ...env, platform: "android", android: true, desktop: false, capabilities: PLATFORM_CAPABILITIES.android });
     const desktopSupport = compatibilityFromRule({ requires }, { ...env, platform: "desktop", android: false, desktop: true, capabilities: PLATFORM_CAPABILITIES.desktop });
+    const iosSupport = compatibilityFromRule({ requires }, { ...env, platform: "ios", android: false, ios: true, desktop: false, capabilities: PLATFORM_CAPABILITIES.ios });
     const partialOnAndroid = mode === "partial" && !androidSupport.supported && desktopSupport.supported;
-    const partial = partialOnAndroid && env.platform === "android";
+    const partialOnIos = mode === "partial" && !iosSupport.supported && desktopSupport.supported;
+    const partial = (partialOnAndroid && env.platform === "android") || (partialOnIos && env.platform === "ios");
 
     let kind = "all";
-    let label = "Desktop + Android";
-    if (!androidSupport.supported && desktopSupport.supported) {
+    let label = "Desktop + Android + iOS";
+    if (env.platform === "ios" && !iosSupport.supported && desktopSupport.supported) {
+      kind = partialOnIos ? "partial-ios" : "desktop-only";
+      label = partialOnIos ? "Partial on iOS" : "Desktop only";
+    } else if (!androidSupport.supported && desktopSupport.supported) {
       kind = partialOnAndroid ? "partial-android" : "desktop-only";
       label = partialOnAndroid ? "Partial on Android" : "Desktop only";
     } else if (androidSupport.supported && !desktopSupport.supported) {
@@ -308,9 +330,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       fullySupported: base.supported,
       partial,
       partialOnAndroid,
+      partialOnIos,
       kind,
       label,
       androidSupported: androidSupport.supported || partialOnAndroid,
+      iosSupported: iosSupport.supported || partialOnIos,
       desktopSupported: desktopSupport.supported,
       reason: partial ? `${base.reason} The rest of this feature still works here.` : base.reason
     };
@@ -394,7 +418,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   try {
     root.document?.documentElement?.setAttribute?.("data-ds-platform", initialEnvironment.platform);
   } catch {}
-  if (initialEnvironment.android && root.document?.addEventListener) {
+  if ((initialEnvironment.android || initialEnvironment.ios) && root.document?.addEventListener) {
     root.document.addEventListener("click", event => {
       const target = event.target instanceof Element
         ? event.target.closest("button, a, [role='button'], input[type='button'], input[type='submit']")
@@ -406,7 +430,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       event.stopPropagation();
       event.stopImmediatePropagation?.();
       target.setAttribute?.("title", compatibility.reason);
-      try { root.DragonScriptQoL?.setQuickStatus?.(`Desktop only: ${compatibility.reason}`); } catch {}
+      try { root.DragonScriptQoL?.setQuickStatus?.(`Unavailable on this device: ${compatibility.reason}`); } catch {}
     }, true);
   }
 })();

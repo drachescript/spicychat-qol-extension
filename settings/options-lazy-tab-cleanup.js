@@ -248,3 +248,121 @@ function dsqRefreshHeavyToolsForTab(tabName) {
     }).catch(error => { const el = document.getElementById("blockedBotDislikeStatus"); if (el) el.textContent = String(error.message || error); });
   }
 }
+
+// v0.2.92: blocked/archived maintenance is a deliberate user action (or a
+// post-upload maintenance request), not part of normal Settings boot. Keep
+// the original safe delete/recovery implementation unchanged and load it only
+// when one of its four entry points is called. Existing Settings button
+// handlers can keep calling the same global names.
+function ensureBotStatusMaintenanceTools() {
+  return dsqLoadSettingsTool("maintenance", "settings/features/options-bot-status-maintenance.js", "cleanupArchivedBlockedBots");
+}
+function dsqStatusMaintenanceStub(name, ...args) {
+  return ensureBotStatusMaintenanceTools().then(() => {
+    const action = window[name];
+    if (typeof action !== "function" || action === dsqHeavySettingsStubs[name]) {
+      throw new Error(`Bot Status maintenance action ${name} did not register`);
+    }
+    return action(...args);
+  }).catch(error => {
+    const status = document.getElementById("blockedArchiveCleanupStatus") ||
+      document.getElementById("botAvailabilityScanStatus");
+    if (status) status.textContent = String(error?.message || error);
+    throw error;
+  });
+}
+function cleanupArchivedBlockedBots(...args) { return dsqStatusMaintenanceStub("cleanupArchivedBlockedBots", ...args); }
+dsqHeavySettingsStubs.cleanupArchivedBlockedBots = cleanupArchivedBlockedBots;
+function refreshBlockedArchiveCleanupStatus(...args) { return dsqStatusMaintenanceStub("refreshBlockedArchiveCleanupStatus", ...args); }
+dsqHeavySettingsStubs.refreshBlockedArchiveCleanupStatus = refreshBlockedArchiveCleanupStatus;
+function compactOlderBlockedBotData(...args) { return dsqStatusMaintenanceStub("compactOlderBlockedBotData", ...args); }
+dsqHeavySettingsStubs.compactOlderBlockedBotData = compactOlderBlockedBotData;
+function cleanConfirmedUnavailableBots(...args) { return dsqStatusMaintenanceStub("cleanConfirmedUnavailableBots", ...args); }
+dsqHeavySettingsStubs.cleanConfirmedUnavailableBots = cleanConfirmedUnavailableBots;
+
+
+// The creator-backup manager is only needed when its Settings tab or an
+// explicit manual export opens. This lightweight adapter preserves its public
+// entry points, with one shared in-flight load and retry after a load failure.
+// No observers, polling or new saved data are introduced.
+let dsqCreatorBackupModulePromise = null;
+let dsqCreatorBackupModuleReady = false;
+const dsqCreatorBackupStubs = Object.create(null);
+function ensureCreatorBackupModuleLoaded() {
+  if (dsqCreatorBackupModuleReady) return Promise.resolve(true);
+  if (dsqCreatorBackupModulePromise) return dsqCreatorBackupModulePromise;
+  dsqCreatorBackupModulePromise = new Promise((resolve, reject) => {
+    const finish = () => {
+      if (typeof window.loadCreatorBackupManager !== "function" ||
+          window.loadCreatorBackupManager === dsqCreatorBackupStubs.loadCreatorBackupManager ||
+          typeof window.setupCreatorBackupManager !== "function" ||
+          window.setupCreatorBackupManager === dsqCreatorBackupStubs.setupCreatorBackupManager) {
+        dsqCreatorBackupModulePromise = null;
+        reject(new Error("Creator backup manager did not register"));
+        return;
+      }
+      try {
+        window.setupCreatorBackupManager();
+        dsqCreatorBackupModuleReady = true;
+        resolve(true);
+      } catch (error) {
+        dsqCreatorBackupModulePromise = null;
+        reject(error);
+      }
+    };
+    // Android packagers may have embedded the original script already.
+    if (typeof window.loadCreatorBackupManager === "function" &&
+        window.loadCreatorBackupManager !== dsqCreatorBackupStubs.loadCreatorBackupManager) {
+      finish();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "settings/features/options-creator-backups.js";
+    script.async = false;
+    script.onload = finish;
+    script.onerror = () => {
+      script.remove();
+      dsqCreatorBackupModulePromise = null;
+      reject(new Error("Could not load Creator Backup Settings"));
+    };
+    document.head.appendChild(script);
+  });
+  return dsqCreatorBackupModulePromise;
+}
+function dsqCreatorBackupCall(method, args) {
+  return ensureCreatorBackupModuleLoaded().then(() => {
+    const actual = window[method];
+    if (typeof actual !== "function" || actual === dsqCreatorBackupStubs[method]) {
+      throw new Error(`Creator backup action ${method} did not register`);
+    }
+    return actual(...args);
+  }).catch(error => {
+    const status = document.getElementById("creatorBackupSummary");
+    if (status) status.textContent = String(error?.message || error);
+    throw error;
+  });
+}
+function loadCreatorBackupManager(...args) { return dsqCreatorBackupCall("loadCreatorBackupManager", args); }
+dsqCreatorBackupStubs.loadCreatorBackupManager = loadCreatorBackupManager;
+function renderCreatorBackupManager(...args) { return dsqCreatorBackupCall("renderCreatorBackupManager", args); }
+dsqCreatorBackupStubs.renderCreatorBackupManager = renderCreatorBackupManager;
+function downloadPortableBotProfile(...args) { return dsqCreatorBackupCall("downloadPortableBotProfile", args); }
+dsqCreatorBackupStubs.downloadPortableBotProfile = downloadPortableBotProfile;
+function downloadBotArchiveEntry(...args) { return dsqCreatorBackupCall("downloadBotArchiveEntry", args); }
+dsqCreatorBackupStubs.downloadBotArchiveEntry = downloadBotArchiveEntry;
+function creatorBackupDate(timestamp) {
+  const time = Number(timestamp) || 0;
+  if (!time) return "Unknown date";
+  try { return new Date(time).toLocaleString(); } catch { return "Unknown date"; }
+}
+function setupCreatorBackupManager() {
+  // The normal Settings tab navigation calls loadCreatorBackupManager when
+  // Bot Tools is selected, including deep links and Settings search.
+  if (typeof activeOptionsTab === "function" && activeOptionsTab() === "bot-tools") {
+    void ensureCreatorBackupModuleLoaded().catch(error => {
+      const status = document.getElementById("creatorBackupSummary");
+      if (status) status.textContent = String(error?.message || error);
+    });
+  }
+}
+dsqCreatorBackupStubs.setupCreatorBackupManager = setupCreatorBackupManager;

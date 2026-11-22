@@ -13,6 +13,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.DEFAULT_SETTINGS = {
     enabled: true,
+    enableReportLinkCollector: false,
 
     globalNsfwMode: "ignore",
     saiToolkitCompatibility: true,

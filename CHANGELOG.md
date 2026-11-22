@@ -1,3 +1,32 @@
+## 0.2.92
+- Made Report Link Collector an optional OFF-by-default Advanced setting; saved links remain available in the popup when disabled.
+- Deferred independent Settings feature panels until their tab, Search, or Features catalogue requests them; initial Settings no longer constructs hidden panel DOM.
+- Hydrated deferred controls from saved settings, preserved autosave and section collapse state, and restored deferred deep links and pinned-section navigation.
+- Shared in-flight panel loads and allowed retries after failed imports; no new polling, observers, migrations, or storage cleanup.
+- Added a local bot-report link collector with a + icon on listing pictures and Copy all / Clear list in the QoL popup; no automatic reporting or Archive uploads.
+- Serialized collector writes across tabs, deduplicated canonical bot links, and kept saved links until explicitly cleared.
+- Reused the existing card-mutation pipeline and one delegated click listener; stopped repeated full card-cache connectivity walks on unchanged listings.
+- Reused one membership index per Saved Bots manager render instead of repeatedly searching large Blocked, Opened, Later and Favorites arrays.
+- Preserved existing Settings hydration and backup/storage data formats; no unverified bulk panel rewrites or new polling.
+- Deferred Creator Backup manager rendering until Bot Tools or an explicit export opens; kept its existing Settings entry points and retry behavior.
+- Deferred Chat Bookmarks, chat backgrounds and chat Lorebook manager behind route/feature demand, preserving bookmark navigator initialization order.
+- Deferred 15 more chat, listing and creator helpers behind route and enabled-setting demand, reducing startup parsing without changing their settings.
+- Kept one existing module loader, shared import promises and failure/retry behavior; no new polling, observers or background workers.
+- Cut repeated Settings pinned/recent shortcut card walks to one indexed pass and cached pin-sort keys; skipped DOM reordering when cards are already in the correct order.
+- Avoided redundant Settings shortcut and pin-label DOM writes during ordinary refreshes; preserved search, reset, section order and saved values.
+- Kept Full and Custom Lite ownership, Orion compatibility, and all existing local/Archive data and safety checks unchanged.
+- Improved Orion/iOS WebExtension startup by accepting callback- or Promise-based storage replies in early chat bridges, including Promise-only APIs.
+- Recognized working extension contexts without runtime.id; kept invalid-context recovery conservative on iOS without new polling.
+- Scoped iOS WebKit to current-page capabilities while preserving desktop-only settings for later use; macOS Orion remains desktop.
+- Labeled unsupported helper-tab and background-worker controls in iOS Settings instead of attempting them silently.
+- Preserved saved data, encrypted backups, Android shim integration and existing Chrome/Firefox paths; no new polling or automatic reloads.
+- Deferred Bot Organizer, scroll/swipe navigation, Translation, Lorebook tag expansion and History Navigator until their settings need them.
+- Reused the existing feature loader, with route-change retries for failed optional imports; no polling or new observer.
+- Deferred blocked-bot Archive cleanup tools until requested, with retry-safe Settings loading.
+- Reduced repeated Settings feature-catalogue ownership, platform and status calculations per render.
+- Removed per-setting DOM lookups from Settings' Show enabled only filter while keeping dynamically added controls visible.
+- Kept Custom Lite Bookmarks history support and Lorebook tag-setting ownership; preserved Chrome, Firefox, Android, Orion and saved data.
+
 ## 0.2.91
 - Made full card descriptions appear through CSS as soon as Settings loads, without waiting for the slow listing pass or repeatedly scanning normal card text.
 - Retained JS description expansion in browsers without native :has() selector support; disabling the option restores native clamping without new observers.

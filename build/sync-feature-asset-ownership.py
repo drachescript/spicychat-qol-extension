@@ -31,6 +31,86 @@ BACKGROUND_OWNERS = {
 }
 
 
+# Explicitly reviewed exceptions for foundational or feature-specific assets
+# without standalone feature contracts. All other modules must demonstrate
+# ownership via manifest neighbors or a reviewed feature contract.
+REVIEWED_RUNTIME_OWNERS = {
+    'content/browser-api-compat.js': ('core', 'manifest'),
+    'content/report-link-collector.js': ('listings', 'on-demand'),
+}
+# This bootstrap is idempotent and must run once, at document_start. An
+# additional matching document_idle injection adds overhead without benefit.
+EARLY_ONCE_SCRIPTS = {'content/browser-api-compat.js'}
+
+
+def sync_manifest_early_once_scripts(manifest):
+    """Remove reviewed repeat injections only for identical page/world scopes.
+
+    Keep the first (early) injection; never deduplicate unrelated injections,
+    different match scopes, execution worlds or intentionally repeated scripts.
+    """
+    scopes = ('matches', 'exclude_matches', 'include_globs', 'exclude_globs',
+              'all_frames', 'match_about_blank', 'match_origin_as_fallback', 'world')
+    first = {}
+    removed = []
+    for block in manifest.get('content_scripts', []):
+        signature = tuple(json.dumps(block.get(k), sort_keys=True) for k in scopes)
+        output = []
+        for rel in block.get('js', []):
+            key = (rel, signature)
+            prev = first.get(key)
+            if (rel in EARLY_ONCE_SCRIPTS and prev == 'document_start'
+                    and block.get('run_at', 'document_idle') in
+                    ('document_start', 'document_end', 'document_idle')):
+                removed.append(rel)
+                continue
+            output.append(rel)
+            first.setdefault(key, block.get('run_at', 'document_idle'))
+        block['js'] = output
+    return removed
+
+
+def sync_reviewed_runtime_owners(manifest, modules):
+    """Assign audited manifest/on-demand assets with verified exact references.
+
+    Does not infer Lite isolation, change feature settings, or create features.
+    """
+    eager = {rel for item in manifest.get('content_scripts', [])
+             for rel in item.get('js', [])}
+    dynamic = {rel for item in manifest.get('web_accessible_resources', [])
+               for rel in item.get('resources', [])}
+    loader_path = ROOT / 'content/on-demand-modules.js'
+    loader = loader_path.read_text(encoding='utf-8') if loader_path.is_file() else ''
+    owners = {}
+    for bundle, entry in modules['bundles'].items():
+        for rel in entry.get('files', []):
+            owners.setdefault(rel, set()).add(bundle)
+    added = []
+    for rel, (bundle, kind) in sorted(REVIEWED_RUNTIME_OWNERS.items()):
+        present = rel in (eager if kind == 'manifest' else dynamic)
+        if not present:
+            continue
+        if bundle not in modules['bundles']:
+            raise ValueError(f'Reviewed runtime owner bundle missing: {rel}: {bundle}')
+        existing = owners.get(rel, set())
+        if existing:
+            if existing != {bundle}:
+                raise ValueError(f'Conflicting reviewed runtime owner for {rel}: {sorted(existing)}')
+            continue
+        if not (ROOT / rel).is_file():
+            raise ValueError(f'Reviewed runtime file missing on disk: {rel}')
+        if kind == 'on-demand':
+            feature = rel.removeprefix('content/').removesuffix('.js')
+            match = (r'["\x27]' + re.escape(feature) + r'["\x27]\s*:\s*["\x27]'
+                     + re.escape(rel) + r'["\x27]')
+            if not re.search(match, loader):
+                raise ValueError(f'On-demand asset has no exact loader mapping: {rel}')
+        modules['bundles'][bundle]['files'].append(rel)
+        owners[rel] = {bundle}
+        added.append(rel)
+    return added
+
+
 def sync_reviewed_worker_helpers(contracts, manifest, modules):
     """Repair only on-demand workers with an existing, unambiguous feature owner.
 
@@ -280,7 +360,11 @@ def scan(write=True):
         contract['settingsFiles'] = sorted(set(contract.get('settingsFiles', [])) | {rel})
         claimed[rel] = owner
 
-    manifest = json.loads((ROOT / 'manifest.json').read_text(encoding='utf-8'))
+    manifest_path = ROOT / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    removed_duplicate_scripts = sync_manifest_early_once_scripts(manifest)
+    if write and removed_duplicate_scripts:
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     loaded_css = {x for entry in manifest.get('content_scripts', []) for x in entry.get('css', [])}
     for name, owner in STYLE_OWNERS.items():
         if owner not in contracts:
@@ -310,8 +394,10 @@ def scan(write=True):
     added_options_assets = sync_shared_options_assets(modules)
     added_dynamic_primaries = sync_reviewed_dynamic_primaries(contracts, manifest, modules)
     added_background_assets = sync_reviewed_background_assets(contracts, entry, modules)
+    added_reviewed_runtime = sync_reviewed_runtime_owners(manifest, modules)
     if write and (added_modules or added_content_modules or added_options_assets or
-                  added_dynamic_primaries or added_background_assets):
+                  added_dynamic_primaries or added_background_assets or
+                  added_reviewed_runtime):
         modules_path.write_text(json.dumps(modules, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
     for owner, (path, contract) in contracts.items():
@@ -332,6 +418,8 @@ def scan(write=True):
         'addedOptionsAssets': added_options_assets,
         'addedDynamicPrimaries': added_dynamic_primaries,
         'addedBackgroundAssets': added_background_assets,
+        'addedReviewedRuntime': added_reviewed_runtime,
+        'removedDuplicateScripts': removed_duplicate_scripts,
         'remainingSharedCss': sorted(
             loaded_css
             - {p for p in claimed if p.startswith('content/styles/')}
@@ -349,7 +437,8 @@ if __name__ == '__main__':
     result = scan(write=not args.verify)
     if args.verify and (result['changedContracts'] or result['addedModuleWorkers'] or
                         result['addedContentModules'] or result['addedOptionsAssets'] or
-                        result['addedDynamicPrimaries'] or result['addedBackgroundAssets']):
+                        result['addedDynamicPrimaries'] or result['addedBackgroundAssets'] or
+                        result['addedReviewedRuntime'] or result['removedDuplicateScripts']):
         raise SystemExit('Ownership declarations out of sync: contracts=' +
                          ', '.join(result['changedContracts']) +
                          '; moduleWorkers=' + ', '.join(result['addedModuleWorkers']) +
@@ -357,5 +446,7 @@ if __name__ == '__main__':
                          '; optionsAssets=' + ', '.join(result['addedOptionsAssets']) +
                          '; dynamicPrimaries=' + ', '.join(result['addedDynamicPrimaries']) +
                          '; backgroundAssets=' + ', '.join(result['addedBackgroundAssets']) +
+                         '; reviewedRuntime=' + ', '.join(result['addedReviewedRuntime']) +
+                         '; deduplicatedManifest=' + ', '.join(result['removedDuplicateScripts']) +
                          '\nRun python3 build/sync-feature-asset-ownership.py and commit its output.')
     print(json.dumps(result, indent=2))

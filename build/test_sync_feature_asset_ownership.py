@@ -314,5 +314,83 @@ class ReviewedGatedBackgroundTests(unittest.TestCase):
             self.repair()
 
 
+class ReviewedRuntimeOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.old_root = sync.ROOT
+        self.addCleanup(setattr, sync, 'ROOT', self.old_root)
+        sync.ROOT = Path(self.temp.name)
+        (sync.ROOT / 'content').mkdir()
+        for name in ('browser-api-compat.js', 'report-link-collector.js'):
+            (sync.ROOT / 'content' / name).write_text('/* valid */', encoding='utf-8')
+        (sync.ROOT / 'content/on-demand-modules.js').write_text(
+            'const MODULES = {"report-link-collector":"content/report-link-collector.js"};',
+            encoding='utf-8',
+        )
+        self.manifest = {
+            'content_scripts': [{'js': ['content/browser-api-compat.js']}],
+            'web_accessible_resources': [{'resources': ['content/report-link-collector.js']}],
+        }
+        self.modules = {'bundles': {'core': {'files': []},
+                                    'listings': {'files': []},
+                                    'chat': {'files': []}}}
+
+    def test_registered_audited_runtime_is_idempotent(self):
+        self.assertEqual(sync.sync_reviewed_runtime_owners(self.manifest, self.modules),
+                         ['content/browser-api-compat.js', 'content/report-link-collector.js'])
+        self.assertEqual(sync.sync_reviewed_runtime_owners(self.manifest, self.modules), [])
+        self.assertIn('content/browser-api-compat.js', self.modules['bundles']['core']['files'])
+        self.assertIn('content/report-link-collector.js',
+                      self.modules['bundles']['listings']['files'])
+
+    def test_unknown_content_is_not_assigned_to_core(self):
+        self.manifest['content_scripts'][0]['js'].append('content/unreviewed.js')
+        self.assertEqual(len(sync.sync_reviewed_runtime_owners(self.manifest, self.modules)), 2)
+        self.assertNotIn('content/unreviewed.js', self.modules['bundles']['core']['files'])
+
+    def test_conflicting_ownership_is_rejected(self):
+        self.modules['bundles']['chat']['files'].append('content/browser-api-compat.js')
+        with self.assertRaisesRegex(ValueError, 'Conflicting reviewed runtime owner'):
+            sync.sync_reviewed_runtime_owners(self.manifest, self.modules)
+
+    def test_dynamic_asset_requires_exact_loader_mapping(self):
+        (sync.ROOT / 'content/on-demand-modules.js').write_text(
+            'const MODULES = {};', encoding='utf-8'
+        )
+        with self.assertRaisesRegex(ValueError, 'no exact loader mapping'):
+            sync.sync_reviewed_runtime_owners(self.manifest, self.modules)
+
+
+class ManifestEarlyDeduplicationTests(unittest.TestCase):
+    def setUp(self):
+        self.manifest = {'content_scripts': [
+            {'matches': ['https://spicychat.ai/*'], 'run_at': 'document_start',
+             'js': ['content/browser-api-compat.js', 'content/other.js']},
+            {'matches': ['https://spicychat.ai/*'], 'run_at': 'document_idle',
+             'js': ['content/browser-api-compat.js', 'content/tab-state-control.js']},
+        ]}
+
+    def test_removes_only_later_duplicate_and_is_idempotent(self):
+        self.assertEqual(sync.sync_manifest_early_once_scripts(self.manifest),
+                         ['content/browser-api-compat.js'])
+        self.assertEqual(self.manifest['content_scripts'][1]['js'],
+                         ['content/tab-state-control.js'])
+        self.assertEqual(sync.sync_manifest_early_once_scripts(self.manifest), [])
+
+    def test_keeps_different_match_scope(self):
+        self.manifest['content_scripts'][1]['matches'] = ['https://spicychat.ai/chat/*']
+        self.assertEqual(sync.sync_manifest_early_once_scripts(self.manifest), [])
+
+    def test_keeps_different_execution_world(self):
+        self.manifest['content_scripts'][1]['world'] = 'MAIN'
+        self.assertEqual(sync.sync_manifest_early_once_scripts(self.manifest), [])
+
+    def test_does_not_collapse_nonreviewed_duplicate(self):
+        self.manifest['content_scripts'][0]['js'] = ['content/other.js']
+        self.manifest['content_scripts'][1]['js'] = ['content/other.js']
+        self.assertEqual(sync.sync_manifest_early_once_scripts(self.manifest), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -596,6 +596,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.scheduleSavedOpenedLane = scheduleSavedOpenedLane;
 
   async function runDisabledCleanup() {
+    DS.removeReportLinkCollector?.();
     return DS.featureLifecycle?.shutdownAll({ runStep, syncNativeScrollBackToTopVisibility });
   }
 

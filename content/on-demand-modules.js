@@ -13,7 +13,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   // importing from a bundle that was deliberately excluded.
   const OWNER = Object.freeze({
     "creator-moderation-warnings": "moderation-warnings",
-    "lorebook-moderation-review": "moderation-warnings"
+    "lorebook-moderation-review": "moderation-warnings",
+    "chat-history-navigator": "chat-bookmarks"
   });
   const has = key => DS.featureBuildProfile?.isInstalled?.(OWNER[key] || key) !== false;
   const any = (s, names) => names.some(k => s?.[k] === true);
@@ -28,6 +29,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const LISTING = /^\/(?:[a-z]{2}\/)?(?:favorite-bots|recommended-bots|chatbots|search|my-creations\/chatbots|creator\/[^/]+)(?:\/|$)/i;
   const BOT_EDITOR = /^\/(?:[a-z]{2}\/)?(?:chatbot\/(?:create|edit|[0-9a-f-]{36}\/edit)|create-chatbot|edit-chatbot)(?:\/|$)/i;
   const MODULES = Object.freeze({
+    "chat-lorebook-manager": "content/chat-lorebook-manager.js",
+    "report-link-collector": "content/report-link-collector.js",
+    "chat-backgrounds": "content/chat-backgrounds.js",
+    "chat-bookmarks": "content/chat-bookmarks.js",
+    "command-palette": "content/command-palette.js",
+    "generation-profiles": "content/generation-profiles.js",
+    "model-quick-access": "content/model-quick-access.js",
+    "chat-topbar": "content/chat-topbar.js",
+    "premium-notifications": "content/premium-notifications.js",
+    "ad-banners": "content/ad-banners.js",
+    "reply-instructions": "content/reply-instructions.js",
+    "chat-tags": "content/chat-tags.js",
+    "native-rating-helpers": "content/native-rating-helpers.js",
+    "formatting-toolbar": "content/formatting-toolbar.js",
+    "alternate-dialogue": "content/alternate-dialogue.js",
+    "failed-message-helper": "content/failed-message-helper.js",
+    "pagination-tools": "content/pagination-tools.js",
+    "bot-editor-actions": "content/bot-editor-actions.js",
+    "bot-editor-memory": "content/bot-editor-memory.js",
+
     "bulk-chat-research": "content/bulk-chat-research.js",
     "soundscapes": "content/soundscapes.js",
     "sidebar": "content/sidebar.js",
@@ -74,11 +95,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     "chat-nudges": "content/chat-nudges.js",
     "selection-memory": "content/selection-memory.js",
     "rulebook-diagnostics": "content/rulebook-diagnostics.js",
-    "saved-snippets": "content/saved-snippets.js"
+    "saved-snippets": "content/saved-snippets.js",
+    "bot-organizer": "content/bot-organizer.js",
+    "scroll-to-top": "content/scroll-to-top.js",
+    "translation": "content/translation.js",
+    "lorebook-tags": "content/lorebook-tags.js",
+    "chat-history-navigator": "content/chat-history-navigator.js"
   });
+
+  // v0.2.92: keep chat header settings as a single owned demand group.
+  // The source module installs no work until its ordinary pass invokes it.
+  const CHAT_TOP_BAR = Object.freeze([
+    "showChatTopBarTools", "keepChatHeaderVisibleWhileTyping", "chatTopBarInlineCreator",
+    "chatTopBarAddLaterButton", "showPerCharacterChatHistory", "showQuickNewChatButton",
+    "chatAlwaysShowProfileLink", "chatJumpToStartShortcut", "chatOpenWindowShortcut",
+    "chatGenerationSettingsShortcut", "showChatExportButton", "hideChatTopBarRatingButton",
+    "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell",
+    "hideChatDropdownMemoryItem", "hideUnlockCustomVoices"
+  ]);
   let lastWantedKey = "";
   const dependencies = Object.freeze({ "memory-packs": ["memory-manager"],
-    "lorebook-moderation-review": ["creator-moderation-warnings"] });
+    "lorebook-moderation-review": ["creator-moderation-warnings"],
+    "chat-history-navigator": ["chat-bookmarks"] });
   function ensureWithDependencies(name) {
     const deps = dependencies[name];
     return deps?.length ? Promise.all(deps.map(ensureWithDependencies)).then(results => results.every(Boolean) && ensure(name)) : ensure(name);
@@ -129,7 +167,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const lorebookEditor = LOREBOOK_EDITOR.test(path) || !!page.isLorebookEditor;
     const botEditor = BOT_EDITOR.test(path) || !!page.isBotEditor;
     const list = [];
+    const s = settings;
+    const listingOrProfile = LISTING.test(path) || PROFILES.test(path) || myCreations || path === "/" || ["listing", "creator-listing", "lorebook-listing"].includes(page.routeType);
     const add = (name,condition) => { if(condition && has(name))list.push(name); };
+    // v0.2.92: route+setting demand for independently registered visual helpers.
+    add("chat-lorebook-manager", chat && s.enableChatLorebookManager === true);
+    add("chat-backgrounds", chat && any(s, ["enableChatBackgrounds", "enableCustomCharacterPictures", "enableCustomPersonaPictures", "enableCustomPictureLibrary", "showAutoImageInlineButton", "chatSceneGalleriesEnabled"]));
+    add("chat-bookmarks", chat && any(s, ["enableMessageBookmarks", "showChatSearch"]));
+    add("command-palette", s.enableCommandPalette === true);
+    add("generation-profiles", chat && s.enableGenerationProfiles === true);
+    add("model-quick-access", chat && s.enableModelQuickAccess === true);
+    add("chat-topbar", chat && (any(s, CHAT_TOP_BAR) || DS.state?.chatTopBarWasActive === true));
+    add("premium-notifications", any(s, ["hideNotifications","hideFeatureReleasePopups","hideTabNotificationBadge","autoReadNotifications","hidePremium","hideFloatingPremiumPopups","hideTopBarNotifications"]));
+    add("ad-banners", s.hideAdvertBanners === true || !!document.querySelector("[data-ds-reason^='advert']"));
+    add("reply-instructions", chat && any(s,["enableReplyInstructions","enableGlobalMemory","enableRpStateTracker","enableChatSceneNotes"]));
+    add("chat-tags", chat && any(s,["showChatTagLinks","showChatTagAddButtons"]));
+    add("native-rating-helpers", s.enableNativeRatingHelpers === true);
+    add("formatting-toolbar", chat && s.showFormattingToolbar === true);
+    add("alternate-dialogue", chat && s.styleAlternateDialogue === true);
+    add("failed-message-helper", chat && any(s,["failedMessageHelper","autoRetryFailedMessageSends"]));
+    add("pagination-tools", listingOrProfile);
+    // Local link collection only needs image cards, not chat/Settings startup.
+    add("report-link-collector", settings.enableReportLinkCollector === true && !chat && !CHATS.test(path) && !lorebookEditor &&
+      !page.isRulebookExplorePage && !page.isLorebookPage && !page.isBotEditor &&
+      (LISTING.test(path) || path === "/" || myCreations || page.routeType === "listing" || page.routeType === "creator-listing"));
+    add("bot-editor-actions", botEditor && s.botEditorSaveActions === true);
+    add("bot-editor-memory", botEditor || myCreations);
+    // Keep these independent feature engines out of every page's eager
+    // content-script graph. Their DS methods are installed before the normal
+    // critical/slow feature pass when the owning setting actually needs them.
+    add("bot-organizer", settings.enableBotOrganizer === true);
+    add("scroll-to-top", any(settings, ["showScrollToTopButton", "showScrollToBottomButton",
+      "showSwipeJumpButtons", "showSwipeJumpToNumber", "restoreFirstSwipeOnLoad"]));
+    add("translation", chat && settings.enableTranslation === true);
+    add("lorebook-tags", settings.lorebookExpandTags === true &&
+      (lorebookEditor || LOREBOOK_PUBLIC.test(path) || page.isLorebookPage ||
+        /^\/(?:[a-z]{2}\/)?my-creations\/lorebooks(?:\/|$)/i.test(path)));
+    // History Navigator also serves explicit older-bookmark jumps when its
+    // optional toolbar is off; it belongs to the Bookmarks feature in Lite.
+    add("chat-history-navigator", chat && settings.enableMessageBookmarks === true);
     add("bulk-chat-research", CHATS.test(path) &&
       new URLSearchParams(location.search).get("ds-research-export") === "1");
     add("quick-panel",settings.showQuickPanel === true);
@@ -207,6 +283,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     if(key === lastWantedKey) return;
     // The key includes active features, not unrelated DOM revisions.
     lastWantedKey = key;
+    // A navigation/setting change is an explicit new demand. Let previously
+    // failed imports retry once then, never via a timer or repeated scan pass.
+    // Imported modules that succeeded stay cached for the whole document.
+    for (const name of names) {
+      if (failed.has(name)) {
+        failed.delete(name);
+        jobs.delete(name);
+      }
+    }
     // Independent optional modules can load concurrently. The existing
     // de-duplicated ensure() promises and dependency map enforce safe ordering.
     // No new work starts after a tab is paused.

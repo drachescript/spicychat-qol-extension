@@ -137,16 +137,15 @@ if (!(() => { try {
     return changed;
   }
 
-  try {
-    chrome.storage.local.get(["settings", ...watchedSettingNames.map(settingStorageKey)], result => {
-      applySettings(hydrateWatchedSettings(result || {}));
-    });
-
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local" || !applyWatchedChanges(changes)) return;
-      applySettings(watchedSettings);
-    });
-  } catch {}
+  // A missing storage reply must not enable an optional interceptor.
+  const compat = globalThis.DSQBrowserApiCompat;
+  void compat?.readLocal?.(["settings", ...watchedSettingNames.map(settingStorageKey)]).then(result => {
+    if (result) applySettings(hydrateWatchedSettings(result));
+  }).catch(() => {});
+  compat?.watchLocal?.((changes, areaName) => {
+    if (areaName !== "local" || !applyWatchedChanges(changes)) return;
+    applySettings(watchedSettings);
+  });
 })();
 
 }

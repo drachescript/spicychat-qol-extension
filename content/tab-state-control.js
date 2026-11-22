@@ -16,10 +16,11 @@
   if (!gate.paused) return;
   let globalEnabled = true;
   try {
-    chrome.storage.local.get(["settings", "dsSettingV1:enabled"], data => {
-      if (data?.["dsSettingV1:enabled"] !== undefined) globalEnabled = data["dsSettingV1:enabled"] !== false;
-      else globalEnabled = data?.settings?.enabled !== false;
-    });
+    void globalThis.DSQBrowserApiCompat?.readLocal?.(["settings", "dsSettingV1:enabled"]).then(data => {
+      if (!data) return;
+      if (data["dsSettingV1:enabled"] !== undefined) globalEnabled = data["dsSettingV1:enabled"] !== false;
+      else globalEnabled = data.settings?.enabled !== false;
+    }).catch(() => {});
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === "DS_GET_QOL_TAB_STATE") {
         sendResponse({ ok: true, globalEnabled, paused: gate.paused, enabled: globalEnabled && !gate.paused });

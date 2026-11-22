@@ -202,17 +202,16 @@ if (!(() => { try {
     return changed;
   }
 
-  try {
-    chrome.storage.local.get(["settings", ...watchedSettingNames.map(settingStorageKey)], result => syncFromSettings(hydrateWatchedSettings(result || {})));
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !applyWatchedChanges(changes)) return;
-      syncFromSettings(watchedSettings);
-    });
-  } catch {
-    // If storage is unavailable, the early route bridge may remain active;
-    // preserving auth capture is safer than letting helpers send anonymous API
-    // requests and fall into editor fallback loops.
-  }
+  const compat = globalThis.DSQBrowserApiCompat;
+  void compat?.readLocal?.(["settings", ...watchedSettingNames.map(settingStorageKey)]).then(result => {
+    if (result) syncFromSettings(hydrateWatchedSettings(result));
+  }).catch(() => {});
+  compat?.watchLocal?.((changes, area) => {
+    if (area !== "local" || !applyWatchedChanges(changes)) return;
+    syncFromSettings(watchedSettings);
+  });
+  // Without verifiable settings, retain only the already-required early
+  // authenticated route bridge; do not manufacture enabled settings.
 })();
 
 }
