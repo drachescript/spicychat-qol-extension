@@ -855,7 +855,7 @@ async function runBotAvailabilityScan(options = {}) {
           creator: result.creator,
           image: result.image,
           profileUrl: result.profileUrl,
-          chatUrls: knownChatUrlsForBot(result.id),
+          chatUrls: knownChatUrlsForBot(result.id, metadataIndex),
           source: "Bot Status Center"
         });
         if (archiveChanged) { archiveChangedCount++; archiveChangedIds.add(result.id); }

@@ -22,7 +22,11 @@
       else globalEnabled = data.settings?.enabled !== false;
     }).catch(() => {});
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type === "DS_GET_QOL_TAB_STATE") {
+      if (message?.type === "DS_GET_PAGE_DIAGNOSTICS_LIGHT") {
+        sendResponse({ ok: true, runtimeReady: false, paused: true,
+          startup: { stage: "disabled", updatedAt: Date.now(), errorType: "", missingModules: [] },
+          sampleAt: Date.now(), sampleKind: "lightweight-no-dom" });
+      } else if (message?.type === "DS_GET_QOL_TAB_STATE") {
         sendResponse({ ok: true, globalEnabled, paused: gate.paused, enabled: globalEnabled && !gate.paused });
       } else if (message?.type === "DS_SET_QOL_TAB_STATE") {
         const enabled = message.enabled !== false;

@@ -108,7 +108,21 @@ function sortBotManagerEntries(entries, kind) {
   const copy = [...entries];
   const savedTime = entry => Number(entry.savedAt || 0) || 0;
   const originalIndex = entry => Number(entry.index || 0) || 0;
-  const nameValue = entry => String(entry.name || entry.id || "").toLowerCase();
+  // Compare large saved lists without lowercasing the same names and creator
+  // handles on every comparison. Scoped to this sort, not retained in storage.
+  const textKeys = new WeakMap();
+  const entryText = entry => {
+    let cached = textKeys.get(entry);
+    if (!cached) {
+      cached = {
+        name: String(entry.name || entry.id || "").toLowerCase(),
+        creator: String(entry.creator || "").replace(/^@/, "").toLowerCase()
+      };
+      textKeys.set(entry, cached);
+    }
+    return cached;
+  };
+  const nameValue = entry => entryText(entry).name;
 
   if (mode === "oldest") {
     return copy.sort((a, b) => savedTime(a) - savedTime(b) || originalIndex(a) - originalIndex(b));
@@ -122,7 +136,7 @@ function sortBotManagerEntries(entries, kind) {
     return copy.sort((a, b) => nameValue(b).localeCompare(nameValue(a)) || originalIndex(a) - originalIndex(b));
   }
 
-  const creatorValue = entry => String(entry.creator || "").replace(/^@/, "").toLowerCase();
+  const creatorValue = entry => entryText(entry).creator;
   if (mode === "creator-asc") {
     return copy.sort((a, b) => creatorValue(a).localeCompare(creatorValue(b)) || nameValue(a).localeCompare(nameValue(b)));
   }
@@ -149,16 +163,23 @@ function refreshBotManagerFolderOptions(kind) {
     uniqueClean(meta?.collections || []).forEach(folder => folders.add(folder));
   });
 
+  const sortedFolders = [...folders].sort((a, b) => a.localeCompare(b));
   const options = [
     ["all", "All folders"],
     ["__unfoldered__", "Unfoldered"],
-    ...[...folders].sort((a, b) => a.localeCompare(b)).map(folder => [folder, folder])
+    ...sortedFolders.map(folder => [folder, folder])
   ];
 
-  select.replaceChildren(...options.map(([value, label]) => makeElement("option", {
-    text: label,
-    attrs: { value }
-  })));
+  // An ordinary manager refresh doesn't change the folder choices. Avoid
+  // detaching the native select options (and disturbing an open dropdown).
+  const signature = JSON.stringify(sortedFolders);
+  if (select.dataset.dsqFolderOptionsSignature !== signature) {
+    select.replaceChildren(...options.map(([value, label]) => makeElement("option", {
+      text: label,
+      attrs: { value }
+    })));
+    select.dataset.dsqFolderOptionsSignature = signature;
+  }
   select.value = options.some(([value]) => value === previous) ? previous : "all";
 }
 
@@ -285,7 +306,8 @@ function botManagerShownEntries(kind) {
 
 function updateBotManagerBulkCount(kind) {
   if (!["blocked", "favorite", "later"].includes(kind)) return;
-  const validIds = new Set(botEntriesFromStore(storeForManagerKind(kind), false).map(entry => String(entry.id || "")).filter(Boolean));
+  const validIds = new Set((storeForManagerKind(kind)?.ids || [])
+    .map(id => String(id || "")).filter(Boolean));
   const selected = botManagerBulkSet(kind);
   for (const id of [...selected]) if (!validIds.has(id)) selected.delete(id);
   const count = $(managerElementId(kind, "SelectedCount"));

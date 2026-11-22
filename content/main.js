@@ -16,18 +16,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const ds = window.DragonScriptQoL;
     const missing = mainFactories.filter(([name]) => typeof ds?.[name] !== "function");
     if (missing.length) {
+      if (!mainBootstrapRetries) DS.markRuntimeStartup?.("waiting-for-modules", {
+        missingModules: missing.map(([, file]) => file)
+      });
       if (mainBootstrapRetries++ < 8) {
         setTimeout(startMainWhenReady, 75);
         return;
       }
       // Never replace a required lane with a silent no-op.
+      DS.markRuntimeStartup?.("missing-modules", {
+        missingModules: missing.map(([, file]) => file)
+      });
       console.error("[DragonScript QoL] Main runtime not started: missing modules: " +
         missing.map(([, file]) => file).join(", ") +
         ". Check the installed build, then reload the extension and this page.");
       return;
     }
     mainBootstrapStarted = true;
-    initializeMainRuntime();
+    DS.markRuntimeStartup?.("main-registered");
+    try {
+      initializeMainRuntime();
+    } catch (error) {
+      DS.markRuntimeStartup?.("error", { errorType: String(error?.name || "Error") });
+      DS.runtimeLog?.("error", "startup", "QoL main modules failed to initialize", {
+        errorType: String(error?.name || "Error")
+      });
+      console.error("[DragonScript QoL] Main module registration failed", String(error?.name || "Error"));
+    }
   }
   function initializeMainRuntime() {
   const DS = window.DragonScriptQoL;
@@ -944,9 +959,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     console.warn(`[${DS.EXT_NAME}] storage listener skipped`, error);
   }
 
-  DS.startMainRuntime = async function startMainRuntime() {
-    if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) return;
+  // The native wrapper may request a readiness check while startup is still
+  // waiting for storage. One shared promise prevents accidental duplicate init.
+  let mainStartPromise = null;
+  DS.startMainRuntime = function startMainRuntime() {
+    if (mainStartPromise) return mainStartPromise;
+    mainStartPromise = (async () => {
+    DS.markRuntimeStartup?.("loading-state");
+    try {
+    if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) {
+      DS.markRuntimeStartup?.("disabled");
+      return;
+    }
     await DS.loadState();
+    DS.markRuntimeStartup?.("state-loaded");
     try { await DS.resolveBackgroundWorkerIdentity?.(); } catch {}
     DS.runtimeLog?.("info", "main", "State loaded", {
       enabled: DS.state?.settings?.enabled !== false,
@@ -954,24 +980,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
 
     if (DS.state.qolBackgroundWorker) {
+      DS.markRuntimeStartup?.("worker");
       DS.runtimeLog?.("info", "main", `${DS.state.qolBackgroundWorker} helper tab: normal QoL page processing skipped`);
       return;
     }
     if (DS.state.quickDislikeWorker) {
+      DS.markRuntimeStartup?.("worker");
       DS.runtimeLog?.("info", "main", "Quick-dislike helper tab: normal QoL page processing skipped");
       return;
     }
     if (DS.state.recommendationWorker) {
+      DS.markRuntimeStartup?.("worker");
       DS.runtimeLog?.("info", "main", "Recommendation helper tab: normal QoL page processing skipped");
       return;
     }
     if (DS.state.listingRefillWorker) {
+      DS.markRuntimeStartup?.("worker");
       DS.runtimeLog?.("info", "main", "Listing helper tab: normal QoL page processing skipped");
       return;
     }
     // No feature observers, trackers, or scheduled work when Full QoL is off.
     // The storage listener remains so re-enabling can reload a clean page.
     if (DS.state.settings?.enabled === false) {
+      DS.markRuntimeStartup?.("disabled");
       DS.runtimeLog?.("info", "main", "Full QoL disabled: runtime not started");
       return;
     }
@@ -1002,6 +1033,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await DS.runCritical?.();
     DS.scheduleRun?.({ priority: "slow", immediate: true, source: "initial-idle-injection" });
     await DS.maybeShowUpdateToast?.();
+    DS.markRuntimeStartup?.("ready");
+    } catch (error) {
+      // Report only an error class, never chat or account content.
+      DS.markRuntimeStartup?.("error", { errorType: String(error?.name || "Error") });
+      DS.runtimeLog?.("error", "startup", "QoL content runtime failed to start", {
+        errorType: String(error?.name || "Error")
+      });
+      throw error;
+    }
+    })();
+    return mainStartPromise;
   };
   DS.installMainDiagnostics?.({ runtimeProfile, loadedChatMessageCount, desktopAppPerformanceGuardActive });
 

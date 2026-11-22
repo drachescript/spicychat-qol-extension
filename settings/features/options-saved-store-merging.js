@@ -154,32 +154,36 @@ function mergeSettingsForImport(currentSettings, importedSettings) {
   return next;
 }
 
-function openedEntryIsBlocked(idValue, meta = {}, store = blockedState) {
+// Build membership just once for a batch. Previously every Opened bot
+// normalized and searched the entire Blocked store again.
+function blockedOpenedMembership(store = blockedState) {
+  const normalized = normalizeBotStore(store);
+  return {
+    ids: new Set(normalized.ids),
+    names: new Set(normalized.names.map(value => String(value || "")
+      .toLowerCase().replace(/\s+/g, " ").trim()))
+  };
+}
+
+function openedEntryIsBlocked(idValue, meta = {}, store = blockedState, membership = null) {
   const id = String(idValue || "").trim();
-  const blocked = normalizeBotStore(store);
-  if (id && blocked.ids.includes(id)) return true;
+  const lookup = membership || blockedOpenedMembership(store);
+  if (id && lookup.ids.has(id)) return true;
 
   const name = String(meta?.name || meta?.title || "")
-    .toLowerCase()
-    .replace(/\s+/g, " " )
-    .trim();
-  if (!name) return false;
-
-  return (blocked.names || []).some(value => String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " " )
-    .trim() === name);
+    .toLowerCase().replace(/\s+/g, " ").trim();
+  return !!(name && lookup.names.has(name));
 }
 
 function enforceBlockedPriorityOverOpenedState(options = {}) {
-  const blocked = normalizeBotStore(options.blockedStore || blockedState);
+  const membership = blockedOpenedMembership(options.blockedStore || blockedState);
   const meta = normalizeMetaStore(options.openedMeta || openedChatMetaState);
   const ids = uniqueClean(options.openedIds || currentOpened);
   const kept = [];
   let removed = 0;
 
   for (const id of ids) {
-    if (openedEntryIsBlocked(id, meta[id], blocked)) {
+    if (openedEntryIsBlocked(id, meta[id], null, membership)) {
       delete meta[id];
       removed++;
       continue;
@@ -317,7 +321,7 @@ function repairBlockedNamesFromLocalMetadata() {
   return repaired;
 }
 
-function knownChatUrlsForBot(idValue) {
+function knownChatUrlsForBot(idValue, scanIndex = null) {
   const id = String(idValue || "").trim();
   if (!BOT_ID_RE.test(id)) return [];
   const urls = [];
@@ -335,10 +339,31 @@ function knownChatUrlsForBot(idValue) {
   add(favoriteBotState?.meta?.[id]);
   add(laterBotState?.meta?.[id]);
   add(botOrganizationState?.meta?.[id]);
-  add(normalizeBotArchive(botArchiveState).meta[id]);
-  for (const item of normalizeRecentlySeenStore(recentlySeenBotState).entries) if (item.id === id) add(item);
-  for (const item of normalizeCreatorBotWatchState(creatorBotWatchState).recent) if (item.id === id) add(item);
-  if (uniqueClean(currentOpened).includes(id) && !urls.length) urls.push(`https://spicychat.ai/chat/${id}`);
+  // The archive can contain thousands of character snapshots. During a scan,
+  // normalize only this character's record; rebuilding the entire archive
+  // for each checked ID would repeatedly process unrelated snapshots.
+  if (scanIndex && botArchiveState?.meta && typeof botArchiveState.meta === "object") {
+    const record = botArchiveState.meta[id];
+    if (record) add(normalizeBotArchive({ meta: { [id]: record } }).meta[id]);
+  } else {
+    add(normalizeBotArchive(botArchiveState).meta[id]);
+  }
+  if (scanIndex?.recent instanceof Map) {
+    const index = scanIndex.recent.get(id);
+    const item = Number.isInteger(index) ? recentlySeenBotState?.entries?.[index] : null;
+    if (item?.id === id) add(normalizeRecentlySeenStore({ entries: [item] }).entries[0]);
+  } else {
+    for (const item of normalizeRecentlySeenStore(recentlySeenBotState).entries) if (item.id === id) add(item);
+  }
+  if (scanIndex?.watch instanceof Map) {
+    const index = scanIndex.watch.get(id);
+    const item = Number.isInteger(index) ? creatorBotWatchState?.recent?.[index] : null;
+    if (item?.id === id) add(normalizeCreatorBotWatchState({ recent: [item] }).recent[0]);
+  } else {
+    for (const item of normalizeCreatorBotWatchState(creatorBotWatchState).recent) if (item.id === id) add(item);
+  }
+  const wasOpened = scanIndex?.opened instanceof Set ? scanIndex.opened.has(id) : uniqueClean(currentOpened).includes(id);
+  if (wasOpened && !urls.length) urls.push(`https://spicychat.ai/chat/${id}`);
   return uniqueClean(urls).slice(0, 50);
 }
 
@@ -414,7 +439,15 @@ function applyAuthoritativeBotMetadata(result, scanIndex = null, dirtyKeys = nul
   const openedHasId = scanIndex?.opened instanceof Set ? scanIndex.opened.has(id) : uniqueClean(currentOpened).includes(id);
   if (openedHasId) {
     const merged = mergeLiveMetaIntoRecord(openedChatMetaState?.[id], id, live, { clearChatPreviewDescription: true });
-    if (merged.changed) { openedChatMetaState = { ...openedChatMetaState, [id]: merged.next }; changed = true; markDirty(OPENED_META_KEY); }
+    if (merged.changed) {
+      if (scanIndex?.opened instanceof Set && dirtyKeys instanceof Set) {
+        openedChatMetaState[id] = merged.next;
+      } else {
+        openedChatMetaState = { ...openedChatMetaState, [id]: merged.next };
+      }
+      changed = true;
+      markDirty(OPENED_META_KEY);
+    }
   }
 
   const organizer = botOrganizationState?.meta && typeof botOrganizationState.meta === "object"
@@ -606,8 +639,50 @@ function collectSavedBotsHubEntries() {
   });
 }
 
+// These caches hold only derived text for the current in-memory Hub entries.
+// When saved data changes, the Hub rebuilds its entries; the old WeakMap keys
+// can then be collected. A normalization-setting change clears search strings.
+let savedBotsHubSearchTextCache = new WeakMap();
+let savedBotsHubNormalizationSignature = "";
+const savedBotsHubSortTextCache = new WeakMap();
+
+function savedBotsHubSortText(entry) {
+  let cached = savedBotsHubSortTextCache.get(entry);
+  if (!cached) {
+    cached = {
+      name: String(entry.name || entry.id || "").toLowerCase(),
+      creator: String(entry.creator || "").replace(/^@/, "").toLowerCase()
+    };
+    savedBotsHubSortTextCache.set(entry, cached);
+  }
+  return cached;
+}
+
+function savedBotsHubSearchText(entry) {
+  let text = savedBotsHubSearchTextCache.get(entry);
+  if (text !== undefined) return text;
+  const org = entry.organizer || {};
+  text = displayNormalizedSavedText([
+    entry.name, entry.id, entry.creator, entry.description,
+    ...(entry.sources || []), ...(org.collections || []), ...(org.tags || []),
+    org.note || "", org.status || ""
+  ].join(" ")).toLowerCase();
+  savedBotsHubSearchTextCache.set(entry, text);
+  return text;
+}
+
 function savedBotsHubFilteredEntries(allEntries = null) {
   const queryTerms = splitManagerSearchTerms($("savedBotsHubSearch")?.value || savedBotsHubUiState.query || "");
+  if (queryTerms.length) {
+    const opts = readTextNormalizationSettingsFromPage();
+    const signature = [opts.textNormalizationEnabled, opts.normalizeFancyUnicode,
+      opts.normalizePunctuation, opts.normalizeInvisibleCharacters,
+      opts.normalizeDecorativeSymbols, opts.normalizeEmojis].map(flag => flag ? "1" : "0").join("");
+    if (signature !== savedBotsHubNormalizationSignature) {
+      savedBotsHubSearchTextCache = new WeakMap();
+      savedBotsHubNormalizationSignature = signature;
+    }
+  }
   const source = value("savedBotsHubSourceFilter", "all");
   const overlap = value("savedBotsHubOverlapFilter", "all");
   const sortMode = value("savedBotsHubSortMode", "recent");
@@ -617,17 +692,14 @@ function savedBotsHubFilteredEntries(allEntries = null) {
     if (overlap === "multiple" && entry.sources.length < 2) return false;
     if (overlap === "single" && entry.sources.length !== 1) return false;
     if (!queryTerms.length) return true;
-    const org = entry.organizer || {};
-    const haystack = displayNormalizedSavedText([
-      entry.name, entry.id, entry.creator, entry.description,
-      ...(entry.sources || []), ...(org.collections || []), ...(org.tags || []),
-      org.note || "", org.status || ""
-    ].join(" ")).toLowerCase();
-    return managerHaystackMatchesTerms(haystack, queryTerms);
+    // Both the query and cached haystack already use the same normalization.
+    // Avoid normalizing another 12k records for every character typed.
+    const haystack = savedBotsHubSearchText(entry);
+    return queryTerms.every(term => haystack.includes(term));
   });
 
-  const name = entry => String(entry.name || entry.id || "").toLowerCase();
-  const creator = entry => String(entry.creator || "").replace(/^@/, "").toLowerCase();
+  const name = entry => savedBotsHubSortText(entry).name;
+  const creator = entry => savedBotsHubSortText(entry).creator;
   if (sortMode === "seen") return filtered.sort((a, b) => (b.seenCount || 0) - (a.seenCount || 0) || (b.sortTime || 0) - (a.sortTime || 0));
   if (sortMode === "name-asc") return filtered.sort((a, b) => name(a).localeCompare(name(b)));
   if (sortMode === "name-desc") return filtered.sort((a, b) => name(b).localeCompare(name(a)));
@@ -649,7 +721,7 @@ function savedBotsHubSourceLabel(source) {
   })[source] || source;
 }
 
-function savedBotsHubCard(entry) {
+function savedBotsHubCard(entry, laterMembership = null) {
   const card = makeElement("div", { className: "bot-manager-card saved-bots-hub-card", dataset: { id: entry.id } });
   if (entry.image) {
     card.appendChild(makeDeferredManagerImage(entry.image));
@@ -687,7 +759,7 @@ function savedBotsHubCard(entry) {
   if (entry.profileUrl) actions.appendChild(makeElement("a", { text: "Open profile", attrs: { href: entry.profileUrl, target: "_blank", rel: "noopener noreferrer" } }));
   if ((entry.sources || []).includes("blocked")) actions.appendChild(makeElement("button", { className: "saved-bots-hub-unblock", text: "Unblock", attrs: { type: "button" } }));
   if ((entry.sources || []).includes("notInterested")) actions.appendChild(makeElement("button", { className: "saved-bots-hub-restore-interest", text: "Remove Not Interested", attrs: { type: "button" } }));
-  const inLater = (laterBotState?.ids || []).includes(entry.id);
+  const inLater = laterMembership ? laterMembership.has(entry.id) : (laterBotState?.ids || []).includes(entry.id);
   actions.appendChild(makeElement("button", { className: "saved-bots-hub-later", text: inLater ? "Remove from Later" : "Add to Later", attrs: { type: "button" } }));
   actions.appendChild(makeElement("button", { className: "saved-bots-hub-copy", text: "Copy link", attrs: { type: "button" } }));
   main.appendChild(actions);
@@ -779,11 +851,17 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
   if (!host) return;
   // Data mutations call renderSavedBotsHub() and always rebuild; UI-only
   // filters/paging can reuse the last complete merged index safely.
-  const all = filterOnly && savedBotsHubFilterRows
-    ? savedBotsHubFilterRows : collectSavedBotsHubEntries();
-  if (!filterOnly || !savedBotsHubFilterRows) savedBotsHubFilterRows = all;
-  const knownIds = new Set(all.map(entry => entry.id).filter(Boolean));
-  for (const id of [...savedBotsHubUiState.selected]) if (!knownIds.has(id)) savedBotsHubUiState.selected.delete(id);
+  const sourceRebuilt = !filterOnly || !savedBotsHubFilterRows;
+  const all = sourceRebuilt ? collectSavedBotsHubEntries() : savedBotsHubFilterRows;
+  if (sourceRebuilt) {
+    savedBotsHubFilterRows = all;
+    // A filter-only refresh cannot invalidate selected IDs. Only allocate
+    // this temporary membership check when saved records actually change.
+    if (savedBotsHubUiState.selected.size) {
+      const knownIds = new Set(all.map(entry => entry.id).filter(Boolean));
+      for (const id of [...savedBotsHubUiState.selected]) if (!knownIds.has(id)) savedBotsHubUiState.selected.delete(id);
+    }
+  }
   const entries = savedBotsHubFilteredEntries(all);
   let limit = Number(savedBotsHubUiState.visible || 10);
   if (!Number.isFinite(limit) || limit < 1) limit = 10;
@@ -839,7 +917,8 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
     setEmptyState(host, "No bots match these hub filters.");
     return;
   }
-  host.replaceChildren(...shown.map(savedBotsHubCard));
+  const laterMembership = new Set(laterBotState?.ids || []);
+  host.replaceChildren(...shown.map(entry => savedBotsHubCard(entry, laterMembership)));
 
   host.querySelectorAll("input.saved-bots-hub-select").forEach(input => {
     input.addEventListener("change", () => {

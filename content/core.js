@@ -331,6 +331,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return DS.getQolTabState?.() || { globalEnabled, paused: !enabled, enabled: globalEnabled && !!enabled };
   };
 
+  // Diagnostic-only startup state. This uses no DOM queries or polling and
+  // deliberately includes no chat, character, or account data.
+  const STARTUP_STAGES = new Set([
+    "core-loaded", "waiting-for-modules", "main-registered", "loading-state",
+    "state-loaded", "ready", "disabled", "worker", "missing-modules", "error"
+  ]);
+  DS.runtimeStartup = {
+    stage: "core-loaded", updatedAt: Date.now(), errorType: "", missingModules: []
+  };
+  DS.markRuntimeStartup = function markRuntimeStartup(stage, detail = {}) {
+    if (!STARTUP_STAGES.has(stage)) return;
+    DS.runtimeStartup = {
+      stage,
+      updatedAt: Date.now(),
+      errorType: String(detail.errorType || "").slice(0, 64),
+      missingModules: Array.isArray(detail.missingModules)
+        ? detail.missingModules.slice(0, 6).map(name => String(name || "").slice(0, 100)) : []
+    };
+  };
+  DS.getRuntimeStartup = () => ({ ...(DS.runtimeStartup || {}),
+    missingModules: [...(DS.runtimeStartup?.missingModules || [])] });
+  // Register this early, before the large main runtime is assembled. If an
+  // optional/required script fails later, Settings can still distinguish a
+  // partial injection from a completely unreachable Android WebView.
+  try {
+    chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "DS_GET_PAGE_DIAGNOSTICS_LIGHT") return false;
+      const startup = DS.getRuntimeStartup();
+      const perf = DS.state?.runtimePerformance || {};
+      sendResponse({
+        ok: true,
+        runtimeReady: startup.stage === "ready",
+        paused: !!DS.isQolPausedForTab?.(),
+        startup,
+        sampleAt: Date.now(),
+        sampleKind: "lightweight-no-dom",
+        messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
+        messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0)
+      });
+      return false;
+    });
+  } catch { /* Android bridges may install their runtime transport later. */ }
+
   DS.state = {
     globalEnabledSetting: true,
     tabQolPaused: false,

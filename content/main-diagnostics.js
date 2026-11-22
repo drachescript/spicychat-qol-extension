@@ -190,18 +190,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         sendResponse({ ok: true, ...state });
         return false;
       }
-      if (message?.type === "DS_GET_PAGE_DIAGNOSTICS_LIGHT") {
-        // Read-only readiness probe for WebViews. Unlike a full snapshot this
-        // never walks the DOM, reads private chat content or forces layout.
-        const perf = DS.state?.runtimePerformance || {};
-        sendResponse({ ok: true, runtimeReady: !!DS.state?.settings,
-          paused: !!DS.isQolPausedForTab?.(),
-          sampleAt: Date.now(),
-          sampleKind: "lightweight-no-dom",
-          messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
-          messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0) });
-        return false;
-      }
       if (message?.type === "DS_GET_PAGE_DIAGNOSTICS") {
         try {
         const chatLayout = (() => {
