@@ -122,6 +122,48 @@ function archiveUploadStatusVerified(status) {
   return false; // Unknown, restricted, missing and first empty-200 candidates.
 }
 
+// Verify that the saved public snapshot is not newer than its confirmed check.
+// An old HTTP 200 is not a permanent authorization to upload changed content.
+// Use a bounded age for Archive imports; local snapshots are never discarded.
+const ARCHIVE_VERIFIED_STATUS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const ARCHIVE_STATUS_SAVE_CLOCK_SLOP_MS = 2 * 60 * 1000;
+function archiveUploadRevisionVerified(entry, status, now = Date.now()) {
+  if (!archiveUploadStatusVerified(status)) return false;
+  const checkedAt = Number(status?.checkedAt || 0);
+  if (checkedAt < now - ARCHIVE_VERIFIED_STATUS_MAX_AGE_MS || checkedAt > now + ARCHIVE_STATUS_SAVE_CLOCK_SLOP_MS) return false;
+  const lastSavedAt = Number(entry?.lastSavedAt || 0);
+  if (lastSavedAt > checkedAt + ARCHIVE_STATUS_SAVE_CLOCK_SLOP_MS) return false;
+
+  // A public API snapshot sometimes contains only a subset of fields. Compare
+  // those actually observed, never treat missing optional fields as a change.
+  // Do not compare preserved historical revisions against today's live data.
+  if (status?.status === "available" && status.snapshot?.fields && entry?.fields) {
+    const verifiedFields = status.snapshot.fields;
+    const savedFields = entry.fields;
+    for (const field of ["name", "title", "description", "greeting", "personality", "scenario", "exampleDialogues", "creator"]) {
+      const observed = verifiedFields[field];
+      const saved = savedFields[field];
+      if (typeof observed !== "string" || !observed.trim() || typeof saved !== "string" || !saved.trim()) continue;
+      if (observed.replace(/\s+/g, " ").trim() !== saved.replace(/\s+/g, " ").trim()) return false;
+    }
+  }
+  return true;
+}
+
+// A running scan or a storage-change event can invalidate records between
+// compression and the POST. Check only this chunk, not all saved bot copies.
+function requireArchiveChunkRevisionSafe(chunk, fingerprints, heldIds = new Set()) {
+  for (const record of chunk.records || []) {
+    const id = String(record?.botId || "").trim().toLowerCase();
+    if (!BOT_ID_RE.test(id) || heldIds.has(id)) throw new Error(`Archive bundle contains a pending or invalid bot: ${id || "unknown"}`);
+    const entry = botArchiveState?.meta?.[id];
+    const status = botAvailabilityState?.meta?.[id];
+    if (!entry || !archiveUploadRevisionVerified(entry, status)) throw new Error(`Bot ${id} changed or verification expired while preparing the Archive upload. Recheck it before sending.`);
+    const live = archiveUploadSavedCopyRecord(entry, status);
+    if (fastArchiveFingerprint(live) !== fingerprints[id]) throw new Error(`Bot ${id} snapshot changed during Archive upload preparation. Nothing from this bundle was sent.`);
+  }
+}
+
 function archiveUploadSavedCopyRecord(entry, availability) {
   const snapshot = botStatusArchiveExportRecord(entry, availability);
   const savedMs = Number(entry?.lastSavedAt) || Number(snapshot?.snapshotAt) || Number(entry?.firstSavedAt) || 0;
@@ -141,7 +183,7 @@ async function currentArchiveUploadRecords({ updateProgress = false, progressEle
   const entries = Object.values(archive.meta || {})
     .filter(entry => {
       if (!botStatusArchiveExportSourceAllowed(entry)) return false;
-      if (excludedIds?.has(String(entry.id || "").toLowerCase()) || !archiveUploadStatusVerified(availability.meta?.[entry.id])) {
+      if (excludedIds?.has(String(entry.id || "").toLowerCase()) || !archiveUploadRevisionVerified(entry, availability.meta?.[entry.id])) {
         excludedCount += 1;
         skippedIds.add(String(entry.id || "").toLowerCase());
         return false;
@@ -368,7 +410,7 @@ async function refreshArchiveContributionUi(prepared = null, safety = null) {
       const state = config.state.lastStatus || "pending";
       summary.textContent = `Last submission: ${last} · ${config.state.lastSentCount.toLocaleString()} copies · ${state}${ids} · ${changed.toLocaleString()} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`;
     }
-    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified or held copies excluded until checked.`;
+    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified, stale or held copies excluded until rechecked.`;
   }
 }
 
@@ -428,12 +470,15 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
 
     const submissionIds = [];
     let finalStatus = "pending";
+    let confirmedCopies = 0;
+    const acknowledgedFingerprints = { ...previous };
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i];
       let blob = chunk.blob;
       if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length }, extraHeader);
       if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe submission limit.`);
-      await requireArchiveTransferSafe(); // Recheck durable queues immediately before each network POST.
+      const currentGate = await requireArchiveTransferSafe(); // Recheck durable queues immediately before each network POST.
+      requireArchiveChunkRevisionSafe(chunk, fingerprints, currentGate.heldIds);
       setStatus(`Submitting bundle ${i + 1} / ${chunks.length} · ${chunk.records.length.toLocaleString()} saved copies…`);
       const result = await postArchiveSubmission(blob, {
         exportedAt,
@@ -443,6 +488,16 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
       if (id) submissionIds.push(id);
       const state = String(result?.status || "pending").toLowerCase();
       if (["pending", "approved", "rejected", "queued"].includes(state)) finalStatus = state;
+      // Acknowledged chunks are durable checkpoints. A later failure must
+      // not cause previously accepted bundles to be blindly resubmitted.
+      confirmedCopies += chunk.records.length;
+      for (const record of chunk.records) acknowledgedFingerprints[record.botId] = fingerprints[record.botId];
+      if (!await storageSet({ [ARCHIVE_CONTRIBUTION_STATE_KEY]: {
+        version: 1, lastSubmissionAt: Date.now(), lastSentCount: confirmedCopies,
+        lastSnapshotCount: records.length, lastMode: forceAll || firstSubmission ? "all" : "changed",
+        lastSubmissionIds: submissionIds, lastStatus: finalStatus || "pending",
+        fingerprints: acknowledgedFingerprints
+      } })) throw new Error("Archive accepted this bundle, but saving its local acknowledgement failed. Do not retry blindly; check the Archive submissions first.");
     }
 
     const currentIds = new Set([...records.map(record => record.botId), ...skippedIds]);
@@ -543,7 +598,7 @@ async function refreshArchiveUploadUi(prepared = null, safety = null) {
     summary.textContent = config.state.lastUploadAt
       ? `Last archive upload: ${last} · ${config.state.lastSnapshotCount || config.state.lastSentCount} copies at that snapshot · ${changed} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`
       : `${records.length} saved copies ready for the first archive upload.`;
-    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified or held copies excluded until checked.`;
+    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified, stale or held copies excluded until rechecked.`;
   }
 }
 
@@ -606,12 +661,15 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
 
     const queueIds = [];
     let uploadedBytes = 0;
+    let confirmedCopies = 0;
+    const acknowledgedFingerprints = { ...previous };
     for (let i = 0; i < chunks.length; i += 1) {
       const chunk = chunks[i];
       let blob = chunk.blob;
       if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length });
       if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe upload limit.`);
-      await requireArchiveTransferSafe(); // A stale UI or new scan cannot bypass this check.
+      const currentGate = await requireArchiveTransferSafe(); // A stale UI or new scan cannot bypass this check.
+      requireArchiveChunkRevisionSafe(chunk, fingerprints, currentGate.heldIds);
       setStatus(`Uploading bundle ${i + 1} / ${chunks.length} · ${chunk.records.length} saved copies…`);
       const result = await postArchiveUpload(config.endpoint, config.token, blob, {
         exportedAt,
@@ -619,6 +677,13 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
       });
       uploadedBytes += Number(result?.bytes || blob.size) || blob.size;
       if (result?.queueId) queueIds.push(String(result.queueId));
+      confirmedCopies += chunk.records.length;
+      for (const record of chunk.records) acknowledgedFingerprints[record.botId] = fingerprints[record.botId];
+      if (!await storageSet({ [ARCHIVE_UPLOAD_STATE_KEY]: {
+        version: 1, lastUploadAt: Date.now(), lastSentCount: confirmedCopies,
+        lastSnapshotCount: records.length, lastMode: forceAll || firstUpload ? "all" : "changed",
+        lastQueueIds: queueIds, fingerprints: acknowledgedFingerprints
+      } })) throw new Error("Archive accepted this bundle, but saving its local acknowledgement failed. Do not retry blindly; check the Archive queue first.");
     }
 
     const currentIds = new Set([...records.map(record => record.botId), ...skippedIds]);

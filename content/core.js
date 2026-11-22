@@ -318,7 +318,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const globalEnabled = DS.state?.globalEnabledSetting !== false;
     DS.state.tabQolPaused = globalEnabled && !enabled;
-    if (DS.state?.settings) DS.state.settings.enabled = globalEnabled && !!enabled;
+    if (DS.state?.settings) {
+      DS.state.settings.enabled = globalEnabled && !!enabled;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!DS.state.settings.enabled && !!DS.state.settings.expandLongCardDescriptions);
+    }
     DS.state.disabledCleanupDone = false;
     DS.runtimeLog?.("info", "tab-control", enabled ? "QoL enabled for this tab" : "QoL paused for this tab");
     if (!enabled) DS.pauseQolTabRuntime?.();
@@ -1834,6 +1837,9 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     const runtimeSettings = DS.applyPlatformCompatibility(settings);
     DS.applyQolTabEnabledOverride?.(runtimeSettings);
     DS.state.settings = runtimeSettings;
+    // CSS handles normal card descriptions at first paint after settings load.
+    // No card traversal, observer or extra timer is needed for this preference.
+    document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!runtimeSettings.enabled && !!runtimeSettings.expandLongCardDescriptions);
 
     DS.state.openedChats = new Set(
       Array.isArray(result[DS.OPENED_KEY])
@@ -1993,6 +1999,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       const next = DS.applyPlatformCompatibility(persisted);
       DS.applyQolTabEnabledOverride?.(next);
       DS.state.settings = next;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!next.enabled && !!next.expandLongCardDescriptions);
       DS.state.settings.oocTemplates = DS.normalizeOocTemplates(
         changes[DS.OOC_TEMPLATES_KEY]?.newValue ?? rawSettings.oocTemplates ?? DS.state.settings.oocTemplates
       );
@@ -2012,6 +2019,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       const next = DS.applyPlatformCompatibility(persisted);
       DS.applyQolTabEnabledOverride?.(next);
       DS.state.settings = next;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!next.enabled && !!next.expandLongCardDescriptions);
       rebuildBlockedStateFromCache();
       refreshLookups = true;
       cardFilterStateChanged = true;

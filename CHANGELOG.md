@@ -1,4 +1,9 @@
 ## 0.2.91
+- Made full card descriptions appear through CSS as soon as Settings loads, without waiting for the slow listing pass or repeatedly scanning normal card text.
+- Retained JS description expansion in browsers without native :has() selector support; disabling the option restores native clamping without new observers.
+- Required fresh Bot Status verification for Archive transfers and rejected snapshots newer than their verified check or inconsistent with observed fields.
+- Rechecked each Archive bundle against saved snapshots immediately before sending; pending scans and stale copies remain blocked for both private and public routes.
+- Saved acknowledged Archive chunks individually so a later bundle failure does not automatically resend previously accepted copies; existing fingerprints and data remain intact.
 - Restricted Text Normalization to bot, creator, listing and Lorebook/Rulebook metadata; removed chat-message rewriting entirely so long dashes and other generated text stay exactly as SpicyChat renders them, even when normalization is enabled.
 - Limited RP Format Repair and chat text-replacement observers to the native message list instead of monitoring the entire SpicyChat page; disabled features remain disconnected.
 - Prevented a chat replacement preset from applying when chat replacements are disabled, without changing saved rules or message content.
