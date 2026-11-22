@@ -25,7 +25,17 @@ class SettingsOwnershipTest(unittest.TestCase):
         for fid in EXPECTED:
             with self.subTest(feature=fid):
                 path = f"settings/feature-panels/{fid}.js"
-                self.assertEqual(HTML.count(f'<script src="{path}"></script>'), 1, path)
+                # v0.2.92 can defer a panel rather than executing it at startup.
+                declarations = re.findall(
+                    r'<script\\b[^>]*\\bsrc="' + re.escape(path) + r'"[^>]*></script>',
+                    HTML,
+                )
+                self.assertEqual(len(declarations), 1, path)
+                self.assertTrue(
+                    declarations[0].startswith('<script src=') or
+                    'type="application/x-dsq-lazy-feature-panel"' in declarations[0],
+                    f"Unrecognized panel declaration for {path}",
+                )
                 mount = f'<div id="ds-feature-panel-{fid}" data-dsq-feature-panel="{fid}"></div>'
                 self.assertEqual(HTML.count(mount), 1, fid)
                 self.assertTrue((ROOT / path).is_file())
