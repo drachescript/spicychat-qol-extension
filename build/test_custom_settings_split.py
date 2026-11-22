@@ -27,7 +27,7 @@ class SettingsOwnershipTest(unittest.TestCase):
                 path = f"settings/feature-panels/{fid}.js"
                 # v0.2.92 can defer a panel rather than executing it at startup.
                 declarations = re.findall(
-                    r'<script\\b[^>]*\\bsrc="' + re.escape(path) + r'"[^>]*></script>',
+                    r'<script\b[^>]*\bsrc="' + re.escape(path) + r'"[^>]*></script>',
                     HTML,
                 )
                 self.assertEqual(len(declarations), 1, path)
