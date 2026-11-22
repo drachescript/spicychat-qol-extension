@@ -17,8 +17,11 @@ class CustomSeventyThree(unittest.TestCase):
         loader=read("content/on-demand-modules.js")
         self.assertTrue("content/chat-pins.js" in js or
                         '"chat-pins": "content/chat-pins.js"' in loader)
-        for p in ["content/chat-bookmarks.js", "content/language-filter.js",
-                  "content/rulebook-public-qol.js", "content/lorebook-public-qol.js"]:
+        # Stage 18+ also defers Chat Bookmarks but preserves its registered import.
+        self.assertTrue("content/chat-bookmarks.js" in js or
+                        '"chat-bookmarks": "content/chat-bookmarks.js"' in loader)
+        for p in ["content/language-filter.js", "content/rulebook-public-qol.js",
+                  "content/lorebook-public-qol.js"]:
             self.assertIn(p,js)
     def test_custom_panels_and_legacy_readers_are_not_duplicated(self):
         html=read("options.html")
