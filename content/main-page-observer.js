@@ -468,7 +468,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (chatLocal) {
         if (messageRootsChanged) DS.bumpDomRevision?.();
       } else if (!cardListing || affectsCards) {
-        DS.bumpDomRevision?.();
+        DS.bumpDomRevision?.({ preserveListingCardCache: cardListing && affectsCards });
       }
 
       // Most message streaming/edit mutations only need the direct chat lane.

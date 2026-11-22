@@ -558,12 +558,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
 
-  DS.bumpDomRevision = function bumpDomRevision() {
+  DS.bumpDomRevision = function bumpDomRevision({ preserveListingCardCache = false } = {}) {
     DS.state.domRevision = Number(DS.state.domRevision || 0) + 1;
     if (DS.state.loadedMessageRootsCache) DS.state.loadedMessageRootsCache.revision = -1;
-    DS.state.cardCache = null;
-    DS.state.cardCacheRevision = -1;
-    DS.state.cardCacheUrl = "";
+    // Native listing mutations are already recorded as changed card shells by
+    // the shared page observer. Keep the old cache just long enough for
+    // collectCards() to reconcile those cards instead of rescanning the grid.
+    // Route changes, chat changes, and uncertain/large listing mutations still
+    // invalidate the whole cache immediately.
+    const dirty = DS.state.listingDirtyCards;
+    const keep = preserveListingCardCache && Array.isArray(DS.state.cardCache) &&
+      DS.state.cardCacheUrl === location.href && !DS.state.listingDirtyNeedsFullPass &&
+      dirty instanceof Set && dirty.size > 0 && dirty.size < 96;
+    if (!keep) {
+      DS.state.cardCache = null;
+      DS.state.cardCacheRevision = -1;
+      DS.state.cardCacheUrl = "";
+    }
   };
 
   DS.bumpCardFilterStateRevision = function bumpCardFilterStateRevision() {

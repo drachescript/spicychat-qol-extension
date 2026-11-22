@@ -13,10 +13,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let mainBootstrapRetries = 0;
   function startMainWhenReady() {
     if (mainBootstrapStarted || window.__DSQ_TAB_GATE__?.paused) return;
-    const ds = window.DragonScriptQoL;
-    const missing = mainFactories.filter(([name]) => typeof ds?.[name] !== "function");
+    // Resolve the core runtime in this scope for both the factory checks and
+    // startup diagnostics. Without this binding, the first startup status
+    // update throws ReferenceError and prevents QoL from booting on every page.
+    const DS = window.DragonScriptQoL;
+    const missing = mainFactories.filter(([name]) => typeof DS?.[name] !== "function");
     if (missing.length) {
-      if (!mainBootstrapRetries) DS.markRuntimeStartup?.("waiting-for-modules", {
+      if (!mainBootstrapRetries) DS?.markRuntimeStartup?.("waiting-for-modules", {
         missingModules: missing.map(([, file]) => file)
       });
       if (mainBootstrapRetries++ < 8) {
@@ -24,7 +27,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
       // Never replace a required lane with a silent no-op.
-      DS.markRuntimeStartup?.("missing-modules", {
+      DS?.markRuntimeStartup?.("missing-modules", {
         missingModules: missing.map(([, file]) => file)
       });
       console.error("[DragonScript QoL] Main runtime not started: missing modules: " +
@@ -33,12 +36,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
     mainBootstrapStarted = true;
-    DS.markRuntimeStartup?.("main-registered");
+    DS?.markRuntimeStartup?.("main-registered");
     try {
       initializeMainRuntime();
     } catch (error) {
-      DS.markRuntimeStartup?.("error", { errorType: String(error?.name || "Error") });
-      DS.runtimeLog?.("error", "startup", "QoL main modules failed to initialize", {
+      DS?.markRuntimeStartup?.("error", { errorType: String(error?.name || "Error") });
+      DS?.runtimeLog?.("error", "startup", "QoL main modules failed to initialize", {
         errorType: String(error?.name || "Error")
       });
       console.error("[DragonScript QoL] Main module registration failed", String(error?.name || "Error"));

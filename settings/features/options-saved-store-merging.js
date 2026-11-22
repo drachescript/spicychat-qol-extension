@@ -671,6 +671,7 @@ function savedBotsHubSearchText(entry) {
   return text;
 }
 
+let savedBotsHubFilteredCache = null;
 function savedBotsHubFilteredEntries(allEntries = null) {
   const queryTerms = splitManagerSearchTerms($("savedBotsHubSearch")?.value || savedBotsHubUiState.query || "");
   if (queryTerms.length) {
@@ -686,8 +687,14 @@ function savedBotsHubFilteredEntries(allEntries = null) {
   const source = value("savedBotsHubSourceFilter", "all");
   const overlap = value("savedBotsHubOverlapFilter", "all");
   const sortMode = value("savedBotsHubSortMode", "recent");
+  const rows = allEntries || collectSavedBotsHubEntries();
+  const key = JSON.stringify([queryTerms, source, overlap, sortMode,
+    queryTerms.length ? savedBotsHubNormalizationSignature : ""]);
+  if (savedBotsHubFilteredCache?.rows === rows && savedBotsHubFilteredCache.key === key) {
+    return savedBotsHubFilteredCache.result;
+  }
 
-  const filtered = (allEntries || collectSavedBotsHubEntries()).filter(entry => {
+  const filtered = rows.filter(entry => {
     if (source !== "all" && !entry.sources.includes(source)) return false;
     if (overlap === "multiple" && entry.sources.length < 2) return false;
     if (overlap === "single" && entry.sources.length !== 1) return false;
@@ -700,12 +707,14 @@ function savedBotsHubFilteredEntries(allEntries = null) {
 
   const name = entry => savedBotsHubSortText(entry).name;
   const creator = entry => savedBotsHubSortText(entry).creator;
-  if (sortMode === "seen") return filtered.sort((a, b) => (b.seenCount || 0) - (a.seenCount || 0) || (b.sortTime || 0) - (a.sortTime || 0));
-  if (sortMode === "name-asc") return filtered.sort((a, b) => name(a).localeCompare(name(b)));
-  if (sortMode === "name-desc") return filtered.sort((a, b) => name(b).localeCompare(name(a)));
-  if (sortMode === "creator-asc") return filtered.sort((a, b) => creator(a).localeCompare(creator(b)) || name(a).localeCompare(name(b)));
-  if (sortMode === "creator-desc") return filtered.sort((a, b) => creator(b).localeCompare(creator(a)) || name(a).localeCompare(name(b)));
-  return filtered.sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0) || name(a).localeCompare(name(b)));
+  if (sortMode === "seen") filtered.sort((a, b) => (b.seenCount || 0) - (a.seenCount || 0) || (b.sortTime || 0) - (a.sortTime || 0));
+  else if (sortMode === "name-asc") filtered.sort((a, b) => name(a).localeCompare(name(b)));
+  else if (sortMode === "name-desc") filtered.sort((a, b) => name(b).localeCompare(name(a)));
+  else if (sortMode === "creator-asc") filtered.sort((a, b) => creator(a).localeCompare(creator(b)) || name(a).localeCompare(name(b)));
+  else if (sortMode === "creator-desc") filtered.sort((a, b) => creator(b).localeCompare(creator(a)) || name(a).localeCompare(name(b)));
+  else filtered.sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0) || name(a).localeCompare(name(b)));
+  savedBotsHubFilteredCache = { rows, key, result: filtered };
+  return filtered;
 }
 
 function savedBotsHubSourceLabel(source) {
@@ -767,10 +776,15 @@ function savedBotsHubCard(entry, laterMembership = null) {
   return card;
 }
 
-function updateSavedBotsHubSelectionUi() {
+function updateSavedBotsHubSelectionUi(changedCard = null) {
   const count = $("savedBotsHubSelectedCount");
-  if (count) count.textContent = `${savedBotsHubUiState.selected.size} selected`;
-  document.querySelectorAll(".saved-bots-hub-card").forEach(card => {
+  const label = `${savedBotsHubUiState.selected.size} selected`;
+  if (count && count.textContent !== label) count.textContent = label;
+  const host = $("savedBotsHubManager");
+  if (!host) return;
+  const cards = changedCard && host.contains(changedCard)
+    ? [changedCard] : host.querySelectorAll(".saved-bots-hub-card");
+  cards.forEach(card => {
     const id = String(card.dataset.id || "").trim();
     const selected = !!id && savedBotsHubUiState.selected.has(id);
     card.classList.toggle("is-bulk-selected", selected);
@@ -846,6 +860,8 @@ async function applySavedBotsHubBulkAction() {
 }
 
 let savedBotsHubFilterRows = null;
+let savedBotsHubRenderedRows = null;
+let savedBotsHubRenderedCount = 0;
 function renderSavedBotsHub({ filterOnly = false } = {}) {
   const host = $("savedBotsHubManager");
   if (!host) return;
@@ -854,6 +870,7 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
   const sourceRebuilt = !filterOnly || !savedBotsHubFilterRows;
   const all = sourceRebuilt ? collectSavedBotsHubEntries() : savedBotsHubFilterRows;
   if (sourceRebuilt) {
+    savedBotsHubFilteredCache = null;
     savedBotsHubFilterRows = all;
     // A filter-only refresh cannot invalidate selected IDs. Only allocate
     // this temporary membership check when saved records actually change.
@@ -909,29 +926,49 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
     collapse.textContent = limit <= 10 ? "Show 100" : "Collapse to 10";
   }
 
-  if (!all.length) {
-    setEmptyState(host, "No saved/known bots yet.");
+  if (!all.length || !entries.length) {
+    savedBotsHubRenderedRows = null;
+    savedBotsHubRenderedCount = 0;
+    setEmptyState(host, !all.length ? "No saved/known bots yet." : "No bots match these hub filters.");
     return;
   }
-  if (!entries.length) {
-    setEmptyState(host, "No bots match these hub filters.");
-    return;
-  }
+  // Paging with unchanged filters only appends the new cards. Reconstructing
+  // hundreds of existing cards on every Show more click wastes DOM/layout
+  // work and replaces their image nodes and event handlers unnecessarily.
+  const appendOnly = filterOnly && savedBotsHubRenderedRows === entries &&
+    savedBotsHubRenderedCount > 0 && shown.length > savedBotsHubRenderedCount &&
+    host.children.length === savedBotsHubRenderedCount;
+  const newEntries = appendOnly ? shown.slice(savedBotsHubRenderedCount) : shown;
   const laterMembership = new Set(laterBotState?.ids || []);
-  host.replaceChildren(...shown.map(entry => savedBotsHubCard(entry, laterMembership)));
+  const newCards = newEntries.map(entry => savedBotsHubCard(entry, laterMembership));
+  if (appendOnly) host.append(...newCards);
+  else host.replaceChildren(...newCards);
+  savedBotsHubRenderedRows = entries;
+  savedBotsHubRenderedCount = shown.length;
+  // Bind only the newly created cards; older cards keep their existing events.
+  const onNewCard = (selector, callback) => {
+    for (const card of newCards) card.querySelectorAll(selector).forEach(callback);
+  };
 
-  host.querySelectorAll("input.saved-bots-hub-select").forEach(input => {
+  onNewCard("input.saved-bots-hub-select", input => {
     input.addEventListener("change", () => {
       const id = String(input.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       if (!id) return;
       if (input.checked) savedBotsHubUiState.selected.add(id);
       else savedBotsHubUiState.selected.delete(id);
-      updateSavedBotsHubSelectionUi();
+      updateSavedBotsHubSelectionUi(input.closest(".saved-bots-hub-card"));
     });
   });
-  updateSavedBotsHubSelectionUi();
+  if (appendOnly) {
+    for (const card of newCards) {
+      const selected = savedBotsHubUiState.selected.has(card.dataset.id || "");
+      card.classList.toggle("is-bulk-selected", selected);
+    }
+  } else {
+    updateSavedBotsHubSelectionUi();
+  }
 
-  host.querySelectorAll(".saved-bots-hub-unblock").forEach(button => {
+  onNewCard(".saved-bots-hub-unblock", button => {
     button.addEventListener("click", async () => {
       const id = String(button.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       if (!id) return;
@@ -945,7 +982,7 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
     });
   });
 
-  host.querySelectorAll(".saved-bots-hub-restore-interest").forEach(button => {
+  onNewCard(".saved-bots-hub-restore-interest", button => {
     button.addEventListener("click", async () => {
       const id = String(button.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       if (!id) return;
@@ -958,7 +995,7 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
     });
   });
 
-  host.querySelectorAll(".saved-bots-hub-later").forEach(button => {
+  onNewCard(".saved-bots-hub-later", button => {
     button.addEventListener("click", async () => {
       const id = String(button.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       if (!id) return;
@@ -998,7 +1035,7 @@ function renderSavedBotsHub({ filterOnly = false } = {}) {
     });
   });
 
-  host.querySelectorAll(".saved-bots-hub-copy").forEach(button => {
+  onNewCard(".saved-bots-hub-copy", button => {
     button.addEventListener("click", async () => {
       const id = String(button.closest(".saved-bots-hub-card")?.dataset.id || "").trim();
       const entry = all.find(item => item.id === id);

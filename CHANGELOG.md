@@ -1,3 +1,11 @@
+## 0.2.95
+- Fixed Android QoL sometimes loading the website without starting its features.
+- Fixed some bot cards appearing out of order after listings refreshed.
+- Made bot listings faster by updating changed cards without rescanning every bot.
+- Prevented old card filters from continuing after switching pages.
+- Made Saved Bots Hub paging, search and selection faster on large collections.
+- Reduced unnecessary work when finding bot cards and browsing saved lists.
+
 ## 0.2.94
 - Made Saved Bots Hub search and sorting faster on large lists.
 - Reduced delays when opening, filtering, and selecting saved bots.
