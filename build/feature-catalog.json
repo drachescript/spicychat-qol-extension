@@ -4209,7 +4209,9 @@
       "description": "Collect bot links from listing pictures for later copying. Never submits reports automatically.",
       "section": "Discovery",
       "group": "listings",
-      "requiredFeatures": [],
+      "requiredFeatures": [
+        "cards"
+      ],
       "runtimeScripts": [
         "content/report-link-collector.js"
       ],

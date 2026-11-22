@@ -1810,7 +1810,9 @@
       "id": "report-link-collector",
       "defaultSelected": false,
       "defaultUpdatesEnabled": false,
-      "dependencies": [],
+      "dependencies": [
+        "cards"
+      ],
       "runtime": "content/report-link-collector.js",
       "settings": [],
       "settingsStyles": [],
