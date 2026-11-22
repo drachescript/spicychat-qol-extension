@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.91",
+  "sourceVersion": "0.2.92",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -1800,6 +1800,19 @@
       "settings": [
         "settings/feature-panels/reply-instructions.js"
       ],
+      "settingsStyles": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "report-link-collector",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/report-link-collector.js",
+      "settings": [],
       "settingsStyles": [],
       "styles": [],
       "background": [],
