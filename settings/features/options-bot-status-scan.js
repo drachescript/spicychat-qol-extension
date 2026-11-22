@@ -1,7 +1,8 @@
 // Bot Status pacing, durable resume queues, eligibility review, and scan execution.
 async function noteBotStatusRunEvent(event, detail = {}) {
   try {
-    await runtimeMessage({ type: "DS_BOT_STATUS_RUN_EVENT", event, detail });
+    // Diagnostics must never strand a scan if its background channel stalls.
+    await runtimeMessageWithTimeout({ type: "DS_BOT_STATUS_RUN_EVENT", event, detail }, 5000);
   } catch {}
 }
 
@@ -14,14 +15,13 @@ async function waitForBotStatusPace(delayMs) {
   const waitMs = Math.max(0, Math.min(10000, Math.round(Number(delayMs || 0))));
   if (!waitMs) return true;
   try {
-    const response = await runtimeMessage({ type: "DS_BOT_STATUS_PACE_WAIT", delayMs: waitMs });
-    if (response?.ok) return true;
-  } catch {}
-  // Old/background-mismatched builds still get a safe fallback. The normal
-  // v0.2.27 path is owned by the extension service worker so hidden Options
-  // timer throttling cannot stretch a ~1s scan delay into multi-minute gaps.
-  await new Promise(resolve => setTimeout(resolve, waitMs));
-  return false;
+    // A lost service-worker response used to leave the serial scan waiting
+    // forever. Never continue without a confirmed pace interval: falling back
+    // to a hidden Options timer may take minutes, or may issue checks too fast.
+    const response = await runtimeMessageWithTimeout(
+      { type: "DS_BOT_STATUS_PACE_WAIT", delayMs: waitMs }, waitMs + 6000);
+    return !!response?.ok;
+  } catch { return false; }
 }
 
 async function waitForRecommendationPace(delayMs) {
@@ -170,6 +170,7 @@ function formatBotStatusLastRunFeedback(report) {
   if (report.coalesced != null) parts.push(`${Number(report.coalesced)} in-flight checks coalesced`);
   if (Number(report.accessFailures || 0)) parts.push(`${Number(report.accessFailures)} network/auth failures`);
   if (report.cancelled) parts.push("stopped by user");
+  if (report.interrupted) parts.push("interrupted; pending checks retained for Resume");
   if (report.saveVerified === false) parts.push("Save verification failed — check previous checkpoints");
   return parts.join(" · ") + ".";
 }
@@ -394,6 +395,10 @@ async function refreshBotStatusPauseButton() {
   botStatusPendingReviewIds = new Set([...normalIds, ...staleIds]);
   const count = normalIds.length;
   const staleCount = staleIds.length;
+  const savedAt = Number(state?.updatedAt || 0);
+  const checkpointDetail = count && savedAt
+    ? `Last durable checkpoint: ${Math.max(0, Number(state?.completed || 0))} completed in that attempt, ${new Date(savedAt).toLocaleString()}. Uncheckpointed checks may be repeated.${state?.phase === "running" && !botAvailabilityScanRunning ? " The prior worker may have been closed by a browser or extension reload; Resume uses the saved queue." : ""}`
+    : "";
   const staleButton = $("resumePausedStaleBotAvailability");
   if (staleButton) {
     staleButton.disabled = botAvailabilityScanRunning || !staleCount;
@@ -412,7 +417,7 @@ async function refreshBotStatusPauseButton() {
   }
   const hint = $("botStatusPendingQueueSummary");
   if (hint) hint.textContent = [
-    count ? `${count} regular pending rechecks saved for Resume.` : "No regular scan pending.",
+    count ? `${count} regular pending rechecks saved for Resume. ${checkpointDetail}` : "No regular scan pending.",
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
     heldCount ? `${heldCount} checks held automatically: ${heldReasons}${heldReasonCounts.size > 3 ? "; more reasons available" : ""}. Nothing deleted; full/stale Refresh also retries recoverable held IDs.` : "No out-of-scope checks held.",
     "Regular and stale queues stay independent."
@@ -657,7 +662,8 @@ async function runBotAvailabilityScan(options = {}) {
     if (!pending.length || (!force && pending.length < checkpointEvery)) return true;
     const availabilityUpdates = Object.fromEntries(pending.map(id => [id, botAvailabilityState.meta?.[id]]).filter(([, v]) => !!v));
     const archiveUpdates = Object.fromEntries(pending.filter(id => archiveChangedIds.has(id)).map(id => [id, botArchiveState.meta?.[id]]).filter(([, v]) => !!v));
-    const saved = await runtimeMessage({ type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates });
+    const saved = await runtimeMessageWithTimeout(
+      { type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates }, 25000);
     if (!saved?.ok) return false;
     pending.forEach(id => checkpointSavedIds.add(id));
     checkpointCount += pending.length;
@@ -673,6 +679,7 @@ async function runBotAvailabilityScan(options = {}) {
   let consecutiveAccessFailures = 0;
   const deferredAccessIds = [];
   let accessPauseTriggered = false;
+  let stalledScan = false;
   let nextScanIndex = 0;
   let lastQueueCheckpointAt = 0;
   let lastQueueCheckpointCompleted = 0;
@@ -685,7 +692,8 @@ async function runBotAvailabilityScan(options = {}) {
   let lastAggregateAt = runStartedAt;
   // Existing worker counters are only observed at start and finish. No
   // periodic stats fetch and no per-bot diagnostic events.
-  const initialWorkerStats = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
+  const initialWorkerStats = await runtimeMessageWithTimeout(
+    { type: "DS_BOT_STATUS_HELPER_STATS" }, 5000).catch(() => null);
   // The persisted queue is written only AFTER its completed records have been
   // saved. If the tab disappears between those writes, a few bots might be
   // checked again, but no completed result is skipped or lost from the queue.
@@ -762,11 +770,29 @@ async function runBotAvailabilityScan(options = {}) {
       checkAttempts++;
       uniqueCheckedIds.add(String(entry.id || "").toLowerCase());
       const requestStartedAt = Date.now();
-      const rawResult = await checkBotAvailability(
-        { ...entry, ...(previous || {}), sources: uniqueClean([...(previous?.sources || []), ...(entry.sources || [])]) },
-        { keepHelper: true, forceOwnHelper: true, bulkScan: true, timeoutMs: 17000 }
-      );
+      // The helper has its own deadlines, but this outer watchdog also covers
+      // any unexpected unresolved promise in the scan/check orchestration.
+      // Stop rather than start another request alongside an unknown in-flight
+      // check. The current ID remains in the saved resume tail.
+      let checkWatchdogTimer;
+      const rawResult = await Promise.race([
+        checkBotAvailability(
+          { ...entry, ...(previous || {}), sources: uniqueClean([...(previous?.sources || []), ...(entry.sources || [])]) },
+          { keepHelper: true, forceOwnHelper: true, bulkScan: true, timeoutMs: 17000 }
+        ),
+        new Promise(resolve => {
+          checkWatchdogTimer = setTimeout(() => resolve({ __dsBotStatusWatchdogTimeout: true }), 30000);
+        })
+      ]).catch(error => ({
+        __dsBotStatusWatchdogTimeout: true,
+        error: String(error?.message || error || "Bot Status check failed")
+      })).finally(() => clearTimeout(checkWatchdogTimer));
       requestTimeMs += Math.max(0, Date.now() - requestStartedAt);
+      if (rawResult?.__dsBotStatusWatchdogTimeout) {
+        stalledScan = true;
+        terminalMessage = `Bot Status check stalled at ${entry.name || entry.id}. ${completed} completed checks will be saved and the remaining IDs kept for Resume.`;
+        break;
+      }
       if (isBotStatusAccessFailure(rawResult)) {
         accessFailures++;
         // A temporary auth/CORS outage must never replace an earlier
@@ -802,7 +828,11 @@ async function runBotAvailabilityScan(options = {}) {
           break;
         }
         if (status) status.textContent = `Temporary auth/network failure ${consecutiveAccessFailures}/${BOT_STATUS_ACCESS_FAILURE_PAUSE_AT}. Skipping ${entry.id} without changing its previous Bot Status result.`;
-        await waitForBotStatusPace(Math.max(750,botStatusScanDelayMs()));
+        if (!await waitForBotStatusPace(Math.max(750, botStatusScanDelayMs()))) {
+          stalledScan = true;
+          terminalMessage = `Bot Status pacing stopped responding after ${completed} completed checks. Progress and remaining IDs will be saved for Resume.`;
+          break;
+        }
         continue;
       }
       consecutiveAccessFailures = 0;
@@ -876,7 +906,11 @@ async function runBotAvailabilityScan(options = {}) {
         // check after the deadline or spend longer than necessary pacing.
         const remainingTime = runDeadline - Date.now();
         if (remainingTime <= 0) { timeLimitReached = true; break; }
-        await waitForBotStatusPace(Math.min(adaptiveDelay, remainingTime));
+        if (!await waitForBotStatusPace(Math.min(adaptiveDelay, remainingTime))) {
+          stalledScan = true;
+          terminalMessage = `Bot Status pacing stopped responding after ${completed} completed checks. Progress and remaining IDs will be saved for Resume.`;
+          break;
+        }
       }
     }
   } finally {
@@ -1000,7 +1034,8 @@ async function runBotAvailabilityScan(options = {}) {
       : `${finalStatusText} Save/queue verification failed; review the last durable checkpoint before running another scan.`;
     if (status) status.textContent = safeStatusText;
     if (archivedStatus) archivedStatus.textContent = safeStatusText;
-    const finalWorkerStats = await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_STATS" }).catch(() => null);
+    const finalWorkerStats = await runtimeMessageWithTimeout(
+      { type: "DS_BOT_STATUS_HELPER_STATS" }, 5000).catch(() => null);
     const statsDelta = name => {
       if (!initialWorkerStats?.ok || !finalWorkerStats?.ok) return null;
       const before = Number(initialWorkerStats[name] || 0);
@@ -1028,10 +1063,10 @@ async function runBotAvailabilityScan(options = {}) {
       retries, cacheHits, accessFailures,
       pending: botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit).length,
       durationMs: Date.now() - runStartedAt,
-      stopReason: botAvailabilityStopRequested ? "manual" : timeLimitReached ? "time" : countLimitReached ? "count" : "complete",
+      stopReason: stalledScan ? "stalled" : terminalMessage ? "error" : botAvailabilityStopRequested ? "manual" : timeLimitReached ? "time" : countLimitReached ? "count" : "complete",
       ...outgoingStats,
       totalCandidates, maxBots, maxMinutes,
-      stopped: !!botAvailabilityStopRequested || timeLimitReached || countLimitReached,
+      stopped: !!botAvailabilityStopRequested || !!terminalMessage || timeLimitReached || countLimitReached,
       changesPreserved, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
       stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped
     });
@@ -1047,6 +1082,7 @@ async function runBotAvailabilityScan(options = {}) {
       at: Date.now(), mode, checked: completed,
       ...outgoingStats,
       cancelled: manuallyStopped,
+      interrupted: stalledScan,
       pending: pendingCount,
       deferred: deferredAccessIds.length,
       changed: changesPreserved,

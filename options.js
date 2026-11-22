@@ -303,6 +303,7 @@ setupControlCenterControls();
 const pendingSavedManagerRefreshKinds = new Set();
 let savedManagerRefreshTimer = 0;
 let blockedManagerRefreshTimer = 0;
+let archiveQueueSafetyRefreshTimer = 0;
 
 
 
@@ -312,6 +313,18 @@ let blockedManagerRefreshTimer = 0;
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+
+  // Reuse the existing storage listener to disable Archive send controls when
+  // another Settings tab starts/resumes a scan. This is a cheap queue-only UI
+  // update while scanning; full snapshot hashing stays deferred.
+  if (optionsDataLoaded && activeOptionsTab() === "saved" &&
+      (changes[BOT_STATUS_PAUSED_QUEUE_KEY] || changes["botStatusPausedStaleQueueV1"])) {
+    clearTimeout(archiveQueueSafetyRefreshTimer);
+    archiveQueueSafetyRefreshTimer = setTimeout(() => {
+      archiveQueueSafetyRefreshTimer = 0;
+      refreshArchiveTransferUi().catch(() => {});
+    }, 120);
+  }
 
   const granularSettingChanges = Object.entries(changes || {})
     .map(([key, change]) => [granularSettingName(key), change])

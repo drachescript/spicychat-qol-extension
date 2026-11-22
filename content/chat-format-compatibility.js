@@ -6,63 +6,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (!DS || DS.__chatFormatCompatibilityLoaded) return;
   DS.__chatFormatCompatibilityLoaded = true;
 
-  // This compatibility layer used to replace every raw text node with a span.
-  // On a React-rendered chat that became a repeat unwrap/wrap feedback loop.
-  // CSS corrects only the affected parent color; <em>, <i> and <q> keep their
-  // own native SpicyChat styling. No MutationObserver or per-message writes.
+  // Older builds wrapped raw text to correct inherited dialogue colors.
+  // SpicyChat's native Chat Appearance now owns those colors. Keep a one-time
+  // wrapper cleanup and remove any old fallback stylesheet, without adding
+  // observers, per-message writes, or permanent event handlers.
   const STYLE_ID = "ds-native-dialogue-format-compatibility-style";
   const LEGACY_WRAPPER = "[data-ds-native-format-dialogue-fix='1']";
 
-  function eligible() {
-    return DS.state?.settings?.enabled !== false &&
-      !!DS.isSingleChatPage?.() &&
-      document.documentElement?.getAttribute("data-ds-chat-bubbles") !== "1";
-  }
-
   function clearLegacyWrappers(root = document) {
-    // One-time migration for live tabs that still have old injected wrappers.
+    // Migrate old injected wrappers without inserting new formatting markup.
     root?.querySelectorAll?.(LEGACY_WRAPPER).forEach(node => {
       node.replaceWith(document.createTextNode(node.textContent || ""));
     });
   }
 
   function refresh() {
-    let style = document.getElementById(STYLE_ID);
-    if (!eligible()) {
-      style?.remove();
-      return;
-    }
-    if (style) return;
-    style = document.createElement("style");
-    style.id = STYLE_ID;
-    style.dataset.dsOwned = "1";
-    style.textContent = `
-      /* Fix only genuinely action-colored dialogue parents. Do not force all
-         narration-containing lines to white: V2 user messages share a white
-         parent with a native blue <em class="chat-range--narration">. */
-      html:not(.dark):not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] span.leading-6[class*="text-sky-"]:has(> q) {
-        color: #000 !important;
-      }
-      html.dark:not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] span.leading-6[class*="text-sky-"]:has(> q) {
-        color: #fff !important;
-      }
-      /* Dark Reader may override SpicyChat's blue narration on user messages.
-         Scope this correction to Dark Reader only. Native SpicyChat colors,
-         custom chat bubbles, and bot narration remain untouched. No DOM writes. */
-      html:not(.dark)[data-darkreader-mode]:not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] [data-chat-side="user"]
-        em:is([data-chat-range="narration"], .chat-range--narration) {
-        color: #317eae !important;
-      }
-      html.dark[data-darkreader-mode]:not([data-ds-chat-bubbles="1"])
-        div[id^="message-"] [data-chat-side="user"]
-        em:is([data-chat-range="narration"], .chat-range--narration) {
-        color: #79c8f5 !important;
-      }
-    `;
-    (document.head || document.documentElement).appendChild(style);
+    // SpicyChat's native Chat Appearance now owns text colors, including
+    // per-theme and user-selected dialogue colors. QoL's bubble feature has
+    // its own strictly opt-in styles; a globally applied black/white fallback
+    // conflicts even when the user explicitly disables QoL bubbles.
+    document.getElementById(STYLE_ID)?.remove();
   }
 
   DS.applyChatFormattingCompatibility = refresh;
@@ -74,12 +37,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   } else {
     refresh();
   }
-  window.addEventListener("popstate", () => setTimeout(refresh, 60), true);
-  try {
-    chrome.storage?.onChanged?.addListener?.((changes, area) => {
-      if (area === "local" && DS.hasSettingStorageChanges?.(changes)) refresh();
-    });
-  } catch {}
 })();
 
 }

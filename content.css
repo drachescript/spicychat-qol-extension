@@ -847,6 +847,29 @@ html[data-ds-message-action-bridge="1"] div[style*="box-shadow"]:has(> button[ar
   backdrop-filter: blur(6px) !important;
 }
 
+/* CSS-first full descriptions for normal native listing cards. Applied as soon
+   as settings hydrate, without waiting for the slow card-processing lane.
+   The narrow native card structure prevents chat/message text changes. */
+html[data-ds-full-card-descriptions] div.relative.group.rounded-xl.flex.flex-col > div[class*="px-2"][class*="py-3"]:has(> div[class*="line-clamp"], > div[class*="scrollbar-hide"]),
+html[data-ds-full-card-descriptions] div[class*="rounded-xl"][class*="group"][class*="flex-col"] > div[class*="px-2"][class*="py-3"]:has(> div[class*="line-clamp"], > div[class*="scrollbar-hide"]) {
+  height: auto !important;
+  min-height: 180px !important;
+  overflow: visible !important;
+}
+html[data-ds-full-card-descriptions] div.relative.group.rounded-xl.flex.flex-col > div[class*="px-2"][class*="py-3"] > :is(div[class*="line-clamp"], div[class*="scrollbar-hide"]),
+html[data-ds-full-card-descriptions] div[class*="rounded-xl"][class*="group"][class*="flex-col"] > div[class*="px-2"][class*="py-3"] > :is(div[class*="line-clamp"], div[class*="scrollbar-hide"]) {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  -webkit-box-orient: initial !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+  scrollbar-width: auto !important;
+  white-space: normal !important;
+}
+
 /* Card description expansion */
 .ds-card-long-description {
   align-self: stretch !important;

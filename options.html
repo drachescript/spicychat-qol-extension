@@ -735,7 +735,7 @@ Testing"></textarea></label>
 <p class="hint" id="botAvatarLookupStatus" role="status"></p>
 <a id="botAvatarLookupResult" target="_blank" rel="noopener noreferrer" hidden></a>
 </fieldset>
-<p class="hint">Refresh saved details for tracked bots without opening every profile. Large scans save at Stop or completion, so keep Settings open while scanning.</p>
+<p class="hint">Refresh saved details for tracked bots without opening every profile. Large scans save frequent resume checkpoints; keep Settings open while scanning. Archive uploads stay paused until queued rechecks finish.</p>
 <fieldset class="bot-status-opened-tracking">
 <legend>Opened history tracking</legend>
 <div id="ds-feature-panel-previously-chatted-indicator" data-dsq-feature-panel="previously-chatted-indicator"></div>
@@ -883,7 +883,7 @@ Testing"></textarea></label>
 <fieldset id="botStatusArchiveContributionSettings">
 <legend>Public Archive contribution</legend>
 <label class="row"><input id="enableBotStatusArchiveContribution" type="checkbox"/><span>Allow my saved Bot Status copies to be submitted anonymously to the public SpicyChat Archive for review</span></label>
-<p class="hint">Uploads contain saved bot snapshots, not chats, account details, settings or saved lists. A hashed install ID is used for rate limiting.</p>
+<p class="hint">Uploads contain saved bot snapshots, not chats, account details, settings or saved lists. A hashed install ID is used for rate limiting. Submission is blocked during pending scans; only independently verified results are eligible.</p>
 <div class="button-row" id="botStatusArchiveContributionActions" hidden>
 <button id="submitBotStatusArchiveChanged" type="button">Submit saved copies for review</button>
 <button id="submitBotStatusArchiveAll" type="button" hidden>Submit all saved copies for review</button>
@@ -901,7 +901,7 @@ Testing"></textarea></label>
 </label>
 <div class="button-row"><button id="testBotStatusArchiveEndpoint" type="button">Test endpoint</button><span class="count" id="botStatusArchiveConfigStatus"></span></div>
 <p class="hint" id="botStatusArchiveUploadSummary">Configure the endpoint and private import token to enable archive upload.</p>
-<p class="hint">The import token stays in local extension storage and is never included in settings backups. Uploads do not delete saved copies.</p>
+<p class="hint">The import token stays in local extension storage and is never included in settings backups. Uploads do not delete saved copies. Pending or unverified Bot Status snapshots cannot be sent.</p>
 </fieldset>
 <fieldset id="botAvailabilityResultsCard">
 <legend>Tracked Bot Status Results</legend>
@@ -1641,9 +1641,9 @@ step sister" spellcheck="false"></textarea></label>
 <div id="ds-feature-panel-language-filter" data-dsq-feature-panel="language-filter"></div>
 <section class="card">
 <h2>Text normalization</h2>
-<p class="hint">Uses the same normalization for displayed bot-card titles/descriptions and for filtering, search, and language checks. QoL only changes the local display; it never edits the bot itself.</p>
-<label class="row"><input id="textNormalizationEnabled" type="checkbox"/><span>Normalize text in bot cards, chat messages, filters, search and language detection</span></label>
-<label class="row"><input id="normalizeFancyUnicode" type="checkbox"/><span>Convert fancy Unicode letters and numbers to normal text, including chat messages</span></label>
+<p class="hint">Applies to bot names, titles, cards and related discovery/Lorebook/Rulebook matching. Never rewrites native chat message text, even if punctuation normalization is enabled. RP Format Repair and explicit chat replacement tools have their own settings.</p>
+<label class="row"><input id="textNormalizationEnabled" type="checkbox"/><span>Normalize bot metadata, titles, cards, filters and discovery matching</span></label>
+<label class="row"><input id="normalizeFancyUnicode" type="checkbox"/><span>Convert fancy Unicode letters and numbers to normal text in enabled scopes</span></label>
 <label class="row"><input id="normalizePunctuation" type="checkbox"/><span>Normalize curly quotes, long dashes, dots, and similar punctuation</span></label>
 <label class="row"><input id="normalizeInvisibleCharacters" type="checkbox"/><span>Remove invisible/zero-width characters while matching</span></label>
 <label class="row"><input id="normalizeDecorativeSymbols" type="checkbox"/><span>Remove decorative ornaments (stars, borders, symbols), keeping emojis</span></label>

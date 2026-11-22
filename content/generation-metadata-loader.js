@@ -88,8 +88,9 @@ if (!(() => { try {
   }
 
   function applySettings(settings) {
-    const toolkitDeferred = !!settings?.saiToolkitCompatibility && !!window.__DSQ_SAI_TOOLKIT_DETECTED__;
-    setEnabled(!!settings?.enabled && metadataRequested(settings) && (!toolkitDeferred || !!settings?.enableContextWindowWarning));
+    // Capture generation responses whenever QoL requests metadata or context
+    // diagnostics, regardless of which extension draws the visual statistics.
+    setEnabled(!!settings?.enabled && metadataRequested(settings));
   }
 
 

@@ -1445,7 +1445,8 @@ async function prepareBotStatusHelper({ forceOwnHelper = true, timeoutMs = 17000
 }
 
 async function releaseBotStatusHelper() {
-  try { await runtimeMessage({ type: "DS_BOT_STATUS_HELPER_RELEASE" }); } catch {}
+  // Helper cleanup must not block the durable final queue/results save.
+  try { await runtimeMessageWithTimeout({ type: "DS_BOT_STATUS_HELPER_RELEASE" }, 5000); } catch {}
 }
 
 async function checkBotAvailability(entry, options = {}) {

@@ -318,7 +318,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const globalEnabled = DS.state?.globalEnabledSetting !== false;
     DS.state.tabQolPaused = globalEnabled && !enabled;
-    if (DS.state?.settings) DS.state.settings.enabled = globalEnabled && !!enabled;
+    if (DS.state?.settings) {
+      DS.state.settings.enabled = globalEnabled && !!enabled;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!DS.state.settings.enabled && !!DS.state.settings.expandLongCardDescriptions);
+    }
     DS.state.disabledCleanupDone = false;
     DS.runtimeLog?.("info", "tab-control", enabled ? "QoL enabled for this tab" : "QoL paused for this tab");
     if (!enabled) DS.pauseQolTabRuntime?.();
@@ -888,24 +891,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function rawStorageGet(keys) {
     return new Promise(resolve => {
+      let settled = false;
+      const done = result => {
+        if (settled) return;
+        settled = true;
+        resolve(result || {});
+      };
       try {
-        if (!DS.isExtensionContextValid()) {
-          resolve({});
-          return;
-        }
-
-        chrome.storage.local.get(keys, result => {
-          try {
-            if (chrome.runtime.lastError) {
-              resolve({});
-              return;
-            }
-          } catch {}
-          resolve(result || {});
+        if (!DS.isExtensionContextValid()) return done({});
+        // Chrome, Firefox and the Android compatibility shim may return a
+        // callback, a Promise, or both. Only the first reply is applied.
+        const pending = chrome.storage.local.get(keys, result => {
+          try { if (chrome.runtime?.lastError) return done({}); } catch {}
+          done(result);
         });
+        if (pending && typeof pending.then === "function") pending.then(done, () => done({}));
       } catch (error) {
         console.warn(`[${DS.EXT_NAME}] storage get skipped`, error);
-        resolve({});
+        done({});
       }
     });
   }
@@ -976,16 +979,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         let localOk = true;
         if (Object.keys(localPayload).length) {
           localOk = await new Promise(resolve => {
+            let settled = false;
+            const done = ok => { if (settled) return; settled = true; resolve(ok); };
             try {
-              chrome.storage.local.set(localPayload, () => {
-                try {
-                  if (chrome.runtime.lastError) return resolve(false);
-                } catch {}
-                resolve(true);
+              const pending = chrome.storage.local.set(localPayload, () => {
+                try { if (chrome.runtime?.lastError) return done(false); } catch {}
+                done(true);
               });
-            } catch {
-              resolve(false);
-            }
+              if (pending && typeof pending.then === "function") pending.then(() => done(true), () => done(false));
+            } catch { done(false); }
           });
         }
         return !!(largeOk && localOk);
@@ -1042,14 +1044,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const localKeys = largeSupported ? localStorageKeysWithoutLarge(keys) : keys;
     const requested = typeof localKeys === "string" ? [localKeys] : (Array.isArray(localKeys) ? localKeys : null);
     const wantsSettings = keys == null || requested?.includes("settings");
+    // Prefetch previously discovered granular settings in the same first
+    // storage request. Re-read the authoritative index, then request only new
+    // keys absent from that first reply (e.g. another tab added a feature).
+    const prefetchedSettingsKeys = wantsSettings && keys != null
+      ? [...(DS.state.settingsIndex || [])].map(DS.settingStorageKey)
+      : [];
     const firstKeys = keys == null
       ? null
-      : [...new Set([...(requested || []), ...(wantsSettings ? [DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
+      : [...new Set([...(requested || []), ...(wantsSettings ? [DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY] : []), ...prefetchedSettingsKeys])];
     const result = await rawStorageGet(firstKeys);
     if (wantsSettings) {
       const index = [...new Set((Array.isArray(result[DS.GRANULAR_SETTINGS_INDEX_KEY]) ? result[DS.GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
       DS.state.settingsIndex = new Set(index);
-      const granular = keys == null || !index.length ? result : await rawStorageGet(index.map(DS.settingStorageKey));
+      const missingKeys = keys == null ? [] : index.map(DS.settingStorageKey).filter(key => !firstKeys.includes(key));
+      const granular = missingKeys.length ? { ...result, ...(await rawStorageGet(missingKeys)) } : result;
       const hadLegacy = result.settings && typeof result.settings === "object";
       const merged = hadLegacy ? { ...result.settings } : {};
       let found = false;
@@ -1828,6 +1837,9 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
     const runtimeSettings = DS.applyPlatformCompatibility(settings);
     DS.applyQolTabEnabledOverride?.(runtimeSettings);
     DS.state.settings = runtimeSettings;
+    // CSS handles normal card descriptions at first paint after settings load.
+    // No card traversal, observer or extra timer is needed for this preference.
+    document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!runtimeSettings.enabled && !!runtimeSettings.expandLongCardDescriptions);
 
     DS.state.openedChats = new Set(
       Array.isArray(result[DS.OPENED_KEY])
@@ -1987,6 +1999,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       const next = DS.applyPlatformCompatibility(persisted);
       DS.applyQolTabEnabledOverride?.(next);
       DS.state.settings = next;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!next.enabled && !!next.expandLongCardDescriptions);
       DS.state.settings.oocTemplates = DS.normalizeOocTemplates(
         changes[DS.OOC_TEMPLATES_KEY]?.newValue ?? rawSettings.oocTemplates ?? DS.state.settings.oocTemplates
       );
@@ -2006,6 +2019,7 @@ DS.normalizeOocTemplates = function normalizeOocTemplates(value) {
       const next = DS.applyPlatformCompatibility(persisted);
       DS.applyQolTabEnabledOverride?.(next);
       DS.state.settings = next;
+      document.documentElement?.toggleAttribute?.("data-ds-full-card-descriptions", !!next.enabled && !!next.expandLongCardDescriptions);
       rebuildBlockedStateFromCache();
       refreshLookups = true;
       cardFilterStateChanged = true;

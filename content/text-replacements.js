@@ -101,7 +101,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .map(line => `${line} => `).join("\n");
   }
   function combinedDisplayRules(settings) {
-    return [settings.enableChatTextReplacements ? settings.chatTextReplacementRules : "", selectedPresetRules(settings), mutedRules(settings)]
+    return [settings.enableChatTextReplacements ? settings.chatTextReplacementRules : "", settings.enableChatTextReplacements ? selectedPresetRules(settings) : "", mutedRules(settings)]
       .filter(Boolean).join("\n");
   }
   function ensurePresetSelector(settings) {
@@ -626,6 +626,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (replacementObserverActive) {
       replacementObserver.disconnect();
       replacementObserverActive = false;
+      replacementObservedList = null;
     }
     clearTimeout(observerTimer);
     observerTimer = null;
@@ -663,9 +664,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    if (!replacementObserverActive) {
-      replacementObserver.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+    const activeList = document.querySelector('[data-testid="ChatMessageList"]');
+    if (activeList && (!replacementObserverActive || replacementObservedList !== activeList)) {
+      replacementObserver.disconnect();
+      replacementObserver.observe(activeList, { childList: true, characterData: true, subtree: true });
+      replacementObservedList = activeList;
       replacementObserverActive = true;
+    } else if (!activeList && replacementObserverActive) {
+      replacementObserver.disconnect();
+      replacementObserverActive = false;
+      replacementObservedList = null;
     }
     DS.state.chatTextReplacementsWasActive = true;
     const signature = replacementSignature(settings);
@@ -673,7 +681,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const signatureChanged = signature !== lastSignature || initializedRoute !== route;
     lastSignature = signature;
     initializedRoute = route;
-    const mode = settings.enableChatMutedWords || censorRules.length > 0 || !!selectedPresetRules(settings)
+    const mode = settings.enableChatMutedWords || censorRules.length > 0 || (settings.enableChatTextReplacements && !!selectedPresetRules(settings))
       ? "display" : (settings.chatTextReplacementMode === "save" ? "save" : "display");
 
     if (mode === "save" && signatureChanged) restoreDisplayChanges();
@@ -720,6 +728,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   let observerTimer = null;
   let replacementObserverActive = false;
+  let replacementObservedList = null;
   const replacementObserver = new MutationObserver(mutations => {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || (!settings.enableChatTextReplacements && !settings.enableChatMutedWords && !settings.enableChatWordCensor) || !DS.isSingleChatPage?.()) return;

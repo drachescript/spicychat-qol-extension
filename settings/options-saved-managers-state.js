@@ -183,8 +183,8 @@ const BOT_STATUS_PAUSED_QUEUE_KEY = "botStatusPausedQueueV1";
 const BOT_STATUS_ACCESS_FAILURE_PAUSE_AT = 3;
 // Persist both completed data AND unprocessed IDs. A tab/extension reload does
 // not run finally handlers, so crash recovery cannot rely on the Stop button.
-const BOT_STATUS_PROGRESS_EVERY = 50;
-const BOT_STATUS_PROGRESS_MS = 30_000;
+const BOT_STATUS_PROGRESS_EVERY = 10;
+const BOT_STATUS_PROGRESS_MS = 10_000;
 
 
 
