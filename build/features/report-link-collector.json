@@ -3,7 +3,9 @@
   "primary": "content/report-link-collector.js",
   "type": "content",
   "label": "Report Link Collector",
-  "dependencies": [],
+  "dependencies": [
+    "cards"
+  ],
   "settingsKeys": [
     "enableReportLinkCollector"
   ],
