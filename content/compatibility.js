@@ -18,25 +18,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let detectionDeadlineTimer = null;
   let detectionAttemptFinished = false;
   let presenceSaved = false;
-
-  function metadataRequested(settings) {
-    return !!(
-      settings?.showGenerationMetadata ||
-      settings?.showMessageTimestamps ||
-      settings?.showGenerationModel ||
-      settings?.showGenerationElapsed ||
-      settings?.showGenerationSettings
-    );
-  }
+  const featureCache = new Map();
+  let lastPresenceCheckAt = 0;
+  let cachedPresence = false;
 
   function hasSaiToolkitMarker() {
+    // Current v1.3.1 markers; do not use retired WYSIWYG/classic-style UI.
     return !!document.querySelector([
+      "#toolkit-modal-root",
       "#sai-toolkit-sidebar-btn",
       "#sai-toolkit-mobile-btn",
       "#sai-toolkit-button-css",
       "[id^='sai-toolkit-']",
-      ".sai-wysiwyg-editor",
       ".generation-stats[data-version-id]",
+      ".generation-stats",
       "#profile-controls",
       "#profile-controls-placeholder",
       "button[aria-label='SAI-Toolkit-button']",
@@ -44,62 +39,84 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     ].join(", "));
   }
 
+  function toolkitFeatureCheckbox(feature) {
+    // Toolkit v1.3.1's settings dialog uses an open shadow root. It can be
+    // absent on normal pages: that means unknown, NOT disabled. Never read the
+    // other extension's private storage or modify its settings.
+    const shadow = document.getElementById("toolkit-modal-root")?.shadowRoot;
+    const selectors = {
+      "generation-metadata": ["#showstats-checkbox", "#showtimestamp-checkbox", "#show-message-ids-checkbox"],
+      "home-for-you": ["#hideforyou-checkbox"],
+      "generation-profiles": ["#generation-profiles-checkbox"],
+      "failed-message-helper": ["#message-recovery-checkbox"]
+    };
+    const controls = (selectors[feature] || []).map(sel => shadow?.querySelector(sel)).filter(Boolean);
+    if (!controls.length) return "unknown";
+    return controls.some(input => input.checked) ? "enabled" : "disabled";
+  }
+
   async function rememberPresence() {
     if (presenceSaved || !DS.isExtensionContextValid?.()) return;
     presenceSaved = true;
-
-    await DS.storageSet?.({
-      [PRESENCE_KEY]: {
-        detected: true,
-        detectedAt: Date.now(),
-        url: location.href
-      }
-    });
+    await DS.storageSet?.({ [PRESENCE_KEY]: {
+      detected: true, detectedAt: Date.now(), url: location.href
+    } });
   }
 
   DS.detectSaiToolkit = function detectSaiToolkit({ persist = true } = {}) {
-    const detected = hasSaiToolkitMarker();
+    const now = Date.now();
+    if (!lastPresenceCheckAt || now - lastPresenceCheckAt >= 300) {
+      cachedPresence = hasSaiToolkitMarker();
+      lastPresenceCheckAt = now;
+    }
+    const detected = cachedPresence;
     DS.state.saiToolkitDetected = detected;
     window.__DSQ_SAI_TOOLKIT_DETECTED__ = detected;
-
-    const settings = DS.state?.settings || {};
-    // Toolkit owns the overlapping generation-stat display. QoL may still
-    // capture metadata for its *separate* optional context window warning.
-    const captureForContext = settings.enableContextWindowWarning === true || settings.nativeMemoryQualityProbe === true;
-    const metadataEnabled = !!settings.enabled && (metadataRequested(settings) || captureForContext) &&
-      (!(settings.saiToolkitCompatibility !== false && detected) || captureForContext);
-    try { window.__DSQ_SET_GENERATION_METADATA_ENABLED__?.(metadataEnabled); } catch {}
-
-    if (detected && persist) {
-      rememberPresence().catch(() => {});
-    }
-
+    // Metadata network capture is independent of Toolkit's *visual* ownership.
+    // The document-start loader owns the bridge's enabled state; do not turn
+    // it off when a Toolkit DOM marker arrives after page initialization.
+    if (detected && persist) rememberPresence().catch(() => {});
     return detected;
   };
 
-  DS.shouldDeferToSaiToolkit = function shouldDeferToSaiToolkit(feature) {
-    const settings = DS.state?.settings || {};
+  DS.getSaiToolkitFeatureStatus = function getSaiToolkitFeatureStatus(feature) {
     const name = String(feature || "");
-    if (settings.saiToolkitCompatibility === false) return false;
-    if (!DEFERRED_FEATURES.has(name)) return false;
-    if (DS.detectSaiToolkit?.({ persist: true }) !== true) return false;
+    if (!DEFERRED_FEATURES.has(name)) return "unknown";
+    const cached = featureCache.get(name);
+    if (cached && Date.now() - cached.at < 300) return cached.value;
+    if (DS.detectSaiToolkit?.({ persist: false }) !== true) {
+      featureCache.set(name, { value: "absent", at: Date.now() });
+      return "absent";
+    }
+    let value = "unknown";
 
-    // Toolkit exposes the active Message Recovery flag to its page-context
-    // interceptor through SpicyChat localStorage. Only defer QoL's helper when
-    // Toolkit recovery is actually enabled, not merely because Toolkit exists.
+    // The page-context recovery hook in Toolkit v1.3.1 publishes a reliable
+    // enabled flag here, and removes it on disable. A visible settings toggle
+    // is useful when first opening the dialog but is never required.
+    const visibleControl = toolkitFeatureCheckbox(name);
     if (name === "failed-message-helper") {
-      try { return localStorage.getItem("sai_message_recovery_enabled") === "true"; }
-      catch { return false; }
+      // Toolkit v1.3.1 removes this key when disabled; absence before the
+      // interceptor initializes must therefore remain unknown, not guessed.
+      if (visibleControl !== "unknown") value = visibleControl;
+      else {
+        try {
+          if (localStorage.getItem("sai_message_recovery_enabled") === "true") value = "enabled";
+        } catch {}
+      }
+    } else if (visibleControl !== "unknown") {
+      value = visibleControl;
+    } else if (name === "generation-metadata" && document.querySelector(".generation-stats")) {
+      value = "enabled";
+    } else if (name === "generation-profiles" && document.querySelector("#profile-controls:not([hidden])")) {
+      value = "enabled";
     }
+    featureCache.set(name, { value, at: Date.now() });
+    return value;
+  };
 
-    // Toolkit's old Generation Profiles controls are now optional legacy UI.
-    // Only yield when they are actually on screen, rather than hiding QoL's
-    // independent optional controls merely because Toolkit is installed.
-    if (name === "generation-profiles") {
-      return !!document.querySelector("#profile-controls, #profile-controls-placeholder");
-    }
-
-    return true;
+  DS.shouldDeferToSaiToolkit = function shouldDeferToSaiToolkit(feature) {
+    if (DS.state?.settings?.saiToolkitCompatibility === false) return false;
+    return DS.getSaiToolkitFeatureStatus?.(feature) === "enabled";
   };
 
   function stopSaiToolkitDetection() {

@@ -39,6 +39,46 @@ function archiveHealthUrl(endpoint) {
   }
 }
 
+// An interrupted/resumable Bot Status scan means saved snapshots may not yet
+// reflect the newest API results. Fail closed for BOTH private and public
+// Archive routes; a hidden/old Settings button is not an authorization bypass.
+// This is one cheap local-storage read, only on an Archive UI refresh or send.
+async function archiveTransferSafety() {
+  if (botAvailabilityScanRunning) {
+    return { blocked: true, reason: "Bot Status scan running. Stop or complete it and finish pending rechecks before sending Archive updates.", heldIds: new Set() };
+  }
+  const keys = [BOT_STATUS_PAUSED_QUEUE_KEY, "botStatusPausedStaleQueueV1"];
+  const response = await storageGetChecked(keys);
+  if (!response?.ok) {
+    return { blocked: true, reason: "Bot Status resume queues could not be verified. Archive sending is disabled until storage can be checked.", heldIds: new Set() };
+  }
+  const queues = keys.map(key => response.data?.[key]).filter(value => value && typeof value === "object");
+  const active = queues.some(queue => queue.phase === "running");
+  const pendingIds = new Set();
+  const heldIds = new Set();
+  for (const queue of queues) {
+    for (const id of (Array.isArray(queue.ids) ? queue.ids : [])) {
+      const clean = String(id || "").trim().toLowerCase();
+      if (BOT_ID_RE.test(clean)) pendingIds.add(clean);
+    }
+    for (const item of (Array.isArray(queue.heldIds) ? queue.heldIds : [])) {
+      const clean = String(item?.id || "").trim().toLowerCase();
+      if (BOT_ID_RE.test(clean)) heldIds.add(clean);
+    }
+  }
+  const blocked = active || pendingIds.size > 0;
+  const reason = blocked
+    ? `Archive sending paused: ${pendingIds.size.toLocaleString()} Bot Status rechecks still pending${active ? " (scan is running or was interrupted)" : ""}. Finish/Resume the scan first; saved copies have not been deleted.`
+    : "";
+  return { blocked, reason, heldIds, pending: pendingIds.size };
+}
+
+async function requireArchiveTransferSafe() {
+  const safety = await archiveTransferSafety();
+  if (safety.blocked) throw new Error(safety.reason);
+  return safety;
+}
+
 function archiveUploadComparable(record) {
   const snapshot = record?.snapshot && typeof record.snapshot === "object" ? record.snapshot : {};
   const status = snapshot.statusObservation && typeof snapshot.statusObservation === "object" ? snapshot.statusObservation : {};
@@ -72,6 +112,16 @@ function fastArchiveFingerprint(record) {
   return `${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
 }
 
+// Never submit an unverified/inconclusive Bot Status result as a fresh
+// Archive observation. Keep the local copy untouched for a later scan.
+function archiveUploadStatusVerified(status) {
+  const checkedAt = Number(status?.checkedAt || 0);
+  if (!Number.isFinite(checkedAt) || checkedAt <= 0) return false;
+  if (status?.status === "available") return Number(status.httpStatus || 0) === 200;
+  if (status?.status === "unavailable") return Number(status.unavailableConfirmedAt || 0) > 0;
+  return false; // Unknown, restricted, missing and first empty-200 candidates.
+}
+
 function archiveUploadSavedCopyRecord(entry, availability) {
   const snapshot = botStatusArchiveExportRecord(entry, availability);
   const savedMs = Number(entry?.lastSavedAt) || Number(snapshot?.snapshotAt) || Number(entry?.firstSavedAt) || 0;
@@ -82,12 +132,22 @@ function archiveUploadSavedCopyRecord(entry, availability) {
   };
 }
 
-async function currentArchiveUploadRecords({ updateProgress = false, progressElementId = "botStatusArchiveUploadStatus" } = {}) {
+async function currentArchiveUploadRecords({ updateProgress = false, progressElementId = "botStatusArchiveUploadStatus", excludedIds = null } = {}) {
   await ensureSavedListsDataLoaded();
   const archive = normalizeBotArchive(botArchiveState);
   const availability = normalizeBotAvailability(botAvailabilityState);
+  let excludedCount = 0;
+  const skippedIds = new Set();
   const entries = Object.values(archive.meta || {})
-    .filter(botStatusArchiveExportSourceAllowed)
+    .filter(entry => {
+      if (!botStatusArchiveExportSourceAllowed(entry)) return false;
+      if (excludedIds?.has(String(entry.id || "").toLowerCase()) || !archiveUploadStatusVerified(availability.meta?.[entry.id])) {
+        excludedCount += 1;
+        skippedIds.add(String(entry.id || "").toLowerCase());
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
   const records = [];
   const fingerprints = {};
@@ -105,7 +165,7 @@ async function currentArchiveUploadRecords({ updateProgress = false, progressEle
       await nextUiFrame();
     }
   }
-  return { records, fingerprints };
+  return { records, fingerprints, excludedCount, skippedIds };
 }
 
 async function gzipArchiveUploadRecords(records, exportedAt, chunk = null, extraHeader = null) {
@@ -263,7 +323,7 @@ async function postArchiveSubmission(blob, { exportedAt, filename }) {
     : { ok: true, submissionId: "", status: "pending", bytes: blob.size, compressed: true };
 }
 
-async function refreshArchiveContributionUi(prepared = null) {
+async function refreshArchiveContributionUi(prepared = null, safety = null) {
   const config = await loadArchiveContributionConfig();
   const toggle = $("enableBotStatusArchiveContribution");
   const actions = $("botStatusArchiveContributionActions");
@@ -277,7 +337,14 @@ async function refreshArchiveContributionUi(prepared = null) {
     return;
   }
 
-  const { records, fingerprints } = prepared || await currentArchiveUploadRecords();
+  const gate = safety || await archiveTransferSafety();
+  if (gate.blocked) {
+    if (sendChanged) { sendChanged.disabled = true; sendChanged.textContent = "Archive submission paused — finish Bot Status scan"; sendChanged.title = gate.reason; }
+    if (sendAll) { sendAll.disabled = true; sendAll.title = gate.reason; }
+    if (summary) summary.textContent = gate.reason;
+    return;
+  }
+  const { records, fingerprints, excludedCount } = prepared || await currentArchiveUploadRecords({ excludedIds: gate.heldIds });
   const previous = config.state.fingerprints || {};
   const changed = records.filter(record => previous[record.botId] !== fingerprints[record.botId]).length;
   const first = !config.state.lastSubmissionAt || !Object.keys(previous).length;
@@ -301,16 +368,21 @@ async function refreshArchiveContributionUi(prepared = null) {
       const state = config.state.lastStatus || "pending";
       summary.textContent = `Last submission: ${last} · ${config.state.lastSentCount.toLocaleString()} copies · ${state}${ids} · ${changed.toLocaleString()} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`;
     }
+    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified or held copies excluded until checked.`;
   }
 }
 
 async function refreshArchiveTransferUi() {
-  const [admin, contribution] = await Promise.all([loadArchiveUploadConfig(), loadArchiveContributionConfig()]);
-  const needsPrepared = (!!admin.endpoint && !!admin.token) || contribution.enabled;
-  const prepared = needsPrepared ? await currentArchiveUploadRecords() : null;
+  const [admin, contribution, safety] = await Promise.all([
+    loadArchiveUploadConfig(), loadArchiveContributionConfig(), archiveTransferSafety()
+  ]);
+  // A large pending scan should be a quick status update, not a 10k-snapshot
+  // normalization/fingerprint pass on every checkpoint or Settings refresh.
+  const needsPrepared = !safety.blocked && ((!!admin.endpoint && !!admin.token) || contribution.enabled);
+  const prepared = needsPrepared ? await currentArchiveUploadRecords({ excludedIds: safety.heldIds }) : null;
   await Promise.all([
-    refreshArchiveUploadUi(prepared),
-    refreshArchiveContributionUi(prepared)
+    refreshArchiveUploadUi(prepared, safety),
+    refreshArchiveContributionUi(prepared, safety)
   ]);
 }
 
@@ -329,9 +401,10 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
   try {
     const config = await loadArchiveContributionConfig();
     if (!config.enabled) throw new Error("Enable public Archive contribution first.");
-    setStatus("Preparing saved copies…");
-    const { records, fingerprints } = await currentArchiveUploadRecords({ updateProgress: true, progressElementId: "botStatusArchiveContributionStatus" });
-    if (!records.length) throw new Error("No public / Bot Status saved copies are available to submit.");
+    const safety = await requireArchiveTransferSafe();
+    setStatus("Preparing verified saved copies…");
+    const { records, fingerprints, excludedCount, skippedIds } = await currentArchiveUploadRecords({ updateProgress: true, progressElementId: "botStatusArchiveContributionStatus", excludedIds: safety.heldIds });
+    if (!records.length) throw new Error(`${excludedCount.toLocaleString()} copies are unverified/held. Complete Bot Status verification before Archive sending.`);
     const previous = config.state.fingerprints || {};
     const firstSubmission = !config.state.lastSubmissionAt || !Object.keys(previous).length;
     const selected = forceAll || firstSubmission
@@ -360,6 +433,7 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
       let blob = chunk.blob;
       if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length }, extraHeader);
       if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe submission limit.`);
+      await requireArchiveTransferSafe(); // Recheck durable queues immediately before each network POST.
       setStatus(`Submitting bundle ${i + 1} / ${chunks.length} · ${chunk.records.length.toLocaleString()} saved copies…`);
       const result = await postArchiveSubmission(blob, {
         exportedAt,
@@ -371,7 +445,7 @@ async function sendBotStatusArchiveContribution({ forceAll = false } = {}) {
       if (["pending", "approved", "rejected", "queued"].includes(state)) finalStatus = state;
     }
 
-    const currentIds = new Set(records.map(record => record.botId));
+    const currentIds = new Set([...records.map(record => record.botId), ...skippedIds]);
     const nextFingerprints = forceAll || firstSubmission ? {} : { ...previous };
     for (const id of Object.keys(nextFingerprints)) if (!currentIds.has(id)) delete nextFingerprints[id];
     for (const record of selected) nextFingerprints[record.botId] = fingerprints[record.botId];
@@ -426,7 +500,7 @@ async function saveArchiveUploadConfig({ quiet = false } = {}) {
   return true;
 }
 
-async function refreshArchiveUploadUi(prepared = null) {
+async function refreshArchiveUploadUi(prepared = null, safety = null) {
   const config = await loadArchiveUploadConfig();
   const endpointInput = $("botStatusArchiveEndpoint");
   const tokenInput = $("botStatusArchiveToken");
@@ -444,7 +518,14 @@ async function refreshArchiveUploadUi(prepared = null) {
     return;
   }
 
-  const { records, fingerprints } = prepared || await currentArchiveUploadRecords();
+  const gate = safety || await archiveTransferSafety();
+  if (gate.blocked) {
+    if (sendChanged) { sendChanged.disabled = true; sendChanged.textContent = "Archive upload paused — finish Bot Status scan"; sendChanged.title = gate.reason; }
+    if (sendAll) { sendAll.disabled = true; sendAll.title = gate.reason; }
+    if (summary) summary.textContent = gate.reason;
+    return;
+  }
+  const { records, fingerprints, excludedCount } = prepared || await currentArchiveUploadRecords({ excludedIds: gate.heldIds });
   const previous = config.state.fingerprints || {};
   const changed = records.filter(record => previous[record.botId] !== fingerprints[record.botId]).length;
   const first = !config.state.lastUploadAt || !Object.keys(previous).length;
@@ -462,6 +543,7 @@ async function refreshArchiveUploadUi(prepared = null) {
     summary.textContent = config.state.lastUploadAt
       ? `Last archive upload: ${last} · ${config.state.lastSnapshotCount || config.state.lastSentCount} copies at that snapshot · ${changed} saved cop${changed === 1 ? "y has" : "ies have"} changed since.`
       : `${records.length} saved copies ready for the first archive upload.`;
+    if (excludedCount) summary.textContent += ` · ${excludedCount.toLocaleString()} unverified or held copies excluded until checked.`;
   }
 }
 
@@ -498,9 +580,10 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
     await saveArchiveUploadConfig({ quiet: true });
     const config = await loadArchiveUploadConfig();
     if (!config.endpoint || !config.token) throw new Error("Configure both the Archive endpoint and import token first.");
-    setStatus("Preparing saved copies…");
-    const { records, fingerprints } = await currentArchiveUploadRecords({ updateProgress: true });
-    if (!records.length) throw new Error("No public / Bot Status saved copies are available to upload.");
+    const safety = await requireArchiveTransferSafe();
+    setStatus("Preparing verified saved copies…");
+    const { records, fingerprints, excludedCount, skippedIds } = await currentArchiveUploadRecords({ updateProgress: true, excludedIds: safety.heldIds });
+    if (!records.length) throw new Error(`${excludedCount.toLocaleString()} copies are unverified/held. Complete Bot Status verification before Archive sending.`);
     const previous = config.state.fingerprints || {};
     const firstUpload = !config.state.lastUploadAt || !Object.keys(previous).length;
     const selected = forceAll || firstUpload
@@ -528,6 +611,7 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
       let blob = chunk.blob;
       if (chunks.length > 1) blob = await gzipArchiveUploadRecords(chunk.records, exportedAt, { index: i + 1, total: chunks.length });
       if (blob.size > ARCHIVE_UPLOAD_SOFT_MAX_BYTES) throw new Error(`Chunk ${i + 1} is still above the 60 MB safe upload limit.`);
+      await requireArchiveTransferSafe(); // A stale UI or new scan cannot bypass this check.
       setStatus(`Uploading bundle ${i + 1} / ${chunks.length} · ${chunk.records.length} saved copies…`);
       const result = await postArchiveUpload(config.endpoint, config.token, blob, {
         exportedAt,
@@ -537,7 +621,7 @@ async function sendBotStatusArchiveToArchive({ forceAll = false } = {}) {
       if (result?.queueId) queueIds.push(String(result.queueId));
     }
 
-    const currentIds = new Set(records.map(record => record.botId));
+    const currentIds = new Set([...records.map(record => record.botId), ...skippedIds]);
     const nextFingerprints = forceAll || firstUpload ? {} : { ...previous };
     for (const id of Object.keys(nextFingerprints)) if (!currentIds.has(id)) delete nextFingerprints[id];
     for (const record of selected) nextFingerprints[record.botId] = fingerprints[record.botId];

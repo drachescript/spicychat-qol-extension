@@ -606,13 +606,13 @@ function collectSavedBotsHubEntries() {
   });
 }
 
-function savedBotsHubFilteredEntries() {
+function savedBotsHubFilteredEntries(allEntries = null) {
   const queryTerms = splitManagerSearchTerms($("savedBotsHubSearch")?.value || savedBotsHubUiState.query || "");
   const source = value("savedBotsHubSourceFilter", "all");
   const overlap = value("savedBotsHubOverlapFilter", "all");
   const sortMode = value("savedBotsHubSortMode", "recent");
 
-  const filtered = collectSavedBotsHubEntries().filter(entry => {
+  const filtered = (allEntries || collectSavedBotsHubEntries()).filter(entry => {
     if (source !== "all" && !entry.sources.includes(source)) return false;
     if (overlap === "multiple" && entry.sources.length < 2) return false;
     if (overlap === "single" && entry.sources.length !== 1) return false;
@@ -779,7 +779,7 @@ function renderSavedBotsHub() {
   const all = collectSavedBotsHubEntries();
   const knownIds = new Set(all.map(entry => entry.id).filter(Boolean));
   for (const id of [...savedBotsHubUiState.selected]) if (!knownIds.has(id)) savedBotsHubUiState.selected.delete(id);
-  const entries = savedBotsHubFilteredEntries();
+  const entries = savedBotsHubFilteredEntries(all);
   let limit = Number(savedBotsHubUiState.visible || 10);
   if (!Number.isFinite(limit) || limit < 1) limit = 10;
   const shown = entries.slice(0, limit);
@@ -791,8 +791,13 @@ function renderSavedBotsHub() {
 
   const stats = $("savedBotsHubStats");
   if (stats) {
-    const count = source => all.filter(entry => entry.sources.includes(source)).length;
-    const overlaps = all.filter(entry => entry.sources.length > 1).length;
+    const counts = { favorite: 0, later: 0, recent: 0, organizer: 0, opened: 0, blocked: 0, notInterested: 0, creatorWatch: 0 };
+    let overlaps = 0;
+    for (const entry of all) {
+      if (entry.sources.length > 1) overlaps += 1;
+      for (const source of entry.sources) if (Object.hasOwn(counts, source)) counts[source] += 1;
+    }
+    const count = source => counts[source] || 0;
     stats.replaceChildren(
       makeElement("span", { text: `${all.length} unique` }),
       makeElement("span", { text: `${count("favorite")} Favorite` }),

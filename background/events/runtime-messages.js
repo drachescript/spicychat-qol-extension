@@ -478,7 +478,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_QUICK_MORE_LIKE_BOT") {
-    runQuickMoreLikeBot({ ...message, sourceTabId: tabId })
+    queueQuickMoreLikeBot({ ...message, sourceTabId: tabId })
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, status: "more-like-worker-error", error: error?.message || String(error) }));
     return true;

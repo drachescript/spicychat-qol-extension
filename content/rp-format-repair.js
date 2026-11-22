@@ -661,8 +661,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return node.matches(MESSAGE_SELECTOR) ? node : node.closest(MESSAGE_SELECTOR);
   }
 
+  let observedMessageList = null;
   function ensureObserver() {
-    if (observer) return;
+    const messageList = document.querySelector('[data-testid="ChatMessageList"]');
+    if (!messageList) { observer?.disconnect(); observedMessageList = null; return; }
+    if (observer && observedMessageList === messageList) return;
+    observer?.disconnect();
     observer = new MutationObserver(mutations => {
       const s = settings();
       if (!s.enabled || !s.enableRpFormatRepair || !DS.isSingleChatPage?.()) return;
@@ -684,12 +688,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
       }
     });
-    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+    observer.observe(messageList, { subtree: true, childList: true, characterData: true });
+    observedMessageList = messageList;
   }
 
   function disconnectObserver() {
     observer?.disconnect();
     observer = null;
+    observedMessageList = null;
     pendingMessages.clear();
     clearTimeout(deferredFlushTimer);
     deferredFlushTimer = null;
@@ -737,7 +743,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const route = String(location.pathname || "");
     const force = nextHash !== lastSettingsHash || initializedRoute !== route;
     lastSettingsHash = nextHash;
-    ensureObserver();
 
     // The module observer handles individual message edits/streaming after the
     // initial pass. Avoid walking every old message again on each global QoL run.

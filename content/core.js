@@ -888,24 +888,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function rawStorageGet(keys) {
     return new Promise(resolve => {
+      let settled = false;
+      const done = result => {
+        if (settled) return;
+        settled = true;
+        resolve(result || {});
+      };
       try {
-        if (!DS.isExtensionContextValid()) {
-          resolve({});
-          return;
-        }
-
-        chrome.storage.local.get(keys, result => {
-          try {
-            if (chrome.runtime.lastError) {
-              resolve({});
-              return;
-            }
-          } catch {}
-          resolve(result || {});
+        if (!DS.isExtensionContextValid()) return done({});
+        // Chrome, Firefox and the Android compatibility shim may return a
+        // callback, a Promise, or both. Only the first reply is applied.
+        const pending = chrome.storage.local.get(keys, result => {
+          try { if (chrome.runtime?.lastError) return done({}); } catch {}
+          done(result);
         });
+        if (pending && typeof pending.then === "function") pending.then(done, () => done({}));
       } catch (error) {
         console.warn(`[${DS.EXT_NAME}] storage get skipped`, error);
-        resolve({});
+        done({});
       }
     });
   }
@@ -976,16 +976,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         let localOk = true;
         if (Object.keys(localPayload).length) {
           localOk = await new Promise(resolve => {
+            let settled = false;
+            const done = ok => { if (settled) return; settled = true; resolve(ok); };
             try {
-              chrome.storage.local.set(localPayload, () => {
-                try {
-                  if (chrome.runtime.lastError) return resolve(false);
-                } catch {}
-                resolve(true);
+              const pending = chrome.storage.local.set(localPayload, () => {
+                try { if (chrome.runtime?.lastError) return done(false); } catch {}
+                done(true);
               });
-            } catch {
-              resolve(false);
-            }
+              if (pending && typeof pending.then === "function") pending.then(() => done(true), () => done(false));
+            } catch { done(false); }
           });
         }
         return !!(largeOk && localOk);
@@ -1042,14 +1041,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const localKeys = largeSupported ? localStorageKeysWithoutLarge(keys) : keys;
     const requested = typeof localKeys === "string" ? [localKeys] : (Array.isArray(localKeys) ? localKeys : null);
     const wantsSettings = keys == null || requested?.includes("settings");
+    // Prefetch previously discovered granular settings in the same first
+    // storage request. Re-read the authoritative index, then request only new
+    // keys absent from that first reply (e.g. another tab added a feature).
+    const prefetchedSettingsKeys = wantsSettings && keys != null
+      ? [...(DS.state.settingsIndex || [])].map(DS.settingStorageKey)
+      : [];
     const firstKeys = keys == null
       ? null
-      : [...new Set([...(requested || []), ...(wantsSettings ? [DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY] : [])])];
+      : [...new Set([...(requested || []), ...(wantsSettings ? [DS.GRANULAR_SETTINGS_INDEX_KEY, DS.GRANULAR_SETTINGS_MIGRATION_KEY] : []), ...prefetchedSettingsKeys])];
     const result = await rawStorageGet(firstKeys);
     if (wantsSettings) {
       const index = [...new Set((Array.isArray(result[DS.GRANULAR_SETTINGS_INDEX_KEY]) ? result[DS.GRANULAR_SETTINGS_INDEX_KEY] : []).map(name => String(name || "").trim()).filter(Boolean))];
       DS.state.settingsIndex = new Set(index);
-      const granular = keys == null || !index.length ? result : await rawStorageGet(index.map(DS.settingStorageKey));
+      const missingKeys = keys == null ? [] : index.map(DS.settingStorageKey).filter(key => !firstKeys.includes(key));
+      const granular = missingKeys.length ? { ...result, ...(await rawStorageGet(missingKeys)) } : result;
       const hadLegacy = result.settings && typeof result.settings === "object";
       const merged = hadLegacy ? { ...result.settings } : {};
       let found = false;

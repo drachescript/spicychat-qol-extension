@@ -51,8 +51,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       conversationId: value.conversationId ? String(value.conversationId) : null,
       role: String(value.role || ""),
       createdAt: value.createdAt || null,
-      requestedModel: clean(value.requestedModel || value.inferenceModel || value.model),
-      responseEngine: clean(value.responseEngine || value.engine),
+      requestedModel: clean(value.requestedModel || value.inferenceModel || value.model).slice(0, 160),
+      responseEngine: clean(value.responseEngine || value.engine).slice(0, 160),
+      // Keep verified server model selection distinct from the requested alias,
+      // engine/backend and any unverified generic response `model` field.
+      actualModel: clean(value.actualModel).slice(0, 160),
+      serverModel: clean(value.serverModel).slice(0, 160),
+      modelResponseObserved: value.modelResponseObserved === true,
       settings: normalizeSettings(value.settings || value.inferenceSettings),
       elapsedMs: numberOrNull(value.elapsedMs),
       estimatedTokens: numberOrNull(value.estimatedTokens),
@@ -100,12 +105,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!incoming) return;
 
     const previous = records[incoming.id] || {};
+    // A new generation may reuse an ID. Never inherit a previously resolved
+    // model into a new reply whose server response omitted that field.
+    const newResponse = incoming.modelResponseObserved;
     records[incoming.id] = {
       ...previous,
       ...incoming,
       settings: incoming.settings || previous.settings || null,
-      requestedModel: incoming.requestedModel || previous.requestedModel || "",
-      responseEngine: incoming.responseEngine || previous.responseEngine || "",
+      requestedModel: newResponse ? incoming.requestedModel : incoming.requestedModel || previous.requestedModel || "",
+      responseEngine: newResponse ? incoming.responseEngine : incoming.responseEngine || previous.responseEngine || "",
+      actualModel: newResponse ? incoming.actualModel : incoming.actualModel || previous.actualModel || "",
+      serverModel: newResponse ? incoming.serverModel : incoming.serverModel || previous.serverModel || "",
+      modelResponseObserved: newResponse || previous.modelResponseObserved === true,
       elapsedMs: incoming.elapsedMs ?? previous.elapsedMs ?? null,
       estimatedTokens: incoming.estimatedTokens ?? previous.estimatedTokens ?? null,
       promptTokens: incoming.promptTokens ?? previous.promptTokens ?? null,
@@ -192,12 +203,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return Number(value).toFixed(digits).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
   }
 
+  function hasModelEvidence(record) {
+    return !!(record && (record.requestedModel || record.responseEngine || record.actualModel ||
+      record.serverModel || record.modelResponseObserved));
+  }
+
+  function actualModelStatusText(record) {
+    if (!hasModelEvidence(record)) return "";
+    return record.actualModel ? `Actual model: ${clean(record.actualModel)}` : "Actual model: Not reported";
+  }
+
   function modelText(record) {
-    const requested = clean(record?.requestedModel);
-    const engine = clean(record?.responseEngine);
-    if (requested && engine && requested.toLowerCase() !== engine.toLowerCase()) return `Requested: ${requested} → Engine: ${engine}`;
-    if (engine) return `Engine: ${engine}`;
-    return requested ? `Requested: ${requested}` : "";
+    if (!hasModelEvidence(record)) return "";
+    const parts = [];
+    const requested = clean(record.requestedModel);
+    const engine = clean(record.responseEngine);
+    const actual = clean(record.actualModel);
+    const serverModel = clean(record.serverModel);
+    if (requested) parts.push(`Requested: ${requested}`);
+    if (engine) parts.push(`Engine: ${engine}`);
+    // A generic top-level response model may be an alias rather than a
+    // resolved backend. Report it honestly, but don't call it "actual".
+    if (!actual && serverModel && serverModel.toLowerCase() !== requested.toLowerCase()) {
+      parts.push(`Server model (unverified): ${serverModel}`);
+    }
+    parts.push(actualModelStatusText(record));
+    return parts.join(" · ");
+  }
+
+  function modelDisplayRequested(settings) {
+    return settings.showGenerationModel === true ||
+      (settings.showGenerationMetadata === true && !metadataDetailRequested(settings));
   }
 
   function settingsText(value) {
@@ -456,7 +492,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (ai && (settings.showGenerationModel === true || combinedDefaults)) {
-      const value = modelText(record);
+      // When Toolkit owns the usual statistics, display only the additional
+      // actual-model status. Do not duplicate requested model/timestamps.
+      const value = settings.modelStatusOnly === true ? actualModelStatusText(record) : modelText(record);
       if (value) lines.push(value);
     }
 
@@ -478,7 +516,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const record = records[id];
     const existing = root.querySelector(":scope .ds-generation-metadata");
-    const lines = displayLines(record, root, settings);
+    // Toolkit may paint a message before its page-wide presence marker is
+    // observed. Suppress only overlapping metadata in that message, while
+    // preserving QoL's independent token estimate if enabled.
+    const toolkitVisibleHere = settings.saiToolkitCompatibility !== false &&
+      !!root.querySelector(".generation-stats");
+    const messageSettings = toolkitVisibleHere ? {
+      ...settings,
+      showGenerationMetadata: false,
+      showMessageTimestamps: false,
+      showGenerationModel: modelDisplayRequested(settings),
+      showGenerationElapsed: false,
+      showGenerationSettings: false,
+      modelStatusOnly: true
+    } : settings;
+    const lines = displayLines(record, root, messageSettings);
 
     if (!lines.length) {
       existing?.remove();
@@ -547,11 +599,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ...settings,
       showGenerationMetadata: false,
       showMessageTimestamps: false,
-      showGenerationModel: false,
+      showGenerationModel: modelDisplayRequested(settings),
       showGenerationElapsed: false,
-      showGenerationSettings: false
+      showGenerationSettings: false,
+      modelStatusOnly: true
     } : settings;
-    if (toolkitOwnsStats && settings.showMessageTokenEstimate !== true) {
+    if (toolkitOwnsStats && settings.showMessageTokenEstimate !== true && !modelDisplayRequested(settings)) {
       cleanup();
       dirtyRecordIds.clear();
       if (settings.enableContextWindowWarning) {
@@ -572,6 +625,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       hour24: displaySettings.messageTimestamp24Hour === true,
       dateFirst: displaySettings.messageTimestampDateFirst !== false,
       model: displaySettings.showGenerationModel === true,
+      modelStatusOnly: displaySettings.modelStatusOnly === true,
       elapsed: displaySettings.showGenerationElapsed === true,
       sliders: displaySettings.showGenerationSettings === true,
       tokens: displaySettings.showMessageTokenEstimate === true,

@@ -15,6 +15,35 @@ const quickDislikeSpaFallbackBulkRuns = new Set();
 // reuse. Recovery still forces a fresh sweep, and release always scans tabs.
 const quickDislikeBulkDuplicateCheckedRuns = new Set();
 
+// Individual Less Like/More Like actions can share an already initialized
+// authenticated helper. Close it with a one-shot idle alarm rather than
+// reloading SpicyChat on every action or keeping an interval alive.
+const QUICK_LESS_LIKE_STANDALONE_GC = "ds-quick-less-like-standalone-idle";
+const QUICK_LESS_LIKE_STANDALONE_IDLE_MS = 90 * 1000;
+let quickLessLikeStandaloneLastUsedAt = 0;
+let quickLessLikeStandaloneInFlight = 0;
+
+function scheduleQuickLessLikeStandaloneIdleGc() {
+  quickLessLikeStandaloneLastUsedAt = Date.now();
+  try { chrome.alarms.create(QUICK_LESS_LIKE_STANDALONE_GC, { when: Date.now() + QUICK_LESS_LIKE_STANDALONE_IDLE_MS }); } catch {}
+}
+
+async function cleanupQuickLessLikeStandaloneIdle() {
+  if (quickLessLikeStandaloneInFlight > 0) {
+    scheduleQuickLessLikeStandaloneIdleGc();
+    return;
+  }
+  if (quickLessLikeStandaloneLastUsedAt && Date.now() - quickLessLikeStandaloneLastUsedAt < QUICK_LESS_LIKE_STANDALONE_IDLE_MS - 1000) {
+    try { chrome.alarms.create(QUICK_LESS_LIKE_STANDALONE_GC, { when: quickLessLikeStandaloneLastUsedAt + QUICK_LESS_LIKE_STANDALONE_IDLE_MS }); } catch {}
+    return;
+  }
+  await releaseQuickLessLikeStandaloneWorker();
+}
+(globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__ ||= Object.create(null))[QUICK_LESS_LIKE_STANDALONE_GC] = {
+  owner: "bot-blocking",
+  run: () => { cleanupQuickLessLikeStandaloneIdle().catch(() => {}); }
+};
+
 function quickLessLikeWorkerUrlInfo(url) {
   try {
     const parsed = new URL(String(url || ""));
@@ -745,13 +774,25 @@ async function prepareQuickLessLikeBulkWorker(message) {
 }
 
 async function releaseQuickLessLikeStandaloneWorker() {
-  const tabId = Number(quickLessLikePersistentWorkerTabId || 0);
+  // A one-shot alarm can fire after Chromium restarts the service worker;
+  // restore only the previously recorded helper identity, never search for
+  // an arbitrary home tab to close.
+  let tabId = Number(quickLessLikePersistentWorkerTabId || 0);
+  if (!Number.isFinite(tabId) || !tabId) {
+    const stored = await storageSessionGet([QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]);
+    tabId = Number(stored?.[QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY] || 0);
+  }
   if (!Number.isFinite(tabId) || !tabId) return false;
   if ([...quickLessLikeBulkWorkerTabs.values()].some(value => Number(value) === tabId)) return false;
+  const tab = await tabsGet(tabId);
+  const safeToClose = !!tab && tab.active !== true &&
+    isKnownQuickLessLikeRecommendationWorkerTab(tabId, tab.url || tab.pendingUrl || "") &&
+    !quickLessLikeWorkerUrlInfo(tab.url || tab.pendingUrl || "")?.bulkRunId;
   quickLessLikeWorkerTabIds.delete(tabId);
   quickLessLikeReadyWorkerTabs.delete(tabId);
   quickLessLikePersistentWorkerTabId = null;
   await storageSessionSet({ [QUICK_LESS_LIKE_WORKER_SESSION_TAB_KEY]: 0 });
+  if (!safeToClose) return false; // Never close a tab navigated by the user.
   const result = await tabsRemove(tabId);
   if (result?.ok) await recordHelperLifecycle("quickLessLikeRecommendationWorkerSingleClosed", { tabId });
   return !!result?.ok;
@@ -893,11 +934,14 @@ async function runQuickLessLikeBot(message) {
 
   const runId = String(message?.bulkRunId || "").trim();
   let result;
+  if (!runId) quickLessLikeStandaloneInFlight++;
   try {
     result = await runDirectCharacterFeedback(message, "less-like");
   } finally {
     if (!runId) {
-      await releaseQuickLessLikeStandaloneWorker().catch(() => {});
+      quickLessLikeStandaloneInFlight--;
+      if (result?.ok && result?.status === "less-liked") scheduleQuickLessLikeStandaloneIdleGc();
+      else await releaseQuickLessLikeStandaloneWorker().catch(() => {});
     } else if (!result?.ok) {
       // Includes worker-not-ready and ambiguous network outcomes. Preserve
       // the original failure and never retry an uncertain request.
@@ -974,11 +1018,14 @@ async function runQuickMoreLikeBot(message) {
     const history = existing[MORE_LIKE_HISTORY_KEY]?.bots || {};
     if (history[botId]?.confirmed === true) return { ok: true, status: "already-handled", handledAt: history[botId].at };
     let result;
+    quickLessLikeStandaloneInFlight++;
     try {
       result = await runDirectCharacterFeedback(message, "more-like");
     } finally {
-      // Never replace a known positive response with a helper-tab cleanup error.
-      await releaseQuickLessLikeStandaloneWorker().catch(() => {});
+      quickLessLikeStandaloneInFlight--;
+      // A failed/uncertain POST must never be retried merely for reuse.
+      if (result?.ok && result?.status === "more-liked") scheduleQuickLessLikeStandaloneIdleGc();
+      else await releaseQuickLessLikeStandaloneWorker().catch(() => {});
     }
     if (result?.ok && result.status === "more-liked" && Number(result.ratingHttpStatus || result.httpStatus || 0) >= 200 && Number(result.ratingHttpStatus || result.httpStatus || 0) < 300) {
       const current = await storageGet([MORE_LIKE_HISTORY_KEY]);

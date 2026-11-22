@@ -79,37 +79,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function chromeGet(keys) {
     return new Promise(resolve => {
+      let settled = false;
+      const done = result => { if (settled) return; settled = true; resolve(result || {}); };
       try {
-        chrome.storage.local.get(keys, result => {
-          try { if (chrome.runtime?.lastError) return resolve({}); } catch {}
-          resolve(result || {});
+        const pending = chrome.storage.local.get(keys, result => {
+          try { if (chrome.runtime?.lastError) return done({}); } catch {}
+          done(result);
         });
-      } catch {
-        resolve({});
-      }
+        if (pending && typeof pending.then === "function") pending.then(done, () => done({}));
+      } catch { done({}); }
     });
   }
 
   function chromeSet(payload) {
     return new Promise(resolve => {
+      let settled = false;
+      const done = () => { if (settled) return; settled = true; resolve(); };
       try {
-        chrome.storage.local.set(payload, () => resolve());
-      } catch {
-        resolve();
-      }
+        const pending = chrome.storage.local.set(payload, done);
+        if (pending && typeof pending.then === "function") pending.then(done, done);
+      } catch { done(); }
     });
   }
 
   function runtimeMessage(message) {
     return new Promise(resolve => {
+      let settled = false;
+      const done = reply => { if (settled) return; settled = true; resolve(reply ?? null); };
       try {
-        chrome.runtime.sendMessage(message, response => {
-          try { if (chrome.runtime?.lastError) return resolve(null); } catch {}
-          resolve(response || null);
+        const pending = chrome.runtime.sendMessage(message, response => {
+          try { if (chrome.runtime?.lastError) return done(null); } catch {}
+          done(response);
         });
-      } catch {
-        resolve(null);
-      }
+        if (pending && typeof pending.then === "function") pending.then(done, () => done(null));
+      } catch { done(null); }
     });
   }
 

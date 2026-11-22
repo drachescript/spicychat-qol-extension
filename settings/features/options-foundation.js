@@ -190,17 +190,28 @@ function localStorageKeysForRequest(keys) {
 
 function chromeLocalGet(keys) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (data, error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error instanceof Error ? error : new Error(String(error)));
+      else resolve(data || {});
+    };
     try {
-      chrome.storage.local.get(keys, result => {
-        const error = chrome.runtime.lastError?.message || "";
-        if (error) reject(new Error(error));
-        else resolve(result || {});
+      // Native Android bridges vary: Chrome callbacks, WebExtension promises,
+      // or both may be available. Whichever settles first owns the reply.
+      const pending = chrome.storage.local.get(keys, result => {
+        const error = chrome.runtime?.lastError?.message;
+        done(result, error ? new Error(error) : null);
       });
-    } catch (error) {
-      reject(error);
-    }
+      if (pending && typeof pending.then === "function") {
+        pending.then(result => done(result), error => done(null, error));
+      }
+    } catch (error) { done(null, error); }
   });
 }
+
+const inFlightLargeStorageReads = new Map();
 
 async function readLargeStorageKeyPaged(key) {
   const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
@@ -247,21 +258,34 @@ async function readLargeStorageForRequest(keys) {
   // message once several thousand rich snapshots have accumulated. Read each
   // store in small IndexedDB pages so Settings never mistakes a message-size
   // failure for an empty archive. Older backgrounds fall back to one-key reads.
-  const data = {};
-  for (const key of requested) {
-    const paged = await readLargeStorageKeyPaged(key);
-    if (paged) {
-      data[key] = paged;
-      continue;
+  // Two independent stores may load at once without sharing an IPC queue.
+  // Coalesce identical requests, but never persist a potentially stale store
+  // after a write or browser-worker restart. Other stores are not loaded here.
+  async function readKey(key) {
+    if (!inFlightLargeStorageReads.has(key)) {
+      const read = (async () => {
+        const paged = await readLargeStorageKeyPaged(key);
+        if (paged) return paged;
+        const response = await runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_GET", keys: [key] }, 16000);
+        if (!response?.ok) return null;
+        return response.data?.[key] && typeof response.data[key] === "object"
+          ? response.data[key] : { meta: {} };
+      })();
+      inFlightLargeStorageReads.set(key, read);
+      read.finally(() => {
+        if (inFlightLargeStorageReads.get(key) === read) inFlightLargeStorageReads.delete(key);
+      }).catch(() => {});
     }
-
-    const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_GET", keys: [key] });
-    if (!response?.ok) return null;
-    data[key] = response.data?.[key] && typeof response.data[key] === "object"
-      ? response.data[key]
-      : { meta: {} };
+    return inFlightLargeStorageReads.get(key);
   }
-  return data;
+  const values = [];
+  // Keep concurrent large-store decoding bounded on memory-constrained WebViews.
+  for (let index = 0; index < requested.length; index += 2) {
+    const batch = await Promise.all(requested.slice(index, index + 2).map(async key => [key, await readKey(key)]));
+    if (batch.some(([, value]) => value === null)) return null;
+    values.push(...batch);
+  }
+  return Object.fromEntries(values);
 }
 
 async function readLargeStorageStats() {
@@ -544,20 +568,21 @@ async function storageRemoveVerified(keys) {
 
 function runtimeMessage(message) {
   return new Promise(resolve => {
+    let settled = false;
+    const done = value => { if (settled) return; settled = true; resolve(value ?? null); };
+    const errorReply = messageText => String(message?.type || "").startsWith("DS_QOL_SYNC_")
+      ? { ok: false, error: "background_unavailable", message: String(messageText || "") } : null;
     try {
-      chrome.runtime.sendMessage(message, response => {
-        if (chrome.runtime.lastError) {
-          const messageText = String(chrome.runtime.lastError.message || "Extension background request failed.");
-          resolve(String(message?.type || "").startsWith("DS_QOL_SYNC_")
-            ? { ok: false, error: "background_unavailable", message: messageText }
-            : null);
-          return;
-        }
-        resolve(response || null);
+      const pending = chrome.runtime.sendMessage(message, response => {
+        const error = chrome.runtime?.lastError?.message;
+        done(error ? errorReply(error) : response);
       });
-    } catch {
-      resolve(null);
-    }
+      // Android's shim and Firefox may resolve a Promise instead of invoking
+      // the Chrome-style callback. Never double-complete mixed transports.
+      if (pending && typeof pending.then === "function") {
+        pending.then(done, error => done(errorReply(error?.message || error)));
+      }
+    } catch (error) { done(errorReply(error?.message || error)); }
   });
 }
 
