@@ -976,12 +976,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const revision = Number(DS.state?.domRevision || 0);
     const url = location.href;
 
+    const cached = DS.state?.cardCache;
+    // The page observer advances domRevision on native DOM changes. Running an
+    // O(card-count) connectivity check on every same-revision cache hit adds
+    // CPU to large listings without finding changes. Validate boundary cards
+    // cheaply and periodically audit the whole list as a fail-safe.
+    const cacheHitNumber = Number(DS.state.cardCacheHitNumber || 0) + 1;
+    const cacheHealthy = Array.isArray(cached) && (
+      !cached.length || ((cached[0]?.card?.isConnected && cached[0]?.anchor?.isConnected) &&
+      (cached[cached.length - 1]?.card?.isConnected && cached[cached.length - 1]?.anchor?.isConnected))
+    );
     if (
-      Array.isArray(DS.state?.cardCache) &&
+      cacheHealthy &&
       DS.state.cardCacheRevision === revision &&
       DS.state.cardCacheUrl === url &&
-      DS.state.cardCache.every(item => item.card?.isConnected && item.anchor?.isConnected)
+      (cacheHitNumber % 24 !== 0 || cached.every(item => item.card?.isConnected && item.anchor?.isConnected))
     ) {
+      DS.state.cardCacheHitNumber = cacheHitNumber;
       const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
       perf.cardCollectionCacheHits = (perf.cardCollectionCacheHits || 0) + 1;
       return DS.state.cardCache;
@@ -1015,6 +1026,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       const reused = [...byCard.values()];
       DS.state.cardCache = reused;
+      DS.state.cardCacheHitNumber = 0;
       DS.state.cardCacheRevision = revision;
       DS.state.cardCacheUrl = url;
       if (fresh.length) DS.rememberListedBotCards?.(fresh);
@@ -1041,6 +1053,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
 
     DS.state.cardCache = cards;
+    DS.state.cardCacheHitNumber = 0;
     DS.state.cardCacheRevision = revision;
     DS.state.cardCacheUrl = url;
     // Identity-only discovery is deferred by Bot Archive. It must not block

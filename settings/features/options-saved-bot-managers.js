@@ -162,20 +162,30 @@ function refreshBotManagerFolderOptions(kind) {
   select.value = options.some(([value]) => value === previous) ? previous : "all";
 }
 
-function managerEntryBlocked(entry) {
+function createBotManagerMembershipFrame() {
+  return {
+    blockedIds: new Set(blockedState?.ids || []),
+    blockedNames: new Set((blockedState?.names || []).map(name => String(name || "").replace(/\s+/g, " ").trim().toLowerCase())),
+    openedIds: new Set(currentOpened || []),
+    laterIds: new Set(laterBotState?.ids || []),
+    favoriteIds: new Set(favoriteBotState?.ids || [])
+  };
+}
+function managerEntryBlocked(entry, membership = null) {
   const id = String(entry?.id || "").trim();
   const name = String(entry?.name || "").replace(/\s+/g, " ").trim().toLowerCase();
-  if (id && (blockedState?.ids || []).includes(id)) return true;
+  if (id && (membership ? membership.blockedIds.has(id) : (blockedState?.ids || []).includes(id))) return true;
   if (!name) return false;
-  return (blockedState?.names || []).some(value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase() === name);
+  return membership ? membership.blockedNames.has(name) :
+    (blockedState?.names || []).some(value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase() === name);
 }
 
-function managerEntryOpened(entry) {
+function managerEntryOpened(entry, membership = null) {
   const id = String(entry?.id || "").trim();
-  return !!(id && currentOpened.includes(id) && !managerEntryBlocked(entry));
+  return !!(id && (membership ? membership.openedIds.has(id) : currentOpened.includes(id)) && !managerEntryBlocked(entry, membership));
 }
 
-function managerExtraFilter(entry, kind) {
+function managerExtraFilter(entry, kind, membership = null) {
   const id = String(entry?.id || "").trim();
 
   if (kind === "blocked") {
@@ -195,11 +205,11 @@ function managerExtraFilter(entry, kind) {
 
   const relation = value(managerElementId(kind, "RelationFilter"), "all");
   if (kind === "favorite") {
-    const inLater = (laterBotState?.ids || []).includes(id);
+    const inLater = membership ? membership.laterIds.has(id) : (laterBotState?.ids || []).includes(id);
     if (relation === "later" && !inLater) return false;
     if (relation === "not-later" && inLater) return false;
   } else {
-    const inFavorites = (favoriteBotState?.ids || []).includes(id);
+    const inFavorites = membership ? membership.favoriteIds.has(id) : (favoriteBotState?.ids || []).includes(id);
     if (relation === "favorite" && !inFavorites) return false;
     if (relation === "not-favorite" && inFavorites) return false;
   }
@@ -218,23 +228,25 @@ function managerExtraFilter(entry, kind) {
   }
 
   const state = value(managerElementId(kind, "StateFilter"), "all");
-  if (state === "blocked" && !managerEntryBlocked(entry)) return false;
-  if (state === "opened" && !managerEntryOpened(entry)) return false;
-  if (state === "unopened" && (managerEntryOpened(entry) || managerEntryBlocked(entry))) return false;
-  if (state === "available" && managerEntryBlocked(entry)) return false;
+  if (state === "blocked" && !managerEntryBlocked(entry, membership)) return false;
+  if (state === "opened" && !managerEntryOpened(entry, membership)) return false;
+  if (state === "unopened" && (managerEntryOpened(entry, membership) || managerEntryBlocked(entry, membership))) return false;
+  if (state === "available" && managerEntryBlocked(entry, membership)) return false;
 
   return true;
 }
 
-function getBotManagerEntries(kind, baseEntries = null) {
+function getBotManagerEntries(kind, baseEntries = null, membership = null) {
   const isBlocked = kind === "blocked";
   const entries = Array.isArray(baseEntries)
     ? baseEntries
     : botEntriesFromStore(storeForManagerKind(kind), isBlocked);
   const queryTerms = getBotManagerSearch(kind);
+  // One membership snapshot per render/filter, never a persisted cache.
+  const lookups = membership || createBotManagerMembershipFrame();
 
   const filtered = entries.filter(entry => {
-    if (!managerExtraFilter(entry, kind)) return false;
+    if (!managerExtraFilter(entry, kind, lookups)) return false;
     if (!queryTerms.length) return true;
 
     const organizer = managerOrganizerMeta(entry);

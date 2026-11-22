@@ -63,7 +63,7 @@ function browserLabelForSync(env) {
   else if (/Edg\//i.test(ua)) browser = "Edge";
   else if (/OPR\//i.test(ua)) browser = "Opera";
   else if (/Chrome\//i.test(ua)) browser = "Chrome / Chromium";
-  return env.android ? env.label : `${browser} · Desktop`;
+  return env.android || env.platform === "ios" ? env.label : `${browser} · Desktop`;
 }
 
 function syncDeviceMeta() {
@@ -72,7 +72,7 @@ function syncDeviceMeta() {
   try { clientVersion = chrome.runtime.getManifest?.().version || clientVersion; } catch {}
   return {
     deviceName: browserLabelForSync(env),
-    platform: env.android ? "android" : "desktop",
+    platform: env.android ? "android" : env.platform === "ios" ? "ios" : "desktop",
     clientVersion
   };
 }

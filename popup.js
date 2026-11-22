@@ -585,3 +585,68 @@ document.getElementById("reloadStaleTab")?.addEventListener("click", async () =>
 });
 
 load();
+
+// Lightweight report-link collector. The popup is the only Clear control;
+// actual writes are serialized by the existing background message router.
+const reportLinkKey = "dsReportBotLinksV1";
+const reportLinkCount = document.getElementById("reportLinkCount");
+const reportLinkList = document.getElementById("reportLinkList");
+const reportLinkStatus = document.getElementById("reportLinkStatus");
+const reportLinkCopy = document.getElementById("reportLinkCopy");
+const reportLinkClear = document.getElementById("reportLinkClear");
+let reportLinks = [];
+function reportPopupMessage(message) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    let timeout = 0;
+    const finish = (value, error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      if (error) reject(error instanceof Error ? error : new Error(String(error)));
+      else resolve(value);
+    };
+    timeout = setTimeout(() => finish(null, new Error("Collector request timed out")), 10000);
+    try {
+      let pending;
+      try { pending = chrome.runtime.sendMessage(message, value => finish(value, chrome.runtime?.lastError?.message || "")); }
+      catch { pending = chrome.runtime.sendMessage(message); }
+      if (pending && typeof pending.then === "function") pending.then(finish, error => finish(null, error));
+    } catch (error) { finish(null, error); }
+  });
+}
+async function refreshReportLinks() {
+  try {
+    const response = await reportPopupMessage({ type: "DS_REPORT_LINK_GET" });
+    if (!response?.ok || !Array.isArray(response.links)) throw new Error("Could not read saved links");
+    reportLinks = response.links;
+    reportLinkCount.textContent = `(${reportLinks.length})`;
+    reportLinkList.value = reportLinks.join("\n");
+    reportLinkCopy.disabled = reportLinkClear.disabled = reportLinks.length === 0;
+  } catch (error) { reportLinkStatus.textContent = String(error?.message || error); }
+}
+reportLinkCopy?.addEventListener("click", async () => {
+  if (!reportLinks.length) return;
+  const text = reportLinks.join("\n");
+  try { await navigator.clipboard.writeText(text); reportLinkStatus.textContent = `Copied ${reportLinks.length} links.`; }
+  catch {
+    reportLinkList.focus(); reportLinkList.select();
+    const ok = document.execCommand?.("copy");
+    reportLinkStatus.textContent = ok ? "Links copied." : "Select the list and copy it manually.";
+  }
+});
+reportLinkClear?.addEventListener("click", async () => {
+  if (!reportLinks.length || !confirm(`Clear all ${reportLinks.length} collected bot links?`)) return;
+  reportLinkClear.disabled = true;
+  try {
+    const response = await reportPopupMessage({ type: "DS_REPORT_LINK_CLEAR" });
+    if (!response?.ok) throw new Error(response?.error || "Could not clear links");
+    await refreshReportLinks();
+    reportLinkStatus.textContent = "List cleared.";
+  } catch (error) { reportLinkStatus.textContent = String(error?.message || error); }
+  finally { reportLinkClear.disabled = reportLinks.length === 0; }
+});
+chrome.storage?.onChanged?.addListener((changes, area) => {
+  if (area === "local" && changes?.[reportLinkKey]) refreshReportLinks();
+});
+refreshReportLinks();

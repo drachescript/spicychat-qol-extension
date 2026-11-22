@@ -8,6 +8,7 @@ const HARD_OOC_TEMPLATE = "[OOC: Never control {user} or the user in any way. Do
 
 const DEFAULT_SETTINGS = {
   enabled: true,
+  enableReportLinkCollector: false,
   globalNsfwMode: "ignore",
   saiToolkitCompatibility: true,
 

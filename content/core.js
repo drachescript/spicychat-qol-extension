@@ -501,7 +501,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const event of recent) if (event.level === "warn" || event.level === "error") levels[event.level]++;
     supportLastSnapshot = Date.now();
     try {
-      const row = { page, version: chrome.runtime.getManifest().version, metrics, levels };
+      let version = String(document.documentElement?.getAttribute("data-ds-qol-version") || "0.2.92");
+      try { version = String(chrome.runtime?.getManifest?.()?.version || version); } catch {}
+      const row = { page, version, metrics, levels };
       if (androidSupportStore) void appendAndroidSupportSnapshot(row);
       else chrome.runtime.sendMessage({ type: "DS_SUPPORT_HISTORY_APPEND", row }, () => { void chrome.runtime.lastError; });
     } catch {}
@@ -646,9 +648,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return removed;
   };
 
+  const EXTENSION_CONTEXT_ORIGINAL_RUNTIME_ID = (() => {
+    try { return String(globalThis.chrome?.runtime?.id || globalThis.browser?.runtime?.id || ""); }
+    catch { return ""; }
+  })();
+
   DS.isExtensionContextValid = function isExtensionContextValid() {
     try {
-      return !!(chrome?.runtime?.id && chrome?.storage?.local);
+      const runtime = globalThis.chrome?.runtime || globalThis.browser?.runtime;
+      const storage = globalThis.chrome?.storage?.local || globalThis.browser?.storage?.local;
+      if (typeof storage?.get !== "function") return false;
+      // Orion/iOS may omit runtime.id even when extension messages work.
+      // Require a callable runtime transport or extension URL resolver, rather
+      // than accepting arbitrary page shims just because storage exists.
+      if (!runtime || (typeof runtime.sendMessage !== "function" && typeof runtime.getURL !== "function")) return false;
+      // Chromium normally exposes an ID. If it was present at startup and
+      // disappears after a reload, keep the existing stale-context recovery.
+      if (EXTENSION_CONTEXT_ORIGINAL_RUNTIME_ID && !runtime.id) return false;
+      // Orion may have no ID from the outset. Calling getURL("") as a liveness
+      // probe is not portable there; trust available transport until a real
+      // message/storage failure provides evidence of invalidation.
+      if (EXTENSION_CONTEXT_ORIGINAL_RUNTIME_ID && typeof runtime.getURL === "function") runtime.getURL("");
+      return true;
     } catch {
       return false;
     }
@@ -695,7 +716,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   if (EXTENSION_CONTEXT_WAS_VALID_AT_START) {
-    window.setInterval(() => recoverInvalidatedExtensionContext("interval"), 15000);
+    // Mobile WebKit may suspend tabs for long periods; use existing focus/
+    // visibility signals rather than waking it on a 15-second interval.
+    if (!DS.getPlatformEnvironment?.()?.ios) {
+      window.setInterval(() => recoverInvalidatedExtensionContext("interval"), 15000);
+    }
     window.addEventListener("focus", () => recoverInvalidatedExtensionContext("focus"), true);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) recoverInvalidatedExtensionContext("visible");

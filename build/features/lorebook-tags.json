@@ -3,7 +3,9 @@
   "primary": "content/lorebook-tags.js",
   "type": "content",
   "dependencies": [],
-  "settingsKeys": [],
+  "settingsKeys": [
+    "lorebookExpandTags"
+  ],
   "requiredHelpers": [],
   "settingsIsolated": false,
   "stylesIsolated": false,

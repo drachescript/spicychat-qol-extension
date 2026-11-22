@@ -4,6 +4,7 @@ function readSettingsFromPage() {
 
   const result = {
     enabled: checked("enabled"),
+    enableReportLinkCollector: checked("enableReportLinkCollector"),
     saiToolkitCompatibility: checked("saiToolkitCompatibility", false),
     globalNsfwMode: value("globalNsfwMode", "ignore"),
 
@@ -533,6 +534,7 @@ function readSingleSettingFromPage(settingKey) {
   if (typeof ownedReader === "function") return ownedReader();
   switch (String(settingKey || "")) {
     case "enabled": return (checked("enabled"));
+    case "enableReportLinkCollector": return checked("enableReportLinkCollector");
     case "saiToolkitCompatibility": return (checked("saiToolkitCompatibility", false));
     case "globalNsfwMode": return (value("globalNsfwMode", "ignore"));
 

@@ -158,6 +158,7 @@ async function load() {
   renderChatBackgroundOptions();
 
   setChecked("enabled", settings.enabled);
+  setChecked("enableReportLinkCollector", settings.enableReportLinkCollector === true);
   const betaStatus = $("spicyChatBetaStatus");
   const betaDetails = $("spicyChatBetaCapabilities");
   if (betaStatus || betaDetails) {
@@ -670,6 +671,10 @@ async function load() {
   if ($("openedCount")) $("openedCount").textContent = savedListsDataLoaded ? `${currentOpened.length} stored` : "loads with Saved Lists";
   if ($("personaCount")) $("personaCount").textContent = `${currentPersonas.length} stored`;
 
+  // Wait only for the visible tab. Other feature-panel definitions remain inert
+  // until requested, and their registered loaders hydrate from the snapshot.
+  try { await window.dsqHydrateFeaturePanelsForTab?.(activeOptionsTab()); }
+  catch (error) { console.warn("[QoL Settings] Deferred panel unavailable; core Settings will continue:", error); }
   optionsDataLoaded = true;
   // Load controls owned by installed feature panels; omitted panels have no handlers.
   for (const loadFeatureSetting of Object.values(window.__DSQ_FEATURE_SETTINGS_LOADERS__ || {})) {

@@ -171,7 +171,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       }
 
+      if (!listing && DS.removeReportLinkCollector) DS.removeReportLinkCollector();
       if (listing) {
+        if (settings.enableReportLinkCollector === true) {
+          await runFeatureStep("report link collector", true, () => DS.applyReportLinkCollector?.());
+        } else {
+          DS.removeReportLinkCollector?.();
+        }
         await runFeatureStep("card hiding", cardFilteringWanted(settings) || !!document.querySelector("[data-ds-hidden-card],.ds-card-hidden,.ds-card-dimmed"), () => DS.applyCardHiding?.());
         await runFeatureStep("card block buttons", cardBlockUiWanted(settings) || !!document.querySelector(".ds-card-block-button"), () => DS.applyCardBlockButtons?.());
         await runFeatureStep("previously chatted indicator", !!settings.enablePreviouslyChattedIndicator || !!document.querySelector(".ds-chatted-indicator"), () => DS.applyPreviouslyChattedIndicator?.());
