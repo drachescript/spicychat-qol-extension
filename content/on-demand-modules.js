@@ -29,6 +29,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const LISTING = /^\/(?:[a-z]{2}\/)?(?:favorite-bots|recommended-bots|chatbots|search|my-creations\/chatbots|creator\/[^/]+)(?:\/|$)/i;
   const BOT_EDITOR = /^\/(?:[a-z]{2}\/)?(?:chatbot\/(?:create|edit|[0-9a-f-]{36}\/edit)|create-chatbot|edit-chatbot)(?:\/|$)/i;
   const MODULES = Object.freeze({
+    // v0.2.93: work specific to chat formatting and listing routes stays
+    // unparsed until the owning route actually needs its implementation.
+    "rp-format-repair": "content/rp-format-repair.js",
+    "text-replacements": "content/text-replacements.js",
+    "chat-list": "content/chat-list.js",
+    "language-filter": "content/language-filter.js",
+    "card-workflow": "content/card-workflow.js",
     "chat-lorebook-manager": "content/chat-lorebook-manager.js",
     "report-link-collector": "content/report-link-collector.js",
     "chat-backgrounds": "content/chat-backgrounds.js",
@@ -113,6 +120,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     "hideChatTopBarModelButton", "hideChatTopBarContextDot", "hideChatDropdownVoiceUpsell",
     "hideChatDropdownMemoryItem", "hideUnlockCustomVoices"
   ]);
+  // Query parameters do not change on ordinary DOM mutation callbacks.
+  // Reparse only after an actual history/navigation change.
+  let cachedQuery = "";
+  let cachedParams = null;
+  function queryParams() {
+    const raw = location.search;
+    if (cachedParams === null || raw !== cachedQuery) {
+      cachedQuery = raw;
+      cachedParams = new URLSearchParams(raw);
+    }
+    return cachedParams;
+  }
   let lastWantedKey = "";
   const dependencies = Object.freeze({ "memory-packs": ["memory-manager"],
     "lorebook-moderation-review": ["creator-moderation-warnings"],
@@ -153,7 +172,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     // The explicit Research Export helper is NOT an ordinary /chats tab.
     // It only needs its own exporter module and shared eager auth readers;
     // unrelated optional panels must not load while thousands of bots scan.
-    const startupParams = new URLSearchParams(location.search);
+    const startupParams = queryParams();
     if (CHATS.test(path) && startupParams.get("ds-research-export") === "1") {
       return has("bulk-chat-research") ? ["bulk-chat-research"] : [];
     }
@@ -170,6 +189,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const s = settings;
     const listingOrProfile = LISTING.test(path) || PROFILES.test(path) || myCreations || path === "/" || ["listing", "creator-listing", "lorebook-listing"].includes(page.routeType);
     const add = (name,condition) => { if(condition && has(name))list.push(name); };
+    // v0.2.93: native /chats search must work even with Chat List tools OFF.
+    // Per-character RP profile overrides can turn repair on independently of
+    // the global toggle, so test the effective profile before deciding.
+    const rpEffective = chat && (DS.getEffectiveRpFormatSettings?.() || s);
+    add("rp-format-repair", chat && (rpEffective?.enableRpFormatRepair === true ||
+      DS.state?.rpFormatRepairWasActive === true));
+    add("text-replacements", chat && (any(s, ["enableChatTextReplacements",
+      "enableChatMutedWords", "enableChatWordCensor"]) || DS.state?.chatTextReplacementsWasActive === true));
+    add("chat-list", CHATS.test(path));
+    add("language-filter", s.enableLanguageFilter === true &&
+      (listingOrProfile || lorebookEditor || page.isLorebookPage || page.isRulebookExplorePage));
+    add("card-workflow", listingOrProfile || (chat && s.trackRecentlySeenBots === true));
     // v0.2.92: route+setting demand for independently registered visual helpers.
     add("chat-lorebook-manager", chat && s.enableChatLorebookManager === true);
     add("chat-backgrounds", chat && any(s, ["enableChatBackgrounds", "enableCustomCharacterPictures", "enableCustomPersonaPictures", "enableCustomPictureLibrary", "showAutoImageInlineButton", "chatSceneGalleriesEnabled"]));
@@ -179,7 +210,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("model-quick-access", chat && s.enableModelQuickAccess === true);
     add("chat-topbar", chat && (any(s, CHAT_TOP_BAR) || DS.state?.chatTopBarWasActive === true));
     add("premium-notifications", any(s, ["hideNotifications","hideFeatureReleasePopups","hideTabNotificationBadge","autoReadNotifications","hidePremium","hideFloatingPremiumPopups","hideTopBarNotifications"]));
-    add("ad-banners", s.hideAdvertBanners === true || !!document.querySelector("[data-ds-reason^='advert']"));
+    add("ad-banners", s.hideAdvertBanners === true || jobs.has("ad-banners"));
     add("reply-instructions", chat && any(s,["enableReplyInstructions","enableGlobalMemory","enableRpStateTracker","enableChatSceneNotes"]));
     add("chat-tags", chat && any(s,["showChatTagLinks","showChatTagAddButtons"]));
     add("native-rating-helpers", s.enableNativeRatingHelpers === true);
@@ -207,7 +238,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     // optional toolbar is off; it belongs to the Bookmarks feature in Lite.
     add("chat-history-navigator", chat && settings.enableMessageBookmarks === true);
     add("bulk-chat-research", CHATS.test(path) &&
-      new URLSearchParams(location.search).get("ds-research-export") === "1");
+      startupParams.get("ds-research-export") === "1");
     add("quick-panel",settings.showQuickPanel === true);
     add("sidebar",!!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
       !!settings.restorePersonasSidebarPosition || Object.keys(settings).some(k => k.startsWith("hideSidebar") && !!settings[k]));
@@ -227,7 +258,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("favorites-recovery",FAV.test(path) && settings.enableFavoritesRecovery === true);
     // Include manual export helper tabs even when the regular editor tools are
     // disabled; they are a separate explicit user-initiated operation.
-    const params = new URLSearchParams(location.search);
+    const params = startupParams;
     add("lorebook-backup",(lorebookEditor && any(settings,["lorebookBackupToolsEnabled","lorebookBackupsEnabled"])) ||
       params.has("dsQolLorebookExport") || params.has("dsQolLorebookBackupWorker"));
     add("my-creations-backup",myCreations && any(settings,["enableMyCreationsBulkBackup","enableAccountMigrationAssistant"]));

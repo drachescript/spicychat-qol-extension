@@ -1079,6 +1079,13 @@ function queueSettingsAutosaveForControl(control, eventType = "change") {
 function queueFullSettingsDiffFromPage({ delay = 0 } = {}) {
   const current = readSettingsFromPage();
   for (const [key, next] of Object.entries(current)) {
+    // Deferred feature panels do not have controls until hydrated. Reading a
+    // nonexistent checkbox as false here could silently disable a setting
+    // when Save now is pressed on another tab. Preserve the stored value.
+    const mounted = document.getElementById(key) ||
+      document.querySelector(`input[name="${CSS.escape(key)}"]`);
+    const hasFeatureReader = typeof window.__DSQ_FEATURE_SETTINGS_READERS__?.[key] === "function";
+    if (!mounted && !hasFeatureReader) continue;
     if (storageValueMatches(loadedSettingsSnapshot[key], next)) continue;
     queueSettingsAutosaveValue(key, next, { delay });
   }

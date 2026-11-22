@@ -773,10 +773,15 @@ async function applySavedBotsHubBulkAction() {
   });
 }
 
-function renderSavedBotsHub() {
+let savedBotsHubFilterRows = null;
+function renderSavedBotsHub({ filterOnly = false } = {}) {
   const host = $("savedBotsHubManager");
   if (!host) return;
-  const all = collectSavedBotsHubEntries();
+  // Data mutations call renderSavedBotsHub() and always rebuild; UI-only
+  // filters/paging can reuse the last complete merged index safely.
+  const all = filterOnly && savedBotsHubFilterRows
+    ? savedBotsHubFilterRows : collectSavedBotsHubEntries();
+  if (!filterOnly || !savedBotsHubFilterRows) savedBotsHubFilterRows = all;
   const knownIds = new Set(all.map(entry => entry.id).filter(Boolean));
   for (const id of [...savedBotsHubUiState.selected]) if (!knownIds.has(id)) savedBotsHubUiState.selected.delete(id);
   const entries = savedBotsHubFilteredEntries(all);
@@ -790,7 +795,8 @@ function renderSavedBotsHub() {
     : `${entries.length} matches of ${all.length}, showing ${shown.length}`;
 
   const stats = $("savedBotsHubStats");
-  if (stats) {
+  if (stats && (!filterOnly || !stats.dataset.dsqHubCountsReady)) {
+    stats.dataset.dsqHubCountsReady = "1";
     const counts = { favorite: 0, later: 0, recent: 0, organizer: 0, opened: 0, blocked: 0, notInterested: 0, creatorWatch: 0 };
     let overlaps = 0;
     for (const entry of all) {
@@ -935,7 +941,7 @@ function setupSavedBotsHubControls() {
     savedBotsHubUiState.query = search?.value || "";
     savedBotsHubUiState.visible = 10;
     savedBotsHubUiState.collapsed = true;
-    renderSavedBotsHub();
+    renderSavedBotsHub({ filterOnly: true });
   });
   search?.addEventListener("input", refresh);
 
@@ -943,31 +949,31 @@ function setupSavedBotsHubControls() {
     $(id)?.addEventListener("change", () => {
       savedBotsHubUiState.visible = 10;
       savedBotsHubUiState.collapsed = true;
-      renderSavedBotsHub();
+      renderSavedBotsHub({ filterOnly: true });
     });
   });
   $("savedBotsHubShowMore")?.addEventListener("click", () => {
     savedBotsHubUiState.visible = Math.min(5000, Number(savedBotsHubUiState.visible || 10) + 10);
     savedBotsHubUiState.collapsed = true;
-    renderSavedBotsHub();
+    renderSavedBotsHub({ filterOnly: true });
   });
   $("savedBotsHubShowLess")?.addEventListener("click", () => {
     savedBotsHubUiState.visible = 10;
     savedBotsHubUiState.collapsed = true;
-    renderSavedBotsHub();
+    renderSavedBotsHub({ filterOnly: true });
   });
   $("savedBotsHubCollapse")?.addEventListener("click", () => {
     savedBotsHubUiState.visible = Number(savedBotsHubUiState.visible || 10) <= 10 ? 100 : 10;
     savedBotsHubUiState.collapsed = savedBotsHubUiState.visible <= 10;
-    renderSavedBotsHub();
+    renderSavedBotsHub({ filterOnly: true });
   });
   $("savedBotsHubSelectShown")?.addEventListener("click", () => {
-    const entries = savedBotsHubFilteredEntries().slice(0, Math.max(1, Number(savedBotsHubUiState.visible || 10)));
+    const entries = savedBotsHubFilteredEntries(savedBotsHubFilterRows).slice(0, Math.max(1, Number(savedBotsHubUiState.visible || 10)));
     entries.forEach(entry => savedBotsHubUiState.selected.add(entry.id));
     updateSavedBotsHubSelectionUi();
   });
   $("savedBotsHubSelectFiltered")?.addEventListener("click", () => {
-    savedBotsHubFilteredEntries().forEach(entry => savedBotsHubUiState.selected.add(entry.id));
+    savedBotsHubFilteredEntries(savedBotsHubFilterRows).forEach(entry => savedBotsHubUiState.selected.add(entry.id));
     updateSavedBotsHubSelectionUi();
   });
   $("savedBotsHubClearSelection")?.addEventListener("click", () => {

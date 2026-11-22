@@ -834,18 +834,28 @@ async function runSettingsHealthCheck() {
   const host = $("settingsHealthResults");
   if (!host) return;
   host.replaceChildren(makeElement("span", { className: "hint", text: "Checking configuration..." }));
+  // Health Check is a deliberate full audit, unlike ordinary Settings startup.
+  // Load independent feature controls before claiming one wasn't shipped.
+  const deferredPanelsReady = await window.dsqHydrateAllFeaturePanels?.() ?? true;
 
   const result = await storageGet(["settings", DEEPL_API_KEY, PERSONAS_KEY, LEGACY_PERSONAS_KEY, CHAT_BACKGROUNDS_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY, BLOCKED_BOTS_KEY, NOT_INTERESTED_KEY, OPENED_KEY]);
   const savedSettings = result.settings && typeof result.settings === "object" ? result.settings : {};
   const current = { ...DEFAULT_SETTINGS, ...savedSettings, ...readSettingsFromPage() };
   const warnings = [];
   const notices = [];
+  if (!deferredPanelsReady) notices.push({
+    title: "Some optional Settings panels could not load",
+    detail: "Retry the affected panel from its own section before treating those controls as missing."
+  });
 
   const missingControls = Object.keys(DEFAULT_SETTINGS).filter(key =>
     !SETTINGS_NO_DIRECT_CONTROL_KEYS.has(key) &&
     !isSettingOwnedByExcludedFeature(key) &&
-    !document.getElementById(key));
-  const requiredMissing = [...SETTINGS_RUNTIME_REQUIRED_KEYS].filter(key => !(key in DEFAULT_SETTINGS) || !document.getElementById(key));
+    !document.getElementById(key) &&
+    (deferredPanelsReady || !window.dsqDeferredFeaturePanelTabForControl?.(key)));
+  const requiredMissing = [...SETTINGS_RUNTIME_REQUIRED_KEYS].filter(key =>
+    !(key in DEFAULT_SETTINGS) || (!document.getElementById(key) &&
+    (deferredPanelsReady || !window.dsqDeferredFeaturePanelTabForControl?.(key))));
   const missing = uniqueClean([...missingControls, ...requiredMissing]);
   if (missing.length) {
     warnings.push({
@@ -1189,6 +1199,9 @@ function reorderOptionsUi() {
 }
 
 function scheduleSavedManagersRefresh(kinds = []) {
+  // Storage changes invalidate Saved Bots Hub filter-only snapshots even
+  // before the deferred Settings render is scheduled.
+  if (typeof savedBotsHubFilterRows !== "undefined") savedBotsHubFilterRows = null;
   for (const kind of kinds) pendingSavedManagerRefreshKinds.add(kind);
   if (!pendingSavedManagerRefreshKinds.size) return;
   clearTimeout(savedManagerRefreshTimer);

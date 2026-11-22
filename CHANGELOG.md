@@ -1,3 +1,19 @@
+## 0.2.93
+- Kept Android cloud-space errors separate from successful Cloud sync; an unsupported app-owned action now explains the required Android bridge update without changing lists or credentials.
+- Clarified a successful sync without a verifiable device receipt instead of implying sync itself failed.
+- Added bounded read-only GitHub object verification after uploads to tolerate delayed GitHub visibility; never repeats an uncertain write or weakens hash validation.
+- Reused Saved Bots Hub's 12k-entry merged index during search, filters and paging; source changes still regenerate it, with no persistent data cache.
+- Deferred five additional chat/listing engines until their route and settings require them; native Chat List search and per-character RP overrides stay supported.
+- Deferred nine more Settings feature panels, including bubble styling and Quick Panel, with on-demand event wiring and saved-value hydration.
+- Cached Settings panel ownership and skipped redundant hydration/rebuilds; independent panel failures no longer block the rest of their section.
+- Protected Save now from writing false/default values for controls not yet created by lazy panels.
+- Made Settings Health Check load deferred controls before reporting missing UI, while distinguishing panel-load failures.
+- Reused route query parsing and avoided a full DOM advert-marker search on repeated optional-module demand checks.
+- Cached feature-search metadata by control instead of rescanning the full feature catalogue for every Settings input.
+- Coalesced external Settings changes affecting the feature catalogue and released Saved Recovery observers/listeners after use.
+- Cancelled a stale Saved-data render before performing its follow-up Lorebook refresh after tab navigation.
+- Kept local data, sync, Archive scan/upload safety, collector OFF by default, and existing settings unchanged.
+
 ## 0.2.92
 - Made Report Link Collector an optional OFF-by-default Advanced setting; saved links remain available in the popup when disabled.
 - Deferred independent Settings feature panels until their tab, Search, or Features catalogue requests them; initial Settings no longer constructs hidden panel DOM.

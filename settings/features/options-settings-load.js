@@ -680,6 +680,12 @@ async function load() {
   for (const loadFeatureSetting of Object.values(window.__DSQ_FEATURE_SETTINGS_LOADERS__ || {})) {
     loadFeatureSetting(settings);
   }
+  // The Appearance/Custom Pictures panels may have been injected only after
+  // the ordinary early appearance pass. Apply visibility and saved previews
+  // once the feature-owned loaders have finished.
+  updateAppearanceColorControlStates?.();
+  updateBubbleContrastWarnings?.();
+  if (activeOptionsTab() === "appearance") renderMiniPanelPreview?.();
   settingsAutosaveReady = true;
   dsqRefreshHeavyToolsForTab(activeOptionsTab());
   initializeMaximumPerformancePreset();
