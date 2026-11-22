@@ -60,7 +60,6 @@
         "https://www.spicychat.ai/*"
       ],
       "js": [
-        "content/browser-api-compat.js",
         "content/tab-state-control.js",
         "content/build-profile.js",
         "shared/platform-capabilities.js",
