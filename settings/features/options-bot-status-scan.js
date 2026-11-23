@@ -236,15 +236,76 @@ function reviewBotStatusQueueEligibility(queue) {
   return { ids, unavailable, mode, scope };
 }
 
-// An explicit full/stale Refresh may also retry durable work which was
-// originally tracked but subsequently lost its list membership. Unlike a
-// routine scan, this is a user-initiated, one-time recovery of *saved* IDs.
-// Never retry IDs deliberately forgotten or blocked, or whose held reason is
-// a policy/recovery exclusion. No speculative ID discovery or network lookups.
+// Reassess every saved held entry against current local membership. Stored
+// reason text is historical diagnostic information, never an authorization
+// to scan. These decisions perform no network requests or destructive writes.
+function botStatusAssessHeldEntries(items) {
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
+  const saved = normalizeBotAvailability(botAvailabilityState).meta;
+  const archives = normalizeBotArchive(botArchiveState).meta;
+  const elsewhere = new Map(collectTrackedAvailabilityBots('all').map(entry => [entry.id, entry]));
+  const groups = new Map();
+  for (const item of items) {
+    const key = `${item.mode}\u0000${item.scope}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  const eligibility = new Map();
+  for (const [key, group] of groups) {
+    const { mode, scope } = group[0];
+    const report = reviewBotStatusQueueEligibility({ mode, scope, ids: group.map(item => item.id) });
+    const unavailable = new Map(report.unavailable.map(row => [row.id, row.reason]));
+    for (const item of group) eligibility.set(`${key}\u0000${item.id}`, unavailable.get(item.id) || '');
+  }
+  return items.map(item => {
+    const id = item.id;
+    const originalReason = String(item.reason || '');
+    const unavailability = eligibility.get(`${item.mode}\u0000${item.scope}\u0000${id}`) || '';
+    const history = saved[id] || {};
+    const currentlyTracked = elsewhere.get(id);
+    const checkedAt = Number(history.checkedAt || 0);
+    const checkedSinceHeld = Number(item.since || 0) > 0 && checkedAt > Number(item.since);
+    const confirmed = ['available', 'unavailable', 'restricted'].includes(String(history.status || '')) &&
+      Number(history.unavailableEvidenceCount || 0) !== 1;
+    let category, reason, action;
+    if (botStatusIdIgnored(id)) {
+      category = 'excluded'; reason = 'Deliberately forgotten / excluded from Bot Status'; action = 'No recheck; excluded by user';
+    } else if (blockedIds.has(id)) {
+      category = 'excluded'; reason = 'Currently blocked; manual recovery must not bypass blocks'; action = 'No recheck while blocked';
+    } else if (checkedSinceHeld && confirmed) {
+      category = 'completed'; reason = `Confirmed ${history.status} after this hold was created`; action = 'Retire completed queue entry; history stays saved';
+    } else if ((item.mode === 'unchecked' && checkedAt > 0 && confirmed) ||
+      (item.mode === 'unknown' && checkedAt > 0 && confirmed)) {
+      category = 'completed'; reason = `Original ${item.mode} check already resolved (${history.status})`; action = 'Retire obsolete queue entry; history stays saved';
+    } else if (!unavailability) {
+      category = 'eligible'; reason = 'Back in the original tracked scan scope'; action = 'Release to original resume queue';
+    } else if (item.mode === 'archived') {
+      category = 'excluded'; reason = unavailability; action = 'No archived recovery scan unless eligibility returns';
+    } else if (checkedSinceHeld && history.status === 'unknown') {
+      category = 'temporary'; reason = 'Most recent recheck was inconclusive; prior results are preserved'; action = 'Manual recheck available';
+    } else if (currentlyTracked) {
+      category = 'out-of-scope';
+      reason = `No longer in original ${item.scope} source; currently found in ${(currentlyTracked.sources || []).join(', ') || 'another tracked source'}`;
+      action = 'Manual recheck available';
+    } else {
+      category = 'recoverable';
+      reason = 'No longer in an eligible tracked source; saved ID retained for manual recovery';
+      action = 'Manual recheck available';
+    }
+    return { ...item, originalReason, category, reason, action,
+      manualRetryAllowed: ['eligible', 'out-of-scope', 'recoverable', 'temporary'].includes(category),
+      checkedAt, status: String(history.status || 'not checked'),
+      sources: Array.isArray(currentlyTracked?.sources) ? currentlyTracked.sources : [],
+      hasCopy: !!archives[id] };
+  });
+}
+
 function botStatusManualHeldRetryAllowed(item, blockedIds) {
+  // Called only with actual held queue entries, and always re-evaluated from
+  // current saved sources. Never trust stale saved reason strings to authorize.
   return !!item && validBotId(item.id) && !botStatusIdIgnored(item.id) &&
-    !blockedIds.has(item.id) &&
-    /^(?:No longer in an eligible tracked source|No longer in the original (?:.+ )?scan scope)$/i.test(String(item.reason || ""));
+    !blockedIds.has(item.id) && item.category !== 'excluded' && item.category !== 'completed' &&
+    item.manualRetryAllowed === true;
 }
 
 function botStatusSavedHeldScanSources(raw) {
@@ -304,69 +365,154 @@ async function botStatusRetireCheckedHeldSources(doneIds, heldSources, currentKi
 
 function botStatusReconciledQueue(queue) {
   if (!queue || !Array.isArray(queue.ids)) return { queue, changed: false };
-  const currentMode = String(queue.mode || "all");
-  const currentScope = String(queue.scope || "all");
-  const active = [...new Set(queue.ids.map(id => String(id || "").trim().toLowerCase()).filter(validBotId))];
+  let currentMode = String(queue.mode || 'all');
+  let currentScope = String(queue.scope || 'all');
+  const active = [...new Set(queue.ids.map(id => String(id || '').trim().toLowerCase()).filter(validBotId))];
   const held = botStatusHeldEntries(queue);
   if (!active.length && !held.length) return { queue, changed: false };
-  const sameOrigin = held.filter(item => item.mode === currentMode && item.scope === currentScope);
-  // Preserve held work from a different scan origin when a new manual scan
-  // replaces the active queue. It must never be silently scanned out of scope.
-  const otherOrigin = held.filter(item => item.mode !== currentMode || item.scope !== currentScope);
-  const pendingReview = reviewBotStatusQueueEligibility({ mode: currentMode, scope: currentScope,
+  const assessed = botStatusAssessHeldEntries(held);
+  const retained = assessed.filter(item => item.category !== 'completed');
+  const sameOrigin = retained.filter(item => item.mode === currentMode && item.scope === currentScope);
+  let otherOrigin = retained.filter(item => item.mode !== currentMode || item.scope !== currentScope);
+  const review = reviewBotStatusQueueEligibility({ mode: currentMode, scope: currentScope,
     ids: [...active, ...sameOrigin.map(item => item.id)] });
   const recoverable = botStatusSavedHeldScanSources(queue.manualHeldScanSources);
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
-  const excluded = new Map(pendingReview.unavailable.filter(item =>
+  const excluded = new Map(review.unavailable.filter(item =>
     !recoverable[item.id] || botStatusIdIgnored(item.id) || blockedIds.has(item.id)
   ).map(item => [item.id, item.reason]));
-  const oldHeld = new Map(sameOrigin.map(item => [item.id, item]));
-  const nextActive = pendingReview.ids.filter(id => !excluded.has(id));
-  const nextHeld = [...otherOrigin, ...pendingReview.ids.filter(id => excluded.has(id)).map(id => ({
+  // Existing active work can never bypass a block/ignore simply because its
+  // original scope happens to include blocked bots.
+  for (const id of review.ids) {
+    if (botStatusIdIgnored(id)) excluded.set(id, 'Deliberately excluded from Bot Status');
+    else if (blockedIds.has(id)) excluded.set(id, 'Currently blocked; scan is not permitted');
+  }
+  const previousHeld = new Map(held.map(item => [item.id, item]));
+  let nextActive = review.ids.filter(id => !excluded.has(id));
+  let nextHeld = [...otherOrigin, ...review.ids.filter(id => excluded.has(id)).map(id => ({
     id, mode: currentMode, scope: currentScope,
-    reason: excluded.get(id), since: oldHeld.get(id)?.since || Date.now()
+    reason: excluded.get(id), since: previousHeld.get(id)?.since || Date.now()
   }))];
-  const originalHeld = botStatusHeldEntries(queue);
-  const originalIds = Array.isArray(queue.ids) ? queue.ids : [];
-  const sameIds = originalIds.length === nextActive.length && originalIds.every((id, i) =>
-    String(id || "").trim().toLowerCase() === nextActive[i]);
-  const sameHeld = originalHeld.length === nextHeld.length && originalHeld.every((item, i) =>
-    item.id === nextHeld[i].id && item.mode === nextHeld[i].mode &&
-    item.scope === nextHeld[i].scope && item.reason === nextHeld[i].reason);
-  // An existing queue can be legacy/un-normalized; reconcile it only when
-  // eligibility or the held-state actually changes, never on every render.
-  return { queue: { ...queue, ids: nextActive, heldIds: nextHeld }, changed: !sameIds || !sameHeld };
+  // A queue that has only holds may have inherited entries from a different
+  // scan origin. Release one eligible origin at a time into its own saved mode
+  // instead of allowing an unrelated Resume mode to silently scan those IDs.
+  if (!nextActive.length) {
+    const promotion = otherOrigin.find(item => item.category === 'eligible');
+    if (promotion) {
+      currentMode = promotion.mode;
+      currentScope = promotion.scope;
+      const promoted = otherOrigin.filter(item => item.category === 'eligible' &&
+        item.mode === currentMode && item.scope === currentScope);
+      const promotedIds = new Set(promoted.map(item => item.id));
+      nextActive = promoted.map(item => item.id);
+      nextHeld = nextHeld.filter(item => !promotedIds.has(item.id));
+    }
+  }
+  // Deduplicate across the active and held buckets. Keep the earliest hold
+  // with its original origin/age, even if a prior version saved duplicates.
+  const activeSet = new Set(nextActive);
+  const seenHeld = new Set();
+  nextHeld = nextHeld.filter(item => {
+    if (activeSet.has(item.id) || seenHeld.has(item.id)) return false;
+    seenHeld.add(item.id); return true;
+  }).map(item => ({id:item.id,mode:item.mode,scope:item.scope,
+    reason:botStatusIdIgnored(item.id) ? 'Deliberately excluded from Bot Status' :
+      blockedIds.has(item.id) ? 'Currently blocked; scan is not permitted' :
+      item.reason, since:item.since}));
+  const replacement = { ...queue, mode:currentMode, scope:currentScope, ids:nextActive, heldIds:nextHeld };
+  const same = JSON.stringify({mode:queue.mode,scope:queue.scope,ids:queue.ids,heldIds:queue.heldIds}) ===
+    JSON.stringify({mode:replacement.mode,scope:replacement.scope,ids:replacement.ids,heldIds:replacement.heldIds});
+  return { queue:replacement, changed:!same };
 }
 
 async function botStatusReconcileSavedQueue(kind, snapshot) {
-  if (!snapshot || botAvailabilityScanRunning || snapshot.phase === "running") return snapshot;
+  if (!snapshot || botAvailabilityScanRunning) return snapshot;
+  // Another Settings tab may still be running a scan. Its checkpoints are
+  // written at least every few completed checks. Only a running checkpoint
+  // with no updates for five minutes is considered abandoned after reload.
+  // Never overwrite a fresh running queue from a different Options tab.
+  const abandoned = snapshot.phase === 'running' &&
+    Date.now() - Number(snapshot.updatedAt || 0) >= 5 * 60 * 1000;
+  if (snapshot.phase === 'running' && !abandoned) return snapshot;
   // Verify before modifying a queue that may be updated in another Options tab.
   // If the queue changed, leave it untouched; the next explicit refresh retries.
   const proposed = botStatusReconciledQueue(snapshot);
-  if (!proposed.changed) return snapshot;
+  if (!proposed.changed && !abandoned) return snapshot;
   const key = botStatusQueueKey(kind);
   const latest = await botStatusPausedQueue(kind);
   if (JSON.stringify(latest) !== JSON.stringify(snapshot) || botAvailabilityScanRunning) return latest;
-  const replacement = { ...proposed.queue, updatedAt: Date.now(),
-    reason: proposed.queue.ids.length ? "Eligible pending checks retained" : "Out-of-scope checks safely held" };
+  const replacement = { ...proposed.queue, phase: abandoned ? 'paused' : proposed.queue.phase,
+    updatedAt: Date.now(),
+    reason: abandoned ? 'Recovered an interrupted scan checkpoint; pending IDs and history preserved'
+      : proposed.queue.ids.length ? "Eligible pending checks retained" : "Out-of-scope checks safely held" };
   if (!await storageSetVerified({ [key]: replacement })) return snapshot;
   return replacement;
 }
 
 async function reviewAndRemoveIneligibleBotStatusPending() {
-  // Kept as the existing button handler for compatibility with saved Settings.
-  // Review is informational; automatic reconciliation never drops saved IDs.
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
+  await refreshBotStatusPauseButton();
   const [main, stale] = await botStatusPausedQueues();
-  const held = [...botStatusHeldEntries(main), ...botStatusHeldEntries(stale)];
-  if (!held.length) {
-    showSettingsToast("No out-of-scope Bot Status checks are being held. Pending checks will resume normally.");
+  const rows = botStatusAssessHeldEntries([
+    ...botStatusHeldEntries(main).map(item => ({...item, queueKind:'main'})),
+    ...botStatusHeldEntries(stale).map(item => ({...item, queueKind:'stale'}))
+  ]);
+  const panel = $('botStatusHeldDetails');
+  const list = $('botStatusHeldDetailsList');
+  if (!panel || !list) {
+    showSettingsToast(`${rows.length} held check(s); unable to display detailed review.`);
     return;
   }
-  const totals = new Map();
-  for (const item of held) totals.set(item.reason, (totals.get(item.reason) || 0) + 1);
-  showSettingsToast(`${held.length} saved Bot Status check${held.length === 1 ? " is" : "s are"} held automatically: ${[...totals].map(([reason, count]) => `${count} ${reason}`).join("; ")}. Existing results are safe; a full or stale Refresh will also retry eligible held IDs.`);
+  panel.hidden = false;
+  list.replaceChildren();
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.textContent = 'No held checks remain. Saved bot records were not deleted.';
+    list.append(p); return;
+  }
+  const summary = document.createElement('p');
+  const counts = new Map();
+  for (const row of rows) counts.set(row.category,(counts.get(row.category)||0)+1);
+  summary.textContent = `${rows.length} held queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. Each ID shows its current eligibility and recovery action; no checks happen until you request them.`;
+  list.append(summary);
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.textContent = 'Copy held-ID diagnostics';
+  copyButton.addEventListener('click', async () => {
+    const safeReport = rows.map(({id, queueKind, scope, mode, category, reason, originalReason, action,
+      status, checkedAt, sources, hasCopy}) => ({id, queueKind, mode, scope, category, reason,
+      originalReason, action, status, checkedAt, sources, hasCopy}));
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({version:1,generatedAt:new Date().toISOString(),entries:safeReport},null,2));
+      showSettingsToast('Copied individual held-ID reasons. Your saved records were not changed.');
+    } catch { showSettingsToast('Clipboard unavailable; review the individual reasons below.'); }
+  });
+  list.append(copyButton);
+  const eligible = rows.filter(item => item.manualRetryAllowed);
+  if (eligible.length) {
+    const allButton = document.createElement('button');
+    allButton.type = 'button'; allButton.textContent = `Recheck recoverable held IDs (${new Set(eligible.map(item=>item.id)).size})`;
+    allButton.addEventListener('click', () => runBotAvailabilityScan({mode:'stale', heldOnlyIds:eligible.map(item=>item.id)}));
+    list.append(allButton);
+  }
+  for (const row of rows) {
+    const entry = document.createElement('div');
+    entry.className = 'sub-card';
+    const heading = document.createElement('strong');
+    heading.textContent = `${row.id} · ${row.category}`;
+    const detail = document.createElement('p');
+    detail.className = 'hint';
+    detail.textContent = `${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
+    entry.append(heading, detail);
+    if (row.manualRetryAllowed) {
+      const retry = document.createElement('button');
+      retry.type = 'button'; retry.textContent = 'Recheck this ID';
+      retry.addEventListener('click', () => runBotAvailabilityScan({mode:'stale',heldOnlyIds:[row.id]}));
+      entry.append(retry);
+    }
+    list.append(entry);
+  }
 }
 
 // Defined by the lightweight Settings loader so the read-only summary works before scan tools load.
@@ -383,12 +529,13 @@ async function refreshBotStatusPauseButton() {
   }
   const allHeld = [...botStatusHeldEntries(state), ...botStatusHeldEntries(staleState)];
   const heldCount = allHeld.length;
+  const assessedHeld = botStatusAssessHeldEntries(allHeld);
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
-  botStatusRecoverableHeldCount = new Set(allHeld
+  botStatusRecoverableHeldCount = new Set(assessedHeld
     .filter(item => botStatusManualHeldRetryAllowed(item, blockedIds))
     .map(item => item.id)).size;
   const heldReasonCounts = new Map();
-  for (const item of allHeld) heldReasonCounts.set(item.reason, (heldReasonCounts.get(item.reason) || 0) + 1);
+  for (const item of assessedHeld) heldReasonCounts.set(item.category, (heldReasonCounts.get(item.category) || 0) + 1);
   const heldReasons = [...heldReasonCounts].slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join("; ");
   const normalIds = (state?.ids || []).filter(validBotId);
   const staleIds = (staleState?.ids || []).filter(validBotId);
@@ -419,7 +566,7 @@ async function refreshBotStatusPauseButton() {
   if (hint) hint.textContent = [
     count ? `${count} regular pending rechecks saved for Resume. ${checkpointDetail}` : "No regular scan pending.",
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
-    heldCount ? `${heldCount} checks held automatically: ${heldReasons}${heldReasonCounts.size > 3 ? "; more reasons available" : ""}. Nothing deleted; full/stale Refresh also retries recoverable held IDs.` : "No out-of-scope checks held.",
+    heldCount ? `${heldCount} checks held automatically: ${heldReasons}. ${botStatusRecoverableHeldCount} available for manual recheck. Open Why held for individual reasons. Nothing deleted.` : "No out-of-scope checks held.",
     "Regular and stale queues stay independent."
   ].join(" ");
   const reviewButton = $("botStatusReviewOutOfScopePending");
@@ -429,6 +576,17 @@ async function refreshBotStatusPauseButton() {
     reviewButton.hidden = heldCount === 0;
     reviewButton.disabled = botAvailabilityScanRunning;
     reviewButton.textContent = `Why held (${heldCount})`;
+  }
+  // The status presentation may have rendered before this asynchronous count
+  // finished. Keep the button responsive without rebuilding thousands of cards.
+  const heldScanButton = $('scanStaleBotAvailability');
+  if (heldScanButton && !botAvailabilityScanRunning) {
+    const trackedStale = Math.max(0, Number(botStatusTrackedStaleCount || 0));
+    heldScanButton.disabled = trackedStale === 0 && botStatusRecoverableHeldCount === 0;
+    heldScanButton.textContent = trackedStale && botStatusRecoverableHeldCount
+      ? `Refresh stale + held bots (${trackedStale + botStatusRecoverableHeldCount})`
+      : trackedStale ? `Refresh stale bots (${trackedStale})`
+      : botStatusRecoverableHeldCount ? `Refresh held bot checks (${botStatusRecoverableHeldCount})` : 'No stale or held bots';
   }
   return { main: state, stale: staleState };
 }
@@ -519,8 +677,10 @@ async function runBotAvailabilityScan(options = {}) {
     for (const kind of ["main", "stale"]) {
       const origin = originSnapshots[kind];
       if (!origin || origin.phase === "running") continue;
-      for (const item of botStatusHeldEntries(origin)) {
+      const reviewed = botStatusAssessHeldEntries(botStatusHeldEntries(origin));
+      for (const item of reviewed) {
         if (!botStatusManualHeldRetryAllowed(item, blockedIds)) continue;
+        if (Array.isArray(options?.heldOnlyIds) && !options.heldOnlyIds.includes(item.id)) continue;
         (manualHeldScanSources[item.id] ||= []).push(kind);
       }
     }
@@ -539,6 +699,13 @@ async function runBotAvailabilityScan(options = {}) {
   } else if (manualEntries.length) {
     const manuallyQueued = new Set(manualHeldIds);
     entries = [...manualEntries, ...entries.filter(entry => !manuallyQueued.has(entry.id))];
+  }
+  // Individual/manual held reviews run only the explicit IDs. A stale queue
+  // already pending is still offered for Resume instead of overwritten.
+  if (!options?.resume && Array.isArray(options?.heldOnlyIds)) {
+    const selectedHeld = new Set(options.heldOnlyIds.map(id => String(id || '').toLowerCase()).filter(validBotId));
+    entries = entries.filter(entry => selectedHeld.has(entry.id) &&
+      Object.prototype.hasOwnProperty.call(manualHeldScanSources, entry.id));
   }
   // Rescued checks go first; all remaining tracked work stays in its prior
   // priority order. Never add duplicates or change the saved scan time caps.
@@ -979,8 +1146,14 @@ async function runBotAvailabilityScan(options = {}) {
     // still available and may safely recheck the unfinished tail.
     if (!accessPauseTriggered && finalResultsSaved) {
       const outstanding = new Set(botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit));
-      const completedHeld = new Set([...completedCheckedIds].filter(id =>
-        manualHeldScanSources[id] && !outstanding.has(id)));
+      const completedHeld = new Set([...completedCheckedIds].filter(id => {
+        const result = botAvailabilityState.meta?.[id];
+        // Unknown and one-evidence unavailable candidates must remain saved
+        // for later verification, never counted as successfully resolved.
+        return manualHeldScanSources[id] && !outstanding.has(id) &&
+          ['available', 'unavailable', 'restricted'].includes(result?.status) &&
+          Number(result?.unavailableEvidenceCount || 0) !== 1;
+      }));
       const outstandingHeld = heldIds.filter(item => !completedHeld.has(item.id));
       const remainingHeldSources = Object.fromEntries(Object.entries(manualHeldScanSources)
         .filter(([id]) => !completedHeld.has(id)));

@@ -1,3 +1,22 @@
+## 0.2.96
+- Reduced repeated card-menu DOM searches on mobile and large bot listings.
+- Stopped recreating unchanged recommendation preference badges on every update.
+- Reduced temporary allocations in Favorites list change detection.
+- Show the optional Report Link Collector button only on Home and Recommendations.
+- Made page updates lighter by reducing temporary allocations in DOM change handling.
+- Reduced slowdown when many bots share a display name in Bot Status.
+- Fixed Bot Status checks getting stuck when their original saved list changes.
+- Added individual held-check reasons and safe manual rechecks in Bot Status Center.
+- Fixed the stale / held scan button remaining disabled when retryable checks exist.
+- Archive presets can now be browsed and chosen before turning on filtering.
+- Made Archive Blocking Presets easier to choose, search, and customize by franchise, character, group, or theme.
+- Improved persona picker responsiveness by skipping unchanged option refreshes.
+- Reduced repeated card scans when adding Later buttons to large bot listings.
+- Reduced duplicate Bot Status helper checks during scans without changing result handling or rate limits.
+- Improved diagnostics for discarded, loading, and unresponsive browser tabs.
+- Improved Archive preset loading compatibility across supported browsers and Android WebView.
+- Reduced leftover Later-button references after long browsing sessions.
+
 ## 0.2.95
 - Fixed Android QoL sometimes loading the website without starting its features.
 - Fixed some bot cards appearing out of order after listings refreshed.

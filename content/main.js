@@ -600,12 +600,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function mutationsMayAffectChatListRows(mutations) {
     if (!DS.isChatListPage?.()) return false;
     for (const mutation of mutations || []) {
-      const nodes = [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
-      for (const node of nodes) {
-        const el = node instanceof Element ? node : node?.parentElement;
-        if (!el) continue;
-        if (el.matches?.("a[href*='/chat/'], [data-testid*='Chat']")) return true;
-        if (el.querySelector?.("a[href*='/chat/'], [data-testid*='Chat']")) return true;
+      // Iterate the two NodeLists directly: large chat-history updates should
+      // not allocate an intermediate array for every MutationRecord.
+      for (const nodes of [mutation.addedNodes, mutation.removedNodes]) {
+        for (const node of nodes || []) {
+          const el = node instanceof Element ? node : node?.parentElement;
+          if (!el) continue;
+          if (el.matches?.("a[href*='/chat/'], [data-testid*='Chat']")) return true;
+          if (el.querySelector?.("a[href*='/chat/'], [data-testid*='Chat']")) return true;
+        }
       }
     }
     return false;

@@ -1517,7 +1517,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.body;
       if (!root) return;
       state.observer = new MutationObserver(mutations => {
-        if (!mutations.some(m => [...m.addedNodes].some(n => n instanceof Element && !n.closest?.('[data-ds-owned="1"]')))) return;
+        // NodeLists are iterable; avoid allocating an array for every native
+        // mutation batch while large Favorites listings are mounting.
+        let nativeAddition = false;
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node instanceof Element && !node.closest?.('[data-ds-owned="1"]')) {
+              nativeAddition = true;
+              break;
+            }
+          }
+          if (nativeAddition) break;
+        }
+        if (!nativeAddition) return;
         if (state.refreshTimer) return;
         state.refreshTimer = setTimeout(() => { state.refreshTimer = null; if (isPage()) { renderLauncher(); historyControls(); if (state.active) selectionCards(); void syncVisibleFavorites(); } }, 300);
       });

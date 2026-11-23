@@ -468,11 +468,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       for (let pass = 0; pass < 6; pass++) {
         if (generation !== laterWork.generation || route !== location.href || !laterEnabled()) return;
         const full = laterWork.needsFullScan;
-        const entries = full ? [...document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")].map(anchor => ({card: null, anchor})) :
-          [...laterWork.dirty].filter(card => card?.isConnected).map(card => ({
-            card, anchor: laterWork.byCard.get(card)?.anchor ||
-              card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']")
-          }));
+        const entries = full ? (() => {
+          // A listing typically has multiple native links per card. Select
+          // actual card roots once, rather than finding each link's card in
+          // the hot path. Preserve the legacy fallback for unfamiliar layouts.
+          const cards = [...document.querySelectorAll(LATER_CARD_SELECTOR)]
+            .filter(card => DS.isRecommendationCardRoot?.(card));
+          return cards.length ? cards.map(card => ({
+            card, anchor: card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']")
+          })) : [...document.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")]
+            .map(anchor => ({ card: null, anchor }));
+        })() : [...laterWork.dirty].filter(card => card?.isConnected).map(card => ({
+          card, anchor: laterWork.byCard.get(card)?.anchor ||
+            card.querySelector("a[href*='/chat/'], a[href*='/chatbot/']")
+        }));
         laterWork.needsFullScan = false;
         laterWork.dirty.clear();
         // A storage sync changes the in-memory Set even when no card mutates.
@@ -494,7 +503,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const visited = new Set();
         for (const item of entries) {
           if (generation !== laterWork.generation || route !== location.href || !laterEnabled()) return;
-          if (full && item.anchor.closest?.('#ds-favorites-later-panel')) continue;
+          if (full && item.anchor?.closest?.('#ds-favorites-later-panel')) continue;
           const card = item.card || DS.getCardFromChatLink?.(item.anchor);
           if (!card?.isConnected || visited.has(card)) {skipped++; continue;}
           visited.add(card);
@@ -505,6 +514,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           }
         }
         if (!laterWork.needsFullScan && !laterWork.dirty.size && !laterWork.savedStateDirty) break;
+      }
+      // Removed infinite-scroll cards must not stay strongly referenced by
+      // the rendered-button Set for the rest of a long browsing session.
+      if (initialFullScan || laterWork.rendered.size > 320) {
+        for (const button of laterWork.rendered) {
+          if (!button.isConnected) laterWork.rendered.delete(button);
+        }
       }
     } catch (error) {
       outcome = 'failed';

@@ -24,6 +24,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const PERSONAS = /^\/(?:[a-z]{2}\/)?personas\/?$/i;
   const FAV = /^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i;
   const MY_CREATIONS = /^\/(?:[a-z]{2}\/)?my-creations(?:\/|$)/i;
+  // The report-link + is a discovery tool, not a general card action.
+  // Localized Home and Recommendations are the only supported routes.
+  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i;
   const LOREBOOK_EDITOR = /^\/(?:[a-z]{2}\/)?lorebook\/(?:edit(?:\/|$)|create(?:\/|$))/i;
   const LOREBOOK_PUBLIC = /^\/(?:[a-z]{2}\/)?(?:lorebook\/(?:[0-9a-f-]{20,})|lorebooks)(?:\/|$)/i;
   const LISTING = /^\/(?:[a-z]{2}\/)?(?:favorite-bots|recommended-bots|chatbots|search|my-creations\/chatbots|creator\/[^/]+)(?:\/|$)/i;
@@ -219,9 +222,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("failed-message-helper", chat && any(s,["failedMessageHelper","autoRetryFailedMessageSends"]));
     add("pagination-tools", listingOrProfile);
     // Local link collection only needs image cards, not chat/Settings startup.
-    add("report-link-collector", settings.enableReportLinkCollector === true && !chat && !CHATS.test(path) && !lorebookEditor &&
-      !page.isRulebookExplorePage && !page.isLorebookPage && !page.isBotEditor &&
-      (LISTING.test(path) || path === "/" || myCreations || page.routeType === "listing" || page.routeType === "creator-listing"));
+    add("report-link-collector", settings.enableReportLinkCollector === true && REPORT_LISTING.test(path));
     add("bot-editor-actions", botEditor && s.botEditorSaveActions === true);
     add("bot-editor-memory", botEditor || myCreations);
     // Keep these independent feature engines out of every page's eager

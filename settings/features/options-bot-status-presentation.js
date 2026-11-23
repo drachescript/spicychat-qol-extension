@@ -202,7 +202,15 @@ function botSameNameCollisionIndex() {
 
   const byId = new Map();
   for (const group of groups.values()) {
-    const unique = group.filter((item, index, list) => list.findIndex(other => other.id === item.id) === index);
+    // Deduplicate in linear time. A popular shared bot name can have hundreds
+    // of UUIDs; the previous findIndex-per-item check was quadratic.
+    if (group.length < 2) continue;
+    const seen = new Set();
+    const unique = group.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
     if (unique.length < 2) continue;
 
     // A shared display name by itself is not useful signal. Normal names such
@@ -214,12 +222,10 @@ function botSameNameCollisionIndex() {
     const otherStates = unique.filter(item => !(item.deletedRecovery || item.status === "unavailable"));
     if (!unavailable.length || !otherStates.length) continue;
 
-    for (const item of unavailable) {
-      byId.set(item.id, otherStates.filter(other => other.id !== item.id));
-    }
-    for (const item of otherStates) {
-      byId.set(item.id, unavailable.filter(other => other.id !== item.id));
-    }
+    // These groups are disjoint by status and UUID. Share their immutable
+    // counterpart arrays instead of repeatedly rebuilding identical lists.
+    for (const item of unavailable) byId.set(item.id, otherStates);
+    for (const item of otherStates) byId.set(item.id, unavailable);
   }
   return byId;
 }
@@ -413,6 +419,7 @@ function renderBotAvailability(renderOptions = {}) {
   const excludedBlockedUncheckedCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && manualBlockedIds.has(String(entry.id || "").toLowerCase())).length;
   const manualOutsideCount = base.filter(entry => entry._scanEligible !== true && Number(entry.checkedAt || 0) <= 0 && !manualBlockedIds.has(String(entry.id || "").toLowerCase()) && !botStatusIdIgnored(entry.id)).length;
   const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
+  botStatusTrackedStaleCount = staleCount;
   let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
   const shown = entries.slice(0, limit);
 

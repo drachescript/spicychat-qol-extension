@@ -203,20 +203,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const preferredTag = !!settings.recommendationPreferredTags && hasConfiguredTag(card, settings.recommendationPreferredTags);
       const favoriteCreator = !!settings.recommendationPreferFavoriteCreators && isFavoriteCreator(card);
       const preferred = preferredTag || favoriteCreator;
+      // Reconciliation runs during ordinary browsing. Avoid rewriting the
+      // same order and removing/readding an identical badge on every pass:
+      // that creates extra DOM mutations and wakes listing observers again.
       if (preferred) {
-        target.style.order = "-10";
-        target.dataset.dsRecommendationOrder = "1";
+        if (target.dataset.dsRecommendationOrder !== "1" || target.style.order !== "-10") {
+          target.style.order = "-10";
+          target.dataset.dsRecommendationOrder = "1";
+        }
       } else if (target.dataset.dsRecommendationOrder) {
         target.style.order = ""; delete target.dataset.dsRecommendationOrder;
       }
-      target.querySelector(`.${REASON_CLASS}`)?.remove();
-      if (settings.recommendationShowReasonBadges && preferred) {
-        const note = document.createElement("span"); note.className = REASON_CLASS;
-        note.textContent = favoriteCreator ? "★ favorite creator" : "★ preferred tag";
-        note.style.cssText = "position:absolute;right:7px;bottom:7px;z-index:30;background:rgba(17,24,39,.9);color:#fff;border:1px solid rgba(167,139,250,.65);border-radius:999px;padding:3px 7px;font:600 10px system-ui;pointer-events:none";
-        if (getComputedStyle(target).position === "static") { target.dataset.dsRecommendationPosition = target.style.position || ""; target.style.position = "relative"; }
-        target.appendChild(note);
+      const note = target.querySelector(`.${REASON_CLASS}`);
+      if (!settings.recommendationShowReasonBadges || !preferred) {
+        note?.remove();
+        continue;
       }
+      const text = favoriteCreator ? "★ favorite creator" : "★ preferred tag";
+      if (note) {
+        if (note.textContent !== text) note.textContent = text;
+        continue;
+      }
+      const nextNote = document.createElement("span");
+      nextNote.className = REASON_CLASS;
+      nextNote.textContent = text;
+      nextNote.style.cssText = "position:absolute;right:7px;bottom:7px;z-index:30;background:rgba(17,24,39,.9);color:#fff;border:1px solid rgba(167,139,250,.65);border-radius:999px;padding:3px 7px;font:600 10px system-ui;pointer-events:none";
+      if (getComputedStyle(target).position === "static") { target.dataset.dsRecommendationPosition = target.style.position || ""; target.style.position = "relative"; }
+      target.appendChild(nextNote);
     }
   }
 

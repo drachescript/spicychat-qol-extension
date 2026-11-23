@@ -557,8 +557,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     menuCard = card;
     card.classList.add("ds-listing-card-menu-open");
     const findMenu = () => {
-      const candidates = Array.from(document.querySelectorAll("button, [role='menuitem'], [role='option'], li, div"));
-      const item = candidates.find(el => String(el.textContent || "").trim().toLowerCase() === "less like this" && el.getClientRects().length);
+      // A full-document scan of every DIV/LI (and its descendant text) could
+      // occupy the mobile main thread for hundreds of milliseconds, repeated
+      // three times per menu opening. Search interactive menu items first.
+      const isLessLike = el => String(el?.textContent || "").trim().toLowerCase() === "less like this" && !!el.getClientRects?.().length;
+      let item = null;
+      for (const candidate of document.querySelectorAll(
+        '[role="menuitem"], [role="option"], button[aria-label*="less like" i], button[title*="less like" i]'
+      )) {
+        if (isLessLike(candidate)) { item = candidate; break; }
+      }
+      // Some native menu layouts use plain divs. Only traverse mounted menu
+      // surfaces, never all divs across a listing containing hundreds of bots.
+      if (!item) {
+        for (const surface of document.querySelectorAll(
+          '[role="menu"], [data-radix-menu-content], [data-menu-content]'
+        )) {
+          for (const candidate of surface.querySelectorAll('button, div, li')) {
+            if (isLessLike(candidate)) { item = candidate; break; }
+          }
+          if (item) break;
+        }
+      }
       if (!item) return;
       let menu = item.closest?.('[role="menu"], [data-radix-menu-content], [data-menu-content]') || null;
       if (!menu) {
@@ -587,18 +607,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.addEventListener("click", event => {
       const target = event.target instanceof Element ? event.target : null;
       if (!target || target.closest?.("#ds-qol-panel")) return;
-      const card = target.closest?.(".ds-listing-card-lite") || (DS.collectCards?.() || []).find(item => item?.card?.contains?.(target))?.card || null;
+      const button = target.closest?.("button");
+      const ellipsis = target.closest?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical") ||
+        button?.querySelector?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical");
+      const label = String(button?.getAttribute?.("aria-label") || button?.title || button?.dataset?.testid || "");
+      const isMore = !!ellipsis || /more|action|ellipsis|menu/i.test(label);
+      // Most clicks are not menu opens. Avoid enumerating every card for
+      // ordinary taps or controls outside a bot card.
+      let card = target.closest?.(".ds-listing-card-lite, [data-testid='CharacterCard'], [data-testid='ChatbotCard']") || null;
+      if (!card && isMore) {
+        card = (DS.collectCards?.() || []).find(item => item?.card?.contains?.(target))?.card || null;
+      }
       if (!card) {
         if (menuCard) setTimeout(() => {
           if (!document.querySelector(".ds-native-card-actions-menu")) clearNativeCardMenuState();
         }, 100);
         return;
       }
-      const button = target.closest?.("button");
-      const ellipsis = target.closest?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical") ||
-        button?.querySelector?.("svg.lucide-ellipsis, svg.lucide-ellipsis-vertical");
-      const label = String(button?.getAttribute?.("aria-label") || button?.title || button?.dataset?.testid || "");
-      const isMore = !!ellipsis || /more|action|ellipsis|menu/i.test(label);
       if (!isMore) {
         if (menuCard) setTimeout(() => {
           if (!document.querySelector(".ds-native-card-actions-menu")) clearNativeCardMenuState();

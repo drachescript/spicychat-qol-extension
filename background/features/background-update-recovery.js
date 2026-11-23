@@ -296,8 +296,11 @@ async function getReachableDiagnosticContext() {
   }
   const probe = {
     tabsFound: allCandidates.length,
+    tabsDiscarded: allCandidates.filter(tab => tab.discarded).length,
+    tabsLoading: allCandidates.filter(tab => !tab.discarded && tab.status !== 'complete').length,
     tabsPinged: pinged.length,
     pingsAnswered: responsive.length,
+    tabsNoPingReply: pinged.length - responsive.length,
     currentVersionPings: current.length,
     mismatchedVersionPings: mismatched.length,
     lightProbesAttempted: lights.length,

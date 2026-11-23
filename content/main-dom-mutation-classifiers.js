@@ -9,44 +9,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!(node instanceof Element)) return false;
     if (node.dataset?.dsOwner === "qol" || node.dataset?.dsOwned === "1") return true;
     if (String(node.id || "").startsWith("ds-")) return true;
-    return Array.from(node.classList || []).some(name => String(name).startsWith("ds-"));
+    // Avoid materializing class lists for every observer record. This path is
+    // invoked continuously while React updates large listings and chats.
+    for (const name of node.classList || []) {
+      if (String(name).startsWith("ds-")) return true;
+    }
+    return false;
   }
 
+  const PERSISTENT_SHORTCUT_SELECTOR = ".ds-chat-asterisk-shortcut,"
+    + ".ds-chat-asterisk-shortcut-wrapper,.ds-chat-ooc-shortcut,.ds-chat-ooc-shortcut-wrapper";
   function nodeContainsPersistentChatShortcut(node) {
     if (!(node instanceof Element)) return false;
-
-    const selector = [
-      ".ds-chat-asterisk-shortcut",
-      ".ds-chat-asterisk-shortcut-wrapper",
-      ".ds-chat-ooc-shortcut",
-      ".ds-chat-ooc-shortcut-wrapper"
-    ].join(",");
-
-    return node.matches?.(selector) || !!node.querySelector?.(selector);
+    return node.matches?.(PERSISTENT_SHORTCUT_SELECTOR) ||
+      !!node.querySelector?.(PERSISTENT_SHORTCUT_SELECTOR);
   }
 
   function mutationRemovedPersistentChatShortcut(mutation) {
-    return [...mutation.removedNodes].some(nodeContainsPersistentChatShortcut);
+    for (const node of mutation.removedNodes || []) {
+      if (nodeContainsPersistentChatShortcut(node)) return true;
+    }
+    return false;
   }
 
+  const PERSISTENT_HEADER_SELECTOR = ".ds-chat-topbar-later-button,.ds-chat-history-button,"
+    + ".ds-chat-new-chat-button,.ds-chat-profile-button,.ds-chat-search-button,"
+    + ".ds-creator-fav-button,#ds-chat-background-control,#ds-android-qol-menu-button,"
+    + "#ds-bot-organizer-context-button";
   function nodeContainsPersistentChatHeaderControl(node) {
     if (!(node instanceof Element)) return false;
-    const selector = [
-      ".ds-chat-topbar-later-button",
-      ".ds-chat-history-button",
-      ".ds-chat-new-chat-button",
-      ".ds-chat-profile-button",
-      ".ds-chat-search-button",
-      ".ds-creator-fav-button",
-      "#ds-chat-background-control",
-      "#ds-android-qol-menu-button",
-      "#ds-bot-organizer-context-button"
-    ].join(",");
-    return node.matches?.(selector) || !!node.querySelector?.(selector);
+    return node.matches?.(PERSISTENT_HEADER_SELECTOR) ||
+      !!node.querySelector?.(PERSISTENT_HEADER_SELECTOR);
   }
 
   function mutationRemovedPersistentChatHeaderControl(mutation) {
-    return [...mutation.removedNodes].some(nodeContainsPersistentChatHeaderControl);
+    for (const node of mutation.removedNodes || []) {
+      if (nodeContainsPersistentChatHeaderControl(node)) return true;
+    }
+    return false;
   }
 
   function nodeContainsNativeChatHeader(node) {
@@ -56,13 +56,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function mutationAddedNativeChatHeader(mutation) {
-    return [...mutation.addedNodes].some(nodeContainsNativeChatHeader);
+    for (const node of mutation.addedNodes || []) {
+      if (nodeContainsNativeChatHeader(node)) return true;
+    }
+    return false;
   }
 
   function mutationTouchesNativeChatHeader(mutation) {
     const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
     if (target && (nodeContainsNativeChatHeader(target) || target.closest?.("a[aria-label='chatbot-profile'], button[aria-label='chat-dropdown']"))) return true;
-    return [...(mutation?.addedNodes || []), ...(mutation?.removedNodes || [])].some(nodeContainsNativeChatHeader);
+    for (const node of mutation?.addedNodes || []) {
+      if (nodeContainsNativeChatHeader(node)) return true;
+    }
+    for (const node of mutation?.removedNodes || []) {
+      if (nodeContainsNativeChatHeader(node)) return true;
+    }
+    return false;
   }
 
   function mutationIsOnlyQolUi(mutation) {
@@ -71,8 +80,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (target?.closest?.("#ds-qol-panel, #ds-chat-export-modal")) return true;
     if (target && (nodeLooksQolOwned(target) || target.closest?.("[data-ds-owned='1']"))) return true;
 
-    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
-    return nodes.length > 0 && nodes.every(nodeLooksQolOwned);
+    // A large React mutation may include hundreds of nodes; short-circuit
+    // without allocating and copying both NodeLists on every callback.
+    let sawNode = false;
+    for (const node of mutation.addedNodes || []) {
+      sawNode = true;
+      if (!nodeLooksQolOwned(node)) return false;
+    }
+    for (const node of mutation.removedNodes || []) {
+      sawNode = true;
+      if (!nodeLooksQolOwned(node)) return false;
+    }
+    return sawNode;
   }
 
   DS.mainDomMutationClassifiers = Object.freeze({
