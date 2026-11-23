@@ -11,6 +11,31 @@ function performancePageFamily(path) {
   return "other";
 }
 
+function listingLongTaskReportLine(runtime, page) {
+  const summary = runtime?.listingLongTaskSummary;
+  const path = String(page || "").split("?")[0];
+  if (!summary || summary.path !== path || !["/", "/favorite-bots", "/recommended-bots"].includes(path)) return "";
+  return `Listing Long Tasks (${summary.route}, current route only): ${Number(summary.count || 0)} tasks; cumulative ${Number(summary.totalMs || 0).toFixed(1)} ms; max ${Number(summary.maxMs || 0).toFixed(1)} ms; QoL-marker overlap ${Number(summary.qolOverlapCount || 0)}; without overlap ${Number(summary.noQolOverlapCount || 0)}. Browser tasks can include native SpicyChat work; overlap does not prove QoL caused a task.`;
+}
+
+function runtimeProbeStageLine(context) {
+  const stage = String(context?.probe?.lightStartupStage || context?.pageDiagnostics?.runtimeStartup?.stage || "");
+  return stage && stage !== "unknown" ? `Lightweight runtime startup stage: ${stage} (an answered probe is separate from full snapshot availability).` : "";
+}
+
+function runtimeDiagnosticPhaseLine(context) {
+  const status = String(context?.runtimeStatus || "");
+  if (context?.runtimeAvailable && context?.pageDiagnostics?.ok) return "Live runtime diagnostic state: full snapshot available.";
+  if (context?.runtimeAvailable && context?.pageDiagnostics) return "Live runtime diagnostic state: full snapshot available.";
+  if (status === "runtime-initializing") return "Live runtime diagnostic state: initializing; lightweight transport responded.";
+  if (status === "runtime-paused") return "Live runtime diagnostic state: paused; lightweight transport responded.";
+  if (status === "runtime-startup-incomplete") return "Live runtime diagnostic state: startup incomplete; lightweight transport responded.";
+  if (["runtime-lightweight-ok-full-snapshot-timeout", "runtime-full-snapshot-error"].includes(status)) return "Live runtime diagnostic state: lightweight transport responded; full snapshot unavailable.";
+  if (["light-probe-unreachable", "current-runtime-ping-ok-lightweight-unavailable"].includes(status)) return "Live runtime diagnostic state: lightweight diagnostic transport did not return a response; runtime health is unknown.";
+  if (["no-spicychat-tab", "page-found-runtime-unreachable", "runtime-version-mismatch", "runtime-marked-stale-after-update"].includes(status)) return "Live runtime diagnostic state: no verified current live runtime; this does not establish that QoL is disabled.";
+  return "Live runtime diagnostic state: unverified; live page counters are unavailable.";
+}
+
 function performanceSnapshotFromContext(context) {
   const runtimeAvailable = !!(context?.runtimeAvailable && context?.pageDiagnostics);
   const runtime = context?.pageDiagnostics?.runtimePerformance || {};
@@ -529,6 +554,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Runtime data: ${context?.runtimeAvailable && context?.pageDiagnostics ? "available" : `unavailable — ${context?.runtimeStatus || "runtime-unreachable"}${context?.runtimeError ? ` (${context.runtimeError})` : ""}; runtime counters below are omitted or unavailable`}`,
     ...(context?.probe ? [`Runtime check: ${Number(context.probe.pingsAnswered || 0)}/${Number(context.probe.tabsPinged || 0)} tab pings answered; lightweight runtime ${context.probe.lightRuntimeAnswered ? "answered" : "unavailable"}; full snapshot ${context.probe.snapshotsAnswered ? "answered" : "unavailable"}.` ] : []),
     (() => { const q = context?.probe; return q ? `Runtime probe: ping ${Number(q.pingsAnswered || 0)}/${Number(q.tabsPinged || 0)} replied; current-version ${Number(q.currentVersionPings ?? q.pingsAnswered ?? 0)}; lightweight ${Number(q.lightProbesAnswered || 0)}/${Number(q.lightProbesAttempted || 0)}; snapshots ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)}; ${Number(q.tabsFlaggedStale || 0)} stored stale markers (not confirmed failures), ${Number(q.sampledPausedTabs || 0)} sampled paused` : "Runtime probe: no result"; })(),
+    ...(runtimeProbeStageLine(context) ? [runtimeProbeStageLine(context)] : []),
+    runtimeDiagnosticPhaseLine(context),
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable with runtime data"; })(),
     `S.AI Toolkit detected: ${result[SAI_TOOLKIT_PRESENCE_KEY]?.detected ? "yes" : "no"}`,
     (() => { const beta = result[SPICYCHAT_BETA_CAPABILITIES_KEY] || {}; const caps = beta.capabilities || {}; const rulebooks = caps.rulebooks && caps.rulebooks !== "unknown" ? `; Rulebooks ${caps.rulebooks}` : ""; return `SpicyChat beta/experimental access: ${beta.detected ? "detected" : "not detected"}; Public Lorebooks ${caps.publicLorebooks || "unknown"}; Story Mode ${caps.storyMode || "unknown"}${rulebooks}`; })(),
@@ -635,6 +662,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     }
     diagnosticLines.push(`Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicate invalidations avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text message mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped`);
     if (Number(runtime.longTasks || 0)) diagnosticLines.push(`Browser long tasks: ${Number(runtime.longTasks || 0)}; last ${Number(runtime.lastLongTaskMs || 0)} ms; max ${Number(runtime.maxLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`);
+    const listingLongTaskLine = listingLongTaskReportLine(runtime, sanitizeDiagnosticPath(context?.url || ""));
+    if (listingLongTaskLine) diagnosticLines.push(listingLongTaskLine);
     diagnosticLines.push(`Slow native click events: ${Number(runtime.nativeSlowClickSamples || 0)}; worst input delay ${Number(runtime.nativeWorstInputDelayMs || 0)} ms; worst click duration ${Number(runtime.nativeWorstClickMs || 0)} ms; last category ${runtime.nativeLastSlowClickCategory || "none"}`);
     diagnosticLines.push(`QoL performance entries: ${perf.length}`);
     perf.forEach(entry => diagnosticLines.push(`  ${entry.name}: ${entry.calls} calls, avg ${entry.averageMs} ms, max ${entry.maxMs} ms, last ${entry.lastMs || 0} ms, total ${entry.totalMs} ms`));
@@ -764,6 +793,9 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
     `Runtime data: ${runtimeAvailable ? "available" : `unavailable — ${context?.runtimeStatus || "snapshot-request-timeout"}; Options-page measurements below are still valid`}`,
     (() => { const q = context?.probe; return q ? `Runtime probe: ${Number(q.tabsPinged || 0)}/${Number(q.tabsFound || 0)} tabs pinged; ${Number(q.pingsAnswered || 0)} replies, ${Number(q.currentVersionPings ?? q.pingsAnswered ?? 0)} current-version; ${Number(q.lightProbesAnswered || 0)}/${Number(q.lightProbesAttempted || 0)} lightweight; ${Number(q.snapshotsAnswered || 0)}/${Number(q.snapshotsAttempted || 0)} full snapshots; ${Number(q.tabsFlaggedStale || 0)} stored stale markers (not confirmed failures); ${Number(q.tabsDiscarded || 0)} discarded, ${Number(q.tabsLoading || 0)} loading, ${Number(q.tabsNoPingReply || 0)} no reply (not proof of failure)` : "Runtime probe: no results received"; })(),
+    ...(runtimeProbeStageLine(context) ? [runtimeProbeStageLine(context)] : []),
+    runtimeDiagnosticPhaseLine(context),
+    ...(runtimeAvailable && listingLongTaskReportLine(runtime, sampledPath) ? [listingLongTaskReportLine(runtime, sampledPath)] : []),
     `Sample scope: ${sampleScope}`,
     (() => { const p = context?.pageDiagnostics?.diagnosticProtocol; return p ? `Dragon's SpicyChat Diagnostic Extension protocol: v${Number(p.protocolVersion || 1)}; ${p.inspectorConnected ? `paired${p.inspectorVersion ? ` with Inspector ${p.inspectorVersion}` : " with Inspector"}` : "Inspector not currently paired"}; QoL ${p.runState || "unknown"}; operation markers ${Number(p.counters?.operationsStarted || 0)}/${Number(p.counters?.operationsEnded || 0)}; network markers ${Number(p.counters?.networkStarted || 0)}/${Number(p.counters?.networkEnded || 0)}` : "Dragon's SpicyChat Diagnostic Extension protocol: unavailable"; })(),
     `Environment: Android ${env.android ? "yes" : "no"}; WebView ${env.webview ? "yes" : "no"}; installed/standalone ${env.installedApp ? `yes (${env.displayMode || "standalone"})` : "no"}; Firefox-family ${env.firefox || env.waterfox ? "yes" : "no"}; Opera ${env.opera ? "yes" : "no"}`,

@@ -1,4 +1,7 @@
 ## 0.2.96
+- Improved lightweight diagnostic listener registration recovery when a browser bridge appears after core startup.
+- Distinguished initializing, paused, and incomplete runtime states from failed lightweight/full diagnostic transport.
+- Added on-demand, current-route Long Task summaries for Home, Favorites, and Recommendations using the existing observer.
 - Reduced repeated card-menu DOM searches on mobile and large bot listings.
 - Stopped recreating unchanged recommendation preference badges on every update.
 - Reduced temporary allocations in Favorites list change detection.

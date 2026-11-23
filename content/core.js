@@ -355,24 +355,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Register this early, before the large main runtime is assembled. If an
   // optional/required script fails later, Settings can still distinguish a
   // partial injection from a completely unreachable Android WebView.
-  try {
-    chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== "DS_GET_PAGE_DIAGNOSTICS_LIGHT") return false;
-      const startup = DS.getRuntimeStartup();
-      const perf = DS.state?.runtimePerformance || {};
-      sendResponse({
-        ok: true,
-        runtimeReady: startup.stage === "ready",
-        paused: !!DS.isQolPausedForTab?.(),
-        startup,
-        sampleAt: Date.now(),
-        sampleKind: "lightweight-no-dom",
-        messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
-        messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0)
+  let lightDiagnosticsInstalled = false;
+  DS.installLightDiagnostics = function installLightDiagnostics() {
+    if (lightDiagnosticsInstalled) return true;
+    // The native WebView shim normally exists before content injection, but a
+    // temporarily missing transport must not silently disable the probe forever.
+    // Later module registration can retry once without polling or duplicate listeners.
+    try {
+      const onMessage = globalThis.chrome?.runtime?.onMessage;
+      if (typeof onMessage?.addListener !== "function") return false;
+      onMessage.addListener((message, _sender, sendResponse) => {
+        if (message?.type !== "DS_GET_PAGE_DIAGNOSTICS_LIGHT") return false;
+        try {
+          const startup = DS.getRuntimeStartup();
+          const perf = DS.state?.runtimePerformance || {};
+          sendResponse({
+            ok: true,
+            runtimeReady: startup.stage === "ready",
+            paused: !!DS.isQolPausedForTab?.(),
+            startup,
+            sampleAt: Date.now(),
+            sampleKind: "lightweight-no-dom",
+            messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
+            messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0)
+          });
+        } catch (error) {
+          sendResponse({ ok: false, errorType: String(error?.name || "Error").slice(0, 48), sampleKind: "lightweight-no-dom" });
+        }
+        return false; // Synchronous response; never holds an Android relay open.
       });
-      return false;
-    });
-  } catch { /* Android bridges may install their runtime transport later. */ }
+      lightDiagnosticsInstalled = true;
+      return true;
+    } catch { return false; }
+  };
+  DS.installLightDiagnostics();
 
   DS.state = {
     globalEnabledSetting: true,

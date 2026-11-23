@@ -314,6 +314,8 @@ async function getReachableDiagnosticContext() {
     sampledStateReplies: lights.filter(row => row.light?.ok).length,
     lightRuntimeAnswered: lights.some(row => row.light?.ok),
     lightRuntimeReady: ready.length > 0,
+    // Status only; no page text, account data or full diagnostic payload.
+    lightStartupStage: String(lights.find(row => row.light?.ok)?.light?.startup?.stage || "unknown").slice(0, 32),
     probeScope: "read-only; two current-version snapshots maximum"
   };
   const winner = snapshots.find(row => row.pageDiagnostics?.ok);
@@ -326,6 +328,9 @@ async function getReachableDiagnosticContext() {
   const runtimeStatus = !fallback ? "no-spicychat-tab"
     : probe.snapshotHandlerErrors ? "runtime-full-snapshot-error"
     : probe.lightRuntimeReady ? "runtime-lightweight-ok-full-snapshot-timeout"
+    : probe.lightRuntimeAnswered && probe.sampledPausedTabs ? "runtime-paused"
+    : probe.lightRuntimeAnswered && ["core-loaded", "waiting-for-modules", "main-registered", "loading-state", "state-loaded"].includes(probe.lightStartupStage) ? "runtime-initializing"
+    : probe.lightRuntimeAnswered && ["error", "missing-modules"].includes(probe.lightStartupStage) ? "runtime-startup-incomplete"
     : probe.lightRuntimeAnswered ? "runtime-lightweight-ok-not-ready"
     : current.length ? "current-runtime-ping-ok-lightweight-unavailable"
     : mismatched.length ? "runtime-version-mismatch"
@@ -334,7 +339,10 @@ async function getReachableDiagnosticContext() {
   const runtimeError = !fallback ? "No open SpicyChat tab was found."
     : probe.snapshotHandlerErrors ? "A current-version diagnostic handler returned an error; the full snapshot was not available."
     : probe.lightRuntimeReady ? "A verified current-version runtime answered lightweight diagnostics, but its full snapshot did not finish. Live page counters are unavailable."
-    : probe.lightRuntimeAnswered ? "The current-version lightweight handler responded but reported an unready or paused runtime."
+    : probe.lightRuntimeAnswered && probe.sampledPausedTabs ? "The lightweight handler answered: QoL is paused for this tab."
+    : probe.lightRuntimeAnswered && ["core-loaded", "waiting-for-modules", "main-registered", "loading-state", "state-loaded"].includes(probe.lightStartupStage) ? "The lightweight handler answered while QoL is initializing. Try again when startup completes."
+    : probe.lightRuntimeAnswered && ["error", "missing-modules"].includes(probe.lightStartupStage) ? "The lightweight handler answered, but QoL startup did not complete. Inspect the startup stage and missing modules."
+    : probe.lightRuntimeAnswered ? "The current-version lightweight handler responded but reported an unready runtime."
     : current.length ? "A current-version tab answered the basic ping, but its main diagnostic handler did not respond."
     : mismatched.length ? "Responding tabs reported a different extension version. Refresh an affected tab manually to attach the current content scripts."
     : probe.tabsFlaggedStale ? "Tabs are marked as stale after an extension update. This is not proof of a broken runtime; refresh an affected tab to attach current content scripts."

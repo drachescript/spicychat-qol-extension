@@ -188,14 +188,45 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       // Runtime Improvements owns the shared long-task observer when installed.
       // A Custom Lite package without that module keeps the local fallback.
+      // Keep only the CURRENT listing session, never a history of URLs or tasks.
+      // Date-free, numeric-only summaries cost nothing while scrolling.
+      const listingRoutes = { "/": "Home", "/favorite-bots": "Favorites", "/recommended-bots": "Recommendations" };
+      let listingRoutePath = String(location.pathname || "/");
+      let listingRouteSince = performance.now();
+      const syncListingLongTaskRoute = () => {
+        const path = String(location.pathname || "/");
+        if (path === listingRoutePath) return;
+        listingRoutePath = path;
+        listingRouteSince = performance.now();
+        // Reset only diagnostic counters, not saved data or the existing global
+        // browser Long Task counters. No DOM queries or asynchronous work.
+        delete runtimeCounters().listingLongTaskSummary;
+      };
+      DS.syncListingLongTaskDiagnosticRoute = syncListingLongTaskRoute;
       const consumeLongTasks = entries => {
         if (!DS.state?.settings?.performanceDiagnostics && !DS.isDiagnosticTraceActive?.("normal")) return;
+        syncListingLongTaskRoute();
         const counters = runtimeCounters();
+        const route = listingRoutes[listingRoutePath] || "";
+        // A browser may deliver a task just after an SPA transition; do not
+        // assign work that began on the previous route to the new one.
+        const listing = route ? (counters.listingLongTaskSummary ||
+          (counters.listingLongTaskSummary = {
+            route, path: listingRoutePath, count: 0, totalMs: 0, maxMs: 0,
+            qolOverlapCount: 0, noQolOverlapCount: 0, sampleStartedAt: Date.now()
+          })) : null;
         for (const entry of entries) {
           const ms = Number(entry.duration || 0);
           const rounded = Math.round(ms * 10) / 10;
           const start = Number(entry.startTime || 0);
           const overlaps = longTaskOverlapNames(start, start + ms);
+          if (listing && Number.isFinite(ms) && ms > 0 && start >= listingRouteSince) {
+            listing.count += 1;
+            listing.totalMs = Math.round((listing.totalMs + ms) * 10) / 10;
+            listing.maxMs = Math.max(listing.maxMs, rounded);
+            if (overlaps.length) listing.qolOverlapCount += 1;
+            else listing.noQolOverlapCount += 1;
+          }
           counters.longTasks = Number(counters.longTasks || 0) + 1;
           counters.lastLongTaskMs = rounded;
           counters.maxLongTaskMs = Math.max(Number(counters.maxLongTaskMs || 0), rounded);

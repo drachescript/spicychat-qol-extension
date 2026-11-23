@@ -179,6 +179,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
   // Kept available even when the main QoL feature runtime is disabled.
   DS.installMainDiagnostics = function installMainDiagnostics({ runtimeProfile, loadedChatMessageCount, desktopAppPerformanceGuardActive }) {
+  // A second module-driven retry; the installer is idempotent if core registered.
+  DS.installLightDiagnostics?.();
   try {
     chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
       if (message?.type === "DS_GET_QOL_TAB_STATE") {
@@ -228,6 +230,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         sendResponse({
           ok: true,
           tabQol: DS.getQolTabState?.() || null,
+          runtimeStartup: DS.getRuntimeStartup?.() || null,
           performance: DS.getPerformanceReport?.() || [],
           slowFeatureSamples: DS.getSlowFeatureSamples?.().slice(-80) || [],
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
