@@ -20,8 +20,29 @@
   DS.setAttributeIfChanged = (element, name, value) => { if (element && element.getAttribute(name) !== String(value)) element.setAttribute(name, String(value)); };
   DS.setDatasetIfChanged = (element, key, value) => { if (element && element.dataset[key] !== String(value)) element.dataset[key] = String(value); };
   DS.setSafeMarkup = (element, markup) => {
-    // Only used by content/ooc.js with an extension-owned constant, not site content.
-    if (element) element.innerHTML = markup;
+    if (!element) return;
+    // Core + OOC only renders this fixed toolbar. Build trusted nodes rather
+    // than parsing HTML, and show any unexpected markup as plain text.
+    const source = String(markup ?? '');
+    if (!source.includes('<select id="ds-qol-ooc-select" title="OOC template"></select>') ||
+        !source.includes('<button id="ds-qol-insert-ooc" type="button">Insert</button>')) {
+      element.textContent = source;
+      return;
+    }
+    const heading = document.createElement('div');
+    heading.className = 'ds-qol-mini-label';
+    heading.textContent = 'OOC message';
+    const controls = document.createElement('div');
+    controls.className = 'ds-qol-ooc-controls';
+    const select = document.createElement('select');
+    select.id = 'ds-qol-ooc-select';
+    select.title = 'OOC template';
+    const button = document.createElement('button');
+    button.id = 'ds-qol-insert-ooc';
+    button.type = 'button';
+    button.textContent = 'Insert';
+    controls.append(select, button);
+    element.replaceChildren(heading, controls);
   };
   DS.runtimeLog = (level, feature, message) => { if (level === 'warn' || level === 'error') console.warn(`[QoL ${feature}] ${message}`); };
   DS.setQuickStatus = message => {

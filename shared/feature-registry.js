@@ -861,7 +861,12 @@
     for (const group of syncGroups()) {
       const label = document.createElement("label");
       label.className = "row";
-      label.innerHTML = `<input type="checkbox" data-sync-scope="${group.id}"><span>${group.label} (${group.keys.length})</span>`;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.dataset.syncScope = String(group.id);
+      const caption = document.createElement("span");
+      caption.textContent = `${group.label} (${group.keys.length})`;
+      label.append(input, caption);
       categoryHost.appendChild(label);
     }
 
