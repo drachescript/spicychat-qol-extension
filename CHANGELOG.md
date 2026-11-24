@@ -1,3 +1,20 @@
+## 0.2.98
+- Removed Later card buttons from My Creations, including after navigation.
+- Made Saved Bots & Lists load recovery managers only when needed and reuse saved-copy and deleted-recovery indexes.
+- Deferred Bot Status queue reconciliation until the status manager is requested.
+- Added Settings performance timings for tab visibility, storage, indexing, rendering and Long Tasks.
+- Removed redundant card metadata extraction when importing opened chats.
+- Made Quick setup presets additive: existing enabled features and custom values stay intact.
+- Made the Archive / Recovery Lab export preset preserve selected media and censor options.
+- Added Copy for paste, Copy selected for paste and Paste entries to the Lorebook entry manager, with review, skip-existing imports and live verification.
+- Added a private Archive / Recovery Lab JSON preset to Chat export, including available bot information, OOC/directives and visible Rulebook context without changing export defaults.
+- Prevented competing Bot Status scans from starting in multiple Settings pages where shared browser locks are supported.
+- Saved recovered list memberships before advancing Bot Status scan checkpoints.
+- Preserved the last saved queue when a checkpoint or result save cannot be verified; reopen Settings to resume safely.
+- Unified rate-limit and authentication-failure pauses with the normal verified scan finalization path.
+- Reduced repeat queue reads and checkpoint bookkeeping during large Bot Status scans.
+- Avoided rewriting unrelated Settings during blocked-membership recovery.
+
 ## 0.2.97
 - Added a separate floating long-chat controls toggle: hiding the bar keeps older-message folding enabled; re-enable it to reveal older messages.
 - Coalesced overlapping read-only Bot Status queue/Settings refreshes without caching completed queue snapshots.

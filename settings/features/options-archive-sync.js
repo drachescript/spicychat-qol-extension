@@ -176,6 +176,7 @@ function archiveUploadSavedCopyRecord(entry, availability) {
 
 async function currentArchiveUploadRecords({ updateProgress = false, progressElementId = "botStatusArchiveUploadStatus", excludedIds = null } = {}) {
   await ensureSavedListsDataLoaded();
+  await ensureSavedRecoveryDataLoaded();
   const archive = normalizeBotArchive(botArchiveState);
   const availability = normalizeBotAvailability(botAvailabilityState);
   let excludedCount = 0;
@@ -398,7 +399,7 @@ async function refreshArchiveContributionUi(prepared = null, safety = null) {
         ? `Submit new/changed copies for review (${changed})`
         : "No new/changed copies to submit";
   }
-  if (sendAll) sendAll.hidden = first || !records.length;
+  if (sendAll) { sendAll.hidden = first || !records.length; sendAll.disabled = !records.length; }
   if (summary) {
     if (!config.state.lastSubmissionAt) {
       summary.textContent = `${records.length.toLocaleString()} saved copies are ready for the first anonymous Archive submission.`;
@@ -592,7 +593,7 @@ async function refreshArchiveUploadUi(prepared = null, safety = null) {
         ? `Send new/changed copies to Archive (${changed})`
         : "No new/changed copies to send";
   }
-  if (sendAll) sendAll.hidden = first || !records.length;
+  if (sendAll) { sendAll.hidden = first || !records.length; sendAll.disabled = !records.length; }
   if (summary) {
     const last = config.state.lastUploadAt ? new Date(config.state.lastUploadAt).toLocaleString() : "Never";
     summary.textContent = config.state.lastUploadAt

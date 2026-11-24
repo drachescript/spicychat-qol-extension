@@ -1,3 +1,26 @@
+// Bounded, local Settings timings; no private data, storage writes or polling.
+function optionsPhaseSample(name, duration) {
+  const samples = OPTIONS_PERFORMANCE.phases ||= {};
+  const ms = Math.max(0, Number(duration) || 0);
+  const prior = samples[name] || { count: 0, totalMs: 0, maxMs: 0, lastMs: 0 };
+  samples[name] = { count: prior.count + 1, totalMs: prior.totalMs + ms, maxMs: Math.max(prior.maxMs, ms), lastMs: ms };
+}
+function optionsAfterPaint() {
+  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+function startOptionsLongTaskTiming() {
+  if (OPTIONS_PERFORMANCE.longTaskObserverStarted) return;
+  OPTIONS_PERFORMANCE.longTaskObserverStarted = true;
+  try {
+    if (!PerformanceObserver.supportedEntryTypes?.includes("longtask")) return;
+    const observer = new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) optionsPhaseSample("settings:browser-long-task", entry.duration);
+    });
+    observer.observe({ type: "longtask", buffered: true });
+    OPTIONS_PERFORMANCE.longTaskSupported = true;
+    window.addEventListener("pagehide", event => { if (!event.persisted) observer.disconnect(); }, { once: true });
+  } catch {}
+}
 
 function optionsDiagLevelRank(level) {
   return String(level || "normal") === "deep" ? 2 : 1;
@@ -102,10 +125,10 @@ function nextUiFrame() {
 
 function nextOptionsIdleSlice(timeout = 220) {
   OPTIONS_PERFORMANCE.heavyManagerIdleSlices += 1;
-  if (typeof requestIdleCallback === "function") {
-    return new Promise(resolve => requestIdleCallback(() => resolve(), { timeout }));
-  }
-  return nextUiFrame();
+  const started = performance.now();
+  const wait = typeof requestIdleCallback === "function"
+    ? new Promise(resolve => requestIdleCallback(() => resolve(), { timeout })) : nextUiFrame();
+  return wait.then(() => optionsPhaseSample("settings:intentional-idle-wait", performance.now() - started));
 }
 
 function debounceCallback(callback, delay = 140) {
@@ -125,6 +148,7 @@ function invalidateHeavyTab(tabName) {
 }
 
 function invalidateDuplicateCache() {
+  if (typeof recoveryPresentationCache !== "undefined") recoveryPresentationCache = null;
   botDuplicateMatchesCache = new Map();
   botDuplicateCacheScope = "";
   botDuplicateCacheReady = false;
@@ -215,6 +239,7 @@ const inFlightLargeStorageReads = new Map();
 
 async function readLargeStorageKeyPaged(key) {
   const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
+  const pageStarted = performance.now();
   const meta = {};
   let afterId = "";
   let pageCount = 0;
@@ -239,6 +264,7 @@ async function readLargeStorageKeyPaged(key) {
     }
 
     if (response.done || !response.rows.length) {
+      optionsPhaseSample(`storage:paging:${key}`, performance.now() - pageStarted);
       if (diagStarted) optionsDiag("options-storage", "read-large-paged", { key, pages: pageCount, records: Object.keys(meta).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
       return { meta };
     }
@@ -306,6 +332,8 @@ async function storageGetChecked(keys) {
   const stages = { largeMs: 0, localMs: 0 };
   const finish = value => {
     const elapsed = optionsPerfFinish("read", started);
+    optionsPhaseSample("storage:callback-wait", stages.localMs);
+    if (stages.largeMs) optionsPhaseSample("storage:large-store-wall", stages.largeMs);
     recordSlowStorageRead(keys, elapsed, stages);
     if (optionsDiagnosticState.active) {
       const requestedKeys = keys == null ? ["*"] : (typeof keys === "string" ? [keys] : (Array.isArray(keys) ? keys.map(String) : Object.keys(keys || {})));
@@ -1450,6 +1478,13 @@ function detachSavedRecoveryLazyActivation() {
   }
   savedRecoveryLazyOpenListeners = [];
   savedRecoveryLazySetup = false;
+  savedRecoveryActivated.clear();
+  savedRecoveryDirty.clear();
+  savedRecoveryPending.clear();
+  savedRecoveryWork = Promise.resolve();
+  savedLorebookLoaded = false;
+  savedLorebookLoad = null;
+  savedRecoveryGeneration++;
 }
 
 function resetHeavySavedDataState() {
@@ -1560,7 +1595,7 @@ async function cleanupMalformedBlockingRecords(settings = {}) {
   return true;
 }
 
-async function cleanupMalformedSavedBotRecords({ includeAvailability = true } = {}) {
+async function cleanupMalformedSavedBotRecords({ includeAvailability = true, availabilityAlreadyNormalized = false } = {}) {
   let changed = false;
   const cleanBotStore = storeValue => {
     const store = normalizeBotStore(storeValue);
@@ -1590,7 +1625,7 @@ async function cleanupMalformedSavedBotRecords({ includeAvailability = true } = 
   botOrganizationState = { ...org, meta: orgMeta };
 
   if (includeAvailability) {
-    const availability = normalizeBotAvailability(botAvailabilityState);
+    const availability = availabilityAlreadyNormalized ? botAvailabilityState : normalizeBotAvailability(botAvailabilityState);
     const availabilityMeta = filterMetaToValidBotIds(availability.meta);
     if (Object.keys(availabilityMeta).length !== Object.keys(availability.meta || {}).length) changed = true;
     botAvailabilityState = { meta: availabilityMeta };
@@ -1659,11 +1694,16 @@ async function retryMissingLargeSavedStores(resultValue, requestedKeys = [BOT_AR
   const requested = [...new Set((requestedKeys || []).filter(key => LARGE_STORAGE_KEYS.has(key)))];
   if (!requested.length) return result;
 
+  // Fast existence check only. Counting a nonempty store by normalizing
+  // every rich snapshot was more expensive than a recovery render itself.
+  const missing = requested.filter(key => {
+    const data = result[key]?.meta || result[key];
+    return !data || !Object.keys(data).length;
+  });
+  if (!missing.length) return result;
   let stats = {};
   try { stats = await readLargeStorageStats(); } catch {}
-  const retryKeys = requested.filter(key => (
-    largeSavedStoreRecordCount(key, result[key]) === 0 && Number(stats?.[key] || 0) > 0
-  ));
+  const retryKeys = missing.filter(key => Number(stats?.[key] || 0) > 0);
   if (!retryKeys.length) return result;
 
   // A just-reloaded extension can briefly answer the first large-store request
@@ -1674,6 +1714,9 @@ async function retryMissingLargeSavedStores(resultValue, requestedKeys = [BOT_AR
     const recovered = await readLargeStorageForRequest(retryKeys);
     if (recovered && typeof recovered === "object") Object.assign(result, recovered);
   } catch {}
+  for (const key of retryKeys) {
+    if (!Object.keys(result[key]?.meta || result[key] || {}).length) throw new Error(`Saved ${key} records are temporarily unavailable; retry loading.`);
+  }
   return result;
 }
 
@@ -1682,6 +1725,7 @@ async function ensureSavedListsDataLoaded() {
   if (savedListsDataLoadPromise) return savedListsDataLoadPromise;
 
   savedListsDataLoadPromise = (async () => {
+    const started = performance.now();
     const result = await storageGet(SAVED_LIST_DATA_KEYS);
     // This list contains no large IndexedDB recovery keys. Checking archive
     // counts here did an unrelated storage round trip on every lazy load.
@@ -1706,6 +1750,7 @@ async function ensureSavedListsDataLoaded() {
     }
     if ($("openedCount")) $("openedCount").textContent = `${currentOpened.length} stored`;
     savedListsDataLoaded = true;
+    optionsPhaseSample("saved:lists-loaded-wall", performance.now() - started);
     invalidateDuplicateCache();
     return true;
   })().finally(() => {
@@ -1714,25 +1759,56 @@ async function ensureSavedListsDataLoaded() {
   return savedListsDataLoadPromise;
 }
 
+// Normalize in bounded slices only when recovery data is requested. The
+// authoritative record contents and normalizers are unchanged.
+async function normalizeRecoveryInSlices(value, normalize, label) {
+  const raw = value?.meta && typeof value.meta === "object" ? value.meta : value || {};
+  const entries = Object.entries(raw);
+  const meta = {};
+  let start = performance.now();
+  for (let i = 0; i < entries.length; i += 64) {
+    Object.assign(meta, normalize({ meta: Object.fromEntries(entries.slice(i, i + 64)) }).meta);
+    if (i + 64 < entries.length && performance.now() - start >= 12) {
+      optionsPhaseSample(`${label}:cpu-slice`, performance.now() - start);
+      const wait = performance.now();
+      await (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise(resolve => setTimeout(resolve, 0)));
+      optionsPhaseSample("settings:normalization-yield-wait", performance.now() - wait);
+      start = performance.now();
+    }
+  }
+  optionsPhaseSample(`${label}:cpu-slice`, performance.now() - start);
+  return { meta };
+}
 async function ensureSavedRecoveryDataLoaded() {
   if (savedRecoveryDataLoaded) return true;
   if (savedRecoveryDataLoadPromise) return savedRecoveryDataLoadPromise;
-
-  savedRecoveryDataLoadPromise = (async () => {
+  const generation = savedRecoveryGeneration;
+  const request = (async () => {
+    const started = performance.now();
     await ensureSavedListsDataLoaded();
-    let result = await storageGet(SAVED_RECOVERY_DATA_KEYS);
-    result = await retryMissingLargeSavedStores(result, [BOT_ARCHIVE_KEY, BOT_AVAILABILITY_KEY]);
-    botAvailabilityState = normalizeBotAvailability(result[BOT_AVAILABILITY_KEY]);
-    botArchiveState = normalizeBotArchive(result[BOT_ARCHIVE_KEY]);
-    botUnavailableRecoveryState = normalizeBotUnavailableRecovery(result[BOT_UNAVAILABLE_RECOVERY_KEY]);
+    const readRevision = savedRecoveryReadRevision;
+    const read = await storageGetChecked(SAVED_RECOVERY_DATA_KEYS);
+    if (!read.ok) throw new Error(read.error || "Recovery storage read failed");
+    let result = await retryMissingLargeSavedStores(read.data, [BOT_ARCHIVE_KEY, BOT_AVAILABILITY_KEY]);
+    const availability = await normalizeRecoveryInSlices(result[BOT_AVAILABILITY_KEY], normalizeBotAvailability, "recovery:availability-normalize");
+    const archive = await normalizeRecoveryInSlices(result[BOT_ARCHIVE_KEY], normalizeBotArchive, "recovery:archive-normalize");
+    const recovery = normalizeBotUnavailableRecovery(result[BOT_UNAVAILABLE_RECOVERY_KEY]);
+    if (generation !== savedRecoveryGeneration || readRevision !== savedRecoveryReadRevision) throw new Error("Recovery data changed while loading; retry to read the latest records");
+    botAvailabilityState = availability;
+    botArchiveState = archive;
+    botUnavailableRecoveryState = recovery;
+    // Saved lists have already passed cleanup. Retain the existing valid-ID
+    // filter for the status presentation without another whole-list cleanup or write.
+    botAvailabilityState = { meta: filterMetaToValidBotIds(availability.meta) };
+    if (generation !== savedRecoveryGeneration) throw new Error("Recovery load cancelled");
     savedRecoveryDataLoaded = true;
-    await cleanupMalformedSavedBotRecords({ includeAvailability: true });
     invalidateDuplicateCache();
+    optionsPhaseSample("saved:recovery-loaded-wall", performance.now() - started);
     return true;
-  })().finally(() => {
-    savedRecoveryDataLoadPromise = null;
-  });
-  return savedRecoveryDataLoadPromise;
+  })();
+  savedRecoveryDataLoadPromise = request;
+  try { return await request; }
+  finally { if (savedRecoveryDataLoadPromise === request) savedRecoveryDataLoadPromise = null; }
 }
 
 async function ensureHeavySavedDataLoaded(tabName = "all") {
@@ -1748,88 +1824,165 @@ async function ensureHeavySavedDataLoaded(tabName = "all") {
   return true;
 }
 
-async function renderSavedRecoveryPlaceholders() {
-  if (savedRecoveryDataLoaded) return;
-  let stats = {};
-  try { stats = await readLargeStorageStats(); } catch {}
-  const archiveCount = Math.max(0, Number(stats?.[BOT_ARCHIVE_KEY] || 0));
-  const availabilityCount = Math.max(0, Number(stats?.[BOT_AVAILABILITY_KEY] || 0));
-  const messages = {
-    savedBotInfoManager: archiveCount
-      ? `${archiveCount.toLocaleString()} saved ${archiveCount === 1 ? "copy" : "copies"} available. Open this section to load them.`
-      : "Saved recovery copies load only when this section is opened.",
-    deletedSavedBotManager: "Deleted / unavailable recovery loads only when this section is opened.",
-    botAvailabilityManager: availabilityCount
-      ? `${availabilityCount.toLocaleString()} Bot Status ${availabilityCount === 1 ? "record" : "records"} available. Open this section to load them.`
-      : "Bot Status data loads only when this section is opened."
-  };
-  for (const [id, message] of Object.entries(messages)) {
-    const host = $(id);
-    if (host) setEmptyState(host, message);
-  }
+const savedRecoveryActivated = new Set();
+const savedRecoveryDirty = new Set();
+const savedRecoveryPending = new Map();
+let savedRecoveryGeneration = 0;
+let savedRecoveryReadRevision = 0;
+let savedRecoveryWork = Promise.resolve();
+const savedRecoveryHostIds = { status: "botAvailabilityManager", copies: "savedBotInfoManager", deleted: "deletedSavedBotManager" };
+function savedRecoverySectionOpen() {
+  const section = $("botAvailabilityCard");
+  return activeOptionsTab() === "saved" && !!section && !section.classList.contains("ds-settings-card-collapsed");
 }
-
-async function loadAndRenderSavedRecoveryManagers(source = "opened") {
-  if (savedRecoveryDataLoaded) return true;
-  ["savedBotInfoManager", "deletedSavedBotManager", "botAvailabilityManager"].forEach(id => {
-    const host = $(id);
-    if (host) setEmptyState(host, "Loading recovery/status data...");
-  });
-  const started = typeof performance !== "undefined" ? performance.now() : 0;
-  await ensureSavedRecoveryDataLoaded();
-  detachSavedRecoveryLazyActivation();
-  if (activeOptionsTab() !== "saved") return true;
-  const sameNameCollisions = botSameNameCollisionIndex();
-  renderSavedBotInfo({ sameNameCollisions });
-  renderDeletedSavedBots({ sameNameCollisions });
-  renderBotAvailability({ sameNameCollisions, skipRecoveryRerender: true });
-  refreshArchiveTransferUi().catch(() => {});
-  if (started && optionsDiagnosticState.active) {
-    optionsDiag("options-saved-bots", "lazy-recovery-load", {
-      source: String(source || "opened"),
-      durationMs: Math.round((performance.now() - started) * 10) / 10,
-      archiveRecords: Object.keys(normalizeBotArchive(botArchiveState).meta).length,
-      availabilityRecords: Object.keys(normalizeBotAvailability(botAvailabilityState).meta).length
-    }, { critical: (performance.now() - started) >= 200 });
+function savedRecoveryManagerCanRender(kind) {
+  if (!savedRecoveryDataLoaded || !savedRecoveryActivated.has(kind) || !savedRecoverySectionOpen() || (kind !== "status" && !savedRecoveryHostVisible(kind))) {
+    if (savedRecoveryActivated.has(kind)) savedRecoveryDirty.add(kind);
+    return false;
   }
+  savedRecoveryDirty.delete(kind);
   return true;
 }
-
-function setupSavedRecoveryLazyActivation() {
-  if (savedRecoveryLazySetup || savedRecoveryDataLoaded) return;
-  savedRecoveryLazySetup = true;
-  const cards = [...new Set(["savedBotInfoManager", "deletedSavedBotManager", "botAvailabilityManager"]
-    .map(id => $(id)?.closest?.("section.card.ds-settings-card-collapsible"))
-    .filter(Boolean))];
-  if (!cards.length) return;
-
-  const activate = source => {
-    if (savedRecoveryDataLoaded || activeOptionsTab() !== "saved") return;
-    loadAndRenderSavedRecoveryManagers(source).catch(() => {});
+function savedRecoveryHostVisible(kind) {
+  const element = kind === "status" ? $("botAvailabilityScope")
+    : kind === "archive-transfer" ? ($("botStatusArchiveContributionSettings") || $("botStatusArchiveUploadSettings")) : $(savedRecoveryHostIds[kind])?.closest("fieldset");
+  if (!element || !savedRecoverySectionOpen()) return false;
+  const isNear = el => {
+    const rect = el?.getBoundingClientRect();
+    return !!rect && rect.height > 0 && rect.top < window.innerHeight + 160 && rect.bottom > -160;
   };
-
-  for (const card of cards) {
-    const onOpen = () => activate("section-opened");
-    card.addEventListener("ds-settings-card-opened", onOpen);
-    savedRecoveryLazyOpenListeners.push([card, onOpen]);
-  }
-  if (typeof IntersectionObserver === "function") {
-    savedRecoveryLazyObserver = new IntersectionObserver(entries => {
-      if (savedRecoveryDataLoaded || activeOptionsTab() !== "saved") return;
-      for (const entry of entries) {
-        if (!entry.isIntersecting || entry.target.classList.contains("ds-settings-card-collapsed")) continue;
-        activate("section-visible");
-        break;
-      }
-    }, { root: null, rootMargin: "240px 0px", threshold: 0.01 });
-    cards.forEach(card => savedRecoveryLazyObserver.observe(card));
+  return isNear(element) || (kind === "status" && isNear($("botAvailabilityResultsCard"))) || (kind === "archive-transfer" && isNear($("botStatusArchiveUploadSettings")));
+}
+function renderSavedRecoveryPlaceholders() {
+  for (const [kind, id] of Object.entries(savedRecoveryHostIds)) {
+    if (savedRecoveryActivated.has(kind)) continue;
+    const host = $(id);
+    if (!host) continue;
+    setEmptyState(host, "Load this manager to review saved records. No data is removed.");
+    const summary = $({ status: "botAvailabilitySummary", copies: "savedBotInfoSummary", deleted: "deletedSavedBotSummary" }[kind]);
+    if (summary) summary.textContent = "Not loaded yet";
+    const load = makeElement("button", { text: "Load records", attrs: { type: "button" } });
+    load.addEventListener("click", () => loadAndRenderSavedRecoveryManagers("manual", kind).catch(() => {}));
+    host.appendChild(load);
   }
 }
+function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") {
+  if (!savedRecoverySectionOpen()) return Promise.resolve(false);
+  if (savedRecoveryPending.has(kind)) return savedRecoveryPending.get(kind);
+  if (savedRecoveryActivated.has(kind) && !savedRecoveryDirty.has(kind)) return Promise.resolve(true);
+  const generation = savedRecoveryGeneration;
+  const request = savedRecoveryWork.catch(() => {}).then(async () => {
+    if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
+    // Let the tab/section paint before large storage/normalization work.
+    await nextOptionsIdleSlice();
+    if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
+    await ensureSavedRecoveryDataLoaded();
+    if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
+    savedRecoveryActivated.add(kind);
+    savedRecoveryDirty.delete(kind);
+    const started = performance.now();
+    if (kind === "status") {
+      // Queue reconciliation must happen only when Bot Status is requested.
+      renderBotAvailability({ skipRecoveryRerender: true });
+      const pendingBefore = new Set(botStatusPendingReviewIds);
+      dsqRefreshHeavyToolsForTab("saved", { activateStatus: true }).then(() => {
+        if (generation !== savedRecoveryGeneration) return;
+        const pendingChanged = pendingBefore.size !== botStatusPendingReviewIds.size || [...pendingBefore].some(id => !botStatusPendingReviewIds.has(id));
+        if (pendingChanged || $("botAvailabilityStatusFilter")?.value === "pending") renderBotAvailability({ skipRecoveryRerender: true });
+      }).catch(() => {});
+    } else if (kind === "copies") renderSavedBotInfo();
+    else if (kind === "deleted") renderDeletedSavedBots();
+    else if (kind === "archive-transfer") await refreshArchiveTransferUi();
+    optionsPhaseSample(`saved:${kind}:activation-wall`, performance.now() - started);
+    return true;
+  }).catch(error => {
+    if (generation !== savedRecoveryGeneration) return false;
+    savedRecoveryActivated.delete(kind);
+    savedRecoveryDirty.delete(kind);
+    const host = $(savedRecoveryHostIds[kind]);
+    if (host) {
+      setEmptyState(host, `Could not load records: ${String(error?.message || error)}. Saved data was not removed.`);
+      const retry = makeElement("button", { text: "Retry loading", attrs: { type: "button" } });
+      retry.addEventListener("click", () => loadAndRenderSavedRecoveryManagers("retry", kind).catch(() => {}));
+      host.appendChild(retry);
+    }
+    return false;
+  });
+  savedRecoveryPending.set(kind, request);
+  savedRecoveryWork = request;
+  request.finally(() => { if (savedRecoveryPending.get(kind) === request) savedRecoveryPending.delete(kind); }).catch(() => {});
+  return request;
+}
+let savedLorebookLoad = null;
+let savedLorebookLoaded = false;
+function activateSavedLorebookIfVisible(force = false) {
+  const lore = $("lorebookStatusHistoryCard");
+  if (!lore || activeOptionsTab() !== "saved" || lore.classList.contains("ds-settings-card-collapsed") || savedLorebookLoaded || savedLorebookLoad) return;
+  const rect = lore.getBoundingClientRect();
+  if (!force && !(rect.height > 0 && rect.top < window.innerHeight + 160 && rect.bottom > -160)) return;
+  const generation = savedRecoveryGeneration;
+  const request = nextOptionsIdleSlice().then(async () => {
+    if (generation !== savedRecoveryGeneration || activeOptionsTab() !== "saved" || lore.classList.contains("ds-settings-card-collapsed")) return;
+    const started = performance.now();
+    await refreshLorebookCenter();
+    if (generation === savedRecoveryGeneration) savedLorebookLoaded = true;
+    optionsPhaseSample("saved:lorebook-load-render-wall", performance.now() - started);
+  }).catch(() => renderLorebookCenter());
+  savedLorebookLoad = request;
+  request.finally(() => { if (savedLorebookLoad === request) savedLorebookLoad = null; }).catch(() => {});
+}
+function activateVisibleSavedRecoveryManagers() {
+  activateSavedLorebookIfVisible();
+  if (!savedRecoverySectionOpen()) return;
+  for (const kind of [...Object.keys(savedRecoveryHostIds), "archive-transfer"]) {
+    if (savedRecoveryHostVisible(kind)) loadAndRenderSavedRecoveryManagers("section-visible", kind).catch(() => {});
+  }
+}
+function setupSavedRecoveryLazyActivation() {
+  if (savedRecoveryLazySetup) { activateVisibleSavedRecoveryManagers(); return; }
+  const card = $("botAvailabilityCard");
+  if (!card) return;
+  savedRecoveryLazySetup = true;
+  renderSavedRecoveryPlaceholders();
+  const onOpen = () => {
+    if (activeOptionsTab() !== "saved") return;
+    if (typeof IntersectionObserver !== "function") loadAndRenderSavedRecoveryManagers("section-opened", "status").catch(() => {});
+    activateVisibleSavedRecoveryManagers();
+  };
+  card.addEventListener("ds-settings-card-opened", onOpen);
+  savedRecoveryLazyOpenListeners.push([card, onOpen]);
+  const lore = $("lorebookStatusHistoryCard");
+  if (lore) {
+    const onLoreOpen = () => activateSavedLorebookIfVisible(typeof IntersectionObserver !== "function");
+    lore.addEventListener("ds-settings-card-opened", onLoreOpen);
+    savedRecoveryLazyOpenListeners.push([lore, onLoreOpen]);
+  }
+  const targets = [card, $("botAvailabilityScope"), $("botAvailabilityResultsCard"), $("savedBotInfoCard"), $("deletedSavedBotsCard"), $("botStatusArchiveContributionSettings"), $("botStatusArchiveUploadSettings"), lore].filter(Boolean);
+  if (typeof IntersectionObserver === "function") {
+    savedRecoveryLazyObserver = new IntersectionObserver(() => activateVisibleSavedRecoveryManagers(), { root: null, rootMargin: "160px 0px", threshold: 0 });
+    targets.forEach(target => savedRecoveryLazyObserver.observe(target));
+  }
+  activateVisibleSavedRecoveryManagers();
+}
 
-async function renderHeavyManagersForTab(tabName) {
+const heavyTabRenderPromises = new Map();
+function renderHeavyManagersForTab(tabName) {
+  if (heavyTabRenderPromises.has(tabName)) return heavyTabRenderPromises.get(tabName);
+  if (!optionsDataLoaded || !["saved", "blocking"].includes(tabName)) return Promise.resolve();
+  const request = renderHeavyManagersForTabNow(tabName);
+  heavyTabRenderPromises.set(tabName, request);
+  request.then(() => {
+    if (heavyTabRenderPromises.get(tabName) === request) heavyTabRenderPromises.delete(tabName);
+    if (activeOptionsTab() === tabName && tabName === "saved" && savedListsDataLoaded) setupSavedRecoveryLazyActivation();
+    if (activeOptionsTab() === tabName && !renderedHeavyTabs.has(tabName) && optionsDataLoaded) renderHeavyManagersForTab(tabName).catch(() => {});
+  }, () => { if (heavyTabRenderPromises.get(tabName) === request) heavyTabRenderPromises.delete(tabName); });
+  return request;
+}
+async function renderHeavyManagersForTabNow(tabName) {
   if (!optionsDataLoaded || !["saved", "blocking"].includes(tabName)) return;
   if (renderedHeavyTabs.has(tabName)) return;
 
+  const tabStarted = performance.now();
   const token = ++heavyRenderToken;
   const loadingHosts = tabName === "saved"
     ? ["savedBotInfoManager", "deletedSavedBotManager", "lorebookCenterRecent", "savedBotsHubManager", "favoriteCreatorManager", "followedCreatorManager", "creatorBotRecentList", "favoriteBotManager", "laterBotManager", "openedBotManager", "botAvailabilityManager"]
@@ -1841,41 +1994,49 @@ async function renderHeavyManagersForTab(tabName) {
 
   await ensureHeavySavedDataLoaded(tabName);
   if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
-  if (tabName === "saved") {
-    // Lorebook status is normally tiny compared with Bot Status / recovery.
-    // Keep its existing automatic load so the section does not appear empty,
-    // while the multi-thousand-record bot datasets remain lazy below.
-    try { await refreshLorebookCenter(); }
-    catch { renderLorebookCenter(); }
-  }
-  if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
+  if (tabName === "saved") setupSavedRecoveryLazyActivation();
 
   const renderers = tabName === "saved"
     ? [
-        renderSavedBotsHub,
-        renderFavoriteCreators,
-        renderFollowedCreators,
-        renderCreatorBotWatchStatus,
-        () => renderBotManager("favorite"),
-        () => renderBotManager("later"),
-        () => renderBotManager("opened")
+        ["savedBotsHubManager", renderSavedBotsHub],
+        ["favoriteCreatorManager", renderFavoriteCreators],
+        ["followedCreatorManager", renderFollowedCreators],
+        ["creatorBotRecentList", renderCreatorBotWatchStatus],
+        ["favoriteBotManager", () => renderBotManager("favorite")],
+        ["laterBotManager", () => renderBotManager("later")],
+        ["openedBotManager", () => renderBotManager("opened")]
       ]
-    : [
-        () => renderBotManager("blocked"),
-        () => renderBotManager("notInterested")
-      ];
+    : [["blockedBotManager", () => renderBotManager("blocked")], ["notInterestedBotManager", () => renderBotManager("notInterested")]];
 
   // Yield between managers so opening a tab never locks the entire options
   // page while several thousand saved entries are being normalized/sorted.
   // Prefer actual browser idle time when available; requestAnimationFrame alone
   // can still put a large manager render directly into a frame the user needs.
   for (let renderIndex = 0; renderIndex < renderers.length; renderIndex += 1) {
-    const render = renderers[renderIndex];
+    const [hostId, render] = renderers[renderIndex];
+    const card = $(hostId)?.closest("section.card");
+    if (card?.classList.contains("ds-settings-card-collapsed")) {
+      // One pending render per manager; refreshes may replace the pending hook.
+      const host = $(hostId);
+      if (host && host.dataset.dsManagerDeferred !== "1") {
+        host.dataset.dsManagerDeferred = "1";
+        card.addEventListener("ds-settings-card-opened", () => {
+          delete host.dataset.dsManagerDeferred;
+          if (activeOptionsTab() !== tabName) { invalidateHeavyTab(tabName); return; }
+          const start = performance.now();
+          render();
+          optionsPhaseSample(`manager:${hostId}:render`, performance.now() - start);
+        }, { once: true });
+      }
+      continue;
+    }
     await nextOptionsIdleSlice();
     if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
+    if (card?.classList.contains("ds-settings-card-collapsed")) { renderIndex--; continue; }
     const renderStarted = performance.now?.() || Date.now();
     render();
     const elapsedMs = Math.max(0, (performance.now?.() || Date.now()) - renderStarted);
+    optionsPhaseSample(`manager:${hostId}:render`, elapsedMs);
     const key = `${tabName}:${renderIndex}`;
     const samples = OPTIONS_PERFORMANCE.managerRenders ||= {};
     const previous = samples[key] || { count: 0, totalMs: 0, maxMs: 0 };
@@ -1884,8 +2045,8 @@ async function renderHeavyManagersForTab(tabName) {
   }
 
   renderedHeavyTabs.add(tabName);
+  optionsPhaseSample(`tab:${tabName}:managers-ready-wall`, performance.now() - tabStarted);
   if (tabName === "saved") {
-    renderSavedRecoveryPlaceholders().catch(() => {});
     setupSavedRecoveryLazyActivation();
   }
 }
@@ -1923,6 +2084,7 @@ function releaseTemporaryOptionsMemory() {
 }
 
 function setActiveTab(tabName) {
+  const tabStarted = performance.now();
   const previousTab = activeOptionsTab();
   if (previousTab && previousTab !== tabName) {
     const previousPage = document.querySelector(`.tab-page[data-page="${CSS.escape(previousTab)}"]`);
@@ -1981,6 +2143,10 @@ function setActiveTab(tabName) {
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
   if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);
+  if (previousTab !== tabName) optionsAfterPaint().then(() => {
+    if (activeOptionsTab() === tabName) optionsPhaseSample(`tab:${tabName}:visible-frame-proxy`, performance.now() - tabStarted);
+  });
+  if (tabName === "saved" && optionsDataLoaded && savedListsDataLoaded) setupSavedRecoveryLazyActivation();
 }
 
 function setupTabs() {
@@ -2688,9 +2854,12 @@ async function applyPreset(name) {
     : PRESET_VALUES[name];
   if (!preset) return;
 
-  OPTIONAL_FEATURE_KEYS.forEach(key => setPageSetting(key, false));
+  // Setup presets are additive. Only the explicit reset / Start clean
+  // action may disable existing features. Preserve custom numeric choices too.
   BASELINE_SAFETY_ON_KEYS.forEach(key => setPageSetting(key, true));
-  Object.entries(preset).forEach(([key, value]) => setPageSetting(key, value));
+  Object.entries(preset).forEach(([key, value]) => {
+    if (value === true) setPageSetting(key, true);
+  });
   setPageSetting("enabled", true);
 
   // Keep safety/behavior sub-options sensible even though their parent features remain opt-in.
@@ -2702,11 +2871,11 @@ async function applyPreset(name) {
   setPageSetting("quickPanelEnabledByDefaultInTab", true);
   setPageSetting("quickPanelAutoCollapseOverlap", true);
 
-  await save();
+  const saved = await save();
   const status = $("presetStatus");
   if (status) {
-    const labels = { minimal: "Minimal", recommended: "Recommended", creator: "Creator-only", both: "Chatting + creator" };
-    status.textContent = `${labels[name] || "Quick"} setup applied and saved.`;
+    const labels = { minimal: "Minimal", recommended: "Recommended", creator: "Creator", both: "Chatting + creator" };
+    status.textContent = saved ? `${labels[name] || "Quick"} setup added and saved. Existing features kept.` : "Could not verify setup save. Try Save now.";
   }
 }
 

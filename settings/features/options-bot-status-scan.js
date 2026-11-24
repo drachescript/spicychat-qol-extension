@@ -126,21 +126,30 @@ function botStatusQueueKey(kind = "main") {
 }
 async function botStatusPausedQueue(kind = "main") {
   const key = botStatusQueueKey(kind);
-  try {
-    const value = (await storageGet([key]))?.[key];
-    return value && Array.isArray(value.ids) ? value : null;
-  } catch { return null; }
+  // A storage read failure is NOT an empty queue. Never start or overwrite a
+  // durable scan when the authoritative pending IDs could not be read.
+  const read = await storageGetChecked([key]);
+  if (!read.ok) throw new Error(`Could not read ${kind} Bot Status resume queue; no scan was started.`);
+  const value = read.data?.[key];
+  return value && Array.isArray(value.ids) ? value : null;
 }
 
+let botStatusQueuedPairRead = null;
+let botStatusScanNeedsReload = false;
 async function botStatusPausedQueues() {
-  // One read for the two independent resume queues when Settings needs their
-  // counts together. Resume itself still reads the single authoritative queue
-  // immediately before starting, and manual review still rechecks for races.
-  try {
+  // Coalesce overlapping read-only UI requests. Do not cache a completed read:
+  // scans, resumes and reconciliation must always see authoritative storage.
+  if (botStatusQueuedPairRead) return botStatusQueuedPairRead;
+  const request = (async () => {
     const keys = [BOT_STATUS_PAUSED_QUEUE_KEY, BOT_STATUS_STALE_PAUSED_QUEUE_KEY];
-    const data = await storageGet(keys);
+    const read = await storageGetChecked(keys);
+    if (!read.ok) throw new Error("Bot Status queue storage is temporarily unavailable; saved queue state was not changed.");
+    const data = read.data;
     return keys.map(key => data?.[key] && Array.isArray(data[key].ids) ? data[key] : null);
-  } catch { return [null, null]; }
+  })();
+  botStatusQueuedPairRead = request;
+  try { return await request; }
+  finally { if (botStatusQueuedPairRead === request) botStatusQueuedPairRead = null; }
 }
 
 const BOT_STATUS_LAST_RUN_FEEDBACK_KEY = "botStatusLastRunFeedbackV1";
@@ -154,7 +163,7 @@ function formatBotStatusLastRunFeedback(report) {
   const recovered = Math.max(0, Number(report.recovered || 0));
   const unknown = Math.max(0, Number(report.unknown || 0));
   const parts = [`Last scan ${new Date(Number(report.at)).toLocaleString()}`, `${checked} checks completed`];
-  if (pending) parts.push(`${pending} pending (Resume available)`);
+  if (pending && report.saveVerified !== false) parts.push(`${pending} pending (Resume available)`);
   if (deferred) parts.push(`${deferred} deferred after network/auth problems`);
   if (unknown) parts.push(`${unknown} inconclusive`);
   if (changed) parts.push(`${changed} updated`);
@@ -171,7 +180,7 @@ function formatBotStatusLastRunFeedback(report) {
   if (Number(report.accessFailures || 0)) parts.push(`${Number(report.accessFailures)} network/auth failures`);
   if (report.cancelled) parts.push("stopped by user");
   if (report.interrupted) parts.push("interrupted; pending checks retained for Resume");
-  if (report.saveVerified === false) parts.push("Save verification failed — check previous checkpoints");
+  if (report.saveVerified === false) parts.push("Save verification failed — reopen Settings and check the previous durable checkpoint");
   return parts.join(" · ") + ".";
 }
 
@@ -210,8 +219,8 @@ function reviewBotStatusQueueEligibility(queue) {
   const mode = String(queue?.mode || "all");
   const scope = String(queue?.scope || "all");
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
-  const saved = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
+  const saved = botAvailabilityState.meta || {};
+  const archives = botArchiveState.meta || {};
   const trackedInScope = collectTrackedAvailabilityBots(scope);
   const eligibleIds = mode === "outside"
     ? new Set(botStatusCenterBaseEntries("all")
@@ -220,7 +229,7 @@ function reviewBotStatusQueueEligibility(queue) {
     : mode === "archived"
       ? new Set(Object.values(saved).filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase())).map(entry => entry.id))
       : new Set(trackedInScope.map(entry => entry.id));
-  const elsewhere = new Set(collectTrackedAvailabilityBots("all").map(entry => entry.id));
+  const elsewhere = new Set((scope === "all" ? trackedInScope : collectTrackedAvailabilityBots("all")).map(entry => entry.id));
   const unavailable = ids.filter(id => !eligibleIds.has(id)).map(id => {
     let reason;
     if (botStatusIdIgnored(id)) reason = "Forgotten / excluded from Bot Status";
@@ -240,9 +249,11 @@ function reviewBotStatusQueueEligibility(queue) {
 // reason text is historical diagnostic information, never an authorization
 // to scan. These decisions perform no network requests or destructive writes.
 function botStatusAssessHeldEntries(items) {
+  // No held entries means no need to rebuild a 6k+ bot tracking index.
+  if (!Array.isArray(items) || !items.length) return [];
   const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
-  const saved = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
+  const saved = botAvailabilityState.meta || {};
+  const archives = botArchiveState.meta || {};
   const elsewhere = new Map(collectTrackedAvailabilityBots('all').map(entry => [entry.id, entry]));
   const groups = new Map();
   for (const item of items) {
@@ -426,7 +437,7 @@ function botStatusReconciledQueue(queue) {
 }
 
 async function botStatusReconcileSavedQueue(kind, snapshot) {
-  if (!snapshot || botAvailabilityScanRunning) return snapshot;
+  if (!snapshot || botAvailabilityScanRunning || botStatusScanNeedsReload) return snapshot;
   // Another Settings tab may still be running a scan. Its checkpoints are
   // written at least every few completed checks. Only a running checkpoint
   // with no updates for five minutes is considered abandoned after reload.
@@ -474,7 +485,8 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
   const summary = document.createElement('p');
   const counts = new Map();
   for (const row of rows) counts.set(row.category,(counts.get(row.category)||0)+1);
-  summary.textContent = `${rows.length} held queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. Each ID shows its current eligibility and recovery action; no checks happen until you request them.`;
+  const currentlyActionable = rows.filter(row => row.manualRetryAllowed).length;
+  summary.textContent = `${rows.length} held queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. ${currentlyActionable} actionable now; ${rows.length-currentlyActionable} excluded or already completed. Historical holds are not proof that a check remains pending. Each entry shows its saved source, current eligibility, and safe next action. No checks happen until you request them.`;
   list.append(summary);
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
@@ -503,7 +515,7 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
     heading.textContent = `${row.id} · ${row.category}`;
     const detail = document.createElement('p');
     detail.className = 'hint';
-    detail.textContent = `${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
+    detail.textContent = `${row.manualRetryAllowed ? 'ACTIONABLE — manual recheck permitted' : 'NOT ACTIONABLE — no manual scan'}: ${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
     entry.append(heading, detail);
     if (row.manualRetryAllowed) {
       const retry = document.createElement('button');
@@ -517,7 +529,22 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
 
 // Defined by the lightweight Settings loader so the read-only summary works before scan tools load.
 
+let botStatusPauseRefreshInFlight = null;
 async function refreshBotStatusPauseButton() {
+  // Duplicate Settings panel refreshes must not reconcile the same queues and
+  // repeatedly walk the full source lists while the first read is still slow.
+  if (botStatusPauseRefreshInFlight) return botStatusPauseRefreshInFlight;
+  const request = refreshBotStatusPauseButtonNow();
+  botStatusPauseRefreshInFlight = request;
+  try { return await request; }
+  catch (error) {
+    const hint = $("botStatusPendingQueueSummary");
+    if (hint) hint.textContent = `Could not read Bot Status resume queues: ${String(error?.message || error)}. No saved checks were removed. Do not start another scan until storage responds.`;
+    return { main: null, stale: null, readError: true };
+  }
+  finally { if (botStatusPauseRefreshInFlight === request) botStatusPauseRefreshInFlight = null; }
+}
+async function refreshBotStatusPauseButtonNow() {
   let [state, staleState] = await botStatusPausedQueues();
   if (!botAvailabilityScanRunning && ((state?.ids?.length || state?.heldIds?.length) || (staleState?.ids?.length || staleState?.heldIds?.length))) {
     await ensureSavedListsDataLoaded();
@@ -591,7 +618,38 @@ async function refreshBotStatusPauseButton() {
   return { main: state, stale: staleState };
 }
 
+// Serialize scan preparation and execution within this Settings page; where
+// supported, use the extension origin's Web Lock to prevent two Settings
+// tabs from writing competing checkpoints. No worker migration or polling.
+let botStatusScanInvocationActive = false;
 async function runBotAvailabilityScan(options = {}) {
+  if (botStatusScanInvocationActive) return;
+  if (botStatusScanNeedsReload) {
+    showSettingsToast("Reopen QoL Settings before resuming. A previous scan save could not be verified; reload the durable records first.");
+    return;
+  }
+  botStatusScanInvocationActive = true;
+  try {
+    const locks = typeof navigator !== "undefined" ? navigator.locks : null;
+    if (locks?.request) {
+      // Do not retry the scan on an exception after the callback has started.
+      let entered = false;
+      try {
+        return await locks.request("ds-qol-bot-status-scan-v1", { ifAvailable: true }, async lock => {
+          entered = true;
+          if (!lock) { showSettingsToast("Bot Status is already running in another Settings page."); return; }
+          return await runBotAvailabilityScanOwned(options, true);
+        });
+      } catch (error) {
+        if (entered) throw error;
+        // Some WebViews expose the API but deny access to it.
+      }
+    }
+    return await runBotAvailabilityScanOwned(options, false);
+  } finally { botStatusScanInvocationActive = false; }
+}
+
+async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) {
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
   if (botAvailabilityScanRunning) return;
@@ -603,8 +661,27 @@ async function runBotAvailabilityScan(options = {}) {
     ? (options?.queue === "stale" ? "stale" : "main")
     : (requestedMode === "stale" ? "stale" : "main");
   const queueKey = botStatusQueueKey(queueKind);
-  const originalQueue = await botStatusPausedQueue(queueKind);
-  const preparedQueue = await botStatusReconcileSavedQueue(queueKind, originalQueue);
+  let preparedQueue, initialQueues;
+  try {
+    const queues = initialQueues = await botStatusPausedQueues();
+    // Without a shared lock a recent running checkpoint may belong to a
+    // different Settings page. Preserve it rather than start a second scan.
+    if (!hasSharedLock && queues.some(queue => queue?.phase === "running" &&
+        Date.now() - Number(queue.updatedAt || 0) < 5 * 60 * 1000)) {
+      const message = "A recent Bot Status checkpoint may belong to another Settings page. Wait for it to finish or for the five-minute recovery window before resuming.";
+      if ($("botAvailabilityScanStatus")) $("botAvailabilityScanStatus").textContent = message;
+      showSettingsToast(message);
+      return;
+    }
+    const originalQueue = queues[queueKind === "stale" ? 1 : 0];
+    preparedQueue = await botStatusReconcileSavedQueue(queueKind, originalQueue);
+  } catch (error) {
+    const message = `${String(error?.message || error)} Saved Bot Status records were not changed.`;
+    const scanStatus = $("botAvailabilityScanStatus");
+    if (scanStatus) scanStatus.textContent = message;
+    showSettingsToast(message);
+    return;
+  }
   const pausedQueue = options?.resume ? preparedQueue : null;
   // Held work is never dropped. Explicit full/stale Refresh can retry
   // non-excluded held IDs even after their original source was untracked.
@@ -619,7 +696,7 @@ async function runBotAvailabilityScan(options = {}) {
       const resumeNow = confirm(isStale
         ? `${unfinished.ids.length} stale refresh checks are pending.\n\nOK: Resume this stale refresh.\nCancel: Leave the stale queue untouched.\n\nYour other paused Bot Status scan will not run.`
         : `${unfinished.ids.length} Bot Status rechecks are still pending.\n\nOK: Resume those IDs first.\nCancel: Keep the queue untouched and don't start a new scan.\n\nUse Refresh stale bots separately without resuming this queue.`);
-      if (resumeNow) await runBotAvailabilityScan({ resume: true, queue: queueKind });
+      if (resumeNow) await runBotAvailabilityScanOwned({ resume: true, queue: queueKind }, hasSharedLock);
       else await refreshBotStatusPauseButton();
       return;
     }
@@ -672,7 +749,21 @@ async function runBotAvailabilityScan(options = {}) {
   // Read both queues once, but do NOT consume one queue through the other:
   // completed results retire the originating hold only after final persistence.
   if (!options?.resume && (mode === "all" || mode === "stale")) {
-    const [mainSnapshot, staleSnapshot] = await botStatusPausedQueues();
+    let mainSnapshot, staleSnapshot;
+    try {
+      // The shared scan lock excludes competing v0.2.98 scan writers. Reuse
+      // the just-read pair and the reconciled current queue rather than
+      // fetching both large resume queues a second time.
+      [mainSnapshot, staleSnapshot] = hasSharedLock ? initialQueues : await botStatusPausedQueues();
+      if (queueKind === "main") mainSnapshot = preparedQueue;
+      else staleSnapshot = preparedQueue;
+    } catch (error) {
+      const message = `${String(error?.message || error)} No Bot Status checks were started and saved queue records were not changed.`;
+      const scanStatus = $("botAvailabilityScanStatus");
+      if (scanStatus) scanStatus.textContent = message;
+      showSettingsToast(message);
+      return;
+    }
     const originSnapshots = { main: mainSnapshot, stale: staleSnapshot };
     for (const kind of ["main", "stale"]) {
       const origin = originSnapshots[kind];
@@ -720,8 +811,9 @@ async function runBotAvailabilityScan(options = {}) {
   }
   // If membership changes between reconciliation and scan preparation,
   // hold those IDs durably as well rather than querying or losing them.
+  const resumeEntryIds = options?.resume ? new Set(entries.map(entry => entry.id)) : null;
   const unresolvablePendingIds = options?.resume
-    ? pausedQueue.ids.filter(validBotId).filter(id => !entries.some(entry => entry.id === id))
+    ? pausedQueue.ids.filter(validBotId).filter(id => !resumeEntryIds.has(id))
     : [];
   // Some imported/resumed sources can accidentally repeat the same ID.
   // Check each ID only once per run, keeping its first position in a resumed
@@ -810,6 +902,7 @@ async function runBotAvailabilityScan(options = {}) {
   let completed = 0;
   let changesPreserved = 0;
   let unknownCount = 0;
+  let verifiedClassificationCount = 0;
   let candidateCount = 0;
   let archiveChangedCount = 0;
   let recoveredCount = 0;
@@ -820,23 +913,61 @@ async function runBotAvailabilityScan(options = {}) {
   const recoveredBlockedIds = new Set();
   const availabilityChangedIds = new Set();
   const archiveChangedIds = new Set();
-  const checkpointSavedIds = new Set();
+  // Only unacknowledged changes need to be visited at each checkpoint.
+  const pendingDeltaIds = new Set();
   let checkpointCount = 0;
   let finalResultsSaved = true;
-  const checkpointEvery = BOT_STATUS_PROGRESS_EVERY;
+  let initialQueueVerified = false;
+  let helperRequested = false;
+  const metadataDirtyKeys = new Set();
+  // Recovery memberships must be durable before a recovered bot's result
+  // can advance the queue. Otherwise an interrupted archived scan may see
+  // an Available result on restart and never restore the saved memberships.
+  async function saveScanMemberships(includeMetadata = false) {
+    if (!recoveryStateDirty && !(includeMetadata && botStatusMetadataDirty)) return true;
+    const payload = botStatusMetadataDirty ? botStatusMetadataStoragePayload(metadataDirtyKeys) : {};
+    if (recoveryStateDirty) {
+      Object.assign(payload, botStatusRecoveryStoragePayload({ restoreBlockedIds: [...recoveredBlockedIds] }).payload);
+      if (recoveredBlockedIds.size) {
+        const stored = await storageGetChecked(["settings"]);
+        if (!stored.ok) return false;
+        const settings = stored.data.settings || {};
+        // Only write the two affected granular settings, not the entire
+        // Settings snapshot (which could overwrite unrelated newer edits).
+        payload.settings = {
+          blockedBotIds: uniqueClean([...(settings.blockedBotIds || []), ...recoveredBlockedIds]).filter(validBotId),
+          blockedBotNames: []
+        };
+      }
+    }
+    if (!await storageSet(payload)) return false;
+    recoveryStateDirty = false;
+    botStatusMetadataDirty = false;
+    metadataDirtyKeys.clear();
+    recoveredBlockedIds.clear();
+    return true;
+  }
+  // Large scans would rewrite thousands of pending IDs after every 10 checks.
+  // Allow up to 20 per count-triggered checkpoint on 2k+ targets while keeping
+  // the same 10-second time-triggered limit. Completed deltas are persisted
+  // BEFORE the queue advances, so interruption can repeat but never skip work.
+  const checkpointEvery = entries.length >= 2000 ? 20 : BOT_STATUS_PROGRESS_EVERY;
   async function saveScanCheckpoint(force = false) {
-    const pending = [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id));
+    const pending = [...pendingDeltaIds];
+    // Checkpoint restored memberships before acknowledging result deltas.
+    if (!await saveScanMemberships()) return false;
     if (!pending.length || (!force && pending.length < checkpointEvery)) return true;
     const availabilityUpdates = Object.fromEntries(pending.map(id => [id, botAvailabilityState.meta?.[id]]).filter(([, v]) => !!v));
     const archiveUpdates = Object.fromEntries(pending.filter(id => archiveChangedIds.has(id)).map(id => [id, botArchiveState.meta?.[id]]).filter(([, v]) => !!v));
     const saved = await runtimeMessageWithTimeout(
       { type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates }, 25000);
-    if (!saved?.ok) return false;
-    pending.forEach(id => checkpointSavedIds.add(id));
+    if (!saved?.ok || Number(saved.availability) !== Object.keys(availabilityUpdates).length ||
+        Number(saved.archive) !== Object.keys(archiveUpdates).length ||
+        Object.keys(availabilityUpdates).length !== pending.length) return false;
+    pending.forEach(id => pendingDeltaIds.delete(id));
     checkpointCount += pending.length;
     return true;
   }
-  const metadataDirtyKeys = new Set();
   let terminalMessage = "";
   let timeLimitReached = false;
   let scanStartedAt = 0;
@@ -845,7 +976,7 @@ async function runBotAvailabilityScan(options = {}) {
   let adaptiveDelay = botStatusScanDelayMs();
   let consecutiveAccessFailures = 0;
   const deferredAccessIds = [];
-  let accessPauseTriggered = false;
+  let accessPauseReason = "";
   let stalledScan = false;
   let nextScanIndex = 0;
   let lastQueueCheckpointAt = 0;
@@ -866,17 +997,24 @@ async function runBotAvailabilityScan(options = {}) {
   // checked again, but no completed result is skipped or lost from the queue.
   async function saveScanProgress(nextIndex, { force = false } = {}) {
     const now = Date.now();
-    if (!force && completed - lastQueueCheckpointCompleted < BOT_STATUS_PROGRESS_EVERY && now - lastQueueCheckpointAt < BOT_STATUS_PROGRESS_MS) return true;
+    if (!force && completed - lastQueueCheckpointCompleted < checkpointEvery && now - lastQueueCheckpointAt < BOT_STATUS_PROGRESS_MS) return true;
     if (!(await saveScanCheckpoint(true))) return false;
     // Do not drop bots deferred by the configured limit on a fresh run.
     const pending = botStatusPendingIds(entries, nextIndex, deferredAccessIds, omittedByBotLimit, true);
     // Keep the last completed ID until final persistence has succeeded.
     try {
-      const queueSaved = await storageSet({ [queueKey]: {
+      const checkpointPayload = { [queueKey]: {
         version: 1, mode, scope, ids: pending, heldIds, manualHeldScanSources, phase: "running",
         updatedAt: now, startedAt: runStartedAt,
-        completed, total: entries.length, reason: "Saved progress"
-      } });
+        completed, total: entries.length, verifiedClassifications: verifiedClassificationCount,
+        inconclusive: unknownCount, reason: "Saved progress"
+      } };
+      // Verify the initial recoverable queue before issuing ANY API request.
+      // On later checkpoints, a successful storage callback is sufficient;
+      // all saved result deltas have already been acknowledged by the worker.
+      const queueSaved = completed === 0
+        ? await storageSetVerified(checkpointPayload)
+        : await storageSet(checkpointPayload);
       if (!queueSaved) return false;
     } catch (error) {
       console.warn("[SpicyChat QoL] Could not save Bot Status resume queue", error);
@@ -905,6 +1043,8 @@ async function runBotAvailabilityScan(options = {}) {
     const queueText = `${preparingText} · initial estimate ~${initialEta}${maxMinutes ? ` · time cap ${maxMinutes}m` : ""}${totalCandidates > entries.length ? ` · ${totalCandidates - entries.length} deferred by bot limit` : ""}`;
     if (status) status.textContent = queueText;
     if (archivedStatus) archivedStatus.textContent = queueText;
+    initialQueueVerified = true;
+    helperRequested = true;
     const prepared = await prepareBotStatusHelper({ forceOwnHelper: true, timeoutMs: 17000 });
     if (!prepared?.ok || prepared?.ready === false) {
       terminalMessage = "Could not initialize the Bot Status helper. No bots were changed; try the scan again after SpicyChat Home is signed in.";
@@ -975,22 +1115,11 @@ async function runBotAvailabilityScan(options = {}) {
           break;
         }
         if (consecutiveAccessFailures >= BOT_STATUS_ACCESS_FAILURE_PAUSE_AT) {
-          // Commit even a partial result batch BEFORE replacing the saved
-          // queue with just the failures and the unprocessed tail.
-          if (!(await saveScanCheckpoint(true))) {
-            terminalMessage = "Paused on an authentication/network failure, but the latest results could not be saved. The previous durable checkpoint remains recoverable.";
-            break;
-          }
-          const remaining = botStatusPendingIds(entries, scanIndex + 1, deferredAccessIds, omittedByBotLimit);
-          const payload = { version: 1, mode, scope, ids: remaining, heldIds, manualHeldScanSources, phase: "paused", completed, total: entries.length, updatedAt: Date.now(), reason: rawResult.reason || `HTTP ${rawResult.httpStatus || 401}` };
-          const pausedSaved = await storageSet({ [queueKey]: payload });
-          if (!pausedSaved) console.warn("[SpicyChat QoL] Could not save paused Bot Status queue; earlier checkpoint remains available");
-          accessPauseTriggered = !!pausedSaved;
-          terminalMessage = pausedSaved
-            ? (Number(rawResult?.httpStatus) === 429
-                ? `Paused after SpicyChat rate-limited the scan (HTTP 429). ${remaining.length} bots saved for Resume; existing results were preserved.`
-                : `Paused after ${consecutiveAccessFailures} consecutive authentication/network failures. ${remaining.length} unprocessed bots saved for Resume; existing results were preserved.`)
-            : "Paused after authentication/network failures. Could not replace the saved resume queue; try resuming the earlier checkpoint.";
+          // Use the normal finalization path so memberships, result deltas
+          // and the verified resume queue commit in the same safe order.
+          accessPauseReason = Number(rawResult?.httpStatus) === 429 ? "HTTP 429 rate limit" : "Authentication/network failure";
+          const remaining = botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit);
+          terminalMessage = `Paused after ${accessPauseReason}. ${remaining.length} bots remain for Resume; verifying the saved checkpoint.`;
           if (status) status.textContent = terminalMessage;
           break;
         }
@@ -1006,6 +1135,8 @@ async function runBotAvailabilityScan(options = {}) {
       const result = reconcileBotUpdate(previous, rawResult);
       if (result.updateStatus === "updated" && Number(result.updateDetectedAt || 0) > Number(previous?.updateDetectedAt || 0)) changesPreserved++;
       if (result.status === "unknown") unknownCount++;
+      if (["available", "restricted", "unavailable"].includes(result.status) &&
+          Number(result.unavailableEvidenceCount || 0) !== 1) verifiedClassificationCount++;
       if (Number(result.unavailableEvidenceCount || 0) === 1 && result.status !== "unavailable") candidateCount++;
       if (mode === "archived") {
         if (result.status === "unavailable") stillUnavailableCount++;
@@ -1014,6 +1145,7 @@ async function runBotAvailabilityScan(options = {}) {
       }
       botAvailabilityState.meta[result.id] = result;
       availabilityChangedIds.add(result.id);
+      pendingDeltaIds.add(result.id);
       if (applyAuthoritativeBotMetadata(rawResult, metadataIndex, metadataDirtyKeys)) botStatusMetadataDirty = true;
       const blockedFromRecovery = metadataIndex?.blocked instanceof Set && metadataIndex.blocked.has(result.id);
       if (rawResult.status === "available" && rawResult.archiveSnapshot && !blockedFromRecovery) {
@@ -1081,7 +1213,7 @@ async function runBotAvailabilityScan(options = {}) {
       }
     }
   } finally {
-    await releaseBotStatusHelper();
+    // Do not let helper cleanup delay or prevent durable scan finalization.
     invalidateDuplicateCache();
     if (completed > 0) {
       // Keep the scan's hot in-memory state as-is. Re-normalizing the entire
@@ -1092,59 +1224,22 @@ async function runBotAvailabilityScan(options = {}) {
       if (status) status.textContent = `Saving ${completed} completed Bot Status checks…`;
       await nextOptionsIdleSlice(120);
 
-      // Persist only the IDs this run touched. The service worker merges the
-      // delta into the large availability/archive stores so the Options page
-      // does not structured-clone and serialize 6k+ status rows / 4k rich bot
-      // copies on its UI thread. Fall back to the old full write if messaging
-      // ever fails so scan results remain crash-safe.
-      // Only flush records not already safely checkpointed.
-      const availabilityUpdates = Object.fromEntries(
-        [...availabilityChangedIds].filter(id => !checkpointSavedIds.has(id))
-          .map(id => [id, botAvailabilityState.meta?.[id]])
-          .filter(([, entry]) => !!entry)
-      );
-      const archiveUpdates = Object.fromEntries(
-        [...archiveChangedIds].filter(id => !checkpointSavedIds.has(id))
-          .map(id => [id, botArchiveState.meta?.[id]])
-          .filter(([, entry]) => !!entry)
-      );
-      const deltaSaved = Object.keys(availabilityUpdates).length || Object.keys(archiveUpdates).length
-        ? await runtimeMessage({ type: "DS_BOT_STATUS_PERSIST_DELTA", availabilityUpdates, archiveUpdates })
-        : { ok: true };
-
-      if (!deltaSaved?.ok) {
-        const availabilitySaved = await storageSet({ [BOT_AVAILABILITY_KEY]: botAvailabilityState });
-        let archiveSaved = true;
-        if (archiveChangedCount > 0) {
-          await nextOptionsIdleSlice(140);
-          archiveSaved = await storageSet({ [BOT_ARCHIVE_KEY]: botArchiveState });
-        }
-        if (!availabilitySaved || !archiveSaved) finalResultsSaved = false;
-      }
-
-      if (botStatusMetadataDirty || recoveryStateDirty) {
-        await nextOptionsIdleSlice(140);
-        if (status) status.textContent = recoveryStateDirty
-          ? "Saving recovered QoL memberships…"
-          : "Saving repaired saved-bot details…";
-        const payload = botStatusMetadataDirty ? botStatusMetadataStoragePayload(metadataDirtyKeys) : {};
-        if (recoveryStateDirty) {
-          Object.assign(payload, botStatusRecoveryStoragePayload({ restoreBlockedIds: [...recoveredBlockedIds] }).payload);
-          if (recoveredBlockedIds.size) {
-            const stored = await storageGet(["settings"]);
-            const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-            settings.blockedBotIds = uniqueClean([...(settings.blockedBotIds || []), ...recoveredBlockedIds]).filter(validBotId);
-            settings.blockedBotNames = [];
-            payload.settings = settings;
-          }
-        }
-        if (!await storageSet(payload)) finalResultsSaved = false;
+      // Reuse the same bounded delta path at completion. A failed worker
+      // acknowledgement leaves the last verified queue intact; do not fall
+      // back to a full-table overwrite of newer data from another context.
+      try {
+        if (!await saveScanMemberships(true) || !await saveScanCheckpoint(true)) finalResultsSaved = false;
+      } catch (error) {
+        finalResultsSaved = false;
+        console.warn("[SpicyChat QoL] Bot Status final delta save failed", error);
       }
     }
+    let finalQueuePendingCount = null;
     // Only advance/clear the resume queue after the final result and recovery
     // writes above complete. On a page crash, the most recent saved queue is
     // still available and may safely recheck the unfinished tail.
-    if (!accessPauseTriggered && finalResultsSaved) {
+    if (!initialQueueVerified) finalResultsSaved = false;
+    if (initialQueueVerified && finalResultsSaved) {
       const outstanding = new Set(botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit));
       const completedHeld = new Set([...completedCheckedIds].filter(id => {
         const result = botAvailabilityState.meta?.[id];
@@ -1158,14 +1253,16 @@ async function runBotAvailabilityScan(options = {}) {
       const remainingHeldSources = Object.fromEntries(Object.entries(manualHeldScanSources)
         .filter(([id]) => !completedHeld.has(id)));
       try {
-        const finalQueueSaved = await storageSet({ [queueKey]: (outstanding.size || outstandingHeld.length) ? {
+        const finalQueueSaved = await storageSetVerified({ [queueKey]: (outstanding.size || outstandingHeld.length) ? {
           version: 1, mode, scope, ids: [...outstanding], heldIds: outstandingHeld,
           manualHeldScanSources: remainingHeldSources, phase: "paused",
           updatedAt: Date.now(), startedAt: runStartedAt,
           completed, total: entries.length,
-          reason: botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : omittedByBotLimit.length ? "Bot limit reached" : "Retry skipped checks"
+          reason: accessPauseReason || (botAvailabilityStopRequested ? "Stopped" : timeLimitReached ? "Time limit" : omittedByBotLimit.length ? "Bot limit reached" : "Retry skipped checks")
         } : null });
         if (!finalQueueSaved) throw new Error("Could not persist Bot Status resume queue");
+        finalQueuePendingCount = outstanding.size;
+        if (accessPauseReason) terminalMessage = `Paused after ${accessPauseReason}. ${outstanding.size} pending checks durably saved for Resume.`;
         await botStatusRetireCheckedHeldSources(completedHeld, manualHeldScanSources, queueKind);
         if (outstanding.size && !terminalMessage) terminalMessage = `${completed} Bot Status checks saved. ${outstanding.size} still pending; use Resume paused scan.`;
       } catch (error) {
@@ -1174,7 +1271,11 @@ async function runBotAvailabilityScan(options = {}) {
         console.warn("[SpicyChat QoL] Could not finalize Bot Status resume queue", error);
       }
     }
-    botStatusMetadataDirty = false;
+    // In-memory recovery/status changes may differ from durable storage after
+    // a failed save. Require a new Settings context before another scan;
+    // in particular, do not reconcile held IDs using uncommitted results.
+    if (!finalResultsSaved) botStatusScanNeedsReload = true;
+    else botStatusMetadataDirty = false;
     botAvailabilityScanRunning = false;
     if (scanButton) scanButton.disabled = false;
     if (uncheckedButton) uncheckedButton.disabled = false;
@@ -1204,9 +1305,10 @@ async function runBotAvailabilityScan(options = {}) {
         ? `${completed} checked · ${recoveredCount} restored · ${stillUnavailableCount} still unavailable · ${restrictedCount} private/restricted · ${retryLaterCount} retry later${archivedBlockedSkipped ? ` · ${archivedBlockedSkipped} blocked left alone` : ""}.`
         : `${mode === "unchecked" ? `Finished ${completed} unchecked bot${completed === 1 ? "" : "s"}` : mode === "stale" ? `Refreshed ${completed} stale bot${completed === 1 ? "" : "s"}` : `Finished ${completed} bot${completed === 1 ? "" : "s"}`}. ${changesPreserved ? `${changesPreserved} profile change${changesPreserved === 1 ? "" : "s"} preserved in history. ` : ""}${recoveredCount ? `${recoveredCount} previously unavailable bot${recoveredCount === 1 ? " was" : "s were"} recovered and restored. ` : ""}${candidateCount ? `${candidateCount} unavailable candidate${candidateCount === 1 ? " needs" : "s need"} another check. ` : ""}${unknownCount ? `${unknownCount} temporary/unknown check${unknownCount === 1 ? "" : "s"}; they were left untouched.` : "Status and saved bot details updated."}`);
     const safeStatusText = finalResultsSaved ? finalStatusText
-      : `${finalStatusText} Save/queue verification failed; review the last durable checkpoint before running another scan.`;
+      : `${finalStatusText} Save/queue verification failed; reopen QoL Settings to resume from the last durable checkpoint.`;
     if (status) status.textContent = safeStatusText;
     if (archivedStatus) archivedStatus.textContent = safeStatusText;
+    if (helperRequested) await releaseBotStatusHelper();
     const finalWorkerStats = await runtimeMessageWithTimeout(
       { type: "DS_BOT_STATUS_HELPER_STATS" }, 5000).catch(() => null);
     const statsDelta = name => {
@@ -1228,7 +1330,7 @@ async function runBotAvailabilityScan(options = {}) {
       timeouts: statsDelta("timeouts"),
       outstanding: finalWorkerStats?.ok ? Number(finalWorkerStats.outstanding || 0) : null
     };
-    await noteBotStatusRunEvent("bot-status-run-complete", {
+    const completionTelemetry = {
       // The lifecycle collector retains the first twelve public counters.
       // Put the actionable run summary first; advanced counts follow.
       mode, scope, completed, requested: entries.length,
@@ -1242,15 +1344,15 @@ async function runBotAvailabilityScan(options = {}) {
       stopped: !!botAvailabilityStopRequested || !!terminalMessage || timeLimitReached || countLimitReached,
       changesPreserved, unknownCount, candidateCount, archiveChangedCount, recoveredCount,
       stillUnavailableCount, restrictedCount, retryLaterCount, archivedBlockedSkipped
-    });
+    };
     const manuallyStopped = !!botAvailabilityStopRequested;
     botAvailabilityStopRequested = false;
-    const savedQueues = await refreshBotStatusPauseButton();
-    // The persisted resume queue remains authoritative; the refresh above
-    // read both queues AFTER the final durable write. Reuse that snapshot
-    // instead of immediately re-reading the same 200+ KB queue a second time.
-    const pauseState = savedQueues[queueKind];
-    const pendingCount = Array.isArray(pauseState?.ids) ? pauseState.ids.length : 0;
+    // Final queue read-back already verified its exact remaining ID set.
+    // Write run feedback BEFORE a slow Settings UI refresh or optional event
+    // relay can delay publication of the completed/failed-finalization state.
+    const pendingCount = finalQueuePendingCount == null
+      ? botStatusPendingIds(entries, nextScanIndex, deferredAccessIds, omittedByBotLimit).length
+      : finalQueuePendingCount;
     const feedback = {
       at: Date.now(), mode, checked: completed,
       ...outgoingStats,
@@ -1263,7 +1365,13 @@ async function runBotAvailabilityScan(options = {}) {
       unknown: unknownCount,
       saveVerified: finalResultsSaved
     };
-    await storageSet({ [BOT_STATUS_LAST_RUN_FEEDBACK_KEY]: feedback });
+    // Record finality to local storage BEFORE optional Inspector/report events.
+    // If the event relay stalls or Settings closes, the persisted run summary
+    // still says whether final queue/result persistence was verified.
+    const feedbackSaved = await storageSet({ [BOT_STATUS_LAST_RUN_FEEDBACK_KEY]: feedback });
+    if (!feedbackSaved) console.warn("[SpicyChat QoL] Last-run feedback could not be saved; the durable resume queue is still authoritative");
+    await noteBotStatusRunEvent("bot-status-run-complete", completionTelemetry);
+    await refreshBotStatusPauseButton();
     const feedbackEl = $("botStatusLastRunSummary");
     if (feedbackEl) feedbackEl.textContent = formatBotStatusLastRunFeedback(feedback);
 
@@ -1271,7 +1379,7 @@ async function runBotAvailabilityScan(options = {}) {
     // exact remotely-preserved archive fingerprint is confirmed. Keep this as
     // idle/background work so scan completion stays responsive.
     const blockedCleanupCandidateIds = [...availabilityChangedIds];
-    if (blockedCleanupCandidateIds.length) {
+    if (finalResultsSaved && blockedCleanupCandidateIds.length) {
       setTimeout(() => {
         nextOptionsIdleSlice(500)
           .then(() => cleanupArchivedBlockedBots({ automatic: true, maxItems: 25, candidateIds: blockedCleanupCandidateIds }))

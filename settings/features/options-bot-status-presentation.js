@@ -144,13 +144,34 @@ function botIdentityDisplay(idValue, creatorValue = "") {
   return creator ? `${creator} · ${shortId}` : `ID ${shortId}`;
 }
 
-function botSameNameCollisionIndex() {
+// Loaded Settings stores contain normalized records. Presentation must not
+// normalize every profile, history and snapshot on every pagination/search.
+// Compare shallow record identities, including replacements/deletions within
+// the same map (scan checkpoints mutate map entries in place).
+let recoveryPresentationCache = null;
+function recoveryPresentationView() {
+  const maps = [botArchiveState.meta || {}, botAvailabilityState.meta || {}, botUnavailableRecoveryState.meta || {}];
+  const blocked = (blockedState.ids || []).map(id => String(id || "").toLowerCase());
+  const previous = recoveryPresentationCache;
+  if (previous && blocked.length === previous.blocked.length && blocked.every((id,i) => id === previous.blocked[i]) && maps.every((map,i) => {
+    const keys = Object.keys(map), snapshot = previous.snapshots[i];
+    return keys.length === snapshot.size && keys.every(id => snapshot.get(id) === map[id]);
+  })) return previous;
+  const started = performance.now();
+  recoveryPresentationCache = {
+    archives: maps[0], availability: maps[1], recovery: maps[2], blocked,
+    blockedIds: new Set(blocked), snapshots: maps.map(map => new Map(Object.entries(map)))
+  };
+  optionsPhaseSample("recovery:index-validation-rebuild", performance.now() - started);
+  return recoveryPresentationCache;
+}
+function botSameNameCollisionIndex(view = recoveryPresentationView()) {
+  if (view.collisions) return view.collisions;
+  const started = performance.now();
   // This index is presentation-only. Availability, cleanup, restore and archive
   // state stay keyed by the exact character UUID; names are never used to join
   // or transfer status between bots.
-  const availability = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
-  const recovery = normalizeBotUnavailableRecovery(botUnavailableRecoveryState).meta;
+  const { availability, archives, recovery } = view;
   const groups = new Map();
   const ids = new Set([
     ...Object.keys(availability || {}),
@@ -227,6 +248,8 @@ function botSameNameCollisionIndex() {
     for (const item of unavailable) byId.set(item.id, otherStates);
     for (const item of otherStates) byId.set(item.id, unavailable);
   }
+  view.collisions = byId;
+  optionsPhaseSample("recovery:collision-index", performance.now() - started);
   return byId;
 }
 
@@ -350,6 +373,11 @@ function botAvailabilityCard(entry) {
 }
 
 function renderBotAvailability(renderOptions = {}) {
+  if (!savedRecoveryManagerCanRender("status")) {
+    if (!renderOptions?.skipRecoveryRerender) { renderSavedBotInfo(); renderDeletedSavedBots(); }
+    return;
+  }
+  const renderStarted = performance.now();
   const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
     ? renderOptions.sameNameCollisions
     : botSameNameCollisionIndex();
@@ -369,8 +397,8 @@ function renderBotAvailability(renderOptions = {}) {
   const base = suppliedBase && statusFilter !== "pending" ? suppliedBase : botStatusCenterBaseEntries(scopeForReview);
   if (statusFilter === "pending") {
     const knownIds = new Set(base.map(entry => entry.id));
-    const archives = normalizeBotArchive(botArchiveState).meta;
-    const checked = normalizeBotAvailability(botAvailabilityState).meta;
+    const archives = botArchiveState.meta || {};
+    const checked = botAvailabilityState.meta || {};
     for (const id of botStatusPendingReviewIds) {
       if (knownIds.has(id)) continue;
       const history = checked[id] || {};
@@ -390,8 +418,8 @@ function renderBotAvailability(renderOptions = {}) {
   const duplicates = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? botDuplicateMatchesCache
     : new Map();
-  const entries = botAvailabilityEntries(base, duplicates)
-    .map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
+  const entries = botAvailabilityEntries(base, duplicates);
+  optionsPhaseSample("status:filter-sort-index", performance.now() - renderStarted);
   const duplicateBots = botDuplicateCacheReady && botDuplicateCacheScope === scope
     ? [...duplicates.values()].filter(matches => matches.length).length
     : null;
@@ -421,7 +449,7 @@ function renderBotAvailability(renderOptions = {}) {
   const staleCount = eligibleEntries.filter(entry => Number(entry.checkedAt || 0) > 0 && Number(entry.checkedAt || 0) <= staleCutoff).length;
   botStatusTrackedStaleCount = staleCount;
   let limit = Math.max(10, Number(botAvailabilityUiState.visible || 10) || 10);
-  const shown = entries.slice(0, limit);
+  const shown = entries.slice(0, limit).map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
 
   const summary = $("botAvailabilitySummary");
   if (summary) {
@@ -484,7 +512,13 @@ function renderBotAvailability(renderOptions = {}) {
     return;
   }
 
-  host.replaceChildren(...shown.map(botAvailabilityCard));
+  const domStarted = performance.now();
+  const cards = shown.map(botAvailabilityCard);
+  optionsPhaseSample("status:construct-cards", performance.now() - domStarted);
+  const commitStarted = performance.now();
+  host.replaceChildren(...cards);
+  optionsPhaseSample("status:dom-commit", performance.now() - commitStarted);
+  optionsPhaseSample("status:render", performance.now() - renderStarted);
   host.querySelectorAll(".bot-availability-recheck").forEach(button => {
     button.addEventListener("click", async () => {
       const id = button.closest(".bot-manager-card")?.dataset.id || "";

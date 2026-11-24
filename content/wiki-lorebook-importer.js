@@ -638,21 +638,49 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       || buttons.find(node => /lorebook:modal\.entry\.action\.(?:create|add|save)/i.test(node.querySelector("[data-translate-key]")?.getAttribute("data-translate-key") || ""));
   }
 
-  async function createSpicyEntry(item) {
+  function exactTransferKeywords(parts) {
+    const clear = parts.root?.querySelector("button[aria-label='Clear all tags']");
+    return [...(parts.form?.querySelectorAll("button") || [])]
+      .filter(button => button !== clear && !/clear all/i.test(button.getAttribute("aria-label") || ""))
+      .filter(button => button.querySelector("svg.lucide-x,svg[class*='lucide-x']"))
+      .map(button => String(button.textContent || "").trim()).filter(Boolean);
+  }
+  async function createSpicyEntry(item, transfer = null) {
+    const checkTarget = () => {
+      if (transfer && (routeInfo()?.id !== transfer.id || routeInfo()?.page !== "entries" || transfer.cancelled())) throw new Error("Lorebook changed or transfer cancelled; no further entry submitted.");
+    };
+    checkTarget();
+    if (transfer && entryModalParts()) throw new Error("An entry editor is already open; transfer stopped before another write.");
     const add = document.querySelector("[data-testid='EntriesCreateHeader-AddEntryButton']") || [...document.querySelectorAll("button")].find(node => /^add entry$/i.test(textOf(node, 50)));
     if (!add) throw new Error("Could not find SpicyChat's Add Entry button.");
     add.click();
     const parts = await waitFor(() => entryModalParts(), 5000);
-    nativeSetValue(parts.name, clean(item.name, 50));
-    nativeSetValue(parts.content, clean(item.content, 24000));
-    for (const keyword of item.keywords.slice(0, 12)) await addKeyword(parts.keyword, keyword);
+    checkTarget();
+    if (transfer && (!parts.form.contains(parts.name) || !parts.form.contains(parts.content) ||
+        parts.name.value.trim() || parts.content.value.trim() || exactTransferKeywords(parts).length)) {
+      throw new Error("Expected an empty Add Entry editor; no fields were changed.");
+    }
+    nativeSetValue(parts.name, transfer ? item.name : clean(item.name, 50));
+    nativeSetValue(parts.content, transfer ? item.content : clean(item.content, 24000));
+    for (const keyword of item.keywords.slice(0, 12)) {
+      checkTarget();
+      if (transfer && entryModalParts()?.content !== parts.content) throw new Error("Native entry editor changed; transfer stopped.");
+      await addKeyword(parts.keyword, keyword);
+    }
+    checkTarget();
+    if (transfer && (entryModalParts()?.content !== parts.content || parts.name.value !== item.name || parts.content.value !== item.content ||
+        JSON.stringify(exactTransferKeywords(parts).sort()) !== JSON.stringify([...item.keywords].sort()))) {
+      throw new Error("Native entry fields could not be verified exactly. Review the open form; nothing was submitted for this entry.");
+    }
     const submit = findSubmitButton(parts);
+    if (transfer && (!submit || submit === add)) throw new Error("Native Create/Save button unavailable. Review the open entry; no submit sent.");
     if (!submit) {
       const cancel = parts.root?.querySelector("button[aria-label='Cancel']") || [...(parts.root?.querySelectorAll("button") || [])].find(node => /^cancel$/i.test(textOf(node, 30)));
       cancel?.click();
       throw new Error("The entry form opened, but QoL could not find its Create/Save button. SpicyChat may have changed the form.");
     }
     const oldContent = parts.content;
+    checkTarget();
     submit.click();
     await waitFor(() => !document.contains(oldContent) || !oldContent.offsetParent, 6000).catch(() => {
       const current = entryModalParts();
@@ -671,12 +699,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
   }
 
-  async function ensureAllExistingEntriesLoaded(operation, onProgress) {
+  async function ensureAllExistingEntriesLoaded(operation, onProgress, canContinue = () => true) {
     // Without this, Skip existing only checks the first 100 loaded rows and
     // a re-import into a larger Lorebook can accidentally create duplicates.
     const started = Date.now();
     while (nativeExistingEntryTotal() === null) {
-      if (operation.cancelled) return false;
+      if (operation.cancelled || !canContinue()) return false;
       if (Date.now() - started > 12000) throw new Error("Could not read SpicyChat's current entry count; import stopped before any write.");
       await new Promise(resolve => setTimeout(resolve, 200));
     }
@@ -684,7 +712,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (let batch = 0; batch < maxBatches; batch += 1) {
       const expected = nativeExistingEntryTotal();
       const rows = existingEntryRows();
-      if (operation.cancelled) return false;
+      if (operation.cancelled || !canContinue()) return false;
       if (routeInfo()?.id !== operation.id || routeInfo()?.page !== "entries") return false;
       if (expected === null) throw new Error("SpicyChat's entry count disappeared; no import started.");
       if (rows.length >= expected) return true;
@@ -706,7 +734,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       const deadline = Date.now() + 20000;
       while (existingEntryRows().length <= previous) {
-        if (operation.cancelled) return false;
+        if (operation.cancelled || !canContinue()) return false;
         if (routeInfo()?.id !== operation.id || routeInfo()?.page !== "entries") return false;
         if (Date.now() > deadline) throw new Error(`SpicyChat did not load more existing entries after ${previous}; nothing imported.`);
         await new Promise(resolve => setTimeout(resolve, 160));
@@ -1232,7 +1260,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ? String(options.duplicatePolicy)
       : "skip";
     const source = Array.isArray(rawEntries) ? rawEntries : Object.values(rawEntries || {});
-    const items = source.map((entry, index) => ({
+    const preserve = options.preserveTransferText === true;
+    if (preserve && (duplicatePolicy !== "skip" || !source.length || source.length > 500 || source.some(entry => !entry ||
+        typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 50 ||
+        typeof entry.content !== "string" || !entry.content.trim() || entry.content.length > 2000 ||
+        !Array.isArray(entry.keywords) || !entry.keywords.length || entry.keywords.length > 12 ||
+        entry.keywords.some(k => typeof k !== "string" || !k.trim() || k.length > 80)))) {
+      throw new Error("Clipboard transfer requires valid entries and Skip existing. No writes sent.");
+    }
+    const items = preserve ? source.map(entry => ({name: entry.name, content: entry.content, keywords: [...entry.keywords]})) : source.map((entry, index) => ({
       name: clean(entry?.name || `Imported entry ${index + 1}`, 50),
       content: clean(entry?.content, 24000),
       keywords: unique(Array.isArray(entry?.keywords) ? entry.keywords : String(entry?.keywords || "").split(/[,;\n]/g), 12)
@@ -1257,7 +1293,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // This also makes interrupted imports safe to re-import when there are
       // more than 100 current entries.
       const existingListStartedAt = Date.now();
-      const existingListReady = await ensureAllExistingEntriesLoaded(operation, options.onProgress);
+      const canContinue = () => !options.signal?.aborted && (!preserve || options.transferAllowed?.() !== false);
+      const existingListReady = await ensureAllExistingEntriesLoaded(operation, options.onProgress, canContinue);
       existingListMs = Date.now() - existingListStartedAt;
       if (!existingListReady) {
         counts.cancelled = !!operation.cancelled;
@@ -1273,7 +1310,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const knownNames = new Set(existingEntryRows().map(existingEntryName).filter(Boolean).map(name => name.toLowerCase()));
       for (let index = startIndex; index < items.length; index += 1) {
         counts.nextIndex = index;
-        if (operation.cancelled || options.signal?.aborted) {
+        if (operation.cancelled || !canContinue()) {
           counts.cancelled = true;
           counts.stopReason = "Cancelled before the next entry.";
           break;
@@ -1285,7 +1322,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
         const item = items[index];
         try {
-          const key = item.name.toLowerCase();
+          const key = preserve ? clean(item.name, 50).toLowerCase() : item.name.toLowerCase();
           let result;
           if (knownNames.has(key) && duplicatePolicy === "skip") {
             result = { action: "skipped", item };
@@ -1296,7 +1333,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               throw new Error(`Matching entry “${item.name}” is no longer loaded. Refresh and review before continuing.`);
             }
             const writeStartedAt = Date.now();
-            try { result = await importOne(item, duplicatePolicy); }
+            try {
+              if (preserve) {
+                // Skip a matching name even if a new card appeared during the import.
+                if (findExistingRowByName(item.name)) result = { action: "skipped", item };
+                else {
+                  await createSpicyEntry(item, { id: operation.id, cancelled: () => operation.cancelled || !canContinue() || !!document.querySelector("[data-testid='EntriesListServer-SearchInput']")?.value?.trim() });
+                  result = { action: "created", item };
+                }
+              } else result = await importOne(item, duplicatePolicy);
+            }
             finally { nativeWriteMs += Date.now() - writeStartedAt; }
           }
           const action = String(result?.action || "");
@@ -1311,7 +1357,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           }
           const detail = String(error?.message || error || "");
           const status = Number(error?.httpStatus || error?.status || 0);
-          if ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500 ||
+          if (preserve || [401, 403, 408, 409, 425, 429].includes(status) || status >= 500 ||
               /rate.limit|too many requests|auth|token|ambiguous|unverified|cannot confirm|timed out|network|no longer loaded/i.test(detail)) {
             counts.paused = true;
             counts.stopReason = status === 429 ? "SpicyChat rate limited this import (HTTP 429)." :

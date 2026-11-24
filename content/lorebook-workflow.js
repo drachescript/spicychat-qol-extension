@@ -10,6 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const STYLE_ID = "ds-lorebook-workflow-style";
   const TOOLBAR_ID = "ds-lorebook-manager-toolbar";
   const MULTI_WORKSPACE_ID = "ds-lorebook-multi-workspace";
+  const TRANSFER_ID = "ds-lb-entry-transfer";
   const SORT_PREF_KEY = "ds-qol-lorebook-sort-preference";
   const DETAILS_SUPPRESS_PREFIX = "ds-qol-lorebook-details-manual:";
   const MAX_DRAFTS = 40;
@@ -73,6 +74,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       #${TOOLBAR_ID} .ds-lb-toolbar-actions[hidden]{display:none!important}
       #${TOOLBAR_ID} .ds-lb-manager-status{font-size:11px;opacity:.7;flex:1 1 180px;min-width:0}
       #${TOOLBAR_ID} .ds-lb-toolbar-toggle{white-space:nowrap}
+      #${TRANSFER_ID}{flex:1 1 100%;display:grid;gap:6px;padding:8px;border:1px solid rgba(127,127,127,.4);border-radius:8px;font:12px/1.4 system-ui;min-width:0}
+      #${TRANSFER_ID} textarea{box-sizing:border-box;width:100%;min-height:110px;resize:vertical;background:transparent;color:inherit;border:1px solid rgba(127,127,127,.5);border-radius:6px;padding:6px;font:12px/1.4 monospace}
+      #${TRANSFER_ID} .ds-lb-transfer-actions{display:flex;flex-wrap:wrap;gap:5px}
       .ds-lb-row-tools{display:flex;gap:5px;align-items:center;padding:2px 10px 5px;font-size:11px;opacity:.82;min-height:20px;flex-wrap:wrap}
       .ds-lb-row-tools button{border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer;padding:1px 2px;font:inherit}
       .ds-lb-row-tools [data-ds-lb-info]{font-size:11px}
@@ -356,6 +360,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       label.dataset.dsLbInfo = "1";
       const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "Rename"; rename.dataset.dsLbAction = "rename";
       const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy"; copy.dataset.dsLbAction = "copy";
+      const transfer = document.createElement("button"); transfer.type = "button"; transfer.textContent = "Copy for paste"; transfer.dataset.dsLbAction = "transfer";
+      transfer.title = "Copy the full entry name, keywords and content as transferable JSON";
+      transfer.addEventListener("click", () => copyTransferRows([row]));
       const duplicate = document.createElement("button"); duplicate.type = "button"; duplicate.textContent = "Duplicate"; duplicate.dataset.dsLbAction = "duplicate";
       const quickToggle = document.createElement("button"); quickToggle.type = "button"; quickToggle.textContent = "Enable / Disable"; quickToggle.dataset.dsLbAction = "quick-toggle";
       quickToggle.title = "Changes the shared Lorebook entry in SpicyChat — may affect multiple chats";
@@ -363,7 +370,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       rename.addEventListener("click", () => quickRename(row));
       copy.addEventListener("click", () => copyRows([row]));
       duplicate.addEventListener("click", () => duplicateRows([row]));
-      tools.append(check, label, rename, copy, duplicate, quickToggle);
+      tools.append(check, label, rename, copy, transfer, duplicate, quickToggle);
       row.insertAdjacentElement("afterend", tools);
     }
 
@@ -378,6 +385,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const quickToggle = tools.querySelector("[data-ds-lb-action='quick-toggle']");
     if (rename) rename.hidden = cfg.lorebookEntryRenameButton === false;
     if (copy) copy.hidden = cfg.lorebookEntryCopyButton === false;
+    const transfer = tools.querySelector("[data-ds-lb-action='transfer']");
+    if (transfer) transfer.hidden = cfg.lorebookEntryCopyButton === false;
     if (duplicate) duplicate.hidden = cfg.lorebookEntryDuplicateButton === false;
     if (quickToggle) quickToggle.hidden = !cfg.lorebookEntryQuickToggle;
 
@@ -447,6 +456,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ["lorebookMultiEntryWorkspace", "Open selected", () => openRowsInWorkspace(selectedRows()), true],
       ["lorebookBulkExportSelected", "Export selected", () => exportRows(selectedRows()), true],
       ["lorebookBulkCopySelected", "Copy selected", () => copyRows(selectedRows()), true],
+      ["lorebookBulkCopySelected", "Copy selected for paste", () => copyTransferRows(selectedRows()), true],
       ["lorebookBulkDuplicateSelected", "Duplicate selected", () => duplicateRows(selectedRows()), true],
       ["lorebookBulkAddKeyword", "Add keyword", () => bulkKeyword(true), true],
       ["lorebookBulkRemoveKeyword", "Remove keyword", () => bulkKeyword(false), true],
@@ -455,7 +465,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ["lorebookBulkFindKeyword", "Find keyword", findKeyword, false]
     ].filter(([key, , , needsSelection]) => cfg[key] !== false && (!needsSelection || selectionOn));
 
-    const signature = JSON.stringify(actionDefs.map(item => item[0]));
+    const pasteEnabled = cfg.lorebookEntryCopyButton !== false || cfg.lorebookBulkCopySelected !== false;
+    const signature = JSON.stringify([pasteEnabled, ...actionDefs.map(item => item[0])]);
     let toolbar = document.getElementById(TOOLBAR_ID);
     const previousExpanded = toolbar?.dataset.dsExpanded === "1";
     const previousStatus = toolbar?.querySelector(".ds-lb-manager-status")?.textContent || "";
@@ -495,6 +506,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const status = document.createElement("span");
       status.className = "ds-lb-manager-status";
       status.textContent = previousStatus || (selectionOn ? "Select entries for bulk actions." : "Entry tools enabled.");
+      if (pasteEnabled) {
+        const paste = document.createElement("button");
+        paste.type = "button"; paste.textContent = "Paste entries";
+        paste.title = "Transfer entries into this Lorebook; existing entries are never overwritten";
+        paste.addEventListener("click", () => showTransferPanel());
+        toolbar.append(paste);
+      }
       toolbar.append(status);
       header.insertAdjacentElement("afterend", toolbar);
     }
@@ -1068,7 +1086,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function openRowsInWorkspace(rows) {
-    if (multiWorkspaceSaving) return;
+    if (bulkBusy || multiWorkspaceSaving || DS.activeLorebookEntryImport || entryModalParts()) return;
     if (!settings().lorebookMultiEntryWorkspace) return setManagerStatus("Enable multi-entry editing in Creator Helpers first.");
     if (!rows?.length) return setManagerStatus("Select at least one entry first.");
     bulkBusy = true;
@@ -1098,6 +1116,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function saveWorkspaceEntry(entry, { rerender = true } = {}) {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return false;
     if (!entry || !entry.dirty || multiWorkspaceSaving) return true;
     multiWorkspaceSaving = true;
     const traceToken = rerender && DS.isDiagnosticTraceActive?.("normal")
@@ -1169,6 +1188,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function quickRename(row) {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     const data = await captureRow(row).catch(() => rowInfo(row));
     const next = prompt("Rename Lorebook entry", data?.name || "");
     if (!next || clean(next,50) === data?.name) return;
@@ -1199,7 +1219,212 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await submitModal(parts);
   }
 
+  // Clipboard transfer is explicit, limited to the native owned-editor route,
+  // and carries no IDs, account credentials, book metadata or hidden fields.
+  const TRANSFER_FORMAT = "spicychat-qol-lorebook-selected";
+  const TRANSFER_MAX_BYTES = 2_000_000;
+  function transferNameKey(name) {
+    return String(name || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function rawTransferKeywords(parts) {
+    const clear = parts.root?.querySelector("button[aria-label='Clear all tags']");
+    return [...(parts.form?.querySelectorAll("button") || [])]
+      .filter(button => button !== clear && !/clear all/i.test(button.getAttribute("aria-label") || ""))
+      .filter(button => button.querySelector("svg.lucide-x,svg[class*='lucide-x']"))
+      .map(button => String(button.textContent || "").trim()).filter(Boolean);
+  }
+  function validateTransferEntries(entries) {
+    if (!Array.isArray(entries) || !entries.length || entries.length > 500) {
+      throw new Error("Transfer 1–500 entries at a time. Use Lorebook JSON backup for larger collections.");
+    }
+    const names = new Set();
+    return entries.map((entry, index) => {
+      const n = index + 1;
+      if (!entry || typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 50 ||
+          typeof entry.content !== "string" || !entry.content.trim() || entry.content.length > 2000 ||
+          !Array.isArray(entry.keywords) || !entry.keywords.length || entry.keywords.length > 12 ||
+          entry.keywords.some(key => typeof key !== "string" || !key.trim() || key.length > 80 || key !== key.trim())) {
+        throw new Error(`Entry ${n} is missing a required field or exceeds the native entry limits. Nothing was submitted.`);
+      }
+      const key = transferNameKey(entry.name);
+      if (names.has(key)) throw new Error(`Duplicate entry name in transfer (entry ${n}). Rename it before importing.`);
+      names.add(key);
+      if (new Set(entry.keywords.map(k => k.toLowerCase())).size !== entry.keywords.length) throw new Error(`Entry ${n} has duplicate keywords.`);
+      return { name: entry.name, keywords: [...entry.keywords], content: entry.content };
+    });
+  }
+
+  function parseTransferText(value) {
+    const text = String(value || "");
+    if (!text || text.length > TRANSFER_MAX_BYTES) throw new Error("Paste a QoL entry transfer JSON (up to 2 million characters).");
+    const payload = JSON.parse(text);
+    if (payload?.format !== TRANSFER_FORMAT || payload.version !== 1) throw new Error("Use Copy for paste, Copy selected for paste, or Export selected to get the entry JSON.");
+    return validateTransferEntries(payload.entries);
+  }
+
+  function transferRouteIsCurrent(route) {
+    const current = lorebookRoute();
+    return !!route && current?.id === route.id && current.page === "entries" &&
+      settings().enabled !== false && !!settings().lorebookEntryManager;
+  }
+
+  async function copyTransferRows(rows) {
+    if (bulkBusy || multiWorkspaceSaving || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the open entry or import first.");
+    if (!rows?.length || rows.length > 500) return setManagerStatus("Select 1–500 loaded entries to copy.");
+    const route = lorebookRoute();
+    if (!transferRouteIsCurrent(route)) return;
+    const entries = [];
+    bulkBusy = true;
+    try {
+      for (const row of rows) {
+        if (!transferRouteIsCurrent(route) || !row.isConnected || entryModalParts()) throw new Error("Lorebook or editor changed. Copy stopped.");
+        const expectedName = rowInfo(row)?.name;
+        const parts = await openRow(row);
+        if (!transferRouteIsCurrent(route)) throw new Error("Lorebook changed. Copy stopped.");
+        try {
+          if (clean(parts.name.value, 50) !== expectedName) throw new Error("The opened entry does not match the selected row.");
+          entries.push({ name: parts.name.value, keywords: rawTransferKeywords(parts), content: parts.content.value });
+        } finally {
+          // Never close an unrelated modal or a changed destination.
+          if (transferRouteIsCurrent(route) && entryModalParts()?.content === parts.content) await closeModal(parts);
+        }
+        setManagerStatus(`Reading entries for transfer: ${entries.length}/${rows.length}…`);
+      }
+      const value = JSON.stringify({ format: TRANSFER_FORMAT, version: 1, entries: validateTransferEntries(entries) }, null, 2);
+      if (value.length > TRANSFER_MAX_BYTES) throw new Error("Transfer is too large. Copy fewer entries at a time.");
+      if (!transferRouteIsCurrent(route)) throw new Error("Lorebook changed. Copy stopped.");
+      try {
+        await navigator.clipboard.writeText(value);
+        setManagerStatus(`Copied ${entries.length} entr${entries.length === 1 ? "y" : "ies"}. Open another Lorebook’s Entries tab and choose Paste entries.`);
+      } catch {
+        showTransferPanel(value);
+        setManagerStatus("Clipboard access was denied. Select and copy the JSON in the transfer box manually.");
+      }
+    } catch (error) { setManagerStatus(error?.message || String(error)); }
+    finally { bulkBusy = false; }
+  }
+
+  function showTransferPanel(copiedText = "") {
+    const route = lorebookRoute();
+    const toolbar = document.getElementById(TOOLBAR_ID);
+    if (!toolbar || !transferRouteIsCurrent(route)) return;
+    const old = document.getElementById(TRANSFER_ID);
+    if (old && old.dataset.bookId !== route.id) old.remove();
+    else if (old) {
+      if (!copiedText) { old.querySelector("textarea")?.focus(); return; }
+      if (old.dataset.busy === "1") return;
+      old.remove();
+    }
+    const panel = document.createElement("section"); panel.id = TRANSFER_ID; panel.dataset.bookId = route.id;
+    const label = document.createElement("label"); label.textContent = "Lorebook entry transfer (JSON)";
+    const input = document.createElement("textarea"); input.rows = 6; input.spellcheck = false;
+    input.setAttribute("aria-label", "Lorebook entry transfer JSON"); input.value = copiedText;
+    input.placeholder = "Paste JSON from Copy for paste / Copy selected for paste…";
+    const note = document.createElement("p"); note.textContent = copiedText ? "Copy this JSON, then paste it into your destination Lorebook. It stays local unless you explicitly import entries." : "Review the pasted entries. Import only adds new names; matching existing entries are skipped. No Lorebook tags, visibility or details are changed.";
+    note.setAttribute("role", "status");
+    const preview = document.createElement("div");
+    const actions = document.createElement("div"); actions.className = "ds-lb-transfer-actions";
+    const makeButton = (text, handler) => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.addEventListener("click", handler); actions.append(b); return b;
+    };
+    let reviewedText = null;
+    let reviewed = [];
+    const invalidate = () => { reviewedText = null; reviewed = []; preview.textContent = ""; submit.disabled = true; };
+    input.addEventListener("input", invalidate);
+    const read = makeButton("Read clipboard", async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!panel.isConnected || !transferRouteIsCurrent(route) || panel.dataset.busy === "1") return;
+        input.value = text; invalidate(); note.textContent = "Clipboard read. Select Review entries before importing.";
+      } catch { note.textContent = "Clipboard access unavailable. Paste into the box manually."; input.focus(); }
+    });
+    const review = makeButton("Review entries", () => {
+      invalidate();
+      try {
+        reviewed = parseTransferText(input.value); reviewedText = input.value;
+        const title = document.createElement("strong"); title.textContent = `${reviewed.length} entr${reviewed.length === 1 ? "y" : "ies"} ready for this Lorebook`;
+        preview.append(title);
+        const list = document.createElement("ul");
+        for (const entry of reviewed.slice(0, 50)) {
+          const li = document.createElement("li"); li.textContent = `${entry.name} · ${entry.keywords.length} keywords · ${entry.content.length} characters`; list.append(li);
+        }
+        preview.append(list);
+        if (reviewed.length > 50) { const more = document.createElement("p"); more.textContent = `${reviewed.length - 50} more (all fields are in the JSON above).`; preview.append(more); }
+        note.textContent = "Review complete. Import adds entries with new names only; existing matches remain untouched.";
+        submit.disabled = false;
+      } catch (error) { note.textContent = `Review failed: ${error?.message || error}`; }
+    });
+    const submit = makeButton("Import reviewed entries (skip existing)", async () => {
+      if (!reviewedText || reviewedText !== input.value || !transferRouteIsCurrent(route)) return;
+      if (bulkBusy || multiWorkspaceSaving || DS.activeLorebookEntryImport || entryModalParts()) { note.textContent = "Finish the open entry or other import first."; return; }
+      if (document.querySelector("[data-testid='EntriesListServer-SearchInput']")?.value?.trim()) { note.textContent = "Clear the native Lorebook entry search before importing, so existing names can be checked."; return; }
+      if (!confirm(`Add ${reviewed.length} reviewed entr${reviewed.length === 1 ? "y" : "ies"} to this Lorebook? Matching names are skipped. Existing entries will not be changed.`)) return;
+      const entries = reviewed;
+      const signal = new AbortController();
+      panel.dataset.busy = "1"; bulkBusy = true;
+      for (const control of [input, read, review, submit, close]) control.disabled = true;
+      stop.hidden = false;
+      let ownImport = false;
+      stop.onclick = () => { signal.abort(); if (ownImport) DS.cancelLorebookEntryImport?.(); stop.disabled = true; note.textContent = "Stopping before the next entry; check any submitted save."; };
+      try {
+        // Reuse the explicit native importer and the existing live readback.
+        // No web crawler, background scan, or new data store is enabled.
+        for (const [module, available] of [["wiki-lorebook-importer", () => typeof DS.importLorebookEntryBatch === "function"], ["lorebook-tags", () => typeof DS.getCurrentOwnLorebookBackupData === "function"]]) {
+          if (!available()) await DS.optionalModuleLoader?.ensure?.(module);
+          if (!available()) throw new Error("Native importer or live verification is unavailable. No entries submitted.");
+          if (!transferRouteIsCurrent(route) || signal.signal.aborted) throw new Error("Transfer cancelled before import.");
+        }
+        if (!panel.isConnected || !transferRouteIsCurrent(route) || signal.signal.aborted || entryModalParts()) throw new Error("The Lorebook or editor changed. No entries submitted.");
+        if (typeof DS.fetchLorebookArchiveData !== "function") throw new Error("Live Lorebook reader unavailable. No entries submitted.");
+        let created = 0;
+        const createdNames = new Set();
+        ownImport = true;
+        const result = await DS.importLorebookEntryBatch(entries, {
+          duplicatePolicy: "skip", preserveTransferText: true, signal: signal.signal,
+          transferAllowed: () => panel.isConnected && transferRouteIsCurrent(route),
+          onProgress(progress) {
+            if (progress.created > created && progress.current) createdNames.add(progress.current);
+            created = Math.max(created, Number(progress.created || 0));
+            if (panel.isConnected) note.textContent = progress.loadingExisting ? `Checking existing names ${progress.current}/${progress.totalExisting}…` : `Submitted ${progress.completed || 0}/${entries.length} · ${created} new · ${progress.skipped || 0} skipped`;
+          }
+        });
+        ownImport = false;
+        if (result.paused || result.cancelled || result.failed || result.completed !== entries.length) throw new Error(result.stopReason || `Only ${result.completed}/${entries.length} entries finished. Review before retrying.`);
+        if (!transferRouteIsCurrent(route)) throw new Error("Destination changed after submission. Verify the saved entries before retrying.");
+        note.textContent = "Checking saved entries against the live Lorebook…";
+        let verifyTimer;
+        let saved;
+        try {
+          saved = await Promise.race([DS.getCurrentOwnLorebookBackupData(route.id), new Promise((_, reject) => {
+            verifyTimer = setTimeout(() => reject(new Error("Live verification timed out. Check saved entries before retrying.")), 20000);
+          })]);
+        } finally { clearTimeout(verifyTimer); }
+        if (!transferRouteIsCurrent(route) || saved?.lorebook?.id?.toLowerCase() !== route.id.toLowerCase() || saved?.completeness?.entries !== true || saved?.completeness?.entryCountVerified !== true) throw new Error("Submitted entries could not be verified. Check the destination before retrying.");
+        const byName = new Map((saved.entries || []).map(entry => [transferNameKey(entry.name), entry]));
+        if (createdNames.size !== result.created || entries.some(entry => !byName.has(transferNameKey(entry.name))) || entries.some(entry => {
+          if (!createdNames.has(entry.name)) return false;
+          const actual = byName.get(transferNameKey(entry.name));
+          const keywords = [...(actual.keywords || [])].sort();
+          return actual.name !== entry.name || actual.content !== entry.content || JSON.stringify(keywords) !== JSON.stringify([...entry.keywords].sort());
+        })) throw new Error("Some saved fields could not be verified exactly. Check the destination before retrying; existing matches will be skipped.");
+        note.textContent = `Verified ${result.created} new entr${result.created === 1 ? "y" : "ies"}; ${result.skipped} matching names skipped. No existing entries overwritten.`;
+        setManagerStatus(note.textContent);
+      } catch (error) { note.textContent = `${error?.message || error} Your pasted JSON remains available for review.`; }
+      finally {
+        bulkBusy = false; panel.dataset.busy = "0";
+        for (const control of [input, read, review, close]) control.disabled = false;
+        submit.disabled = true; reviewedText = null; stop.hidden = true; stop.disabled = false;
+      }
+    });
+    submit.disabled = true;
+    const stop = makeButton("Stop after current entry", () => {}); stop.hidden = true;
+    const close = makeButton("Close", () => panel.remove());
+    label.append(input); panel.append(label, actions, preview, note); toolbar.append(panel);
+    input.focus(); if (copiedText) input.select();
+  }
+
   async function copyRows(rows) {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     if (!rows?.length) return setManagerStatus("Select at least one entry first.");
     const out = [];
     for (let i=0;i<rows.length;i+=1) {
@@ -1211,6 +1436,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function exportRows(rows) {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     if (!rows?.length) return setManagerStatus("Select at least one entry first.");
     try { await DS.requestDownloadPermission?.(); } catch {}
     const payload = [];
@@ -1244,6 +1470,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function bulkKeyword(add) {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     const rows = selectedRows(); if (!rows.length) return setManagerStatus("Select at least one entry first.");
     const keyword = clean(prompt(`${add?'Add':'Remove'} which keyword?`, ""),80); if (!keyword) return;
     bulkBusy=true;
@@ -1278,6 +1505,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function bulkToggleEnabled() {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     const rows=selectedRows(); if(!rows.length)return setManagerStatus("Select at least one entry first.");
     const answer = clean(prompt("Type enable or disable for the selected entries", "enable"), 20).toLowerCase();
     if (!answer) return;
@@ -1300,6 +1528,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function bulkDelete() {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     const rows=selectedRows(); if(!rows.length)return setManagerStatus("Select at least one entry first.");
     if(!confirm(`Delete ${rows.length} selected Lorebook entr${rows.length===1?'y':'ies'}? This uses SpicyChat's normal Delete action and cannot be undone by QoL.`))return;
     bulkBusy=true; let deleted=0;
@@ -1319,6 +1548,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findKeyword() {
+    if (bulkBusy || DS.activeLorebookEntryImport || entryModalParts()) return setManagerStatus("Finish the current entry operation first.");
     const keyword=clean(prompt("Find Lorebook entries triggered by keyword", ""),80); if(!keyword)return;
     const input=document.querySelector("[data-testid='EntriesListServer-SearchInput']");
     if(input){nativeSetValue(input,keyword);input.focus();setManagerStatus(`Searching for “${keyword}”.`);} else setManagerStatus("Could not find SpicyChat's entry search box.");
@@ -1394,6 +1624,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.handleLorebookWorkflowRouteChange = function handleLorebookWorkflowRouteChange(){
     ensureAnalysisForCurrentLorebook();
     const route = lorebookRoute();
+    const transfer = document.getElementById(TRANSFER_ID);
+    if (transfer && (route?.id !== transfer.dataset.bookId || route.page !== "entries")) transfer.remove();
     if (!route) {
       resetAutoEntriesVisit();
       return;

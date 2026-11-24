@@ -1245,13 +1245,32 @@ function refreshSavedManagersFromStorageChange(kinds = []) {
   if (activeOptionsTab() !== "saved") return;
 
   const changed = new Set(kinds);
-  if (changed.has("hub")) renderSavedBotsHub();
-  if (changed.has("opened")) renderBotManager("opened");
-  if (changed.has("favorite")) renderBotManager("favorite");
-  if (changed.has("later")) renderBotManager("later");
-  if (changed.has("favoriteCreators")) renderFavoriteCreators();
-  if (changed.has("followedCreators")) { renderFollowedCreators(); renderCreatorBotWatchStatus(); }
-  if (changed.has("creatorWatch")) renderCreatorBotWatchStatus();
+  const refresh = (hostId, render) => {
+    const host = $(hostId), card = host?.closest("section.card");
+    if (card?.classList.contains("ds-settings-card-collapsed")) {
+      if (host.dataset.dsManagerDeferred !== "1") {
+        host.dataset.dsManagerDeferred = "1";
+        card.addEventListener("ds-settings-card-opened", () => {
+          delete host.dataset.dsManagerDeferred;
+          if (activeOptionsTab() !== "saved") { invalidateHeavyTab("saved"); return; }
+          const start = performance.now();
+          render();
+          optionsPhaseSample(`manager:${hostId}:render`, performance.now() - start);
+        }, { once: true });
+      }
+      return;
+    }
+    const start = performance.now();
+    render();
+    optionsPhaseSample(`manager:${hostId}:render`, performance.now() - start);
+  };
+  if (changed.has("hub")) refresh("savedBotsHubManager", renderSavedBotsHub);
+  if (changed.has("opened")) refresh("openedBotManager", () => renderBotManager("opened"));
+  if (changed.has("favorite")) refresh("favoriteBotManager", () => renderBotManager("favorite"));
+  if (changed.has("later")) refresh("laterBotManager", () => renderBotManager("later"));
+  if (changed.has("favoriteCreators")) refresh("favoriteCreatorManager", renderFavoriteCreators);
+  if (changed.has("followedCreators")) refresh("followedCreatorManager", renderFollowedCreators);
+  if (changed.has("followedCreators") || changed.has("creatorWatch")) refresh("creatorBotRecentList", renderCreatorBotWatchStatus);
   if (changed.has("availability")) renderBotAvailability();
 
   // The tab is already fully mounted; mark it current again after the targeted

@@ -16,6 +16,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function laterEnabled() {
     const settings = DS.state?.settings || {};
     return !!(settings.enabled && settings.showLaterBotButtons &&
+      !/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?my-creations(?:\/|$)/i.test(location.pathname) &&
       !DS.isSingleChatPage?.() && !DS.isChatListPage?.() && !DS.isBotProfilePage?.() &&
       !DS.isLaterFavoritesTabActive?.());
   }
@@ -354,7 +355,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      toggleLater(card, anchor, button);
+      if (laterEnabled()) toggleLater(card, anchor, button);
     }, true);
 
     return button;

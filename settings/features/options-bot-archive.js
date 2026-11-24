@@ -938,7 +938,7 @@ function collectTrackedAvailabilityBots(scope = "all") {
     uniqueClean(currentOpened).forEach(id => add(id, openedChatMetaState?.[id], "opened"));
   }
   if (selected("archive")) {
-    const store = normalizeBotArchive(botArchiveState);
+    const store = botArchiveState;
     Object.entries(store.meta || {}).forEach(([id, meta]) => add(id, {
       id,
       name: meta.name || meta.fields?.name || "",
@@ -1729,8 +1729,8 @@ function computeBotDuplicateMatches(entries) {
 
 function botStatusCenterBaseEntries(scope = "all") {
   const tracked = collectTrackedAvailabilityBots(scope);
-  const saved = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
+  const saved = botAvailabilityState.meta || {};
+  const archives = botArchiveState.meta || {};
   const byId = new Map();
   for (const item of tracked) {
     byId.set(item.id, {
@@ -1833,13 +1833,17 @@ function botUpdateDetails(entry) {
   const details = makeElement("details", { className: "bot-update-details" });
   const when = entry.updateDetectedAt ? ` · ${new Date(entry.updateDetectedAt).toLocaleString()}` : "";
   details.appendChild(makeElement("summary", { text: `Last detected change${entry.changedFields.length === 1 ? "" : "s"} (${entry.changedFields.length})${when}` }));
-  for (const change of entry.changedFields) {
-    const block = makeElement("div", { className: "bot-update-change" });
-    block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
-    block.appendChild(makeElement("div", { className: "bot-update-before", text: `Before: ${shortenedDiffValue(change.before)}` }));
-    block.appendChild(makeElement("div", { className: "bot-update-after", text: `Now: ${shortenedDiffValue(change.after)}` }));
-    details.appendChild(block);
-  }
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.detailsLoaded === "1") return;
+    for (const change of entry.changedFields) {
+      const block = makeElement("div", { className: "bot-update-change" });
+      block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
+      block.appendChild(makeElement("div", { className: "bot-update-before", text: `Before: ${shortenedDiffValue(change.before)}` }));
+      block.appendChild(makeElement("div", { className: "bot-update-after", text: `Now: ${shortenedDiffValue(change.after)}` }));
+      details.appendChild(block);
+    }
+    details.dataset.detailsLoaded = "1";
+  });
   return details;
 }
 
@@ -1848,20 +1852,24 @@ function botDuplicateDetails(entry) {
   if (!matches.length) return null;
   const details = makeElement("details", { className: "bot-duplicate-details" });
   details.appendChild(makeElement("summary", { text: `${matches.length} possible duplicate/reupload match${matches.length === 1 ? "" : "es"}` }));
-  for (const match of matches.slice(0, 20)) {
-    const row = makeElement("div", { className: "bot-duplicate-match" });
-    row.appendChild(makeElement("span", {
-      className: "bot-duplicate-badge",
-      text: match.level === "exact" ? "Exact" : match.level === "likely" ? "Likely" : "Possible",
-      dataset: { level: match.level }
-    }));
-    row.appendChild(makeElement("a", {
-      text: match.name || match.id,
-      attrs: { href: `https://spicychat.ai/chatbot/${match.id}`, target: "_blank", rel: "noopener noreferrer" }
-    }));
-    if (match.reasons?.length) row.appendChild(makeElement("span", { className: "bot-duplicate-reason", text: match.reasons.join(" + ") }));
-    details.appendChild(row);
-  }
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.detailsLoaded === "1") return;
+    for (const match of matches.slice(0, 20)) {
+      const row = makeElement("div", { className: "bot-duplicate-match" });
+      row.appendChild(makeElement("span", {
+        className: "bot-duplicate-badge",
+        text: match.level === "exact" ? "Exact" : match.level === "likely" ? "Likely" : "Possible",
+        dataset: { level: match.level }
+      }));
+      row.appendChild(makeElement("a", {
+        text: match.name || match.id,
+        attrs: { href: `https://spicychat.ai/chatbot/${match.id}`, target: "_blank", rel: "noopener noreferrer" }
+      }));
+      if (match.reasons?.length) row.appendChild(makeElement("span", { className: "bot-duplicate-reason", text: match.reasons.join(" + ") }));
+      details.appendChild(row);
+    }
+    details.dataset.detailsLoaded = "1";
+  });
   return details;
 }
 
@@ -1912,7 +1920,7 @@ function botArchiveDetails(entry) {
 
 function botArchiveHistoryDetails(archiveValue) {
   const archive = archiveValue && typeof archiveValue === "object" ? archiveValue : null;
-  const revisions = Array.isArray(archive?.revisions) ? archive.revisions.map(normalizeBotArchiveRevision).filter(Boolean) : [];
+  const revisions = Array.isArray(archive?.revisions) ? archive.revisions : [];
   if (!archive || !revisions.length) return null;
 
   const details = makeElement("details", { className: "bot-update-details bot-archive-history-details" });
@@ -1920,7 +1928,7 @@ function botArchiveHistoryDetails(archiveValue) {
   details.addEventListener("toggle", () => {
     if (!details.open || details.dataset.historyLoaded === "1") return;
     const snapshots = [
-      ...revisions.map(item => ({
+      ...revisions.map(normalizeBotArchiveRevision).filter(Boolean).map(item => ({
         capturedAt: Number(item.capturedAt || 0),
         source: item.source || item.label || "Saved profile",
         fields: item.fields || {}

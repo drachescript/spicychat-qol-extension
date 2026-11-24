@@ -222,15 +222,15 @@ function updateBlockedLessLikeResumeControls(...args) { return dsqHeavyToolStub(
 dsqHeavySettingsStubs["updateBlockedLessLikeResumeControls"] = updateBlockedLessLikeResumeControls;
 // One-time work is performed only when the corresponding tab becomes visible.
 let dsqBotStatusRateLoaded = false;
-function dsqRefreshHeavyToolsForTab(tabName) {
-  if (tabName === "saved" && document.getElementById("scanBotAvailability")) {
-    ensureBotStatusScanTools().then(() => {
+function dsqRefreshHeavyToolsForTab(tabName, { activateStatus = false } = {}) {
+  if (tabName === "saved" && activateStatus && document.getElementById("scanBotAvailability")) {
+    return ensureBotStatusScanTools().then(async () => {
       if (typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
-        refreshBotStatusPauseButton().then(() => renderBotAvailability({ skipRecoveryRerender: true })).catch(() => {});
-        refreshBotStatusLastRunFeedback().catch(() => {});
+        await refreshBotStatusPauseButton();
+        await refreshBotStatusLastRunFeedback();
         if (!dsqBotStatusRateLoaded) {
           dsqBotStatusRateLoaded = true;
-          storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
+          await storageGet([BOT_STATUS_LAST_RATE_KEY]).then(result => {
             const rate = Number(result?.[BOT_STATUS_LAST_RATE_KEY] || 0);
             if (rate >= 100 && rate <= 120000) botStatusPreviousScanRateMs = rate;
             if (typeof updateBotStatusScanEstimate === "function") updateBotStatusScanEstimate();

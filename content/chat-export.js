@@ -1042,7 +1042,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       appearanceTemplate: captureAppearanceTemplate(),
       messages,
       olderMessagesAvailable: !!findLoadPreviousMessagesButton(),
-      captureStatus: captureStatus || null
+      captureStatus: captureStatus || null,
+      includesOocDirectives: settings.chatExportIncludeOocDirectives === true
     };
   }
 
@@ -1124,6 +1125,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return JSON.stringify({
       format: "SpicyChat QoL chat export",
       version: 2,
+      censored: opts.censored === true ? true : undefined,
       exportedAt: data.exportedAt,
       chatUrl: data.chatUrl,
       bot: opts.includeBotInfo ? data.botInfo : undefined,
@@ -1133,6 +1135,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         source: data.captureStatus.source || undefined,
         requestedSource: data.captureStatus.requestedSource || undefined,
         complete: data.captureStatus.complete === true,
+        includesOocDirectives: data.includesOocDirectives === true,
         expectedCount: data.captureStatus.expectedCount || undefined,
         messageCount: data.messages.length,
         pages: data.captureStatus.pages || undefined,
@@ -1151,6 +1154,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         id: message.id || undefined,
         createdAt: message.createdAt || message.metadata?.createdAt || undefined,
         speaker: message.speaker,
+        role: message.role || undefined,
         text: message.text,
         avatar: opts.includeAvatars ? message.avatar || undefined : undefined,
         images: opts.includeImageLinks && message.images?.length ? message.images : undefined,
@@ -2478,10 +2482,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // before this window is shown. A retry only appears when that automatic
     // fetch did not complete; Native lives behind Advanced / Compatibility.
     const apiHistoryButton = makeExportButton("ds-chat-export-api-history", "Retry full chat fetch");
+    const archivePresetButton = makeExportButton("ds-chat-export-archive-preset", "Archive / Recovery Lab");
+    archivePresetButton.title = "Prepare a private JSON recovery backup. Adds evidence options without unchecking existing choices or changing saved defaults.";
     const copyButton = makeExportButton("ds-chat-export-copy", "Copy");
     const downloadButton = makeExportButton("ds-chat-export-download", "Download");
     const printButton = makeExportButton("ds-chat-export-print", "Print / Save PDF");
-    actions.append(apiHistoryButton, copyButton, downloadButton, printButton);
+    actions.append(archivePresetButton, apiHistoryButton, copyButton, downloadButton, printButton);
 
     const compatibility = document.createElement("details");
     compatibility.className = "ds-export-compatibility";
@@ -2561,6 +2567,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const messageLabel = `${workingData.messages.length} active message${workingData.messages.length === 1 ? "" : "s"}`;
       if (status?.source === "api" && status?.complete) {
         count.textContent = `Chat ready · ${messageLabel}.`;
+      } else if (status?.source === "api") {
+        count.textContent = `${messageLabel} available · incomplete API capture. Retry full chat fetch before relying on the backup.`;
       } else if (status?.source === "api-error") {
         count.textContent = `${messageLabel} available · full chat fetch failed. Retry full chat fetch, or use Advanced / Compatibility if needed.`;
       } else if (status?.source === "dom") {
@@ -2615,7 +2623,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const messages = collectMessages(nextSettings);
       const metadata = await loadGenerationMetadata();
       for (const message of messages) message.metadata = metadata[message.id] || null;
-      workingData = { ...workingData, messages };
+      workingData = { ...workingData, messages, includesOocDirectives: ooc.checked,
+        captureStatus: { ...workingData.captureStatus, complete: false, source: "dom", reason: "mounted-ooc-change" } };
       refresh();
     });
 
@@ -2630,7 +2639,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
     backdrop.addEventListener("click", close);
     closeButton.addEventListener("click", close);
-    const runHistoryMethod = async (method, button, { automatic = false } = {}) => {
+    const runHistoryMethod = async (method, button, { automatic = false, preserveRecoveryCapture = false } = {}) => {
       if (activeLoadLock?.active) {
         activeLoadLock.cancelled = true;
         activeCapture.cancelled = true;
@@ -2641,7 +2650,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       activeLoadLock = beginExportLock();
-      if (!activeLoadLock) return;
+      if (!activeLoadLock) return false;
       activeCapture.cancelled = false;
       apiHistoryButton.disabled = true;
       refreshApiButton.disabled = true;
@@ -2702,12 +2711,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         else apiCapture = activeCapture;
         count.textContent = `Building export from ${result.messages.length} messages…`;
         await DS.sleep?.(0);
-        workingData = await buildExportData(nextSettings, result.messages, result);
+        // A recovery preset must not discard an existing usable capture or
+        // combine messages from the old chat with metadata from a new route.
+        if (preserveRecoveryCapture && (!modal.isConnected || location.href !== data.chatUrl ||
+            result.cancelled || result.messages.length < workingData.messages.length ||
+            (!result.complete && workingData.captureStatus?.complete))) {
+          return false;
+        }
+        const nextData = await buildExportData(nextSettings, result.messages, result);
+        if (preserveRecoveryCapture && (!modal.isConnected || location.href !== data.chatUrl)) return false;
+        workingData = nextData;
         refresh();
+        return true;
       } catch (error) {
         count.textContent = method === "api"
           ? `Full chat fetch failed: ${String(error?.message || error)}. Retry the API fetch, or use Advanced / Compatibility if needed.`
           : `Page compatibility load failed: ${String(error?.message || error)}.`;
+        return false;
       } finally {
         endExportLock(activeLoadLock);
         activeLoadLock = null;
@@ -2722,6 +2742,63 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     };
 
+    archivePresetButton.addEventListener("click", async () => {
+      if (activeLoadLock?.active) return;
+      if (location.href !== data.chatUrl) {
+        countNote.textContent = "The chat changed. Close Export and reopen it on the desired conversation.";
+        return;
+      }
+      // Per-export choices only: no storage writes, no upload, no native
+      // history expansion. Retain the original transcript and role metadata.
+      format.value = "json";
+      botInfo.checked = true;
+      rulebook.checked = true;
+      rulebookState.checked = true;
+      generation.checked = true;
+      numbers.checked = true;
+      // Add evidence; do not override explicit avatar, media or censor choices.
+      const oocWasEnabled = ooc.checked;
+      const privacyNote = "Recovery preset: private local JSON; adds available bot info and visible Rulebook evidence, not hidden definitions. Existing export options kept." +
+        (censored.checked ? " Censored export remains enabled; turn it off yourself if original text is needed." : " Keep the conversation file private.");
+      countNote.textContent = privacyNote;
+      // OOC/directives are filtered during capture, not serialization. Only
+      // re-fetch when the current capture omitted them; do not merely tick a box.
+      if (workingData.includesOocDirectives !== true) {
+        ooc.checked = true;
+        const lockedControls = [archivePresetButton, copyButton, downloadButton, printButton,
+          format, layout, botInfo, rulebook, rulebookState, ooc, generation, numbers, avatars, imageLinks, censored];
+        const previousDisabled = lockedControls.map(control => control.disabled);
+        lockedControls.forEach(control => { control.disabled = true; });
+        let captured = false;
+        try {
+          captured = await runHistoryMethod("api", null, { automatic: true, preserveRecoveryCapture: true });
+        } finally {
+          lockedControls.forEach((control, index) => { control.disabled = previousDisabled[index]; });
+        }
+        if (!modal.isConnected) return;
+        if (location.href !== data.chatUrl) {
+          countNote.textContent = "The chat changed during capture. Close Export and reopen it on the desired conversation.";
+          archivePresetButton.disabled = true;
+          copyButton.disabled = true;
+          downloadButton.disabled = true;
+          printButton.disabled = true;
+          return;
+        }
+        if (!captured) {
+          ooc.checked = oocWasEnabled || workingData.includesOocDirectives === true;
+          countNote.textContent = `${privacyNote} OOC refresh did not complete; existing capture retained. Retry the preset if needed.`;
+          refresh();
+          return;
+        }
+        // runHistoryMethod already rendered this capture. Refreshing again
+        // would unnecessarily serialize a second copy of the same transcript.
+        printButton.disabled = true;
+        layout.disabled = true;
+      } else {
+        ooc.checked = true;
+        refresh();
+      }
+    });
     apiHistoryButton.addEventListener("click", () => runHistoryMethod("api", apiHistoryButton));
     refreshApiButton.addEventListener("click", () => runHistoryMethod("api", refreshApiButton));
     nativeHistoryButton.addEventListener("click", () => runHistoryMethod("native", nativeHistoryButton));

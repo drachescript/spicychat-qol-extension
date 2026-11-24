@@ -2,25 +2,27 @@
 function renderSavedBotInfo(renderOptions = {}) {
   const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
   const host = $("savedBotInfoManager");
-  if (!host) return;
-  const query = String($("savedBotInfoSearch")?.value || savedBotInfoUiState.query || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!host || !savedRecoveryManagerCanRender("copies")) return;
+  const started = performance.now();
+  const query = String($("savedBotInfoSearch")?.value ?? savedBotInfoUiState.query ?? "").toLowerCase().replace(/\s+/g, " ").trim();
   savedBotInfoUiState.query = query;
-  const archives = normalizeBotArchive(botArchiveState).meta;
-  const availability = normalizeBotAvailability(botAvailabilityState).meta;
-  const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
-    ? renderOptions.sameNameCollisions
-    : botSameNameCollisionIndex();
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids);
-  const visibleArchives = Object.values(archives).filter(archive => !blockedIds.has(archive.id));
-  const items = visibleArchives
-    .filter(archive => {
-      if (!query) return true;
-      const fields = archive.fields || {};
-      return `${archive.id} ${archive.name || ""} ${archive.creator || ""} ${fields.title || ""} ${fields.description || ""}`.toLowerCase().includes(query);
-    })
-    .sort((a, b) => Number(b.lastSavedAt || 0) - Number(a.lastSavedAt || 0));
+  const view = recoveryPresentationView();
+  const { archives, availability } = view;
+  if (!view.sortedCopies) {
+    const indexStarted = performance.now();
+    view.sortedCopies = Object.values(archives).filter(archive => !view.blockedIds.has(String(archive.id || "").toLowerCase()))
+      .sort((a,b) => Number(b.lastSavedAt || 0) - Number(a.lastSavedAt || 0));
+    optionsPhaseSample("copies:sort-index", performance.now() - indexStarted);
+  }
+  const visibleArchives = view.sortedCopies;
+  const items = query ? visibleArchives.filter(archive => {
+    const fields = archive.fields || {};
+    return `${archive.id} ${archive.name || ""} ${archive.creator || ""} ${fields.title || ""} ${fields.description || ""}`.toLowerCase().includes(query);
+  }) : visibleArchives;
   const total = visibleArchives.length;
-  const blockedHidden = Math.max(0, Object.keys(archives).length - total);
+  const blockedHidden = Math.max(0, view.snapshots[0].size - total);
+  const sameNameCollisions = items.length ? botSameNameCollisionIndex(view) : new Map();
+  optionsPhaseSample("copies:filter-sort-index", performance.now() - started);
   const limit = Math.max(10, Number(savedBotInfoUiState.visible || 10) || 10);
   const shown = items.slice(0, limit);
   if ($("savedBotInfoSummary")) {
@@ -43,6 +45,7 @@ function renderSavedBotInfo(renderOptions = {}) {
     if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "saved-copies", total, shown: 0, matching: 0, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
     return;
   }
+  const domStarted = performance.now();
   const nodes = shown.map(archive => {
     const status = availability[archive.id] || null;
     const entry = {
@@ -68,26 +71,29 @@ function renderSavedBotInfo(renderOptions = {}) {
     card.querySelector(".bot-update-accept")?.remove();
     return card;
   });
+  optionsPhaseSample("copies:construct-cards", performance.now() - domStarted);
+  const commitStarted = performance.now();
   host.replaceChildren(...nodes);
+  optionsPhaseSample("copies:dom-commit", performance.now() - commitStarted);
   host.querySelectorAll(".bot-archive-copy").forEach(button => button.addEventListener("click", async () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (!archive) return;
     try { await navigator.clipboard.writeText(botArchiveReadableText(archive)); showSettingsToast("Saved bot copy copied to clipboard."); } catch {}
   }));
   host.querySelectorAll(".bot-archive-portable").forEach(button => button.addEventListener("click", () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (archive) downloadPortableBotProfile(archive);
   }));
   host.querySelectorAll(".bot-archive-download").forEach(button => button.addEventListener("click", () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (archive) downloadBotArchiveEntry(archive);
   }));
   host.querySelectorAll(".bot-archive-delete").forEach(button => button.addEventListener("click", async () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (!archive || !confirm(`Delete the saved local recovery copy of ${archive.name || id}?`)) return;
     delete botArchiveState.meta[id];
     botArchiveState = normalizeBotArchive(botArchiveState);
@@ -95,6 +101,7 @@ function renderSavedBotInfo(renderOptions = {}) {
     renderSavedBotInfo();
     renderBotAvailability();
   }));
+  optionsPhaseSample("copies:render", performance.now() - started);
   if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "saved-copies", total, shown: shown.length, matching: items.length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 }, { critical: (performance.now() - diagStarted) >= 200 });
 }
 
@@ -107,22 +114,23 @@ function isConfirmedUnavailableBotStatus(entry) {
   return !!entry && String(entry.status || "") === "unavailable";
 }
 
-function deletedSavedBotEntries() {
-  const availability = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
-  const query = String($("deletedSavedBotSearch")?.value || deletedSavedBotsUiState.query || "")
+function deletedSavedBotEntries(view = recoveryPresentationView()) {
+  const { archives, availability, blockedIds } = view;
+  if (!view.sortedDeleted) {
+    const started = performance.now();
+    view.sortedDeleted = Object.values(availability)
+      .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase()))
+      .map(entry => ({ ...entry, archive: archives[entry.id] }))
+      .sort((a,b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0) || String(a.archive?.name || a.name || a.id).localeCompare(String(b.archive?.name || b.name || b.id)));
+    optionsPhaseSample("deleted:sort-index", performance.now() - started);
+  }
+  const query = String($("deletedSavedBotSearch")?.value ?? deletedSavedBotsUiState.query ?? "")
     .toLowerCase().replace(/\s+/g, " ").trim();
   deletedSavedBotsUiState.query = query;
-  return Object.values(availability)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase()))
-    .map(entry => ({ ...entry, archive: archives[entry.id] }))
-    .filter(entry => {
-      if (!query) return true;
-      const fields = entry.archive?.fields || {};
-      return `${entry.id} ${entry.name || ""} ${entry.creator || ""} ${fields.name || ""} ${fields.title || ""} ${fields.description || ""} ${fields.tags || ""}`.toLowerCase().includes(query);
-    })
-    .sort((a, b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0) || String(a.archive?.name || a.name || a.id).localeCompare(String(b.archive?.name || b.name || b.id)));
+  return query ? view.sortedDeleted.filter(entry => {
+    const fields = entry.archive?.fields || {};
+    return `${entry.id} ${entry.name || ""} ${entry.creator || ""} ${fields.name || ""} ${fields.title || ""} ${fields.description || ""} ${fields.tags || ""}`.toLowerCase().includes(query);
+  }) : view.sortedDeleted;
 }
 
 function deletedSavedBotCard(entry) {
@@ -191,16 +199,13 @@ function deletedSavedBotCard(entry) {
 function renderDeletedSavedBots(renderOptions = {}) {
   const diagStarted = optionsDiagnosticState.active && typeof performance !== "undefined" ? performance.now() : 0;
   const host = $("deletedSavedBotManager");
-  if (!host) return;
-  const sameNameCollisions = renderOptions?.sameNameCollisions instanceof Map
-    ? renderOptions.sameNameCollisions
-    : botSameNameCollisionIndex();
-  const all = deletedSavedBotEntries()
-    .map(entry => ({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
-  const archives = normalizeBotArchive(botArchiveState).meta;
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
-  const totalRecoverable = Object.values(normalizeBotAvailability(botAvailabilityState).meta)
-    .filter(entry => isConfirmedUnavailableBotStatus(entry) && archives[entry.id] && !blockedIds.has(String(entry.id || "").toLowerCase())).length;
+  if (!host || !savedRecoveryManagerCanRender("deleted")) return;
+  const started = performance.now();
+  const view = recoveryPresentationView();
+  const all = deletedSavedBotEntries(view);
+  const totalRecoverable = view.sortedDeleted.length;
+  const sameNameCollisions = all.length ? botSameNameCollisionIndex(view) : new Map();
+  optionsPhaseSample("deleted:filter-sort-index", performance.now() - started);
   const limit = Math.max(10, Number(deletedSavedBotsUiState.visible || 10) || 10);
   const shown = all.slice(0, limit);
   if ($("deletedSavedBotSummary")) {
@@ -227,7 +232,12 @@ function renderDeletedSavedBots(renderOptions = {}) {
     if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "deleted-recovery", total: totalRecoverable, shown: 0, matching: 0, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
     return;
   }
-  host.replaceChildren(...shown.map(deletedSavedBotCard));
+  const domStarted = performance.now();
+  const cards = shown.map(entry => deletedSavedBotCard({ ...entry, sameNameMatches: sameNameCollisions.get(entry.id) || [] }));
+  optionsPhaseSample("deleted:construct-cards", performance.now() - domStarted);
+  const commitStarted = performance.now();
+  host.replaceChildren(...cards);
+  optionsPhaseSample("deleted:dom-commit", performance.now() - commitStarted);
 
   host.querySelectorAll(".deleted-bot-recheck").forEach(button => button.addEventListener("click", async () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
@@ -263,24 +273,26 @@ function renderDeletedSavedBots(renderOptions = {}) {
   }));
   host.querySelectorAll(".bot-archive-copy").forEach(button => button.addEventListener("click", async () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (!archive) return;
     try { await navigator.clipboard.writeText(botArchiveReadableText(archive)); showSettingsToast("Saved bot copy copied to clipboard."); } catch {}
   }));
   host.querySelectorAll(".bot-archive-portable").forEach(button => button.addEventListener("click", () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (archive) downloadPortableBotProfile(archive);
   }));
   host.querySelectorAll(".bot-archive-download").forEach(button => button.addEventListener("click", () => {
     const id = button.closest(".bot-manager-card")?.dataset.id || "";
-    const archive = normalizeBotArchive(botArchiveState).meta[id];
+    const archive = botArchiveState.meta[id];
     if (archive) downloadBotArchiveEntry(archive);
   }));
+  optionsPhaseSample("deleted:render", performance.now() - started);
   if (diagStarted) optionsDiag("options-saved-bots", "render", { manager: "deleted-recovery", total: totalRecoverable, shown: shown.length, matching: all.length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 }, { critical: (performance.now() - diagStarted) >= 200 });
 }
 
 async function clearBotAvailabilityResults() {
+  try { await ensureSavedRecoveryDataLoaded(); } catch { showSettingsToast("Could not load status records. Nothing was cleared."); return; }
   const count = Object.keys(normalizeBotAvailability(botAvailabilityState).meta).length;
   if (!count) {
     showSettingsToast("There is no bot status history to clear.");
@@ -296,7 +308,8 @@ async function clearBotAvailabilityResults() {
 }
 
 async function clearBotArchive() {
-  const count = Object.keys(normalizeBotArchive(botArchiveState).meta).length;
+  try { await ensureSavedRecoveryDataLoaded(); } catch { showSettingsToast("Could not load recovery records. Nothing was cleared."); return; }
+  const count = Object.keys(botArchiveState.meta).length;
   if (!count) {
     showSettingsToast("There are no saved bot copies to clear.");
     return;
@@ -396,7 +409,7 @@ function setupBotAvailabilityControls() {
   });
   $("savedBotInfoCollapse")?.addEventListener("click", () => {
     if (Number(savedBotInfoUiState.visible || 10) <= 10) {
-      const archiveCount = Object.keys(normalizeBotArchive(botArchiveState).meta).length;
+      const archiveCount = Object.keys(botArchiveState.meta).length;
       savedBotInfoUiState.visible = Math.min(100, archiveCount);
       savedBotInfoUiState.collapsed = false;
     } else {
@@ -454,12 +467,12 @@ function setupBotAvailabilityControls() {
     $(id)?.addEventListener("input", updateBotStatusScanEstimate);
   }
   // The saved scan rate/estimate is loaded when Saved Bots becomes active.
-  $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability(); });
+  $("botStatusStaleDays")?.addEventListener("change", () => { save().catch(() => {}); renderBotAvailability({ skipRecoveryRerender: true }); });
   $("botAvailabilityScope")?.addEventListener("change", () => {
     invalidateDuplicateCache();
     botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
   $("botAvailabilityStatusFilter")?.addEventListener("change", async event => {
     botAvailabilityUiState.status = event.target.value || "all";
@@ -468,33 +481,31 @@ function setupBotAvailabilityControls() {
     if (BOT_DUPLICATE_LEVELS.has(botAvailabilityUiState.status) && !botDuplicateCacheReady) {
       const scope = String($("botAvailabilityScope")?.value || "all");
       await nextUiFrame();
-      const availabilitySnapshot = normalizeBotAvailability(botAvailabilityState);
       const base = botStatusCenterBaseEntries(scope);
       botDuplicateMatchesCache = computeBotDuplicateMatches(base);
       botDuplicateCacheScope = scope;
       botDuplicateCacheReady = true;
-      botAvailabilityState = availabilitySnapshot;
       renderBotAvailability({ baseEntries: base, skipRecoveryRerender: true });
       return;
     }
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
   const renderAvailabilitySearch = debounceCallback(event => {
     botAvailabilityUiState.query = event?.target?.value || $("botAvailabilitySearch")?.value || "";
     botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
   $("botAvailabilitySearch")?.addEventListener("input", renderAvailabilitySearch);
   $("botAvailabilityShowMore")?.addEventListener("click", () => {
     botAvailabilityUiState.collapsed = true;
     botAvailabilityUiState.visible = Math.min(5000, Number(botAvailabilityUiState.visible || 10) + 10);
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
   $("botAvailabilityShowLess")?.addEventListener("click", () => {
     botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
   $("botAvailabilityCollapse")?.addEventListener("click", () => {
     const current = Number(botAvailabilityUiState.visible || 10);
@@ -505,6 +516,6 @@ function setupBotAvailabilityControls() {
       botAvailabilityUiState.collapsed = true;
       botAvailabilityUiState.visible = 10;
     }
-    renderBotAvailability();
+    renderBotAvailability({ skipRecoveryRerender: true });
   });
 }

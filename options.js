@@ -159,6 +159,7 @@ $("copyPerformanceReport")?.addEventListener("click", () => runOptionsDiagnostic
 $("refreshPerformanceTroubleshooter")?.addEventListener("click", () => runOptionsDiagnosticsAction("refreshPerformanceTroubleshooter"));
 $("downloadPerformanceReport")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadPerformanceReport"));
 $("runPerformanceSelfCheck")?.addEventListener("click", () => runOptionsDiagnosticsAction("runPerformanceSelfCheck"));
+$("recheckRefreshedSpicyChatTab")?.addEventListener("click", () => runOptionsDiagnosticsAction("recheckRefreshedSpicyChatTab"));
 $("downloadPerformanceSelfCheck")?.addEventListener("click", () => runOptionsDiagnosticsAction("downloadPerformanceSelfCheck"));
 $("resetPerformanceCounters")?.addEventListener("click", () => runOptionsDiagnosticsAction("resetPerformanceCounters"));
 $("releaseOptionsTemporaryMemory")?.addEventListener("click", releaseTemporaryOptionsMemory);
@@ -330,12 +331,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   // Reuse the existing storage listener to disable Archive send controls when
   // another Settings tab starts/resumes a scan. This is a cheap queue-only UI
   // update while scanning; full snapshot hashing stays deferred.
-  if (optionsDataLoaded && activeOptionsTab() === "saved" &&
+  if (optionsDataLoaded &&
       (changes[BOT_STATUS_PAUSED_QUEUE_KEY] || changes["botStatusPausedStaleQueueV1"])) {
+    savedRecoveryDirty.add("archive-transfer");
+    if (!botAvailabilityScanRunning && savedRecoveryActivated.has("status")) savedRecoveryDirty.add("status");
     clearTimeout(archiveQueueSafetyRefreshTimer);
     archiveQueueSafetyRefreshTimer = setTimeout(() => {
       archiveQueueSafetyRefreshTimer = 0;
-      refreshArchiveTransferUi().catch(() => {});
+      if (savedRecoveryActivated.has("archive-transfer") && savedRecoveryHostVisible("archive-transfer")) loadAndRenderSavedRecoveryManagers("queue-changed", "archive-transfer").catch(() => {});
+      else {
+        savedRecoveryDirty.add("archive-transfer");
+        for (const id of ["sendBotStatusArchiveChanged", "sendBotStatusArchiveAll", "submitBotStatusArchiveChanged", "submitBotStatusArchiveAll"]) if ($(id)) $(id).disabled = true;
+      }
     }, 120);
   }
 
@@ -513,6 +520,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     savedRefreshKinds.add("hub");
   }
 
+  if (savedRecoveryDataLoadPromise && !savedRecoveryDataLoaded && (changes[BOT_AVAILABILITY_KEY] || changes[BOT_ARCHIVE_KEY] || changes[BOT_UNAVAILABLE_RECOVERY_KEY])) savedRecoveryReadRevision++;
+
   // IndexedDB recovery stores are lazily loaded. Do not normalize a very
   // large changed payload until the corresponding recovery UI is in use.
   if (changes[BOT_AVAILABILITY_KEY] && savedRecoveryDataLoaded) {
@@ -541,6 +550,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[BOT_ARCHIVE_KEY] && savedRecoveryDataLoaded) {
     botArchiveState = normalizeBotArchive(changes[BOT_ARCHIVE_KEY].newValue);
     // Archive metadata feeds name/image recovery helpers used by saved managers.
+    savedRefreshKinds.add("availability");
     savedRefreshKinds.add("opened");
     savedRefreshKinds.add("favorite");
     savedRefreshKinds.add("later");
