@@ -735,6 +735,7 @@ const DEFAULT_SETTINGS = {
   failedMessageHelper: false,
   autoRetryFailedMessageSends: false,
   chatPerformanceMode: false,
+  showChatWindowControls: true,
   runtimePerformanceMode: "adaptive",
   maximumPerformancePresetInitialized: false,
   maximumPerformanceOptOuts: [],

@@ -452,6 +452,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function ensureChatWindowControl({ hiddenCount, total, config }) {
+    // A hidden toolbar is a presentation choice, not an opt-out from folding.
+    // Keep the bounded message window; the user can re-enable these controls
+    // in Settings whenever they need to reveal older messages.
+    if (settings().showChatWindowControls === false) {
+      removeChatWindowControl();
+      return;
+    }
     if (!chatWindowControl?.isConnected) {
       const control = document.createElement("div");
       control.id = "ds-long-chat-window-control";
@@ -500,6 +507,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function applyChatWindowing(roots) {
+    // The toolbar is optional. Message folding remains enabled with Performance
+    // Mode, and restoring the toolbar lets the user reveal folded history.
     const config = chatWindowConfig();
     const routeKey = chatRouteKey();
     if (chatWindowRouteKey !== routeKey) {
@@ -748,7 +757,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const revision = Number(DS.state.domRevision || 0);
     if (
       DS.state.performanceModeApplied &&
-      DS.state.performanceModeRevision === revision
+      DS.state.performanceModeRevision === revision &&
+      DS.state.performanceModeWindowControlsVisible === (s.showChatWindowControls !== false)
     ) {
       return;
     }
@@ -776,6 +786,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     DS.state.performanceModeApplied = lightweight;
     DS.state.performanceModeRevision = revision;
+    DS.state.performanceModeWindowControlsVisible = s.showChatWindowControls !== false;
     DS.state.performanceModeMessageCount = roots.length;
   };
 

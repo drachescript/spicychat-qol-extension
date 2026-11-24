@@ -1,3 +1,20 @@
+## 0.2.97
+- Added a separate floating long-chat controls toggle: hiding the bar keeps older-message folding enabled; re-enable it to reveal older messages.
+- Coalesced overlapping read-only Bot Status queue/Settings refreshes without caching completed queue snapshots.
+- Reduced count-triggered queue rewrites for 2,000+ target scans (20 results or the unchanged 10-second checkpoint limit); unfinished IDs stay resumable.
+- Removed a quadratic lookup while preparing large interrupted Bot Status scan resumes.
+- Verified initial and final saved queue checkpoints; bounded final status-delta persistence and saved the run summary before optional telemetry.
+- Improved held-check review with explicit actionable/non-actionable reasons; preserved saved IDs and blocked/unknown protections.
+- Added pseudonymous numeric Bot Status telemetry fingerprints and separate HTTP-200-unconfirmed signals without recording private bot content.
+- Differentiated stale, loading, missing-receiver, and messaging failures in live runtime diagnostics; added an on-demand recheck without tab reloads.
+- Included ping transport failure counts in read-only support reports and stopped scans safely if a later held-queue read fails.
+- Skipped repeated Bot order grid/card walks when the current listing route, DOM revision and sort mode have not changed.
+- Stopped allocating a temporary anchor array for every card while checking listing sort order.
+- Improved early Settings reads when Firefox, Orion, or another supported browser uses a different WebExtension API implementation.
+- Kept lightweight diagnostics available through the working runtime listener, including on paused tabs.
+- Allowed early auth and metadata bridges to recover from temporary extension-script load failures.
+- Preserved v0.2.96 route-specific performance diagnostics and existing listing optimizations.
+
 ## 0.2.96
 - Improved lightweight diagnostic listener registration recovery when a browser bridge appears after core startup.
 - Distinguished initializing, paused, and incomplete runtime states from failed lightweight/full diagnostic transport.

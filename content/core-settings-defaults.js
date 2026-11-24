@@ -716,6 +716,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     failedMessageHelper: false,
     autoRetryFailedMessageSends: false,
     chatPerformanceMode: false,
+    showChatWindowControls: true,
     runtimePerformanceMode: "adaptive",
     desktopAppPerformanceGuard: true,
     pauseQolInHiddenTabs: false,

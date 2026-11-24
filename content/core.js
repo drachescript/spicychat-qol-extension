@@ -362,9 +362,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // temporarily missing transport must not silently disable the probe forever.
     // Later module registration can retry once without polling or duplicate listeners.
     try {
-      const onMessage = globalThis.chrome?.runtime?.onMessage;
-      if (typeof onMessage?.addListener !== "function") return false;
-      onMessage.addListener((message, _sender, sendResponse) => {
+      const onMessage = (message, _sender, sendResponse) => {
         if (message?.type !== "DS_GET_PAGE_DIAGNOSTICS_LIGHT") return false;
         try {
           const startup = DS.getRuntimeStartup();
@@ -383,7 +381,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           sendResponse({ ok: false, errorType: String(error?.name || "Error").slice(0, 48), sampleKind: "lightweight-no-dom" });
         }
         return false; // Synchronous response; never holds an Android relay open.
-      });
+      };
+      const subscribe = globalThis.DSQBrowserApiCompat?.listenRuntime;
+      if (typeof subscribe === "function") {
+        if (!subscribe(onMessage)) return false;
+      } else {
+        // Older Android bundles may not include the early API helper yet.
+        const event = globalThis.chrome?.runtime?.onMessage || globalThis.browser?.runtime?.onMessage;
+        if (typeof event?.addListener !== "function") return false;
+        event.addListener(onMessage);
+      }
       lightDiagnosticsInstalled = true;
       return true;
     } catch { return false; }

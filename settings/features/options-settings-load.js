@@ -548,6 +548,7 @@ async function load() {
   setChecked("failedMessageHelper", !!settings.failedMessageHelper);
   setChecked("autoRetryFailedMessageSends", !!settings.autoRetryFailedMessageSends);
   setChecked("chatPerformanceMode", !!settings.chatPerformanceMode);
+  setChecked("showChatWindowControls", settings.showChatWindowControls !== false);
   setValue("runtimePerformanceMode", ["normal", "adaptive", "aggressive", "maximum"].includes(settings.runtimePerformanceMode) ? settings.runtimePerformanceMode : "adaptive");
   setChecked("desktopAppPerformanceGuard", settings.desktopAppPerformanceGuard !== false);
   setChecked("pauseQolInHiddenTabs", !!settings.pauseQolInHiddenTabs);

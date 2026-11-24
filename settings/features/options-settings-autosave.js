@@ -330,6 +330,7 @@ function readSettingsFromPage() {
     failedMessageHelper: checked("failedMessageHelper"),
     autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
     chatPerformanceMode: checked("chatPerformanceMode"),
+    showChatWindowControls: checked("showChatWindowControls", true),
     runtimePerformanceMode: ["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive",
     maximumPerformancePresetInitialized: loadedSettingsSnapshot.maximumPerformancePresetInitialized === true,
     maximumPerformanceOptOuts: Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : [],
@@ -846,6 +847,7 @@ function readSingleSettingFromPage(settingKey) {
     case "failedMessageHelper": return (checked("failedMessageHelper"));
     case "autoRetryFailedMessageSends": return (checked("autoRetryFailedMessageSends"));
     case "chatPerformanceMode": return (checked("chatPerformanceMode"));
+    case "showChatWindowControls": return (checked("showChatWindowControls", true));
     case "runtimePerformanceMode": return (["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive");
     case "maximumPerformancePresetInitialized": return (loadedSettingsSnapshot.maximumPerformancePresetInitialized === true);
     case "maximumPerformanceOptOuts": return (Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : []);

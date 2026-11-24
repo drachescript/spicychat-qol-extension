@@ -1189,6 +1189,8 @@ Testing" spellcheck="false"></textarea></label>
 </label>
 <p class="hint" id="maximumPerformancePresetNote">If Maximum performance is enabled, some of the options will turn on automatically. You can turn them off individually, and those choices will be remembered.</p>
 <label class="row"><input id="chatPerformanceMode" type="checkbox"/><span>Use lighter rendering on long chat pages</span></label>
+<label class="row"><input id="showChatWindowControls" type="checkbox" checked/><span>Show floating long-chat folding controls (Show older / Show all)</span></label>
+<p class="hint">Turning this off hides only the floating bar. Long-chat Performance Mode still folds older messages by default. Re-enable the bar to use Show older or Show all; no messages are deleted.</p>
 <label class="row"><input id="desktopAppPerformanceGuard" type="checkbox"/><span>Reduce QoL work while messages stream in the installed desktop web app</span></label>
 <label class="row"><input id="pauseQolInHiddenTabs" type="checkbox"/><span>Pause most QoL checks while this tab is not focused</span></label>
 <label class="row"><input id="autoPerformanceLargeChats" type="checkbox"/><span>Automatically use stronger performance mode on very large chats</span></label>
@@ -2170,6 +2172,7 @@ step sister" spellcheck="false"></textarea></label>
 <label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include enabled feature names in support reports (off by default)</label>
 <div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
 <p class="hint">Use Copy all or Download all for a complete support report, or export individual parts. Chat text is excluded.</p>
+<div class="button-row"><button id="recheckRefreshedSpicyChatTab" type="button">Recheck refreshed SpicyChat tab</button><span class="hint">After an extension update, manually reload just one stale SpicyChat tab and click here. This check does not reload any tabs.</span></div>
 <p class="hint">Support history survives updates. Copy never clears it; downloads clear only successfully saved records when confirmed.</p>
 <div class="button-row"><button id="dsSupportHistoryRefresh" type="button">Check saved support history</button><button id="dsSupportHistoryClear" type="button">Clear support history…</button></div>
 <p class="hint" id="dsSupportHistoryStatus">Saved support history hasn't been checked yet.</p>

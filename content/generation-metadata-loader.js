@@ -58,19 +58,30 @@ if (!(() => { try {
       return;
     }
 
+    const path = "content/generation-metadata-bridge.js";
+    let url = globalThis.DSQBrowserApiCompat?.extensionUrl?.(path);
+    // Preserve older Android/WebExtension injectors without the helper.
+    if (!url) try { url = globalThis.chrome?.runtime?.getURL?.(path); } catch {}
+    if (!url) try { url = globalThis.browser?.runtime?.getURL?.(path); } catch {}
+    if (!url) return;
     injected = true;
     const script = document.createElement("script");
-    script.src = chrome.runtime.getURL("content/generation-metadata-bridge.js");
+    script.src = url;
     script.async = false;
     script.dataset.dsQolGenerationMetadataBridge = "1";
     script.addEventListener("load", () => {
       sendState();
       script.remove();
     }, { once: true });
-    script.addEventListener("error", () => script.remove(), { once: true });
+    script.addEventListener("error", () => {
+      injected = false; // Permit a settings-triggered retry after transient failures.
+      script.remove();
+    }, { once: true });
     const append = () => {
       const root = document.documentElement || document.head || document.body;
-      if (root) root.appendChild(script);
+      if (!root) return;
+      try { root.appendChild(script); }
+      catch { injected = false; script.remove(); }
     };
 
     if (document.documentElement || document.head || document.body) append();
@@ -81,7 +92,10 @@ if (!(() => { try {
     const next = !!nextEnabled;
     // Detection and regular Settings refreshes can both send the same state.
     // Avoid broadcasting unchanged bridge settings into SpicyChat on every pass.
-    if (enabled === next) return;
+    if (enabled === next) {
+      if (next && !injected) injectBridge();
+      return;
+    }
     enabled = next;
     if (enabled) injectBridge();
     else if (injected) sendState();

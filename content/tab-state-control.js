@@ -21,7 +21,7 @@
       if (data["dsSettingV1:enabled"] !== undefined) globalEnabled = data["dsSettingV1:enabled"] !== false;
       else globalEnabled = data.settings?.enabled !== false;
     }).catch(() => {});
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    const onMessage = (message, _sender, sendResponse) => {
       if (message?.type === "DS_GET_PAGE_DIAGNOSTICS_LIGHT") {
         sendResponse({ ok: true, runtimeReady: false, paused: true,
           startup: { stage: "disabled", updatedAt: Date.now(), errorType: "", missingModules: [] },
@@ -38,6 +38,11 @@
         if (enabled) setTimeout(() => { try { location.reload(); } catch {} }, 100);
       }
       return false;
-    });
+    };
+    if (!globalThis.DSQBrowserApiCompat?.listenRuntime?.(onMessage)) {
+      // Preserve the original listener path for older WebView injectors.
+      const event = globalThis.chrome?.runtime?.onMessage || globalThis.browser?.runtime?.onMessage;
+      event?.addListener?.(onMessage);
+    }
   } catch {}
 })();

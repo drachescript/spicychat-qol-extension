@@ -57,9 +57,15 @@ if (!(() => { try {
       sendState();
       return;
     }
+    const path = "content/exact-message-counts-bridge.js";
+    let url = globalThis.DSQBrowserApiCompat?.extensionUrl?.(path);
+    // Preserve older Android/WebExtension injectors without the helper.
+    if (!url) try { url = globalThis.chrome?.runtime?.getURL?.(path); } catch {}
+    if (!url) try { url = globalThis.browser?.runtime?.getURL?.(path); } catch {}
+    if (!url) return;
     injected = true;
     const script = document.createElement("script");
-    script.src = chrome.runtime.getURL("content/exact-message-counts-bridge.js");
+    script.src = url;
     script.async = false;
     script.dataset.dsQolExactMessageCountsBridge = "1";
     script.addEventListener("load", () => {
@@ -70,7 +76,8 @@ if (!(() => { try {
       injected = false;
       script.remove();
     }, { once: true });
-    (document.documentElement || document.head || document).appendChild(script);
+    try { (document.documentElement || document.head || document).appendChild(script); }
+    catch { injected = false; script.remove(); }
   }
 
   function setEnabled(next) {
