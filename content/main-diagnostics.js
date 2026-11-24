@@ -179,6 +179,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
   // Kept available even when the main QoL feature runtime is disabled.
   DS.installMainDiagnostics = function installMainDiagnostics({ runtimeProfile, loadedChatMessageCount, desktopAppPerformanceGuardActive }) {
+  // A second module-driven retry; the installer is idempotent if core registered.
+  DS.installLightDiagnostics?.();
   try {
     chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
       if (message?.type === "DS_GET_QOL_TAB_STATE") {
@@ -188,18 +190,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (message?.type === "DS_SET_QOL_TAB_STATE") {
         const state = DS.setQolEnabledForTab?.(message.enabled !== false) || DS.getQolTabState?.() || {};
         sendResponse({ ok: true, ...state });
-        return false;
-      }
-      if (message?.type === "DS_GET_PAGE_DIAGNOSTICS_LIGHT") {
-        // Read-only readiness probe for WebViews. Unlike a full snapshot this
-        // never walks the DOM, reads private chat content or forces layout.
-        const perf = DS.state?.runtimePerformance || {};
-        sendResponse({ ok: true, runtimeReady: !!DS.state?.settings,
-          paused: !!DS.isQolPausedForTab?.(),
-          sampleAt: Date.now(),
-          sampleKind: "lightweight-no-dom",
-          messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
-          messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0) });
         return false;
       }
       if (message?.type === "DS_GET_PAGE_DIAGNOSTICS") {
@@ -240,6 +230,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         sendResponse({
           ok: true,
           tabQol: DS.getQolTabState?.() || null,
+          runtimeStartup: DS.getRuntimeStartup?.() || null,
           performance: DS.getPerformanceReport?.() || [],
           slowFeatureSamples: DS.getSlowFeatureSamples?.().slice(-80) || [],
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
@@ -287,7 +278,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           typingDeferrals: 0, desktopAppGuardDelays: 0, messageCacheHits: 0, messageCacheMisses: 0,
           messageCacheInvalidations: 0, messageCacheInvalidationRequests: 0, messageCacheInvalidationDeduped: 0,
           messageCacheMutationCandidateNodes: 0, messageCacheMutationRoots: 0, messageCacheMutationNodesCollapsed: 0,
-          observerBatches: 0, observerQolOnlyBatches: 0, observerMixedQolBatches: 0, blockedBotMutationSkips: 0, listingSortNoopSkips: 0, listingSortAlreadyOrdered: 0,
+          observerBatches: 0, observerQolOnlyBatches: 0, observerMixedQolBatches: 0, blockedBotMutationSkips: 0, listingSortNoopSkips: 0, listingSortAlreadyOrdered: 0, listingSortRevisionSkips: 0,
           routeFeatureStepSkips: 0, routeFeatureGroupSkips: 0, buildBundleStepSkips: 0, runtimeKernelRuns: 0, runtimePlanCacheHits: 0,
           quickPanelStateSkips: 0, quickPanelUpdateCoalesced: 0, quickPanelLayoutSkips: 0, quickPanelRenderQuietDeferrals: 0,
           storageWriteRequests: 0, storageWriteBatches: 0, storageWriteKeys: 0, storageWriteMergedKeys: 0, storageWriteImmediateFlushes: 0,

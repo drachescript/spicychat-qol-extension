@@ -30,35 +30,29 @@ if (missingOptionsControllerModules.length) {
 
 
 
-["chatBubbleAiBackground", "chatBubbleAiText", "chatBubbleUserBackground", "chatBubbleUserText"].forEach(id => {
-  $(id)?.addEventListener("input", updateBubbleContrastWarnings);
-  $(id)?.addEventListener("change", updateBubbleContrastWarnings);
+// v0.2.93: Bubble controls are inserted on demand by the Appearance panel.
+// Delegation preserves input, preset, and color validation without keeping
+// their entire 25 KB panel builder in Settings startup.
+const bubbleContrastControlIds = new Set([
+  "chatBubbleAiBackground", "chatBubbleAiText", "chatBubbleUserBackground", "chatBubbleUserText"
+]);
+const bubbleAppearanceControlIds = new Set([
+  "chatBubbleAiTextMode", "chatBubbleAiActionMode", "chatBubbleAiDialogueMode",
+  "chatBubbleAiDecorationMode", "chatBubbleAiShape", "chatBubbleUserTextMode",
+  "chatBubbleUserActionMode", "chatBubbleUserDialogueMode", "chatBubbleUserDecorationMode",
+  "chatBubbleUserShape", "alternateDialogueCustomColors"
+]);
+document.addEventListener("input", event => {
+  if (bubbleContrastControlIds.has(event.target?.id)) updateBubbleContrastWarnings();
 });
-["chatBubbleAiTextMode", "chatBubbleAiActionMode", "chatBubbleAiDialogueMode", "chatBubbleAiDecorationMode", "chatBubbleAiShape", "chatBubbleUserTextMode", "chatBubbleUserActionMode", "chatBubbleUserDialogueMode", "chatBubbleUserDecorationMode", "chatBubbleUserShape", "alternateDialogueCustomColors"].forEach(id => {
-  $(id)?.addEventListener("change", updateAppearanceColorControlStates);
+document.addEventListener("change", event => {
+  const id = event.target?.id;
+  if (bubbleContrastControlIds.has(id)) updateBubbleContrastWarnings();
+  if (bubbleAppearanceControlIds.has(id)) updateAppearanceColorControlStates();
 });
-["messageQuickActionRemoveImage"].forEach(id => {
-  $(id)?.addEventListener("change", updateMessageQuickActionControlStates);
-});
-document.querySelectorAll("[data-chat-bubble-preset]").forEach(button => {
-  button.addEventListener("click", () => applyBubblePreset(button.dataset.chatBubblePreset));
-});
-
-document.querySelectorAll("[data-context-keeper-preset]").forEach(button => {
-  button.addEventListener("click", () => {
-    const preset = String(button.dataset.contextKeeperPreset || "recommended");
-    const values = preset === "light"
-      ? { sensitivity: "strict", every: 6, max: 60, recap: "compact" }
-      : preset === "detailed"
-        ? { sensitivity: "broad", every: 2, max: 200, recap: "full" }
-        : { sensitivity: "balanced", every: 4, max: 120, recap: "balanced" };
-    setValue("contextKeeperAutoSensitivity", values.sensitivity);
-    setValue("contextKeeperAutoEveryMessages", String(values.every));
-    setValue("contextKeeperAutoMaxDetails", String(values.max));
-    setValue("contextKeeperRecapSize", values.recap);
-    setChecked("contextKeeperAutoCapture", true);
-    showSettingsToast(`Context Keeper ${preset === "recommended" ? "Recommended" : preset[0].toUpperCase() + preset.slice(1)} preset applied. Changes save automatically.`);
-  });
+document.addEventListener("click", event => {
+  const button = event.target?.closest?.("[data-chat-bubble-preset]");
+  if (button) applyBubblePreset(button.dataset.chatBubblePreset);
 });
 
 $("botBackupToolsEnabled")?.addEventListener("change", event => {
@@ -84,13 +78,23 @@ $("duplicateTabCheckNow")?.addEventListener("click", runDuplicateTabCheckNow);
 installLazyTabCleanupPanel();
 
 
-$("chatBackgroundGlobalUpload")?.addEventListener("change", async event => { await importGlobalChatBackground(event.target.files); event.target.value = ""; });
-$("useGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl());
-$("refreshGlobalChatBackgroundUrl")?.addEventListener("click", () => importGlobalChatBackgroundUrl({ refresh: true }));
-$("clearGlobalChatBackground")?.addEventListener("click", clearGlobalChatBackground);
-$("clearPerChatBackgrounds")?.addEventListener("click", clearPerChatBackgrounds);
-$("chatBackgroundFit")?.addEventListener("change", renderChatBackgroundOptions);
-$("chatBackgroundPosition")?.addEventListener("change", renderChatBackgroundOptions);
+// Custom Pictures controls are constructed when their Settings panel opens.
+// A single delegated handler survives deferred hydration and DOM replacement.
+document.addEventListener("change", event => {
+  const target = event.target;
+  if (target?.id === "chatBackgroundGlobalUpload") {
+    Promise.resolve(importGlobalChatBackground(target.files)).catch(() => {}).finally(() => { target.value = ""; });
+  } else if (target?.id === "chatBackgroundFit" || target?.id === "chatBackgroundPosition") {
+    renderChatBackgroundOptions();
+  }
+});
+document.addEventListener("click", event => {
+  const id = event.target?.closest?.("button")?.id;
+  if (id === "useGlobalChatBackgroundUrl") importGlobalChatBackgroundUrl().catch(() => {});
+  if (id === "refreshGlobalChatBackgroundUrl") importGlobalChatBackgroundUrl({ refresh: true }).catch(() => {});
+  if (id === "clearGlobalChatBackground") clearGlobalChatBackground();
+  if (id === "clearPerChatBackgrounds") clearPerChatBackgrounds();
+});
 
 $("clearOpened")?.addEventListener("click", clearOpened);
 $("exportSettings")?.addEventListener("click", exportSettings);
@@ -304,6 +308,15 @@ const pendingSavedManagerRefreshKinds = new Set();
 let savedManagerRefreshTimer = 0;
 let blockedManagerRefreshTimer = 0;
 let archiveQueueSafetyRefreshTimer = 0;
+let externalFeatureIndexRefreshTimer = 0;
+function queueExternalFeatureIndexRefresh() {
+  if (activeOptionsTab() !== "features") return;
+  clearTimeout(externalFeatureIndexRefreshTimer);
+  externalFeatureIndexRefreshTimer = setTimeout(() => {
+    externalFeatureIndexRefreshTimer = 0;
+    if (activeOptionsTab() === "features") DS_FEATURE_INDEX_REFRESH?.();
+  }, 120);
+}
 
 
 
@@ -341,7 +354,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (settingsChanged && optionsDataLoaded) {
     refreshPlatformCompatibilityUi(loadedSettingsSnapshot);
-    DS_FEATURE_INDEX_REFRESH?.();
+    queueExternalFeatureIndexRefresh();
     if (activeOptionsTab() === "account") refreshAccountSyncUi().catch(() => {});
   }
   if (changes[QOL_SYNC_STATE_KEY] && optionsDataLoaded && activeOptionsTab() === "account") {

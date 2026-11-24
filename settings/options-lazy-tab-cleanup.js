@@ -133,6 +133,7 @@ async function runOptionsDiagnosticsAction(name,...args) {
 // Keep the original functions and storage formats; this only delays evaluation
 // until a matching tab or an existing action actually needs a module.
 let botStatusRecoverableHeldCount = 0;
+let botStatusTrackedStaleCount = 0;
 const dsqHeavySettingsModules = Object.create(null);
 function dsqLoadSettingsTool(group, path, readyName) {
   if (typeof window[readyName] === "function" &&

@@ -1439,18 +1439,27 @@ function setVersionText() {
   versionEl.textContent = `v${manifest.version_name || displayReleaseVersion(manifest.version)}`;
 }
 
+let savedRecoveryLazyOpenListeners = [];
+function detachSavedRecoveryLazyActivation() {
+  if (savedRecoveryLazyObserver) {
+    try { savedRecoveryLazyObserver.disconnect(); } catch {}
+    savedRecoveryLazyObserver = null;
+  }
+  for (const [card, handler] of savedRecoveryLazyOpenListeners) {
+    card.removeEventListener("ds-settings-card-opened", handler);
+  }
+  savedRecoveryLazyOpenListeners = [];
+  savedRecoveryLazySetup = false;
+}
+
 function resetHeavySavedDataState() {
+  detachSavedRecoveryLazyActivation();
   blockingDataLoaded = false;
   savedListsDataLoaded = false;
   savedRecoveryDataLoaded = false;
   blockingDataLoadPromise = null;
   savedListsDataLoadPromise = null;
   savedRecoveryDataLoadPromise = null;
-  savedRecoveryLazySetup = false;
-  if (savedRecoveryLazyObserver) {
-    try { savedRecoveryLazyObserver.disconnect(); } catch {}
-    savedRecoveryLazyObserver = null;
-  }
   blockedState = { ids: [], names: [], meta: {} };
   notInterestedState = { ids: [], meta: {} };
   quickDislikeHistoryState = { version: 1, bots: {} };
@@ -1768,6 +1777,7 @@ async function loadAndRenderSavedRecoveryManagers(source = "opened") {
   });
   const started = typeof performance !== "undefined" ? performance.now() : 0;
   await ensureSavedRecoveryDataLoaded();
+  detachSavedRecoveryLazyActivation();
   if (activeOptionsTab() !== "saved") return true;
   const sameNameCollisions = botSameNameCollisionIndex();
   renderSavedBotInfo({ sameNameCollisions });
@@ -1798,7 +1808,11 @@ function setupSavedRecoveryLazyActivation() {
     loadAndRenderSavedRecoveryManagers(source).catch(() => {});
   };
 
-  for (const card of cards) card.addEventListener("ds-settings-card-opened", () => activate("section-opened"));
+  for (const card of cards) {
+    const onOpen = () => activate("section-opened");
+    card.addEventListener("ds-settings-card-opened", onOpen);
+    savedRecoveryLazyOpenListeners.push([card, onOpen]);
+  }
   if (typeof IntersectionObserver === "function") {
     savedRecoveryLazyObserver = new IntersectionObserver(entries => {
       if (savedRecoveryDataLoaded || activeOptionsTab() !== "saved") return;
@@ -1826,6 +1840,7 @@ async function renderHeavyManagersForTab(tabName) {
   });
 
   await ensureHeavySavedDataLoaded(tabName);
+  if (token !== heavyRenderToken || activeOptionsTab() !== tabName) return;
   if (tabName === "saved") {
     // Lorebook status is normally tiny compared with Bot Status / recovery.
     // Keep its existing automatic load so the section does not appear empty,
@@ -2100,17 +2115,24 @@ function setupSettingsSearch() {
   const GENERIC_SEARCH_TERMS = "setting settings option options preference preferences pref control controls configuration config";
   const GENERIC_QUERY_TERMS = new Set(GENERIC_SEARCH_TERMS.split(/\s+/));
   const featureRegistry = Array.isArray(window.SpicyChatQoLFeatureRegistry) ? window.SpicyChatQoLFeatureRegistry : [];
-
-  function registrySearchTextFor(controlId, targetId, cardId) {
-    const id = String(controlId || targetId || "");
-    const parts = [];
-    for (const entry of featureRegistry) {
-      const settings = Array.isArray(entry?.settings) ? entry.settings : [];
-      const matched = (id && (entry?.setting === id || settings.includes(id) || entry?.target === id)) || (cardId && entry?.target === cardId);
-      if (!matched) continue;
-      parts.push(entry.name, entry.category, entry.description, ...(entry.aliases || []));
+  // v0.2.93: the first full Settings search used to scan every feature for
+  // every input/label; build a reverse lookup once (O(features + controls)).
+  const featureSearchByControl = new Map();
+  for (const entry of featureRegistry) {
+    if (!entry) continue;
+    const text = [entry.name, entry.category, entry.description, ...(entry.aliases || [])].filter(Boolean).join(" ");
+    if (!text) continue;
+    for (const key of new Set([entry.setting, entry.target, ...(Array.isArray(entry.settings) ? entry.settings : [])].filter(Boolean))) {
+      if (!featureSearchByControl.has(key)) featureSearchByControl.set(key, []);
+      featureSearchByControl.get(key).push(text);
     }
-    return parts.filter(Boolean).join(" ");
+  }
+  function registrySearchTextFor(controlId, targetId, cardId) {
+    const primary = String(controlId || targetId || "");
+    const texts = [...(featureSearchByControl.get(primary) || [])];
+    const card = String(cardId || "");
+    if (card && card !== primary) texts.push(...(featureSearchByControl.get(card) || []));
+    return [...new Set(texts)].join(" ");
   }
 
   const input = $("settingsSearch");

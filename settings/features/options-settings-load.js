@@ -548,6 +548,7 @@ async function load() {
   setChecked("failedMessageHelper", !!settings.failedMessageHelper);
   setChecked("autoRetryFailedMessageSends", !!settings.autoRetryFailedMessageSends);
   setChecked("chatPerformanceMode", !!settings.chatPerformanceMode);
+  setChecked("showChatWindowControls", settings.showChatWindowControls !== false);
   setValue("runtimePerformanceMode", ["normal", "adaptive", "aggressive", "maximum"].includes(settings.runtimePerformanceMode) ? settings.runtimePerformanceMode : "adaptive");
   setChecked("desktopAppPerformanceGuard", settings.desktopAppPerformanceGuard !== false);
   setChecked("pauseQolInHiddenTabs", !!settings.pauseQolInHiddenTabs);
@@ -653,6 +654,9 @@ async function load() {
   setValue("blockedWords", arrayToLines(settings.blockedWords));
   setValue("blockedCreators", arrayToLines(settings.blockedCreators));
 
+
+
+
   setChecked("lorebookBlockingEnabled", settings.lorebookBlockingEnabled === true);
   setChecked("applyBotBlockingToLorebooks", settings.applyBotBlockingToLorebooks === true);
   setChecked("showLorebookBlockButtons", settings.showLorebookBlockButtons === true);
@@ -677,6 +681,12 @@ async function load() {
   for (const loadFeatureSetting of Object.values(window.__DSQ_FEATURE_SETTINGS_LOADERS__ || {})) {
     loadFeatureSetting(settings);
   }
+  // The Appearance/Custom Pictures panels may have been injected only after
+  // the ordinary early appearance pass. Apply visibility and saved previews
+  // once the feature-owned loaders have finished.
+  updateAppearanceColorControlStates?.();
+  updateBubbleContrastWarnings?.();
+  if (activeOptionsTab() === "appearance") renderMiniPanelPreview?.();
   settingsAutosaveReady = true;
   dsqRefreshHeavyToolsForTab(activeOptionsTab());
   initializeMaximumPerformancePreset();
@@ -694,7 +704,9 @@ async function load() {
     initializeExportScopeSelection().catch(() => {});
   }
   if (activeTab === "browser") {
-    // Stage 15: Tab Cleanup is loaded on demand.
+    // Stage 15: the Tab Cleanup implementation is no longer a startup script.
+    // The on-demand loader initializes both panels after the module registers.
+    // Calling their functions directly here races its script load on #browser.
     ensureTabCleanupPanelLoaded().catch(error => {
       const status = document.getElementById("tabCleanupDiagnosticStatus");
       if (status) status.textContent = String(error?.message || error);

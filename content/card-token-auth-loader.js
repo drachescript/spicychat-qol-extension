@@ -26,10 +26,16 @@ if (!(() => { try {
       sendControl(bridgeWanted);
       return;
     }
+    const path = "content/card-token-main.js";
+    let url = globalThis.DSQBrowserApiCompat?.extensionUrl?.(path);
+    // Preserve older Android/WebExtension injectors without the helper.
+    if (!url) try { url = globalThis.chrome?.runtime?.getURL?.(path); } catch {}
+    if (!url) try { url = globalThis.browser?.runtime?.getURL?.(path); } catch {}
+    if (!url) return; // A later settings/route update can retry a missing runtime URL.
     requested = true;
     const script = document.createElement("script");
     script.id = LOADER_ID;
-    script.src = chrome.runtime.getURL("content/card-token-main.js");
+    script.src = url;
     script.async = false;
     script.onload = () => {
       script.remove();
@@ -41,7 +47,9 @@ if (!(() => { try {
     };
     const append = () => {
       const root = document.documentElement || document.head || document.body;
-      if (root) root.appendChild(script);
+      if (!root) return;
+      try { root.appendChild(script); }
+      catch { requested = false; script.remove(); }
     };
     if (document.documentElement || document.head || document.body) append();
     else document.addEventListener("readystatechange", append, { once: true });

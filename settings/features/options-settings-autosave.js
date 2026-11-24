@@ -330,6 +330,7 @@ function readSettingsFromPage() {
     failedMessageHelper: checked("failedMessageHelper"),
     autoRetryFailedMessageSends: checked("autoRetryFailedMessageSends"),
     chatPerformanceMode: checked("chatPerformanceMode"),
+    showChatWindowControls: checked("showChatWindowControls", true),
     runtimePerformanceMode: ["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive",
     maximumPerformancePresetInitialized: loadedSettingsSnapshot.maximumPerformancePresetInitialized === true,
     maximumPerformanceOptOuts: Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : [],
@@ -470,6 +471,9 @@ function readSettingsFromPage() {
     blockedTags: linesToArray(value("blockedTags")),
     blockedWords: linesToArray(value("blockedWords")),
     blockedCreators: linesToArray(value("blockedCreators")),
+
+
+
 
     lorebookBlockingEnabled: checked("lorebookBlockingEnabled", false),
     applyBotBlockingToLorebooks: checked("applyBotBlockingToLorebooks", false),
@@ -843,6 +847,7 @@ function readSingleSettingFromPage(settingKey) {
     case "failedMessageHelper": return (checked("failedMessageHelper"));
     case "autoRetryFailedMessageSends": return (checked("autoRetryFailedMessageSends"));
     case "chatPerformanceMode": return (checked("chatPerformanceMode"));
+    case "showChatWindowControls": return (checked("showChatWindowControls", true));
     case "runtimePerformanceMode": return (["normal", "adaptive", "aggressive", "maximum"].includes(value("runtimePerformanceMode")) ? value("runtimePerformanceMode") : "adaptive");
     case "maximumPerformancePresetInitialized": return (loadedSettingsSnapshot.maximumPerformancePresetInitialized === true);
     case "maximumPerformanceOptOuts": return (Array.isArray(loadedSettingsSnapshot.maximumPerformanceOptOuts) ? loadedSettingsSnapshot.maximumPerformanceOptOuts : []);
@@ -978,6 +983,9 @@ function readSingleSettingFromPage(settingKey) {
     case "blockedWords": return (linesToArray(value("blockedWords")));
     case "blockedCreators": return (linesToArray(value("blockedCreators")));
 
+
+
+
     case "lorebookBlockingEnabled": return (checked("lorebookBlockingEnabled", false));
     case "applyBotBlockingToLorebooks": return (checked("applyBotBlockingToLorebooks", false));
     case "showLorebookBlockButtons": return (checked("showLorebookBlockButtons", false));
@@ -1073,6 +1081,13 @@ function queueSettingsAutosaveForControl(control, eventType = "change") {
 function queueFullSettingsDiffFromPage({ delay = 0 } = {}) {
   const current = readSettingsFromPage();
   for (const [key, next] of Object.entries(current)) {
+    // Deferred feature panels do not have controls until hydrated. Reading a
+    // nonexistent checkbox as false here could silently disable a setting
+    // when Save now is pressed on another tab. Preserve the stored value.
+    const mounted = document.getElementById(key) ||
+      document.querySelector(`input[name="${CSS.escape(key)}"]`);
+    const hasFeatureReader = typeof window.__DSQ_FEATURE_SETTINGS_READERS__?.[key] === "function";
+    if (!mounted && !hasFeatureReader) continue;
     if (storageValueMatches(loadedSettingsSnapshot[key], next)) continue;
     queueSettingsAutosaveValue(key, next, { delay });
   }

@@ -325,6 +325,19 @@ function setupBotAvailabilityControls() {
     button.addEventListener("click", () => reviewAndRemoveIneligibleBotStatusPending().catch(() =>
       showSettingsToast("Could not read the automatically held Bot Status IDs. Saved queues were not changed.")));
     pendingHint.insertAdjacentElement("afterend", button);
+    const panel = document.createElement('div');
+    panel.id = 'botStatusHeldDetails';
+    panel.className = 'sub-card';
+    panel.hidden = true;
+    const header = document.createElement('div');
+    const close = document.createElement('button');
+    close.type = 'button'; close.textContent = 'Close held review';
+    close.addEventListener('click', () => { panel.hidden = true; });
+    header.append(close);
+    const list = document.createElement('div');
+    list.id = 'botStatusHeldDetailsList';
+    panel.append(header, list);
+    button.insertAdjacentElement('afterend', panel);
   }
   const scanStatus = $("botAvailabilityScanStatus");
   if (scanStatus && !document.getElementById("ds-bot-status-worker-stats")) {

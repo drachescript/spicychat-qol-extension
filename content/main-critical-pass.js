@@ -173,7 +173,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       if (!listing && DS.removeReportLinkCollector) DS.removeReportLinkCollector();
       if (listing) {
-        if (settings.enableReportLinkCollector === true) {
+        if (settings.enableReportLinkCollector === true && /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i.test(location.pathname)) {
           await runFeatureStep("report link collector", true, () => DS.applyReportLinkCollector?.());
         } else {
           DS.removeReportLinkCollector?.();

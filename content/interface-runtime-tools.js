@@ -17,7 +17,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     orderById: new Map(),
     nextOrder: 0,
     lastMode: "native",
-    lastSignatureByGrid: new WeakMap()
+    lastSignatureByGrid: new WeakMap(),
+    // The page observer advances domRevision when native cards change. A
+    // repeated slow/cosmetic pass must not rediscover every grid and link if
+    // the route, mode, controls and card DOM are still identical.
+    lastAppliedRevision: -1,
+    lastAppliedMode: "",
+    lastAppliedSkipCount: 0,
+    lastAppliedControl: null,
+    lastAppliedGrids: []
   };
 
   function runtimeCounters() {
@@ -56,10 +64,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function directBotCards(grid) {
     if (!(grid instanceof Element)) return [];
-    return Array.from(grid.children).filter(child => {
-      if (!(child instanceof Element)) return false;
-      return Array.from(child.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")).some(isRealBotLink);
-    });
+    const cards = [];
+    for (const child of grid.children) {
+      if (!(child instanceof Element)) continue;
+      // Short-circuit on the first real bot link; a card can contain several
+      // chat/profile links, and materializing an array for each is unnecessary.
+      for (const anchor of child.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']")) {
+        if (isRealBotLink(anchor)) {
+          cards.push(child);
+          break;
+        }
+      }
+    }
+    return cards;
   }
 
   function findListingGrids() {
@@ -91,6 +108,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     listingSortState.orderById.clear();
     listingSortState.nextOrder = 0;
     listingSortState.lastSignatureByGrid = new WeakMap();
+    listingSortState.lastAppliedRevision = -1;
+    listingSortState.lastAppliedMode = "";
+    listingSortState.lastAppliedSkipCount = 0;
+    listingSortState.lastAppliedControl = null;
+    listingSortState.lastAppliedGrids = [];
   }
 
   function rememberNativeOrder(records) {
@@ -238,6 +260,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.removeListingSortTools = function removeListingSortTools() {
     document.getElementById(SORT_CONTROL_ID)?.remove();
+    listingSortState.lastAppliedRevision = -1;
+    listingSortState.lastAppliedSkipCount = 0;
+    listingSortState.lastAppliedControl = null;
+    listingSortState.lastAppliedGrids = [];
   };
 
   DS.applyListingSortTools = function applyListingSortTools() {
@@ -245,19 +271,43 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.removeListingSortTools?.();
       return;
     }
+    resetRouteOrderIfNeeded();
+    const mode = currentSortMode();
+    const revision = Number(DS.state?.domRevision || 0);
+    const control = listingSortState.lastAppliedControl;
+    if (listingSortState.lastAppliedRevision === revision &&
+        listingSortState.lastAppliedMode === mode &&
+        control?.isConnected &&
+        control.parentElement === findSortControlHost() &&
+        listingSortState.lastAppliedGrids.length &&
+        listingSortState.lastAppliedGrids.every(grid => grid.isConnected)) {
+      // The shared observer tracks native child/text/href changes. It does not
+      // track every attribute; audit occasionally so an unobserved title or
+      // layout change cannot remain stale for a whole browsing session.
+      listingSortState.lastAppliedSkipCount++;
+      if (listingSortState.lastAppliedSkipCount < 16) {
+        const counters = runtimeCounters();
+        counters.listingSortRevisionSkips = Number(counters.listingSortRevisionSkips || 0) + 1;
+        return;
+      }
+    }
+
     const grids = findListingGrids();
     if (!grids.length) {
       DS.removeListingSortTools?.();
       return;
     }
 
-    resetRouteOrderIfNeeded();
-    const mode = currentSortMode();
-    ensureSortControl();
+    const mountedControl = ensureSortControl();
     grids.forEach(grid => sortGrid(grid, mode));
     const counters = runtimeCounters();
     counters.listingSortMode = mode;
     counters.listingSortLoadedCards = grids.reduce((sum, grid) => sum + directBotCards(grid).length, 0);
+    listingSortState.lastAppliedRevision = revision;
+    listingSortState.lastAppliedMode = mode;
+    listingSortState.lastAppliedSkipCount = 0;
+    listingSortState.lastAppliedControl = mountedControl;
+    listingSortState.lastAppliedGrids = grids;
   };
 
   DS.applyChatBackgroundControlPlacement = function applyChatBackgroundControlPlacement() {

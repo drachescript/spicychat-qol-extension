@@ -4,6 +4,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   const DS = window.DragonScriptQoL;
   let personaPickerLightweightLastRun = 0;
+  let lastPersonaPickerRoot = null;
+  let lastPersonaPickerOptions = null;
+  let lastPersonaPickerSignature = '';
+
 
   function cleanText(value) {
     return String(value || "")
@@ -895,6 +899,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findPersonaPicker() {
+    // Once a real native picker is identified, avoid searching every label on
+    // the page again until React unmounts it. This cache contains only a DOM
+    // reference and is discarded automatically when the modal disappears.
+    if (lastPersonaPickerRoot?.isConnected &&
+        lastPersonaPickerRoot.querySelector("label input[type='radio'][value]")) {
+      return lastPersonaPickerRoot;
+    }
+    lastPersonaPickerRoot = null;
     const labels = DS.qsa("label")
       .filter(label => !!label.querySelector("input[type='radio'][value]"))
       .filter(label => !!DS.extractPersonaFromModalLabel(label));
@@ -910,13 +922,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const text = DS.normalize(root.textContent);
 
       if (count >= labels.length && (text.includes("persona") || count >= 2)) {
+        lastPersonaPickerRoot = root;
         return root;
       }
     }
 
-    return labels[0].closest("[role='dialog']") ||
+    lastPersonaPickerRoot = labels[0].closest("[role='dialog']") ||
       labels[0].closest("div.fixed") ||
       labels[0].parentElement;
+    return lastPersonaPickerRoot;
   }
 
   DS.isPersonaPickerOpen = function isPersonaPickerOpen() {
@@ -926,7 +940,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyPersonaPickerLightweight = async function applyPersonaPickerLightweight() {
     const settings = DS.state?.settings || {};
     const picker = findPersonaPicker();
-    if (!picker) return false;
+    if (!picker) {
+      lastPersonaPickerOptions = null;
+      lastPersonaPickerSignature = '';
+      return false;
+    }
 
     // The native picker can animate/re-render while it is open. Keep QoL's
     // modal-specific work bounded so those native updates do not wake the full
@@ -934,6 +952,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const now = Date.now();
     if (now - personaPickerLightweightLastRun < 700) return true;
     personaPickerLightweightLastRun = now;
+
+    // Most observer passes are from native animations or adjacent chat UI.
+    // Extracting descriptions and rewriting organizer controls for identical
+    // options was taking hundreds of milliseconds. A small, read-only option
+    // signature lets the expensive work run only when the picker changes.
+    const inputs = picker.querySelectorAll("label input[type='radio'][value]");
+    const signature = Array.from(inputs, input => {
+      const label = input.closest('label');
+      const text = label?.textContent || '';
+      return `${input.value}:${input.checked ? 1 : 0}:${input.disabled ? 1 : 0}:${text}`;
+    }).join('|');
+    const unchanged = lastPersonaPickerOptions === inputs[0] &&
+      lastPersonaPickerRoot === picker && lastPersonaPickerSignature === signature;
+    lastPersonaPickerOptions = inputs[0] || null;
+    lastPersonaPickerSignature = signature;
+    if (unchanged) {
+      // Confirmation is a separate modal and must remain responsive even if
+      // the persona options themselves did not change.
+      if (settings.enabled && settings.autoAcceptPersonaChange) DS.acceptPersonaChangeModal?.();
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.unchangedPersonaPickerRefreshesSkipped = (perf.unchangedPersonaPickerRefreshesSkipped || 0) + 1;
+      return true;
+    }
 
     if (settings.enabled && settings.savePersonasFromPages) {
       await DS.scanPersonasFromPage?.();

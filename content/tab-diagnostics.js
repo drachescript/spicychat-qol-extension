@@ -3,6 +3,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   "use strict";
 
   const DS = window.DragonScriptQoL;
+  // One bounded retry if the transport was not present when core.js executed.
+  DS?.installLightDiagnostics?.();
   if (!DS || !chrome?.runtime?.onMessage) return;
 
   const clean = value => String(value || "").replace(/\s+/g, " ").trim();

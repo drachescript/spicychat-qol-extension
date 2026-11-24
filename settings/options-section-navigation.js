@@ -496,14 +496,24 @@ function applySettingsSectionDefault(settings = {}) {
 (function installDeferredFeaturePanelHydration() {
   const lazyType = "application/x-dsq-lazy-feature-panel";
   const inflight = new Map();
+  const inflightTabs = new Map();
+  let groupedPanels = null;
   const deferredControlTabs = Object.freeze({"languageFilterMode":"blocking","languageShowDetectedBadge":"blocking","enableLanguageFilter":"blocking","languageAutoDetectUntagged":"blocking","languageFilterRulebooks":"blocking","languageSelectionMode":"blocking","languageFilterLorebooks":"blocking","ds-feature-panel-language-filter":"blocking","ds-feature-panel-native-memory-probe":"personas-memory","chatBubbleMaxWidth":"appearance","chatComposerWidth":"appearance","chatWidthControlsCard":"appearance","chatStreamWidth":"appearance","enableChatWidthControls":"appearance","ds-feature-panel-chat-width-controls":"appearance","enableReplyInstructions":"writing","replyInstructionsCard":"writing","replyInstructionText":"writing","replyInstructionOocWrapper":"writing","replyInstructionSendMode":"writing","replyInstructionShowChatButton":"writing","ds-feature-panel-reply-instructions":"writing","ds-feature-panel-model-quick-access":"writing","enableTagAliases":"blocking","tagAliasesCard":"blocking","showTagExplanations":"blocking","tagAliasShowDisplay":"blocking","tagAliasRules":"blocking","ds-feature-panel-tag-aliases":"blocking","topBarProfilePillMode":"appearance","hideTopBarNotifications":"appearance","hideTopBarTheme":"appearance","topBarProfilePillPersonaPrefix":"appearance","topBarProfilePillCustomText":"appearance","hideTopBarLanguage":"appearance","ds-feature-panel-top-bar-1":"appearance","ds-feature-panel-top-bar-2":"appearance","ds-feature-panel-selection-memory":"personas-memory","scrollNavOnProfiles":"chat-ui","scrollNavOnChat":"chat-ui","showScrollToBottomButton":"chat-ui","showSwipeJumpButtons":"chat-ui","scrollNavOnChats":"chat-ui","restoreFirstSwipeOnLoad":"chat-ui","scrollTopLoadPreviousTiming":"chat-ui","scrollNavOnCreation":"chat-ui","scrollTopLoadPreviousMode":"chat-ui","showScrollToTopButton":"chat-ui","scrollNavOnOther":"chat-ui","showSwipeJumpToNumber":"chat-ui","scrollNavOnHome":"chat-ui","scrollTopLoadPreviousMessages":"chat-ui","ds-feature-panel-scroll-to-top":"chat-ui","rpFormatPreserveSemanticQuotes":"writing","rpFormatStyle":"writing","rpFormatRepairCard":"writing","rpFormatDetection":"writing","rpFormatPreserveBackticks":"writing","rpFormatPreserveInlineEmphasis":"writing","rpFormatConvertBoldActions":"writing","rpFormatRepairAuto":"writing","rpFormatRemoveActionParens":"writing","enableRpFormatRepair":"writing","rpFormatShowMessageButtons":"writing","ds-feature-panel-rp-format-repair":"writing","focusHideSidebar":"chat-ui","focusHideChatHeader":"chat-ui","focusHideQolPanel":"chat-ui","focusModeCard":"chat-ui","focusHideTopBar":"chat-ui","enableFocusMode":"chat-ui","ds-feature-panel-focus-mode":"chat-ui","ds-feature-panel-chat-continuation":"chat-ui","storyDayTrackerShowQuickPanel":"personas-memory","storyDayTrackerMode":"personas-memory","storyDayTrackerIncludeInContext":"personas-memory","storyDayTrackerCard":"personas-memory","enableStoryDayTracker":"personas-memory","ds-feature-panel-story-day-tracker":"personas-memory","localTagMatchRules":"blocking","localTagMatchFetchPublic":"blocking","localTagMatchEnabled":"blocking","ds-feature-panel-local-tag-matching":"blocking","hideSidebarSocialDiscord":"appearance","hideSidebarCreateVoice":"appearance","hideSidebarBlockedCreators":"appearance","hideSidebarFooterAffiliates":"appearance","hideSidebarCreateLorebook":"appearance","hideSidebarSubscribe":"appearance","hideSidebarMyLorebooks":"appearance","hideSidebarCreateMenu":"appearance","hideSidebarSocialReddit":"appearance","hideSidebarCreateChatbot":"appearance","hideSidebarPersonas":"appearance","hideSidebarHome":"appearance","hideSidebarLeaderboard":"appearance","hideSidebarMyCreationsMenu":"appearance","hideSidebarFooterPrivacy":"appearance","hideSidebarMyVoices":"appearance","hideSidebarRecommendations":"appearance","hideSidebarAppDownloadGeneric":"appearance","hideSidebarFavorites":"appearance","hideSidebarNewBadges":"appearance","hideSidebarFooterSupport":"appearance","showQolSidebarButton":"appearance","hideSidebarWebVersion":"appearance","hideSidebarLogo":"appearance","qolSidebarButtonPlacement":"appearance","hideSidebarFooterRefunds":"appearance","hideSidebarMyChatbots":"appearance","hideSidebarCreateGroup":"appearance","hideSidebarSocialX":"appearance","hideSidebarAppDownloadGooglePlay":"appearance","hideSidebarHelp":"appearance","hideSidebarFooterGuidelines":"appearance","hideSidebarAppDownloadAppStore":"appearance","hideSidebarChats":"appearance","restorePersonasSidebarPosition":"appearance","hideSidebarMyGroups":"appearance","hideSidebarSignOut":"appearance","hideSidebarFooterTerms":"appearance","hideSidebarFooterReporting":"appearance","ds-feature-panel-sidebar":"appearance","autoFillTargetCards":"blocking","autoFillListings":"blocking","autoFillMaxClicks":"blocking","ds-feature-panel-list-fill":"blocking","enableCreationAudit":"bot-tools","creationAuditQuickStatus":"bot-tools","ds-feature-panel-creation-audit":"bot-tools","alternateDialogueBackgroundColor":"appearance","alternateDialogueBorderColor":"appearance","styleAlternateDialogue":"appearance","alternateDialogueCard":"appearance","alternateDialogueScope":"appearance","alternateDialogueTextColor":"appearance","alternateDialogueCustomColors":"appearance","alternateDialogueStyle":"appearance","ds-feature-panel-alternate-dialogue":"appearance","paginationQuickJumpMenu":"blocking","paginationTopJumpBox":"blocking","ds-feature-panel-pagination-tools":"blocking","rpStateInjectMode":"personas-memory","rpStateTrackerMode":"personas-memory","rpStateTrackerCard":"personas-memory","rpStateShowQuickPanel":"personas-memory","rpStateMaxContextChars":"personas-memory","enableRpStateTracker":"personas-memory","ds-feature-panel-rp-state-tracker":"personas-memory","excludeTags":"blocking","autoTags":"blocking","includeTags":"blocking","showTagTemplateButton":"blocking","ds-feature-panel-tags-nsfw":"blocking","storyReadingLayout":"chat-ui","ds-feature-panel-story-reading-layout":"chat-ui","enableGenerationProfiles":"writing","generationProfileCount":"writing","ds-feature-panel-generation-profiles":"writing","animatedImagesChatMedia":"appearance","animatedImagesProfiles":"appearance","animatedImagesCard":"appearance","animatedImageMode":"appearance","animatedImagesChats":"appearance","animatedImagesListings":"appearance","reduceAnimatedBotImages":"appearance","ds-feature-panel-animation-control":"appearance","enableSmartFilterPresets":"blocking","ds-feature-panel-smart-filter-presets":"blocking","chatExportNumberMessages":"chat-ui","chatExportIncludeOocDirectives":"chat-ui","chatExportIncludeAvatars":"chat-ui","chatExportIncludeRulebookState":"chat-ui","chatExportIncludeBotInfo":"chat-ui","chatExportHtmlLayout":"chat-ui","showChatExportButton":"chat-ui","chatExportIncludeImageLinks":"chat-ui","chatExportDefaultFormat":"chat-ui","chatExportIncludeGenerationDetails":"chat-ui","chatExportIncludeRulebook":"chat-ui","ds-feature-panel-chat-export":"chat-ui","chatTextReplacementPreview":"chat-ui","chatTextReplacementPresets":"chat-ui","chatTextReplacementScope":"chat-ui","chatWordCensorCustom":"chat-ui","chatWordCensorList":"chat-ui","chatTextReplacementRules":"chat-ui","enableChatMutedWords":"chat-ui","chatMutedWords":"chat-ui","enableChatWordCensor":"chat-ui","chatWordCensorShowChatToggle":"chat-ui","chatWordCensorReveal":"chat-ui","chatTextReplacementMode":"chat-ui","chatWordCensorScope":"chat-ui","enableChatTextReplacements":"chat-ui","chatTextReplacementShowChatPresetControl":"chat-ui","chatWordCensorMask":"chat-ui","ds-feature-panel-text-replacements":"chat-ui","nativeRatingHelpersCard":"chat-ui","enableNativeRatingHelpers":"chat-ui","ds-feature-panel-native-rating-helpers":"chat-ui","keepChatHeaderVisibleWhileTyping":"chat-ui","hideChatTopBarRatingButton":"chat-ui","hideChatDropdownMemoryItem":"chat-ui","chatTopBarInlineCreator":"chat-ui","showChatTopBarTools":"chat-ui","hideChatDropdownVoiceUpsell":"chat-ui","chatTopBarCard":"chat-ui","hideChatTopBarModelButton":"chat-ui","hideChatTopBarContextDot":"chat-ui","ds-feature-panel-chat-topbar":"chat-ui","ds-feature-panel-bulk-chat-research":"chat-ui","ds-feature-panel-chat-lorebook-manager":"writing","showBlockButtonOnMyCreations":"bot-tools","autoLoadMyCreations":"bot-tools","enableMyCreationsFilters":"bot-tools","myCreationsAutoLoadPages":"bot-tools","rememberMyCreationsView":"bot-tools","ds-feature-panel-my-creations-filters":"bot-tools","profileExportCard":"bot-tools","enableProfileExport":"bot-tools","ds-feature-panel-profile-export":"bot-tools","enableCharacterQolProfiles":"advanced","characterQolProfilesCard":"advanced","ds-feature-panel-character-qol-profiles":"advanced","ds-feature-panel-archive-community-themes":"blocking","ds-feature-panel-character-token-optimizer":"bot-tools","chatSearchLoadUntilMatch":"chat-ui","chatSearchCaseSensitive":"chat-ui","chatSearchRegex":"chat-ui","chatSearchShowFindButton":"chat-ui","chatSearchShowPanel":"chat-ui","chatSearchWholeWord":"chat-ui","chatSearchCard":"chat-ui","showChatSearch":"chat-ui","chatSearchExactPhrase":"chat-ui","ds-feature-panel-chat-search":"chat-ui","enableCreatorWritingAssistant":"bot-tools","creatorWritingAssistantCard":"bot-tools","creatorWritingDictionary":"bot-tools","creatorWritingUseBrowserAi":"bot-tools","creatorWritingTargetLanguage":"bot-tools","ds-feature-panel-creator-writing-assistant":"bot-tools","soundscapeAddScene":"appearance","soundscapeMasterVolumeValue":"appearance","soundscapeOnProfiles":"appearance","soundscapeShowChatControl":"appearance","soundscapeOnChats":"appearance","soundscapesCard":"appearance","soundscapeAudioStatus":"appearance","soundscapeMasterVolume":"appearance","soundscapeAudioUpload":"appearance","enableSoundscapes":"appearance","soundscapeOnChat":"appearance","soundscapeOnHome":"appearance","soundscapeAudioList":"appearance","soundscapeSceneList":"appearance","soundscapeOnOther":"appearance","soundscapeNewSceneName":"appearance","ds-feature-panel-soundscapes":"appearance","ds-feature-panel-previously-chatted-indicator":"saved","randomChatIncludeOpened":"blocking","randomChatUseLastHomeFilters":"blocking","randomChatIncludeFavorites":"blocking","randomChatIncludeLater":"blocking","randomChatSettingsCard":"blocking","showRandomChatButton":"blocking","ds-feature-panel-chat-list":"blocking","enableBotComparison":"blocking","showCopyBotInfoButtons":"blocking","cardClickBehavior":"blocking","cardWorkflowCard":"blocking","trackRecentlySeenBots":"blocking","showQuickDislikeButtons":"blocking","showQuickMoreLikeButtons":"blocking","showRecentlySeenButton":"blocking","recentlySeenLimit":"blocking","cardDensityMode":"blocking","showQuickLessLikeButtons":"blocking","showQuickNotInterestedButtons":"blocking","ds-feature-panel-card-workflow":"blocking","expandModelSelectorDescriptions":"writing","customizeModelQuickMenu":"writing","modelFavoriteNames":"writing","hideModelUpgradeButtons":"writing","modelQuickFavoritesOnly":"writing","modelHiddenNames":"writing","ds-feature-panel-model-selector":"writing","ds-feature-panel-chat-smart-folders":"chat-list","ds-feature-panel-private-lorebook-bridge":"writing","contextKeeperAutoCapture":"personas-memory","contextKeeperMessageButtons":"personas-memory","contextKeeperCard":"personas-memory","contextKeeperAutoMaxDetails":"personas-memory","contextKeeperRelevantRecall":"personas-memory","contextKeeperAutoEveryMessages":"personas-memory","contextKeeperAutoSensitivity":"personas-memory","contextKeeperAutoRecall":"personas-memory","contextKeeperRecallEverySends":"personas-memory","contextKeeperRecallMaxChars":"personas-memory","enableContextKeeper":"personas-memory","contextKeeperRecapSize":"personas-memory","ds-feature-panel-context-keeper":"personas-memory","hideFeatureReleasePopups":"browser","hideNotifications":"browser","hideTabNotificationBadge":"browser","notificationCleanupCard":"browser","autoReadNotifications":"browser","ds-feature-panel-premium-notifications":"browser","chatSceneNotesEnableBotApply":"writing","chatSceneNotesSettingsCard":"writing","chatSceneNotesAutoMode":"writing","enableChatSceneNotes":"writing","chatSceneNotesAutoInclude":"writing","ds-feature-panel-chat-scene-notes":"writing","showChatTagLinks":"bot-tools","showChatTagAddButtons":"bot-tools","ds-feature-panel-chat-tags":"bot-tools","messageBookmarksCard":"chat-ui","enableChatHistoryNavigator":"chat-ui","enableMessageBookmarks":"chat-ui","messageBookmarkButtons":"chat-ui","ds-feature-panel-chat-bookmarks":"chat-ui","ds-feature-panel-archive-website-link":"blocking","rulebookDiagnosticsCard":"chat-ui","enableRulebookDiagnostics":"chat-ui","ds-feature-panel-rulebook-diagnostics":"chat-ui","ds-feature-panel-archive-blocking-presets":"blocking","ds-feature-panel-chat-lorebook-recall":"writing","savedSnippetsCard":"writing","enableSavedTextSnippets":"writing","ds-feature-panel-saved-snippets":"writing","recommendationHideLaterBots":"blocking","recommendationShowReasonBadges":"blocking","recommendationSessionHideButtons":"blocking","recommendationPreferFavoriteCreators":"blocking","enableRecommendationHelpers":"blocking","recommendationOnlyLorebook":"blocking","recommendationAvoidWords":"blocking","recommendationHideNotInterested":"blocking","recommendationOnlyUnopened":"blocking","recommendationHideFavoriteBots":"blocking","recommendationRandomButton":"blocking","recommendationPreferredTags":"blocking","recommendationAvoidTags":"blocking","recommendationHideOwnBots":"blocking","ds-feature-panel-recommendation-helpers":"blocking"});
   const tabFor = panel => {
     const id = String(panel.getAttribute("src") || "").split("/").pop().replace(/\.js$/, "");
     return document.querySelector(`[data-dsq-feature-panel="${CSS.escape(id)}"]`)?.closest(".tab-page")?.dataset.page || "";
   };
   function scriptsForTab(tab) {
-    return [...document.querySelectorAll(`script[type="${lazyType}"][src]`)]
-      .filter(script => tabFor(script) === tab);
+    if (!groupedPanels) {
+      groupedPanels = new Map();
+      for (const script of document.querySelectorAll(`script[type="${lazyType}"][src]`)) {
+        const owner = tabFor(script);
+        if (!owner) continue;
+        if (!groupedPanels.has(owner)) groupedPanels.set(owner, []);
+        groupedPanels.get(owner).push(script);
+      }
+    }
+    return groupedPanels.get(tab) || [];
   }
   function loadPanel(declaration) {
     if (declaration.dataset.dsqLazyLoaded === "1") return Promise.resolve(true);
@@ -535,7 +545,9 @@ function applySettingsSectionDefault(settings = {}) {
             retry.textContent = `Retry loading ${feature.replace(/-/g, " ")} settings`;
             retry.addEventListener("click", () => {
               retry.disabled = true;
-              loadPanel(declaration).catch(() => { retry.disabled = false; });
+              hydrate(tabFor(declaration)).then(ok => {
+                if (!ok) retry.disabled = false;
+              }).catch(() => { retry.disabled = false; });
             });
             host.appendChild(retry);
           }
@@ -543,6 +555,19 @@ function applySettingsSectionDefault(settings = {}) {
           return;
         }
         declaration.dataset.dsqLazyLoaded = "1";
+        const feature = String(src || "").split("/").pop().replace(/\.js$/, "");
+        document.querySelector(`[data-dsq-feature-panel="${CSS.escape(feature)}"] [data-dsq-panel-retry]`)?.remove();
+        // These helpers previously attached at Settings startup, before
+        // their deferred DOM existed. Attach once as the panel appears.
+        if (feature === "chat-bubbles") {
+          setupBubbleResetControls?.();
+          updateAppearanceColorControlStates?.();
+          updateBubbleContrastWarnings?.();
+        } else if (feature === "quick-panel") {
+          setupMiniPanelPreview?.();
+        } else if (feature === "chat-backgrounds") {
+          renderChatBackgroundOptions?.();
+        }
         if (typeof optionsDataLoaded !== "undefined" && optionsDataLoaded &&
             typeof loadedSettingsSnapshot !== "undefined") {
           const current = window.__DSQ_FEATURE_SETTINGS_LOADERS__ || {};
@@ -559,33 +584,183 @@ function applySettingsSectionDefault(settings = {}) {
     inflight.set(declaration, promise);
     return promise;
   }
-  async function hydrate(tabName) {
-    if (!tabName) return false;
+  function hydrate(tabName) {
+    if (!tabName) return Promise.resolve(false);
+    if (inflightTabs.has(tabName)) return inflightTabs.get(tabName);
     const panels = scriptsForTab(tabName);
-    for (const panel of panels) await loadPanel(panel);
-    if (panels.length && typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
-      setupCollapsibleSettingsCards?.();
-      applySettingsSectionDefault?.(loadedSettingsSnapshot);
-      updateSettingDependencies?.();
-      applyPinnedSettingsSectionOrder?.();
-      applySettingsEnabledOnlyFilter?.();
-      refreshSettingsSectionShortcuts?.();
-      DS_FEATURE_INDEX_REFRESH?.();
-    }
-    return true;
+    if (!panels.length || panels.every(panel => panel.dataset.dsqLazyLoaded === "1"))
+      return Promise.resolve(true);
+    const promise = (async () => {
+      let added = false;
+      let allOk = true;
+      // Keep original page script ordering; a failure in one independent
+      // feature must not prevent the other panels from becoming usable.
+      for (const panel of panels) {
+        if (panel.dataset.dsqLazyLoaded === "1") continue;
+        try { await loadPanel(panel); added = true; }
+        catch (error) { allOk = false; console.warn("[QoL Settings] Deferred panel unavailable:", error); }
+      }
+      if (added && typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
+        setupCollapsibleSettingsCards?.();
+        applySettingsSectionDefault?.(loadedSettingsSnapshot);
+        updateSettingDependencies?.();
+        applyPinnedSettingsSectionOrder?.();
+        applySettingsEnabledOnlyFilter?.();
+        refreshSettingsSectionShortcuts?.();
+        DS_FEATURE_INDEX_REFRESH?.();
+      }
+      return allOk;
+    })().finally(() => inflightTabs.delete(tabName));
+    inflightTabs.set(tabName, promise);
+    return promise;
   }
   window.dsqHydrateFeaturePanelsForTab = hydrate;
   window.dsqHydrateAllFeaturePanels = async () => {
-    const tabs = [...new Set([...document.querySelectorAll(`script[type="${lazyType}"]`)].map(tabFor).filter(Boolean))];
-    // Yield between groups, keeping the search/Features UI responsive and
-    // avoiding one large DOM construction task.
-    for (const tab of tabs) {
-      await hydrate(tab);
+    // One cached ownership index for all tabs. Search/Feature views may ask
+    // explicitly for all panels; normal navigation loads only its own tab.
+    scriptsForTab("");
+    let allOk = true;
+    for (const tab of groupedPanels.keys()) {
+      if (!(await hydrate(tab))) allOk = false;
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-    return true;
+    return allOk;
   };
-  window.dsqDeferredFeaturePanelTabForControl = id => deferredControlTabs[String(id || "")] || "";
+  window.dsqUnhydratedFeaturePanels = () => {
+    scriptsForTab("");
+    return [...groupedPanels.values()].reduce((sum, panels) =>
+      sum + panels.filter(panel => panel.dataset.dsqLazyLoaded !== "1").length, 0);
+  };
+  const additionalDeferredControls = Object.freeze({
+    showPersonaLimitIndicator: "personas-memory",
+    enableCommandPalette: "control", commandPaletteShortcut: "control",
+    commandPaletteShowSavedItems: "control",
+    enableTranslation: "writing", translationProvider: "writing",
+    translationAutoAi: "writing", translationAutoUser: "writing",
+    botOrganizerExplorerFolders: "saved", enableBotOrganizer: "saved",
+    botEditorShowCharButton: "bot-tools", botEditorShowCustomSnippets: "bot-tools",
+    enableChatBubbleCustomization: "appearance", chatBubbleAiBackground: "appearance",
+    chatBubbleUserBackground: "appearance", chatBubbleAiText: "appearance",
+    chatBubbleUserText: "appearance", showQuickPanel: "appearance",
+    quickPanelPlacement: "appearance", showGenerationModel: "writing",
+    showGenerationMetadata: "writing", enableChatBackgrounds: "custom-pictures",
+    dsChatBackgroundsSettingsSlot: "custom-pictures",
+    "botCollections": "saved",
+    "botEditorShowContinueButton": "bot-tools",
+    "botEditorShowNoControlButton": "bot-tools",
+    "botEditorShowUserButton": "bot-tools",
+    "botOrganizerBulkTools": "saved",
+    "botOrganizerShowCardMeta": "saved",
+    "chatBubbleAiActionFont": "appearance",
+    "chatBubbleAiActionMode": "appearance",
+    "chatBubbleAiActionText": "appearance",
+    "chatBubbleAiBorder": "appearance",
+    "chatBubbleAiBorderOpacity": "appearance",
+    "chatBubbleAiBorderStyle": "appearance",
+    "chatBubbleAiBorderWidth": "appearance",
+    "chatBubbleAiCatEarLayout": "appearance",
+    "chatBubbleAiDecorationColor": "appearance",
+    "chatBubbleAiDecorationMode": "appearance",
+    "chatBubbleAiDialogueFont": "appearance",
+    "chatBubbleAiDialogueMode": "appearance",
+    "chatBubbleAiDialogueText": "appearance",
+    "chatBubbleAiFont": "appearance",
+    "chatBubbleAiOpacity": "appearance",
+    "chatBubbleAiRadius": "appearance",
+    "chatBubbleAiShadow": "appearance",
+    "chatBubbleAiShape": "appearance",
+    "chatBubbleAiTextMode": "appearance",
+    "chatBubbleUserActionFont": "appearance",
+    "chatBubbleUserActionMode": "appearance",
+    "chatBubbleUserActionText": "appearance",
+    "chatBubbleUserBorder": "appearance",
+    "chatBubbleUserBorderOpacity": "appearance",
+    "chatBubbleUserBorderStyle": "appearance",
+    "chatBubbleUserBorderWidth": "appearance",
+    "chatBubbleUserCatEarLayout": "appearance",
+    "chatBubbleUserDecorationColor": "appearance",
+    "chatBubbleUserDecorationMode": "appearance",
+    "chatBubbleUserDialogueFont": "appearance",
+    "chatBubbleUserDialogueMode": "appearance",
+    "chatBubbleUserDialogueText": "appearance",
+    "chatBubbleUserFont": "appearance",
+    "chatBubbleUserOpacity": "appearance",
+    "chatBubbleUserRadius": "appearance",
+    "chatBubbleUserShadow": "appearance",
+    "chatBubbleUserShape": "appearance",
+    "chatBubbleUserTextMode": "appearance",
+    "compactGenerationMetadata": "writing",
+    "contextWarningBrowserNotifications": "writing",
+    "contextWarningManualLimit": "writing",
+    "contextWarningShowMeter": "writing",
+    "contextWarningThreshold": "writing",
+    "ds-feature-panel-bot-editor-snippets": "bot-tools",
+    "ds-feature-panel-bot-organizer": "saved",
+    "ds-feature-panel-chat-backgrounds": "custom-pictures",
+    "ds-feature-panel-chat-bubbles": "appearance",
+    "ds-feature-panel-command-palette": "control",
+    "ds-feature-panel-generation-metadata": "writing",
+    "ds-feature-panel-personas": "personas-memory",
+    "ds-feature-panel-quick-panel": "appearance",
+    "ds-feature-panel-translation": "writing",
+    "enableContextWindowWarning": "writing",
+    "libreTranslateUrl": "writing",
+    "messageTimestamp24Hour": "writing",
+    "messageTimestampDateFirst": "writing",
+    "messageTimestampShowSeconds": "writing",
+    "persistSpicyChatUserAppearance": "appearance",
+    "quickPanelAutoCollapseOverlap": "appearance",
+    "quickPanelCustomXPercent": "appearance",
+    "quickPanelCustomYPercent": "appearance",
+    "quickPanelDefaultClosed": "appearance",
+    "quickPanelDraggable": "appearance",
+    "quickPanelEnabledByDefaultInTab": "appearance",
+    "quickPanelMaxHeightPercent": "appearance",
+    "quickPanelShowAutoAsterisk": "appearance",
+    "quickPanelShowAutoVoice": "appearance",
+    "quickPanelShowCharacterProfile": "appearance",
+    "quickPanelShowChatMessageSearch": "appearance",
+    "quickPanelShowChatSearch": "appearance",
+    "quickPanelShowChatSort": "appearance",
+    "quickPanelShowContextKeeper": "appearance",
+    "quickPanelShowCreatorPreview": "appearance",
+    "quickPanelShowCustomPictures": "appearance",
+    "quickPanelShowExport": "appearance",
+    "quickPanelShowFeatureSummary": "appearance",
+    "quickPanelShowFillNow": "appearance",
+    "quickPanelShowFocusMode": "appearance",
+    "quickPanelShowImageGenerator": "appearance",
+    "quickPanelShowLoadAll": "appearance",
+    "quickPanelShowLoadedMessageCount": "appearance",
+    "quickPanelShowOoc": "appearance",
+    "quickPanelShowOptions": "appearance",
+    "quickPanelShowPersona": "appearance",
+    "quickPanelShowRulebookDiagnostics": "appearance",
+    "quickPanelShowSavedSnippets": "appearance",
+    "quickPanelShowScanVisible": "appearance",
+    "quickPanelShowSmartFilterPins": "appearance",
+    "quickPanelShowSoundscapes": "appearance",
+    "quickPanelShowStatus": "appearance",
+    "quickPanelShowTranslation": "appearance",
+    "quickPanelStatusShowBlocked": "appearance",
+    "quickPanelStatusShowOpened": "appearance",
+    "quickPanelUiScale": "appearance",
+    "quickPanelWidth": "appearance",
+    "showGenerationElapsed": "writing",
+    "showGenerationSettings": "writing",
+    "showMessageTimestamps": "writing",
+    "translationAllowRemoteFallback": "writing",
+    "translationAutoGreeting": "writing",
+    "translationGreetingButton": "writing",
+    "translationPerChatControls": "writing",
+    "translationProtectedTerms": "writing",
+    "translationShowMessageButtons": "writing",
+    "translationTargetLanguage": "writing",
+    "translationUnderstoodLanguages": "writing"
+
+  });
+  window.dsqDeferredFeaturePanelTabForControl = id =>
+    deferredControlTabs[String(id || "")] || additionalDeferredControls[String(id || "")] || "";
 })();
 
 // The mobile section picker must work independently from options.js. That large

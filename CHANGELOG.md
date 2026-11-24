@@ -1,207 +1,147 @@
+## 0.2.97
+- Added a separate floating long-chat controls toggle: hiding the bar keeps older-message folding enabled; re-enable it to reveal older messages.
+- Coalesced overlapping read-only Bot Status queue/Settings refreshes without caching completed queue snapshots.
+- Reduced count-triggered queue rewrites for 2,000+ target scans (20 results or the unchanged 10-second checkpoint limit); unfinished IDs stay resumable.
+- Removed a quadratic lookup while preparing large interrupted Bot Status scan resumes.
+- Verified initial and final saved queue checkpoints; bounded final status-delta persistence and saved the run summary before optional telemetry.
+- Improved held-check review with explicit actionable/non-actionable reasons; preserved saved IDs and blocked/unknown protections.
+- Added pseudonymous numeric Bot Status telemetry fingerprints and separate HTTP-200-unconfirmed signals without recording private bot content.
+- Differentiated stale, loading, missing-receiver, and messaging failures in live runtime diagnostics; added an on-demand recheck without tab reloads.
+- Included ping transport failure counts in read-only support reports and stopped scans safely if a later held-queue read fails.
+- Skipped repeated Bot order grid/card walks when the current listing route, DOM revision and sort mode have not changed.
+- Stopped allocating a temporary anchor array for every card while checking listing sort order.
+- Improved early Settings reads when Firefox, Orion, or another supported browser uses a different WebExtension API implementation.
+- Kept lightweight diagnostics available through the working runtime listener, including on paused tabs.
+- Allowed early auth and metadata bridges to recover from temporary extension-script load failures.
+- Preserved v0.2.96 route-specific performance diagnostics and existing listing optimizations.
+
+## 0.2.96
+- Improved lightweight diagnostic listener registration recovery when a browser bridge appears after core startup.
+- Distinguished initializing, paused, and incomplete runtime states from failed lightweight/full diagnostic transport.
+- Added on-demand, current-route Long Task summaries for Home, Favorites, and Recommendations using the existing observer.
+- Reduced repeated card-menu DOM searches on mobile and large bot listings.
+- Stopped recreating unchanged recommendation preference badges on every update.
+- Reduced temporary allocations in Favorites list change detection.
+- Show the optional Report Link Collector button only on Home and Recommendations.
+- Made page updates lighter by reducing temporary allocations in DOM change handling.
+- Reduced slowdown when many bots share a display name in Bot Status.
+- Fixed Bot Status checks getting stuck when their original saved list changes.
+- Added individual held-check reasons and safe manual rechecks in Bot Status Center.
+- Fixed the stale / held scan button remaining disabled when retryable checks exist.
+- Archive presets can now be browsed and chosen before turning on filtering.
+- Made Archive Blocking Presets easier to choose, search, and customize by franchise, character, group, or theme.
+- Improved persona picker responsiveness by skipping unchanged option refreshes.
+- Reduced repeated card scans when adding Later buttons to large bot listings.
+- Reduced duplicate Bot Status helper checks during scans without changing result handling or rate limits.
+- Improved diagnostics for discarded, loading, and unresponsive browser tabs.
+- Improved Archive preset loading compatibility across supported browsers and Android WebView.
+- Reduced leftover Later-button references after long browsing sessions.
+
+## 0.2.95
+- Fixed Android QoL sometimes loading the website without starting its features.
+- Fixed some bot cards appearing out of order after listings refreshed.
+- Made bot listings faster by updating changed cards without rescanning every bot.
+- Prevented old card filters from continuing after switching pages.
+- Made Saved Bots Hub paging, search and selection faster on large collections.
+- Reduced unnecessary work when finding bot cards and browsing saved lists.
+
+## 0.2.94
+- Made Saved Bots Hub search and sorting faster on large lists.
+- Reduced delays when opening, filtering, and selecting saved bots.
+- Made Blocked and Opened history cleanup faster with large collections.
+- Reduced repeated archive and chat-link lookups during Bot Status scans.
+- Improved startup error detection when QoL does not finish loading.
+
+## 0.2.93
+- Improved GitHub Backup reliability when uploaded files take time to appear.
+- Improved error messages when Android needs a Cloud sync compatibility update.
+- Made Saved Bots Hub smoother on large collections.
+- Reduced page loading by starting more optional tools only when needed.
+- Made nine more Settings panels load when opened.
+- Fixed Save now changing settings in panels that had not been opened.
+- Fixed Settings Health Check reporting unopened controls as missing.
+- Improved Settings search and Saved Recovery cleanup.
+
 ## 0.2.92
-- Made Report Link Collector an optional OFF-by-default Advanced setting; saved links remain available in the popup when disabled.
-- Deferred independent Settings feature panels until their tab, Search, or Features catalogue requests them; initial Settings no longer constructs hidden panel DOM.
-- Hydrated deferred controls from saved settings, preserved autosave and section collapse state, and restored deferred deep links and pinned-section navigation.
-- Shared in-flight panel loads and allowed retries after failed imports; no new polling, observers, migrations, or storage cleanup.
-- Added a local bot-report link collector with a + icon on listing pictures and Copy all / Clear list in the QoL popup; no automatic reporting or Archive uploads.
-- Serialized collector writes across tabs, deduplicated canonical bot links, and kept saved links until explicitly cleared.
-- Reused the existing card-mutation pipeline and one delegated click listener; stopped repeated full card-cache connectivity walks on unchanged listings.
-- Reused one membership index per Saved Bots manager render instead of repeatedly searching large Blocked, Opened, Later and Favorites arrays.
-- Preserved existing Settings hydration and backup/storage data formats; no unverified bulk panel rewrites or new polling.
-- Deferred Creator Backup manager rendering until Bot Tools or an explicit export opens; kept its existing Settings entry points and retry behavior.
-- Deferred Chat Bookmarks, chat backgrounds and chat Lorebook manager behind route/feature demand, preserving bookmark navigator initialization order.
-- Deferred 15 more chat, listing and creator helpers behind route and enabled-setting demand, reducing startup parsing without changing their settings.
-- Kept one existing module loader, shared import promises and failure/retry behavior; no new polling, observers or background workers.
-- Cut repeated Settings pinned/recent shortcut card walks to one indexed pass and cached pin-sort keys; skipped DOM reordering when cards are already in the correct order.
-- Avoided redundant Settings shortcut and pin-label DOM writes during ordinary refreshes; preserved search, reset, section order and saved values.
-- Kept Full and Custom Lite ownership, Orion compatibility, and all existing local/Archive data and safety checks unchanged.
-- Improved Orion/iOS WebExtension startup by accepting callback- or Promise-based storage replies in early chat bridges, including Promise-only APIs.
-- Recognized working extension contexts without runtime.id; kept invalid-context recovery conservative on iOS without new polling.
-- Scoped iOS WebKit to current-page capabilities while preserving desktop-only settings for later use; macOS Orion remains desktop.
-- Labeled unsupported helper-tab and background-worker controls in iOS Settings instead of attempting them silently.
-- Preserved saved data, encrypted backups, Android shim integration and existing Chrome/Firefox paths; no new polling or automatic reloads.
-- Deferred Bot Organizer, scroll/swipe navigation, Translation, Lorebook tag expansion and History Navigator until their settings need them.
-- Reused the existing feature loader, with route-change retries for failed optional imports; no polling or new observer.
-- Deferred blocked-bot Archive cleanup tools until requested, with retry-safe Settings loading.
-- Reduced repeated Settings feature-catalogue ownership, platform and status calculations per render.
-- Removed per-setting DOM lookups from Settings' Show enabled only filter while keeping dynamically added controls visible.
-- Kept Custom Lite Bookmarks history support and Lorebook tag-setting ownership; preserved Chrome, Firefox, Android, Orion and saved data.
+- Added an optional Report Link Collector for saving bot links from card pictures.
+- Added Copy all and Clear list in the extension popup.
+- Made bot listings and Saved Bots Hub more responsive.
+- Reduced startup work by loading optional tools only when needed.
+- Made many Settings sections, backups, and Archive tools load on demand.
+- Improved Settings search, pinned sections, and saved-value loading.
+- Improved Orion Browser and iOS extension compatibility.
+- Fixed optional tools getting stuck after a failed load or page change.
 
 ## 0.2.91
-- Made full card descriptions appear through CSS as soon as Settings loads, without waiting for the slow listing pass or repeatedly scanning normal card text.
-- Retained JS description expansion in browsers without native :has() selector support; disabling the option restores native clamping without new observers.
-- Required fresh Bot Status verification for Archive transfers and rejected snapshots newer than their verified check or inconsistent with observed fields.
-- Rechecked each Archive bundle against saved snapshots immediately before sending; pending scans and stale copies remain blocked for both private and public routes.
-- Saved acknowledged Archive chunks individually so a later bundle failure does not automatically resend previously accepted copies; existing fingerprints and data remain intact.
-- Restricted Text Normalization to bot, creator, listing and Lorebook/Rulebook metadata; removed chat-message rewriting entirely so long dashes and other generated text stay exactly as SpicyChat renders them, even when normalization is enabled.
-- Limited RP Format Repair and chat text-replacement observers to the native message list instead of monitoring the entire SpicyChat page; disabled features remain disconnected.
-- Prevented a chat replacement preset from applying when chat replacements are disabled, without changing saved rules or message content.
-- Coalesced concurrent large Settings-store reads per store and read independent stores concurrently, reducing avoidable IPC serialization without caching stale records.
-- Supported callback- and Promise-based runtime and storage replies in Settings and card-token helpers for Android WebView compatibility, without adding retry loops or changing stored data.
-- Bounded parallel Settings large-store reads to two stores to avoid excess Android WebView decoding and memory pressure.
-- Reduced repeated content-script granular-settings IPC reads by prefetching known setting keys and fetching only new keys; also handled callback/Promise storage results without changing the saved format.
-- Preserved independent chat mute and word-censor activation without relying on generic chat-replacement enablement.
-- Blocked private Archive uploads and public submissions while a Bot Status scan is running or has queued rechecks; old Settings buttons cannot bypass this check.
-- Rechecked saved scan queues immediately before each Archive network upload, and excluded held/out-of-scope and unverified Bot Status copies until safely checked.
-- Showed the specific pending-scan reason on disabled Archive buttons without scanning or fingerprinting thousands of saved copies unnecessarily.
-- Kept existing Archive fingerprints for temporarily held bots; no stored snapshots, scan queues, or upload history are deleted.
-- Reduced Saved Bots Hub refresh work for large lists by building known entries once and counting list memberships in one pass.
-- Reused the existing Settings storage-change listener for Archive safety updates; no new polling, observers or background workers.
-- Separated the requested model, server engine and explicitly resolved actual model in Generation Metadata; missing actual-model fields are labeled Not reported rather than guessed.
-- Displayed a generic server response model only as unverified metadata, never as proof of an underlying model or automatic fallback.
-- Kept the actual-model status available when S.AI Toolkit draws the overlapping generation statistics, without duplicating its model and timestamp blocks.
-- Preserved model details across message-history reloads and cleared stale resolved-model data when a new server response reuses a message ID; no changes to saved chat content or requests.
-- Fixed Bot Status scans getting stuck when a background pacing request or helper check never answered.
-- Saved Bot Status scan checkpoints every 10 checks or about 10 seconds instead of every 50 checks or 30 seconds, reducing repeated checks after an interruption.
-- Kept incomplete Bot Status scans recoverable with clearer last-checkpoint details and interrupted-run feedback; existing results and pending IDs are preserved.
-- Added time limits to Bot Status diagnostics, delta persistence and helper cleanup so background delays cannot indefinitely block scan completion.
-- Reduced Research Export Start / Resume work to new and changed conversations plus a small rotation of older verification checks, instead of processing every saved chat each run.
-- Kept the full saved conversation catalog, previously verified ZIP parts, native Memory checkpoints and GitHub Research records intact when older chats are deferred.
-- Added a compact, resumable local index of verified research backups; existing completed archives are indexed automatically on the first incremental run.
-- Rechecked active older chats when they move into the newest conversation list, while avoiding repeated per-bot scans for unchanged recent results.
-- Added Verify all to recheck every saved chat history, including older message edits, without clearing existing downloads; Fresh still rebuilds a standalone archive.
-- Made export progress and startup diagnostics show the smaller active queue separately from the total saved conversation catalog.
-- Kept bounded older-history audits, failed-history retries, and safe fallback for missing or incomplete local/GitHub backups; no continuous polling or new background workers.
-- No changes to Android, SpicyChat Archive, encrypted GitHub backup formats, or saved chat content.
-
-- Improved S.AI Toolkit v1.3.1 compatibility by detecting feature ownership individually rather than suppressing QoL features whenever Toolkit is present.
-- Removed retired Toolkit WYSIWYG detection and recognized its current settings dialog without introducing permanent observers or polling.
-- Kept generation metadata capture independent of Toolkit's visual statistics, including QoL Context Window and Memory diagnostics.
-- Deferred overlapping metadata, Generation Profiles, Hide For You and failed-message recovery only when Toolkit's corresponding feature is confirmed active.
-- Let SpicyChat native Chat Appearance retain its chosen dialogue colors when QoL chat bubbles are disabled.
-- Reused an authenticated Less Like/More Like helper briefly across separate confirmed rating actions, then closed it after an idle period.
-- Protected user-navigated tabs from rating-worker cleanup, serialized individual Less Like/More Like actions, and kept existing deduplication and ambiguous-request safeguards.
-- Clarified that a running Bot Status resume queue may reflect an extension reload; checkpoints and saved results remain intact.
-- Left creator-profile and Rulebook attachment issues for reproduction rather than risking speculative listing or picker changes.
+- Made full bot descriptions appear faster on cards.
+- Prevented bots with unfinished or unverified scans from being sent to the Archive.
+- Improved Archive upload recovery after a partially completed upload.
+- Fixed Text Normalization unexpectedly changing chat replies.
+- Improved RP Format Repair and text replacement responsiveness.
+- Made Bot Status scans easier to resume after interruptions.
+- Improved Research Export reliability and backup reuse.
+- Added clearer generation model information when SpicyChat reports it.
+- Improved S.AI Toolkit compatibility and chat appearance colors.
+- Improved Less Like and More Like helper reliability.
+- Reduced unnecessary Settings and saved-bot refresh work.
 
 ## 0.2.90
-
-- Kept Bot Organizer's search and Select bots toolbar off Story Mode pages, and removed leftover listing controls when navigating into a story.
-- Improved automatic persona-limit detection using verified SpicyChat subscription roles paid_minimal, paid_basic and paid_premium, while preferring an explicit account quota and retaining the manual fallback.
-- Measured Research Export's start-to-run lock wait and pre-history startup phases separately from message downloads, including selection discovery and GitHub summary lookup.
-- Reused one IndexedDB connection while a Research Export runs instead of reopening it for every conversation checkpoint; transaction commit checks and saved data are unchanged.
-- Improved native Lorebook entry-count detection when SpicyChat moves the counter outside its original header or displays thousands separators; incomplete 100-of-629 responses are still rejected rather than saved.
-- Preserved existing Research Export checkpoint/ZIP formats, GitHub encryption, Android separation and all stored settings; no tests folder is included in the changed-files package.
-
-- Start / Resume now looks for recently added bots and conversations automatically instead of relying only on the last saved selection.
-- Checks verified GitHub Research summaries against fresh conversation counts and existing local checkpoints to skip unnecessary history downloads for unchanged chats.
-- Reuses complete GitHub-only research backups after checking a fresh latest-message page, without pretending a local ZIP was recreated.
-- Falls back to the usual safe history checks when GitHub is disabled, locked, unavailable or has no matching verified record.
-- Gradually updates older GitHub Research backup summaries without uploading the same full chat records again.
-- Periodically rechecks older chats, keeps previously downloaded ZIPs and checkpoints intact, and preserves Fresh as a full standalone re-download.
-- Shows GitHub-backed reuse in Research Export progress and ZIP metadata, while keeping private message text out of the summary index.
-
-- Reduced Settings startup work by checking each section's reset controls in one pass instead of repeatedly searching for every possible setting.
-- Deferred the Features catalogue until its tab opens, and stopped rebuilding its cards when settings change on unrelated tabs.
-- Kept section Reset buttons, Features search, saved category states, auto-save and existing settings behavior unchanged.
-- Streamed large verified GitHub Research records into bounded 110k-character chunks, yielding between serialization batches instead of blocking the Research Export tab with one huge `JSON.stringify` call. Preserved the existing background staging contract and 79-million-character safety limit.
-- Awaited Rulebook, Story Moments and OOC extraction before submitting conversation records to GitHub staging, so those fields are no longer accidentally omitted from staged backups.
-- Reduced repeated scans of staged ZIP entries during part verification by counting each conversation's files once per part. Existing incremental ZIP files, download verification, saved checkpoints and GitHub encryption flow are unchanged.
-- No changes to Android, the Archive, the ZIP worker, or any Settings storage format.
-- Bot Status scanning (63 KB) and Blocked Bulk Dislike/Less Like (65 KB) now load from Settings only when their tabs or controls need them. Normal Settings startup no longer evaluates these engines.
-- Retained original scan queues, checkpoint persistence, rate limits, pending-state UI and feedback validation. First-use loader shares one in-flight request and retries failed module loads.
-- Added a regression test for deferred registration, module isolation and retry behavior. No new polling or observers.
-- Reuse compiled name, tag, word and creator blockers when Favorites/Later or other membership lists change; live block verification still rereads the card.
-- Reuse already prepared card fields for read-only blocking diagnostics.
-- Skip unrelated granular background Settings writes, and only reconfigure alarms when their own saved fields actually change.
-- Classify each native card-mutation batch once when both changed-card and added-card decisions are needed.
-- Process dirty chat-message roots through a persistent newest-first queue instead of recollecting and ordering the full chat history for every chunk.
-- Reuse normalized chat-text results while the same native text and normalization settings are unchanged; restore original visible text when the feature is disabled.
-- Listing Refill and My Creations Load More now ignore unrelated DOM mutations while watching for newly added card IDs, with a full count check at timeout.
-- My Creations fingerprinting uses a Set rather than quadratic duplicate-ID searches on large lists.
-- Optional-module diagnostics now include the failing module path and error, without changing the Android-native compatibility contract.
-- Clear the pending message queue on normal-profile passes, route changes, and history-export resets to avoid retaining detached chat nodes; wait for native edit completion instead of scheduling empty passes.
-- No changes to exported chats, saved settings, the Research Export worker, GitHub backup encryption, or Android APK files.
+- Fixed Bot Organizer controls showing on Story Mode pages.
+- Improved persona limit detection for different subscriptions.
+- Fixed Lorebook backups missing some entry counts.
+- Improved Research Export resume, backup reuse, and missing Rulebook data.
+- Made large Research Export uploads more responsive.
+- Reduced Settings startup work by loading more tools only when needed.
+- Improved the Features catalogue, bot listings, and long-chat performance.
 
 ## 0.2.89
-- Fixed RP Format Repair missing most narration in long greetings and mixed dialogue, with safer full-message edit previews.
-- Kept the RP edit shortcut separate from the display toggle and removed RP controls when the feature is disabled.
-- Improved RP Format Repair for unformatted greetings and mixed narration/dialogue; kept bold inner thoughts intact.
-- Fixed GitHub Research progress resetting each batch and added bounded retries after temporary upload failures.
-- Extended text normalization to displayed chat messages, using the existing changed-message updates without editing saved replies.
-- Fixed GitHub repository verification hiding successful results behind old errors and resetting encryption unlocks on repeated verification.
-- Replaced raw repository-list output with a clear selection message.
-- Fixed Rulebook cards not opening in new tabs with Ctrl+click, middle-click or the right-click menu.
-- Added a way to send completed Research Export checkpoints to GitHub without re-exporting chats.
-- Made GitHub Research upload status and setup requirements clearer; syncing still follows the saved backup categories.
-- Reduced Research Export panel startup checkpoint reads and narrowed Later-button updates to changed listing cards.
-- Fixed chat-message avatars sometimes animating after SpicyChat re-renders them or replaces their frozen frame.
-- Reused verified unchanged Research Export histories instead of rebuilding every message file or writing the full checkpoint again.
-- Exported changed chats as incremental ZIP parts; Fresh still makes a complete archive. Earlier ZIP parts remain necessary for reused chats.
-- Avoided retransferring already-staged GitHub research records and protected research scans from duplicate helper-tab runs where supported.
-- Added Research Export tests for unchanged and updated chats, archive verification and GitHub staging.
-- Reduced repeated listing-card collection by reusing the changed-card queue and shared card cache.
-- Moved animation controls, exact message counts and previously chatted indicators into the existing on-demand loader.
-- Improved route-change handling and reduced idle fallback checks without adding observers or timers.
-- Avoided unnecessary Memory Manager row updates and inactive-manager cleanup work.
-- Reduced unrelated background alarm updates when changing individual settings.
-- Made automatic GitHub backups less disruptive during active chats and reduced research staging overhead.
-- Split Research Export fallback work into smaller chunks to keep the page more responsive.
-- Added source regression checks for changed-card batching, background setting wakeups and build assets.
-- Cleaned up repetitive source comments and shortened Settings and feature descriptions.
-- Kept QoL Cloud, GitHub backups, Inspector tracing, saved data and existing feature settings intact.
+- Improved RP Format Repair for long greetings and mixed dialogue.
+- Fixed Rulebook links opening incorrectly in new tabs.
+- Improved GitHub Backup setup, verification, and error messages.
+- Improved Research Export progress, resume, and GitHub checkpoints.
+- Made unchanged chat backups reuse verified copies.
+- Improved ZIP export options and recovery.
+- Fixed animated chat avatars restarting unexpectedly.
+- Reduced unnecessary card scans, Settings work, and idle activity.
+- Improved Memory Manager and creator-tool responsiveness.
 
 ## 0.2.88
-- Restored a clear Add device control for QoL Cloud and added GitHub backup device-connection guidance.
-- Added unofficial hover explanations for chatbot tags in search filters and character creation without changing native tags.
-- Added experimental GitHub backups alongside QoL Cloud, with built-in Device Flow login, repository selection and refreshed tokens.
-- Added encrypted backups with password unlock, remembered-device keys, and explicit category-level plaintext exceptions.
-- Added incremental, integrity-checked backup snapshots with five recent recovery points and safe cross-device conflict detection.
-- Added selective restore for settings, saved lists, other QoL data and selected media without clearing unselected data.
-- Added Research Export backup and recovery of verified histories, Memories, Rulebook data and character metadata, reusing unchanged records.
-- Added manual Backup Now / Sync Now actions, backup progress, and 12-hour active-tab synchronization.
-- Improved Inspector v0.1.7 tracing and background-event replay handling, avoiding duplicate events and private route details.
-- Fixed Mini Panel refreshes scanning listing cards on chat pages and reduced repeated listing status work.
-- Fixed the separate Later sidebar/Favorites shortcut and Later-page filters reverting to off instead of saving their settings.
-- Fixed New V2 Memory JSON imports choosing the actual save control and recognizing updated memory cards, with clearer private diagnostics.
-- Improved RP Format Repair with a reviewed native-message edit preview for missing action markers; messages save only through SpicyChat.
-- Changed Research Export Scan bots to check recent bots and reuse older verified chat lists; Full scan remains available.
-- Preserved existing QoL Cloud accounts, manual research ZIP exports, checkpoints and existing user data.
+- Added GitHub Backup with account sign-in, encryption, and recovery options.
+- Added safer backup snapshots and selective restore across devices.
+- Added manual backup and sync actions, with automatic checks every 12 hours.
+- Expanded Research Export to save verified chat histories, Memories, Rulebooks, and bot details.
+- Added helpful tag explanations in searches and character creation.
+- Fixed Later navigation and filters not saving correctly.
+- Improved Memory import, RP Format Repair, and chat performance.
+- Improved Inspector diagnostics and duplicate-event handling.
 
 ## 0.2.87
-- Improved Later buttons on Home and listings by updating only changed cards and processing large updates in small batches.
-- Reduced startup and large-listing slowdowns by loading more tools on demand and reusing card information.
-- Added Archive Blocking Presets for franchises, characters, and themes, with customizable exceptions.
-- Added Research Export Quick scan for recent and uncached bots; the original Scan bots still performs a full scan.
-- Made Research Export restore its previous bot selection and download only newer chat history when possible, with safe recovery if history changes.
-- Improved Research Export checkpoints, resume reliability, download verification, and warnings for incomplete data.
-- Expanded research ZIPs with Rulebook state, Story Moments, and OOC/Director Mode directive records.
-- Improved character and Lorebook metadata caching, retry options, and reporting of failed or incomplete records.
-- Updated Lorebook backups for SpicyChat's new infinite scrolling and added checks against incomplete backups or merges.
-- Fixed Android Lorebook backup and JSON import issues, with easier-to-use merge controls on smaller screens.
-- Restored native mobile chat headers and reply actions while typing, and avoided hiding chats before native content loads.
-- Fixed Memory Manager V2 JSON imports with SpicyChat's updated inline memory editor.
-- Improved Inspector v2 timing details for slow features and Research Export while reducing repetitive diagnostics.
-- Improved Home and Chats promotional-banner dismissal using SpicyChat's native close button when available.
+- Improved Later buttons and performance on large bot listings.
+- Added Archive Blocking Presets with exceptions for characters and themes.
+- Added faster Research Export scans and improved resume options.
+- Expanded research backups with Rulebooks, Story Moments, and OOC information.
+- Improved Lorebook backups with better handling of long lists and incomplete results.
+- Fixed Android Lorebook backup and JSON import issues.
+- Fixed mobile chat headers, reply controls, and Memory imports.
+- Improved Inspector timing reports and native banner dismissal.
 
 ## 0.2.86
-- Improved Research Export responsiveness with fewer progress redraws and a dedicated lightweight export tab.
-- Fixed Example Dialogue metadata availability and repaired previously saved character records without extra profile requests.
-- Added retries for partially retrieved linked Lorebooks and clearer export phase timings and API diagnostics.
-- Added clearer initial synchronous-call timing for runtime steps without changing chat scheduling or recovery.
-- Added a Character Token Optimizer to chatbot creation, with per-field estimates, reviewable suggestions and manual Apply actions.
-- Added step-by-step Bulk Research Export progress with a live, stage-specific ETA for bot discovery, conversation scanning, and export.
-- Improved startup performance by deferring more creator, Persona, chat, Lorebook, and Smart Filter tools until needed.
-- Reduced delays from loading independent modules while preserving their required dependencies.
-- Delayed the heavy Diagnostics/Support Settings code until those tools are used.
-- Kept saved export checkpoints, enabled-feature behavior, and native rating/recovery safeguards unchanged.
-- Added Archive Community Themes with reviewed/candidate trust choices, historical-only warnings, per-bot exceptions and batched, version-cached public bot-ID lookups.
-- Kept local Implied Themes independent and added explicit human-review suggestions without uploading private data.
+- Improved Research Export speed, progress, and recovery from incomplete downloads.
+- Fixed missing character metadata in saved backups.
+- Added a Character Token Optimizer with reviewable suggestions.
+- Made more optional creator, chat, and Lorebook tools load only when needed.
+- Made Diagnostics and Support load only when opened.
+- Added Archive Community Themes and customizable block exceptions.
 
 ## 0.2.85
-- Improved startup performance by loading more features only when needed.
-- Added guides and clearer explanations for Memory, Context Keeper, Lorebooks, Rulebooks, and creator tools.
-- Added adjustable native Memory checks and a manual Check now action.
-- Made backup, import, Replace, and cloud sync safety information clearer.
-- Improved Creation Audit explanations and browser/platform support guidance.
-- Added Implied Blocked Themes for bots with untagged cheating, emotional affairs, NTR, cuckolding, or suspicious relationship dynamics.
-- Improved implied-theme detection using audited examples, including wedding-weekend and hidden relationship-history scenarios, while reducing false positives.
-- Expanded bulk research exports with separate character metadata files, accessible linked content, and better retry and completeness reporting.
-- Fixed Tab Cleanup Settings failing to load after startup optimizations.
-- Reduced unnecessary Bot Status storage reads and improved storage performance diagnostics without changing saved checkpoints.
-- Reduced repeat Dislike helper checks and unnecessary chatbot card updates while preserving native rating verification.
-- Improved Favorites scanning and browsing by avoiding repeated filtering, imports and unchanged history writes.
-- Clarified Favorites listing, account and locally saved counts, with authenticated verification when available.
+- Improved startup speed by loading more features when needed.
+- Added clearer guides for Memory, Lorebooks, Rulebooks, and creator tools.
+- Added adjustable native Memory checks and a Check now button.
+- Improved backup, import, and Cloud sync safety information.
+- Added Implied Blocked Themes for untagged relationship and cheating themes.
+- Expanded Research Export with character and Lorebook details.
+- Fixed Tab Cleanup Settings failing to open.
+- Improved Bot Status, Favorites, and Dislike helper performance.
 
 ## 0.2.84
 - Kept SpicyChat's native chat header visible while typing by default, with an independent option to restore native hiding.

@@ -10,6 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const routeCheckStartedAt = performance.now();
 
     DS.state.lastUrl = location.href;
+    DS.syncListingLongTaskDiagnosticRoute?.();
     clearSlowThrottle();
     DS.invalidatePageStateCache?.();
     DS.handleLorebookWorkflowRouteChange?.();

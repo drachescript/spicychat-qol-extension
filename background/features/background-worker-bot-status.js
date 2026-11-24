@@ -29,6 +29,13 @@ function createBotStatusWorkerSessionId() {
   return `bot-status:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// These values live only for this background-worker instance. Session storage
+// still provides recovery after a service-worker restart.
+let lastRememberedBotStatusWorkerState = '';
+let lastReusedBotStatusReadyLogAt = 0;
+let lastReusedBotStatusReadyLogTab = 0;
+let suppressedReusedBotStatusReadyLogs = 0;
+
 function botStatusWorkerLastActivityAt() {
   return Math.max(Number(botStatusWorkerHeartbeatAt || 0), Number(botStatusWorkerActivityAt || 0));
 }
@@ -122,11 +129,14 @@ async function rememberBotStatusWorker(tabId, owned, sessionId = botStatusWorker
     botStatusWorkerActivityAt = 0;
     botStatusWorkerRequestActive = false;
   }
+  const signature = `${id || 0}:${!!owned}:${nextSessionId}`;
+  if (lastRememberedBotStatusWorkerState === signature) return;
   await storageSessionSet({
     [BOT_STATUS_WORKER_SESSION_TAB_KEY]: id || 0,
     [BOT_STATUS_WORKER_SESSION_OWNED_KEY]: !!owned,
     [BOT_STATUS_WORKER_SESSION_ID_KEY]: nextSessionId
   });
+  lastRememberedBotStatusWorkerState = signature;
 }
 
 async function restoreBotStatusWorkerSession() {
@@ -197,15 +207,33 @@ async function prepareBotStatusWorker({ forceOwnHelper = false } = {}) {
   }
 
   if (tab?.id) {
+    // One item-result often arrives only ~150ms after the preceding one.
+    // Re-probing a known live, owned helper for every item caused thousands of
+    // duplicate ready events and session writes in a single Bot Status scan.
+    // The actual API request still validates each result; its existing retry
+    // path forces a new probe if the helper stops responding.
+    if (botStatusWorkerOwned && !tab.discarded &&
+        isBotStatusWorkerUrl(tab.url || tab.pendingUrl || "") &&
+        botStatusWorkerLastActivityAt() > 0 &&
+        Date.now() - botStatusWorkerLastActivityAt() < 3000) {
+      return { tabId: Number(tab.id), owned: true, ready: true,
+        reused: true, sessionId: botStatusWorkerSessionId || "" };
+    }
     const ready = await probeBotStatusWorker(Number(tab.id), botStatusWorkerOwned ? 10000 : 1500);
     if (ready?.ready) {
       await rememberBotStatusWorker(Number(tab.id), !!botStatusWorkerOwned, ready?.sessionId || botStatusWorkerSessionId);
-      await recordHelperLifecycle("bot-status-worker-ready", {
-        tabId: Number(tab.id),
-        reused: true,
-        owned: !!botStatusWorkerOwned,
-        sessionId: botStatusWorkerSessionId || ""
-      });
+      const now = Date.now();
+      if (lastReusedBotStatusReadyLogTab !== Number(tab.id) ||
+          now - lastReusedBotStatusReadyLogAt >= 60000) {
+        await recordHelperLifecycle("bot-status-worker-ready", {
+          tabId: Number(tab.id), reused: true, owned: !!botStatusWorkerOwned,
+          sessionId: botStatusWorkerSessionId || "",
+          duplicateReadyChecksCoalesced: suppressedReusedBotStatusReadyLogs
+        });
+        lastReusedBotStatusReadyLogAt = now;
+        lastReusedBotStatusReadyLogTab = Number(tab.id);
+        suppressedReusedBotStatusReadyLogs = 0;
+      } else suppressedReusedBotStatusReadyLogs++;
       return { tabId: Number(tab.id), owned: !!botStatusWorkerOwned, ready: true, sessionId: botStatusWorkerSessionId || "" };
     }
     // A router URL change is no longer treated as worker death. If the worker

@@ -64,12 +64,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         continue;
       }
 
-      const links = DS.qsa("a[href*='/chat/'], a[href*='/chatbot/']", el);
+      // A shared grid may contain hundreds of links. Check its link count
+      // before reading and normalizing the text of the entire grid; those
+      // ancestors cannot qualify as an individual fallback card anyway.
+      const linkCount = el.querySelectorAll("a[href*='/chat/'], a[href*='/chatbot/']").length;
+      if (linkCount < 1 || linkCount > 4) continue;
       const textLen = DS.normalize(el.textContent).length;
 
       if (
-        links.length >= 1 &&
-        links.length <= 4 &&
         textLen > 35 &&
         textLen < 2600
       ) {
@@ -988,6 +990,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     );
     if (
       cacheHealthy &&
+      !DS.state.listingDirtyNeedsFullPass &&
+      !(DS.state.listingDirtyCards instanceof Set && DS.state.listingDirtyCards.size) &&
       DS.state.cardCacheRevision === revision &&
       DS.state.cardCacheUrl === url &&
       (cacheHitNumber % 24 !== 0 || cached.every(item => item.card?.isConnected && item.anchor?.isConnected))
@@ -1005,13 +1009,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (Array.isArray(cachedCards) && DS.state.cardCacheUrl === url &&
         !DS.state.listingDirtyNeedsFullPass && dirtyCards instanceof Set &&
         dirtyCards.size > 0 && dirtyCards.size < 96) {
-      const byCard = new Map();
-      for (const item of cachedCards) {
-        if (item.card?.isConnected && item.anchor?.isConnected) byCard.set(item.card, item);
-      }
+      // Preserve native page order when React refreshes an existing card.
+      // Deleting/reinserting a Map entry moved a changed card to the end of
+      // the cache, even when the visible card never moved.
+      const updated = new Map();
       const fresh = [];
       for (const changedCard of dirtyCards) {
-        byCard.delete(changedCard);
         if (!changedCard?.isConnected) continue;
         const anchor = changedCard.matches?.("a[href*='/chat/'], a[href*='/chatbot/']") ? changedCard :
           changedCard.querySelector?.("a[href*='/chat/'], a[href*='/chatbot/']");
@@ -1021,10 +1024,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const card = DS.getCardFromChatLink(anchor);
         if (!card?.isConnected) continue;
         const entry = { card, anchor };
-        byCard.set(card, entry);
+        updated.set(card, entry);
         fresh.push(entry);
       }
-      const reused = [...byCard.values()];
+      const reused = [];
+      const present = new Set();
+      const movedCards = [];
+      for (const item of cachedCards) {
+        const card = item.card;
+        if (!card?.isConnected || !item.anchor?.isConnected || present.has(card)) continue;
+        const replacement = updated.get(card);
+        if (replacement) updated.delete(card);
+        if (dirtyCards.has(card) && !replacement) continue;
+        present.add(card);
+        if (replacement) movedCards.push(card);
+        reused.push(replacement || item);
+      }
+      // Most updates replace one card in-place. Only newly mounted cards need
+      // an order insertion, and only moved existing cards need an order audit.
+      const comesBefore = (left, right) =>
+        !!(left?.compareDocumentPosition?.(right) & 4);
+      for (const entry of updated.values()) {
+        if (present.has(entry.card)) continue;
+        let low = 0, high = reused.length;
+        while (low < high) {
+          const mid = (low + high) >> 1;
+          if (comesBefore(reused[mid].card, entry.card)) low = mid + 1;
+          else high = mid;
+        }
+        reused.splice(low, 0, entry);
+        present.add(entry.card);
+      }
+      // A native reordering may move an existing node without replacing it.
+      // Check the affected neighbors; sort all cached cards only if needed.
+      if (movedCards.length) {
+        const indexByCard = new Map(reused.map((item, i) => [item.card, i]));
+        const outOfOrder = movedCards.some(card => {
+          const at = indexByCard.get(card);
+          if (at == null) return false;
+          return (at > 0 && !comesBefore(reused[at - 1].card, card)) ||
+            (at + 1 < reused.length && !comesBefore(card, reused[at + 1].card));
+        });
+        if (outOfOrder) {
+          reused.sort((a, b) => comesBefore(a.card, b.card) ? -1 : comesBefore(b.card, a.card) ? 1 : 0);
+          const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+          perf.incrementalCardNativeReorders = (perf.incrementalCardNativeReorders || 0) + 1;
+        }
+      }
       DS.state.cardCache = reused;
       DS.state.cardCacheHitNumber = 0;
       DS.state.cardCacheRevision = revision;
@@ -1682,7 +1728,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const addNode = node => {
       const el = node instanceof Element ? node : node?.parentElement;
-      if (!el) return;
+      if (!el || !el.isConnected) return;
 
       const direct = el.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group']");
       if (direct && DS.isRecommendationCardRoot?.(direct)) {
@@ -1706,7 +1752,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
       if (target) {
         const nearestCard = target.closest?.("div.relative.group.rounded-xl, div[class*='rounded-xl'][class*='group'], .ds-card-density-target");
-        if (nearestCard && DS.isRecommendationCardRoot?.(nearestCard)) {
+        if (nearestCard?.isConnected && DS.isRecommendationCardRoot?.(nearestCard)) {
           dirty.add(nearestCard);
           preparedMetadataCache.delete(nearestCard);
         }
@@ -1834,7 +1880,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await new Promise(resolve => setTimeout(resolve, 0));
         lastCardYieldAt = performance.now();
         if (yieldStarted) filterYieldMs += performance.now() - yieldStarted;
+        if (routeKey !== location.href || filterKey !== cardFilterKey() || DS.isSingleChatPage?.()) {
+          DS.state.cardHidingLastPassKey = "";
+          DS.state.cardHidingHasFullPass = false;
+          DS.state.listingDirtyNeedsFullPass = true;
+          traceOutcome = 'cancelled';
+          const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+          perf.cardFilterCancelledStalePasses = Number(perf.cardFilterCancelledStalePasses || 0) + 1;
+          return;
+        }
       }
+      if (!card?.isConnected || !anchor?.isConnected) continue;
       const target = DS.getBestHideTarget(card);
 
       if (!target) {

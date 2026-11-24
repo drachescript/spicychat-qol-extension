@@ -20,8 +20,10 @@ class CustomSeventyThree(unittest.TestCase):
         # Stage 18+ also defers Chat Bookmarks but preserves its registered import.
         self.assertTrue("content/chat-bookmarks.js" in js or
                         '"chat-bookmarks": "content/chat-bookmarks.js"' in loader)
-        for p in ["content/language-filter.js", "content/rulebook-public-qol.js",
-                  "content/lorebook-public-qol.js"]:
+        # v0.2.93+ Language Filter can also be loaded only when selected.
+        self.assertTrue("content/language-filter.js" in js or
+                        '"language-filter": "content/language-filter.js"' in loader)
+        for p in ["content/rulebook-public-qol.js", "content/lorebook-public-qol.js"]:
             self.assertIn(p,js)
     def test_custom_panels_and_legacy_readers_are_not_duplicated(self):
         html=read("options.html")

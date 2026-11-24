@@ -331,6 +331,72 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return DS.getQolTabState?.() || { globalEnabled, paused: !enabled, enabled: globalEnabled && !!enabled };
   };
 
+  // Diagnostic-only startup state. This uses no DOM queries or polling and
+  // deliberately includes no chat, character, or account data.
+  const STARTUP_STAGES = new Set([
+    "core-loaded", "waiting-for-modules", "main-registered", "loading-state",
+    "state-loaded", "ready", "disabled", "worker", "missing-modules", "error"
+  ]);
+  DS.runtimeStartup = {
+    stage: "core-loaded", updatedAt: Date.now(), errorType: "", missingModules: []
+  };
+  DS.markRuntimeStartup = function markRuntimeStartup(stage, detail = {}) {
+    if (!STARTUP_STAGES.has(stage)) return;
+    DS.runtimeStartup = {
+      stage,
+      updatedAt: Date.now(),
+      errorType: String(detail.errorType || "").slice(0, 64),
+      missingModules: Array.isArray(detail.missingModules)
+        ? detail.missingModules.slice(0, 6).map(name => String(name || "").slice(0, 100)) : []
+    };
+  };
+  DS.getRuntimeStartup = () => ({ ...(DS.runtimeStartup || {}),
+    missingModules: [...(DS.runtimeStartup?.missingModules || [])] });
+  // Register this early, before the large main runtime is assembled. If an
+  // optional/required script fails later, Settings can still distinguish a
+  // partial injection from a completely unreachable Android WebView.
+  let lightDiagnosticsInstalled = false;
+  DS.installLightDiagnostics = function installLightDiagnostics() {
+    if (lightDiagnosticsInstalled) return true;
+    // The native WebView shim normally exists before content injection, but a
+    // temporarily missing transport must not silently disable the probe forever.
+    // Later module registration can retry once without polling or duplicate listeners.
+    try {
+      const onMessage = (message, _sender, sendResponse) => {
+        if (message?.type !== "DS_GET_PAGE_DIAGNOSTICS_LIGHT") return false;
+        try {
+          const startup = DS.getRuntimeStartup();
+          const perf = DS.state?.runtimePerformance || {};
+          sendResponse({
+            ok: true,
+            runtimeReady: startup.stage === "ready",
+            paused: !!DS.isQolPausedForTab?.(),
+            startup,
+            sampleAt: Date.now(),
+            sampleKind: "lightweight-no-dom",
+            messageCacheInvalidations: Number(perf.messageCacheInvalidations || 0),
+            messageCacheInvalidationRequests: Number(perf.messageCacheInvalidationRequests || 0)
+          });
+        } catch (error) {
+          sendResponse({ ok: false, errorType: String(error?.name || "Error").slice(0, 48), sampleKind: "lightweight-no-dom" });
+        }
+        return false; // Synchronous response; never holds an Android relay open.
+      };
+      const subscribe = globalThis.DSQBrowserApiCompat?.listenRuntime;
+      if (typeof subscribe === "function") {
+        if (!subscribe(onMessage)) return false;
+      } else {
+        // Older Android bundles may not include the early API helper yet.
+        const event = globalThis.chrome?.runtime?.onMessage || globalThis.browser?.runtime?.onMessage;
+        if (typeof event?.addListener !== "function") return false;
+        event.addListener(onMessage);
+      }
+      lightDiagnosticsInstalled = true;
+      return true;
+    } catch { return false; }
+  };
+  DS.installLightDiagnostics();
+
   DS.state = {
     globalEnabledSetting: true,
     tabQolPaused: false,
@@ -515,12 +581,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
 
-  DS.bumpDomRevision = function bumpDomRevision() {
+  DS.bumpDomRevision = function bumpDomRevision({ preserveListingCardCache = false } = {}) {
     DS.state.domRevision = Number(DS.state.domRevision || 0) + 1;
     if (DS.state.loadedMessageRootsCache) DS.state.loadedMessageRootsCache.revision = -1;
-    DS.state.cardCache = null;
-    DS.state.cardCacheRevision = -1;
-    DS.state.cardCacheUrl = "";
+    // Native listing mutations are already recorded as changed card shells by
+    // the shared page observer. Keep the old cache just long enough for
+    // collectCards() to reconcile those cards instead of rescanning the grid.
+    // Route changes, chat changes, and uncertain/large listing mutations still
+    // invalidate the whole cache immediately.
+    const dirty = DS.state.listingDirtyCards;
+    const keep = preserveListingCardCache && Array.isArray(DS.state.cardCache) &&
+      DS.state.cardCacheUrl === location.href && !DS.state.listingDirtyNeedsFullPass &&
+      dirty instanceof Set && dirty.size > 0 && dirty.size < 96;
+    if (!keep) {
+      DS.state.cardCache = null;
+      DS.state.cardCacheRevision = -1;
+      DS.state.cardCacheUrl = "";
+    }
   };
 
   DS.bumpCardFilterStateRevision = function bumpCardFilterStateRevision() {

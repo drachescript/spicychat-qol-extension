@@ -449,6 +449,25 @@
     const digest=key?await crypto.subtle.sign('HMAC',key,data):await crypto.subtle.digest('SHA-256',data);
     return hashHex(digest);
   }
+  // A successful GitHub Contents PUT can precede the file's GET visibility.
+  // Read-only bounded retries avoid treating accepted uploads as a failure and
+  // never issue a second PUT for an uncertain first write.
+  async function verifyUploadedObject(repo,target,digest,keys,plain){
+    const delays=[0,250,550,1100,2000,3200];
+    for(let i=0;i<delays.length;i++){
+      checkCancelled();
+      if(delays[i])await sleep(delays[i]);
+      // The API wrapper already retries transient HTTP errors conservatively.
+      // Only retry a confirmed 404 here; never add another retry layer to 429s.
+      const check=await fileRead(repo,target);
+      if(!check)continue; // Accepted PUT may not yet be visible in GET.
+      const decoded=check.value.encrypted?await openBytes(check.value,keys.aes):bytes(check.value.data);
+      if(await objectIdentity(decoded,plain?null:keys.mac)!==digest)
+        throw Error('GitHub object failed integrity verification');
+      return true;
+    }
+    throw Error('GitHub accepted the object upload, but read-back is still pending. No duplicate upload was attempted; retry backup later.');
+  }
   async function putObject(repo,payload,keys,plain=false){
     const raw=ArrayBuffer.isView(payload) ? new Uint8Array(payload.buffer,payload.byteOffset,payload.byteLength) : payload instanceof ArrayBuffer ? new Uint8Array(payload) : enc.encode(String(payload));
     const digest=await objectIdentity(raw,plain?null:keys.mac);
@@ -457,10 +476,7 @@
     if(existing)return {id:digest,bytes:raw.length,plain};
     const value=plain?{schema:'dsq-object-v1',encrypted:false,data:b64(raw)}:{schema:'dsq-object-v1',...await sealBytes(raw,keys.aes)};
     try{await fileWrite(repo,target,value);}catch(error){if(error.code!==409&&error.code!==422)throw error;}
-    const check=await fileRead(repo,target);
-    if(!check)throw Error('Uploaded GitHub object could not be read back');
-    const decoded=check.value.encrypted?await openBytes(check.value,keys.aes):bytes(check.value.data);
-    if(await objectIdentity(decoded,plain?null:keys.mac)!==digest)throw Error('GitHub object failed integrity verification');
+    await verifyUploadedObject(repo,target,digest,keys,plain);
     return {id:digest,bytes:raw.length,plain};
   }
   async function readObject(repo,entry,keys){

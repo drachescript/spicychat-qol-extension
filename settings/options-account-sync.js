@@ -478,7 +478,10 @@ function renderAccountSyncCoverage(response, state) {
   host.textContent = `${listSummary} · Settings: ${syncDirectionDescription(response.prefs?.mode)} · ${state.paused ? "Paused" : "Active"} · Check interval: ${Math.round(Number(response.prefs?.syncIntervalMinutes || 720) / 60)}h${accountSyncUserEditing ? " · Unsaved edits below are not applied" : ""}`;
   const receipt = state.lastReceipt;
   if (!receipt?.at) {
-    note.textContent = "No verified sync receipt yet. Sync now after saving your choices to check this device.";
+    const successfulAt = Number(state.lastSyncAt || 0);
+    note.textContent = successfulAt
+      ? `Last successful sync reported ${formatSyncTime(successfulAt)}, but this runtime has no per-device verification receipt. Sync can be working; the downloaded Blocked/Later totals cannot yet be independently confirmed here.`
+      : "No verified sync receipt yet. Sync now after saving your choices to check this device.";
     return;
   }
   note.textContent = `Last successful local sync: ${formatSyncTime(receipt.at)} · Blocked: ${Number(receipt.localTotals?.blockedBots || 0).toLocaleString()} · Later: ${Number(receipt.localTotals?.laterBots || 0).toLocaleString()}. These are current-device counts at that time; another device must sync before its copy is verified.`;
@@ -486,7 +489,15 @@ function renderAccountSyncCoverage(response, state) {
 function renderAccountSyncCloudAudit(result) {
   const node = $("accountSyncCloudAuditResults");
   if (!node) return;
-  if (!result?.ok) { node.textContent = `Cloud check failed: ${result?.message || result?.error || "unknown error"}. No data was modified.`; return; }
+  if (!result?.ok) {
+    if (result?.error === "unknown_sync_action" &&
+        (PLATFORM_API?.detectEnvironment?.()?.android || detectSettingsEnvironment()?.android)) {
+      node.textContent = "Cloud-space inspection needs an updated Android app sync bridge. The installed app handles sync messages itself but does not yet support this read-only action. Existing successful syncs are unaffected; no data was modified. Update the Android wrapper, then reopen Settings and check again.";
+      return;
+    }
+    node.textContent = `Cloud check failed: ${result?.message || result?.error || "unknown error"}. No data was modified.`;
+    return;
+  }
   const lines = [
     `Cloud snapshot (read-only, ${formatSyncTime(result.at)}): ~${syncBytesLabel(result.estimatedPayloadBytes)} of current serialized key/value data; ${Number(result.keyCount || 0).toLocaleString()} keys across ${Number(result.pages || 0)} response pages.`,
     `${Number(result.settingCount || 0).toLocaleString()} setting keys (~${syncBytesLabel(result.settingBytes)}); saved-list keys (~${syncBytesLabel(result.listPayloadBytes)}). Local sync journal cache: ~${syncBytesLabel(result.localLedgerBytes)}.`,

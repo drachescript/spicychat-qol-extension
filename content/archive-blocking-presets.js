@@ -4,9 +4,40 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   'use strict';
   const DS = window.DragonScriptQoL;
   if (!DS) return;
+  const requestArchiveCatalog = () => new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (value, error) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error); else resolve(value);
+    };
+    try {
+      const result = chrome.runtime.sendMessage({type:'DS_ARCHIVE_BLOCK_PRESET_CATALOG',enabled:true}, value => {
+        const error = chrome.runtime.lastError;
+        finish(value, error ? new Error(error.message || String(error)) : null);
+      });
+      if (result && typeof result.then === 'function') result.then(value => finish(value), error => finish(null,error));
+    } catch (error) { finish(null,error); }
+  });
   const CONTRACT = 'spicychat-archive-block-presets-v1';
   let catalog = null, pending = null, retryAfter = 0;
-  let selection = null;
+  let selection = null, catalogIndex = null;
+  function indexCatalog(value) {
+    const characters = new Map(), groups = new Map();
+    for (const character of value.characters || []) {
+      if (!characters.has(character.franchiseId)) characters.set(character.franchiseId, []);
+      characters.get(character.franchiseId).push(character);
+    }
+    for (const group of value.groups || []) {
+      if (!groups.has(group.franchiseId)) groups.set(group.franchiseId, []);
+      groups.get(group.franchiseId).push(group);
+    }
+    return { value, characters, groups,
+      charactersById: new Map((value.characters || []).map(item => [item.id, item])),
+      groupsById: new Map((value.groups || []).map(item => [item.id, item])),
+      themesById: new Map((value.presets || []).filter(p=>p.kind === 'theme').map(item => [item.id, item])),
+      franchises: (value.presets || []).filter(p => p.kind === 'franchise') };
+  }
   const clean = input => String(input ?? '').replace(/([a-z])([A-Z])/g,'$1 $2')
     .normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
     .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
@@ -55,30 +86,33 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const text = clean(rawText);
     if (!text) return null;
     const selected = settingsNow(state);
-    const allPresets = cat.presets || [];
-    const franchises = allPresets.filter(p => p.kind === 'franchise');
+    const index = catalogIndex?.value === cat ? catalogIndex : indexCatalog(cat);
+    const franchises = index.franchises;
     for (const preset of franchises) {
       const cfg = selected.franchises[preset.id] || selected.franchises[preset.franchiseId];
       if (!cfg || cfg.enabled !== true) continue;
-      const chars = (cat.characters || []).filter(x => x.franchiseId === preset.franchiseId);
-      const groups = (cat.groups || []).filter(x => x.franchiseId === preset.franchiseId);
+      const chars = index.characters.get(preset.franchiseId) || [];
+      const groups = index.groups.get(preset.franchiseId) || [];
       const hit = evaluateFranchise(preset,text,cfg,chars,groups);
       if (hit?.hide) return {hide:true,reason:hit.reason};
     }
-    for (const character of cat.characters || []) {
-      if (!selected.characters.has(character.id)) continue;
+    for (const id of selected.characters) {
+      const character = index.charactersById.get(id);
+      if (!character) continue;
       const franchise = franchises.find(p => p.franchiseId === character.franchiseId);
       const context = !!franchise && matchedAliases(text,franchise.aliases).some(x => x.strength === 'strong');
       if (!isVariant(text) && matchedAliases(text,character.aliases,context).length)
         return {hide:true,reason:`character: ${character.name || character.id}`};
     }
-    for (const group of cat.groups || []) {
-      if (selected.groups.has(group.id) && matchedAliases(text,group.aliases).length)
+    for (const id of selected.groups) {
+      const group = index.groupsById.get(id);
+      if (group && matchedAliases(text,group.aliases).length)
         return {hide:true,reason:`group: ${group.name || group.id}`};
     }
-    for (const theme of allPresets) {
-      if (theme.kind !== 'theme' || !selected.themes.has(theme.id)) continue;
-      if (matchedAliases(text,theme.aliases).length) return {hide:true,reason:`theme title: ${theme.name}`};
+    for (const id of selected.themes) {
+      const theme = index.themesById.get(id);
+      if (theme && matchedAliases(text,theme.aliases).length)
+        return {hide:true,reason:`theme title: ${theme.name}`};
     }
     return null;
   }
@@ -122,12 +156,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   function load() {
     if (catalog || pending || Date.now() < retryAfter) return;
     if (!DS.state?.settings?.archiveBlockingPresetsEnabled) return;
-    pending = chrome.runtime.sendMessage({type:'DS_ARCHIVE_BLOCK_PRESET_CATALOG',enabled:true})
+    pending = requestArchiveCatalog()
       .then(response => {
         const value = response?.catalog;
         if (!response?.ok || value?.schemaVersion !== 1 || value.contract !== CONTRACT || !Array.isArray(value.presets))
           throw Error(response?.error || 'No valid Archive catalog available');
         catalog = value;
+        catalogIndex = indexCatalog(value);
         notify();
       }).catch(() => {retryAfter=Date.now()+60000;})
       .finally(()=>{pending=null;});
