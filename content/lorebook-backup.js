@@ -48,6 +48,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function normalizedPath() {
+    if (typeof DS.normalizedRoutePath === "function") return DS.normalizedRoutePath();
     return String(location.pathname || "").replace(/^\/[a-z]{2}(?=\/)/i, "").replace(/\/+$/, "") || "/";
   }
 

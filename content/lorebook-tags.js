@@ -17,11 +17,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findCard(anchor) {
+    if (DS.isNativePickerSurface?.(anchor)) return null;
     let node = anchor;
     let fallback = anchor.parentElement;
 
     for (let i = 0; node && i < 9; i++, node = node.parentElement) {
-      if (node === document.body || node.id === "root") break;
+      if (node === document.body || node.id === "root" || DS.isNativePickerSurface?.(node) || DS.containsNativePickerSurface?.(node)) break;
       const text = clean(node.textContent);
       const links = node.querySelectorAll?.("a[href*='/lorebook/']")?.length || 0;
       if (links >= 1 && links <= 3 && text.length >= 12 && text.length < 2200) fallback = node;
@@ -803,7 +804,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.applyLorebookTagExpansion = async function applyLorebookTagExpansion() {
     const settings = DS.state?.settings || {};
-    const path = String(location.pathname || "");
+    const path = DS.normalizedRoutePath?.() || String(location.pathname || "");
+    const route = location.href;
     const supportedSurface = /^\/lorebooks(?:\/|$)/i.test(path) || /^\/lorebook(?:\/|$)/i.test(path);
 
     // The persistent bulk-backup helper exists only to collect the requested
@@ -828,7 +830,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    const anchors = [...document.querySelectorAll("a[href*='/lorebook/']")];
+    const anchors = [...document.querySelectorAll("a[href*='/lorebook/']")].filter(anchor => !DS.isNativePickerSurface?.(anchor));
     const work = [];
     const seen = new Set();
 
@@ -858,9 +860,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // config. Query all collapsed cards in one batched Typesense request instead
     // of doing one profile/API request per card.
     await fetchIndexedLorebookMetaBatch(unresolved.map(item => item.id));
+    if (location.href !== route || DS.state?.settings !== settings || !settings.lorebookExpandTags) return;
     const stillMissing = [];
     for (const item of unresolved) {
       const indexedTags = cache.get(item.id)?.tags || [];
+      if (!item.rowInfo.row.isConnected || DS.isNativePickerSurface?.(item.rowInfo.row)) continue;
       if (!showExpanded(item.rowInfo, indexedTags)) stillMissing.push(item);
     }
 
@@ -868,7 +872,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // authenticated/profile lookups per pass, preserving the old low-work limit.
     await Promise.all(stillMissing.slice(0, 2).map(async item => {
       const tags = await getTags(item.id);
-      showExpanded(item.rowInfo, tags);
+      if (location.href === route && DS.state?.settings === settings && settings.lorebookExpandTags && item.rowInfo.row.isConnected && !DS.isNativePickerSurface?.(item.rowInfo.row)) showExpanded(item.rowInfo, tags);
     }));
   };
 

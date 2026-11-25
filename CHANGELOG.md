@@ -1,3 +1,19 @@
+## 0.2.99
+- Added a lightweight Bot Status and recovery record-count overview; full saved profiles, histories and queue reconciliation load on request instead of when opening Settings.
+- Reduced unnecessary large-store decoding work for plain records; separated IndexedDB, decoding and message-response wall timings.
+- Kept native My Creations pagination outside the general feature scheduler, with deduplicated runs and route-safe cancellation.
+- Deferred custom picture refreshes outside the critical chat pass and reused recent message roots for character/persona pictures.
+- Distinguished unverified API history endings, count mismatches and filtered rows in chat exports, with completeness warnings in downloaded formats.
+- Included QoL version/build in Settings telemetry and clarified wall-time versus measured synchronous processing.
+- Refined Settings layout choices: Classic, Sidebar, Ribbon, Picker, Underline and Pills, with Original/Outlined cards and optional blue accent. Removed unused experiments with safe Classic/Original fallbacks.
+- Kept the active Settings section visible in scrollable navigation and improved keyboard focus when closing the section picker.
+- Added an optional double-click / double-tap message editing guard that preserves browser text selection and explicit Edit actions.
+- Protected native Lorebook attachment choices and conversation selectors from discovery and advert cleanup.
+- Scoped tag-filter controls to the native discovery filter, and improved route recognition for localized pages.
+- Added a numbered Settings Layout lab, including optional sticky ribbon navigation.
+- Made Settings section navigation lighter by skipping unchanged recent-section updates and unnecessary pin refreshes.
+- Added optional collapsible excluded tags, included-tag priority and search for loaded tags in the native tag filter.
+
 ## 0.2.98
 - Removed Later card buttons from My Creations, including after navigation.
 - Made Saved Bots & Lists load recovery managers only when needed and reuse saved-copy and deleted-recovery indexes.

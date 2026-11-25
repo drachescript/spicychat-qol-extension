@@ -47,10 +47,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let pageStateCache = null;
   const stablePageElements = new Map();
 
-  function normalizedRoutePath() {
-    const raw = String(location.pathname || "/").replace(/\/+$/, "") || "/";
-    return raw.replace(/^\/[a-z]{2}(?=\/)/i, "") || "/";
+  function normalizedRoutePath(path = location.pathname) {
+    const raw = String(path || "/").replace(/\/+$/, "") || "/";
+    // Locale-only Home and regional/script-qualified locale prefixes.
+    return raw.replace(/^\/[a-z]{2}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|[0-9]{3}))?(?=\/|$)/i, "") || "/";
   }
+  DS.normalizedRoutePath = normalizedRoutePath;
+
+  // Native selection surfaces are not discovery cards or advertisements.
+  // Only use this at existing decoration/hide boundaries; no new observer.
+  const NATIVE_PICKER = "form, dialog, [role='dialog'], [role='listbox'], [role='option'], [role='combobox'], [aria-modal='true'], [data-testid*='LorebookPicker' i], [data-testid*='LorebookSelect' i], [data-testid*='LorebookAttach' i], [data-testid*='AttachLorebook' i]";
+  DS.isNativePickerSurface = el => !!el?.closest?.(NATIVE_PICKER);
+  DS.containsNativePickerSurface = el => !!el?.querySelector?.(NATIVE_PICKER);
 
   DS.invalidatePageStateCache = function invalidatePageStateCache() {
     pageStateCacheHref = "";

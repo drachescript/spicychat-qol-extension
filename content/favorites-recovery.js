@@ -11,7 +11,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const uniq=ids=>[...new Set((ids||[]).map(x=>String(x||'').toLowerCase()).filter(x=>UUID.test(x)))];
   const text=x=>String(x||'').trim().slice(0,1200);
-  const isPage=()=>/^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i.test(location.pathname);
+  const isPage=()=>/^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname);
   const enabled=()=>isPage() && DS.state?.settings?.enabled!==false && DS.state?.settings?.enableFavoritesRecovery===true;
   let coverage=null,active=location.hash==='#recovered',busy=false,stop=false,page=1,selected=new Set(),search='',filter='all',sort='name',tag='',target=300;
   let status='No account recovery scan has run on this device.',cleanupExpanded=false,historySyncPending=false;

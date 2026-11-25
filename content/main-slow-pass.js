@@ -215,6 +215,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runRoutedFeatureStep(plan, "listings", "favorite history", () => !!settings.showFavoriteHistoryButton || !!settings.enableFavoritesRecovery || !!settings.favoritePageFoldersEnabled || !!settings.favoritePageSortEnabled || !!document.querySelector("[data-ds-favorite-history],#ds-favorite-history,#ds-favorite-qol-controls"), () => DS.applyFavoriteHistoryButton?.());
       await runRoutedFeatureStep(plan, "listings", "NSFW toggle", String(settings.globalNsfwMode || "ignore") !== "ignore", () => DS.setGlobalNsfwSwitch?.());
       await runRoutedFeatureStep(plan, "listings", "tag template", !!settings.autoTags, () => DS.applyAutoTags?.());
+      await runRoutedFeatureStep(plan, "listings", "excluded tag grouping", () => !!settings.groupExcludedTags || !!DS.hasGroupedExcludedTags?.(), () => DS.applyExcludedTagGrouping?.());
       await runRoutedFeatureStep(plan, "listings", "tag template button", () => !!settings.showTagTemplateButton || !!document.querySelector(".ds-tag-template-button"), () => DS.addTagTemplateButton?.());
       if (listing) {
         await runThrottledFeatureStep("premium cleanup", !!settings.hidePremium || !!settings.hideFloatingPremiumPopups || !!document.querySelector("[data-ds-reason^='premium']"), listingMaintenanceInterval, () => DS.hidePremiumStuff?.(), !!options.force);
@@ -323,7 +324,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await runFeatureStep("smart filter presets", !!settings.enableSmartFilterPresets || !!document.querySelector("[data-ds-smart-filter]"), () => DS.applySmartFilterPresets?.());
         await runThrottledFeatureStep("exact message counts / creation dates", !!settings.showExactMessageCounts || !!settings.showBotCreationDates || !!settings.showNewBotBadge || !!document.querySelector("[data-ds-exact-message-count-applied=\"1\"], .ds-bot-created-date, .ds-bot-new-badge"), listingCardInterval, () => DS.applyExactMessageCounts?.(), !!options.force);
         await runFeatureStep("my creations view memory", !!settings.rememberMyCreationsView, () => DS.applyMyCreationsViewMemory?.());
-        await runFeatureStep("my creations auto-load", !!settings.autoLoadMyCreations, () => DS.applyMyCreationsAutoLoad?.());
+        await runFeatureStep("my creations auto-load", !!settings.autoLoadMyCreations, () => { Promise.resolve(DS.applyMyCreationsAutoLoad?.()).catch(error => DS.runtimeLog?.("warn", "my-creations-auto-load", "Auto-load failed", error)); });
         await runFeatureStep("my creations backup", true, () => DS.applyMyCreationsBackupTools?.());
         await runThrottledFeatureStep("creation audit", !!settings.enableCreationAudit || !!document.querySelector("[data-ds-creation-audit]"), listingCardInterval, () => DS.applyCreationAudit?.(), !!options.force);
         await runThrottledFeatureStep("my creations filters", !!settings.enableMyCreationsFilters || !!document.querySelector("[data-ds-my-creations-filter]"), listingCardInterval, () => DS.applyMyCreationsFilters?.(), !!options.force);
@@ -381,8 +382,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         slices = Number(laneState.slowSliceState.slices || 1);
         dirtyGroups = Array.isArray(laneState.slowSliceState.dirtyGroups) ? laneState.slowSliceState.dirtyGroups : [];
       }
-      if (slowToken) DS.diagOperationEnd?.(slowToken, { outcome: "ok", meta: { activeMs: Math.round(activeMs * 10) / 10, slices, dirtyGroups, queueDelayMs: slowQueueDelayMs } });
-      DS.diagScheduler?.("finished", { lane: "slow", durationActiveMs: Math.round(activeMs * 10) / 10, slices, dirtyGroups });
+      if (slowToken) DS.diagOperationEnd?.(slowToken, { outcome: "ok", meta: { sliceWallMs: Math.round(activeMs * 10) / 10, timingKind: "wall-between-yields-includes-awaits", slices, dirtyGroups, queueDelayMs: slowQueueDelayMs } });
+      DS.diagScheduler?.("finished", { lane: "slow", durationSliceWallMs: Math.round(activeMs * 10) / 10, timingKind: "wall-between-yields-includes-awaits", slices, dirtyGroups });
       laneState.slowSliceState = null;
       DS.state.diagSlowOperationId = "";
       DS.state.diagSlowScheduledAt = 0;

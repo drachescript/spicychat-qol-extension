@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS = {
   includeTags: [],
   excludeTags: [],
   showTagTemplateButton: false,
+  groupExcludedTags: false,
   showChatTagLinks: false,
   showChatTagAddButtons: false,
 
@@ -709,6 +710,7 @@ const DEFAULT_SETTINGS = {
   showMessageQuickActions: false,
   messageQuickActionCopy: false,
   messageQuickActionEdit: false,
+  disableDoubleTapMessageEdit: false,
   messageQuickActionDelete: false,
   messageQuickActionRemoveImage: false,
   messageQuickActionResend: false,

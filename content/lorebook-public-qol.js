@@ -21,12 +21,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const list = value => [...new Set((Array.isArray(value) ? value : []).map(clean).filter(Boolean))];
 
   function onLorebookSurface() {
-    const path = String(location.pathname || "");
+    const path = DS.normalizedRoutePath?.() || String(location.pathname || "");
     // My Creations is a management surface. Do not run public/discovery
     // Lorebook scanners there; the dedicated creator tools remain available.
     if (/^\/my-creations\/lorebooks(?:\/|$)/i.test(path)) return false;
-    return /^\/lorebooks(?:\/|$)/i.test(path)
-      || /^\/lorebook(?:\/|$)/i.test(path);
+    return /^\/lorebooks(?:\/explore(?:\/|$)|$)/i.test(path) || path === "/lorebook"
+      || /^\/lorebook\/[0-9a-f-]{20,}\/?$/i.test(path);
   }
 
   function idFromHref(href) {
@@ -35,7 +35,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function currentLorebookId() {
-    const path = String(location.pathname || "");
+    const path = DS.normalizedRoutePath?.() || String(location.pathname || "");
     return (path.match(/^\/lorebook\/([0-9a-f-]{20,})(?:\/|$)/i)?.[1]
       || path.match(/^\/lorebook\/edit\/([0-9a-f-]{20,})(?:\/|$)/i)?.[1]
       || "").toLowerCase();
@@ -70,10 +70,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function findCard(anchor) {
+    if (DS.isNativePickerSurface?.(anchor)) return null;
     let node = anchor;
     let fallback = anchor?.parentElement || null;
     for (let i = 0; node && i < 9; i += 1, node = node.parentElement) {
-      if (node === document.body || node.id === "root") break;
+      if (node === document.body || node.id === "root" || DS.isNativePickerSurface?.(node) || DS.containsNativePickerSurface?.(node)) break;
       const links = node.querySelectorAll?.("a[href*='/lorebook/']")?.length || 0;
       const text = clean(node.textContent);
       if (links >= 1 && links <= 4 && text.length >= 8 && text.length < 2600) fallback = node;
@@ -170,7 +171,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function hideTarget(card) {
-    if (!card) return null;
+    if (!card || DS.isNativePickerSurface?.(card) || DS.containsNativePickerSurface?.(card)) return null;
 
     // Public Lorebook cards are wrapped in a one-child grid cell. Hiding only
     // the inner rounded card leaves the grid cell behind as an empty hole, so
@@ -181,6 +182,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (
       wrapper &&
       grid &&
+      !DS.isNativePickerSurface?.(wrapper) && !DS.containsNativePickerSurface?.(wrapper) &&
       wrapper.children.length === 1 &&
       grid.classList?.contains("grid") &&
       wrapper.querySelectorAll?.("a[href*='/lorebook/']")?.length >= 1
@@ -302,7 +304,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } catch { ids.forEach(id => pendingIds.add(id)); }
   }
 
-  async function hydrateMissingTags(items, settings) {
+  async function hydrateMissingTags(items, settings, route) {
     const tagRules = effectiveRules(settings).tags;
     if (!tagRules.length || typeof DS.getLorebookTagsForId !== "function") return;
     const now = Date.now();
@@ -320,6 +322,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (apiMeta) Object.assign(item.meta, apiMeta, { id: item.meta.id, profileUrl: item.meta.profileUrl });
         } catch {}
       }
+      if (location.href !== route || !onLorebookSurface() || !item.card?.isConnected || DS.isNativePickerSurface?.(item.card) || DS.state?.settings !== settings || !settings.enabled || !settings.lorebookBlockingEnabled) return;
       remember(item.meta);
       const reason = blockReason(item.meta, settings);
       if (reason) DS.hideElement?.(hideTarget(item.card), `lorebook:block:${reason}`);
@@ -327,7 +330,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.isPublicLorebookExplorePage = function isPublicLorebookExplorePage() {
-    return /^\/lorebooks\/explore(?:\/|$)/i.test(String(location.pathname || ""));
+    return /^\/lorebooks\/explore(?:\/|$)/i.test(DS.normalizedRoutePath?.() || String(location.pathname || ""));
   };
 
   DS.getPublicLorebookHideTarget = hideTarget;
@@ -348,7 +351,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
     const settings = DS.state?.settings || {};
-    if (!settings.enabled) return;
+    const route = location.href;
+    if (!settings.enabled) { restoreLorebookHides(); document.querySelectorAll(".ds-lorebook-block-button").forEach(el => el.remove()); return; }
     const active = settings.lorebookBlockingEnabled === true
       || settings.showLorebookBlockButtons === true
       || settings.lorebookTrackHistory === true
@@ -363,7 +367,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const anchors = [...document.querySelectorAll("a[href*='/lorebook/']")]
-      .filter(anchor => idFromHref(anchor.href || anchor.getAttribute("href")));
+      .filter(anchor => idFromHref(anchor.href || anchor.getAttribute("href")) && !DS.isNativePickerSurface?.(anchor));
     const unique = [];
     const seen = new Set();
     for (const anchor of anchors) {
@@ -380,14 +384,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (settings.lorebookTrackHistory === true || settings.lorebookBlockingEnabled === true || settings.showLorebookBlockButtons === true) {
       await loadExisting([...unique.map(item => item.id), ...(currentId ? [currentId] : [])]);
     }
+    if (location.href !== route || DS.state?.settings !== settings || !onLorebookSurface()) return;
     const processedItems = [];
     for (const item of unique) {
+      if (!item.card.isConnected || DS.isNativePickerSurface?.(item.card) || DS.containsNativePickerSurface?.(item.card)) continue;
       const meta = cardMeta(item.card, item.anchor);
       const fingerprint = JSON.stringify([meta.name, meta.creator, meta.description, meta.entryCount, meta.tags]);
       if (processed.get(item.card) !== fingerprint) processed.set(item.card, fingerprint);
       if (settings.lorebookTrackHistory === true) remember(meta);
       ensureBlockButton(item.card, item.anchor, meta, settings);
       const target = hideTarget(item.card);
+      if (!target) continue;
       const reason = settings.lorebookBlockingEnabled === true ? blockReason(meta, settings) : "";
       const language = !reason && DS.isPublicLorebookExplorePage?.()
         ? DS.getPublicListingLanguageHideReason?.(meta, "lorebook") || "" : "";
@@ -410,11 +417,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         } else if (typeof DS.getLorebookTagsForId === "function") {
           try { meta.tags = list(await DS.getLorebookTagsForId(currentId)); } catch {}
         }
-        if (settings.lorebookTrackHistory === true) remember(meta);
+        if (location.href === route && DS.state?.settings === settings && settings.lorebookTrackHistory === true) remember(meta);
       }
     }
 
-    if (settings.lorebookBlockingEnabled === true) await hydrateMissingTags(processedItems, settings);
+    if (location.href !== route || DS.state?.settings !== settings) return;
+    if (settings.lorebookBlockingEnabled === true) await hydrateMissingTags(processedItems, settings, route);
     await DS.applyLorebookTagExpansion?.();
   };
 

@@ -16,7 +16,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     autoLoadObserver: null,
     panelAdjustTimer: null,
     lastRoute: "",
-    manualPauseUntil: 0
+    manualPauseUntil: 0,
+    generation: 0,
+    nextAttemptAt: 0,
+    cancelGrowth: null,
+    observerTimer: null,
+    signatureCache: null
   };
 
   function settings() {
@@ -28,7 +33,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function isMyCreations() {
-    return currentPath() === MY_CREATIONS_PATH;
+    return currentPath().replace(/^\/[a-z]{2,3}(?:-[a-z0-9]{2,8})*(?=\/my-creations\/chatbots$)/i, "") === MY_CREATIONS_PATH;
   }
 
   function isVisible(element) {
@@ -69,19 +74,44 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return Math.max(1, Math.min(30, Number(settings().myCreationsAutoLoadPages) || 1));
   }
 
-  function listingSignature() {
-    const ids = Array.from(currentBotIds());
-    return `${ids.length}|${ids.slice(0, 3).join(",")}|${ids.slice(-3).join(",")}|${pageCountSetting()}`;
+  function listingSignature(fresh = false) {
+    const revision = Number(DS.state?.domRevision || 0);
+    const key = `${routeKey()}|${revision}|${pageCountSetting()}`;
+    if (!fresh && state.signatureCache?.key === key && Date.now() - state.signatureCache.at < 1500) return state.signatureCache.value;
+    const ids = Array.from(currentBotIds(true));
+    const value = `${ids.length}|${ids.slice(0, 3).join(",")}|${ids.slice(-3).join(",")}|${pageCountSetting()}`;
+    state.signatureCache = { key, value, at: Date.now() };
+    return value;
   }
 
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async function waitForButton(timeoutMs = 8000) {
+  function routeKey() { return `${location.pathname || ""}${location.search || ""}`; }
+  function ownsRun(token, route) {
+    return token === state.generation && route === routeKey() && isMyCreations() && settings().enabled && settings().autoLoadMyCreations && Date.now() >= state.manualPauseUntil;
+  }
+  function cancelRun() {
+    state.generation++;
+    state.cancelGrowth?.();
+    clearTimeout(state.autoLoadRetryTimer);
+    state.autoLoadRetryTimer = null;
+    stopAutoLoadObserver();
+  }
+  DS.cancelMyCreationsAutoLoad = () => {
+    if (routeKey() === state.lastRoute) return;
+    cancelRun();
+    state.lastRoute = routeKey();
+    state.autoLoadCompletedSignature = "";
+    state.nextAttemptAt = 0;
+    state.signatureCache = null;
+    state.manualPauseUntil = 0;
+  };
+  async function waitForButton(token, route, timeoutMs = 8000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
-      if (!isMyCreations()) return null;
+      if (!ownsRun(token, route)) return null;
       const button = loadMoreButton();
       if (button) return button;
       // If SpicyChat is currently fetching, wait for its native control to
@@ -91,7 +121,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
-  function waitForGrowth(beforeIds, timeoutMs = 10000) {
+  function waitForGrowth(beforeIds, token, route, timeoutMs = 10000) {
     return new Promise(resolve => {
       let done = false;
       let timer = null;
@@ -102,9 +132,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         done = true;
         if (timer) clearTimeout(timer);
         observer.disconnect();
-        resolve({ grew: !!grew, ids: currentBotIds(true) });
+        if (state.cancelGrowth === cancel) state.cancelGrowth = null;
+        const valid = ownsRun(token, route);
+        resolve({ grew: valid && !!grew, ids: valid ? currentBotIds(true) : new Set(), cancelled: !valid });
       };
 
+      const cancel = () => finish(false);
       const anchorAddsNewBot = node => {
         if (!(node instanceof Element)) return false;
         const anchors = [];
@@ -120,7 +153,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       };
 
       const observer = new MutationObserver(mutations => {
-        if (!isMyCreations()) return finish(false);
+        if (!ownsRun(token, route)) return finish(false);
         for (const mutation of mutations) {
           for (const node of mutation.addedNodes || []) {
             if (anchorAddsNewBot(node)) return finish(true);
@@ -128,14 +161,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         }
       });
 
-      if (!root) return finish(false);
+      if (!root || !ownsRun(token, route)) return finish(false);
+      state.cancelGrowth = cancel;
       observer.observe(root, { childList: true, subtree: true });
       timer = setTimeout(() => finish(false), Math.max(500, timeoutMs));
 
       // Cover the tiny gap between the native click and observer installation
       // with one immediate check, rather than rescanning the whole page every
       // 160 ms for up to ten seconds.
-      const now = currentBotIds();
+      const now = currentBotIds(true);
       if (now.size > beforeIds.size || [...now].some(id => !beforeIds.has(id))) finish(true);
     });
   }
@@ -161,6 +195,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function stopAutoLoadObserver() {
     state.autoLoadObserver?.disconnect();
     state.autoLoadObserver = null;
+    clearTimeout(state.observerTimer);
+    state.observerTimer = null;
   }
 
   function scheduleAutoLoadRetry(delay = 500) {
@@ -170,16 +206,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       stopAutoLoadObserver();
       return;
     }
+    const route = routeKey();
+    const token = state.generation;
     state.autoLoadRetryTimer = setTimeout(() => {
       state.autoLoadRetryTimer = null;
-      DS.applyMyCreationsAutoLoad?.();
+      if (token === state.generation && route === routeKey()) Promise.resolve(DS.applyMyCreationsAutoLoad?.()).catch(() => {});
     }, Math.max(100, delay));
   }
 
   function watchForNativeLoadMore() {
     stopAutoLoadObserver();
     if (!isMyCreations() || !settings().enabled || !settings().autoLoadMyCreations || state.autoLoadRunning) return;
-    if (loadMoreButton()) return scheduleAutoLoadRetry(80);
+    if (loadMoreButton()) { state.nextAttemptAt = 0; return scheduleAutoLoadRetry(80); }
     if (!document.body) return scheduleAutoLoadRetry(400);
 
     // Route-scoped and temporary: disconnect as soon as the native Load More
@@ -188,31 +226,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!isMyCreations()) return stopAutoLoadObserver();
       if (!loadMoreButton({ allowBusy: true })) return;
       stopAutoLoadObserver();
+      state.nextAttemptAt = 0;
       scheduleAutoLoadRetry(120);
     });
     state.autoLoadObserver.observe(document.body, { childList: true, subtree: true });
-    setTimeout(stopAutoLoadObserver, 10000);
+    state.observerTimer = setTimeout(stopAutoLoadObserver, 10000);
   }
 
   DS.applyMyCreationsAutoLoad = async function rc87MyCreationsAutoLoad() {
-    if (!isMyCreations()) {
-      state.autoLoadCompletedSignature = "";
-      state.autoLoadRunning = false;
-      stopAutoLoadObserver();
-      return;
-    }
+    DS.cancelMyCreationsAutoLoad();
+    if (!isMyCreations()) return;
 
     const cfg = settings();
     if (!cfg.enabled || !cfg.autoLoadMyCreations || state.autoLoadRunning) return;
+    if (state.autoLoadObserver || state.autoLoadRetryTimer) return;
     if (Date.now() < Number(state.manualPauseUntil || 0)) {
       scheduleAutoLoadRetry(Math.max(200, state.manualPauseUntil - Date.now() + 150));
       return;
     }
 
+    if (Date.now() < state.nextAttemptAt) return;
     const requestedPages = pageCountSetting();
     const startSignature = listingSignature();
     if (state.autoLoadCompletedSignature && state.autoLoadCompletedSignature === startSignature) return;
 
+    const token = state.generation;
+    const route = routeKey();
+    const started = performance.now();
+    let nativeWaitMs = 0, settleWaitMs = 0;
+    const diag = DS.diagOperationStart?.("my-creations-auto-load", "native-pagination", { phase: "detached-from-slow-pass", requestedPages });
     state.autoLoadRunning = true;
     DS.state.myCreationsAutoLoadRunning = true;
     stopAutoLoadObserver();
@@ -221,10 +263,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try {
       for (let page = 0; page < requestedPages; page += 1) {
-        const button = await waitForButton(page === 0 ? 5000 : 8000);
-        if (!button) break;
+        if (!ownsRun(token, route)) break;
+        let waitStarted = performance.now();
+        const button = await waitForButton(token, route, page === 0 ? 5000 : 8000);
+        nativeWaitMs += performance.now() - waitStarted;
+        if (!button || !ownsRun(token, route)) break;
 
-        const beforeIds = currentBotIds();
+        const beforeIds = currentBotIds(true);
         attempted = true;
         DS.runtimeLog?.("info", "my-creations-auto-load", "Clicking native My Creations Load More", {
           batch: page + 1,
@@ -233,7 +278,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         });
 
         if (!clickNativeLoadMore(button)) break;
-        const result = await waitForGrowth(beforeIds, 10000);
+        waitStarted = performance.now();
+        const result = await waitForGrowth(beforeIds, token, route, 10000);
+        nativeWaitMs += performance.now() - waitStarted;
+        if (result.cancelled || !ownsRun(token, route)) break;
         if (!result.grew) {
           DS.runtimeLog?.("warn", "my-creations-auto-load", "Native Load More produced no new cards", {
             batch: page + 1,
@@ -246,28 +294,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
         loaded += 1;
         DS.state.myCreationsAutoLoadLoadedPages = loaded;
+        waitStarted = performance.now();
         await sleep(220);
+        settleWaitMs += performance.now() - waitStarted;
       }
 
+      if (!ownsRun(token, route)) return;
       DS.state.myCreationsAutoLoadLastPages = requestedPages;
-      // Only remember a completed signature after at least one successful
-      // native load. If React simply had not mounted the button yet, a later
-      // route-scoped retry is still allowed to do the work.
-      if (loaded > 0) {
-        state.autoLoadCompletedSignature = listingSignature();
+      // A click which yielded no new cards also suppresses repeated retries
+      // on the unchanged listing. Native/manual changes or a new route can
+      // start a new run; a missing button uses the bounded observer below.
+      if (loaded > 0 || attempted) {
+        state.autoLoadCompletedSignature = listingSignature(true);
         DS.state.myCreationsAutoLoadLastFingerprint = state.autoLoadCompletedSignature;
-        DS.bumpDomRevision?.();
+        if (loaded) DS.bumpDomRevision?.();
         DS.runtimeLog?.("info", "my-creations-auto-load", "My Creations auto-load complete", {
           loaded,
           requested: requestedPages,
           total: currentBotIds().size
         });
       } else if (!attempted) {
-        watchForNativeLoadMore();
+        // Avoid repeating a five-second wait on every unrelated mutation.
+        state.nextAttemptAt = Date.now() + 10000;
       }
     } finally {
       state.autoLoadRunning = false;
       DS.state.myCreationsAutoLoadRunning = false;
+      const wallMs = performance.now() - started;
+      DS.diagOperationEnd?.(diag, { outcome: ownsRun(token, route) ? (loaded ? "loaded" : "no-growth") : "cancelled", meta: { requestedPages, loaded, wallMs, nativeWaitMs, settleWaitMs, otherWallMs: Math.max(0, wallMs - nativeWaitMs - settleWaitMs), timingKind: "wall; native wait includes network/render; not CPU" } });
+      if (ownsRun(token, route) && !attempted) watchForNativeLoadMore();
+      else if (token !== state.generation && isMyCreations() && settings().enabled && settings().autoLoadMyCreations && !state.autoLoadRetryTimer && !state.autoLoadObserver) scheduleAutoLoadRetry(Math.max(100, state.manualPauseUntil - Date.now() + 150));
       // If a successful first batch was requested but React still has another
       // busy/reappearing button, the loop already waited for it. No persistent
       // observer remains after completion.
@@ -284,19 +340,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function routeRefresh() {
-    const route = `${location.pathname || ""}${location.search || ""}`;
-    if (route !== state.lastRoute) {
-      state.lastRoute = route;
-      state.autoLoadCompletedSignature = "";
-    }
-    if (isMyCreations()) {
-      scheduleAutoLoadRetry(350);
-      setTimeout(() => scheduleAutoLoadRetry(0), 1300);
-      setTimeout(() => scheduleAutoLoadRetry(0), 3200);
-    } else {
-      clearTimeout(state.autoLoadRetryTimer);
-      stopAutoLoadObserver();
-    }
+    const changed = routeKey() !== state.lastRoute;
+    DS.cancelMyCreationsAutoLoad();
+    if (changed && isMyCreations()) scheduleAutoLoadRetry(350);
     schedulePanelAdjustment(120);
     DS.rc86RefreshBulkBlockUi?.();
   }
@@ -309,10 +355,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Never compete with a user's native Load More click. Let SpicyChat own
       // the click/request completely, then allow optional auto-load to resume
       // after the native list has had time to settle.
+      cancelRun();
       state.manualPauseUntil = Date.now() + 12000;
-      clearTimeout(state.autoLoadRetryTimer);
-      state.autoLoadRetryTimer = null;
-      setTimeout(() => scheduleAutoLoadRetry(0), 12200);
+      state.autoLoadCompletedSignature = "";
+      scheduleAutoLoadRetry(12200);
       return;
     }
     if (event.target.closest("a[href]")) setTimeout(routeRefresh, 80);
@@ -321,8 +367,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !DS.hasSettingStorageChanges?.(changes)) return;
+      const toggled = !!changes[DS.settingStorageKey?.("autoLoadMyCreations")] || (changes.settings && changes.settings.oldValue?.autoLoadMyCreations !== changes.settings.newValue?.autoLoadMyCreations);
+      if (toggled) { state.autoLoadCompletedSignature = ""; state.nextAttemptAt = 0; }
       setTimeout(() => {
-        if (isMyCreations()) scheduleAutoLoadRetry(250);
+        if (isMyCreations()) {
+          if (!settings().enabled || !settings().autoLoadMyCreations) cancelRun();
+          else if (!state.autoLoadRunning && !state.autoLoadRetryTimer && !state.autoLoadObserver) scheduleAutoLoadRetry(250);
+        }
         schedulePanelAdjustment(50);
         DS.rc86RefreshBulkBlockUi?.();
       }, 0);

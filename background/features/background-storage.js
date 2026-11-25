@@ -97,13 +97,25 @@ async function unpackLargeStorageRecord(row) {
 }
 
 async function unpackLargeStorageRows(rows) {
-  // Bound the number of simultaneous gzip streams on large reads.
+  // Plain rows do not need async decompression or one Promise per record.
+  // Compressed rows keep the same six-stream bound and strict codec checks.
   const result = new Array(rows.length);
-  for (let i = 0; i < rows.length; i += 6) {
-    await Promise.all(rows.slice(i, i + 6).map(async (row, j) => {
-      result[i + j] = { id: row.id, value: await unpackLargeStorageRecord(row) };
+  let packed = [];
+  const decode = async batch => {
+    await Promise.all(batch.map(async ([index, row]) => {
+      result[index] = { id: row.id, value: await unpackLargeStorageRecord(row) };
     }));
+  };
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row.codec) {
+      result[i] = { id: row.id, value: row.value && typeof row.value === "object" ? row.value : null };
+      continue;
+    }
+    packed.push([i, row]);
+    if (packed.length === 6) { await decode(packed); packed = []; }
   }
+  if (packed.length) await decode(packed);
   return result;
 }
 
@@ -352,8 +364,11 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
   const safeLimit = Math.max(25, Math.min(500, Number(limit) || 250));
   const cursorAfter = String(afterId || "").trim();
   const range = cursorAfter ? IDBKeyRange.lowerBound(cursorAfter, true) : null;
+  const fetchStarted = Date.now();
   const rows = await idbRequest(store.getAll(range, safeLimit));
+  const fetchedAt = Date.now();
   const decodedRows = await unpackLargeStorageRows(rows);
+  const decodedAt = Date.now();
   const cleanRows = [];
   for (const row of decodedRows) {
     const id = String(row?.id || "").trim();
@@ -361,8 +376,8 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
     cleanRows.push({ id, value: row.value });
   }
   const nextAfterId = rows.length ? String(rows[rows.length - 1].id) : cursorAfter;
-  const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit };
-  qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt }, { level: "deep" });
+  const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit, timing: { idbReadWallMs: fetchedAt - fetchStarted, decodeWallMs: decodedAt - fetchedAt, resultBuildMs: Date.now() - decodedAt, preparationWallMs: fetchStarted - startedAt } };
+  qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt, idbReadWallMs: fetchedAt - fetchStarted, decodeWallMs: decodedAt - fetchedAt, resultBuildMs: Date.now() - decodedAt, preparationWallMs: fetchStarted - startedAt }, { level: "deep" });
   return result;
 }
 
@@ -413,10 +428,12 @@ async function getLargeStorageValues(keys) {
   return data;
 }
 
-async function getLargeStorageStats() {
+async function getLargeStorageStats(keys = null) {
   const startedAt = Date.now();
   const stats = {};
-  for (const key of LARGE_STORAGE_KEYS) {
+  for (const key of largeStorageRequestedKeys(keys)) {
+    // The new scoped overview is read-only even for a legacy/unmigrated store.
+    if (keys != null && !(await largeStorageMeta(key))?.migrated) continue;
     await ensureLargeStorageMigrated(key);
     const db = await openLargeStorageDb();
     const tx = db.transaction(key, "readonly");

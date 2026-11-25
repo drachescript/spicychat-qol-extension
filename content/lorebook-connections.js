@@ -18,8 +18,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let authorQuery = '';
   let filterTimer = 0;
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
-  const profileId = () => (location.pathname.match(/^\/lorebook\/([0-9a-f-]{20,})(?:\/|$)/i)?.[1] || '').toLowerCase();
-  const isListing = () => /^\/lorebooks(?:\/|$)/i.test(location.pathname);
+  const profileId = () => ((DS.normalizedRoutePath?.() || location.pathname).match(/^\/lorebook\/([0-9a-f-]{20,})(?:\/|$)/i)?.[1] || '').toLowerCase();
+  const isListing = () => /^\/lorebooks(?:\/|$)/i.test(DS.normalizedRoutePath?.() || location.pathname);
   const allowed = () => DS.state?.settings?.enabled !== false && DS.state?.settings?.showLorebookConnections === true;
   function mainContent() {
     return document.querySelector('main, [role="main"]') || null;
@@ -111,10 +111,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const anchors = [...document.querySelectorAll("main a[href*='/lorebook/'],[role='main'] a[href*='/lorebook/']")];
     const seen = new Set(); const result = [];
     for (const anchor of anchors) {
+      if (DS.isNativePickerSurface?.(anchor)) continue;
       const id = anchor.href.match(/\/lorebook\/([0-9a-f-]{20,})(?:[/?#]|$)/i)?.[1]?.toLowerCase();
       if (!id || seen.has(id) || !UUID.test(id)) continue;
       const card = anchor.closest('div.relative.group.rounded-xl, div[class*="rounded-xl"]');
-      if (!card) continue;
+      if (!card || DS.isNativePickerSurface?.(card) || DS.containsNativePickerSurface?.(card)) continue;
       seen.add(id);
       const meta = DS.getPublicLorebookCardMeta?.(card, anchor) || {};
       const author = clean(meta.creator || card.querySelector("a[href*='/creator/']")?.textContent);

@@ -1149,12 +1149,27 @@ function applyOptionsLayoutPreferences(settings = null) {
     settingsContentLayout: value("settingsContentLayout", "single"),
     settingsPageWidth: value("settingsPageWidth", "comfortable")
   };
-  const nav = ["classic", "grouped"].includes(source.settingsNavigationStyle) ? source.settingsNavigationStyle : "classic";
+  const nav = ["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(source.settingsNavigationStyle) ? source.settingsNavigationStyle : "classic";
   const layout = ["single", "adaptive"].includes(source.settingsContentLayout) ? source.settingsContentLayout : "single";
   const width = ["comfortable", "wide"].includes(source.settingsPageWidth) ? source.settingsPageWidth : "comfortable";
-  document.body.classList.toggle("ds-options-nav-grouped", nav === "grouped");
+  document.body.classList.remove("ds-options-nav-grouped", "ds-options-nav-grid", "ds-options-nav-rows", "ds-options-nav-directory");
+  document.body.classList.toggle("ds-options-nav-sidebar", nav === "sidebar");
+  for (const variant of ["ribbon", "picker", "underline", "pills"]) {
+    document.body.classList.toggle(`ds-options-nav-${variant}`, nav === variant);
+  }
+  const previewToggle = $("settingsLayoutPreviewToggle");
+  if (previewToggle) previewToggle.hidden = nav === "classic";
+  // The existing compact Sections menu handles picker mode on desktop too.
+  // Close an open menu when the selected navigation mode changes.
+  const navElement = $("optionsTabsNav");
+  if (navElement && navElement.dataset.dsLayoutMode !== nav) {
+    navElement.dataset.dsLayoutMode = nav;
+    navElement.classList.remove("is-mobile-open");
+    $("mobileSectionsToggle")?.setAttribute("aria-expanded", "false");
+  }
   document.body.classList.toggle("ds-options-layout-adaptive", layout === "adaptive");
   document.body.classList.toggle("ds-options-width-wide", width === "wide");
+  keepActiveOptionsTabVisible();
 }
 
 function reorderOptionsUi() {

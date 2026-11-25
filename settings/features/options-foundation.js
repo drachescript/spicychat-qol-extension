@@ -40,6 +40,13 @@ async function refreshOptionsDiagnosticState(force = false) {
   return optionsDiagnosticState;
 }
 
+const optionsTelemetryIdentity = (() => {
+  let version = "unknown";
+  try { version = chrome.runtime.getManifest().version || version; } catch {}
+  const profile = window.__DSQ_BUILD_PROFILE__;
+  return Object.freeze({ version, build: profile?.id || "full", revision: profile?.revision || "unknown" });
+})();
+
 function optionsDiag(feature, event, meta = {}, { level = "normal", critical = false } = {}) {
   if (!optionsDiagnosticState.active || optionsDiagLevelRank(optionsDiagnosticState.traceLevel) < optionsDiagLevelRank(level)) return false;
   try {
@@ -47,7 +54,7 @@ function optionsDiag(feature, event, meta = {}, { level = "normal", critical = f
       type: "DS_QOL_DIAGNOSTIC_BACKGROUND_EMIT",
       feature: String(feature || "options").slice(0, 80),
       event: String(event || "event").slice(0, 80),
-      meta,
+      meta: { ...meta, qolVersion: optionsTelemetryIdentity.version, qolBuild: optionsTelemetryIdentity.build, qolRevision: optionsTelemetryIdentity.revision },
       level,
       critical: !!critical
     });
@@ -243,9 +250,11 @@ async function readLargeStorageKeyPaged(key) {
   const meta = {};
   let afterId = "";
   let pageCount = 0;
+  const timing = { responseWallMs: 0, idbReadWallMs: 0, decodeWallMs: 0, resultBuildMs: 0, preparationWallMs: 0, settingsAssemblyMs: 0, instrumentedPages: 0 };
 
   while (pageCount < 1000) {
     pageCount += 1;
+    const requestStarted = performance.now();
     const response = await runtimeMessageWithTimeout({
       type: "DS_LARGE_STORAGE_GET_PAGE",
       key,
@@ -256,16 +265,27 @@ async function readLargeStorageKeyPaged(key) {
       limit: key === "botAvailability" ? 400 : 250
     }, 15000);
     if (!response?.ok || !Array.isArray(response.rows)) return null;
-
+    timing.responseWallMs += performance.now() - requestStarted;
+    if (response.timing) {
+      timing.instrumentedPages++;
+      for (const field of ["idbReadWallMs", "decodeWallMs", "resultBuildMs", "preparationWallMs"]) timing[field] += Math.max(0, Number(response.timing[field]) || 0);
+    }
+    const assemblyStarted = performance.now();
     for (const row of response.rows) {
       const id = String(row?.id || "").trim();
       if (!id || !row?.value || typeof row.value !== "object") continue;
       meta[id] = row.value;
     }
 
+    timing.settingsAssemblyMs += performance.now() - assemblyStarted;
     if (response.done || !response.rows.length) {
       optionsPhaseSample(`storage:paging:${key}`, performance.now() - pageStarted);
-      if (diagStarted) optionsDiag("options-storage", "read-large-paged", { key, pages: pageCount, records: Object.keys(meta).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
+      optionsPhaseSample(`storage:page-response-wall:${key}`, timing.responseWallMs);
+      optionsPhaseSample(`storage:page-assembly:${key}`, timing.settingsAssemblyMs);
+      if (timing.instrumentedPages === pageCount) {
+        for (const field of ["idbReadWallMs", "decodeWallMs", "resultBuildMs", "preparationWallMs"]) optionsPhaseSample(`storage:worker-${field}:${key}`, timing[field]);
+      }
+      if (diagStarted) optionsDiag("options-storage", "read-large-paged", { key, pages: pageCount, records: Object.keys(meta).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10, ...timing });
       return { meta };
     }
     const nextAfterId = String(response.nextAfterId || "").trim();
@@ -1479,6 +1499,8 @@ function detachSavedRecoveryLazyActivation() {
   savedRecoveryLazyOpenListeners = [];
   savedRecoveryLazySetup = false;
   savedRecoveryActivated.clear();
+  savedRecoveryOverview = null;
+  savedRecoveryOverviewRequest = null;
   savedRecoveryDirty.clear();
   savedRecoveryPending.clear();
   savedRecoveryWork = Promise.resolve();
@@ -1802,6 +1824,10 @@ async function ensureSavedRecoveryDataLoaded() {
     botAvailabilityState = { meta: filterMetaToValidBotIds(availability.meta) };
     if (generation !== savedRecoveryGeneration) throw new Error("Recovery load cancelled");
     savedRecoveryDataLoaded = true;
+    const overview = $("dsSavedRecoveryOverview");
+    if (overview) overview.textContent = "Recovery records loaded. Search, scan and recovery controls are available.";
+    const loadButton = $("dsLoadSavedRecovery");
+    if (loadButton) loadButton.hidden = true;
     invalidateDuplicateCache();
     optionsPhaseSample("saved:recovery-loaded-wall", performance.now() - started);
     return true;
@@ -1824,6 +1850,8 @@ async function ensureHeavySavedDataLoaded(tabName = "all") {
   return true;
 }
 
+let savedRecoveryOverview = null;
+let savedRecoveryOverviewRequest = null;
 const savedRecoveryActivated = new Set();
 const savedRecoveryDirty = new Set();
 const savedRecoveryPending = new Map();
@@ -1853,7 +1881,45 @@ function savedRecoveryHostVisible(kind) {
   };
   return isNear(element) || (kind === "status" && isNear($("botAvailabilityResultsCard"))) || (kind === "archive-transfer" && isNear($("botStatusArchiveUploadSettings")));
 }
+// Count-only overview. Never put projected/partial records into the mutable
+// recovery stores: scans, exports and Archive submission still load full data.
+function loadSavedRecoveryOverview() {
+  if (savedRecoveryDataLoaded || savedRecoveryOverview || savedRecoveryOverviewRequest) return;
+  const generation = savedRecoveryGeneration;
+  const started = performance.now();
+  const overview = $("dsSavedRecoveryOverview");
+  if (overview) overview.textContent = "Reading saved record counts…";
+  const request = runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_STATS", keys: [BOT_ARCHIVE_KEY, BOT_AVAILABILITY_KEY] }, 15000).then(result => {
+    if (generation !== savedRecoveryGeneration || savedRecoveryDataLoaded || savedRecoveryDataLoadPromise) return;
+    if (!result?.ok || !Number.isFinite(result.stats?.[BOT_ARCHIVE_KEY]) || !Number.isFinite(result.stats?.[BOT_AVAILABILITY_KEY])) throw new Error("Counts unavailable");
+    savedRecoveryOverview = result.stats;
+    if (overview) overview.textContent = `${result.stats[BOT_ARCHIVE_KEY].toLocaleString()} stored copies · ${result.stats[BOT_AVAILABILITY_KEY].toLocaleString()} stored status records (count snapshot, before filters). Load records to browse, reconcile or review held checks.`;
+    optionsPhaseSample("saved:recovery-counts-wall", performance.now() - started);
+    optionsDiag("options-saved-manager", "recovery-counts", { durationMs: performance.now() - started, archiveCount: result.stats[BOT_ARCHIVE_KEY], availabilityCount: result.stats[BOT_AVAILABILITY_KEY] });
+  }).catch(() => {
+    if (generation === savedRecoveryGeneration && !savedRecoveryDataLoaded) {
+      savedRecoveryOverview = {}; // failed count is not zero; do not repeat on scroll
+      if (overview) overview.textContent = "Record counts unavailable. Load records to read the full saved data; nothing was removed.";
+    }
+  }).finally(() => { if (savedRecoveryOverviewRequest === request) savedRecoveryOverviewRequest = null; });
+  savedRecoveryOverviewRequest = request;
+}
 function renderSavedRecoveryPlaceholders() {
+  const overviewButton = $("dsLoadSavedRecovery");
+  if (overviewButton && !overviewButton.dataset.dsBound) {
+    overviewButton.dataset.dsBound = "1";
+    overviewButton.addEventListener("click", () => loadAndRenderSavedRecoveryManagers("manual", "status"));
+  }
+  if (!savedRecoveryDataLoaded) {
+    if (overviewButton) overviewButton.hidden = false;
+    const overview = $("dsSavedRecoveryOverview");
+    if (overview && !savedRecoveryOverview) overview.textContent = "Full saved profiles and history load only when requested.";
+    const queue = $("botStatusPendingQueueSummary");
+    if (queue) queue.textContent = "Load Bot Status records to review pending and held checks.";
+    const feedback = $("botStatusLastRunSummary");
+    if (feedback) feedback.textContent = "Load Bot Status records to review the last run.";
+  }
+
   for (const [kind, id] of Object.entries(savedRecoveryHostIds)) {
     if (savedRecoveryActivated.has(kind)) continue;
     const host = $(id);
@@ -1868,6 +1934,7 @@ function renderSavedRecoveryPlaceholders() {
 }
 function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") {
   if (!savedRecoverySectionOpen()) return Promise.resolve(false);
+  if (!savedRecoveryDataLoaded && source !== "manual" && source !== "retry") { loadSavedRecoveryOverview(); return Promise.resolve(false); }
   if (savedRecoveryPending.has(kind)) return savedRecoveryPending.get(kind);
   if (savedRecoveryActivated.has(kind) && !savedRecoveryDirty.has(kind)) return Promise.resolve(true);
   const generation = savedRecoveryGeneration;
@@ -1876,8 +1943,20 @@ function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") 
     // Let the tab/section paint before large storage/normalization work.
     await nextOptionsIdleSlice();
     if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
+    // Opening a section is not consent to hydrate every saved profile/history.
+    // After the first explicit request, the existing warmed managers can
+    // activate independently as they become visible.
+    if (!savedRecoveryDataLoaded && source !== "manual" && source !== "retry") {
+      loadSavedRecoveryOverview();
+      return false;
+    }
+    const overview = $("dsSavedRecoveryOverview");
+    if (overview) overview.textContent = "Loading full recovery records… Other Settings remain available.";
     await ensureSavedRecoveryDataLoaded();
     if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
+    if (overview) overview.textContent = "Recovery records loaded. Search, scan and recovery controls are available.";
+    const overviewButton = $("dsLoadSavedRecovery");
+    if (overviewButton) overviewButton.hidden = true;
     savedRecoveryActivated.add(kind);
     savedRecoveryDirty.delete(kind);
     const started = performance.now();
@@ -1894,9 +1973,14 @@ function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") 
     else if (kind === "deleted") renderDeletedSavedBots();
     else if (kind === "archive-transfer") await refreshArchiveTransferUi();
     optionsPhaseSample(`saved:${kind}:activation-wall`, performance.now() - started);
+    optionsDiag("options-saved-manager", "activation", { manager: kind, durationMs: performance.now() - started, timingKind: "wall-including-async" });
     return true;
   }).catch(error => {
     if (generation !== savedRecoveryGeneration) return false;
+    const overview = $("dsSavedRecoveryOverview");
+    if (overview) overview.textContent = "Recovery load failed. Retry loading; saved records remain intact.";
+    const overviewButton = $("dsLoadSavedRecovery");
+    if (overviewButton) overviewButton.hidden = false;
     savedRecoveryActivated.delete(kind);
     savedRecoveryDirty.delete(kind);
     const host = $(savedRecoveryHostIds[kind]);
@@ -1934,6 +2018,11 @@ function activateSavedLorebookIfVisible(force = false) {
 function activateVisibleSavedRecoveryManagers() {
   activateSavedLorebookIfVisible();
   if (!savedRecoverySectionOpen()) return;
+  if (!savedRecoveryDataLoaded) {
+    const overview = $("dsSavedRecoveryOverview")?.getBoundingClientRect();
+    if ((overview?.height > 0 && overview.top < window.innerHeight + 160 && overview.bottom > -160) || Object.keys(savedRecoveryHostIds).some(savedRecoveryHostVisible)) loadSavedRecoveryOverview();
+    return;
+  }
   for (const kind of [...Object.keys(savedRecoveryHostIds), "archive-transfer"]) {
     if (savedRecoveryHostVisible(kind)) loadAndRenderSavedRecoveryManagers("section-visible", kind).catch(() => {});
   }
@@ -1946,7 +2035,10 @@ function setupSavedRecoveryLazyActivation() {
   renderSavedRecoveryPlaceholders();
   const onOpen = () => {
     if (activeOptionsTab() !== "saved") return;
-    if (typeof IntersectionObserver !== "function") loadAndRenderSavedRecoveryManagers("section-opened", "status").catch(() => {});
+    if (typeof IntersectionObserver !== "function") {
+      if (savedRecoveryDataLoaded) loadAndRenderSavedRecoveryManagers("section-opened", "status").catch(() => {});
+      else loadSavedRecoveryOverview();
+    }
     activateVisibleSavedRecoveryManagers();
   };
   card.addEventListener("ds-settings-card-opened", onOpen);
@@ -1957,7 +2049,7 @@ function setupSavedRecoveryLazyActivation() {
     lore.addEventListener("ds-settings-card-opened", onLoreOpen);
     savedRecoveryLazyOpenListeners.push([lore, onLoreOpen]);
   }
-  const targets = [card, $("botAvailabilityScope"), $("botAvailabilityResultsCard"), $("savedBotInfoCard"), $("deletedSavedBotsCard"), $("botStatusArchiveContributionSettings"), $("botStatusArchiveUploadSettings"), lore].filter(Boolean);
+  const targets = [card, $("dsSavedRecoveryOverview"), $("botAvailabilityScope"), $("botAvailabilityResultsCard"), $("savedBotInfoCard"), $("deletedSavedBotsCard"), $("botStatusArchiveContributionSettings"), $("botStatusArchiveUploadSettings"), lore].filter(Boolean);
   if (typeof IntersectionObserver === "function") {
     savedRecoveryLazyObserver = new IntersectionObserver(() => activateVisibleSavedRecoveryManagers(), { root: null, rootMargin: "160px 0px", threshold: 0 });
     targets.forEach(target => savedRecoveryLazyObserver.observe(target));
@@ -2083,6 +2175,31 @@ function releaseTemporaryOptionsMemory() {
   showSettingsToast("Released temporary Settings memory. Saved QoL data was not deleted.");
 }
 
+// Keep the current section reachable after search or keyboard navigation.
+// Scroll only the navigation container, never the Settings page itself.
+let optionsNavVisibilityFrame = 0;
+function keepActiveOptionsTabVisible() {
+  if (!document.body.classList.contains("ds-options-nav-ribbon") && !document.body.classList.contains("ds-options-nav-sidebar")) return;
+  if (optionsNavVisibilityFrame) return;
+  optionsNavVisibilityFrame = requestAnimationFrame(() => {
+    optionsNavVisibilityFrame = 0;
+    if (!window.matchMedia("(min-width: 721px)").matches) return;
+    const nav = $("optionsTabsNav");
+    const active = nav?.querySelector(".tab-button.active:not([hidden])");
+    if (!active) return;
+    const horizontal = document.body.classList.contains("ds-options-nav-ribbon");
+    if (!horizontal && !document.body.classList.contains("ds-options-nav-sidebar")) return;
+    const outer = nav.getBoundingClientRect(), inner = active.getBoundingClientRect();
+    if (horizontal) {
+      if (inner.left < outer.left + 4) nav.scrollLeft += inner.left - outer.left - 4;
+      else if (inner.right > outer.right - 4) nav.scrollLeft += inner.right - outer.right + 4;
+    } else {
+      if (inner.top < outer.top + 4) nav.scrollTop += inner.top - outer.top - 4;
+      else if (inner.bottom > outer.bottom - 4) nav.scrollTop += inner.bottom - outer.bottom + 4;
+    }
+  });
+}
+
 function setActiveTab(tabName) {
   const tabStarted = performance.now();
   const previousTab = activeOptionsTab();
@@ -2092,7 +2209,10 @@ function setActiveTab(tabName) {
   }
 
   document.querySelectorAll(".tab-button").forEach(button => {
-    button.classList.toggle("active", button.dataset.tab === tabName);
+    const active = button.dataset.tab === tabName;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
   const mobileSectionsCurrent = $("mobileSectionsCurrent");
   if (mobileSectionsCurrent) {
@@ -2143,8 +2263,13 @@ function setActiveTab(tabName) {
   renderHeavyManagersForTab(tabName);
   const currentPage = document.querySelector(`.tab-page[data-page="${CSS.escape(tabName)}"]`);
   if (currentPage) window.setTimeout(() => resumeManagerImages(currentPage), 0);
+  if (previousTab !== tabName) keepActiveOptionsTabVisible();
   if (previousTab !== tabName) optionsAfterPaint().then(() => {
-    if (activeOptionsTab() === tabName) optionsPhaseSample(`tab:${tabName}:visible-frame-proxy`, performance.now() - tabStarted);
+    if (activeOptionsTab() === tabName) {
+      const elapsed = performance.now() - tabStarted;
+      optionsPhaseSample(`tab:${tabName}:visible-frame-proxy`, elapsed);
+      optionsDiag("options-navigation", "visible-frame-proxy", { tab: tabName, durationMs: elapsed, timingKind: "two-animation-frames-not-input-latency" });
+    }
   });
   if (tabName === "saved" && optionsDataLoaded && savedListsDataLoaded) setupSavedRecoveryLazyActivation();
 }
@@ -2174,8 +2299,10 @@ function setupTabs() {
   window.matchMedia("(min-width: 721px)").addEventListener?.("change", closeMobileNavigation);
   document.querySelectorAll(".tab-button").forEach(button => {
     button.addEventListener("click", () => {
+      const fromPicker = mobileNavigation?.classList.contains("is-mobile-open") && (document.body.classList.contains("ds-options-nav-picker") || !window.matchMedia("(min-width: 721px)").matches);
       setActiveTab(button.dataset.tab);
       closeMobileNavigation();
+      if (fromPicker) mobileToggle?.focus({ preventScroll: true });
     });
   });
 
@@ -2255,7 +2382,7 @@ function setupSettingsSearch() {
     enableBulkCardBlocking: "select bots bulk blocking multi select bot cards home recommendations creator pages",
     bulkCardBlockingSidebarLauncher: "select bots placement narrow by group size sidebar",
     rememberBotImagePrompt: "remember save restore chatbot character image generation prompt edit editor refresh",
-    settingsNavigationStyle: "settings layout navigation tabs classic grouped categories options appearance",
+    settingsNavigationStyle: "settings layout navigation tabs classic sidebar ribbon picker underline pills numbered preview categories options appearance outlined blue layout lab",
   settingsContentLayout: "settings layout cards single column adaptive columns two column options appearance",
   settingsPageWidth: "settings layout width comfortable wide full page options appearance",
   collapseSettingsSectionsByDefault: "settings sections collapsed collapse options dropdown dropdowns accordion accordions less scrolling compact settings",

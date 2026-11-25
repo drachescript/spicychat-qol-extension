@@ -1072,6 +1072,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function makePlainText(data, opts) {
     const parts = [`SpicyChat Export`, `Exported: ${new Date(data.exportedAt).toLocaleString()}`, `Chat: ${data.chatUrl}`];
+    if (data.captureStatus?.source === "api" && !data.captureStatus.complete) parts.push(`History completeness: unverified (${data.captureStatus.reason || "API capture"}; ${data.captureStatus.rawUniqueCount ?? data.messages.length} unique API rows; ${data.captureStatus.expectedCount || "unknown"} reported).`);
     if (opts.includeBotInfo) parts.push(`BOT INFO\n${plainBotInfo(data.botInfo)}`);
     if (opts.includeRulebook && data.rulebook) parts.push(`RULEBOOK SNAPSHOT (at export, not message history)\n${plainRulebook(data.rulebook)}`);
     if (opts.includeRulebookState && data.rulebookState) parts.push(`RULEBOOK STATE UPDATES (mounted messages only)\n${plainRulebookState(data.rulebookState)}`);
@@ -1092,6 +1093,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function makeMarkdown(data, opts) {
     const parts = ["# SpicyChat Export", `- Exported: ${new Date(data.exportedAt).toLocaleString()}`, `- Chat: ${data.chatUrl}`];
+    if (data.captureStatus?.source === "api" && !data.captureStatus.complete) parts.push(`- History completeness: unverified (${data.captureStatus.reason || "API capture"}; ${data.captureStatus.rawUniqueCount ?? data.messages.length} unique API rows; ${data.captureStatus.expectedCount || "unknown"} reported).`);
     if (opts.includeBotInfo) {
       parts.push("## Bot info");
       if (data.botInfo.name) parts.push(`**Name:** ${escapeMd(data.botInfo.name)}`);
@@ -1137,6 +1139,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         complete: data.captureStatus.complete === true,
         includesOocDirectives: data.includesOocDirectives === true,
         expectedCount: data.captureStatus.expectedCount || undefined,
+        completeness: data.captureStatus.completeness,
+        rawUniqueCount: data.captureStatus.rawUniqueCount,
+        rawRowsSeen: data.captureStatus.rawRowsSeen,
+        rawCountDifference: data.captureStatus.rawCountDifference,
+        duplicateRawRows: data.captureStatus.duplicateRawRows,
+        missingRawIds: data.captureStatus.missingRawIds,
+        filteredCount: data.captureStatus.filteredCount,
+        countChanged: data.captureStatus.countChanged,
         messageCount: data.messages.length,
         pages: data.captureStatus.pages || undefined,
         pageLimit: data.captureStatus.limit || undefined,
@@ -1258,7 +1268,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }).join("\n");
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtmlText(bot.name || "SpicyChat")} chat export</title><style>
       :root{color-scheme:dark;${vars}}*{box-sizing:border-box}body{margin:0;background:${matched ? "var(--ds-export-page-bg)" : "#0b0b0d"};color:${matched ? "var(--ds-export-page-text)" : "#eee"};font:${matched ? "var(--ds-export-font-size)/var(--ds-export-line-height) var(--ds-export-font)" : "15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif"}}main{max-width:900px;margin:auto;padding:28px 18px 60px}h1,h2{margin:.2em 0}.muted,small{color:#aaa}.export-meta{margin-bottom:18px;color:#999}.bot-info{padding:16px;border:1px solid #2b2b31;border-radius:14px;background:#141417;margin-bottom:22px}.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tags span{background:#24242b;padding:3px 8px;border-radius:999px;font-size:12px}details{margin-top:8px;border-top:1px solid #2b2b31;padding-top:8px}summary{cursor:pointer}.messages{display:flex;flex-direction:column;gap:14px}.message{break-inside:avoid}.message header{display:flex;gap:10px;align-items:center;margin-bottom:7px}.message header .avatar{width:38px;height:38px;flex:0 0 38px;background-size:cover;background-position:center;border-radius:9px}${avatarCss}.message header div{display:flex;flex-direction:column}.message.match{padding:14px 16px;max-width:min(100%,650px)}.message.match.role-bot{align-self:flex-start;background:var(--ds-export-bot-bg);color:var(--ds-export-bot-text);border:var(--ds-export-bot-border-width) var(--ds-export-bot-border-style) var(--ds-export-bot-border);border-radius:var(--ds-export-bot-radius)}.message.match.role-user{align-self:flex-end;background:var(--ds-export-user-bg);color:var(--ds-export-user-text);border:var(--ds-export-user-border-width) var(--ds-export-user-border-style) var(--ds-export-user-border);border-radius:var(--ds-export-user-radius)}.message.transcript{padding:10px 0;border-bottom:1px solid #24242a;border-radius:0;background:none}.message-images{font-size:.85em;margin-top:8px;overflow-wrap:anywhere}.message-images a{color:#85bdff;text-decoration:underline}.body{white-space:normal;overflow-wrap:anywhere}.body code{padding:.08em .34em;background:var(--ds-export-code-bg,#24242b);color:var(--ds-export-code-text,inherit);border:1px solid var(--ds-export-code-border,transparent);border-radius:var(--ds-export-code-radius,5px);font:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone}.body pre code{display:block;padding:10px;white-space:pre-wrap}@media print{:root{color-scheme:light}body{background:#fff;color:#111}.bot-info,.message.match{background:#fff!important;color:#111!important;border-color:#ccc!important}.muted,small,.export-meta{color:#555}.tags span{background:#eee}.message.transcript{border-color:#ddd}main{max-width:none;padding:0}}
-    </style></head><body><main><h1>SpicyChat Export</h1><div class="export-meta">Exported ${escapeHtmlText(new Date(data.exportedAt).toLocaleString())} · ${escapeHtmlText(data.chatUrl)}</div>${infoBlocks}${rulebookBlock}${rulebookStateBlock}<section class="messages">${messages || "<p>No chat messages found.</p>"}</section></main></body></html>`;
+    </style></head><body><main><h1>SpicyChat Export</h1><div class="export-meta">Exported ${escapeHtmlText(new Date(data.exportedAt).toLocaleString())} · ${escapeHtmlText(data.chatUrl)}</div>${data.captureStatus?.source === "api" && !data.captureStatus.complete ? `<p class="export-meta">${escapeHtmlText(`History completeness: unverified (${data.captureStatus.reason || "API capture"}; ${data.captureStatus.rawUniqueCount ?? data.messages.length} unique API rows; ${data.captureStatus.expectedCount || "unknown"} reported).`)}</p>` : ""}${infoBlocks}${rulebookBlock}${rulebookStateBlock}<section class="messages">${messages || "<p>No chat messages found.</p>"}</section></main></body></html>`;
   }
 
   function safeBaseName(value) {
@@ -1645,11 +1655,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return `${location.origin}/${raw.replace(/^\/+/, "")}`;
   }
 
-  function apiHistoryMessages(data, settings, fallbackBotName) {
+  function apiHistoryMessages(data, settings, fallbackBotName, cachedVisibleBot = null) {
     const rows = Array.isArray(data?.messages) ? data.messages : [];
     const personaName = cleanInline(data?.userPersona?.name || "You") || "You";
     const userAvatar = normalizeApiAvatar(data?.userPersona?.avatar_url || data?.userPersona?.avatarUrl);
-    const visibleBot = collectBotInfo();
+    const visibleBot = cachedVisibleBot || collectBotInfo();
     const botName = cleanInline(fallbackBotName || visibleBot?.name || "Bot") || "Bot";
     const botAvatar = normalizeApiAvatar(visibleBot?.avatar || "");
 
@@ -1749,10 +1759,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let reachedStart = false;
     const byId = new Map();
     const orderNewestFirst = [];
-    const botName = collectBotInfo()?.name || "Bot";
-
+    const visibleBot = collectBotInfo() || {};
+    const botName = visibleBot.name || "Bot";
+    const rawIds = new Set();
+    let rawRowsSeen = 0, duplicateRawRows = 0, missingRawIds = 0, countChanged = false;
     const absorb = data => {
-      const parsed = apiHistoryMessages(data, settings, botName);
+      const reported = Math.max(0, Number(data?.num_messages || 0));
+      if (reported && expectedCount && reported !== expectedCount) countChanged = true;
+      for (const row of Array.isArray(data?.messages) ? data.messages : []) {
+        rawRowsSeen++;
+        const id = String(row?.id || "").trim();
+        if (!id) { missingRawIds++; continue; }
+        if (rawIds.has(id)) duplicateRawRows++;
+        rawIds.add(id);
+      }
+      const parsed = apiHistoryMessages(data, settings, botName, visibleBot);
       let added = 0;
       for (const message of parsed) {
         if (!message.id || byId.has(message.id)) continue;
@@ -1803,7 +1824,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!chosenLimit) throw new Error("chat history API did not accept a page size");
 
       const seenCursors = new Set();
-      while (lastId && !reachedStart && (!expectedCount || byId.size < expectedCount)) {
+      while (lastId && !reachedStart && pages < 1000) {
         if (lock?.cancelled) {
           reason = "cancelled";
           break;
@@ -1827,11 +1848,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
         const rawRows = Array.isArray(data?.messages) ? data.messages : [];
         if (!rawRows.length) {
+          absorb(data); // record a changed native counter even on the final empty page
           reason = "api-exhausted";
           break;
         }
 
-        const added = absorb(data);
+        absorb(data);
         pages++;
         const oldest = rawRows.at(-1) || null;
         reachedStart = apiRowStartsConversation(oldest);
@@ -1848,8 +1870,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           lastId = "";
           break;
         }
-        if (!nextCursor || nextCursor === lastId || (!added && !expectedCount)) {
-          reason = "api-exhausted";
+        if (!nextCursor || nextCursor === lastId) {
+          reason = "api-cursor-stalled";
           break;
         }
         lastId = nextCursor;
@@ -1857,16 +1879,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       const messages = orderNewestFirst.map(id => byId.get(id)).filter(Boolean).reverse();
-      if (reason === "api-complete" && expectedCount > 0 && messages.length >= expectedCount) reason = "api-count-reached";
-
-      const complete = reason !== "cancelled" && (
-        reachedStart ||
-        reason === "api-chain-start" ||
-        reason === "api-exhausted" ||
-        reason === "api-count-reached" ||
-        (expectedCount > 0 && messages.length >= expectedCount) ||
-        (!lastId && messages.length > 0)
-      );
+      if (reason === "api-complete") reason = pages >= 1000 ? "api-page-limit" : "api-cursor-missing";
+      const rawCountDifference = expectedCount > 0 ? expectedCount - rawIds.size : null;
+      const filteredCount = Math.max(0, rawIds.size - messages.length);
+      // An empty page alone proves only that this endpoint returned no more
+      // rows. The server counter may include deleted/alternate rows or may
+      // differ from the active chain. Do not silently promise completeness.
+      const terminal = reachedStart || reason === "api-exhausted";
+      const countAgrees = expectedCount > 0 ? rawCountDifference === 0 : reachedStart;
+      const complete = reason !== "cancelled" && terminal && countAgrees && !countChanged && !missingRawIds;
+      const completeness = complete ? (reachedStart ? "chain-start-count-consistent" : "endpoint-exhausted-count-consistent") : (terminal ? "endpoint-ended-unverified" : "pagination-unverified");
       const reportedDifference = expectedCount > 0 ? expectedCount - messages.length : 0;
       const elapsedMs = Math.round(performance.now() - started);
       const processingMs = Math.max(0, Math.round(elapsedMs - metrics.requestMs));
@@ -1879,6 +1901,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         source: "api",
         expectedCount,
         reportedDifference,
+        completeness, rawCountDifference, rawRowsSeen, rawUniqueCount: rawIds.size, duplicateRawRows, missingRawIds, filteredCount, countChanged,
         messageCount: messages.length,
         pages,
         limit: chosenLimit,
@@ -1907,11 +1930,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       DS.diagOperationEnd?.(token, {
         outcome: reason,
         counts: { scanned: messages.length, changed: messages.length, skipped: 0, errors: complete ? 0 : 1 },
-        extra: {
+        meta: {
           source: "api", pages, limit: chosenLimit, expectedCount,
-          reportedDifference, elapsedMs: result.elapsedMs,
+          reportedDifference, completeness, rawCountDifference, rawRowsSeen, rawUniqueCount: rawIds.size, duplicateRawRows, missingRawIds, filteredCount, countChanged, elapsedMs: result.elapsedMs,
           requestMs: result.requestMs, networkMs: result.networkMs,
-          processingMs: result.processingMs, retries: result.retries,
+          nonRequestWallMs: result.processingMs, timingKind: "non-request-wall-includes-yields", retries: result.retries,
           authRefreshes: result.authRefreshes
         }
       });
@@ -2566,9 +2589,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const status = workingData.captureStatus;
       const messageLabel = `${workingData.messages.length} active message${workingData.messages.length === 1 ? "" : "s"}`;
       if (status?.source === "api" && status?.complete) {
-        count.textContent = `Chat ready · ${messageLabel}.`;
+        count.textContent = `Chat ready · ${messageLabel}${status.filteredCount ? ` · ${status.filteredCount} API rows excluded by content/export filters` : ""}.`;
       } else if (status?.source === "api") {
-        count.textContent = `${messageLabel} available · incomplete API capture. Retry full chat fetch before relying on the backup.`;
+        const raw = Number.isFinite(status.rawUniqueCount) ? ` · ${status.rawUniqueCount} unique API rows${status.expectedCount ? ` / ${status.expectedCount} reported` : ""}` : "";
+        const omitted = status.filteredCount ? ` · ${status.filteredCount} excluded by content/export filters` : "";
+        count.textContent = `${messageLabel} available${raw}${omitted} · ${status.reason || "API capture"}: completeness unverified. Native counts may include alternate/deleted rows; retry or use compatibility capture before relying on the backup.`;
       } else if (status?.source === "api-error") {
         count.textContent = `${messageLabel} available · full chat fetch failed. Retry full chat fetch, or use Advanced / Compatibility if needed.`;
       } else if (status?.source === "dom") {

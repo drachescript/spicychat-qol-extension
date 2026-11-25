@@ -11,8 +11,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     DS.state.lastUrl = location.href;
     DS.syncListingLongTaskDiagnosticRoute?.();
+    DS.cancelMyCreationsAutoLoad?.();
     clearSlowThrottle();
     DS.invalidatePageStateCache?.();
+    DS.removeExcludedTagGrouping?.();
     DS.handleLorebookWorkflowRouteChange?.();
     DS.state.openedImportRevision = -1;
     DS.state.lastMarkedChatId = "";

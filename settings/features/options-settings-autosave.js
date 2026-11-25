@@ -342,7 +342,7 @@ function readSettingsFromPage() {
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
     reduceOptionsAnimations: checked("reduceOptionsAnimations"),
-    settingsNavigationStyle: ["classic", "grouped"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic",
+    settingsNavigationStyle: ["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic",
     settingsContentLayout: ["single", "adaptive"].includes(value("settingsContentLayout")) ? value("settingsContentLayout") : "single",
     settingsPageWidth: ["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable",
     collapseSettingsSectionsByDefault: checked("collapseSettingsSectionsByDefault"),
@@ -859,7 +859,7 @@ function readSingleSettingFromPage(settingKey) {
     case "pauseQolWhileMessageEditing": return (checked("pauseQolWhileMessageEditing", true));
     case "reduceQolAnimations": return (checked("reduceQolAnimations"));
     case "reduceOptionsAnimations": return (checked("reduceOptionsAnimations"));
-    case "settingsNavigationStyle": return (["classic", "grouped"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic");
+    case "settingsNavigationStyle": return (["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic");
     case "settingsContentLayout": return (["single", "adaptive"].includes(value("settingsContentLayout")) ? value("settingsContentLayout") : "single");
     case "settingsPageWidth": return (["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable");
     case "collapseSettingsSectionsByDefault": return (checked("collapseSettingsSectionsByDefault"));

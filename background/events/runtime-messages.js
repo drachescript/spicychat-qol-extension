@@ -406,7 +406,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_LARGE_STORAGE_STATS") {
-    getLargeStorageStats()
+    getLargeStorageStats(message?.keys ?? null)
       .then(stats => sendResponse({ ok: true, stats }))
       .catch(error => sendResponse({ ok: false, stats: {}, error: String(error?.message || error || "") }));
     return true;

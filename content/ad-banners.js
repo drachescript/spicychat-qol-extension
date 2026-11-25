@@ -82,7 +82,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function isProtectedArea(el) {
-    return !!el.closest(
+    return !!DS.isNativePickerSurface?.(el) || !!el.closest(
       [
         "#ds-qol-panel",
         "#ds-chat-export-modal",
@@ -299,7 +299,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function looksLikeBanner(el) {
-    if (!el || isProtectedArea(el) || !isVisible(el)) return false;
+    if (!el || isProtectedArea(el) || DS.containsNativePickerSurface?.(el) || !isVisible(el)) return false;
     if (!rootHasPromoSignal(el)) return false;
 
     const rect = el.getBoundingClientRect();
@@ -324,8 +324,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (structural) return structural;
     const slide = findSnapSlide(el);
 
-    if (slide && rootHasPromoSignal(slide)) {
-      return findCarouselShell(slide) || slide;
+    if (slide && !isProtectedArea(slide) && !DS.containsNativePickerSurface?.(slide) && rootHasPromoSignal(slide)) {
+      const shell = findCarouselShell(slide);
+      return shell && !DS.containsNativePickerSurface?.(shell) ? shell : slide;
     }
 
     let node = el;
@@ -373,7 +374,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function quickPromoRelevant(node) {
     const el = normalizeDirtyNode(node);
-    if (!el || el.closest?.("[id^='message-'], #ds-qol-panel, #ds-chat-export-modal, form, [contenteditable='true']")) return false;
+    if (!el || DS.isNativePickerSurface?.(el) || el.closest?.("[id^='message-'], #ds-qol-panel, #ds-chat-export-modal, form, [contenteditable='true']")) return false;
     for (const root of cachedBannerRoots) {
       if (root?.isConnected && (root === el || root.contains(el))) return true;
     }
@@ -498,7 +499,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // "remembers more" or "more memory". Never leave form/editor content hidden
     // just because it happens to match wording used by a SpicyChat banner.
     DS.qsa("[data-ds-reason^='ad-banner']").forEach(el => {
-      if (!isProtectedArea(el)) return;
+      if (!isProtectedArea(el) && !DS.containsNativePickerSurface?.(el)) return;
 
       if (typeof DS.unhideElement === "function") {
         DS.unhideElement(el);
@@ -518,7 +519,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const shell = slide ? findCarouselShell(slide) : null;
       const replacement = shell || slide;
 
-      if (!replacement || replacement === oldRoot) continue;
+      if (!replacement || replacement === oldRoot || isProtectedArea(replacement) || DS.containsNativePickerSurface?.(replacement)) continue;
 
       const reason = oldRoot.dataset.dsReason || "ad-banner:promo";
       DS.unhideElement?.(oldRoot);
@@ -527,7 +528,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function hideBannerRoot(root, reason) {
-    if (!root?.isConnected || root.dataset.dsHidden === "1") return false;
+    if (!root?.isConnected || root.dataset.dsHidden === "1" || isProtectedArea(root) || DS.containsNativePickerSurface?.(root)) return false;
     if (typeof DS.hideElement === "function") {
       DS.hideElement(root, reason);
     } else {
@@ -544,7 +545,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Home/Chats promo shell may receive a synthetic click.
     const path = String(location.pathname || "/").replace(/\/+$/, "") || "/";
     if (path !== "/" && path !== "/chats") return null;
-    if (!root?.isConnected || isProtectedArea(root)) return null;
+    if (!root?.isConnected || isProtectedArea(root) || DS.containsNativePickerSurface?.(root)) return null;
     const images = root.querySelectorAll?.(NATIVE_BANNER_IMAGE_SELECTOR) || [];
     if (![...images].some(image => nativeBannerRoot(image) === root)) return null;
     const buttons = [...root.querySelectorAll('button[aria-label="X-button"]')]
@@ -626,7 +627,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // These routes contain real product/editor UI whose words overlap with
       // promotional banners. Only perform the one-time cleanup when the route
       // or setting actually changes; never scan them because a chat message did.
-      if (DS.isSubscribePage?.() || DS.isLorebookPage?.() || /^\/group\/create(?:\/|$)/i.test(String(location.pathname || "")) || !enabled) {
+      if (DS.getPageState?.()?.isBotEditor || DS.getPageState?.()?.isRulebookEditor || DS.isSubscribePage?.() || DS.isLorebookPage?.() || /^\/group\/create(?:\/|$)/i.test(String(location.pathname || "")) || !enabled) {
         if (routeChanged || settingChanged || document.querySelector("[data-ds-reason^='ad-banner']")) unhideOldAdvertBanners();
         bannerRouteKey = currentRoute;
         bannerSettingState = enabled;

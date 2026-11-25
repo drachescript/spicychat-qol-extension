@@ -168,6 +168,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await runStep("remove creator follow buttons", () => DS.removeCreatorFollowButtons?.());
     await runStep("remove favorite history", () => DS.removeFavoriteHistoryButton?.());
     await runStep("remove later buttons", () => DS.removeLaterBotButtons?.());
+    DS.removeExcludedTagGrouping?.();
     await runStep("remove tag template button", () => {
       (DS.qsa?.(".ds-tag-template-button") || []).forEach(button => button.remove());
     });

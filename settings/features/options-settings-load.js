@@ -559,7 +559,7 @@ async function load() {
   setChecked("pauseQolWhileMessageEditing", settings.pauseQolWhileMessageEditing !== false);
   setChecked("reduceQolAnimations", !!settings.reduceQolAnimations);
   setChecked("reduceOptionsAnimations", !!settings.reduceOptionsAnimations);
-  setValue("settingsNavigationStyle", ["classic", "grouped"].includes(settings.settingsNavigationStyle) ? settings.settingsNavigationStyle : "classic");
+  setValue("settingsNavigationStyle", ["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(settings.settingsNavigationStyle) ? settings.settingsNavigationStyle : "classic");
   setValue("settingsContentLayout", ["single", "adaptive"].includes(settings.settingsContentLayout) ? settings.settingsContentLayout : "single");
   setValue("settingsPageWidth", ["comfortable", "wide"].includes(settings.settingsPageWidth) ? settings.settingsPageWidth : "comfortable");
   applyOptionsLayoutPreferences(settings);
@@ -689,6 +689,8 @@ async function load() {
   updateBubbleContrastWarnings?.();
   if (activeOptionsTab() === "appearance") renderMiniPanelPreview?.();
   settingsAutosaveReady = true;
+  if ($("settingsLayoutPreviewToggle")) $("settingsLayoutPreviewToggle").disabled = false;
+  if ($("settingsLayoutLabOpen")) $("settingsLayoutLabOpen").disabled = false;
   optionsPhaseSample("settings:core-controls-ready", performance.now() - OPTIONS_PERFORMANCE.bootStartedAt);
   optionsAfterPaint().then(() => optionsPhaseSample("settings:controls-ready-frame-proxy", performance.now() - OPTIONS_PERFORMANCE.bootStartedAt));
   dsqRefreshHeavyToolsForTab(activeOptionsTab());

@@ -187,9 +187,85 @@ $("lorebookCenterCollapse")?.addEventListener("click", () => {
   renderLorebookCenter();
 });
 $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerformancePreferences({ reduceOptionsAnimations: checked("reduceOptionsAnimations") }));
+$("settingsLayoutPreviewToggle")?.addEventListener("click", () => {
+  const control = $("settingsNavigationStyle");
+  if (!control) return;
+  control.value = "classic";
+  control.dispatchEvent(new Event("change", { bubbles: true }));
+});
 ["settingsNavigationStyle", "settingsContentLayout", "settingsPageWidth"].forEach(id => {
   $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());
 });
+// Browser-local appearance experiments: no feature autosave, heavy data reads,
+// observers, or DOM recreation. One small set of root attributes, on demand.
+(function setupSettingsLayoutLab() {
+  const host = $("settingsLayoutLab");
+  if (!host) return;
+  const storageKey = "spicychatQolSettingsLayoutLabV1";
+  const defaults = { surface: "default", accent: "default", sticky: false };
+  const choices = { surface: ["default", "outline"], accent: ["default", "blue"] };
+  const controls = [...host.querySelectorAll("[data-layout-experiment]")];
+  const status = $("settingsLayoutLabStatus");
+  let state = { ...defaults };
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (raw && typeof raw === "object") {
+      for (const [key, allowed] of Object.entries(choices)) if (allowed.includes(raw[key])) state[key] = raw[key];
+      state.sticky = raw.sticky === true;
+    }
+  } catch {}
+  function apply() {
+    delete document.body.dataset.dsLabDensity;
+    for (const control of controls) {
+      const key = control.dataset.layoutExperiment;
+      if (key === "sticky") control.checked = state.sticky;
+      else control.value = state[key];
+    }
+    for (const key of Object.keys(choices)) {
+      if (state[key] === "default") delete document.body.dataset[`dsLab${key[0].toUpperCase()}${key.slice(1)}`];
+      else document.body.dataset[`dsLab${key[0].toUpperCase()}${key.slice(1)}`] = state[key];
+    }
+    document.body.classList.toggle("ds-lab-sticky-ribbon", state.sticky);
+  }
+  function persist(message) {
+    apply();
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      if (status) status.textContent = message;
+    } catch {
+      if (status) status.textContent = "Applied for this session; browser storage unavailable.";
+    }
+  }
+  // Keep local experiments out of the ordinary feature-setting autosave path.
+  host.addEventListener("input", event => {
+    if (event.target?.dataset?.layoutExperiment) event.stopPropagation();
+  });
+  host.addEventListener("change", event => {
+    const control = event.target;
+    const key = control?.dataset?.layoutExperiment;
+    if (!key) return;
+    event.stopPropagation();
+    if (key === "sticky") state.sticky = control.checked;
+    else if (choices[key]?.includes(control.value)) state[key] = control.value;
+    else return;
+    persist("Appearance updated.");
+  });
+  $("settingsLayoutLabReset")?.addEventListener("click", event => {
+    event.stopPropagation(); state = { ...defaults }; persist("Appearance experiments reset.");
+  });
+  $("settingsLayoutLabClassic")?.addEventListener("click", event => {
+    event.stopPropagation();
+    state = { ...defaults }; persist("Classic layout restored. Features unchanged.");
+    for (const [id, initial] of [["settingsNavigationStyle", "classic"], ["settingsContentLayout", "single"], ["settingsPageWidth", "comfortable"]]) {
+      const control = $(id);
+      if (!control || control.value === initial) continue;
+      control.value = initial;
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  $("settingsLayoutLabOpen")?.addEventListener("click", () => navigateToSettingsCard($("settingsLayoutCard")));
+  apply();
+})();
 for (const id of ["qolInterfaceScale", "settingsReadingFont", "settingsReadingSize", "settingsReadingLineSpacing", "settingsReadingLetterSpacing", "settingsReadingContrast", "settingsReadingLargerControls"]) {
   $(id)?.addEventListener("change", () => applyOptionsAccessibilityPreview(settingsReadingValuesFromControls()));
 }

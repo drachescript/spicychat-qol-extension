@@ -47,6 +47,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     includeTags: [],
     excludeTags: [],
     showTagTemplateButton: false,
+    groupExcludedTags: false,
     showChatTagLinks: false,
     showChatTagAddButtons: false,
 
@@ -690,6 +691,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     showMessageQuickActions: false,
     messageQuickActionCopy: false,
     messageQuickActionEdit: false,
+    disableDoubleTapMessageEdit: false,
     messageQuickActionDelete: false,
     messageQuickActionRemoveImage: false,
     messageQuickActionResend: false,

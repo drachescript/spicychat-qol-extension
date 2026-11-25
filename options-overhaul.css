@@ -1,6 +1,6 @@
 /* v0.2.14 Options layout refresh.
    The familiar classic navigation + single-column cards are the defaults.
-   Grouped navigation, adaptive two-column cards, and a wider canvas are opt-in. */
+   Alternate navigation, adaptive two-column cards, and a wider canvas are opt-in. */
 
 main {
   width: min(1180px, calc(100vw - 40px));
@@ -48,50 +48,6 @@ header {
   min-width: 0;
   padding: 9px 14px;
   line-height: 1.25;
-}
-
-/* Optional grouped navigation. */
-body.ds-options-nav-grouped .tabs.tabs-grouped {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 10px;
-  padding: 0 0 14px;
-  align-items: stretch;
-}
-
-body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group {
-  display: block;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid #2d3035;
-  border-radius: 12px;
-  background: #141517;
-}
-
-body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group:has(.tab-button.active) {
-  border-color: #4e5b6c;
-  background: #181b1f;
-}
-
-body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group-label {
-  display: block;
-  margin: 0 4px 7px;
-  color: #868d96;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-body.ds-options-nav-grouped .tabs.tabs-grouped .tab-group-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-body.ds-options-nav-grouped .tabs.tabs-grouped .tab-button {
-  flex: 1 1 92px;
-  padding: 8px 10px;
 }
 
 /* Familiar single-column content is the default. */
@@ -248,9 +204,6 @@ body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .
   main,
   body.ds-options-width-wide main { width: calc(100vw - 20px); padding-top: 14px; }
   .settings-quick-nav { grid-template-columns: 1fr; }
-  body.ds-options-nav-grouped .tabs.tabs-grouped { grid-template-columns: 1fr; }
-  body.ds-options-nav-grouped .tab-group-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  body.ds-options-nav-grouped .tabs.tabs-grouped .tab-button { width: 100%; }
 }
 
 /* Mobile Settings: keep sections available without covering the content. */
@@ -288,8 +241,7 @@ body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .
   /* Always collapse on narrow layouts, including the Android WebView. */
   .tabs.tabs-grouped:not(.is-mobile-open) { display: none !important; }
   .mobile-sections-toggle:focus-visible { outline: 3px solid #a8ceff; outline-offset: 2px; }
-  .tabs.tabs-grouped.is-mobile-open,
-  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open {
+  .tabs.tabs-grouped.is-mobile-open {
     position: relative;
     z-index: 1;
     box-sizing: border-box;
@@ -317,9 +269,6 @@ body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .
     overflow-wrap: anywhere;
     text-align: center;
   }
-  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open {
-    grid-template-columns: 1fr;
-  }
   /* Restore structure even when desktop classic navigation flattens groups. */
   .tabs.tabs-grouped.is-mobile-open .tab-group {
     display: block;
@@ -343,12 +292,8 @@ body.ds-options-layout-adaptive #botBlockingDislikesCard .settings-card-body > .
     line-height: 1.35;
     min-height: 44px;
   }
-  body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   @media (max-width: 370px) {
-    .tabs.tabs-grouped.is-mobile-open .tab-group-buttons,
-    body.ds-options-nav-grouped .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
+    .tabs.tabs-grouped.is-mobile-open .tab-group-buttons {
       grid-template-columns: 1fr;
     }
   }
@@ -403,3 +348,116 @@ html :is(button, input, select, textarea, a, [tabindex]):focus-visible {
 .ds-bg-url-entry input[type="url"] { flex: 1 1 240px; min-width: min(100%, 240px); }
 .ds-bg-url-entry select { max-width: 100%; }
 @media (max-width: 650px) { .ds-active-options-row button { flex: 1 1 120px; } }
+
+/* Reversible v0.2.99 Settings preview. Existing controls and lazy panels stay
+   in their original DOM, with the same events, IDs, and persisted values. */
+#settingsLayoutPreviewToggle { flex: 0 1 auto; white-space: normal; }
+#settingsLayoutPreviewToggle[hidden] { display: none !important; }
+@media (min-width: 721px) {
+  body.ds-options-nav-sidebar main {
+    display: grid;
+    grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
+    column-gap: 20px;
+    align-items: start;
+  }
+  body.ds-options-nav-sidebar main > * { grid-column: 1 / -1; }
+  body.ds-options-nav-sidebar #optionsTabsNav {
+    grid-column: 1; grid-row: 6;
+    position: sticky; top: 12px; align-self: start;
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px);
+    overflow-y: auto; overscroll-behavior: contain;
+    box-sizing: border-box; padding: 8px; margin: 0;
+    border: 1px solid #353941; border-radius: 12px; background: #141517;
+  }
+  body.ds-options-nav-sidebar main > .tab-page.active { grid-column: 2; grid-row: 6; min-width: 0; }
+  body.ds-options-nav-sidebar #optionsTabsNav .tab-group,
+  body.ds-options-nav-sidebar #optionsTabsNav .tab-group-buttons { display: flex; flex-direction: column; gap: 3px; }
+  body.ds-options-nav-sidebar #optionsTabsNav .tab-group-label {
+    display: block; margin: 4px 8px; color: #a9afb8; font-size: .75em; font-weight: 700;
+  }
+  body.ds-options-nav-sidebar #optionsTabsNav .tab-button {
+    text-align: left; white-space: normal; overflow-wrap: anywhere;
+    width: 100%; box-sizing: border-box; padding: 8px 10px;
+  }
+  body.ds-options-nav-sidebar #optionsTabsNav .tab-button.active { border-inline-start: 3px solid #83b5f5; }
+  body.ds-options-nav-sidebar #settingsFooter { grid-column: 2; }
+}
+@media (max-width: 720px) {
+  #settingsLayoutPreviewToggle { font-size: .8em; max-width: 45%; }
+}
+
+@media (min-width: 721px) {
+  body.ds-options-nav-sidebar main > header { grid-row: 1; }
+  body.ds-options-nav-sidebar #firstRunNotice { grid-row: 2; }
+  body.ds-options-nav-sidebar #platformCompatibilityNotice { grid-row: 3; }
+  body.ds-options-nav-sidebar #settingsSearchCard { grid-row: 4; }
+  body.ds-options-nav-sidebar #dsActiveOptionsPanel { grid-row: 5; }
+}
+
+/* v0.2.99 Layout lab. Presentation only; the same controls, tab handlers,
+   section state and deferred managers remain in place. */
+.ds-layout-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
+.ds-layout-header-actions button { white-space: normal; }
+.ds-layout-lab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 0 12px; }
+.ds-layout-lab-grid label { min-width: 0; }
+.ds-layout-lab-grid select { width: 100%; box-sizing: border-box; }
+body[data-ds-lab-surface="outline"] .tab-page.active > .card { background: #141517; border-color: #535964; border-radius: 10px; }
+body[data-ds-lab-accent="blue"] { --ds-lab-accent: #9ac6ff; --ds-lab-accent-bg: #192e47; }
+body[data-ds-lab-accent] #optionsTabsNav .tab-button.active,
+body[data-ds-lab-accent] #mobileSectionsToggle { color: var(--ds-lab-accent); background: var(--ds-lab-accent-bg); border-color: var(--ds-lab-accent); }
+@media (min-width: 721px) {
+  body.ds-options-nav-ribbon #optionsTabsNav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-block: 8px; overscroll-behavior-x: contain; }
+  body.ds-options-nav-ribbon #optionsTabsNav .tab-button { white-space: nowrap; }
+  body.ds-options-nav-ribbon.ds-lab-sticky-ribbon #optionsTabsNav { position: sticky; top: 0; z-index: 5; background: #0f0f10; }
+  body.ds-options-nav-ribbon.ds-lab-sticky-ribbon .tab-page.active > .card { scroll-margin-top: 70px; }
+  body.ds-options-nav-picker #mobileSectionsToggle { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; margin-bottom: 10px; padding: 10px 14px; }
+  body.ds-options-nav-picker .mobile-sections-current { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  body.ds-options-nav-picker #optionsTabsNav:not(.is-mobile-open) { display: none; }
+  body.ds-options-nav-picker #optionsTabsNav.is-mobile-open { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); padding: 8px; border: 1px solid #41454c; border-radius: 10px; }
+  body.ds-options-nav-picker #optionsTabsNav .tab-button { width: 100%; text-align: left; white-space: normal; }
+}
+@media (max-width: 720px) {
+  .ds-layout-header-actions { max-width: 48%; }
+  .ds-layout-header-actions #settingsLayoutPreviewToggle { max-width: 100%; }
+}
+
+/* Retained numbered layouts. The compact mobile menu uses the same controls. */
+@media (min-width: 721px) {
+  body.ds-options-nav-underline #optionsTabsNav { gap: 2px 12px; align-items: stretch; }
+  body.ds-options-nav-underline #optionsTabsNav .tab-button {
+    background: transparent; border: 1px solid transparent;
+    border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 9px;
+  }
+  body.ds-options-nav-underline #optionsTabsNav .tab-button:hover { background: #1b1d20; }
+  body.ds-options-nav-underline #optionsTabsNav .tab-button.active {
+    color: var(--ds-lab-accent, #a8ceff); border-bottom-color: var(--ds-lab-accent, #a8ceff);
+  }
+  body.ds-options-nav-pills #optionsTabsNav { gap: 7px; }
+  body.ds-options-nav-pills #optionsTabsNav .tab-button {
+    border-radius: 999px; background: #181a1e; border-color: #363b43; padding: 8px 14px;
+  }
+  body.ds-options-nav-pills #optionsTabsNav .tab-button:hover { background: #262a31; }
+  body.ds-options-nav-pills #optionsTabsNav .tab-button.active {
+    color: var(--ds-lab-accent, #f0f0f0); background: var(--ds-lab-accent-bg, #303743);
+    border-color: var(--ds-lab-accent, #74859c);
+  }
+}
+
+/* Shared polish: consistent focus, compact navigation and no animated layout. */
+#optionsTabsNav .tab-button:focus-visible,
+#mobileSectionsToggle:focus-visible,
+.ds-layout-header-actions button:focus-visible {
+  outline: 2px solid var(--ds-lab-accent, #a8ceff);
+  outline-offset: 2px;
+}
+body[data-ds-lab-accent="blue"] #optionsTabsNav .tab-button:hover:not(.active) { color: #c4ddff; }
+@media (min-width: 721px) {
+  body.ds-options-nav-ribbon #optionsTabsNav { scroll-behavior: auto; scroll-padding-inline: 8px; min-width: 0; padding-inline: 4px; }
+  body.ds-options-nav-picker #mobileSectionsToggle { min-height: 42px; border: 1px solid #444a53; border-radius: 10px; }
+  body.ds-options-nav-picker #optionsTabsNav.is-mobile-open { max-height: min(50vh, 360px); overflow-y: auto; overscroll-behavior: contain; }
+  body.ds-options-nav-picker #optionsTabsNav .tab-button { min-height: 38px; }
+  body.ds-options-nav-underline #optionsTabsNav .tab-button.active { background: transparent; border-color: transparent; border-bottom-color: var(--ds-lab-accent, #a8ceff); }
+  body.ds-options-nav-underline #optionsTabsNav .tab-button { min-height: 36px; }
+  body.ds-options-nav-pills #optionsTabsNav .tab-button { min-height: 36px; }
+}

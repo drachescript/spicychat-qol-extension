@@ -16,6 +16,8 @@
 <h1>SpicyChat QoL</h1>
 <p id="versionText">Version loading...</p>
 </div>
+<div class="ds-layout-header-actions"><button id="settingsLayoutLabOpen" type="button" disabled>Layout lab</button>
+<button id="settingsLayoutPreviewToggle" type="button" hidden disabled>Back to classic Settings</button></div>
 </header>
 <section class="first-run-notice" hidden="" id="firstRunNotice">
 <div>
@@ -136,7 +138,7 @@
 <section class="card" id="settingsLayoutCard">
 <h2>Settings layout</h2>
 <label>Navigation style
-<select id="settingsNavigationStyle"><option value="classic">Classic tabs (recommended)</option><option value="grouped">Grouped navigation</option></select>
+<select id="settingsNavigationStyle"><option value="classic">Classic tabs (01)</option><option value="sidebar">Sidebar navigation (03)</option><option value="ribbon">Horizontal tab ribbon (05)</option><option value="picker">Compact section picker (06)</option><option value="underline">Underline tabs (07)</option><option value="pills">Pill tabs (08)</option></select>
 </label>
 <label>Settings card layout
 <select id="settingsContentLayout"><option value="single">Single column (recommended)</option><option value="adaptive">Adaptive columns on wide screens</option></select>
@@ -144,7 +146,18 @@
 <label>Settings page width
 <select id="settingsPageWidth"><option value="comfortable">Comfortable</option><option value="wide">Wide</option></select>
 </label>
-<p class="hint">Choose how Settings looks: normal tabs or grouped sections, one column or several on larger screens. This only changes the Settings page.</p>
+<p class="hint">Choose a numbered navigation layout. Classic tabs (01) remains the default and fallback. On narrow screens, all layouts use the compact Sections menu. Switching layouts does not change your enabled features.</p>
+<div id="settingsLayoutLab" class="sub-card ds-layout-lab">
+<h3>Layout lab — appearance</h3>
+<p class="hint">Choose Original or Outlined cards and the original or blue navigation accent. Appearance choices are local to this browser; feature settings are unchanged.</p>
+<div class="ds-layout-lab-grid">
+<label>Card style<select data-layout-experiment="surface"><option value="default">Original (S01)</option><option value="outline">Outlined (S03)</option></select></label>
+<label>Navigation accent<select data-layout-experiment="accent"><option value="default">Original (A01)</option><option value="blue">Blue (A02)</option></select></label>
+</div>
+<label class="row"><input type="checkbox" data-layout-experiment="sticky"/><span>Keep the horizontal tab ribbon visible while scrolling (desktop ribbon layout only)</span></label>
+<div class="button-row"><button id="settingsLayoutLabReset" type="button">Reset appearance</button><button id="settingsLayoutLabClassic" type="button">Restore classic layout</button></div>
+<p class="hint" id="settingsLayoutLabStatus" role="status"></p>
+</div>
 <label class="row"><input id="collapseSettingsSectionsByDefault" type="checkbox"/><span>Collapse Settings sections by default</span></label>
 <p class="hint">Start with Settings sections closed to reduce scrolling. Click a title to open it. Search still opens the right section for you.</p>
 <div class="button-row">
@@ -721,6 +734,8 @@ Testing"></textarea></label>
 </section>
 <section class="card" id="botAvailabilityCard">
 <h2>Bot Status Center</h2>
+<div class="button-row"><button id="dsLoadSavedRecovery" type="button">Load Bot Status &amp; recovery records</button><span id="dsSavedRecoveryOverview" class="hint" role="status">Full saved profiles and history load only when requested.</span></div>
+
 <fieldset id="botAvatarLookupCard">
 <legend>Avatar link from ID</legend>
 <p class="hint">Paste a bot ID, chat link or avatar URL. QoL prefers a saved image link, otherwise offers an unverified CDN guess. It never downloads the image.</p>

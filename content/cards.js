@@ -58,7 +58,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let el = anchor.parentElement;
 
     for (let i = 0; el && i < 12; i++, el = el.parentElement) {
-      if (el === document.body || el.id === "root") break;
+      if (el === document.body || el.id === "root" || DS.isNativePickerSurface?.(el) || DS.containsNativePickerSurface?.(el)) break;
 
       if (el.querySelector?.("textarea[placeholder='Message...'], button[aria-label='chat-dropdown'], nav, [role='navigation']")) {
         continue;
@@ -83,6 +83,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.getCardFromChatLink = function getCardFromChatLink(anchor) {
+    if (DS.isNativePickerSurface?.(anchor)) return null;
     return (
       DS.findRecommendationCardRoot(anchor) ||
       DS.findChatHistoryRow(anchor) ||

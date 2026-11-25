@@ -172,6 +172,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     return promise;
   }
   function wanted(settings, path = location.pathname) {
+    path = DS.normalizedRoutePath?.(path) || path;
     // The explicit Research Export helper is NOT an ordinary /chats tab.
     // It only needs its own exporter module and shared eager auth readers;
     // unrelated optional panels must not load while thousands of bots scan.

@@ -89,7 +89,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const button = target?.closest?.(BUTTON);
     if (!button || !document.contains(button)) return;
     // SPA navigation can change the route before the next normal render pass.
-    if (!REPORT_LISTING.test(location.pathname)) { cleanup(); return; }
+    if (!REPORT_LISTING.test(DS.normalizedRoutePath?.() || location.pathname)) { cleanup(); return; }
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation?.();
@@ -141,7 +141,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   DS.removeReportLinkCollector = cleanup;
   DS.applyReportLinkCollector = function applyReportLinkCollector() {
-    if (!REPORT_LISTING.test(location.pathname) || !DS.state?.settings?.enabled || DS.state.settings.enableReportLinkCollector !== true || DS.isQolPausedForTab?.()) { cleanup(); return; }
+    if (!REPORT_LISTING.test(DS.normalizedRoutePath?.() || location.pathname) || !DS.state?.settings?.enabled || DS.state.settings.enableReportLinkCollector !== true || DS.isQolPausedForTab?.()) { cleanup(); return; }
     const cards = DS.collectCards?.() || [];
     const route = location.href;
     const revision = Number(DS.state?.domRevision || 0);

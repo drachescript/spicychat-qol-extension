@@ -2311,3 +2311,18 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
 .ds-report-link-image-host > .ds-report-link-button:focus-visible { background: rgba(53,89,160,.96) !important; }
 .ds-report-link-image-host > .ds-report-link-button.ds-report-link-saved { background: rgba(28,95,65,.92) !important; font-size: 17px !important; }
 .ds-report-link-image-host > .ds-report-link-button:disabled { opacity: .72 !important; cursor: progress !important; }
+
+/* Native tag checkboxes stay mounted and retain their native handlers. */
+.ds-grouped-tag-rows { display: flex !important; flex-direction: column !important; }
+.ds-grouped-tag-rows > * { flex-shrink: 0; }
+.ds-grouped-tag-rows > :has(input[type="checkbox"][id^="include_"]:checked) { order: -2; }
+.ds-grouped-tag-rows > :has(input[type="checkbox"][id^="exclude_"]:checked) { order: -1; }
+.ds-grouped-tag-rows.ds-excluded-tags-collapsed > :has(input[type="checkbox"][id^="exclude_"]:checked) { display: none !important; }
+.ds-excluded-tags-toggle { display: block; width: 100%; text-align: start; font: inherit; font-size: .9em; opacity: .86; padding: 5px 6px; cursor: pointer; background: transparent; color: inherit; border: 0; }
+.ds-excluded-tags-toggle[hidden] { display: none !important; }
+.ds-excluded-tags-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+
+.ds-grouped-tag-rows > .ds-tag-search-hidden { display: none !important; }
+.ds-tag-filter-tools { box-sizing: border-box; width: 100%; min-width: 0; }
+.ds-loaded-tag-search { box-sizing: border-box; width: 100%; min-width: 0; padding: 7px 8px; margin: 3px 0; border: 1px solid #7778; border-radius: 6px; color: inherit; background: transparent; font: inherit; font-size: .9em; }
+.ds-excluded-tags-toggle:disabled { cursor: default; }

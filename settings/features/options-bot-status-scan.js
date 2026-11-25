@@ -652,6 +652,7 @@ async function runBotAvailabilityScan(options = {}) {
 async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) {
   await ensureSavedListsDataLoaded();
   await ensureSavedRecoveryDataLoaded();
+  savedRecoveryActivated.add("status");
   if (botAvailabilityScanRunning) return;
   // Only resume a queue when its own Resume control was clicked (or the user
   // explicitly agrees to resume that same scan type). Stale refreshes must
