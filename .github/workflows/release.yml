@@ -95,9 +95,10 @@ jobs:
           version = str(manifest.get("version") or "").strip()
           version_name = str(manifest.get("version_name") or version).strip()
 
-          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+          if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
               raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
-          if version_name != version:
+          if (not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version_name)
+                  or tuple(map(int, version_name.split("."))) != tuple(map(int, version.split(".")))):
               raise SystemExit(
                   f"manifest.json version_name ({version_name}) does not match version ({version})."
               )
@@ -109,7 +110,7 @@ jobs:
           if mode == "manual":
               requested = os.environ.get("REQUESTED_VERSION", "").strip()
               requested = requested[1:] if requested.startswith("v") else requested
-              if requested != version:
+              if requested not in (version, version_name):
                   raise SystemExit(
                       f"Requested release {requested!r} does not match manifest version {version}."
                   )
@@ -169,11 +170,12 @@ jobs:
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
           # The existing tag/current-main checks decide release eligibility.
           # Changelog headings remain plain version numbers.
-          if publish and not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no exact '## {version}' section.")
+          if publish and not re.search(rf"(?m)^##\s+{re.escape(version_name)}\s*$", changelog):
+              raise SystemExit(f"CHANGELOG.md has no exact '## {version_name}' section.")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"version={version}\n")
+              out.write(f"display_version={version_name}\n")
               out.write(f"tag={tag}\n")
               out.write(f"publish={'true' if publish else 'false'}\n")
               out.write(f"reason={reason}\n")
@@ -380,7 +382,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists. Updating title/assets and marking it latest."
             gh release edit "$TAG" \
-              --title "SpicyChat QoL v${VERSION}" \
+              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
               --latest
 
             gh release upload "$TAG" \
@@ -394,7 +396,7 @@ jobs:
               "$FIREFOX" \
               "$CHECKSUMS" \
               --verify-tag \
-              --title "SpicyChat QoL v${VERSION}" \
+              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
               --generate-notes \
               --latest
           else
@@ -403,7 +405,7 @@ jobs:
               "$FIREFOX" \
               "$CHECKSUMS" \
               --target "$HEAD_SHA" \
-              --title "SpicyChat QoL v${VERSION}" \
+              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
               --generate-notes \
               --latest
           fi
