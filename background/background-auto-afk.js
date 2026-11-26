@@ -1,7 +1,7 @@
 "use strict";
 // Optional background service, imported before background event registration.
 function autoAfkProtectedTab(tab, action, settings) {
-  if (!tab || dsqChatExportTabProtected(tab)) return true;
+  if (!tab || dsqChatExportTabProtected(tab) || dsqLorebookImportTabProtected(tab)) return true;
   if (settings.autoAfkProtectActive !== false && tab.active) return true;
 
   // Safety rules from the tab-discard design: never touch pinned or audible tabs.
@@ -148,7 +148,7 @@ function isDedicatedWorkerTab(tab) {
 }
 
 function lowMemoryProtectedTab(tab) {
-  if (!tab || dsqChatExportTabProtected(tab)) return true;
+  if (!tab || dsqChatExportTabProtected(tab) || dsqLorebookImportTabProtected(tab)) return true;
   // PC protection always keeps the tab the user is looking at. Pinned/audible
   // tabs and browser-declared non-discardable tabs are never sacrificed either.
   if (tab.active || tab.pinned || tab.audible || tab.autoDiscardable === false) return true;
@@ -230,6 +230,7 @@ async function runAutoAfkScan() {
     return summary;
   }
 
+  await dsqRestoreLorebookImportProtection().catch(()=>{});
   const cutoff = now - minutes * 60 * 1000;
   const tabs = await tabsQuery({
     url: ["https://spicychat.ai/*", "https://www.spicychat.ai/*"]

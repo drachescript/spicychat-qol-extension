@@ -17,6 +17,8 @@
 - Fixed Lorebook and Rulebook attachment choices being affected by QoL features in the chatbot editor.
 - Fixed support history access and clearing from Settings opened in a browser tab.
 - Improved Settings, Bot Status scanning and chat performance by reducing unnecessary loading, refreshes and background processing.
+- Improved individual and bulk Lorebook backups, including large Lorebooks and exports with tag expansion disabled.
+- Improved large Lorebook JSON imports with saved progress, safe pause and resume, server write receipts, clearer recovery status and less editor background work.
 
 ## 0.2.99
 - Added a lightweight Bot Status and recovery record-count overview; full saved profiles, histories and queue reconciliation load on request instead of when opening Settings.

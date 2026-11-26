@@ -78,7 +78,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       if (!name) name = clean(anchor.textContent, 240);
       const existing = map.get(id);
-      if (!existing || (!existing.name && name)) map.set(id, { id, name });
+      let listedEntryCount = existing?.listedEntryCount ?? null;
+      if (kind === "lorebooks") {
+        const card = anchor.closest("[data-testid='CharacterCard']");
+        const badge = card?.querySelector("[data-testid='CharacterCardHeader'] svg.lucide-book-open")?.parentElement;
+        const count = clean(badge?.textContent, 40);
+        if (/^\d[\d,]*$/.test(count)) listedEntryCount = Number(count.replace(/,/g, ""));
+      }
+      if (!existing || (!existing.name && name)) map.set(id, { id, name, ...(kind === "lorebooks" ? { listedEntryCount } : {}) });
+      else if (kind === "lorebooks" && listedEntryCount !== null) existing.listedEntryCount = listedEntryCount;
     }
     return [...map.values()];
   }
@@ -538,22 +546,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
-  async function fetchCurrent(kind, id) {
+  async function fetchCurrent(kind, id, progress) {
     if (kind === "chatbots") {
       if (typeof DS.getCurrentOwnBotBackupData !== "function") throw new Error("Current chatbot backup reader is not ready.");
       return DS.getCurrentOwnBotBackupData(id);
     }
+    if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+      await DS.optionalModuleLoader?.ensure?.("lorebook-tags");
+    }
     if (typeof DS.getCurrentOwnLorebookBackupData !== "function") throw new Error("Current Lorebook backup reader is not ready.");
-    return DS.getCurrentOwnLorebookBackupData(id);
+    return DS.getCurrentOwnLorebookBackupData(id, { progress });
   }
 
-  async function fetchWithRetry(kind, id, job) {
+  async function fetchWithRetry(kind, id, job, progress) {
     let lastError = null;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       if (job.cancelled) throw new Error("Backup cancelled.");
-      try { return await fetchCurrent(kind, id); }
+      try { return await fetchCurrent(kind, id, progress); }
       catch (error) {
         lastError = error;
+        // A failed full native capture is not a transient API failure. Do
+        // not automatically repeat a potentially expensive editor crawl.
+        if (kind === "lorebooks" && error?.code === "lorebook-editor-fallback-failed") break;
         if (attempt < 3) await sleep(attempt === 1 ? 500 : 1400);
       }
     }
@@ -820,7 +834,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         try {
           let snapshot;
           try {
-            snapshot = await fetchWithRetry(kind, item.id, job);
+            snapshot = await fetchWithRetry(kind, item.id, job, message => {
+              if (!job.cancelled && kind === "lorebooks") setStatus(`${item.name || item.id}: ${message}`);
+            });
           } catch (error) {
             if (kind !== "chatbots") throw error;
             // Unlisted/reviewed bot APIs can redact creator-only fields.
@@ -830,16 +846,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               creator: item.creator || "", source: "character-api-unavailable" };
           }
           if (job.cancelled) return;
-          if (kind === "lorebooks" && item.name && snapshot?.lorebook?.name &&
-              !equivalentVisibleText(item.name, snapshot.lorebook.name)) {
+          const listingCount = item.listedEntryCount;
+          const nameMismatch = kind === "lorebooks" && item.name && snapshot?.lorebook?.name && !equivalentVisibleText(item.name, snapshot.lorebook.name);
+          const countMismatch = kind === "lorebooks" && Number.isSafeInteger(listingCount) && listingCount !== snapshot?.entries?.length;
+          if (nameMismatch || countMismatch) {
             // The owned-Lorebooks page disagrees with the API, which may be
             // serving an older revision. Try an actual editor capture rather
             // than labeling that API result a successful current backup.
             if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") {
-              throw new Error("Lorebook name disagrees with the live listing, and the editor verifier is unavailable.");
+              await DS.optionalModuleLoader?.ensure?.("lorebook-backup");
             }
-            snapshot = await DS.getCurrentOwnLorebookBackupDataFromEditor(item.id);
-            if (!snapshot?.lorebook?.name || !equivalentVisibleText(item.name, snapshot.lorebook.name)) {
+            if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") {
+              throw new Error("Lorebook details disagree with the live listing, and the editor verifier is unavailable.");
+            }
+            if (snapshot?.source?.includes("editor")) throw new Error("The current Lorebook editor disagrees with the listing. Refresh My Creations and retry.");
+            snapshot = await DS.getCurrentOwnLorebookBackupDataFromEditor(item.id, { progress: message => {
+              if (!job.cancelled) setStatus(`${item.name || item.id}: ${message}`);
+            } });
+            if ((item.name && (!snapshot?.lorebook?.name || !equivalentVisibleText(item.name, snapshot.lorebook.name))) ||
+                (Number.isSafeInteger(listingCount) && listingCount !== snapshot?.entries?.length)) {
               throw new Error("Lorebook editor does not match the live owned-Lorebook listing; no stale copy was exported.");
             }
           }
@@ -890,13 +915,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             files.push({ name: `chatbots/${name} - ${item.id}.json`, data: JSON.stringify(payload, null, 2) });
           } else {
             if (snapshot?.lorebook && (!snapshot.lorebook.name || snapshot.lorebook.name === item.id) && item.name) snapshot.lorebook.name = item.name;
+            if (!Array.isArray(snapshot?.entries) || snapshot?.completeness?.details !== true ||
+                snapshot?.completeness?.entries !== true || snapshot?.completeness?.entryCountVerified !== true ||
+                Number(snapshot?.lorebook?.entryCount) !== snapshot.entries.length ||
+                String(snapshot?.lorebook?.id || "").toLowerCase() !== item.id.toLowerCase()) {
+              throw new Error("Live Lorebook backup did not confirm a complete matching entry list.");
+            }
             const payload = lorebookJson(snapshot);
             const name = safeFilename(snapshot?.lorebook?.name || item.name || item.id, "lorebook");
             files.push({ name: `lorebooks/${name} - ${item.id}.json`, data: JSON.stringify(payload, null, 2) });
           }
           job.success.push(item.id);
         } catch (error) {
-          if (!job.cancelled) job.failures.push({ id: item.id, name: item.name || "", error: clean(error?.message || error, 500) });
+          if (!job.cancelled) job.failures.push({ id: item.id, name: item.name || "", ...(kind === "lorebooks" ? { listedEntryCount: item.listedEntryCount ?? null } : {}), error: clean(error?.message || error, 500) });
         } finally {
           job.completed += 1;
           setStatus(`Fetching current owner ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… ${job.completed} / ${items.length}${job.failures.length ? ` · ${job.failures.length} failed` : ""}`);
@@ -943,7 +974,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const stamp = exportedAt.replace(/[:.]/g, "-");
       const label = kind === "chatbots" ? "chatbots" : "lorebooks";
       downloadBlob(storedZipBlob(files), `spicychat-my-creations-${label}-${stamp}.zip`);
-      lastFailures = job.failures.map(row => ({ id: row.id, name: row.name }));
+      lastFailures = job.failures.map(row => ({ id: row.id, name: row.name, ...(kind === "lorebooks" ? { listedEntryCount: row.listedEntryCount ?? null } : {}) }));
       lastFailureKind = kind;
       if (job.failures.length) {
         setStatus(`Backup downloaded: ${job.success.length} current ${label} · ${job.failures.length} failed. Retry failed is available.`);

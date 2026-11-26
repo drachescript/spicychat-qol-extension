@@ -343,7 +343,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return cache.get(key)?.meta || null;
   };
 
-  async function getCurrentOwnLorebookBackupDataApi(lorebookId) {
+  async function getCurrentOwnLorebookBackupDataApi(lorebookId, { progress } = {}) {
     const id = clean(lorebookId).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
     if (typeof DS.fetchLorebookArchiveData !== "function") throw new Error("The current Lorebook API bridge is not available.");
@@ -357,8 +357,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const entries = [];
     const seen = new Set();
     let expected = 0;
+    const requestedCursors = new Set();
+    let stopReason = "page limit";
 
     for (let page = 0; page < 120; page += 1) {
+      requestedCursors.add(cursor);
       const api = await DS.fetchLorebookArchiveData(id, page === 0, { lastSortPriority: cursor });
       const payload = lorebookPayload(api?.data);
       const copy = normalizeLorebookRecoveryCopy(payload, id);
@@ -373,27 +376,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // Generated index:0...index:99 IDs repeat on each API page. Those
         // are not real entry UUIDs and must never suppress later pages.
         const realId = String(entry.id || '').startsWith('index:') ? '' : entry.id;
-        const key = clean(realId || `${entry.name}:${entry.priority}:${entry.content}:${entry.keywords.join('|')}`, 900).toLowerCase();
-        if (!key || seen.has(key)) continue;
+        const key = realId ? `id:${realId.toLowerCase()}` : `content:${JSON.stringify([entry.name, entry.priority, entry.content, entry.keywords])}`;
+        if (seen.has(key)) continue;
         seen.add(key);
-        entries.push(entry);
+        entries.push(realId ? entry : { ...entry, id: `index:${entries.length}` });
         added += 1;
       }
 
+      progress?.(`Reading Lorebook from API: ${entries.length}${expected ? `/${expected}` : ""} entries…`);
       if (!expected || entries.length >= expected) break;
-      if (!copy.entries.length || !added) break;
-      const tail = copy.entries[copy.entries.length - 1];
-      const rawCursor = tail?.priority;
+      if (!copy.entries.length || !added) {
+        stopReason = !copy.entries.length ? "empty API page" : "API repeated entries";
+        break;
+      }
+      // Use the original sort-priority field if provided, rather than the
+      // normalized export priority (which can be a separate display field).
+      const tail = lorebookEntryArray(payload).at(-1);
+      const rawCursor = tail?.sortPriority ?? tail?.sort_priority ?? tail?.priority ?? tail?.order ?? tail?.position ?? tail?.rank;
       const nextCursor = rawCursor === '' || rawCursor == null ? NaN : Number(rawCursor);
-      if (!Number.isFinite(nextCursor) || nextCursor === cursor) break;
+      if (!Number.isFinite(nextCursor) || requestedCursors.has(nextCursor)) {
+        stopReason = !Number.isFinite(nextCursor) ? "missing sort priority" : "repeated sort priority";
+        break;
+      }
       cursor = nextCursor;
       await new Promise(resolve => setTimeout(resolve, 80));
     }
 
     if (!meta) throw new Error("Current Lorebook data could not be read.");
-    if (expected && entries.length < expected) {
+    if (expected && entries.length !== expected) {
       const error = new Error(`SpicyChat returned ${entries.length} of ${expected} Lorebook entries; refusing to create an incomplete backup.`);
       error.code = "incomplete-lorebook";
+      error.paginationStopReason = stopReason;
+      error.message += ` (API pagination: ${stopReason}; ${requestedCursors.size} request(s).)`;
       error.expectedEntries = expected;
       error.receivedEntries = entries.length;
       // A live, ID-checked details response is useful on mobile even when
@@ -412,26 +426,34 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       savedAt: Date.now(),
       fetchedAt: new Date().toISOString(),
       source: "current-live-api",
-      completeness: { details: true, entries: true, entryCountVerified: !expected || entries.length >= expected },
+      completeness: { details: true, entries: true, entryCountVerified: !expected || entries.length === expected },
       lorebook: { ...meta, entryCount: expected || entries.length },
       entries
     };
   }
 
-  DS.getCurrentOwnLorebookBackupData = async function getCurrentOwnLorebookBackupData(lorebookId) {
+  DS.getCurrentOwnLorebookBackupDataApiOnly = getCurrentOwnLorebookBackupDataApi;
+  DS.getCurrentOwnLorebookBackupData = async function getCurrentOwnLorebookBackupData(lorebookId, { progress } = {}) {
     try {
-      return await getCurrentOwnLorebookBackupDataApi(lorebookId);
+      return await getCurrentOwnLorebookBackupDataApi(lorebookId, { progress });
     } catch (apiError) {
+      // My Creations does not normally load the editor-only backup module.
+      // Only explicit live backup calls may request the native fallback.
+      if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") {
+        try { await DS.optionalModuleLoader?.ensure?.("lorebook-backup"); } catch {}
+      }
       if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") throw apiError;
+      progress?.("Live API could not verify all entries. Reading the native Lorebook editor…");
       try {
         return await DS.getCurrentOwnLorebookBackupDataFromEditor(lorebookId, {
-          partialLorebook: apiError?.partialLorebook || null
+          partialLorebook: apiError?.partialLorebook || null, progress
         });
       } catch (editorError) {
         const apiMessage = clean(apiError?.message || apiError, 500);
         const editorMessage = clean(editorError?.message || editorError, 500);
         const combined = new Error(`Live API failed: ${apiMessage || "unknown error"}. Editor fallback failed: ${editorMessage || "unknown error"}.`);
         combined.cause = editorError;
+        combined.code = "lorebook-editor-fallback-failed";
         throw combined;
       }
     }
@@ -792,11 +814,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!rows.length) return;
 
     const entries = await fetchEditorLorebookEntries(lorebookId);
-    if (!entries.length) return;
+    if (!entries.length || DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
 
     const usedIds = new Set();
     for (const rowInfo of rows) {
       const entry = matchEditorEntry(entries, rowInfo, usedIds);
+      if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
       if (!entry) continue;
       showExpanded(rowInfo, entry.keywords || []);
     }
@@ -812,6 +835,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Details/Entries snapshot. Never let automatic keyword expansion run in
     // that worker: doing so can trigger another live-reader fallback while the
     // helper is already collecting the same Lorebook.
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
     if (isLorebookBackupWorkerPage()) {
       restoreExpandedRows();
       return;
@@ -908,7 +932,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
     // Private/unknown Lorebook editors are intentionally blocked by the
     // Creator Editor privacy guard. Do not keep scheduling a guarded read.
-    return !!settings.enabled && !!settings.lorebookExpandTags && !!editorLorebookIdFromPath() &&
+    return !DS.state?.lorebookNativeCaptureActive && !DS.state?.lorebookImportActive && !!settings.enabled && !!settings.lorebookExpandTags && !!editorLorebookIdFromPath() &&
       DS.creatorEditorAutoReadAllowed?.() !== false;
   }
 
@@ -923,6 +947,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function scheduleEditorExpansion(delay = 120) {
     clearTimeout(editorExpansionTimer);
     editorExpansionTimer = null;
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
     if (!editorExpansionEnabled()) {
       stopEditorExpansionObserver();
       restoreExpandedRows();
@@ -956,6 +981,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       editorInputListening = true;
     }
     editorExpansionObserver = new MutationObserver(mutations => {
+      if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
       let relevant = false;
       for (const mutation of mutations) {
         if (DS.mutationIsQolOnly?.(mutation)) continue;
@@ -974,6 +1000,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function refreshEditorExpansion() {
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
     if (!editorExpansionEnabled()) {
       stopEditorExpansionObserver();
       restoreExpandedRows();

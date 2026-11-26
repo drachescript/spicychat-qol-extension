@@ -263,9 +263,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const root = document.querySelector("[data-testid='EntriesListServer-Header']")?.parentElement;
     if (!root) return [];
 
-    return [...root.querySelectorAll("button[type='button']")]
+    return [...root.querySelectorAll("button[type='button'].w-full.items-start.justify-between:not([data-testid])")]
       .filter(button => button.offsetParent !== null)
-      .filter(button => !button.dataset.testid)
       .filter(button => {
         if (button.closest(`#${TOOLBAR_ID},.ds-lb-row-tools,.ds-lorebook-entry-toggle-wrap`)) return false;
 
@@ -868,17 +867,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // React updates are observable without repeatedly waking a throttled helper
   // tab. One observer + one absolute deadline replaces 60/150ms polling loops.
   // This is only attached during an explicit editor/export operation.
-  function awaitNativeCondition(check, { timeout = 5000, root = document.body, route = null } = {}) {
+  function awaitNativeCondition(check, { timeout = 5000, root = document.body, route = null, coalesceMs = 0 } = {}) {
     return new Promise((resolve, reject) => {
       let finished = false;
       let checking = false;
       let observer;
       let timer;
+      let pendingCheck = null;
       const finish = (value, error) => {
         if (finished) return;
         finished = true;
         try { observer?.disconnect(); } catch {}
         clearTimeout(timer);
+        clearTimeout(pendingCheck);
         if (error) reject(error);
         else resolve(value);
       };
@@ -901,7 +902,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       timer = setTimeout(() => finish(null, new Error("SpicyChat did not finish loading the Lorebook editor before the deadline.")), timeout);
       const target = root || document.body || document.documentElement;
       if (target) {
-        observer = new MutationObserver(inspect);
+        observer = new MutationObserver(() => {
+          if (!coalesceMs) return inspect();
+          if (finished || pendingCheck !== null) return;
+          pendingCheck = setTimeout(() => { pendingCheck = null; inspect(); }, coalesceMs);
+        });
         observer.observe(target, { childList: true, subtree: true, characterData: true, attributes: false });
       }
       inspect();
@@ -1686,7 +1691,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return await awaitNativeCondition(() => {
         const mounted = findEntryRows();
         return mounted.length > previousCount ? mounted : null;
-      }, { timeout, route, root });
+      }, { timeout, route, root, coalesceMs: 120 });
     } catch (error) {
       if (/deadline/i.test(String(error?.message || ""))) {
         throw new Error(`SpicyChat did not load any more entries after ${previousCount}. No partial backup was accepted.`);
@@ -1790,6 +1795,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           throw new Error(`Lorebook list grew beyond its reported ${statedTotal} entries. Previous backup kept.`);
         }
         progress?.({ current: rows.length, total: statedTotal, message: `Loaded ${rows.length}/${statedTotal} Lorebook entries.` });
+        // Give React and the browser a chance to settle each appended batch.
+        await sleep(180);
       }
       if (rows.length !== statedTotal) {
         throw new Error(`Only ${rows.length}/${statedTotal} Lorebook entries loaded. No partial backup was accepted.`);
@@ -1835,7 +1842,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return { name, keywords, content };
   }
 
-  DS.captureLorebookEntriesFully = async function captureLorebookEntriesFully({ progress } = {}) {
+  DS.captureLorebookEntriesFully = async function captureLorebookEntriesFully(options = {}) {
+    if (DS.state.lorebookNativeCaptureActive) throw new Error("A Lorebook export is already collecting entries in this tab.");
+    DS.state.lorebookNativeCaptureActive = true;
+    try { return await captureLorebookEntriesFully(options); }
+    finally { DS.state.lorebookNativeCaptureActive = false; }
+  };
+
+  async function captureLorebookEntriesFully({ progress } = {}) {
     const route = lorebookRoute();
     if (!route?.id || route.page !== "entries") throw new Error("Open the Lorebook Entries page to collect full entry data.");
     let rows = findEntryRows();
@@ -1868,18 +1882,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wasBusy = bulkBusy;
     bulkBusy = true;
     try {
-      const expectedNames = rows.map(row => clean(rowInfo(row)?.name, 50));
+      const expectedNames = [];
+      const quickRows = [];
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        expectedNames.push(clean(row.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1")?.textContent, 50));
+        quickRows.push(readCompleteNativeListRow(row));
+        if ((i + 1) % 40 === 0) await sleep(0);
+      }
       if (expectedNames.some(name => !name)) throw new Error("Lorebook contains an unreadable entry name. No backup was replaced.");
-      const quickRows = rows.map(readCompleteNativeListRow);
       const quickIndices = quickRows.map((item, index) => item ? index : -1).filter(index => index !== -1);
       let trustNativeList = quickIndices.length > 0;
 
       async function readEditorRow(index) {
-        const liveRows = findEntryRows();
-        if (liveRows.length !== rows.length || clean(rowInfo(liveRows[index])?.name, 50) !== expectedNames[index]) {
+        // The native list is append-only; reuse its verified row reference
+        // when still attached. Re-query only after a React remount.
+        const row = rows[index]?.isConnected ? rows[index] : findEntryRows()[index];
+        if (!row || nativeEntryCountFromCounter() !== statedTotal || clean(row.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1")?.textContent, 50) !== expectedNames[index]) {
           throw new Error("Lorebook entry list changed while exporting. No incomplete backup was accepted.");
         }
-        const modal = await openRow(liveRows[index]);
+        const modal = await openRow(row);
         let data;
         try { data = modalData(modal); }
         finally { await closeModal(modal); }
@@ -1931,6 +1953,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!summary || index % 25 === 0 || index === rows.length - 1) {
           progress?.({ current: index + 1, total: rows.length, message: `Reading entry ${index + 1}/${rows.length}…` });
         }
+        if ((index + 1) % 40 === 0) await sleep(0);
         analyzedEntries.set(name, data);
         entries.push({
           key: name.toLowerCase(),
@@ -1946,7 +1969,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Compare row identities once more before marking the capture complete.
       const closingRows = findEntryRows();
       if (closingRows.length !== expectedNames.length || closingRows.some((row, index) =>
-        clean(rowInfo(row)?.name, 50) !== expectedNames[index])) {
+        clean(row.querySelector("[data-tooltip-content] > p.text-label-md, p.text-label-md.line-clamp-1")?.textContent, 50) !== expectedNames[index])) {
         throw new Error("Lorebook entry list changed during collection. No backup was replaced.");
       }
       if (entries.length !== rows.length) {
@@ -1966,6 +1989,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.applyLorebookWorkflowTools = async function applyLorebookWorkflowTools(){
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
     ensureAnalysisForCurrentLorebook();
     if (document.documentElement.dataset.dsLorebookExportHelper === "1") {
       DS.removeLorebookWorkflowTools?.();

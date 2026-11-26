@@ -34,6 +34,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const MERGE_KEY = "dsQolPendingLorebookJsonMergeV1";
   const MERGE_PANEL_ID = "ds-qol-lorebook-json-merge";
 
+  // The live reader belongs to the lazily loaded Lorebook tag module, but
+  // backup/import operations must also work with tag expansion disabled.
+  async function ensureLiveLorebookReader() {
+    if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+      await DS.optionalModuleLoader?.ensure?.("lorebook-tags");
+    }
+    return typeof DS.getCurrentOwnLorebookBackupData === "function";
+  }
+
   function clean(value, max = 24000) {
     return String(value ?? "")
       .replace(/\r\n?/g, "\n")
@@ -348,7 +357,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // The full-export helper must be read-only. Its first React batch may
     // contain just 100 entries; never let an automatic snapshot commit that
     // partial state while a user-requested full save is running.
-    if (manualFullSaveRunning || new URLSearchParams(location.search || "").get("dsQolLorebookBackupWorker") === "1") {
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive || manualFullSaveRunning || new URLSearchParams(location.search || "").get("dsQolLorebookBackupWorker") === "1") {
       return Promise.resolve(false);
     }
     // Capture synchronously: the editor/modal can disappear before storage is ready.
@@ -574,11 +583,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function saveCompleteLorebookNow(reason = "Manual Lorebook backup") {
     const info = routeInfo();
     if (!info?.id) throw new Error("Open a Lorebook editor to save its backup.");
-    if (manualFullSaveRunning) throw new Error("A full Lorebook backup is already running.");
+    if (manualFullSaveRunning || DS.state?.lorebookImportActive) throw new Error("Finish the active Lorebook import or backup first.");
     manualFullSaveRunning = true;
     const op = DS.diagOperationStart?.("lorebook-backup", "save-complete", { lorebookId: info.id, page: info.page });
     try {
-      if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+      if (!(await ensureLiveLorebookReader())) {
         throw new Error("The full Lorebook reader is unavailable.");
       }
       setStatus("Collecting current Lorebook details and all entries…");
@@ -665,7 +674,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     try { await chrome.storage.local.remove(jobKey(token)); } catch {}
   }
 
-  async function requestEditorPageCapture(id, target, { statusPrefix = "" } = {}) {
+  async function requestEditorPageCapture(id, target, { statusPrefix = "", progress } = {}) {
     const safeId = clean(id, 200);
     if (!safeId || !["details", "entries"].includes(target)) return false;
     const token = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -706,6 +715,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (job?.message && job.message !== lastMessage) {
         lastMessage = job.message;
         setStatus(`${statusPrefix}${job.message}`);
+        progress?.(job.message);
       }
       if (job?.status === "done") {
         await removeExportJob(token);
@@ -750,15 +760,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // Shared only while a verified live capture is in progress; never reuse a
   // historical backup or a previous complete result as if it were current.
   const liveLorebookCapturesInFlight = new Map();
-  async function captureCurrentLorebookThroughEditors(lorebookId, { partialLorebook = null } = {}) {
+  async function captureCurrentLorebookThroughEditors(lorebookId, { partialLorebook = null, progress } = {}) {
     const id = clean(lorebookId, 200).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
     if (liveLorebookCapturesInFlight.has(id)) return liveLorebookCapturesInFlight.get(id);
     const task = async () => {
       let helperRequested = false;
-      const requestHelper = (...args) => {
+      const requestHelper = (bookId, target, options = {}) => {
         helperRequested = true;
-        return requestEditorPageCapture(...args);
+        progress?.(`Opening native Lorebook ${target} helper…`);
+        return requestEditorPageCapture(bookId, target, { ...options, progress });
       };
       try {
       // This fallback used to read from the persistent Lorebook backup store,
@@ -824,6 +835,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       if (!entries || entries.page !== "entries" || entries.id !== id || entries.complete !== true || !Array.isArray(entries.data)) {
         throw new Error("Lorebook editor did not confirm a complete fresh entry list.");
+      }
+      if (partialLorebook?.id && String(partialLorebook.id).toLowerCase() === id &&
+          Number.isSafeInteger(Number(partialLorebook.entryCount)) &&
+          Number(partialLorebook.entryCount) !== entries.data.length) {
+        throw new Error(`Live API reports ${partialLorebook.entryCount} entries but the native editor returned ${entries.data.length}; no incomplete backup was accepted.`);
       }
       const payload = {
         ...details.data,
@@ -1014,7 +1030,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
-  function parseLorebookImportPayload(raw) {
+  function parseLorebookImportPayload(raw, { allowDuplicateNames = false } = {}) {
     const payload = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
     if (!payload) throw new Error("That file is not a JSON Lorebook backup.");
     const book = payload.lorebook && typeof payload.lorebook === "object" ? payload.lorebook : payload;
@@ -1033,7 +1049,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       throw new Error(`Only ${entries.length}/${rawEntries.length} entries had both name and content. Nothing imported.`);
     }
     const entryNames = entries.map(item => item.name.slice(0, 50).trim().toLocaleLowerCase());
-    if (entryNames.length !== new Set(entryNames).size) {
+    if (!allowDuplicateNames && entryNames.length !== new Set(entryNames).size) {
       throw new Error("This backup has duplicate entry names (SpicyChat uses the first 50 characters). Rename those entries before importing.");
     }
     const image = clean(book.image || book.avatar_url || book.avatarUrl || "", 3000);
@@ -1616,7 +1632,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       try {
         await verifyPrivateImportTarget(info.id);
         if (policy !== "skip") {
-          if (typeof DS.getCurrentOwnLorebookBackupData !== "function") throw new Error("Live Lorebook backup reader is unavailable. Nothing changed.");
+          if (!(await ensureLiveLorebookReader())) throw new Error("Live Lorebook backup reader is unavailable. Nothing changed.");
           status.textContent = "Checking current entries before allowing changes to matching names…";
           const original = await DS.getCurrentOwnLorebookBackupData(info.id);
           if (!original?.completeness?.entries || original.completeness.entryCountVerified !== true ||
@@ -2032,7 +2048,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       choice.id = "ds-qol-lb-import-policy";
       choice.style.cssText = "display:block;width:100%;box-sizing:border-box;padding:10px;background:#272b35;border:1px solid #747b8a;border-radius:7px;color:inherit;font:inherit";
       for (const [value, text] of [
-        ["skip", "Skip existing (recommended for re-import)"],
+        ["skip", "Skip existing (matching names)"],
+        ["add", "Add every entry (including duplicate names)"],
         ["merge", "Merge matching entries"],
         ["replace", "Replace matching entries"]
       ]) {
@@ -2046,7 +2063,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const updateHint = () => {
         hint.textContent = choice.value === "skip"
           ? "Existing entries stay unchanged. Use this when continuing after a paused import. If a save was uncertain, check that entry first."
-          : "This changes existing entries. QoL will first verify the destination and download a complete safety backup, then ask you to confirm again.";
+          : choice.value === "add" ? "Every source row is submitted separately. SpicyChat may reject duplicate names. Already completed rows are tracked by their saved IDs." : "This changes existing entries. QoL will first verify the destination and download a complete safety backup, then ask you to confirm again.";
       };
       choice.addEventListener("change", updateHint);
       updateHint();
@@ -2099,7 +2116,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function verifyBeforeImportingOverExisting(info) {
     // This is the same pre-write safety standard as Merge full JSON.
     await verifyPrivateImportTarget(info.id);
-    if (typeof DS.getCurrentOwnLorebookBackupData !== "function") {
+    if (!(await ensureLiveLorebookReader())) {
       throw new Error("Current Lorebook backup reader unavailable. Nothing imported.");
     }
     setStatus("Verifying the destination and downloading a safety backup…");
@@ -2226,171 +2243,226 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     queueMicrotask(()=>startRestore());
   }
 
-  async function runLorebookImport(payload, info, { confirmed = false, duplicatePolicy = "skip" } = {}) {
-    if (importRunning) return false;
-    if (info?.page !== "entries") throw new Error("Open the Lorebook Entries tab before importing.");
-    const count = payload.entries.length;
-    if (!count) { setStatus("This file has no entries; nothing to import into this Lorebook."); return true; }
-    if (!confirmed) {
-      const selected = await chooseLorebookEntryImportPolicy(payload);
-      if (!selected) { setStatus("Lorebook import cancelled."); return false; }
-      duplicatePolicy = selected;
-      if (duplicatePolicy !== "skip") {
-        if (!await verifyBeforeImportingOverExisting(info)) return false;
+  // Durable JSON entry imports. The native form remains the writer: do not
+  // bypass SpicyChat validation or retry a request that may have succeeded.
+  let importViewRoute = '', importViewChecking = false, currentImportJob = null;
+  let importStopRequest = null;
+  const IMPORT_RESPONSE_EVENT = 'ds-qol-lorebook-import-response-v1';
+  const importTerminal = j => !j || ['completed','cancelled'].includes(j.phase);
+  async function importAccount(info) {
+    const api=DS.privateLorebookAuth?.request;
+    if(typeof api!=='function')throw Error('The authenticated Lorebook reader is not ready.');
+    const me=await api('/v2/users'), book=await api(`/lorebooks/${info.id}?sortBy=priority&lastSortPriority=0`);
+    const accountId=String(me?.user?.id||'');
+    if(!accountId||String(book?.id||'').toLowerCase()!==info.id.toLowerCase()||book.creator_user_id!==accountId)throw Error('Could not verify ownership of the destination Lorebook. No entries submitted.');
+    return {accountId,book};
+  }
+  function importJobMessage(info, accountId, action, extra={}) {
+    return new Promise((resolve,reject)=>{
+      let done=false;const finish=(value,error)=>{if(done)return;done=true;clearTimeout(timer);error?reject(Error(error)):resolve(value);};
+      const timer=setTimeout(()=>finish(null,'Import checkpoint service did not respond. No further entries submitted.'),20000);
+      try{chrome.runtime.sendMessage({type:'DS_LOREBOOK_IMPORT_JOB',bookId:info.id.toLowerCase(),accountId,action,...extra},r=>{
+        const err=chrome.runtime.lastError?.message;finish(r,err||(!r?.ok?r?.error||'Import checkpoint unavailable':''));
+      });}catch(e){finish(null,String(e?.message||e));}
+    });
+  }
+  async function importDigest(entry) {
+    const normalized=[String(entry?.name||'').trim(),String(entry?.content||'').replace(/\r\n?/g,'\n').trim(),[...(entry?.keywords||[])].map(String).map(x=>x.trim()).sort()];
+    const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(normalized)));
+    return Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
+  }
+  function importJobView(info, j, note='', locked=false) {
+    if(routeInfo()?.id!==info.id||routeInfo()?.page!=='entries')return;
+    const panel=document.getElementById(PANEL_ID);if(!panel)return;
+    let box=document.getElementById('ds-lorebook-import-job');
+    if(!box){box=document.createElement('section');box.id='ds-lorebook-import-job';box.style.cssText='margin:6px 0;padding:8px;border:1px solid #718096;border-radius:7px;display:flex;flex-wrap:wrap;gap:6px;align-items:center';panel.insertAdjacentElement('afterend',box);}
+    if(!j){box.remove();return;}
+    const rows=j.results||[], created=rows.filter(r=>r.action==='created').length, skipped=rows.filter(r=>r.action==='skipped').length;
+    const stamp=t=>t?new Date(t).toLocaleTimeString():'—';
+    let summary=box.querySelector('[data-role="import-summary"]');if(!summary){summary=document.createElement('span');summary.dataset.role='import-summary';summary.style.cssText='flex:1 1 100%;white-space:pre-wrap';box.append(summary);}
+    const text=`Import ${j.jobId} · ${note||j.phase}\n${j.nextIndex}/${j.total} processed · ${created} created · ${skipped} skipped (matching name, selected policy) · ${j.total-j.nextIndex} remaining\nLast successful request: ${stamp(j.lastSuccess)} · Checkpoint: ${stamp(j.checkpointAt)} · Retries: ${j.retries||0} · Resumes: ${j.resumes||0}${j.verifiedCount!=null?' · Verified total: '+j.verifiedCount:''}${j.interruption?'\nLast interruption: '+j.interruption:''}${j.pending?'\nEntry '+(j.pending.index+1)+' has an unresolved save. It will not be submitted again without verification.':''}`;
+    if(summary.textContent!==text)summary.textContent=text;
+    const button=(role,label,handler,show)=>{let b=box.querySelector(`[data-role="${role}"]`);if(!b){b=document.createElement('button');b.type='button';b.dataset.role=role;box.append(b);}b.onclick=handler;b.textContent=label;b.hidden=!show;b.disabled=false;};
+    const active=importRunning&&currentImportJob?.jobId===j.jobId;
+    button('pause','Pause after current entry',()=>importStopRequest?.('paused'),active);
+    button('stop','Cancel after current entry',()=>{if(confirm('Cancel remaining entries? Already saved entries and backups are kept.'))importStopRequest?.('cancelled');},active);
+    button('resume',j.nextIndex===j.total?'Verify saved entries':j.pending?'Check uncertain save and resume':'Resume import',async()=>{
+      if(importRunning)return;
+      try{await runLorebookImport(null,info,{resumeJobId:j.jobId});}catch(e){importJobView(info,currentImportJob||j,String(e?.message||e));}
+    },!active&&!locked&&!importTerminal(j));
+    button('cancel','Cancel saved import',async()=>{
+      if(importRunning||!confirm('Cancel this saved import? Already created entries and backups will remain.'))return;
+      try{const {accountId}=await importAccount(info);const r=await importJobMessage(info,accountId,'cancel-saved',{jobId:j.jobId});currentImportJob=r.job;importJobView(info,r.job);}catch(e){importJobView(info,j,String(e?.message||e));}
+    },!active&&!locked&&!importTerminal(j)&&!j.pending);
+    button('check','Check import status',()=>{importViewRoute='';void offerPersistentLorebookImport(info,true);},!active&&locked);
+  }
+  async function offerPersistentLorebookImport(info, force=false) {
+    if(importRunning||importViewChecking||DS.isQolWorkerTab?.()||info?.page!=='entries'||!info.id)return;
+    const key=info.id.toLowerCase();if(!force&&importViewRoute===key)return;
+    importViewRoute=key;importViewChecking=true;
+    try{
+      // No recurring network reads from the general feature scheduler. Ask the
+      // checkpoint service if a job exists before doing authenticated reads.
+      const peek=await importJobMessage(info,'','peek');if(!peek.exists){importJobView(info,null);return;}
+      const {accountId}=await importAccount(info);
+      const r=await importJobMessage(info,accountId,'get');
+      if(importRunning)return;currentImportJob=r.job;importJobView(info,r.job,r.locked?'Running in another editor, or waiting for its lease to expire':'',r.locked);
+    }catch(e){if(force)setStatus('Could not check saved imports: '+String(e?.message||e));}
+    finally{importViewChecking=false;}
+  }
+  async function runLorebookImport(payload, info, { confirmed = false, duplicatePolicy = "skip", resumeJobId = '' } = {}) {
+    if(importRunning)return false;
+    if(info?.page!=='entries')throw Error('Open the Lorebook Entries tab before importing.');
+    if(DS.state?.lorebookNativeCaptureActive||manualFullSaveRunning||DS.activeLorebookEntryImport)throw Error('Finish the other Lorebook operation first.');
+    importRunning=true;
+    const runId=crypto.randomUUID(), controller=new AbortController();
+    let rejectStall;const stall=new Promise((_,reject)=>{rejectStall=reject;});stall.catch(()=>{});
+    const guarded=p=>Promise.race([p,stall]);
+    let job=null, accountId='', phase='preparing', stopRequested='', lastProgress=Date.now(), busyEntry=false, watchdog, heartbeat, receiptCleanup=null, receiptPromise=null, lastFailure='', lastRender=0, stopped=false, ownJob=false;
+    const trace=DS.diagOperationStart?.('lorebook-import','persistent-native-import',{resumed:!!resumeJobId});
+    const routeMatches=()=>routeInfo()?.id===info.id&&routeInfo()?.page==='entries'&&settings().enabled!==false&&settings().lorebookBackupToolsEnabled!==false&&!window.__DSQ_TAB_GATE__?.paused;
+    const render=(note='',force=false)=>{if(job&&(force||Date.now()-lastRender>400)){lastRender=Date.now();currentImportJob=job;importJobView(info,job,note);}};
+    const msg=async(action,extra={})=>{
+      const r=await importJobMessage(info,accountId,action,{jobId:job?.jobId,runId,...extra});
+      if(!stopped&&r.job){job=r.job;currentImportJob=job;}return r;
+    };
+    const progress=(p,note='')=>{if(stopped)return;phase=p;lastProgress=Date.now();render(note||p);};
+    const requestStop=(p)=>{stopRequested=p;render(p==='cancelled'?'Cancelling after current entry…':'Pausing after current entry…',true);if(!busyEntry)controller.abort();};
+    importStopRequest=requestStop;
+    try{
+      const auth=await importAccount(info);accountId=auth.accountId;
+      const existing=await msg('get');
+      if(existing.job&&!importTerminal(existing.job)&&!resumeJobId){render('An unfinished import already exists. Use Resume import.',true);setStatus('A saved import exists. Resume it instead of starting the file again.');return false;}
+      if(resumeJobId){if(existing.locked||existing.job?.jobId!==resumeJobId)throw Error('Import is running elsewhere or has changed. Check status again.');const r=await msg('resume');ownJob=true;payload=r.payload;duplicatePolicy=job.policy;}
+      else {
+        if(!payload?.entries?.length)return true;
+        if(!confirmed){const selected=await chooseLorebookEntryImportPolicy(payload);if(!selected)return false;duplicatePolicy=selected;}
+        if(!confirmed&&['merge','replace'].includes(duplicatePolicy)&&!await verifyBeforeImportingOverExisting(info))return false;
+        if(payload.entries.length>5000)throw Error('This import exceeds 5,000 entries. Nothing imported.');
+        // No silent truncation: retain the exact approved source ordering and data.
+        if(payload.entries.some(e=>e.name.length>50||e.content.length>2000||e.keywords.some(k=>k.length>80)))throw Error('An entry exceeds SpicyChat’s name, content or keyword limits. Correct the JSON before importing.');
+        if(['merge','replace'].includes(duplicatePolicy)&&new Set(payload.entries.map(e=>e.name.toLowerCase())).size!==payload.entries.length)throw Error('Merge/Replace requires unique source names. Select Add every entry or Skip existing instead.');
+        await msg('start',{payload,policy:duplicatePolicy});ownJob=true;
       }
-    }
-    // Wiki/web crawling stays disabled unless separately enabled. Only the
-    // existing native entry writer is needed for a user-approved JSON import.
-    if (typeof DS.importLorebookEntryBatch !== "function") {
-      await DS.optionalModuleLoader?.ensure?.("wiki-lorebook-importer");
-    }
-    if (typeof DS.importLorebookEntryBatch !== "function") {
-      throw new Error("The native Lorebook entry importer could not load. Nothing was changed. In an Android app, update the optional-module bridge before retrying.");
-    }
-
-    // An Entries-tab import must use the existing native entry importer.
-    // The private-copy background writer is ONLY for a separately approved
-    // automatic clone. It is not suitable for ordinary Skip existing imports.
-
-    // A stuck native form must not leave the status at "Importing 1/5" forever.
-    // All timeouts stop further entries; uncertain saves are never resent.
-    importRunning = true;
-    const traceToken = DS.isDiagnosticTraceActive?.("normal")
-      ? DS.diagOperationStart?.("lorebook-import", "import-and-verify", { entryCount: count, duplicatePolicy }) : null;
-    let traceOutcome = "failed";
-    let nativeImportMs = 0;
-    let nativeImportStartedAt = 0;
-    let verificationMs = 0;
-    let traceCompleted = 0;
-    let traceErrors = 0;
-    const controller = new AbortController();
-    let timer;
-    let lastFailure = '';
-    let timedOut = false;
-    let cancelImportButton = document.getElementById('ds-lorebook-cancel-import');
-    if (!cancelImportButton) {
-      cancelImportButton = document.createElement('button');
-      cancelImportButton.id = 'ds-lorebook-cancel-import';
-      cancelImportButton.type = 'button';
-      cancelImportButton.textContent = 'Stop after current entry';
-      cancelImportButton.title = 'Stops before another entry is submitted.';
-      cancelImportButton.addEventListener('click', () => {
-        controller.abort();
-        DS.cancelLorebookEntryImport?.();
-        cancelImportButton.disabled = true;
-        setStatus('Stopping import after the current entry…');
-      });
-      document.querySelector(`#${PANEL_ID} .ds-lorebook-backup-actions`)?.appendChild(cancelImportButton);
-    }
-    try {
-      setStatus(`Preparing ${count} Lorebook entries…`);
-      const maximumWait = Math.max(45000, Math.min(240000, count * 14000 + 15000));
-      nativeImportStartedAt = Date.now();
-      const result = await Promise.race([
-        DS.importLorebookEntryBatch(payload.entries, {
-          duplicatePolicy,
-          signal: controller.signal,
-          onError(error, item, index) {
-            lastFailure = `Entry ${index + 1}/${count} (“${item?.name || 'unnamed'}”): ${error?.message || error}`;
-          },
-          onProgress(progress) {
-            if (progress.loadingExisting) {
-              setStatus(`Checking existing entries ${progress.current}/${progress.totalExisting}…`);
-            } else if (progress.stopped) {
-              setStatus(progress.stopReason || 'Import stopped; check the last entry before retrying.');
-            } else {
-              setStatus(`Importing ${Math.min(progress.completed, count)}/${count} entries…`);
+      DS.state.lorebookImportActive=true;
+      if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}if(initialTimer){clearTimeout(initialTimer);initialTimer=null;}
+      render('Preparing saved import…',true);
+      if(!routeMatches())throw Error('Lorebook editor changed.');
+      // Renew only while meaningful progress occurs. A suspended/invalidated
+      // editor never retains permanent ownership or starts a duplicate worker.
+      let heartbeatBusy=false;
+      heartbeat=setInterval(async()=>{if(heartbeatBusy||stopped||!ownJob||Date.now()-lastProgress>90000)return;heartbeatBusy=true;try{await importJobMessage(info,accountId,'heartbeat',{jobId:job.jobId,runId,phase});}catch{controller.abort();lastFailure='Import checkpoint connection lost';rejectStall(Error(lastFailure));}finally{heartbeatBusy=false;}},20000);
+      watchdog=setInterval(()=>{
+        if(!routeMatches()||Date.now()-lastProgress>90000){lastFailure=!routeMatches()?'Lorebook editor or extension changed':'No import progress for 90 seconds';controller.abort();DS.cancelLorebookEntryImport?.();render(lastFailure+'; stopping safely…',true);rejectStall(Error(lastFailure));}
+      },5000);
+      // Read the API snapshot once at a fresh/resumed boundary if pagination is
+      // available. A partial read never establishes an ID baseline.
+      await ensureLiveLorebookReader();
+      let baseline=null;
+      try{baseline=await guarded(DS.getCurrentOwnLorebookBackupDataApiOnly?.(info.id,{progress:()=>progress('checking-existing')}));}catch{if(controller.signal.aborted)throw Error(lastFailure||'Import paused');}
+      const completeIds=baseline?.completeness?.entryCountVerified===true&&baseline?.entries?.length===baseline?.lorebook?.entryCount&&baseline.entries.every(x=>UUID_RE.test(x.id))&&new Set(baseline.entries.map(x=>x.id)).size===baseline.entries.length;
+      if(job.pending){
+        progress('checking-uncertain-save');const p=job.pending, receipt=p.receipt;
+        if(receipt?.status>=200&&receipt.status<300&&UUID_RE.test(receipt.entryId)){
+          // A response was durably captured before the editor disappeared.
+          await msg('commit',{index:p.index,result:p.result,attemptId:p.attemptId,entryId:receipt.entryId.toLowerCase()});
+        }else if(receipt&&[400,401,403,404,422].includes(receipt.status)){
+          await msg('rejected',{attemptId:p.attemptId,status:receipt.status});ownJob=false;throw Error('Server rejected the last write. Resume again after checking authentication or the entry.');
+        }else if(p.kind==='create'&&completeIds&&Array.isArray(job.baselineIds)){
+          const known=new Set([...job.baselineIds,...job.results.filter(x=>x.action==='created').map(x=>x.id)]);
+          const fresh=baseline.entries.filter(e=>!known.has(e.id));
+          if(fresh.length===1&&baseline.entries.length===known.size+1&&await importDigest(fresh[0])===p.digest&&confirm('One new server entry matches the interrupted write. Verify and resume without creating it again?')){
+            await msg('commit',{index:p.index,result:'created',attemptId:p.attemptId,entryId:fresh[0].id.toLowerCase(),reconciled:true});
+          }else throw Error('Could not uniquely reconcile the uncertain save. No retry sent; check the Lorebook before continuing.');
+        }else throw Error('The previous save has no reliable server identity. No retry sent. Reopen and check the saved Lorebook; the source and checkpoint are retained.');
+      }
+      if(job.nextIndex===0||!job.pending){const n=Number(auth.book.num_entries??auth.book.numEntries);if(completeIds)await msg('baseline',{count:baseline.entries.length,ids:baseline.entries.map(x=>x.id)});else if(Number.isSafeInteger(n)&&n>=0&&n<=5000)await msg('baseline',{count:n});}
+      if(typeof DS.importLorebookEntryBatch!=='function')await DS.optionalModuleLoader?.ensure?.('wiki-lorebook-importer');
+      if(typeof DS.importLorebookEntryBatch!=='function')throw Error('Native entry importer unavailable. Saved job can be resumed later.');
+      const initialCursor=job.nextIndex;
+      if(job.nextIndex<job.total){
+        const result=await guarded(DS.importLorebookEntryBatch(payload.entries,{
+          duplicatePolicy,startIndex:initialCursor,signal:controller.signal,
+          onProgress(p){if(p.loadingExisting)progress('checking-existing',`Checking existing entries ${p.current}/${p.totalExisting}…`);else if(!p.stopped)progress('running');},
+          onError(e){lastFailure=String(e?.message||e);},
+          durable:{
+            async baseline(count){await msg('baseline',{count});progress('running');},
+            async beforeSubmit(index,kind,entry){
+              if(stopped||stopRequested||controller.signal.aborted||!routeMatches())throw Error('Import paused before submitting another entry.');
+              busyEntry=true;progress('checkpointing');const attemptId=crypto.randomUUID(),digest=await importDigest(entry);
+              await msg('begin',{index,kind,attemptId,digest,result:kind==='create'?'created':duplicatePolicy==='merge'?'merged':'replaced'});
+              // Persist a receipt as soon as it is observed, even if React
+              // never closes the modal or the tab is reloaded afterward.
+              receiptPromise=new Promise(resolve=>{
+                let finished=false;const finish=v=>{if(finished)return;finished=true;clearTimeout(timer);window.removeEventListener(IMPORT_RESPONSE_EVENT,onResponse);if(document.documentElement.getAttribute('data-ds-lorebook-import-attempt')===`${attemptId}:${info.id.toLowerCase()}:${kind}`)document.documentElement.removeAttribute('data-ds-lorebook-import-attempt');resolve(v);};
+                const onResponse=e=>{const d=e.detail;if(d?.attemptId!==attemptId||d.bookId!==info.id.toLowerCase())return;window.removeEventListener(IMPORT_RESPONSE_EVENT,onResponse);clearTimeout(timer);void msg('receipt',{attemptId,status:Number(d.status)||0,entryId:String(d.entryId||'')}).then(()=>finish(d),()=>finish(null));};
+                const timer=setTimeout(()=>finish(null),30000);receiptCleanup=()=>finish(null);window.addEventListener(IMPORT_RESPONSE_EVENT,onResponse);
+                document.documentElement.setAttribute('data-ds-lorebook-import-attempt',`${attemptId}:${info.id.toLowerCase()}:${kind}`);
+              });
+              progress('waiting-for-save');
+            },
+            async notSent(){const p=job?.pending;receiptCleanup?.();receiptPromise=null;busyEntry=false;if(p)await msg('not-sent',{attemptId:p.attemptId});},
+            async commit(index,action){
+              if(stopped)throw Error('Import owner stopped.');
+              if(action==='skipped'){await msg('commit',{index,result:'skipped'});}
+              else {const receipt=await receiptPromise;const pending=job.pending;if(!receipt||!pending)throw Error('No durable server receipt for the last native save.');
+                if([400,401,403,404,422].includes(receipt.status)){await msg('rejected',{attemptId:pending.attemptId,status:receipt.status});ownJob=false;throw Error('Server rejected entry (HTTP '+receipt.status+').');}
+                if(!(receipt.status>=200&&receipt.status<300&&UUID_RE.test(receipt.entryId)))throw Error('Server response is uncertain (HTTP '+receipt.status+'). No retry sent.');
+                await msg('commit',{index,result:action,attemptId:pending.attemptId,entryId:receipt.entryId.toLowerCase()});
+              }
+              receiptCleanup=null;receiptPromise=null;busyEntry=false;progress('running');if(stopRequested)controller.abort();
             }
           }
-        }),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-            DS.cancelLorebookEntryImport?.();
-            reject(new Error('The importer did not finish. The last save may still be processing; check the Entries list before retrying.'));
-          }, maximumWait);
-        })
-      ]);
-      nativeImportMs = Date.now() - nativeImportStartedAt;
-      traceCompleted = Number(result.completed || 0);
-      traceErrors = Number(result.failed || 0);
-      const parts = [];
-      if (result.created) parts.push(`${result.created} added`);
-      if (result.skipped) parts.push(`${result.skipped} already existed`);
-      if (result.failed) parts.push(`${result.failed} failed`);
-      if (result.replaced) parts.push(`${result.replaced} replaced`);
-      if (result.merged) parts.push(`${result.merged} merged`);
-      const counts = parts.join(' · ') || 'no changes';
-      if (result.paused || result.cancelled || result.failed || result.completed !== count) {
-        const reason = lastFailure || result.stopReason || `Only ${result.completed}/${count} entries finished.`;
-        setStatus(`Import stopped: ${reason} (${counts}). Your JSON is still available to retry after checking SpicyChat.`);
-        traceOutcome = result.cancelled ? "cancelled" : result.paused ? "paused" : "partial";
-        return false;
+        }));
+        // A native modal may time out even after a successful POST. Preserve
+        // the receipt, then pause; on Resume the committed server ID is reused.
+        if(receiptPromise)await receiptPromise;
+        if(job.nextIndex!==job.total||result.failed||stopRequested||controller.signal.aborted){
+          if(ownJob){await msg('stop',{phase:stopRequested||'interrupted',reason:stopRequested?'User requested '+stopRequested:lastFailure?'Native import stopped; check the editor':'Native import did not finish'});ownJob=false;}
+          render(lastFailure||job.interruption||'Import paused',true);return false;
+        }
       }
-      // Refresh from SpicyChat rather than treating a closed modal as proof
-      // that the server saved all entries. This performs reads only.
-      if (typeof DS.getCurrentOwnLorebookBackupData !== 'function') {
-        setStatus(`Import submitted (${counts}), but server verification is unavailable. Refresh the Entries tab to confirm before retrying.`);
-        return false;
+      progress('verifying','Verifying saved entries and IDs…');
+      if(!routeMatches())throw Error('Editor changed before final verification.');
+      if(!await ensureLiveLorebookReader())throw Error('Live Lorebook reader unavailable. Saved entries will not be resent.');
+      const full=await guarded(DS.getCurrentOwnLorebookBackupData(info.id,{progress:()=>progress('verifying')}));
+      if(controller.signal.aborted||!routeMatches())throw Error('Verification interrupted; saved entries will not be resent.');
+      if(full?.completeness?.entries!==true||full?.completeness?.entryCountVerified!==true||String(full?.lorebook?.id||'').toLowerCase()!==info.id.toLowerCase()||!Array.isArray(full.entries))throw Error('Final Lorebook read was incomplete; resume verification without resending entries.');
+      const displayedCount=nativeLorebookEntryCount();
+      if(full.lorebook.entryCount!==full.entries.length||(displayedCount!==null&&displayedCount!==full.entries.length))throw Error('Final entry count changed during verification.');
+      const allIds=full.entries.every(x=>UUID_RE.test(x.id))&&new Set(full.entries.map(x=>x.id)).size===full.entries.length;
+      const byId=new Map(full.entries.map(x=>[x.id?.toLowerCase(),x]));
+      const digestCounts=new Map(), nameCounts=new Map();
+      // Exact content and keyword multiset verification also supports the
+      // native reader, which may not expose stable entry IDs for list rows.
+      for(const row of full.entries){const d=await importDigest(row);digestCounts.set(d,(digestCounts.get(d)||0)+1);const name=String(row.name||'').trim().toLowerCase();nameCounts.set(name,(nameCounts.get(name)||0)+1);}
+      const latestUpdates=new Map();for(const r of job.results)if(r.id)latestUpdates.set(r.id,r);
+      for(const r of latestUpdates.values()){
+        if(allIds){const row=byId.get(r.id);if(!row||await importDigest(row)!==r.digest)throw Error('Saved entry ID or content did not match the approved import. No entries resent.');}
+        else{const n=digestCounts.get(r.digest)||0;if(!n)throw Error('Native verification could not match all saved entry contents. No entries resent.');digestCounts.set(r.digest,n-1);}
       }
-      setStatus(`Checking SpicyChat saved all ${count} entries…`);
-      let verifyTimer;
-      let current;
-      const verificationStartedAt = Date.now();
-      try {
-        current = await Promise.race([
-          DS.getCurrentOwnLorebookBackupData(info.id),
-          new Promise((_,reject) => {verifyTimer=setTimeout(()=>reject(new Error('SpicyChat did not finish checking the entries.')),15000);})
-        ]);
-      } catch (error) {
-        setStatus(`Import submitted (${counts}), but the saved entries could not be checked: ${error?.message || error}. Review the Entries list before retrying.`);
-        return false;
-      } finally {clearTimeout(verifyTimer); verificationMs = Date.now() - verificationStartedAt;}
-      const saved = Array.isArray(current?.entries) ? current.entries : [];
-      const names = new Set(saved.map(entry=>String(entry?.name||'').trim().toLowerCase()));
-      const missing = payload.entries.filter(entry=>!names.has(String(entry.name||'').trim().toLowerCase()));
-      if (String(current?.lorebook?.id||'').toLowerCase() !== info.id.toLowerCase() ||
-          current?.completeness?.entries !== true ||
-          current?.completeness?.entryCountVerified !== true || missing.length) {
-        setStatus(`Import submitted (${counts}), but SpicyChat has not confirmed ${missing.length || 'all'} entries. Refresh the Entries tab and check before retrying.`);
-        return false;
-      }
-      const clone=cloneRecord();
-      if (clone?.targetId===info.id && JSON.stringify(clone.payload?.entries||[])===JSON.stringify(payload.entries)) clearClone();
-      // Entries are verified before touching tags; failed tag changes do not
-      // affect any saved entry and can be retried separately.
-      let tagsQueued=false, tagWarning='';
-      try {tagsQueued = await queueMissingLorebookTags(payload, info);}
-      catch (error) {tagWarning=String(error?.message||error);}
-      if (tagsQueued) { traceOutcome = "verified-tags-pending"; return true; }
-      try {
-        const pending=JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY)||'null');
-        if(pending?.targetId===info.id && JSON.stringify(pending.payload?.entries||[])===JSON.stringify(payload.entries))
-          sessionStorage.removeItem(IMPORT_SESSION_KEY);
-      } catch {}
-      setStatus(`Import complete: ${counts}.${tagWarning ? ` Tags could not be checked: ${tagWarning}` : ' Refreshing the Lorebook…'}`);
-      if (!tagWarning) setTimeout(() => {
-        if (routeInfo()?.id === info.id && routeInfo()?.page === 'entries' &&
-            !document.querySelector('[role="dialog"][open], [data-state="open"][role="dialog"]')) location.reload();
-      }, 1000);
-      traceOutcome = "verified";
+      for(const r of job.results.filter(x=>x.action==='skipped'))if(!nameCounts.has(payload.entries[r.index].name.toLowerCase()))throw Error('A previously skipped matching entry is no longer present.');
+      if(full.entries.length < Number(job.initialCount||0)+job.results.filter(x=>x.action==='created').length)throw Error('Final entry count is below the confirmed additions.');
+      await msg('finish',{verifiedCount:full.entries.length,verificationMode:allIds?'ids':'native'});ownJob=false;
+      render(allIds?'Completed — server IDs and contents verified':'Completed — confirmed write IDs, final native content/count verified',true);
+      setStatus(`Import complete: ${job.nextIndex}/${job.total} processed; ${full.entries.length} current entries verified.`);
+      const clone=cloneRecord();if(clone?.targetId===info.id&&JSON.stringify(clone.payload?.entries||[])===JSON.stringify(payload.entries))clearClone();
+      try{const tagsQueued=await queueMissingLorebookTags(payload,info);if(tagsQueued)return true;}catch(e){setStatus('Entries completed; tags still need review: '+String(e?.message||e));}
+      try{const pending=JSON.parse(sessionStorage.getItem(IMPORT_SESSION_KEY)||'null');if(pending?.targetId===info.id&&JSON.stringify(pending.payload?.entries||[])===JSON.stringify(payload.entries))sessionStorage.removeItem(IMPORT_SESSION_KEY);}catch{}
       return true;
-    } catch (error) {
-      setStatus(`Import stopped: ${lastFailure || error?.message || error}. Check SpicyChat before retrying. Your JSON is unchanged.`);
-      return false;
-    } finally {
-      clearTimeout(timer);
-      if (timedOut) controller.abort();
-      if (!nativeImportMs && nativeImportStartedAt) nativeImportMs = Date.now() - nativeImportStartedAt;
-      if (traceToken) DS.diagOperationEnd?.(traceToken, {
-        outcome: timedOut ? "timeout" : traceOutcome,
-        counts: { scanned: traceCompleted, changed: traceCompleted, errors: traceErrors },
-        meta: { entryCount: count, duplicatePolicy, nativeImportMs, verificationMs,
-          serverVerificationAttempted: verificationMs > 0, timedOut }
-      });
-      document.getElementById('ds-lorebook-cancel-import')?.remove();
-      importRunning = false;
+    }catch(e){
+      lastFailure=String(e?.message||e);
+      if(receiptPromise&&!controller.signal.aborted)await receiptPromise;
+      if(ownJob)try{await msg('stop',{phase:stopRequested||'interrupted',reason:'Import interrupted; resume from saved checkpoint'});ownJob=false;}catch{}
+      setStatus('Import stopped: '+String(e?.message||e)+'. Saved progress is retained.');render(String(e?.message||e),true);return false;
+    }finally{
+      stopped=true;clearInterval(watchdog);clearInterval(heartbeat);receiptCleanup?.();controller.abort();document.documentElement.removeAttribute('data-ds-lorebook-import-attempt');
+      DS.state.lorebookImportActive=false;importRunning=false;importStopRequest=null;
+      if(job)importJobView(info,job,job.phase==='completed'?(job.verificationMode==='ids'?'Completed — server IDs and contents verified':'Completed — native contents and count verified'):lastFailure||job.interruption||job.phase);
+      DS.diagOperationEnd?.(trace,{outcome:job?.phase||'not-started',counts:{scanned:job?.nextIndex||0},meta:{resumes:job?.resumes||0,retries:job?.retries||0,remaining:job?job.total-job.nextIndex:0,pending:!!job?.pending}});
+      // Do not resume background backup snapshots until import processing has
+      // stopped. Existing backup history is never cleared or replaced here.
+      if(settings().lorebookBackupsEnabled&&routeMatches()&&!DS.activeLorebookEntryImport)scheduleSave(3000);
     }
   }
 
@@ -2408,7 +2480,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function handleLorebookImportFile(file) {
     const info = routeInfo();
     if (!info?.id) throw new Error("Open a Lorebook editor before importing.");
-    const payload = parseLorebookImportPayload(await readJsonFile(file));
+    const payload = parseLorebookImportPayload(await readJsonFile(file), {allowDuplicateNames:true});
     if (info.page === "entries") return runLorebookImport(payload, info);
     storePendingLorebookImport(payload, info);
     setStatus(`Loaded ${payload.entries.length} entries. Opening the Entries tab…`);
@@ -2584,21 +2656,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function exportCurrent() {
+    if(DS.state?.lorebookImportActive)throw Error('Pause the active Lorebook import before exporting.');
     const info = routeInfo();
     if (!info?.id) return false;
     const op = DS.diagOperationStart?.("lorebook-backup", "export", { lorebookId: info.id, page: info.page });
     DS.diagUserAction?.("lorebook-backup", "export-json", { page: info.page });
     setStatus("Fetching the current Lorebook from SpicyChat…");
     try {
-      if (typeof DS.getCurrentOwnLorebookBackupData !== "function") throw new Error("Live Lorebook reader is unavailable.");
-      const maxWaitMs = 90_000;
-      let timeout;
-      const timeoutPromise = new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("The current Lorebook couldn't be verified within 90 seconds. Try again later or use the last saved local copy.")), maxWaitMs);
+      if (!(await ensureLiveLorebookReader())) throw new Error("Live Lorebook reader is unavailable.");
+      // The live reader bounds individual API requests and the native helper
+      // has its own progress/stall checks. A fixed outer 90-second race can
+      // reject a healthy large capture while leaving it running in the tab.
+      const full = await DS.getCurrentOwnLorebookBackupData(info.id, {
+        progress: message => setStatus(message)
       });
-      let full;
-      try { full = await Promise.race([DS.getCurrentOwnLorebookBackupData(info.id), timeoutPromise]); }
-      finally { clearTimeout(timeout); }
       if (!full?.lorebook || full?.completeness?.details !== true || full?.completeness?.entries !== true ||
           full?.completeness?.entryCountVerified !== true || !Array.isArray(full.entries)) {
         throw new Error("SpicyChat did not confirm a complete current entry list. Use the last saved copy if needed.");
@@ -2853,6 +2924,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function scheduleSave(delayMs = 2000) {
+    if (DS.state?.lorebookImportActive) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
@@ -2868,6 +2940,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function onInput(event) {
+    if (DS.state?.lorebookImportActive) return;
     if (!document.getElementById(PANEL_ID)) return;
     if (event.target?.closest?.(`#${PANEL_ID},#ds-qol-panel`)) return;
     if (!event.target?.closest?.("input,textarea,[contenteditable='true']")) return;
@@ -2875,6 +2948,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function onClick(event) {
+    if (DS.state?.lorebookImportActive) return;
     if (event.target?.closest?.(`#${PANEL_ID},#ds-qol-panel`)) return;
     const button = event.target?.closest?.("button");
     if (!button) return;
@@ -2918,6 +2992,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     initialTimer = null;
     removeListeners();
     document.getElementById(PANEL_ID)?.remove();
+    document.getElementById("ds-lorebook-import-job")?.remove();
+    importViewRoute="";
     document.getElementById(STYLE_ID)?.remove();
     activeId = "";
     lastSignature = "";
@@ -2953,6 +3029,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const activeRoute = `${info.id}:${info.page}`;
     if (activeId !== activeRoute) {
+      importViewRoute = "";
+      document.getElementById("ds-lorebook-import-job")?.remove();
       activeId = activeRoute;
       lastSignature = "";
       if (initialTimer) clearTimeout(initialTimer);
@@ -2968,6 +3046,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (info.page === "details") renderExistingLorebookMerge(info);
     if (info.page === "details") offerPendingTagRestore(info);
     if (info.page === "entries") {
+      void offerPersistentLorebookImport(info);
       offerQueuedEntryImport(info);
       offerCloneEntries(info);
       offerMergeEntries(info);

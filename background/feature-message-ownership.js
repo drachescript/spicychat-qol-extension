@@ -61,6 +61,7 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_LOAD_ALL_CHATS_RESCHEDULE": "chat-index",
   "DS_LOAD_ALL_CHATS_START": "chat-index",
   "DS_LOAD_ALL_CHATS_STOP": "chat-index",
+  "DS_LOREBOOK_IMPORT_JOB": "lorebook-backup",
   "DS_LOREBOOK_EXPORT_HELPER": "lorebook-backup",
   "DS_LOREBOOK_EXPORT_HELPER_RELEASE": "lorebook-backup",
   "DS_LOREBOOK_COVER_FETCH": "lorebook-backup",
