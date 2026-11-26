@@ -80,6 +80,8 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
         if 'manifest.json' not in available:
             raise ValueError(f'{path}: manifest.json missing')
         manifest = json.loads(archive.read('manifest.json'))
+        if (manifest.get('version_name') or manifest.get('version')) != (source_manifest.get('version_name') or source_manifest.get('version')):
+            problems.append('wrong public version name')
         if manifest.get('version') != source_manifest.get('version'):
             problems.append(f"wrong version {manifest.get('version')!r}")
 

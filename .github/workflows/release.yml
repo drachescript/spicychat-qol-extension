@@ -103,7 +103,7 @@ jobs:
                   f"manifest.json version_name ({version_name}) does not match version ({version})."
               )
 
-          tag = f"v{version}"
+          tag = f"v{version_name}"
           publish = True
           reason = ""
 
@@ -158,8 +158,12 @@ jobs:
                               f"Manifest version {version} is older than latest stable tag {latest_tag}."
                           )
                       if current_tuple == latest_tuple:
-                          publish = False
-                          reason = f"{tag} is not newer than the latest stable version."
+                          # Migrate an old unpadded public tag to the declared release name.
+                          if latest_tag != f"v{version}" or tag == latest_tag:
+                              publish = False
+                              reason = f"{tag} is not newer than the latest stable version."
+                          else:
+                              reason = f"Replacing public release name {latest_tag} with {tag}."
                       else:
                           reason = f"{tag} is newer than {latest_tag}; automatic stable release enabled."
                   else:
@@ -174,7 +178,8 @@ jobs:
               raise SystemExit(f"CHANGELOG.md has no exact '## {version_name}' section.")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"version={version}\n")
+              out.write(f"version={version_name}\n")
+              out.write(f"manifest_version={version}\n")
               out.write(f"display_version={version_name}\n")
               out.write(f"tag={tag}\n")
               out.write(f"publish={'true' if publish else 'false'}\n")
@@ -278,7 +283,8 @@ jobs:
                       raise SystemExit(f"{path}: manifest.json is missing")
 
                   manifest = json.loads(zf.read("manifest.json"))
-                  if manifest.get("version") != version:
+                  if (manifest.get("version") != ".".join(str(int(part)) for part in version.split("."))
+                          or (manifest.get("version_name") or manifest.get("version")) != version):
                       raise SystemExit(
                           f"{path}: manifest version {manifest.get('version')} != {version}"
                       )
@@ -379,7 +385,13 @@ jobs:
           FIREFOX="dist/spicychat-qol-v${VERSION}-firefox.zip"
           CHECKSUMS="dist/SHA256SUMS.txt"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          LEGACY_TAG="v${{ steps.release.outputs.manifest_version }}"
+          if [ "$LEGACY_TAG" != "$TAG" ] && ! gh release view "$TAG" >/dev/null 2>&1 && gh release view "$LEGACY_TAG" >/dev/null 2>&1; then
+            # Keep the old source tag and release asset links as a historical
+            # alias until the correctly named release is fully published.
+            gh release create "$TAG" "$CHROME" "$FIREFOX" "$CHECKSUMS" --target "$HEAD_SHA" --title "SpicyChat QoL v${VERSION}" --generate-notes --latest
+            gh release edit "$LEGACY_TAG" --latest=false
+          elif gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists. Updating title/assets and marking it latest."
             gh release edit "$TAG" \
               --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
