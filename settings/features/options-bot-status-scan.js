@@ -486,15 +486,15 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
   const counts = new Map();
   for (const row of rows) counts.set(row.category,(counts.get(row.category)||0)+1);
   const currentlyActionable = rows.filter(row => row.manualRetryAllowed).length;
-  summary.textContent = `${rows.length} held queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. ${currentlyActionable} actionable now; ${rows.length-currentlyActionable} excluded or already completed. Historical holds are not proof that a check remains pending. Each entry shows its saved source, current eligibility, and safe next action. No checks happen until you request them.`;
+  summary.textContent = `${rows.length} retained queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. ${currentlyActionable} actionable records now; ${rows.length-currentlyActionable} excluded or already completed (not pending). Each entry shows its saved source, current eligibility, hold age and safe next action. No checks happen until you request them.`;
   list.append(summary);
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.textContent = 'Copy held-ID diagnostics';
   copyButton.addEventListener('click', async () => {
     const safeReport = rows.map(({id, queueKind, scope, mode, category, reason, originalReason, action,
-      status, checkedAt, sources, hasCopy}) => ({id, queueKind, mode, scope, category, reason,
-      originalReason, action, status, checkedAt, sources, hasCopy}));
+      status, checkedAt, sources, hasCopy, since}) => ({id, queueKind, mode, scope, category, reason,
+      originalReason, action, status, checkedAt, sources, hasCopy, since}));
     try {
       await navigator.clipboard.writeText(JSON.stringify({version:1,generatedAt:new Date().toISOString(),entries:safeReport},null,2));
       showSettingsToast('Copied individual held-ID reasons. Your saved records were not changed.');
@@ -515,7 +515,7 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
     heading.textContent = `${row.id} · ${row.category}`;
     const detail = document.createElement('p');
     detail.className = 'hint';
-    detail.textContent = `${row.manualRetryAllowed ? 'ACTIONABLE — manual recheck permitted' : 'NOT ACTIONABLE — no manual scan'}: ${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
+    detail.textContent = `${row.manualRetryAllowed ? 'ACTIONABLE — manual recheck permitted' : 'NOT ACTIONABLE — no manual scan'}: ${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}. Held since ${new Date(row.since).toLocaleString()}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
     entry.append(heading, detail);
     if (row.manualRetryAllowed) {
       const retry = document.createElement('button');
@@ -561,9 +561,15 @@ async function refreshBotStatusPauseButtonNow() {
   botStatusRecoverableHeldCount = new Set(assessedHeld
     .filter(item => botStatusManualHeldRetryAllowed(item, blockedIds))
     .map(item => item.id)).size;
-  const heldReasonCounts = new Map();
-  for (const item of assessedHeld) heldReasonCounts.set(item.category, (heldReasonCounts.get(item.category) || 0) + 1);
-  const heldReasons = [...heldReasonCounts].slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join("; ");
+  const excludedHeld = assessedHeld.filter(item => item.category === 'excluded');
+  const completedHeld = assessedHeld.filter(item => item.category === 'completed');
+  // Keep queue records intact. A retained exclusion is a review record, not
+  // an unfinished scan. Counts of records can differ from unique bot IDs.
+  botStatusHeldReviewRecordCount = heldCount;
+  botStatusHeldReviewIds = new Set(allHeld.map(item => item.id));
+  const actionableCount = botStatusRecoverableHeldCount;
+  const excludedCount = new Set(excludedHeld.map(item => item.id)).size;
+  const completedCount = new Set(completedHeld.map(item => item.id)).size;
   const normalIds = (state?.ids || []).filter(validBotId);
   const staleIds = (staleState?.ids || []).filter(validBotId);
   botStatusPendingReviewIds = new Set([...normalIds, ...staleIds]);
@@ -593,16 +599,22 @@ async function refreshBotStatusPauseButtonNow() {
   if (hint) hint.textContent = [
     count ? `${count} regular pending rechecks saved for Resume. ${checkpointDetail}` : "No regular scan pending.",
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
-    heldCount ? `${heldCount} checks held automatically: ${heldReasons}. ${botStatusRecoverableHeldCount} available for manual recheck. Open Why held for individual reasons. Nothing deleted.` : "No out-of-scope checks held.",
+    actionableCount ? `${actionableCount} held bot${actionableCount === 1 ? '' : 's'} eligible for manual recheck.` : "No actionable held checks.",
+    excludedCount ? `${excludedCount} excluded bot${excludedCount === 1 ? '' : 's'} retained for review (not pending).` : "",
+    completedCount ? `${completedCount} previously resolved bot${completedCount === 1 ? '' : 's'} retained until queue reconciliation.` : "",
+    heldCount ? "Open held / excluded history for individual reasons. Nothing deleted." : "",
     "Regular and stale queues stay independent."
-  ].join(" ");
+  ].filter(Boolean).join(" ");
   const reviewButton = $("botStatusReviewOutOfScopePending");
   if (reviewButton) {
     // Listing scans may hold thousands of records. Keep this refresh cheap;
     // compute actual eligibility only when the user opens Review.
     reviewButton.hidden = heldCount === 0;
     reviewButton.disabled = botAvailabilityScanRunning;
-    reviewButton.textContent = `Why held (${heldCount})`;
+    reviewButton.textContent = actionableCount
+      ? `Review held / excluded (${actionableCount} actionable; ${heldCount} records)`
+      : `Excluded / held history (${heldCount})`;
+    reviewButton.title = "Review original queue, current eligibility and hold age. Excluded records are not unfinished scan work.";
   }
   // The status presentation may have rendered before this asynchronous count
   // finished. Keep the button responsive without rebuilding thousands of cards.
@@ -613,7 +625,7 @@ async function refreshBotStatusPauseButtonNow() {
     heldScanButton.textContent = trackedStale && botStatusRecoverableHeldCount
       ? `Refresh stale + held bots (${trackedStale + botStatusRecoverableHeldCount})`
       : trackedStale ? `Refresh stale bots (${trackedStale})`
-      : botStatusRecoverableHeldCount ? `Refresh held bot checks (${botStatusRecoverableHeldCount})` : 'No stale or held bots';
+      : botStatusRecoverableHeldCount ? `Refresh held bot checks (${botStatusRecoverableHeldCount})` : 'No stale or actionable held bots';
   }
   return { main: state, stale: staleState };
 }

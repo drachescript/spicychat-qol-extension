@@ -12,7 +12,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let renderTimer = 0;
   const clean = (value, cap = 16000) => String(value ?? "").trim().slice(0, cap);
   const routeId = () => location.pathname.match(/^\/lorebook\/(?:edit\/)?([0-9a-f-]{20,})(?:\/entries)?\/?$/i)?.[1] || "";
-  const enabled = () => !!(DS.state?.settings?.enabled && DS.state.settings.creatorModerationWarnings && routeId());
+  const importing = () => !!(DS.state?.lorebookImportActive || DS.activeLorebookEntryImport);
+  const enabled = () => !!(!importing() && DS.state?.settings?.enabled && DS.state.settings.creatorModerationWarnings && routeId());
   const make = (tag, text, cls) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (cls) el.className = cls; return el; };
   function editor() {
     const content = [...document.querySelectorAll("textarea[name='content']")].find(el => el.offsetParent !== null);
@@ -123,7 +124,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     );
     panel.append(header, note, terms, actions, message, diff);
     parts.form.append(panel);
-    parts.content.addEventListener("input", () => updateWarnings(parts, panel));
+    parts.content.addEventListener("input", () => {if(!importing() && panel.isConnected) updateWarnings(parts, panel);});
     updateWarnings(parts, panel);
     currentPanel = panel;
   }
@@ -169,6 +170,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       renderTimer = setTimeout(update, 100);
     }
   }).observe(document.documentElement, {childList:true, subtree:true});
+  DS.refreshLorebookSaveReview = update;
   if (/\/lorebook\//.test(location.pathname)) update();
 })();
 }

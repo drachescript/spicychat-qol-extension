@@ -609,10 +609,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function entryModalParts() {
-    const content = [...document.querySelectorAll("textarea[name='content']")].find(node => node.offsetParent !== null);
-    const name = content ? [...document.querySelectorAll("input[name='name']")].find(node => node.offsetParent !== null) : null;
-    const form = content?.closest("form");
-    if (!content || !name || !form) return null;
+    const visible = [...document.querySelectorAll("textarea[name='content']")].filter(node => node.isConnected && node.offsetParent !== null);
+    if (visible.length !== 1) return null;
+    const content = visible[0];
+    const form = content.closest("form");
+    const names = [...(form?.querySelectorAll("input[name='name']") || [])].filter(node => node.isConnected && node.offsetParent !== null);
+    if (!form || names.length !== 1) return null;
+    const name = names[0];
     let root = form.parentElement;
     for (let i = 0; root && i < 6; i += 1, root = root.parentElement) {
       if (root.querySelector("button[aria-label='Cancel'],button[aria-label='Update']") || [...root.querySelectorAll("button")].some(node => /^(cancel|update|create|add|save)$/i.test(textOf(node, 40)))) break;
@@ -621,15 +624,55 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return { root: root || form.parentElement, form, name, keyword, content };
   }
 
-  async function addKeyword(input, keyword) {
+  async function addKeyword(input, keyword, guard = null, draft = null) {
     if (!input || input.disabled) return false;
+    let manual=false;
+    const mark=e=>{if(e.isTrusted && entryModalParts()?.root?.contains(e.target))manual=true;};
+    const events=['input','change','click','keydown','submit'];
+    if(guard)for(const type of events)document.addEventListener(type,mark,true);
+    const check=()=>{guard?.();if(manual)throw Error('Manual entry interaction during keyword recovery. Review the open form; no automatic write sent.');};
+    try {
     nativeSetValue(input, keyword);
     input.focus();
     await new Promise(resolve => setTimeout(resolve, 25));
+    if (guard) {
+      const until = Date.now()+1200;
+      let recovered = false;
+      for (let attempt=0; attempt<13; attempt++) {
+        check();
+        const current = entryModalParts();
+        if (current && draft) {
+          const chips=JSON.stringify(exactTransferKeywords(current).sort());
+          const before=JSON.stringify([...draft.keywords].sort());
+          const after=JSON.stringify([...draft.keywords,keyword].sort());
+          if (current.name.value!==draft.name || current.content.value!==draft.content || (chips!==before && chips!==after)) throw Error('Native keyword draft changed. Review the open form; no write sent.');
+          if (chips===after && !current.keyword?.value) return true;
+          if (chips===before && current.keyword?.isConnected && !current.keyword.disabled && current.keyword.value===keyword) {
+            input=current.keyword; recovered=true; break;
+          }
+          if (current.keyword?.value && current.keyword.value!==keyword) throw Error('Native keyword text changed. Review the open form; no write sent.');
+        } else if (!draft && input.isConnected && input.value===keyword && current?.keyword===input) {recovered=true;break;}
+        if(Date.now()>=until)break;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      if(!recovered)throw Error('Native keyword input unavailable or changed. Review the open form; no write sent.');
+    }
+    check();
     input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 }));
     input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter", code: "Enter", keyCode: 13, which: 13 }));
     await new Promise(resolve => setTimeout(resolve, 65));
+    if (guard && draft) {
+      const expected={...draft,keywords:[...draft.keywords,keyword]};
+      for(let attempt=0;attempt<12;attempt++) {
+        check();const current=entryModalParts();
+        if(verifyCreateFields(current,expected))return true;
+        if(current && (current.name.value!==draft.name || current.content.value!==draft.content || (current.keyword?.value && current.keyword.value!==keyword)))throw Error('Native keyword draft changed after Enter. No write sent.');
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      throw Error('Native keyword was not confirmed after Enter. No write sent; review the open form.');
+    }
     return true;
+    } finally { if(guard)for(const type of events)document.removeEventListener(type,mark,true); }
   }
 
   function findSubmitButton(parts) {
@@ -645,17 +688,81 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .filter(button => button.querySelector("svg.lucide-x,svg[class*='lucide-x']"))
       .map(button => String(button.textContent || "").trim()).filter(Boolean);
   }
+  // React can replace the form between IndexedDB checkpointing and the
+  // native click. Reacquire only a unique, exact, still-unsaved create form.
+  function verifyCreateFields(parts, item) {
+    return !!parts?.form?.isConnected && parts.form.contains(parts.name) && parts.form.contains(parts.content) &&
+      parts.name.value === item.name && parts.content.value === item.content &&
+      !String(parts.keyword?.value || '').trim() &&
+      JSON.stringify(exactTransferKeywords(parts).sort()) === JSON.stringify([...item.keywords].sort());
+  }
+  function verifiedCreateSubmit(parts, item, add) {
+    if (!verifyCreateFields(parts, item)) return null;
+    // Do not adopt an Update form or a QoL button as a replacement Create.
+    if ([...parts.root.querySelectorAll('button')].some(b => b.offsetParent !== null &&
+      /^(update|update entry)$/i.test(String(b.getAttribute('aria-label') || textOf(b, 60)).trim()))) return null;
+    const button = findSubmitButton(parts);
+    return button && button !== add && button.isConnected && button.offsetParent !== null &&
+      !button.disabled && button.getAttribute('aria-disabled') !== 'true' &&
+      !button.closest('[data-ds-owned], [id^="ds-"]') ? button : null;
+  }
+  async function recoverCreateSubmit(item, add, checkTarget, manuallyChanged, readParts = entryModalParts, now = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms))) {
+    const deadline = now() + 4000;
+    for (let attempt = 0; attempt < 41; attempt++) {
+      checkTarget();
+      if (manuallyChanged()) throw Error('Manual editor interaction during checkpoint; review the open entry and check the saved job before resuming.');
+      const current = readParts();
+      if (current && !verifyCreateFields(current, item)) throw Error('Native create fields changed; review and close the unsaved form before resuming.');
+      const button = verifiedCreateSubmit(current, item, add);
+      if (button) return {parts:current, button};
+      if (now() >= deadline) break;
+      await sleep(100);
+    }
+    throw Error('Native create form or Save button unavailable; review and close the unsaved form before resuming.');
+  }
+  // Only use this wait for the native importer. Timers in hidden tabs can
+  // run much later than requested. Allow bounded background grace without
+  // treating a replaced form as evidence of a successful write.
+  async function waitImportUi(check, durable, timeout=6000) {
+    const started=Date.now();let last=started,active=0;
+    while(true){
+      durable.checkTarget();
+      const at=Date.now();if(!document.hidden)active+=Math.min(at-last,1000);last=at;
+      if(at-started>=300000)throw Error('Native editor did not become ready; saved progress retained.');
+      const value=check();if(value)return value;
+      if(active>=timeout)throw Error('Native editor did not become ready; saved progress retained.');
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+  }
+  async function waitAfterConfirmedWrite(durable,expectedCount=null) {
+    durable.phase?.('preparing-next-entry');
+    await waitImportUi(()=>{
+      if([...document.querySelectorAll("textarea[name='content']")].some(n=>n.isConnected&&n.offsetParent!==null))return false;
+      // Native post-save GET is allowed to finish normally. Wait on the local
+      // count rather than sending our own GET or reopening the editor early.
+      return expectedCount===null||nativeExistingEntryTotal()===expectedCount;
+    },durable,20000);
+    await new Promise(resolve=>setTimeout(resolve,100));
+    durable.checkTarget();
+  }
   async function createSpicyEntry(item, transfer = null, durable = null) {
     const checkTarget = () => {
       if (durable) durable.checkTarget();
       if (transfer && (routeInfo()?.id !== transfer.id || routeInfo()?.page !== "entries" || transfer.cancelled())) throw new Error("Lorebook changed or transfer cancelled; no further entry submitted.");
     };
     checkTarget();
-    if ((transfer || durable) && entryModalParts()) throw new Error("An entry editor is already open; transfer stopped before another write.");
-    const add = document.querySelector("[data-testid='EntriesCreateHeader-AddEntryButton']") || [...document.querySelectorAll("button")].find(node => /^add entry$/i.test(textOf(node, 50)));
+    if ((transfer || durable) && [...document.querySelectorAll("textarea[name='content']")].some(node=>node.offsetParent!==null)) throw new Error("An entry editor is already open. Review and close the unsaved form before resuming; no write sent.");
+    durable?.phase?.('opening-native-editor');
+    const getAdd=()=>{const b=document.querySelector("[data-testid='EntriesCreateHeader-AddEntryButton']") || [...document.querySelectorAll("button")].find(node => /^add entry$/i.test(textOf(node,50)));return b?.isConnected&&!b.disabled&&b.offsetParent!==null&&b.getAttribute('aria-disabled')!=='true'&&!b.closest('[data-ds-owned], [id^="ds-"]')?b:null;};
+    const add = durable ? await waitImportUi(getAdd,durable,5000) : getAdd();
     if (!add) throw new Error("Could not find SpicyChat's Add Entry button.");
+    checkTarget();
+    if(durable&&[...document.querySelectorAll("textarea[name='content']")].some(n=>n.offsetParent!==null))throw Error('An entry editor opened while waiting; review it before resuming. No write sent.');
+    if(durable&&getAdd()!==add)throw Error('Native Add Entry button changed; resume from the saved checkpoint. No write sent.');
+    const beforeCount=durable?nativeExistingEntryTotal():null;
     add.click();
-    const parts = await waitFor(() => entryModalParts(), 5000);
+    const parts = durable ? await waitImportUi(entryModalParts,durable,5000) : await waitFor(() => entryModalParts(), 5000);
+    durable?.phase?.('preparing-form');
     checkTarget();
     if ((transfer || durable) && (!parts.form.contains(parts.name) || !parts.form.contains(parts.content) ||
         parts.name.value.trim() || parts.content.value.trim() || exactTransferKeywords(parts).length)) {
@@ -663,32 +770,75 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     nativeSetValue(parts.name, transfer || durable ? item.name : clean(item.name, 50));
     nativeSetValue(parts.content, transfer || durable ? item.content : clean(item.content, 24000));
+    const enteredKeywords = [];
     for (const keyword of item.keywords.slice(0, 12)) {
       checkTarget();
-      if ((transfer || durable) && entryModalParts()?.content !== parts.content) throw new Error("Native entry editor changed; transfer stopped.");
-      await addKeyword(parts.keyword, keyword);
+      const current = entryModalParts();
+      if (durable) {
+        if (!verifyCreateFields(current,{...item,keywords:enteredKeywords})) throw Error('Native create draft changed while entering keywords. Review the open form; no write sent.');
+        await addKeyword(current.keyword, keyword, checkTarget, {...item,keywords:enteredKeywords});
+      } else {
+        if (transfer && current?.content !== parts.content) throw new Error("Native entry editor changed; transfer stopped.");
+        await addKeyword(parts.keyword, keyword);
+      }
+      enteredKeywords.push(keyword);
     }
     checkTarget();
     if (transfer && (entryModalParts()?.content !== parts.content || parts.name.value !== item.name || parts.content.value !== item.content ||
         JSON.stringify(exactTransferKeywords(parts).sort()) !== JSON.stringify([...item.keywords].sort()))) {
       throw new Error("Native entry fields could not be verified exactly. Review the open form; nothing was submitted for this entry.");
     }
-    if (durable && (entryModalParts()?.content !== parts.content || parts.name.value!==item.name || parts.content.value!==item.content || JSON.stringify(exactTransferKeywords(parts).sort())!==JSON.stringify([...item.keywords].sort()))) throw Error('Native entry fields could not be verified. No write submitted.');
-    const submit = findSubmitButton(parts);
-    if ((transfer || durable) && (!submit || submit === add)) throw new Error("Native Create/Save button unavailable. Review the open entry; no submit sent.");
-    if (!submit) {
+    if (durable && !verifyCreateFields(entryModalParts(), item)) throw Error('Native entry fields could not be verified. No write submitted; review and close the open form before resuming.');
+    const submit = findSubmitButton(durable ? entryModalParts() : parts);
+    if (transfer && (!submit || submit === add)) throw new Error("Native Create/Save button unavailable. Review the open entry; no submit sent.");
+    if (!submit && !durable) {
       const cancel = parts.root?.querySelector("button[aria-label='Cancel']") || [...(parts.root?.querySelectorAll("button") || [])].find(node => /^cancel$/i.test(textOf(node, 30)));
       cancel?.click();
       throw new Error("The entry form opened, but QoL could not find its Create/Save button. SpicyChat may have changed the form.");
     }
-    const oldContent = parts.content;
+    let oldContent = parts.content;
     checkTarget();
     if (durable) {
-      await durable.beforeSubmit("create", item);
-      try {checkTarget();if(!submit.isConnected||entryModalParts()?.content!==parts.content||submit.disabled)throw Error('Native create form changed before submission.');}
-      catch(e){await durable.notSent?.();throw e;}
-    } else checkTarget();
-    submit.click();
+      // A real user edit/save during the asynchronous checkpoint cannot be
+      // attributed to this importer. Keep an uncertain checkpoint if touched.
+      let manual = false, clicked = false, checkpointed = false;
+      const mark = event => {
+        if (!event.isTrusted) return;
+        const current = entryModalParts();
+        const target = event.target;
+        if (current?.root?.contains(target) || parts.root?.contains(target)) manual = true;
+      };
+      const events = ['input','change','click','submit','keydown'];
+      for (const type of events) document.addEventListener(type, mark, true);
+      try {
+        durable.phase?.('validating-form');
+        await durable.beforeSubmit("create", item); checkpointed = true;
+        const recovered = await recoverCreateSubmit(item, add, checkTarget, () => manual);
+        // Final synchronous validation, including after the await above.
+        checkTarget();
+        const fresh = entryModalParts();
+        if (manual || fresh?.form !== recovered.parts.form || verifiedCreateSubmit(fresh,item,add) !== recovered.button)
+          throw Error('Native create form changed again; review and close the unsaved form before resuming.');
+        if (fresh.content !== parts.content || recovered.button !== submit) durable.formRecovered?.();
+        oldContent = fresh.content;
+        durable.armSubmit?.();
+        clicked = true;
+        recovered.button.click();
+        durable.phase?.('awaiting-response');
+      } catch(e) {
+        if (checkpointed && !clicked && !manual) await durable.notSent?.();
+        throw e;
+      } finally {
+        for (const type of events) document.removeEventListener(type, mark, true);
+      }
+    } else { checkTarget(); submit.click(); }
+    if(durable){
+      // Commit the verified server receipt independently of React closing the
+      // form. Once committed, a UI wait can never resend this source entry.
+      await durable.confirmWrite('created');
+      await waitAfterConfirmedWrite(durable,beforeCount===null?null:beforeCount+1);
+      return;
+    }
     await waitFor(() => !document.contains(oldContent) || !oldContent.offsetParent, 6000).catch(() => {
       const current = entryModalParts();
       if (current?.content === oldContent) throw new Error(`SpicyChat did not finish saving “${item.name}”.`);
@@ -697,14 +847,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 
-  function nativeExistingEntryTotal() {
-    const header = document.querySelector("[data-testid='EntriesListServer-Header']");
-    const counter = header?.querySelector('[data-translate-key="lorebook:entries.count"]');
-    // Read the CURRENT value, never SpicyChat's separate "up to 5,000" hint.
-    const match = /^([\d,]+)\s*\/\s*[\d,]+/.exec(String(counter?.textContent || "").trim());
-    const count = match ? Number(match[1].replace(/,/g, "")) : null;
-    return Number.isSafeInteger(count) && count >= 0 && count <= 5000 ? count : null;
+  function parseNativeEntryCounter(text) {
+    const match = /^([\d,]+)\s*\/\s*([\d,]+)/.exec(String(text || '').trim());
+    if (!match) return null;
+    const count = Number(match[1].replace(/,/g,'')), limit = Number(match[2].replace(/,/g,''));
+    if (!Number.isSafeInteger(count) || !Number.isSafeInteger(limit) || count < 0 || limit < 1 || count > limit || count > 5000) return null;
+    // 5,000 is also the current durable storage guard. Native smaller limits win.
+    return {count, limit:Math.min(limit,5000)};
   }
+  function nativeEntryCounter() {
+    const header = document.querySelector("[data-testid='EntriesListServer-Header']");
+    return parseNativeEntryCounter(header?.querySelector('[data-translate-key="lorebook:entries.count"]')?.textContent);
+  }
+  function nativeExistingEntryTotal() { return nativeEntryCounter()?.count ?? null; }
 
   async function ensureAllExistingEntriesLoaded(operation, onProgress, canContinue = () => true) {
     // Without this, Skip existing only checks the first 100 loaded rows and
@@ -809,8 +964,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   async function updateSpicyEntry(row, item, mode = "replace", durable = null) {
     durable?.checkTarget();
+    durable?.phase?.('opening-native-editor');
     row.click();
-    const parts = await waitFor(() => entryModalParts(), 5000);
+    const parts = durable ? await waitImportUi(entryModalParts,durable,5000) : await waitFor(() => entryModalParts(), 5000);
+    durable?.phase?.('preparing-form');
     const currentContent = clean(parts.content.value, 24000);
     const currentKeywords = currentModalKeywords(parts);
     const nextContent = mode === "merge"
@@ -830,10 +987,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (durable) {
       durable.checkTarget();
       if(entryModalParts()?.content!==parts.content||parts.name.value!==item.name||parts.content.value!==nextContent||JSON.stringify(exactTransferKeywords(parts).sort())!==JSON.stringify([...nextKeywords].sort()))throw Error('Native update fields could not be verified. No write submitted.');
-      await durable.beforeSubmit("update", {...item,content:nextContent,keywords:nextKeywords});
-      try{durable.checkTarget();if(!submit.isConnected||entryModalParts()?.content!==parts.content||submit.disabled)throw Error('Native update form changed before submission.');}catch(e){await durable.notSent?.();throw e;}
-    }
-    submit.click();
+      let manual=false, checkpointed=false, clicked=false;
+      const events=['input','change','click','submit','keydown'];
+      const mark=e=>{if(e.isTrusted&&(parts.root?.contains(e.target)||entryModalParts()?.root?.contains(e.target)))manual=true;};
+      for(const type of events)document.addEventListener(type,mark,true);
+      try{
+        durable.phase?.('validating-form');
+        await durable.beforeSubmit("update", {...item,content:nextContent,keywords:nextKeywords});checkpointed=true;
+        durable.checkTarget();
+        if(manual||!submit.isConnected||entryModalParts()?.content!==parts.content||submit.disabled||parts.name.value!==item.name||parts.content.value!==nextContent||JSON.stringify(exactTransferKeywords(parts).sort())!==JSON.stringify([...nextKeywords].sort()))throw Error('Native update form changed before submission. Review the open entry before resuming.');
+        durable.armSubmit?.();clicked=true;submit.click();durable.phase?.('awaiting-response');
+      }catch(e){if(checkpointed&&!clicked&&!manual)await durable.notSent?.();throw e;}
+      finally{for(const type of events)document.removeEventListener(type,mark,true);}
+    }else submit.click();
+    if(durable){await durable.confirmWrite(mode==='merge'?'merged':'replaced');await waitAfterConfirmedWrite(durable);return;}
     await waitFor(() => !document.contains(oldContent) || !oldContent.offsetParent, 6000);
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -1312,7 +1479,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // more than 100 current entries.
       const existingListStartedAt = Date.now();
       const canContinue = () => !options.signal?.aborted && (!preserve || options.transferAllowed?.() !== false);
-      const existingListReady = await ensureAllExistingEntriesLoaded(operation, options.onProgress, canContinue);
+      const verified=options.durable && ['add','skip'].includes(duplicatePolicy) && options.verifiedExisting;
+      const useVerified=!!verified && canContinue() && routeInfo()?.id===operation.id &&
+        !document.querySelector("[data-testid='EntriesListServer-SearchInput']")?.value?.trim() &&
+        nativeExistingEntryTotal()===verified.count && Array.isArray(verified.names) && verified.names.length===verified.count;
+      const existingListReady = useVerified || await ensureAllExistingEntriesLoaded(operation, options.onProgress, canContinue);
       existingListMs = Date.now() - existingListStartedAt;
       if (!existingListReady) {
         counts.cancelled = !!operation.cancelled;
@@ -1325,13 +1496,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Keep a complete, stable name set. React may reset its mounted cards
       // to the first page after a Create, so consulting the DOM alone for each
       // subsequent item could miss pre-existing names that were loaded earlier.
-      const knownNames = new Set(existingEntryRows().map(existingEntryName).filter(Boolean).map(name => name.toLowerCase()));
+      const knownNames = new Set((useVerified ? verified.names : existingEntryRows().map(existingEntryName)).filter(Boolean).map(name => name.toLowerCase()));
       if (options.durable) {
         const total=nativeExistingEntryTotal();
         const additions=duplicatePolicy==='add' ? items.length-startIndex : new Set(items.slice(startIndex).map(item=>item.name.toLowerCase()).filter(name=>!knownNames.has(name))).size;
-        const counter=document.querySelector("[data-translate-key='lorebook:entries.count']");
-        const limit=Number((String(counter?.textContent||'').match(/\/\s*([\d,]+)/)?.[1]||'2000').replace(/,/g,''));
-        if (total===null || total+additions>Math.min(5000,limit||2000)) throw Error('Import would exceed the Lorebook entry limit. Nothing else submitted.');
+        const limit=nativeEntryCounter()?.limit;
+        if (total===null || !limit) throw Error('Could not verify the native Lorebook entry limit. Nothing else submitted.');
+        if (total+additions>limit) throw Error(`Import would exceed the ${limit.toLocaleString()} entry Lorebook limit. Nothing else submitted.`);
         await options.durable.baseline(total);
       }
       for (let index = startIndex; index < items.length; index += 1) {
@@ -1347,6 +1518,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           break;
         }
         const item = items[index];
+        let committedAction=null;
         try {
           const key = preserve ? clean(item.name, 50).toLowerCase() : item.name.toLowerCase();
           let result;
@@ -1370,21 +1542,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               } else {
                 const durable=options.durable ? {
                   checkTarget:()=>{if(operation.cancelled||!canContinue()||routeInfo()?.id!==operation.id||routeInfo()?.page!=="entries"||document.querySelector("[data-testid='EntriesListServer-SearchInput']")?.value?.trim())throw Error('Import paused before the next native write.');},
-                  beforeSubmit:(kind,entry)=>options.durable.beforeSubmit(index,kind,entry),notSent:()=>options.durable.notSent()
+                  beforeSubmit:(kind,entry)=>options.durable.beforeSubmit(index,kind,entry),notSent:()=>options.durable.notSent(),
+                  armSubmit:()=>options.durable.armSubmit(),formRecovered:()=>options.durable.formRecovered?.(),
+                  phase:p=>options.durable.phase?.(p,index),
+                  confirmWrite:async action=>{await options.durable.commit(index,action);committedAction=action;counts.nextIndex=index+1;}
                 } : null;
-                if (durable && knownNames.has(key) && duplicatePolicy!=="add" && !findExistingRowByName(item.name)) throw Error('Matching entry is no longer loaded.');
                 result = await importOne(item, duplicatePolicy, durable, knownNames);
               }
             }
             finally { nativeWriteMs += Date.now() - writeStartedAt; }
           }
           const action = String(result?.action || "");
-          if (options.durable) await options.durable.commit(index, action);
+          if (options.durable && !committedAction) await options.durable.commit(index, action);
           if (action === "created") knownNames.add(key);
           if (Object.prototype.hasOwnProperty.call(counts, action)) counts[action] += 1;
           counts.completed++;
           counts.nextIndex = index + 1;
         } catch (error) {
+          // A post-commit UI interruption must never describe the already
+          // confirmed creation as a failed write or rewind its cursor.
+          if(committedAction){
+            counts[committedAction]++;counts.completed++;counts.nextIndex=index+1;
+            counts.paused=true;counts.stopReason='Saved entry confirmed; native editor not ready for the next entry.';
+            try{options.onError?.(Error(counts.stopReason),item,index);}catch{}
+            break;
+          }
           counts.failed += 1;
           if (typeof options.onError === "function") {
             try { options.onError(error, item, index); } catch {}

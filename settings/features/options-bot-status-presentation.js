@@ -481,7 +481,7 @@ function renderBotAvailability(renderOptions = {}) {
     staleButton.textContent = staleCount && heldCount
       ? `Refresh stale + held bots (${staleCount + heldCount})`
       : staleCount ? `Refresh stale bots (${staleCount})`
-      : heldCount ? `Refresh held bot checks (${heldCount})` : "No stale or held bots";
+      : heldCount ? `Refresh held bot checks (${heldCount})` : "No stale or actionable held bots";
   }
   const unavailableSummary = $("botAvailabilityUnavailableSummary");
   if (unavailableSummary) {

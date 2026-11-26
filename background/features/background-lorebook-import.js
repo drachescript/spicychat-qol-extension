@@ -33,6 +33,8 @@ function dsqLorebookImportScope(m,s) {
   return {key:bookId,bookId,tabId:s.tab.id,documentId:s.documentId||'',accountId:m.accountId};
 }
 async function dsqLorebookImportMessage(m,s) {
+  if (String(m.action||'').startsWith('capture-')) return dsqLorebookCaptureMessage(m,s);
+  if (['backup-acquire','backup-renew','backup-release'].includes(m.action)) return dsqLorebookBulkBackupLease(m,s);
   const scope=dsqLorebookImportScope(m,s), db=await dsqLorebookImportOpen();
   const now=Date.now(), action=m.action;
   return new Promise((resolve,reject)=>{
@@ -45,7 +47,7 @@ async function dsqLorebookImportMessage(m,s) {
       resolve({ok:true,...result});};
     tx.onerror=tx.onabort=()=>reject(error||tx.error||Error('Import checkpoint transaction failed'));
     const r=jobs.get(scope.key);
-    r.onsuccess=()=>{try{
+    const handleJob=()=>{try{
       let j=r.result||null;
       if(action==='peek'){result={exists:!!j};return;}
       if(j&&j.accountId!==scope.accountId)throw Error('Saved import belongs to another account. No entries changed.');
@@ -107,17 +109,135 @@ async function dsqLorebookImportMessage(m,s) {
         if(m.result==='skipped'){if(j.pending||j.policy!=='skip')throw Error('Unexpected skip');}
         else if(!j.pending||j.pending.attemptId!==m.attemptId||!DSQ_LI_UUID.test(m.entryId)||((m.result==='created')!==(j.pending.kind==='create'))||(m.result==='created'&&(j.results.some(x=>x.id===m.entryId)||j.baselineIds?.includes(m.entryId))))throw Error('Missing or conflicting server entry identity');
         if(m.result!=='skipped'&&(m.result!==j.pending.result||(!m.reconciled&&!(j.pending.receipt?.status>=200&&j.pending.receipt.status<300&&j.pending.receipt.entryId===m.entryId))||(m.reconciled&&(!Array.isArray(j.baselineIds)||j.pending.kind!=='create'))))throw Error('Server receipt or verified reconciliation required');
-        j.results.push({index:m.index,action:m.result,id:m.entryId||null,digest:j.pending?.digest||null,at:now});j.nextIndex++;if(m.result!=='skipped')j.lastSuccess=j.pending?.receipt?.at||now;j.pending=null;j.phase='running';save();return;
+        j.results.push({index:m.index,action:m.result,id:m.entryId||null,digest:j.pending?.digest||null,at:now,...(m.result==='skipped'&&m.verifiedExisting===true&&DSQ_LI_UUID.test(m.verifiedExistingId)?{verifiedExisting:true,verifiedExistingId:m.verifiedExistingId.toLowerCase()}: {})});j.nextIndex++;if(m.result!=='skipped')j.lastSuccess=j.pending?.receipt?.at||now;j.pending=null;j.phase='running';save();return;
       }
       if(action==='finish'){
         if(j.pending||j.nextIndex!==j.total||!Number.isInteger(m.verifiedCount)||m.verifiedCount<0||m.verifiedCount>5000)throw Error('Cannot mark an incomplete import finished');
         j.verifiedCount=m.verifiedCount;j.verificationMode=m.verificationMode==='ids'?'ids':'native';j.phase='completed';j.owner=null;save();return;
       }
       if(action==='stop'){
-        j.phase=m.phase==='cancelled'&&!j.pending?'cancelled':m.phase==='paused'?'paused':'interrupted';j.interruption=String(m.reason||'Import stopped').slice(0,120);j.owner=null;save();return;
+        j.phase=m.phase==='cancelled'&&!j.pending?'cancelled':m.phase==='paused'?'paused':'interrupted';j.interruption=String(m.reason||'Import stopped').slice(0,240);j.owner=null;save();return;
       }
       throw Error('Unknown import operation');
     }catch(e){abort(e);}};
+    r.onsuccess=()=>{
+      if(!['start','resume'].includes(action)){handleJob();return;}
+      const check=jobs.get('bulk-backup:'+scope.bookId);
+      check.onsuccess=()=>{if(check.result?.until>Date.now())abort(Error('A live backup is collecting this Lorebook in another tab. Wait for it to finish, then resume the import.'));else handleJob();};
+    };
   });
 }
+// Bulk read leases share the import job transaction. Reserved keys cannot collide
+// with UUID job keys, and no source, account identifier or entry data is exposed.
+async function dsqLorebookBulkBackupLease(m,s) {
+  const u=new URL(s.url||s.tab?.url||'');
+  const id=String(m.bookId||'').toLowerCase(), runId=String(m.runId||'');
+  if(s.id!==chrome.runtime.id||s.frameId!==0||!s.tab?.id||u.protocol!=='https:'||!['spicychat.ai','www.spicychat.ai'].includes(u.hostname)||!/^\/(?:[a-z]{2}\/)?my-creations\/lorebooks\/?$/i.test(u.pathname)||!DSQ_LI_UUID.test(id)||!DSQ_LI_UUID.test(runId))throw Error('Invalid bulk Lorebook backup context.');
+  const db=await dsqLorebookImportOpen(), key='bulk-backup:'+id;
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('jobs','readwrite'), jobs=tx.objectStore('jobs');
+    let result, failure;
+    tx.oncomplete=()=>resolve({ok:true,...result});
+    tx.onabort=tx.onerror=()=>reject(failure||tx.error||Error('Lorebook coordination unavailable.'));
+    const imp=jobs.get(id), lock=jobs.get(key);
+    let ready=0;
+    const handle=()=>{if(++ready!==2)return;try{
+      const now=Date.now(), j=imp.result, old=lock.result;
+      const ours=old?.runId===runId&&old.tabId===s.tab.id&&old.documentId===(s.documentId||'');
+      const active=!!(j?.owner&&j.owner.until>now);
+      const summary={importJobId:j?.jobId||null,phase:j?.phase||null,processed:j?.nextIndex??null,total:j?.total??null,verifiedCount:j?.phase==='completed'&&Number.isSafeInteger(j.verifiedCount)?j.verifiedCount:null};
+      if(m.action==='backup-release'){if(ours)jobs.delete(key);result={released:!!ours};return;}
+      if(m.action==='backup-renew'&&(!ours||old.until<=now||active||j?.pending)){result={acquired:false,reason:'lease-lost'};return;}
+      if(active||j?.pending){result={acquired:false,reason:active?'import-active':'import-uncertain',...summary};return;}
+      if(m.action==='backup-acquire'&&m.waitingJobId&&j?.jobId===m.waitingJobId&&!['completed','cancelled'].includes(j.phase)){result={acquired:false,reason:'import-paused',...summary};return;}
+      if(old?.until>now&&!ours){result={acquired:false,reason:'backup-active',...summary};return;}
+      jobs.put({runId,tabId:s.tab.id,documentId:s.documentId||'',until:now+180000},key);
+      result={acquired:true,...summary};
+    }catch(e){failure=e;tx.abort();}};
+    imp.onsuccess=handle;lock.onsuccess=handle;
+  });
+}
+// Immutable, account-scoped capture rows share the existing extension-local
+// IndexedDB, not the import source itself or the portable backup/sync data.
+// A failed capture never replaces the last complete snapshot. Only explicitly
+// requested backups/import verification write here; tag expansion does not.
+async function dsqLorebookCaptureMessage(m,s) {
+  const u=new URL(s.url||s.tab?.url||'');
+  const id=String(m.bookId||'').toLowerCase(), account=String(m.accountKey||'');
+  const path=u.pathname.replace(/^\/[a-z]{2}(?=\/)/i,'').replace(/\/+$/,'');
+  const editor=path.match(/^\/lorebook\/(?:edit\/([0-9a-f-]{36})|([0-9a-f-]{36})\/edit)(?:\/(?:entries|details))?$/i);
+  const allowed=path==='/my-creations/lorebooks'||(editor&&(editor[1]||editor[2]).toLowerCase()===id);
+  if(s.id!==chrome.runtime.id||s.frameId!==0||!s.tab?.id||u.protocol!=='https:'||!['spicychat.ai','www.spicychat.ai'].includes(u.hostname)||!allowed||!DSQ_LI_UUID.test(id)||!/^[a-f0-9]{64}$/.test(account))throw Error('Invalid Lorebook capture context');
+  const action=m.action, runId=String(m.runId||'');
+  if(!['capture-read','capture-clear'].includes(action)&&!DSQ_LI_UUID.test(runId))throw Error('Invalid capture ID');
+  const key='capture:'+account+':'+id;
+  let incoming=[];
+  if(action==='capture-page'){
+    if(!Array.isArray(m.entries)||m.entries.length>100||!Number.isSafeInteger(m.offset)||m.offset<0||m.offset>5000)throw Error('Invalid capture page');
+    const seen=new Set();
+    // Compute digests before opening the IndexedDB transaction. Same ID and
+    // exact normalized row content share storage even if page order shifts.
+    incoming=await Promise.all(m.entries.map(async row=>{
+      if(!row||!DSQ_LI_UUID.test(row.id)||seen.has(row.id)||typeof row.content!=='string'||row.content.length>24000||typeof row.name!=='string'||!Array.isArray(row.keywords))throw Error('Invalid capture row');
+      seen.add(row.id);const json=JSON.stringify(row);if(json.length>64000)throw Error('Capture row too large');
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(json))),x=>x.toString(16).padStart(2,'0')).join('');
+      return {id:row.id,key:key+':row:'+row.id+':'+digest,row};
+    }));
+  }
+  // A cache scope has one writer. Normal live export continues if cache
+  // storage fails, and no cache operation ever affects the import cursor.
+  const db=await dsqLorebookImportOpen();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('sources','readwrite'), st=tx.objectStore('sources');let result,failure;
+    const fail=e=>{failure=e;try{tx.abort();}catch{}};
+    tx.oncomplete=()=>resolve({ok:true,...result});tx.onabort=tx.onerror=()=>reject(failure||tx.error||Error('Lorebook capture storage failed'));
+    const q=st.get(key);
+    q.onsuccess=()=>{try{
+      const now=Date.now();let b=q.result||{known:[],complete:null,draft:null};
+      const owns=b.draft?.runId===runId&&b.draft?.tabId===s.tab.id&&b.draft?.documentId===(s.documentId||'');
+      const active=!!(b.draft?.until>now), save=()=>st.put(b,key);
+      const prune=keep=>{const set=new Set(keep);for(const k of b.known||[])if(!set.has(k))st.delete(k);b.known=[...set];};
+      if(action==='capture-start'){
+        if(active&&!owns){result={acquired:false};return;}
+        if(!Number.isInteger(m.total)||m.total<0||m.total>5000)throw Error('Invalid capture total');
+        const prior=b.draft?.keys||[];
+        prune([...(b.complete?.keys||[]),...prior]);
+        b.draft={runId,tabId:s.tab.id,documentId:s.documentId||'',until:now+180000,total:m.total,keys:[],ids:[],prior,startedAt:now};
+        save();result={acquired:true,previouslySaved:prior.length,previousComplete:b.complete?.keys?.length||0};return;
+      }
+      if(action==='capture-read'){
+        const c=b.complete;if(!c){result={snapshot:null};return;}
+        const rows=Array(c.keys.length);let pending=c.keys.length;
+        const finish=()=>{result={snapshot:{schema:'spicychat-qol-lorebook-recovery-copy',version:1,savedAt:c.at,fetchedAt:new Date(c.at).toISOString(),source:'saved-verified-capture',completeness:{details:true,entries:true,entryCountVerified:true},lorebook:c.meta,entries:rows}};};
+        if(!pending){finish();return;}
+        c.keys.forEach((k,i)=>{const r=st.get(k);r.onsuccess=()=>{if(!r.result||r.result.id!==c.ids[i]){fail(Error('Saved capture is missing an entry'));return;}rows[i]=r.result;if(!--pending)finish();};});return;
+      }
+      if(action==='capture-clear'){
+        if(active)throw Error('A capture is still active. Finish it before clearing its cache.');
+        prune([]);st.delete(key);result={cleared:true};return;
+      }
+      if(!owns)throw Error('Lorebook capture ownership changed');
+      const d=b.draft;
+      if(action==='capture-stop'){d.until=0;save();result={saved:d.keys.length};return;}
+      if(!active)throw Error('Lorebook capture lease expired');
+      if(action==='capture-page'){
+        if(d.keys.length!==m.offset||d.total!==m.total||d.keys.length+incoming.length>d.total)throw Error('Capture page order or count changed');
+        const ids=new Set(d.ids), known=new Set(b.known), previous=new Map((b.complete?.ids||[]).map((v,i)=>[v,b.complete.keys[i]]));
+        let reused=0,added=0,changed=0;
+        for(const x of incoming){if(ids.has(x.id))throw Error('Duplicate capture entry ID');ids.add(x.id);
+          if(known.has(x.key))reused++;else{st.put(x.row,x.key);known.add(x.key);}
+          if(!previous.has(x.id))added++;else if(previous.get(x.id)!==x.key)changed++;
+          d.keys.push(x.key);d.ids.push(x.id);}
+        b.known=[...known];d.until=now+180000;save();result={reused,added,changed,saved:d.keys.length};return;
+      }
+      if(action==='capture-finish'){
+        if(d.keys.length!==d.total||!m.meta||String(m.meta.id||'').toLowerCase()!==id||m.meta.entryCount!==d.total||typeof m.meta.name!=='string')throw Error('Capture not complete');
+        const oldIds=new Set(b.complete?.ids||[]),newIds=new Set(d.ids);let removed=0;for(const x of oldIds)if(!newIds.has(x))removed++;
+        b.complete={keys:d.keys,ids:d.ids,meta:m.meta,at:now};b.draft=null;prune(b.complete.keys);save();result={verified:d.total,removed};return;
+      }
+      throw Error('Unknown Lorebook capture operation');
+    }catch(e){fail(e);}};
+  });
+}
+
 dsqRegisterBackgroundMessageHandler('DS_LOREBOOK_IMPORT_JOB','lorebook-backup',(m,s,respond)=>{dsqLorebookImportMessage(m,s).then(respond,e=>respond({ok:false,error:String(e?.message||e)}));return true;});

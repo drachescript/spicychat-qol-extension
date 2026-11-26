@@ -25,8 +25,7 @@ function runtimeProbeStageLine(context) {
 
 function runtimeDiagnosticPhaseLine(context) {
   const status = String(context?.runtimeStatus || "");
-  if (context?.runtimeAvailable && context?.pageDiagnostics?.ok) return "Live runtime diagnostic state: full snapshot available.";
-  if (context?.runtimeAvailable && context?.pageDiagnostics) return "Live runtime diagnostic state: full snapshot available.";
+  if (context?.runtimeAvailable && context?.pageDiagnostics) return "Live runtime diagnostic state: full snapshot available." + (context.probe && !context.probe.lightRuntimeAnswered ? " Lightweight probe did not respond; the full snapshot independently succeeded." : "");
   if (status === "runtime-initializing") return "Live runtime diagnostic state: initializing; lightweight transport responded.";
   if (status === "runtime-paused") return "Live runtime diagnostic state: paused; lightweight transport responded.";
   if (status === "runtime-startup-incomplete") return "Live runtime diagnostic state: startup incomplete; lightweight transport responded.";
@@ -663,6 +662,8 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     diagnosticLines.push(`Chat visibility: ${Number(runtime.chatUnexpectedEmptyTransitions || 0)} sudden empty transitions; ${Number(runtime.chatUnexpectedEmptyRecovered || 0)} recovered without reload; ${Number(runtime.chatUnexpectedEmptyUnresolved || 0)} still empty after checks; last before ${Number(runtime.chatUnexpectedEmptyLastBefore || 0)} messages; last empty ${Number(runtime.chatUnexpectedEmptyLastAt || 0) ? new Date(Number(runtime.chatUnexpectedEmptyLastAt)).toISOString() : "none"}; last recovery ${Number(runtime.chatUnexpectedEmptyLastRecoveryMs || 0)} ms; visibility ${runtime.chatUnexpectedEmptyLastVisibility || "unknown"}; generation ${runtime.chatUnexpectedEmptyLastGeneration || "unknown"}`);
     { const v = context?.pageDiagnostics?.runtimeContext?.chatVisibility;
       if (v) diagnosticLines.push(formatChatVisibilityStatus(v));
+      const n=context?.pageDiagnostics?.runtimeContext?.nonChatVisibility;
+      if(n){const dims=Object.entries(n.nodes||{}).map(([k,x])=>`${k}: ${x?`${x.width}×${x.height} (${x.display}, ${x.visibility}, opacity ${x.opacity})`:"missing"}`).join("; "); diagnosticLines.push(`Non-chat page layout: ${dims}; meaningful content ${n.meaningful?"yes":"no"}; suspicious ${n.suspicious?"yes":"no"}; last sustained warning ${n.recent?.at?new Date(n.recent.at).toISOString():"none"}. Layout evidence does not prove renderer failure.`);}
     }
     diagnosticLines.push(`Message cache: ${Number(runtime.messageCacheHits || 0)} hits; ${Number(runtime.messageCacheMisses || 0)} misses; ${Number(runtime.messageCacheInvalidations || 0)} actual invalidations; ${Number(runtime.messageCacheInvalidationRequests || 0)} requests; ${Number(runtime.messageCacheInvalidationDeduped || 0)} duplicate invalidations avoided; ${Number(runtime.messageCacheNonTextSkips || 0)} non-text message mutations kept cached; ${Number(runtime.messageCacheFingerprintSkips || 0)} unchanged-text invalidations skipped`);
     if (Number(runtime.longTasks || 0)) diagnosticLines.push(`Browser long tasks: ${Number(runtime.longTasks || 0)}; last ${Number(runtime.lastLongTaskMs || 0)} ms; max ${Number(runtime.maxLongTaskMs || 0)} ms; QoL-overlap ${Number(runtime.longTasksWithQolOverlap || 0)}; no-QoL-overlap ${Number(runtime.longTasksWithoutQolOverlap || 0)}; last overlap ${runtime.lastLongTaskOverlap || "none"}`);
@@ -1057,10 +1058,10 @@ async function downloadSupportVerified(text, compressed) {
     const started = await downloadSupportText(text, supportReportFilename("support-info"), "Support file requested on Android.");
     return { started, verified: started && lastAndroidSupportFileResult.verified === true, isGzip: false };
   }
-  const raw = compressed && typeof CompressionStream === "function"
-    ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).blob()
+  const isGzip = !!compressed && typeof CompressionStream === "function";
+  const raw = isGzip
+    ? await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip")), {headers:{"Content-Type":"application/gzip"}}).blob()
     : new Blob([text], { type: "text/plain;charset=utf-8" });
-  const isGzip = compressed && raw.type !== "text/plain;charset=utf-8";
   if (!raw.size) throw new Error("The generated support file was empty.");
   const filename = isGzip ? supportReportFilename("support-info").replace(/\.txt$/, ".txt.gz") : supportReportFilename("support-info");
   let permission = false;

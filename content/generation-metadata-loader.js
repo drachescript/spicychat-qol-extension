@@ -32,6 +32,7 @@ if (!(() => { try {
 
   let injected = false;
   let enabled = false;
+  let quotaEnabled = false;
 
   window[BUFFER_KEY] = Array.isArray(window[BUFFER_KEY]) ? window[BUFFER_KEY] : [];
 
@@ -48,7 +49,7 @@ if (!(() => { try {
     window.postMessage({
       source: CONTROL_SOURCE,
       type: "DSQ_GENERATION_METADATA_ENABLED",
-      enabled
+      enabled, quotaEnabled
     }, "*");
   }
 
@@ -88,23 +89,21 @@ if (!(() => { try {
     else document.addEventListener("readystatechange", append, { once: true });
   }
 
-  function setEnabled(nextEnabled) {
-    const next = !!nextEnabled;
-    // Detection and regular Settings refreshes can both send the same state.
-    // Avoid broadcasting unchanged bridge settings into SpicyChat on every pass.
-    if (enabled === next) {
-      if (next && !injected) injectBridge();
+  function setEnabled(nextEnabled, nextQuota = quotaEnabled) {
+    const next = !!nextEnabled, quota = !!nextQuota;
+    if (enabled === next && quotaEnabled === quota) {
+      if ((next || quota) && !injected) injectBridge();
       return;
     }
-    enabled = next;
-    if (enabled) injectBridge();
+    enabled = next; quotaEnabled = quota;
+    if (enabled || quotaEnabled) injectBridge();
     else if (injected) sendState();
   }
 
   function applySettings(settings) {
     // Capture generation responses whenever QoL requests metadata or context
     // diagnostics, regardless of which extension draws the visual statistics.
-    setEnabled(!!settings?.enabled && metadataRequested(settings));
+    setEnabled(!!settings?.enabled && metadataRequested(settings), !!settings?.enabled && settings?.dailyMessageLimitTrackerEnabled === true);
   }
 
 
@@ -123,7 +122,7 @@ if (!(() => { try {
   window.__DSQ_SET_GENERATION_METADATA_ENABLED__ = setEnabled;
 
   const GRANULAR_SETTING_PREFIX = "dsSettingV1:";
-  const watchedSettingNames = ["enabled", "saiToolkitCompatibility", "showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning", "nativeMemoryQualityProbe"];
+  const watchedSettingNames = ["enabled", "saiToolkitCompatibility", "showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning", "nativeMemoryQualityProbe", "dailyMessageLimitTrackerEnabled"];
   const watchedSettings = {};
 
   function settingStorageKey(name) { return `${GRANULAR_SETTING_PREFIX}${name}`; }

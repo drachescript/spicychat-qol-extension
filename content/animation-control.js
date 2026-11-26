@@ -128,8 +128,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Opening an image is an explicit request to view it. Never replace that
     // full-screen/modal image with a frozen canvas, even when avatar animation
     // reduction is enabled elsewhere on the page.
-    if (el.tagName === "IMG" && isExplicitImageViewer(el)) return false;
     if (el.tagName === "IMG" && !sourceLooksAnimated(el)) return false;
+    if (el.tagName === "IMG" && isExplicitImageViewer(el)) return false;
 
     if (DS.isSingleChatPage?.()) {
       if (isMessageMedia(el)) return !!settings.animatedImagesChatMedia;

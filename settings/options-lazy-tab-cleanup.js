@@ -133,6 +133,8 @@ async function runOptionsDiagnosticsAction(name,...args) {
 // Keep the original functions and storage formats; this only delays evaluation
 // until a matching tab or an existing action actually needs a module.
 let botStatusRecoverableHeldCount = 0;
+let botStatusHeldReviewRecordCount = 0;
+let botStatusHeldReviewIds = new Set();
 let botStatusTrackedStaleCount = 0;
 const dsqHeavySettingsModules = Object.create(null);
 function dsqLoadSettingsTool(group, path, readyName) {
@@ -141,7 +143,11 @@ function dsqLoadSettingsTool(group, path, readyName) {
   if (dsqHeavySettingsModules[group]) return dsqHeavySettingsModules[group];
   dsqHeavySettingsModules[group] = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = path;
+    // Resolve from the installed extension, not the document's relative URL.
+    // After an extension reload a stale Settings page can lose its context.
+    const runtime = globalThis.chrome?.runtime || globalThis.browser?.runtime;
+    script.src = group === "maintenance"
+      ? (runtime?.getURL?.(path) || new URL(path, document.baseURI).href) : path;
     script.async = false;
     script.onload = () => {
       if (typeof window[readyName] !== "function" ||
@@ -159,6 +165,9 @@ function dsqLoadSettingsTool(group, path, readyName) {
       reject(new Error(`Could not load ${path}`));
     };
     document.head.appendChild(script);
+  }).catch(error => {
+    dsqHeavySettingsModules[group] = null;
+    throw error;
   });
   return dsqHeavySettingsModules[group];
 }
@@ -262,6 +271,7 @@ function ensureBotStatusMaintenanceTools() {
 }
 function dsqStatusMaintenanceStub(name, ...args) {
   return ensureBotStatusMaintenanceTools().then(() => {
+    document.getElementById("dsBotStatusMaintenanceRetry")?.remove();
     const action = window[name];
     if (typeof action !== "function" || action === dsqHeavySettingsStubs[name]) {
       throw new Error(`Bot Status maintenance action ${name} did not register`);
@@ -270,7 +280,21 @@ function dsqStatusMaintenanceStub(name, ...args) {
   }).catch(error => {
     const status = document.getElementById("blockedArchiveCleanupStatus") ||
       document.getElementById("botAvailabilityScanStatus");
-    if (status) status.textContent = String(error?.message || error);
+    if (status) {
+      status.textContent = `Maintenance unavailable: ${String(error?.message || error)}. Retry loading the status, or reload QoL and reopen Settings if it still fails. No cleanup is retried automatically.`;
+      if (!document.getElementById("dsBotStatusMaintenanceRetry")) {
+        const retry = document.createElement("button");
+        retry.id = "dsBotStatusMaintenanceRetry";
+        retry.type = "button";
+        retry.textContent = "Retry maintenance status";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          try { await refreshBlockedArchiveCleanupStatus(); }
+          catch {} finally { retry.disabled = false; }
+        });
+        status.insertAdjacentElement("afterend", retry);
+      }
+    }
     throw error;
   });
 }

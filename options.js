@@ -438,6 +438,42 @@ function queueExternalFeatureIndexRefresh() {
 
 
 
+// Only membership differences for IDs that actually have pending or held work
+// need to invalidate eligibility. Metadata-only writes (e.g. recent-seen
+// timestamps) must not repeatedly rebuild the Bot Status index.
+function botStatusQueueMembershipChanged(changes, targets) {
+  if (!targets.size) return false;
+  const listKeys = [BLOCKED_BOTS_KEY, NOT_INTERESTED_KEY, FAVORITE_BOTS_KEY, LATER_BOTS_KEY,
+    OPENED_KEY, BOT_STATUS_IGNORED_KEY, RECENTLY_SEEN_BOTS_KEY, CREATOR_BOT_WATCH_KEY];
+  const relevantIds = (key, raw) => {
+    const rows = key === OPENED_KEY || key === BOT_STATUS_IGNORED_KEY ? raw
+      : key === RECENTLY_SEEN_BOTS_KEY ? raw?.entries
+      : key === CREATOR_BOT_WATCH_KEY ? raw?.recent : raw?.ids;
+    const result = new Set();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const id = String(row?.id || row || "").trim().toLowerCase();
+      if (targets.has(id)) result.add(id);
+    }
+    return result;
+  };
+  for (const key of listKeys) {
+    const change = changes[key];
+    if (!change) continue;
+    const oldIds = relevantIds(key, change.oldValue), newIds = relevantIds(key, change.newValue);
+    if (oldIds.size !== newIds.size || [...oldIds].some(id => !newIds.has(id))) return true;
+  }
+  for (const key of [BOT_ORGANIZER_KEY, "botDiscoveryIndexV1", BOT_ARCHIVE_KEY, BOT_UNAVAILABLE_RECOVERY_KEY]) {
+    const change = changes[key];
+    if (!change) continue;
+    const before = change.oldValue?.meta || change.oldValue || {}, after = change.newValue?.meta || change.newValue || {};
+    for (const id of targets) {
+      const active = entry => !!entry && (key !== BOT_UNAVAILABLE_RECOVERY_KEY || !(Number(entry.recoveredAt) > 0));
+      if (active(before[id]) !== active(after[id])) return true;
+    }
+  }
+  return false;
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
 
@@ -484,6 +520,21 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes[QOL_SYNC_STATE_KEY] && optionsDataLoaded && activeOptionsTab() === "account") {
     refreshAccountSyncUi().catch(() => {});
+  }
+
+  // Reconsider retained holds when list membership changes. Do not scan or
+  // wake uninitialized recovery managers. The existing deferred render lane
+  // reconciles queues when the Status controls are visible again.
+  if (changes[BOT_STATUS_IGNORED_KEY] && savedListsDataLoaded) {
+    setBotStatusIgnoredIds(changes[BOT_STATUS_IGNORED_KEY].newValue);
+  }
+  if (savedRecoveryDataLoaded && savedRecoveryActivated.has("status") &&
+      (botStatusHeldReviewRecordCount || botStatusPendingReviewIds.size) &&
+      botStatusQueueMembershipChanged(changes, new Set([...botStatusHeldReviewIds, ...botStatusPendingReviewIds]))) {
+    savedRecoveryDirty.add("status");
+    if (!botAvailabilityScanRunning && savedRecoverySectionOpen() && savedRecoveryHostVisible("status")) {
+      scheduleSavedManagersRefresh(["heldEligibility"]);
+    }
   }
 
   // Bot Status / unavailable-cleanup writes originate from this Options page,

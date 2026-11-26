@@ -140,16 +140,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       name: ["[name='name']"],
       title: ["[name='title']", "[name='tagline']"],
       description: ["[name='description']"],
-      greeting: ["[name='greeting']", "[name='first_message']", "[name='firstMessage']"],
-      personality: ["[name='persona']", "[name='personality']", "[name='definition']"],
-      scenario: ["[name='scenario']"],
+      greeting: ["textarea[name='greeting']", "textarea[name='first_message']", "textarea[name='firstMessage']", "textarea[name='first_mes']", "textarea[name='initial_message']", "[data-field-name='greeting'] textarea", "[data-field-name='first_message'] textarea"],
+      personality: ["textarea[name='persona']", "textarea[name='personality']", "textarea[name='definition']", "[data-field-name='persona'] textarea", "[data-field-name='personality'] textarea"],
+      scenario: ["textarea[name='scenario']", "[data-field-name='scenario'] textarea"],
       exampleDialogues: ["[name='dialogue']", "[name='example_dialogue']", "[name='exampleDialogues']"]
     }[key] || [];
     for (const selector of selectors) {
       const field = root.querySelector?.(selector);
       if (field && !field.closest?.(`#${PANEL_ID},#ds-qol-panel`)) return field;
     }
-    return null;
+    const matches = [...(root.querySelectorAll?.("textarea,input,select") || [])].filter(field => semanticKey(field) === key && !field.closest?.(`#${IMPORT_DIALOG_ID},[data-ds-owned='1']`));
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function captureTextFields() {
@@ -644,23 +645,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function importedBotFields(payload) {
     const root = payload && typeof payload === "object" ? payload : {};
     const data = root.data && typeof root.data === "object" ? root.data : root;
-    const qol = data.extensions?.spicychat_qol && typeof data.extensions.spicychat_qol === "object"
-      ? data.extensions.spicychat_qol
-      : {};
-    const sc = qol.spicychat_fields && typeof qol.spicychat_fields === "object" ? qol.spicychat_fields : {};
-    const tags = Array.isArray(sc.tags) && sc.tags.length
-      ? sc.tags
-      : (Array.isArray(data.tags) ? data.tags : []);
+    const native = data.character || data.chatbot || root.character || root.chatbot || data;
+    const qol = data.extensions?.spicychat_qol || root.extensions?.spicychat_qol || {};
+    const sc = qol.spicychat_fields || {};
+    const sources = [sc, native, data, root];
+    const pick = (...keys) => {
+      for (const source of sources) for (const key of keys) {
+        const val = source?.[key];
+        if (typeof val === "string" && val.trim()) return val;
+      }
+      return "";
+    };
+    const greeting = pick("greeting", "first_mes", "first_message", "firstMessage", "initial_message", "initialMessage") ||
+      sources.map(source => source?.greetings).filter(Array.isArray).flatMap(list => list.map(x => typeof x === "string" ? x : (x?.content ?? x?.text ?? x?.message ?? ""))).find(x => typeof x === "string" && x.trim()) || "";
+    const personality = pick("personality", "persona", "definition") || pick("description");
+    const description = pick("description");
+    const tags = sources.map(source=>source?.tags).find(value=>Array.isArray(value)&&value.length) || [];
     return {
-      name: clean(data.name, 200),
-      title: clean(sc.title || data.title, 500),
-      description: clean(sc.description || (data.description && data.description !== (sc.personality || data.personality) ? data.description : ""), 12000),
-      greeting: clean(sc.greeting || data.first_mes || data.first_message, 12000),
-      personality: clean(sc.personality || data.personality || data.description, 18000),
-      scenario: clean(sc.scenario || data.scenario, 12000),
-      exampleDialogues: clean(sc.example_dialogues || data.mes_example, 18000),
-      visibility: clean(sc.visibility || qol.visibility, 80),
-      tags: [...new Set(tags.map(tag => clean(tag, 100)).filter(Boolean))].slice(0, 12)
+      name: clean(pick("name"), 200), title: clean(pick("title", "tagline"), 500),
+      description: clean(description !== personality ? description : "",12000),
+      greeting: clean(greeting,12000), personality: clean(personality,18000),
+      scenario: clean(pick("scenario"),12000),
+      exampleDialogues: clean(pick("example_dialogues","example_dialogue","exampleDialogues","mes_example","dialogue"),18000),
+      visibility: clean(pick("visibility") || qol.visibility,80),
+      tags: [...new Set(tags.map(tag=>typeof tag === "string" ? clean(tag,100) : clean(tag?.name || "",100)).filter(Boolean))].slice(0,12)
     };
   }
 
@@ -820,16 +828,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const form = editorForm();
     if (!form) throw new Error("SpicyChat's bot form is not ready. Try again after it loads.");
     if (editorReadOnlyState()) throw new Error("This bot editor is read-only. Import was not applied.");
+    const initialEditor = editorInfo();
     await ensureImportAdvancedFields(selected);
+    if (JSON.stringify(editorInfo()) !== JSON.stringify(initialEditor)) throw Error("The chatbot editor changed during import. No fields filled.");
     const result = { filled: [], missing: [], tags: "", visibility: false, unchanged: [] };
     const keys = ["name", "title", "description", "greeting", "personality", "scenario", "exampleDialogues"];
     for (const key of keys) {
       if (!selected.includes(key)) continue;
-      const control = directField(key, form);
+      if (JSON.stringify(editorInfo()) !== JSON.stringify(initialEditor)) throw Error("The chatbot editor changed during import. Review the fields already filled.");
+      const liveForm = editorForm();
+      const control = liveForm && directField(key, liveForm);
       if (!control || control.disabled || control.readOnly) { result.missing.push(key); continue; }
       const value = importFieldValue(fields, key);
       if (String(control.value || "") === value) { result.unchanged.push(key); continue; }
-      if (setNativeFormValue(control, value)) result.filled.push(key);
+      if (setNativeFormValue(control, value)) {
+        const live = editorForm();
+        if (live && directField(key,live)?.value === value) result.filled.push(key);
+        else result.missing.push(key);
+      }
       else result.missing.push(key);
     }
     if (selected.includes("visibility")) result.visibility = await applyImportedVisibility(fields.visibility);
@@ -846,7 +862,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return result;
   }
 
-  function openBotImportPreview(candidates) {
+  function openBotImportPreview(candidates, contextGuard = null) {
     document.getElementById(IMPORT_DIALOG_ID)?.remove();
     const overlay = document.createElement("div");
     overlay.id = IMPORT_DIALOG_ID;
@@ -915,7 +931,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const check = document.createElement("input");
         check.type = "checkbox";
         check.value = key;
-        check.checked = key !== "visibility" && !(key === "name" && editorInfo()?.mode === "edit" && current.name && current.name.toLowerCase() !== value.toLowerCase());
+        check.checked = !contextGuard && key !== "visibility" && !(key === "name" && editorInfo()?.mode === "edit" && current.name && current.name.toLowerCase() !== value.toLowerCase());
         const before = key === "tags" ? selectedTags() : String(current[key] || "");
         const compareText = key === "tags" ? "add without removing current tags" : value === before ? "unchanged" : before ? "will replace existing text" : "will fill empty field";
         label.append(check, document.createTextNode(` ${labels[key]} · ${value.length.toLocaleString()} chars · ${compareText}`));
@@ -944,11 +960,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       apply.disabled = true;
       cancel.disabled = true;
       try {
+        if(contextGuard)await contextGuard();
         const info = editorInfo();
         if (info?.mode === "edit" && info.id) {
           const backedUp = await saveOwnBackup("Before bot import", { manual: true, label: "Before bot import" });
           if (!backedUp) throw new Error("Could not create a safety backup of this bot. Import cancelled.");
         }
+        if(contextGuard)await contextGuard();
         const result = await applySelectedBotFields(candidates[Number(chooser.value) || 0].fields, selected);
         const parts = [];
         if (result.filled.length) parts.push(`${result.filled.length} field(s) filled`);
@@ -1216,6 +1234,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   } catch {}
 
+  DS.captureCreatorToolsBot = () => {
+    const form=editorForm(),info=editorInfo();if(!form||!info||!directField('name',form)||!directField('greeting',form)||!directField('personality',form))throw Error('Wait for the native chatbot editor to load.');
+    activeForm=form;const profile=captureProfile();if(!profile||profile.tagCaptureIncomplete)throw Error('Bot fields or tags are not fully available.');
+    const fields={};for(const key of ['name','title','description','greeting','personality','scenario','exampleDialogues']){const el=directField(key,form);if(el)fields[key]=el.value;}
+    if(!String(fields.name||'').trim())throw Error('Wait for the native chatbot editor to load.');
+    fields.tags=profile.fields.tags.split(',').map(x=>x.trim()).filter(Boolean);if(profile.fields.image)fields.image=profile.fields.image;if(profile.fields.visibility)fields.visibility=profile.fields.visibility;
+    return {nativeId:info.id||null,content:fields,coverage:Object.fromEntries([...BACKUP_FIELD_KEYS,'lorebookAttachments','rulebookAttachments'].map(k=>[k,Object.hasOwn(fields,k)?'available':'unverified']))};
+  };
+  DS.previewCreatorToolsBot = (payload, guard) => openBotImportPreview([{source:'Creator Tools reviewed package',fields:importedBotFields(payload)}],guard);
   DS.removeBotBackupTools = cleanup;
 })();
 

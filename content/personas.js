@@ -416,6 +416,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return 0;
   }
 
+  DS.parsePersonaAccountLimit = accountPersonaLimit;
+
   async function readPersonaLimitChoice() {
     if (!personaLimitChoiceRead) {
       personaLimitChoiceRead = (async () => {
@@ -441,8 +443,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       personaAccountLimitChecked = true;
       return;
     }
-    personaAccountLimitPending = Promise.resolve().then(() => request("/v2/users", "GET"))
-      .then(result => { personaAccountLimit = accountPersonaLimit(result); })
+    personaAccountLimitPending = Promise.resolve().then(() => typeof DS.readSubscriptionSnapshot === 'function'
+      ? DS.readSubscriptionSnapshot().then(snapshot => snapshot.personaLimit)
+      : request("/v2/users", "GET").then(accountPersonaLimit))
+      .then(result => { personaAccountLimit = Number(result)||0; })
       .catch(() => { personaAccountLimit = 0; })
       .finally(() => {
         personaAccountLimitPending = null;

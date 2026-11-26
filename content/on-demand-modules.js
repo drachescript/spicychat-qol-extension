@@ -14,7 +14,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const OWNER = Object.freeze({
     "creator-moderation-warnings": "moderation-warnings",
     "lorebook-moderation-review": "moderation-warnings",
-    "chat-history-navigator": "chat-bookmarks"
+    "chat-history-navigator": "chat-bookmarks", "sidebar-redesign": "sidebar"
   });
   const has = key => DS.featureBuildProfile?.isInstalled?.(OWNER[key] || key) !== false;
   const any = (s, names) => names.some(k => s?.[k] === true);
@@ -62,6 +62,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     "bulk-chat-research": "content/bulk-chat-research.js",
     "soundscapes": "content/soundscapes.js",
     "sidebar": "content/sidebar.js",
+    "sidebar-redesign": "content/sidebar-redesign.js",
+    "creator-tools-integration": "content/creator-tools-integration.js",
     "quick-panel": "content/quick-panel.js",
     "animation-control": "content/animation-control.js",
     "exact-message-counts": "content/exact-message-counts.js",
@@ -242,6 +244,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("bulk-chat-research", CHATS.test(path) &&
       startupParams.get("ds-research-export") === "1");
     add("quick-panel",settings.showQuickPanel === true);
+    add("sidebar-redesign",settings.redesignedSidebarEnabled === true);
+    add("creator-tools-integration",settings.creatorToolsIntegrationEnabled === true && (botEditor || lorebookEditor));
     add("sidebar",!!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
       !!settings.restorePersonasSidebarPosition || Object.keys(settings).some(k => k.startsWith("hideSidebar") && !!settings[k]));
     add("soundscapes",!!settings.enableSoundscapes);

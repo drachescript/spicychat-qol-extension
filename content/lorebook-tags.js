@@ -343,7 +343,35 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return cache.get(key)?.meta || null;
   };
 
-  async function getCurrentOwnLorebookBackupDataApi(lorebookId, { progress } = {}) {
+  // Save only explicitly requested captures, and only for a verified owner.
+  // No old page is used as live data merely because its count matches.
+  async function captureAccount(ownerId = "", force = false) {
+    if (typeof DS.readSubscriptionSnapshot !== "function") return null;
+    try {
+      const account = (await DS.readSubscriptionSnapshot({force}))?.accountKey;
+      if (!/^[a-f0-9]{64}$/.test(account || "")) return null;
+      if (ownerId) {
+        const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("dsq-quota-account-v1:" + ownerId))), x => x.toString(16).padStart(2, "0")).join("");
+        if (hash !== account) return null;
+      }
+      return account;
+    } catch { return null; }
+  }
+  async function captureMessage(id, accountKey, action, extra = {}) {
+    let timeout;
+    try {
+      const result = await Promise.race([runtimeMessage({type:"DS_LOREBOOK_IMPORT_JOB",bookId:id,accountKey,action,...extra}),new Promise(resolve=>{timeout=setTimeout(()=>resolve(null),15000);})]);
+      if (!result?.ok) throw Error(result?.error || "Local capture storage unavailable");
+      return result;
+    } finally { clearTimeout(timeout); }
+  }
+  DS.readSavedLorebookCapture = async (id, clear = false) => {
+    const account = await captureAccount("", true);
+    if (!account) throw Error("Could not verify the current account.");
+    return captureMessage(clean(id).toLowerCase(),account,clear?"capture-clear":"capture-read");
+  };
+
+  async function getCurrentOwnLorebookBackupDataApi(lorebookId, { progress, persistCapture = false } = {}) {
     const id = clean(lorebookId).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(id)) throw new Error("Invalid Lorebook UUID.");
     if (typeof DS.fetchLorebookArchiveData !== "function") throw new Error("The current Lorebook API bridge is not available.");
@@ -352,91 +380,132 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // feature promises the newest live version, so always ask SpicyChat now.
     // The Lorebook endpoint is priority-paged on large books; walk it until the
     // API-reported entry count is satisfied, deduping stable entry UUIDs.
-    let cursor = 0;
+    let cursor = 0, lastEntryId = "";
     let meta = null;
     const entries = [];
     const seen = new Set();
-    let expected = 0;
+    let expected = null;
     const requestedCursors = new Set();
+    let capture = null, cacheFinished = false, reused = 0, addedLocally = 0, changedLocally = 0;
+    const stopCache = async () => { if (capture) { const c=capture; capture=null; try { await captureMessage(id,c.account,"capture-stop",{runId:c.runId}); } catch {} } };
     let stopReason = "page limit";
 
-    for (let page = 0; page < 120; page += 1) {
-      requestedCursors.add(cursor);
-      const api = await DS.fetchLorebookArchiveData(id, page === 0, { lastSortPriority: cursor });
-      const payload = lorebookPayload(api?.data);
-      const copy = normalizeLorebookRecoveryCopy(payload, id);
-      if (!copy?.lorebook?.id) throw new Error("Current Lorebook data could not be normalized.");
-      const returnedId = clean(payload?.id || payload?.uuid || payload?.lorebook_id || "").toLowerCase();
-      if (returnedId && returnedId !== id) throw new Error("Live Lorebook endpoint returned a different Lorebook ID.");
-      if (!meta) meta = copy.lorebook;
-      expected = Math.max(expected, Number(copy.lorebook.entryCount) || 0);
+    try {
+      for (let page = 0; page < 120; page += 1) {
+        requestedCursors.add(JSON.stringify([cursor, lastEntryId]));
+        const api = await DS.fetchLorebookArchiveData(id, page === 0, { lastSortPriority: cursor, lastEntryId, ...(page === 0 ? {authWaitMs:20000, onAuthWait:()=>progress?.("Waiting for authenticated SpicyChat traffic…")} : {}) });
+        const payload = lorebookPayload(api?.data);
+        const copy = normalizeLorebookRecoveryCopy(payload, id);
+        if (!copy?.lorebook?.id) throw new Error("Current Lorebook data could not be normalized.");
+        const returnedId = clean(payload?.id || payload?.uuid || payload?.lorebook_id || "").toLowerCase();
+        if (returnedId && returnedId !== id) throw new Error("Live Lorebook endpoint returned a different Lorebook ID.");
+        if (!meta) meta = copy.lorebook;
+        else if ((meta.creatorId && copy.lorebook.creatorId && meta.creatorId !== copy.lorebook.creatorId) ||
+                 (meta.updatedAt && copy.lorebook.updatedAt && meta.updatedAt !== copy.lorebook.updatedAt) ||
+                 (meta.version && copy.lorebook.version && meta.version !== copy.lorebook.version)) {
+          const error=Error("Lorebook owner or revision changed during capture; previous backup kept. Wait for edits or imports to finish and retry.");
+          error.code="lorebook-changing";throw error;
+        }
+        const rawTotal = payload.num_entries ?? payload.numEntries ?? payload.entries_count ?? payload.entriesCount ?? payload.entryCount;
+        const total = rawTotal == null || rawTotal === "" ? NaN : Number(rawTotal);
+        if (!Number.isSafeInteger(total) || total < 0) throw Error("Live Lorebook total unavailable; refusing an unverified backup.");
+        if (expected !== null && total !== expected) {
+          const error = Error("Lorebook entry count changed during capture; previous backup kept. Wait for edits or imports to finish and retry.");
+          error.code = "lorebook-changing";
+          throw error;
+        }
+        expected = total;
+        if (page === 0 && persistCapture && meta.creatorId && total <= 5000) {
+          const account=await captureAccount(meta.creatorId);
+          if(account){try{const runId=crypto.randomUUID();const r=await captureMessage(id,account,"capture-start",{runId,total});if(r.acquired)capture={account,runId};}catch{}}
+        }
+        const offset=entries.length;
+        let added = 0;
+        for (const entry of copy.entries || []) {
+          const realId = String(entry.id || '').toLowerCase();
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(realId)) throw Error("Live Lorebook entry has no stable ID; refusing an unverified backup.");
+          if (seen.has(realId)) continue;
+          seen.add(realId);
+          entries.push({...entry, id: realId});
+          added += 1;
+        }
 
-      let added = 0;
-      for (const entry of copy.entries || []) {
-        // Generated index:0...index:99 IDs repeat on each API page. Those
-        // are not real entry UUIDs and must never suppress later pages.
-        const realId = String(entry.id || '').startsWith('index:') ? '' : entry.id;
-        const key = realId ? `id:${realId.toLowerCase()}` : `content:${JSON.stringify([entry.name, entry.priority, entry.content, entry.keywords])}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        entries.push(realId ? entry : { ...entry, id: `index:${entries.length}` });
-        added += 1;
+        if(capture){try{const r=await captureMessage(id,capture.account,"capture-page",{runId:capture.runId,total:expected,offset,entries:entries.slice(offset)});reused+=r.reused;addedLocally+=r.added;changedLocally+=r.changed;}catch{await stopCache();}}
+        progress?.(`Reading Lorebook from API: ${entries.length}${expected ? `/${expected}` : ""} entries…${capture?` (${reused} already stored · ${addedLocally} new · ${changedLocally} changed)`:""}`);
+        if (entries.length >= expected) break;
+        if (!copy.entries.length || !added) {
+          stopReason = !copy.entries.length ? "empty API page" : "API repeated entries";
+          break;
+        }
+        // Use the original sort-priority field if provided, rather than the
+        // normalized export priority (which can be a separate display field).
+        const tail = lorebookEntryArray(payload).at(-1);
+        const rawCursor = tail?.sortPriority ?? tail?.sort_priority ?? tail?.priority ?? tail?.order ?? tail?.position ?? tail?.rank;
+        const nextCursor = rawCursor === '' || rawCursor == null ? NaN : Number(rawCursor);
+        const nextId = clean(tail?.id || tail?.entry_id || tail?.entryId || tail?.uuid || tail?._id || "").toLowerCase();
+        if (!Number.isFinite(nextCursor) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nextId) || requestedCursors.has(JSON.stringify([nextCursor,nextId]))) {
+          stopReason = "missing or repeated composite cursor";
+          break;
+        }
+        cursor = nextCursor;
+        lastEntryId = nextId;
+        await new Promise(resolve => setTimeout(resolve, 80));
       }
 
-      progress?.(`Reading Lorebook from API: ${entries.length}${expected ? `/${expected}` : ""} entries…`);
-      if (!expected || entries.length >= expected) break;
-      if (!copy.entries.length || !added) {
-        stopReason = !copy.entries.length ? "empty API page" : "API repeated entries";
-        break;
+      if (!meta) throw new Error("Current Lorebook data could not be read.");
+      if (expected === null || entries.length !== expected) {
+        const error = new Error(`SpicyChat returned ${entries.length} of ${expected} Lorebook entries; refusing to create an incomplete backup.`);
+        error.code = "incomplete-lorebook";
+        error.paginationStopReason = stopReason;
+        error.message += ` (API pagination: ${stopReason}; ${requestedCursors.size} request(s).)`;
+        error.expectedEntries = expected;
+        error.receivedEntries = entries.length;
+        // A live, ID-checked details response is useful on mobile even when
+        // Keep only metadata for the native Entries-tab fallback; the separate
+        // durable capture may hold partial rows but cannot publish them as complete.
+        if (meta?.id && clean(meta.id).toLowerCase() === id) {
+          error.partialLorebook = { ...meta, entryCount: expected };
+        }
+        throw error;
       }
-      // Use the original sort-priority field if provided, rather than the
-      // normalized export priority (which can be a separate display field).
-      const tail = lorebookEntryArray(payload).at(-1);
-      const rawCursor = tail?.sortPriority ?? tail?.sort_priority ?? tail?.priority ?? tail?.order ?? tail?.position ?? tail?.rank;
-      const nextCursor = rawCursor === '' || rawCursor == null ? NaN : Number(rawCursor);
-      if (!Number.isFinite(nextCursor) || requestedCursors.has(nextCursor)) {
-        stopReason = !Number.isFinite(nextCursor) ? "missing sort priority" : "repeated sort priority";
-        break;
-      }
-      cursor = nextCursor;
-      await new Promise(resolve => setTimeout(resolve, 80));
-    }
 
-    if (!meta) throw new Error("Current Lorebook data could not be read.");
-    if (expected && entries.length !== expected) {
-      const error = new Error(`SpicyChat returned ${entries.length} of ${expected} Lorebook entries; refusing to create an incomplete backup.`);
-      error.code = "incomplete-lorebook";
-      error.paginationStopReason = stopReason;
-      error.message += ` (API pagination: ${stopReason}; ${requestedCursors.size} request(s).)`;
-      error.expectedEntries = expected;
-      error.receivedEntries = entries.length;
-      // A live, ID-checked details response is useful on mobile even when
-      // SpicyChat's priority pagination repeats the first 100 entries. Keep
-      // ONLY that metadata in memory for the native Entries-tab fallback;
-      // never treat the partial API entries as complete or save them as such.
-      if (meta?.id && clean(meta.id).toLowerCase() === id) {
-        error.partialLorebook = { ...meta, entryCount: expected };
-      }
-      throw error;
-    }
-
-    return {
-      schema: "spicychat-qol-lorebook-recovery-copy",
-      version: 1,
-      savedAt: Date.now(),
-      fetchedAt: new Date().toISOString(),
-      source: "current-live-api",
-      completeness: { details: true, entries: true, entryCountVerified: !expected || entries.length === expected },
-      lorebook: { ...meta, entryCount: expected || entries.length },
-      entries
-    };
+      let captureSummary=null;
+      if(capture){try{const r=await captureMessage(id,capture.account,"capture-finish",{runId:capture.runId,meta:{...meta,entryCount:expected}});cacheFinished=true;captureSummary={reused,new:addedLocally,changed:changedLocally,removed:r.removed};progress?.(`Verified ${expected} entries · ${reused} already stored · ${addedLocally} new · ${changedLocally} changed · ${r.removed} removed`);}catch{await stopCache();}}
+      return {
+        schema: "spicychat-qol-lorebook-recovery-copy",
+        version: 1,
+        savedAt: Date.now(),
+        ...(captureSummary?{captureSummary}:{}),
+        fetchedAt: new Date().toISOString(),
+        source: "current-live-api",
+        completeness: { details: true, entries: true, entryCountVerified: entries.length === expected },
+        lorebook: { ...meta, entryCount: expected },
+        entries
+      };
+    } finally { if(!cacheFinished) await stopCache(); }
   }
 
-  DS.getCurrentOwnLorebookBackupDataApiOnly = getCurrentOwnLorebookBackupDataApi;
-  DS.getCurrentOwnLorebookBackupData = async function getCurrentOwnLorebookBackupData(lorebookId, { progress } = {}) {
+  const apiCaptures = new Map(), fullCaptures = new Map();
+  DS.isLorebookLiveCaptureActive = id => apiCaptures.has(clean(id).toLowerCase()) || fullCaptures.has(clean(id).toLowerCase());
+  function shareCapture(map, id, progress, run) {
+    const key = clean(id).toLowerCase();
+    let current = map.get(key);
+    if (current) { if (progress) current.listeners.add(progress); return current.promise; }
+    current = {listeners: new Set(progress ? [progress] : [])};
+    const notify = message => { for (const fn of current.listeners) { try { fn(message); } catch {} } };
+    current.promise = Promise.resolve().then(() => run(notify)).finally(() => {
+      if (map.get(key) === current) map.delete(key);
+    });
+    map.set(key,current);
+    return current.promise;
+  }
+  DS.getCurrentOwnLorebookBackupDataApiOnly = (id, {progress,persistCapture=false} = {}) => shareCapture(apiCaptures,id,progress,notify => getCurrentOwnLorebookBackupDataApi(id,{progress:notify,persistCapture}));
+  DS.getCurrentOwnLorebookBackupData = (id, {progress,persistCapture=false} = {}) => shareCapture(fullCaptures,id,progress,notify => getFullLorebookBackup(id,{progress:notify,persistCapture}));
+  async function getFullLorebookBackup(lorebookId, { progress,persistCapture=false } = {}) {
     try {
-      return await getCurrentOwnLorebookBackupDataApi(lorebookId, { progress });
+      return await DS.getCurrentOwnLorebookBackupDataApiOnly(lorebookId, { progress,persistCapture });
     } catch (apiError) {
+      if (apiError?.code === "lorebook-changing") throw apiError;
       // My Creations does not normally load the editor-only backup module.
       // Only explicit live backup calls may request the native fallback.
       if (typeof DS.getCurrentOwnLorebookBackupDataFromEditor !== "function") {
@@ -793,7 +862,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // expansion recursively spawn another helper while already inside one.
       if (!entries.length) {
         try {
-          const copy = await getCurrentOwnLorebookBackupDataApi(id);
+          const copy = await DS.getCurrentOwnLorebookBackupDataApiOnly(id);
           if (Array.isArray(copy?.entries) && copy.entries.length) {
             entries = copy.entries.map((entry, index) => normalizeLorebookEntry(entry, index));
             source = clean(copy.source || "current-live-api");

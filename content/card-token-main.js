@@ -476,9 +476,11 @@ if (!(() => { try {
     const url = parseApiUrl(input);
     const match = url?.hostname === API_HOST && url.pathname.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries(?:\/([0-9a-f-]{36}))?\/?$/i);
     const [attemptId, bookId, kind] = String(arm || '').split(':');
-    if (!active || !match || match[1].toLowerCase() !== bookId || !/^[0-9a-f-]{36}$/i.test(attemptId)) return null;
+    if (!active || !match || match[1].toLowerCase() !== bookId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)) return null;
     const verb = String(method || 'GET').toUpperCase();
     if (kind === 'create' ? verb !== 'POST' || !!match[2] : !['PUT','PATCH','POST'].includes(verb) || !match[2]) return null;
+    // Each armed attempt belongs to one native request, not any later save.
+    document.documentElement.removeAttribute('data-ds-lorebook-import-attempt');
     return {attemptId, bookId, targetId:match[2] || '', kind};
   }
   function lorebookImportResponse(attempt, status, data) {
@@ -486,7 +488,7 @@ if (!(() => { try {
     const value = data?.entry || data?.data?.entry || data?.data || data;
     const id = String(value?.id || value?.entryId || value?.entry_id || attempt.targetId || '');
     const returnedBook = String(value?.lorebookId || value?.lorebook_id || attempt.bookId).toLowerCase();
-    try { window.dispatchEvent(new CustomEvent('ds-qol-lorebook-import-response-v1', {detail:{attemptId:attempt.attemptId, bookId:attempt.bookId, status:Number(status)||0, entryId:returnedBook===attempt.bookId && /^[0-9a-f-]{36}$/i.test(id)?id:''}})); } catch {}
+    try { window.dispatchEvent(new CustomEvent('ds-qol-lorebook-import-response-v1', {detail:{attemptId:attempt.attemptId, bookId:attempt.bookId, status:Number(status)||0, entryId:returnedBook===attempt.bookId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)?id:''}})); } catch {}
   }
   function observedFetch(input, init) {
     let historySeq = 0;
@@ -1058,6 +1060,9 @@ if (!(() => { try {
     const requestId = clean(detail.requestId);
     const lorebookId = clean(detail.lorebookId).toLowerCase();
     const lastSortPriority = Number.isFinite(Number(detail.lastSortPriority)) ? Number(detail.lastSortPriority) : 0;
+    const lastEntryId = clean(detail.lastEntryId || "");
+    if (lastEntryId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lastEntryId)) return;
+    const cursorQuery = lastEntryId ? `&lastEntryId=${encodeURIComponent(lastEntryId)}` : "";
     if (!requestId || !/^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(lorebookId)) return;
 
     const initial = resolveAuth(detail);
@@ -1078,7 +1083,7 @@ if (!(() => { try {
       if (isJwt(token) && token.length < MAX_TOKEN) headers.Authorization = `Bearer ${token}`;
       if (isGuest(guest)) headers["x-guest-userid"] = guest;
 
-      const url = `${LOREBOOK_API_BASE}${encodeURIComponent(lorebookId)}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}&view=live`;
+      const url = `${LOREBOOK_API_BASE}${encodeURIComponent(lorebookId)}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}${cursorQuery}&view=live`;
       const response = await nativeFetch(url, {
         method: "GET",
         credentials: "include",

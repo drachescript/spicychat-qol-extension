@@ -16,6 +16,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (slowDirtyHas(dirty, "interface")) {
       await runStep("remove disabled panel", () => DS.removeQuickPanelIfDisabled?.());
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
+      if (settings.redesignedSidebarEnabled || document.getElementById("ds-qol-navigation-redesign")) DS.applyRedesignedSidebar?.();
       const sidebarWanted = !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       await runFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn,#ds-qol-sidebar-later"), () => DS.applySidebarCleanup?.());
       await runFeatureStep("main footer", !!settings.enableMainFooterManagement || !!document.querySelector("[data-ds-reason^='main-footer:'],[data-ds-main-footer-root]"), () => DS.applyMainFooterManagement?.());
@@ -208,6 +209,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // listing/banner work so a busy chat cannot leave SpicyChat UI elements
       // visible just because the cosmetic lane was delayed.
       await runFeatureStep("top bar", topBarWanted(settings) || !!document.querySelector("[data-ds-reason^='topbar:']"), () => DS.applyTopBarCleanup?.());
+      if (settings.redesignedSidebarEnabled || document.getElementById("ds-qol-navigation-redesign")) DS.applyRedesignedSidebar?.();
       const sidebarWanted = !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton || !!settings.restorePersonasSidebarPosition || !!DS.sidebarPersonasMoved?.() || Object.keys(settings).some(key => key.startsWith("hideSidebar") && settings[key]);
       if (listing) {
         await runThrottledFeatureStep("sidebar", sidebarWanted || !!document.querySelector("[data-ds-reason^='sidebar:'],#ds-qol-sidebar-btn,#ds-qol-sidebar-later"), listingMaintenanceInterval, () => DS.applySidebarCleanup?.(), !!options.force);

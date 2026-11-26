@@ -1183,7 +1183,9 @@ html.ds-chat-custom-background div.flex.grow.flex-col.top-0.left-0.w-full.h-full
    menus, or the theme picker. When the QoL picture is off these selectors
    do not apply and SpicyChat owns its theme colors. */
 html.ds-chat-custom-background [data-testid="ChatAppearanceScope"],
-html.ds-chat-custom-background [data-testid="ChatAppearanceScope"] > [data-chat-scroll-area="chat"] {
+html.ds-chat-custom-background [data-testid="ChatAppearanceScope"] [data-chat-scroll-area="chat"],
+html.ds-chat-custom-background [data-testid="ChatAppearanceScope"] div:has(> [data-chat-scroll-area="chat"]),
+html.ds-chat-custom-background [data-testid="ChatAppearanceScope"] div:has(> div > [data-chat-scroll-area="chat"]) {
   background-color: transparent !important;
 }
 .ds-chat-background-control {

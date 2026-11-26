@@ -598,11 +598,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const PAGE_SIZE = 48;
   const ui = {active: location.hash === '#later', page: 1, search: '', sort: 'newest', folder: 'all',
     tags: '', excludeTags: '', opened: 'all', safety: 'all', selected: new Set(), changing: false,
-    lastStore: null, lastRevision: '', applying: false, searchTimer: null,
+    lastStore: null, lastRevision: '', applying: false, searchTimer: null, panel: null,
     archiveTags: new Map(), archiveRequested: new Set(), tagAttempted: new Set(), fetchingTags: false, tagStatus: ''};
-  const enabled = () => /^\/favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname) &&
+  const enabled = () => /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname) &&
     DS.state?.settings?.enabled !== false && DS.state?.settings?.showLaterFavoritesTab === true;
-  DS.isLaterFavoritesTabActive = () => ui.active && enabled();
+  DS.isLaterFavoritesTabActive = () => ui.active && enabled() && !!ui.panel?.isConnected && !!ui.panel.childElementCount;
   const text = value => String(value ?? '').replace(/\s+/g,' ').trim();
   const tokens = value => [...new Set(String(value||'').split(/[,\n]/).map(t=>t.trim().toLowerCase()).filter(Boolean))];
   function normalizeTags(raw) {
@@ -694,13 +694,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       html[data-ds-later-active="1"]:has(#${PANEL_ID}) [data-ds-favorites-native-controls="1"],
       html[data-ds-later-active="1"]:has(#${PANEL_ID}) [data-ds-favorites-native-results="1"]{display:none!important}
       html[data-ds-later-active="1"]:has(#${PANEL_ID}) .ds-later-native-pagination{display:none!important}
-      [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab){margin-inline-end:12px;}
-      [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab)>#ds-favorites-later-tab{padding-inline:10px;white-space:nowrap;}
+      :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab){margin-inline-end:12px;}
+      :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab)>#ds-favorites-later-tab{padding-inline:10px;white-space:nowrap;}
       [data-testid="SearchClientCharacterListing"] div:has(> [role="tablist"] > #ds-favorites-later-tab) {column-gap:16px!important;flex-wrap:wrap!important;}
-      [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab) + [data-testid="AppliedFiltersBarView"]{min-width:160px;}
-      @media(max-width:860px){[data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab){margin-inline-end:0;}
-        [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab){overflow-x:auto;max-width:100%;}
-        [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#ds-favorites-later-tab) + [data-testid="AppliedFiltersBarView"]{flex-basis:100%;min-width:0;margin-left:0;}}
+      :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab) + [data-testid="AppliedFiltersBarView"]{min-width:160px;}
+      @media(max-width:860px){:is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab){margin-inline-end:0;}
+        :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab){overflow-x:auto;max-width:100%;}
+        :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#ds-favorites-later-tab) + [data-testid="AppliedFiltersBarView"]{flex-basis:100%;min-width:0;margin-left:0;}}
 
       #${PANEL_ID}{width:100%;min-width:0;box-sizing:border-box;display:block;padding:18px 0 36px;color:inherit}
       #${PANEL_ID}[hidden]{display:none!important}
@@ -742,10 +742,36 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       @media(max-width:640px){#${PANEL_ID} .ds-later-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}}
     `;document.head?.appendChild(e);
   }
+  const LISTING_SELECTOR = '[data-testid="SearchClientCharacterListingBody"],[data-testid="SearchClientCharacterListing"]';
   function host() {
-    const native=document.querySelector('[data-testid="SearchClientCharacterListing"]');
+    const scope=document.querySelector('[data-testid="FavoritesListingBoundary"]') || document;
+    const native=scope.querySelector(LISTING_SELECTOR);
     return native?.parentElement ? {native,parent:native.parentElement} : null;
   }
+  // Shared by Later and Recovered. The V2 header owns the native tabs;
+  // mark toolbar, filter row and results individually rather than the header.
+  function markNativeSections(native) {
+    const mark=(node,key)=>{if(node && node.dataset[key]!=='1')node.dataset[key]='1';};
+    if(native.matches('[data-testid="SearchClientCharacterListingBody"]')) {
+      mark(native.querySelector('[data-testid="SearchClientCharacterListingToolbar"]'),'dsFavoritesNativeControls');
+      const filters=native.querySelector('[data-testid="AppliedFiltersBarView"]');
+      const row=filters?.parentElement;
+      mark(row && !row.querySelector('[role="tablist"]') && !row.matches('[data-testid="ListingHeader"]') ? row : filters,'dsFavoritesNativeControls');
+      mark(native.querySelector('[data-testid="CharacterListingResults"]'),'dsFavoritesNativeResults');
+      mark(native.querySelector('[data-testid="ListingSpinnerTarget"]'),'dsFavoritesNativeResults');
+    } else {
+      const rows=native.firstElementChild;
+      if(rows?.children?.length>=3){
+        const controls=rows.children[0],results=rows.children[rows.children.length-1];
+        if(!controls.querySelector('[role="tablist"]'))mark(controls,'dsFavoritesNativeControls');
+        if(!results.querySelector('[role="tablist"]'))mark(results,'dsFavoritesNativeResults');
+      }
+    }
+    const pager=native.parentElement?.querySelector(':scope > [data-testid="ListingPagination"]');
+    if(pager && !pager.classList.contains('ds-later-native-pagination'))pager.classList.add('ds-later-native-pagination');
+  }
+  DS.getFavoritesCollectionHost = host;
+  DS.markFavoritesCollectionNativeSections = markNativeSections;
   function setActive(value,reset=true,navigate=true) {
     ui.active=!!value&&enabled();if(ui.active&&reset)ui.page=1;
     if(navigate&&enabled()){
@@ -912,7 +938,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     panel.replaceChildren(fragment);
     void hydrateCachedTags(onPage);
     ui.lastStore=DS.state.laterBots;
-    ui.lastRevision=`${all.length}|${settings.expandLongCardDescriptions?1:0}|${settings.laterPageHideOpenedBots?1:0}`;
+    ui.lastRevision=`${all.length}|${settings.expandLongCardDescriptions?1:0}|${settings.laterPageHideOpenedBots?1:0}|${settings.laterPageHideBlockedBots?1:0}`;
   }
   function markNativePagination(where) {
     // SpicyChat mounts Favorites pagination NEXT TO the listing, not inside it.
@@ -934,24 +960,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const where=host();
       if(!where||!enabled()){
         document.documentElement.removeAttribute('data-ds-later-active');
-        document.getElementById(PANEL_ID)?.remove();ui.active=false;return;
+        document.getElementById(PANEL_ID)?.remove();ui.panel=null;
+        document.getElementById('ds-favorites-later-tab')?.remove();
+        ui.active=false;return;
       }
       ensureCss();
-      if(location.hash==='#later'&&!ui.active)ui.active=true;
+      ui.active=location.hash==='#later';
       markNativePagination(where);
-      const rows=where.native.firstElementChild;
-      if(rows?.children?.length>=3){
-        const controls=rows.children[0],results=rows.children[rows.children.length-1];
-        if(controls.dataset.dsFavoritesNativeControls!=='1')controls.dataset.dsFavoritesNativeControls='1';
-        if(results.dataset.dsFavoritesNativeResults!=='1')results.dataset.dsFavoritesNativeResults='1';
-      }
+      markNativeSections(where.native);
       const tabs=where.native.querySelector('[role="tablist"]');
       let launcher=document.getElementById('ds-favorites-later-tab');
-      if(tabs&&(!launcher||launcher.parentElement!==tabs)){
-        launcher?.remove();launcher=document.createElement('a');launcher.id='ds-favorites-later-tab';
-        launcher.href='/favorite-bots#later';launcher.setAttribute('role','tab');launcher.className='relative cursor-pointer bg-transparent gap-sm flex flex-shrink-0 items-center justify-center transition-colors duration-200 min-w-10 text-gray-11 no-underline';
-        launcher.addEventListener('click',e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();setActive(true);});tabs.append(launcher);
+      if(!launcher){
+        launcher=document.createElement('a');launcher.id='ds-favorites-later-tab';
+        launcher.href=location.pathname+'#later';launcher.setAttribute('role','tab');launcher.className='relative cursor-pointer bg-transparent gap-sm flex flex-shrink-0 items-center justify-center transition-colors duration-200 min-w-10 text-gray-11 no-underline';
+        launcher.style.cssText='padding-inline:10px;min-height:36px;white-space:nowrap;';
+        launcher.addEventListener('click',e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();setActive(true);});
       }
+      if(tabs){if(launcher.parentElement!==tabs)tabs.append(launcher);}
+      else if(launcher.parentElement!==where.parent)where.native.insertAdjacentElement('beforebegin',launcher);
       if(launcher){
         const label=`Later (${new Set(DS.state?.laterBots?.ids||[]).size})`;
         if(launcher.textContent!==label)launcher.textContent=label;
@@ -959,22 +985,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if(launcher.getAttribute('aria-selected')!==selected)launcher.setAttribute('aria-selected',selected);
       }
       if(!ui.active){document.documentElement.removeAttribute('data-ds-later-active');
-        document.getElementById(PANEL_ID)?.remove();return;}
+        document.getElementById(PANEL_ID)?.remove();ui.panel=null;return;}
       let panel=document.getElementById(PANEL_ID);
-      if(!panel||panel.previousElementSibling!==where.native){panel?.remove();panel=document.createElement('section');panel.id=PANEL_ID;panel.setAttribute('aria-label','Saved for Later');where.native.insertAdjacentElement('afterend',panel);force=true;}
-      if(document.documentElement.dataset.dsLaterActive!=='1')document.documentElement.dataset.dsLaterActive='1';
-      if(force||ui.lastStore!==DS.state.laterBots||ui.lastRevision!==`${new Set(DS.state?.laterBots?.ids||[]).size}|${DS.state?.settings?.expandLongCardDescriptions?1:0}|${DS.state?.settings?.laterPageHideOpenedBots?1:0}`)render();
+      if(!panel||panel.parentElement!==where.parent){panel?.remove();panel=document.createElement('section');panel.id=PANEL_ID;panel.setAttribute('aria-label','Saved for Later');panel.dataset.dsOwned='1';where.native.insertAdjacentElement('afterend',panel);force=true;}
+      ui.panel=panel;
+      if(force||!panel.childElementCount||ui.lastStore!==DS.state.laterBots||ui.lastRevision!==`${new Set(DS.state?.laterBots?.ids||[]).size}|${DS.state?.settings?.expandLongCardDescriptions?1:0}|${DS.state?.settings?.laterPageHideOpenedBots?1:0}|${DS.state?.settings?.laterPageHideBlockedBots?1:0}`)render();
+      if(panel.childElementCount && document.documentElement.dataset.dsLaterActive!=='1')document.documentElement.dataset.dsLaterActive='1';
+    }catch(error){
+      document.documentElement.removeAttribute('data-ds-later-active');
+      document.getElementById(PANEL_ID)?.remove();ui.panel=null;
+      console.warn('[SpicyChat QoL] Later view could not mount',error);
     }finally{ui.applying=false;}
   }
   DS.openLaterFavoritesTab=()=>setActive(true);
   DS.closeLaterFavoritesTab=()=>setActive(false);
   DS.refreshFavoritesLaterTab=mount;
-  const onRoute=()=>{if(enabled())setActive(location.hash==='#later',false,false);};
+  const onRoute=()=>{if(enabled())setActive(location.hash==='#later',false,false);else if(ui.active||document.getElementById(PANEL_ID))mount();};
   window.addEventListener('hashchange',onRoute);
   window.addEventListener('popstate',onRoute);
   document.addEventListener('click',e=>{
     if(!ui.active)return;
-    const tab=e.target?.closest?.('[data-testid="SearchClientCharacterListing"] [role="tablist"] [role="tab"]');
+    const tab=e.target?.closest?.(':is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"] [role="tab"]');
     if(tab&&tab.id!=='ds-favorites-later-tab'&&tab.id!=='ds-favorites-full-open')setActive(false,false);
   },true);
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>mount(),{once:true});else mount();

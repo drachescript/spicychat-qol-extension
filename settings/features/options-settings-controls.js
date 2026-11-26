@@ -1292,6 +1292,10 @@ function refreshSavedManagersFromStorageChange(kinds = []) {
   if (changed.has("followedCreators")) refresh("followedCreatorManager", renderFollowedCreators);
   if (changed.has("followedCreators") || changed.has("creatorWatch")) refresh("creatorBotRecentList", renderCreatorBotWatchStatus);
   if (changed.has("availability")) renderBotAvailability();
+  if (changed.has("heldEligibility") && !botAvailabilityScanRunning &&
+      savedRecoveryDataLoaded && savedRecoveryActivated.has("status") && savedRecoveryHostVisible("status")) {
+    loadAndRenderSavedRecoveryManagers("membership-changed", "status").catch(() => {});
+  }
 
   // The tab is already fully mounted; mark it current again after the targeted
   // refresh so a later click does not unnecessarily rebuild every manager.

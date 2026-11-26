@@ -27,6 +27,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     try {
       const settings = DS.state?.settings || {};
+      if(settings.dailyMessageLimitTrackerEnabled || document.getElementById('ds-qol-generation-quota-button')) DS.updateDailyMessageLimitStatus?.();
       if (settings.enabled !== false && DS.nativeMobileChatShellUnavailable?.()) {
         // A SpicyChat-native failure is not a QoL recovery opportunity. Avoid
         // piling optional DOM modifications on an unmounted chat; the same
@@ -63,6 +64,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // call its DS methods. Cached imports cost nothing on subsequent passes.
       await DS.prepareOptionalModules?.(settings);
       if (DS.syncNativeEditorAttachmentPicker?.()) return;
+      if(settings.creatorToolsIntegrationEnabled || document.getElementById("ds-sct-integration")) DS.applyCreatorToolsIntegration?.();
 
       // The chat-start/change-persona modal is a transient native surface.
       // While it is open, broad chat/listing reconciliation only competes with
@@ -80,7 +82,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       syncNativeScrollBackToTopVisibility();
 
-      if (/^\/favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) DS.refreshFavoritesLaterTab?.();
+      if (/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname) || document.documentElement.hasAttribute("data-ds-later-active")) DS.refreshFavoritesLaterTab?.();
       const page = DS.getPageState?.() || {};
       const singleChat = !!page.isSingleChatPage;
       const chatList = !!page.isChatListPage;

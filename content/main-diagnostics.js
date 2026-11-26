@@ -153,6 +153,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       activeQolDisplayFeatures: firstHidden ? featureFlagsAtCapture() : []
     };
   };
+  const NON_CHAT_KEY = "dsQolNonChatVisibilityV1";
+  DS.readNonChatVisibilitySnapshot = function () {
+    if (DS.isSingleChatPage?.()) return null;
+    const html=document.documentElement, body=document.body, root=document.getElementById("root");
+    const measure=node=>{ if(!node)return null; const r=node.getBoundingClientRect(), s=getComputedStyle(node); return {width:Math.round(r.width),height:Math.round(r.height),display:s.display,visibility:s.visibility,opacity:s.opacity,qolHidden:node.classList.contains("ds-hidden")}; };
+    const nodes={html:measure(html),body:measure(body),root:measure(root)};
+    const meaningful=!!root && !!root.querySelector("nav, main, [role='main'], a[href], button, [data-testid='CharacterListingResults']");
+    const visible=document.visibilityState==="visible";
+    const suspicious=visible && document.readyState==="complete" && meaningful && Object.values(nodes).some(n=>n&&(n.width<=0||n.height<=0||n.display==="none"||n.visibility==="hidden"||n.visibility==="collapse"||Number(n.opacity)===0));
+    let recent=null;try{recent=JSON.parse(sessionStorage.getItem(NON_CHAT_KEY)||"null");}catch{}
+    return {nodes,meaningful,visible,suspicious,viewport:{width:window.innerWidth,height:window.innerHeight},recent};
+  };
+  DS.recordNonChatVisibilityEvent = function(sample) {
+    if(!sample?.suspicious)return;
+    const event={at:Date.now(),nodes:sample.nodes,viewport:sample.viewport};
+    try{sessionStorage.setItem(NON_CHAT_KEY,JSON.stringify(event));}catch{}
+    const counters=DS.state.runtimePerformance||(DS.state.runtimePerformance={});
+    counters.nonChatVisibilityWarnings=Number(counters.nonChatVisibilityWarnings||0)+1;
+    DS.diagEvent?.("route-visibility","non-chat-layout-warning",event);
+  };
   DS.recordChatVisibilityEvent = function recordChatVisibilityEvent(snapshot, { generation, trigger, elapsedMs } = {}) {
     if (!snapshot?.sourceTabVisible || !snapshot.hiddenSource) return;
     const prior = previousVisibilityEvent();
@@ -240,6 +260,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           runtimePerformance: { ...(DS.state.runtimePerformance || {}), mode: runtimeProfile(), loadedChatMessages: loadedChatMessageCount(), desktopAppGuardActive: desktopAppPerformanceGuardActive(), historyBatchActive: Date.now() < Number(DS.state.chatHistoryBatchUntil || 0) || !!DS.state.bulkChatHistoryLoadActive },
           runtimeContext: {
             chatVisibility,
+            nonChatVisibility: DS.readNonChatVisibilitySnapshot?.() || null,
             visibilityState: String(document.visibilityState || "unknown"),
             focused: typeof document.hasFocus === "function" ? !!document.hasFocus() : null,
             mountedMessages: loadedChatMessageCount(),

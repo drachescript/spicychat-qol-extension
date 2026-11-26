@@ -25,6 +25,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let activeJob = null;
   let lastFailures = [];
   let lastFailureKind = "";
+  let lastBackupSummary = "";
   let shortcutInstalled = false;
 
   function settings() {
@@ -539,10 +540,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       currentLiveFetch: true,
       completeness: snapshot?.completeness || { details: true, entries: true },
       source: snapshot?.source || "current-live-api",
+      ...(snapshot?.captureSummary?{captureSummary:snapshot.captureSummary}:{}),
       lorebook: {
         ...lorebook,
         entries: Array.isArray(snapshot?.entries) ? snapshot.entries : []
       }
+    };
+  }
+
+  // Read the local durable import state only; no SpicyChat polling. A short
+  // lease prevents a new persistent import from starting during this capture.
+  async function acquireLorebookBackupLease(item, job, progress) {
+    const runId = crypto.randomUUID();
+    let waited = false, response, waitingJobId = null;
+    const send = async action => {
+      let timeout;
+      try { return await Promise.race([runtimeMessage({type:"DS_LOREBOOK_IMPORT_JOB", action, bookId:item.id.toLowerCase(), runId, waitingJobId}), new Promise(resolve=>{timeout=setTimeout(()=>resolve(null),10000);})]); }
+      finally {clearTimeout(timeout);}
+    };
+    const deadline = Date.now() + 60 * 60_000;
+    while (!job.cancelled && pageKind() === "lorebooks" && Date.now() < deadline) {
+      response = await send("backup-acquire");
+      if (!response?.ok) {
+        // Native WebView / custom builds without the persistent import handler
+        // retain their existing verified capture path, not a fake lock.
+        if (!response && (/Android/i.test(navigator.userAgent||"") || DS.featureBuildProfile?.isInstalled?.("lorebook-backup") === false)) return null;
+        throw new Error(response?.error || "Lorebook import coordination unavailable. Reload QoL and retry.");
+      }
+      if (response.acquired) break;
+      waited = true;
+      if (response.importJobId && response.reason.startsWith("import-")) waitingJobId = response.importJobId;
+      if (response.reason === "import-uncertain") progress("Waiting for the interrupted import to reconcile its pending save. Resume it in the editor, or cancel this backup.");
+      else if (response.reason === "import-active") progress(`Waiting for active Lorebook import to finish (${response.processed ?? "?"}/${response.total ?? "?"})…`);
+      else if (response.reason === "import-paused") progress("Import paused or interrupted. Waiting for you to resume or cancel it in the editor…");
+      else progress("Waiting for another backup of this Lorebook…");
+      await sleep(5000);
+    }
+    if (!response?.acquired || job.cancelled || pageKind() !== "lorebooks") {
+      if(response?.acquired) await send("backup-release");
+      throw new Error(job.cancelled ? "Backup cancelled." : "Lorebook backup wait ended. Retry from My Creations.");
+    }
+    let lost=false, busy=false, closed=false;
+    const renew=async()=>{const r=await send("backup-renew");if(!r?.ok||!r.acquired)lost=true;return r;};
+    const timer=setInterval(async()=>{if(busy||closed||lost)return;busy=true;try{await renew();}finally{busy=false;}},30000);
+    if(waited) progress("Import or other backup finished. Reading the current Lorebook…");
+    return {verifiedCount:waitingJobId && response.importJobId === waitingJobId ? response.verifiedCount : null, waited,
+      async verify(){if(closed||lost||!(await renew())?.acquired||lost)throw Error("Lorebook backup coordination was interrupted; no incomplete backup was accepted. Retry.");},
+      async release(){closed=true;clearInterval(timer);await send("backup-release");}
     };
   }
 
@@ -555,7 +599,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await DS.optionalModuleLoader?.ensure?.("lorebook-tags");
     }
     if (typeof DS.getCurrentOwnLorebookBackupData !== "function") throw new Error("Current Lorebook backup reader is not ready.");
-    return DS.getCurrentOwnLorebookBackupData(id, { progress });
+    return DS.getCurrentOwnLorebookBackupData(id, { progress,persistCapture:true });
   }
 
   async function fetchWithRetry(kind, id, job, progress) {
@@ -567,7 +611,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         lastError = error;
         // A failed full native capture is not a transient API failure. Do
         // not automatically repeat a potentially expensive editor crawl.
-        if (kind === "lorebooks" && error?.code === "lorebook-editor-fallback-failed") break;
+        if (kind === "lorebooks" && ["lorebook-editor-fallback-failed","lorebook-changing"].includes(error?.code)) break;
         if (attempt < 3) await sleep(attempt === 1 ? 500 : 1400);
       }
     }
@@ -810,6 +854,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (filter) filter.hidden = true;
     if (cancel) cancel.hidden = false;
     if (retry) retry.hidden = true;
+    const oldDetails = document.querySelector(`#${BAR_ID} [data-role="failure-details"]`);
+    if (oldDetails) oldDetails.hidden = true;
 
     try {
       try { await DS.requestDownloadPermission?.(); } catch {}
@@ -831,7 +877,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       await runPool(items, async item => {
         if (job.cancelled) return;
+        let lease;
+        const progress = message => { if (!job.cancelled) setStatus(`${item.name || item.id}: ${message}`); };
         try {
+          if (kind === "lorebooks") lease = await acquireLorebookBackupLease(item, job, progress);
           let snapshot;
           try {
             snapshot = await fetchWithRetry(kind, item.id, job, message => {
@@ -846,7 +895,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               creator: item.creator || "", source: "character-api-unavailable" };
           }
           if (job.cancelled) return;
-          const listingCount = item.listedEntryCount;
+          // The listing may predate the import. A completed job's independently
+          // verified count plus a fresh full capture can supersede that stale badge.
+          // Never accept a mismatch on the basis of a partial or running job.
+          let listingCount = item.listedEntryCount;
+          if (kind === "lorebooks" && lease && Number.isSafeInteger(lease.verifiedCount) &&
+              snapshot?.completeness?.entryCountVerified === true && snapshot.entries?.length === lease.verifiedCount &&
+              listingCount !== lease.verifiedCount) {
+            listingCount = lease.verifiedCount;
+            progress(`Current verified entry count: ${listingCount} (listing was stale).`);
+          }
           const nameMismatch = kind === "lorebooks" && item.name && snapshot?.lorebook?.name && !equivalentVisibleText(item.name, snapshot.lorebook.name);
           const countMismatch = kind === "lorebooks" && Number.isSafeInteger(listingCount) && listingCount !== snapshot?.entries?.length;
           if (nameMismatch || countMismatch) {
@@ -921,16 +979,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
                 String(snapshot?.lorebook?.id || "").toLowerCase() !== item.id.toLowerCase()) {
               throw new Error("Live Lorebook backup did not confirm a complete matching entry list.");
             }
+            await lease?.verify();
+            if (job.cancelled) return;
             const payload = lorebookJson(snapshot);
             const name = safeFilename(snapshot?.lorebook?.name || item.name || item.id, "lorebook");
             files.push({ name: `lorebooks/${name} - ${item.id}.json`, data: JSON.stringify(payload, null, 2) });
           }
           job.success.push(item.id);
         } catch (error) {
-          if (!job.cancelled) job.failures.push({ id: item.id, name: item.name || "", ...(kind === "lorebooks" ? { listedEntryCount: item.listedEntryCount ?? null } : {}), error: clean(error?.message || error, 500) });
+          if (!job.cancelled) job.failures.push({ id: item.id, name: item.name || "", ...(kind === "lorebooks" ? { listedEntryCount: item.listedEntryCount ?? null } : {}), error: clean(error?.message || error, 500) || "Unknown error; see support diagnostics." });
         } finally {
+          await lease?.release();
           job.completed += 1;
-          setStatus(`Fetching current owner ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… ${job.completed} / ${items.length}${job.failures.length ? ` · ${job.failures.length} failed` : ""}`);
+          if (!job.cancelled) setStatus(`Fetching current owner ${kind === "chatbots" ? "chatbots" : "Lorebooks"}… ${job.completed} / ${items.length}${job.failures.length ? ` · ${job.failures.length} failed. Latest: ${failureText(job.failures[job.failures.length - 1])}` : ""}`);
         }
       }, job);
 
@@ -974,17 +1035,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const stamp = exportedAt.replace(/[:.]/g, "-");
       const label = kind === "chatbots" ? "chatbots" : "lorebooks";
       downloadBlob(storedZipBlob(files), `spicychat-my-creations-${label}-${stamp}.zip`);
-      lastFailures = job.failures.map(row => ({ id: row.id, name: row.name, ...(kind === "lorebooks" ? { listedEntryCount: row.listedEntryCount ?? null } : {}) }));
+      lastFailures = job.failures.map(row => ({ ...row }));
       lastFailureKind = kind;
-      if (job.failures.length) {
-        setStatus(`Backup downloaded: ${job.success.length} current ${label} · ${job.failures.length} failed. Retry failed is available.`);
-        if (retry) {
-          retry.hidden = false;
-          retry.textContent = `Retry failed (${job.failures.length})`;
-        }
-      } else {
-        setStatus(`Backup downloaded: ${job.success.length} current ${label}.`);
-      }
+      lastBackupSummary = backupSummary(label, job.success.length, lastFailures);
+      setStatus(lastBackupSummary);
+      const liveBar = document.getElementById(BAR_ID);
+      if (liveBar?.dataset.kind === kind) renderBackupFailures(liveBar, kind);
       DS.diagUserAction?.("my-creations-backup", "download", { kind, succeeded: job.success.length, failed: job.failures.length });
     } catch (error) {
       setStatus(`Backup failed: ${error?.message || String(error)}`);
@@ -996,7 +1052,47 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (select) select.disabled = false;
       if (filter) filter.hidden = false;
       if (cancel) cancel.hidden = true;
+      const liveBar = document.getElementById(BAR_ID);
+      if (liveBar?.dataset.kind === kind) {
+        const liveRetry = liveBar.querySelector('[data-role="retry"]');
+        if (liveRetry?.hidden && lastFailureKind === kind && lastFailures.length) renderBackupFailures(liveBar, kind);
+      }
     }
+  }
+
+  function failureText(row) {
+    return `${row.name || row.id}: ${row.error || "Unknown error; see support diagnostics."}`;
+  }
+
+  function backupSummary(label, succeeded, failures) {
+    if (!failures.length) return `Backup ZIP prepared: ${succeeded} current ${label}.`;
+    const prefix = succeeded ? `Backup ZIP prepared: ${succeeded} current ${label}` : `No ${label} backed up; failure report ZIP prepared`;
+    return `${prefix} · ${failures.length} failed. ${failures.length === 1 ? failureText(failures[0]) : `Latest: ${failureText(failures[failures.length - 1])}`} Retry failed is available.`;
+  }
+
+  function renderBackupFailures(bar, kind) {
+    const rows = lastFailureKind === kind ? lastFailures : [];
+    const retry = bar.querySelector('[data-role="retry"]');
+    if (retry) { retry.hidden = !rows.length; retry.textContent = `Retry failed (${rows.length})`; }
+    const details = bar.querySelector('[data-role="failure-details"]');
+    if (!details) return;
+    details.hidden = rows.length < 2;
+    details.open = false;
+    details.querySelector('summary').textContent = `View all failure reasons (${rows.length})`;
+    const list = details.querySelector('ul');
+    list.replaceChildren();
+    // Render potentially long lists only when requested. Use textContent for
+    // untrusted creator names and errors; never interpret them as HTML.
+    details.ontoggle = () => {
+      if (!details.open || details.hidden || list.childElementCount) return;
+      const fragment = document.createDocumentFragment();
+      for (const row of rows) {
+        const li = document.createElement('li');
+        li.textContent = failureText(row);
+        fragment.append(li);
+      }
+      list.append(fragment);
+    };
   }
 
   function setStatus(message) {
@@ -1249,7 +1345,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     style.textContent = `
       #${BAR_ID}{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px;padding:8px 10px;border:1px solid rgba(148,163,184,.26);border-radius:10px;background:rgba(31,41,55,.12);font:12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #${BAR_ID} strong{font-size:12px;white-space:nowrap}
-      #${BAR_ID} [data-role="status"]{opacity:.75;flex:1 1 260px;min-width:160px}
+      #${BAR_ID} [data-role="status"]{opacity:.75;flex:1 1 260px;min-width:0;overflow-wrap:anywhere}
+      #${BAR_ID} [data-role="failure-details"]{flex:1 1 100%;min-width:0;overflow-wrap:anywhere}
+      #${BAR_ID} [data-role="failure-details"] ul{max-height:220px;overflow:auto;margin:6px 0;padding-inline-start:20px}
+      #${BAR_ID} [data-role="failure-details"] li{margin:4px 0}
       #${BAR_ID} button{appearance:none;border:1px solid rgba(148,163,184,.34);border-radius:7px;background:rgba(55,65,81,.64);color:inherit;padding:5px 8px;cursor:pointer;font:600 11px/1.15 inherit;white-space:nowrap}
       #${BAR_ID} button:hover:not(:disabled){background:rgba(75,85,99,.88)}
       #${BAR_ID} button:disabled{opacity:.55;cursor:default}
@@ -1372,7 +1471,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       bar.append(migrate);
     }
     if (filter) bar.appendChild(filter);
-    bar.append(cancel, retry);
+    const failureDetails = document.createElement("details");
+    failureDetails.dataset.role = "failure-details";
+    failureDetails.hidden = true;
+    failureDetails.append(document.createElement("summary"), document.createElement("ul"));
+    bar.append(cancel, retry, failureDetails);
+    if (!activeJob && lastFailureKind === kind) {
+      status.textContent = lastBackupSummary;
+      renderBackupFailures(bar, kind);
+    }
 
     // Do not fall back to #root while React is still mounting. That placed the
     // bar above SpicyChat's entire shell/logo. If the tab row is not ready yet,

@@ -29,11 +29,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const entries=Array.isArray(archive?.entries)?archive.entries:[];
     const expectedCount=archive?.num_entries;
     const complete=Array.isArray(archive?.entries) && Number.isSafeInteger(expectedCount) &&
-      expectedCount>=0 && entries.length===expectedCount &&
+      expectedCount>=0 && expectedCount<=5000 && entries.length===expectedCount &&
       new Set(entries.map(entry=>String(entry?.id||'').toLowerCase())).size===expectedCount;
     const current = new Map((records || []).filter(r=>r?.detailId).map(r=>[r.detailId,r]));
     const grouped=new Map();
-    for(const entry of entries.slice(0,2000)) {
+    for(const entry of entries.slice(0,5000)) {
       const value=parse(entry,scope);
       if(!value)continue;
       const group=grouped.get(value.detailId)||[];group.push(value);grouped.set(value.detailId,group);

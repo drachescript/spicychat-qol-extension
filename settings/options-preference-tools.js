@@ -42,7 +42,7 @@ function previewSettingsPreferencePreset(name) {
 function settingsDiscoveryIncludes(item, view, basic) {
   const entry = item.entry || {};
   const keys = item.controlIds || [];
-  if (basic && (item.tabName === "advanced" || /diagnostic|developer|experimental|migration|recovery|research|compatibility/i.test(entry.name || ""))) return false;
+  if (basic && (entry.id === "creator-tools-integration" || /Creator Tools integration/i.test(entry.name || "") || item.tabName === "advanced" || /diagnostic|developer|experimental|migration|recovery|research|compatibility/i.test(entry.name || ""))) return false;
   if (view === "enabled") {
     if (!settingsAutosaveReady || entry.builtIn || entry.planned) return false;
     const candidates = entry.setting ? [entry.setting] : Array.isArray(entry.settings) ? entry.settings : keys;

@@ -903,7 +903,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           status: String(result?.status || "unknown"),
           httpStatus: Number(result?.httpStatus || 0),
           elapsedMs: Date.now() - startedAt,
-          emptyObject: String(result?.status || "") === "api-empty"
+          emptyObject: String(result?.status || "") === "api-empty",
+          reasonCode: ({"id-mismatch":"identity-mismatch","identity-unverified":"missing-character-id","api-empty":"no-public-fields","auth-unavailable":"authentication-unavailable","api-bridge-not-ready":"bridge-unavailable","worker-timeout":"worker-timeout","unknown":"unclassified-api-response"})[result?.status] || String(result?.status || "unknown").slice(0,60)
         });
       } catch {}
       return result;

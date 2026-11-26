@@ -7,6 +7,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (!DS) return;
   DS.createMainRouteRecovery = function createMainRouteRecovery({ runtimeCounters }) {
     let routePresentationRecoveryTimers = [];
+    let recoveryEpoch = 0;
   function clearStaleRouteScopedUi(source = "route") {
     const page = DS.getPageState?.({ refresh: true }) || {};
     const listing = ["listing", "creator-listing", "lorebook-listing"].includes(page.routeType);
@@ -76,6 +77,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // happens first so an Android WebView never has to wait for the delayed
     // runtime lane before a Home/listing route becomes visible again.
     try { DS.removeChatBackgrounds?.(); } catch {}
+    try { DS.removeBackgroundLayer?.(); } catch {}
+    try { DS.applyChatWidthSettings?.(); } catch {}
+    try { DS.applyChatUiCleanup?.(); } catch {}
     try { DS.removeAndroidAppControls?.(); } catch {}
     try { DS.applyPerformanceMode?.(); } catch {}
     try { DS.applyFocusMode?.(); } catch {}
@@ -90,12 +94,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       root?.dataset?.dsHidden === "1" &&
       /^(?:chat|focus|android|performance)(?::|$)/i.test(rootReason)
     ) {
-      root.classList.remove("ds-hidden");
-      delete root.dataset.dsHidden;
-      delete root.dataset.dsReason;
-      root.style.removeProperty("display");
-      root.style.removeProperty("visibility");
-      root.style.removeProperty("opacity");
+      // hideElement owns the marker/classes, not arbitrary inline native styles.
+      DS.unhideElement?.(root);
       changed = true;
     }
 
@@ -112,19 +112,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function scheduleNonChatPresentationRecovery(source = "route") {
     routePresentationRecoveryTimers.forEach(timer => clearTimeout(timer));
     routePresentationRecoveryTimers = [];
+    const epoch = ++recoveryEpoch;
+    const route = location.href;
+    const sameRoute = () => epoch === recoveryEpoch && location.href === route && !DS.isQolPausedForTab?.();
 
     clearStaleRouteScopedUi(`${source}:scoped-immediate`);
     if (DS.isSingleChatPage?.()) return;
 
     clearStaleNonChatPresentationState(`${source}:immediate`);
 
+    let suspiciousSamples = 0;
     // WebView/React can swap the route DOM after history.url has already
     // changed. Re-check a few times without causing a reload.
     for (const delay of [120, 500, 1400]) {
       routePresentationRecoveryTimers.push(setTimeout(() => {
+        if (!sameRoute()) return;
         clearStaleRouteScopedUi(`${source}:scoped-${delay}`);
         if (DS.isSingleChatPage?.()) return;
         clearStaleNonChatPresentationState(`${source}:${delay}`);
+        const sample = DS.readNonChatVisibilitySnapshot?.();
+        if (sample?.suspicious) suspiciousSamples++; else suspiciousSamples = 0;
+        if (suspiciousSamples === 2) DS.recordNonChatVisibilityEvent?.(sample);
         DS.scheduleRun?.({ priority: "critical", source: `route-recovery-${delay}` });
       }, delay));
     }
