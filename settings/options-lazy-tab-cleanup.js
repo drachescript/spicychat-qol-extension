@@ -226,7 +226,8 @@ function dsqRefreshHeavyToolsForTab(tabName, { activateStatus = false } = {}) {
   if (tabName === "saved" && activateStatus && document.getElementById("scanBotAvailability")) {
     return ensureBotStatusScanTools().then(async () => {
       if (typeof optionsDataLoaded !== "undefined" && optionsDataLoaded) {
-        await refreshBotStatusPauseButton();
+        const queues = await refreshBotStatusPauseButton();
+        if (queues?.readError) throw new Error("Could not read saved Bot Status queues. Retry preparation before scanning.");
         await refreshBotStatusLastRunFeedback();
         if (!dsqBotStatusRateLoaded) {
           dsqBotStatusRateLoaded = true;
@@ -238,7 +239,8 @@ function dsqRefreshHeavyToolsForTab(tabName, { activateStatus = false } = {}) {
         }
         updateBotStatusScanEstimate();
       }
-    }).catch(error => { const el = document.getElementById("botAvailabilityScanStatus"); if (el) el.textContent = String(error.message || error); });
+      return true;
+    }).catch(error => { const el = document.getElementById("botAvailabilityScanStatus"); if (el) el.textContent = String(error.message || error); return false; });
   } else if (tabName === "blocking" &&
              (document.getElementById("bulkDislikeBlockedBots") || document.getElementById("bulkLessLikeBlockedBots"))) {
     ensureBulkFeedbackTools().then(() => {

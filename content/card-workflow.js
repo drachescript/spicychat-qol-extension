@@ -280,10 +280,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     const status = clean(response?.rememberedStatus || response?.status || "failed");
     if (response?.ok) {
-      DS.setQuickStatus?.(status === "already-handled"
-        ? `Recommendations were already updated for ${snapshot.name || snapshot.id}.`
-        : `Updated SpicyChat recommendations for ${snapshot.name || snapshot.id}.`);
-      finishDiag("ok", 0);
+      DS.setQuickStatus?.(response.crossHandledBy === "native-dislike"
+        ? `Native Dislike already confirmed for ${snapshot.name || snapshot.id}; no extra rating sent.`
+        : response.status === "already-handled"
+          ? `Recommendations were already updated for ${snapshot.name || snapshot.id}.`
+          : `Updated SpicyChat recommendations for ${snapshot.name || snapshot.id}.`);
+      finishDiag(response.status === "already-handled" ? "already-handled" : "ok", 0);
       if (card?.isConnected) {
         card.style.display = "none";
         card.dataset.dsLessLiked = "1";

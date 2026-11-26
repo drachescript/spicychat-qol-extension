@@ -441,6 +441,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       showStatus(host, `Deleted “${name}”.`, "success");
     });
 
+    // Capability changes or native modal remounts can occur during profile reads.
+    if (!modal.isConnected || !container.isConnected || modal.querySelector(`#${TOOL_ID}`) ||
+        !DS.state?.settings?.enabled || !DS.state?.settings?.enableGenerationProfiles ||
+        !DS.isSingleChatPage?.() || DS.shouldDeferToSaiToolkit?.("generation-profiles")) return;
     container.appendChild(host);
   }
 

@@ -1125,13 +1125,15 @@ async function persistGranularSettingsPatch(patch, previous = {}, { verify = fal
   const ok = await rawStorageSet(payload);
   if (!ok) return false;
   granularSettingsMigrationSeen = true;
-  if (!verify) return true;
+  if (!verify) { recordSettingsPreferenceChanges(patch, previous); return true; }
   const keys = entries.map(([name]) => granularSettingStorageKey(name));
   const readback = await new Promise(resolve => {
     try { chrome.storage.local.get(keys, result => resolve(chrome.runtime.lastError ? {} : (result || {}))); }
     catch { resolve({}); }
   });
-  return entries.every(([name, expected]) => storageValueMatches(readback[granularSettingStorageKey(name)], expected));
+  const verified = entries.every(([name, expected]) => storageValueMatches(readback[granularSettingStorageKey(name)], expected));
+  if (verified) recordSettingsPreferenceChanges(patch, previous);
+  return verified;
 }
 
 async function flushSettingsAutosave({ force = false } = {}) {

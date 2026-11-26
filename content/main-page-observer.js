@@ -218,6 +218,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         stopVisibilityWatch();
         return;
       }
+      // Picker scrolling/search/pagination is native work, not a reason to
+      // wake discovery and creator UI. A close/remount is handled by the same
+      // observer and resumes the normal editor reconciliation.
+      if (DS.state?.settings?.enabled && DS.syncNativeEditorAttachmentPicker?.(true)) return;
 
       if (DS.isSingleChatPage?.()) {
         const roots = new Set();

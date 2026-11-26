@@ -270,33 +270,44 @@ function resetSettingsSection(card) {
   if (!confirm(`Reset “${info.heading}” to its default settings? Changes save automatically; Save now is only a force-and-verify fallback.`)) return;
 
   let changed = 0;
-  for (const [key, defaultValue] of Object.entries(DEFAULT_SETTINGS)) {
-    let handled = false;
-    let control = null;
-    try { control = card.querySelector(`#${CSS.escape(key)}`); } catch {}
-    if (control) {
-      if (control.type === "checkbox") control.checked = !!defaultValue;
-      else if (control.type === "radio") control.checked = String(control.value) === String(defaultValue);
-      else if (Array.isArray(defaultValue)) control.value = defaultValue.join("\n");
-      else control.value = String(defaultValue ?? "");
-      control.dispatchEvent(new Event("input", { bubbles: true }));
-      control.dispatchEvent(new Event("change", { bubbles: true }));
-      handled = true;
-    }
+  // Walk only the controls in this section, not every default in the extension.
+  // Unchanged controls need no events or storage writes; backup datasets remain
+  // outside this normal preference reset.
+  const keys = new Set([...card.querySelectorAll("input[id], select[id], textarea[id], input[type='radio'][name]")]
+    .flatMap(control => [control.id, control.type === "radio" ? control.name : ""])
+    .filter(key => key && Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key) && !isSettingOwnedByExcludedFeature(key)));
+  for (const key of keys) {
+    const defaultValue = DEFAULT_SETTINGS[key];
+    const control = card.querySelector(`#${CSS.escape(key)}`);
     const radios = [...card.querySelectorAll(`input[type="radio"][name="${CSS.escape(key)}"]`)];
     if (radios.length) {
-      radios.forEach(radio => { radio.checked = String(radio.value) === String(defaultValue); });
-      radios.find(radio => radio.checked)?.dispatchEvent(new Event("change", { bubbles: true }));
-      handled = true;
+      const wanted = radios.find(radio => String(radio.value) === String(defaultValue));
+      if (!wanted || wanted.checked) continue;
+      wanted.checked = true;
+      wanted.dispatchEvent(new Event("change", { bubbles: true }));
+      changed++;
+      continue;
     }
-    if (handled) changed += 1;
+    if (!control) continue;
+    if (control.type === "checkbox" || control.type === "radio") {
+      const wanted = control.type === "checkbox" ? !!defaultValue : String(control.value) === String(defaultValue);
+      if (control.checked === wanted) continue;
+      control.checked = wanted;
+    } else {
+      const wanted = Array.isArray(defaultValue) ? defaultValue.join("\n") : String(defaultValue ?? "");
+      if (control.value === wanted) continue;
+      control.value = wanted;
+    }
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    changed++;
   }
 
   updateSettingDependencies?.();
   applySettingsEnabledOnlyFilter();
   showSettingsToast(changed
     ? `Reset ${info.heading}. Changes save automatically.`
-    : `There are no normal Settings values to reset in ${info.heading}.`);
+    : `No normal Settings values needed resetting in ${info.heading}.`);
 }
 
 function setupSettingsSectionNavigation() {

@@ -402,6 +402,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function runStep(name, fn) {
     if (DS.isQolPausedForTab?.() && !DS.isQolWorkerTab?.()) return null;
     if (typeof fn !== "function") return null;
+    // A chooser may mount while a previous async step is yielding.
+    if (DS.state?.settings?.enabled && DS.syncNativeEditorAttachmentPicker?.()) return null;
     const laneParentOperationId = String(
       DS.state?.diagMessageLaneOperationId ||
       DS.state?.diagCriticalOperationId ||

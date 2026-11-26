@@ -1161,6 +1161,9 @@ if (!(() => { try {
       if (isGuest(guest)) headers["x-guest-userid"] = guest;
 
       const response = await nativeFetch(url, {
+        // Local RequestInit marker only; fetch does not transmit unknown keys.
+        // Metadata collectors can skip replaying bulk export pages.
+        [Symbol.for("dsq.ownedHistoryRead")]: true,
         method: "GET",
         credentials: "include",
         cache: "no-store",

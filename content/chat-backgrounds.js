@@ -126,7 +126,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const signature = JSON.stringify([
       settings.chatBackgroundBlur, settings.chatBackgroundDim,
       settings.chatBackgroundFit, settings.chatBackgroundPosition,
-      settings.chatBackgroundBubbleOpacity, settings.chatBackgroundAnimateAvatar,
+      settings.chatBackgroundBubbleOpacity, DS.shouldDeferToSaiToolkit?.("customMessageColors"), settings.chatBackgroundAnimateAvatar,
       mediaStore.viewModes?.[key], mediaStore.avatarSizes?.[key],
       mediaStore.avatarSideCopies?.[key], avatarImageChecks.get(item?.url) || ''
     ]);
@@ -174,7 +174,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     layer.style.filter = blur ? `blur(${blur}px)` : "none";
     layer.style.transform = blur ? `scale(${1 + Math.min(0.08, blur / 250)})` : "none";
     document.documentElement.classList.add("ds-chat-custom-background");
-    const bubbleOpacity = Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
+    const bubbleOpacity = DS.shouldDeferToSaiToolkit?.("customMessageColors") ? 1 : Math.max(.25, Math.min(1, (Number(settings.chatBackgroundBubbleOpacity ?? 100)) / 100));
     if (bubbleOpacity < 1) captureUserBubbleColor();
     document.documentElement.classList.toggle("ds-chat-bubble-alpha", bubbleOpacity < 1);
     document.documentElement.style.setProperty("--ds-chat-background-bubble-opacity", String(bubbleOpacity));
@@ -644,7 +644,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   kit.registerTab("backgrounds", "Backgrounds", "chat-backgrounds", "enableChatBackgrounds", buildBackgroundSection);
   DS.applyBackgroundLayer = async function applyBackgroundLayer(enabled) {
     mediaStore = kit.getStore();
-    if (enabled) applyLayer(currentItem()); else removeLayer();
+    // Explicit scene galleries remain stored and available; only defer the
+    // overlapping background layer while Toolkit owns the background.
+    if (enabled && !DS.shouldDeferToSaiToolkit?.("backgroundImage")) applyLayer(currentItem()); else removeLayer();
     document.getElementById("ds-chat-background-control")?.remove();
   };
   DS.removeBackgroundLayer = () => { removeLayer(); removeControl(); };

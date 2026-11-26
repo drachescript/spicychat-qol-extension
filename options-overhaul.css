@@ -349,7 +349,7 @@ html :is(button, input, select, textarea, a, [tabindex]):focus-visible {
 .ds-bg-url-entry select { max-width: 100%; }
 @media (max-width: 650px) { .ds-active-options-row button { flex: 1 1 120px; } }
 
-/* Reversible v0.2.99 Settings preview. Existing controls and lazy panels stay
+/* Reversible Settings layouts. Existing controls and lazy panels stay
    in their original DOM, with the same events, IDs, and persisted values. */
 #settingsLayoutPreviewToggle { flex: 0 1 auto; white-space: normal; }
 #settingsLayoutPreviewToggle[hidden] { display: none !important; }
@@ -395,7 +395,7 @@ html :is(button, input, select, textarea, a, [tabindex]):focus-visible {
   body.ds-options-nav-sidebar #dsActiveOptionsPanel { grid-row: 5; }
 }
 
-/* v0.2.99 Layout lab. Presentation only; the same controls, tab handlers,
+/* Settings appearance preferences. Presentation only; the same controls, tab handlers,
    section state and deferred managers remain in place. */
 .ds-layout-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
 .ds-layout-header-actions button { white-space: normal; }
@@ -461,3 +461,27 @@ body[data-ds-lab-accent="blue"] #optionsTabsNav .tab-button:hover:not(.active) {
   body.ds-options-nav-underline #optionsTabsNav .tab-button { min-height: 36px; }
   body.ds-options-nav-pills #optionsTabsNav .tab-button { min-height: 36px; }
 }
+
+/* On-demand Settings discovery and appearance previews. */
+.ds-discovery-views { align-items: end; }
+.ds-discovery-views label { display: grid; gap: 4px; flex: 1 1 150px; }
+.ds-preference-history-row, .ds-perf-operation { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent); }
+.ds-preference-history-info { min-width:0; flex:1; overflow-wrap:anywhere; display:grid; gap:4px; }
+.ds-preference-history-info small, .ds-perf-operation small { opacity:.75; }
+.ds-perf-operation { flex-wrap:wrap; justify-content:space-between; overflow-wrap:anywhere; }
+.ds-layout-previews { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-top:8px; }
+.ds-layout-preview-tile { display:grid; gap:6px; justify-items:stretch; text-align:left; padding:8px; }
+.ds-layout-preview-art { display:flex; flex-direction:column; gap:5px; padding:6px; border:1px solid currentColor; border-radius:4px; height:58px; overflow:hidden; }
+.ds-preview-nav { display:flex; gap:3px; flex:none; }
+.ds-preview-nav i { display:block; flex:1; height:8px; background:currentColor; opacity:.22; border-radius:2px; }
+.ds-preview-nav i:first-child { background:#72a9ff; opacity:1; }
+.ds-preview-content { display:grid; flex:1; gap:4px; }
+.ds-preview-content i { display:block; background:currentColor; opacity:.12; border-radius:3px; }
+[data-preview-mode="classic"] .ds-preview-nav { flex-wrap:wrap; }
+[data-preview-mode="classic"] .ds-preview-nav i { flex:1 1 40%; }
+[data-preview-mode="sidebar"] .ds-layout-preview-art { flex-direction:row; }
+[data-preview-mode="sidebar"] .ds-preview-nav { flex-direction:column; width:28%; }
+[data-preview-mode="sidebar"] .ds-preview-nav i { min-height:5px; }
+[data-preview-mode="picker"] .ds-preview-nav i:not(:first-child) { display:none; }
+[data-preview-mode="underline"] .ds-preview-nav i { height:3px; border-radius:0; }
+[data-preview-mode="pills"] .ds-preview-nav i { border-radius:20px; }

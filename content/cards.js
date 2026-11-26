@@ -1609,6 +1609,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       location.href,
       Number(DS.state?.domRevision || 0),
       Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hideHomeForYouCards && DS.shouldDeferToSaiToolkit?.("home-for-you") ? 1 : 0,
       Number(DS.state?.archiveThemeRevision || 0),
       Number(DS.state?.archiveBlockingRevision || 0),
       DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,
@@ -1631,6 +1632,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function cardFilterKey() {
     return [
       Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hideHomeForYouCards && DS.shouldDeferToSaiToolkit?.("home-for-you") ? 1 : 0,
       Number(DS.state?.archiveThemeRevision || 0),
       Number(DS.state?.archiveBlockingRevision || 0),
       DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,

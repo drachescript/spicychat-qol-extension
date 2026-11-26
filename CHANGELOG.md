@@ -1,3 +1,23 @@
+## 0.3.0
+- Improved Settings search to find features by name, description and related terms.
+- Added Enabled, Recently changed, What's new and Pinned views, a simpler Basic view, and the ability to undo recent setting changes.
+- Expanded Quick setup with presets for performance, mobile, recovery, research, roleplay and local controls. Preview changes without replacing existing preferences.
+- Improved Settings navigation with numbered layouts, layout previews, shareable appearance presets and a quick return to Classic.
+- Added individual Settings section resets and made related settings easier to find.
+- Added a Performance Center to review extension performance directly in Settings.
+- Added a dedicated Bot Status scan workspace with clearer progress, scan scope, unchecked bots and retry controls.
+- Improved Chat Export for very large conversations, with saved progress, resume, estimated time remaining, pause and partial exports.
+- Added compressed JSON.GZ exports and removed the previous history page limit.
+- Improved repeat exports by reusing saved chat history and retrieving new messages without downloading the entire conversation again.
+- Added clearer export completeness checks, download status, detailed export timings and a Clear all saved exports action.
+- Added a three-hour automatic sync interval for linked devices.
+- Improved Dislike and Less Like reliability, including duplicate request prevention and safer bulk actions.
+- Extended the Report Link Collector to public creator pages.
+- Improved S.AI Toolkit compatibility for overlapping features, message statistics, appearance settings and message recovery. Added a compatibility check in Settings.
+- Fixed Lorebook and Rulebook attachment choices being affected by QoL features in the chatbot editor.
+- Fixed support history access and clearing from Settings opened in a browser tab.
+- Improved Settings, Bot Status scanning and chat performance by reducing unnecessary loading, refreshes and background processing.
+
 ## 0.2.99
 - Added a lightweight Bot Status and recovery record-count overview; full saved profiles, histories and queue reconciliation load on request instead of when opening Settings.
 - Reduced unnecessary large-store decoding work for plain records; separated IndexedDB, decoding and message-response wall timings.

@@ -629,6 +629,11 @@ async function runBotAvailabilityScan(options = {}) {
     return;
   }
   botStatusScanInvocationActive = true;
+  // Closing the dedicated workspace interrupts this UI-owned scan. Warn only
+  // during an active invocation; the existing durable checkpoint remains the
+  // authority even if the browser does not show an unload prompt.
+  const warnDuringScan = event => { event.preventDefault(); event.returnValue = ""; };
+  window.addEventListener("beforeunload", warnDuringScan);
   try {
     const locks = typeof navigator !== "undefined" ? navigator.locks : null;
     if (locks?.request) {
@@ -646,7 +651,10 @@ async function runBotAvailabilityScan(options = {}) {
       }
     }
     return await runBotAvailabilityScanOwned(options, false);
-  } finally { botStatusScanInvocationActive = false; }
+  } finally {
+    botStatusScanInvocationActive = false;
+    window.removeEventListener("beforeunload", warnDuringScan);
+  }
 }
 
 async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) {

@@ -246,6 +246,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!text) return;
 
       if (action === "restore") {
+        markManualRecovery();
         setTextareaValue(findComposerTextarea(), text);
         DS.setQuickStatus?.("Restored last sent draft.");
       }
@@ -255,6 +256,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
 
       if (action === "resubmit") {
+        markManualRecovery();
         writePayload(SENT_PREFIX, text, "manual resubmit");
         button.click();
       }
@@ -288,6 +290,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     state.timer = 0;
     state.text = "";
     state.attempts = 0;
+    state.exhausted = false;
     state.awaitingConfirmation = false;
     state.sentAt = 0;
     state.generation++;
@@ -327,6 +330,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return visibleUserMessageTexts().some(value => value === wanted || value.endsWith(wanted));
   }
 
+  let manualRecoveryBanner = null;
+  let manualRecoveryIdentity = "";
+  function markManualRecovery() {
+    manualRecoveryBanner = findSendErrorBanner();
+    manualRecoveryIdentity = currentChatIdentity();
+    clearRetryState("manual-recovery");
+  }
+  function manualRecoveryPending() {
+    return manualRecoveryIdentity === currentChatIdentity() && !!manualRecoveryBanner;
+  }
   function scheduleAutoRetryFromBanner() {
     if (!autoRetryEnabled()) {
       clearRetryState("disabled");
@@ -334,7 +347,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const banner = findSendErrorBanner();
-    if (!banner) return;
+    if (!banner || manualRecoveryPending()) return;
 
     const textarea = findComposerTextarea();
     const payload = readPayload(SENT_PREFIX) || readPayload(DRAFT_PREFIX);
@@ -356,8 +369,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     if (state.timer || state.awaitingConfirmation) return;
     if (state.attempts >= RETRY_DELAYS.length) {
-      DS.setQuickStatus?.("Auto retry stopped after 5 failed attempts.");
-      clearRetryState("max-attempts");
+      // Do not reset attempts on the same error; that would restart the budget
+      // every time the scheduler sees the banner again. A deliberate send or
+      // edited draft starts a new retry sequence.
+      if (!state.exhausted) DS.setQuickStatus?.("Auto retry stopped after 5 failed attempts.");
+      state.exhausted = true;
       return;
     }
 
@@ -366,7 +382,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.setQuickStatus?.(`Message send failed. Retrying in ${Math.round(delay / 1000)}s…`);
     state.timer = setTimeout(() => {
       state.timer = 0;
-      if (generation !== state.generation || !autoRetryEnabled()) return;
+      if (generation !== state.generation || !autoRetryEnabled() || manualRecoveryPending() || !findSendErrorBanner()) return;
       if (currentChatIdentity() !== state.chatKey) {
         clearRetryState("navigation");
         return;
@@ -441,12 +457,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     document.addEventListener("keydown", event => {
       if (!helperEnabled()) return;
+      const targetButton = event.target?.closest?.("button");
+      if (event.isTrusted && targetButton && findSendErrorBanner() && /recover message|resubmit|restore/.test(buttonLabel(targetButton)) && ["Enter"," "].includes(event.key)) markManualRecovery();
       const textarea = event.target?.closest?.("textarea");
       if (!textarea || isEditTextarea(textarea)) return;
 
       saveCurrentDraft("typing");
 
       if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        if (event.isTrusted) { manualRecoveryBanner = null; clearRetryState("manual-send"); }
         saveLastSentDraft("enter");
       }
     }, true);
@@ -458,7 +477,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (textarea && !isEditTextarea(textarea)) saveCurrentDraft("typing");
 
         const button = event.target?.closest?.("button");
-        if (button && isSendButton(button)) saveLastSentDraft("send button");
+        if (!button) return;
+        if (event.isTrusted && (eventName === "pointerdown" || eventName === "click")) {
+          const label = buttonLabel(button);
+          if (findSendErrorBanner() && /recover message|resubmit|restore/.test(label)) markManualRecovery();
+          else if (isSendButton(button)) { manualRecoveryBanner = null; clearRetryState("manual-send"); }
+        }
+        if (isSendButton(button)) saveLastSentDraft("send button");
       }, true);
     }
   }

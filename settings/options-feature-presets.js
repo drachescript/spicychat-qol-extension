@@ -20,7 +20,10 @@ const PAGE_INTROS = {
 };
 
 const FEATURE_CHANGE_MARKERS = {
-  saiToolkitCompatibility: { version: "0.1.8.76", label: "Updated" },
+  settingsNavigationStyle: { version: "0.3.0", label: "Updated" },
+  groupExcludedTags: { version: "0.3.0", label: "New" },
+  disableDoubleTapMessageEdit: { version: "0.3.0", label: "New" },
+  saiToolkitCompatibility: { version: "0.3.0", label: "Updated" },
   enableSmartFilterPresets: { version: "0.1.9.105", label: "Updated" },
   enableCreationAudit: { version: "0.1.9.111", label: "Updated" },
   enableBulkMemoryManager: { version: "0.1.9.121", label: "Updated" },

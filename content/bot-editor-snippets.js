@@ -443,6 +443,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    if (DS.isNativeEditorAttachmentPickerOpen?.()) return;
     applyLorebookAutoStartNew();
     applyDefaultChatbotVisibility();
     applyCreationGuidelinesAgreement();

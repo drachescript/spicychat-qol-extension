@@ -46,6 +46,39 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return null;
   }
 
+  // Native helper tabs are usually hidden, so timer-only polling can wait a
+  // full throttled second for controls that are already mounted. Observe
+  // actual DOM changes while waiting, with the original poll as fallback.
+  // Each wait releases its observer and timer on success, failure or timeout.
+  function waitForNativeRatingElement(getter, timeoutMs, intervalMs = 120) {
+    return new Promise(resolve => {
+      const started = Date.now();
+      let timer, observer, finished = false, lastCheck = -Infinity;
+      const finish = value => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        observer?.disconnect();
+        resolve(value);
+      };
+      const check = () => {
+        if (finished) return;
+        lastCheck = Date.now();
+        if (lastCheck - started >= timeoutMs) return finish(null);
+        try { const value = getter(); if (value) finish(value); } catch { finish(null); }
+      };
+      const poll = () => { check(); if (!finished) timer = setTimeout(poll, intervalMs); };
+      check();
+      if (finished) return;
+      if (typeof MutationObserver === "function" && document.documentElement) {
+        observer = new MutationObserver(() => { if (Date.now() - lastCheck >= 60) check(); });
+        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true,
+          attributeFilter: ["aria-pressed", "aria-disabled", "data-state", "disabled", "class", "hidden", "style"] });
+      }
+      timer = setTimeout(poll, intervalMs);
+    });
+  }
+
   // Native rating UI can vary between SpicyChat releases. Only choose
   // controls inside the chat header or a real rating dialog; never click a
   // message's thumbs-up / thumbs-down feedback button by mistake.
@@ -171,7 +204,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return result;
     };
 
-    const opening = await waitForElement(() => {
+    const opening = await waitForNativeRatingElement(() => {
       const unavailable = unavailableChatStatus();
       if (unavailable) return { unavailable };
       const button = nativeRatingOpenButton();
@@ -190,7 +223,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     // A visible dialog title does not mean React has finished mounting its
     // choices. Wait for the thumb-down button before reporting it missing.
-    const readyChoice = await waitForElement(() => {
+    const readyChoice = await waitForNativeRatingElement(() => {
       const panel = ratingModal();
       const choice = nativeDislikeButton(panel);
       return panel && choice ? { panel, choice } : null;
@@ -212,18 +245,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         reason: "SpicyChat currently disables its native Dislike choice for this chat." });
     }
     if (dislikeAlreadySelected(dislike)) {
+      try { modal.querySelector("button[aria-label='Close'], button[aria-label='close']")?.click(); } catch {}
       return finish({ ok: true, status: "already-disliked", nativeUiConfirmed: true, requestSent: false });
     }
 
     try { dislike.click(); } catch { DS.realClick?.(dislike); }
 
-    const done = await waitForElement(() => nativeRatingDoneButton(modal), 3500);
+    const done = await waitForNativeRatingElement(() => nativeRatingDoneButton(modal), 3500);
 
     if (!done) return finish({ ok: false, status: "done-button-not-ready" });
 
     const submitStartedAt = Date.now();
     try { done.click(); } catch { DS.realClick?.(done); }
-    const closed = await waitForElement(() => !ratingModal(), 4000).catch?.(() => null);
+    const closed = await waitForNativeRatingElement(() => !ratingModal(), 4000).catch?.(() => null);
     stages.submitMs = Date.now() - submitStartedAt;
     if (!closed) return finish({ ok: false, status: "submit-not-confirmed", requestSent: true });
     const verifyStartedAt = Date.now();
@@ -234,7 +268,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return finish({ ok: false, status: "native-rating-unverified", requestSent: true });
     }
     try { freshOpenButton.click(); } catch { DS.realClick?.(freshOpenButton); }
-    const selected = await waitForElement(() => {
+    const selected = await waitForNativeRatingElement(() => {
       const checkModal = ratingModal();
       const selectedButton = nativeDislikeButton(checkModal);
       return selectedButton && dislikeAlreadySelected(selectedButton) ? checkModal : null;

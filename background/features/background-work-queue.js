@@ -5,14 +5,16 @@
 function queueQuickDislikeBot(message) {
   quickDislikeChain = quickDislikeChain
     .catch(() => {})
-    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickDislikeBot(message)));
+    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickDislikeBot(message)))
+    .catch(error => ({ ok: false, status: "feedback-result-unconfirmed", reason: String(error?.message || error), requestSent: true, networkAmbiguous: true, retryable: false, bulkPaused: true }));
   return quickDislikeChain;
 }
 
 function queueQuickLessLikeBot(message) {
   quickLessLikeChain = quickLessLikeChain
     .catch(() => {})
-    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickLessLikeBot(message)));
+    .then(() => queueRecommendationFeedbackForBot(message?.botId, () => runQuickLessLikeBot(message)))
+    .catch(error => ({ ok: false, status: "feedback-result-unconfirmed", reason: String(error?.message || error), requestSent: true, networkAmbiguous: true, retryable: false, bulkPaused: true }));
   return quickLessLikeChain;
 }
 

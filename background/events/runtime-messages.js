@@ -95,6 +95,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   const ownedMessageHandler = dsqBackgroundFeatureMessageHandlers[String(message?.type || "")];
   if (ownedMessageHandler) return ownedMessageHandler(message, sender, sendResponse);
+  if (message?.type === "DS_CHAT_EXPORT_CHECKPOINT") {
+    dsqChatExportCheckpoint(message, sender).then(sendResponse, error => sendResponse({ok:false,error:String(error?.message || error)}));
+    return true;
+  }
   if (["DS_SUPPORT_HISTORY_APPEND", "DS_SUPPORT_HISTORY_GET", "DS_SUPPORT_HISTORY_CLEAR"].includes(message?.type)) {
     return dsqSupportHistoryRequest(message, sender, sendResponse);
   }
@@ -529,11 +533,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_QUICK_DISLIKE_RELEASE_BULK") {
-    Promise.all([
-      releaseQuickDislikeBulkWorker(message.bulkRunId),
-      releaseQuickLessLikeBulkWorker(message.bulkRunId)
-    ])
-      .then(values => sendResponse({ ok: true, released: values.some(Boolean) }))
+    // Wait for the native queue before closing its reused helper. Do not
+    // touch the independent Less Like queue or its success journal.
+    (quickDislikeChain = quickDislikeChain.catch(() => {}).then(() => releaseQuickDislikeBulkWorker(message.bulkRunId)))
+      .then(released => sendResponse({ ok: true, released }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
@@ -551,7 +554,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "DS_QUICK_LESS_LIKE_RELEASE_BULK") {
-    releaseQuickLessLikeBulkWorker(message.bulkRunId)
+    (quickLessLikeChain = quickLessLikeChain.catch(() => {}).then(() => releaseQuickLessLikeBulkWorker(message.bulkRunId)))
       .then(released => sendResponse({ ok: true, released }))
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;

@@ -36,6 +36,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
+    if (slowDirtyHas(dirty, "sai-metadata")) {
+      await runFeatureStep("generation metadata", generationMetadataWanted(settings) || !!document.querySelector(".ds-generation-metadata,#ds-context-window-warning"), () => DS.applyGenerationMetadata?.());
+    }
+    if (slowDirtyHas(dirty, "sai-profile")) {
+      await runRoutedFeatureStep(plan, "chat", "generation profiles", () => !!settings.enableGenerationProfiles || !!document.querySelector("[data-ds-generation-profile]"), () => DS.applyGenerationProfileTools?.());
+    }
     if (slowDirtyHas(dirty, "chat-chrome")) {
       if (settings.showSwipeJumpButtons || settings.showSwipeJumpToNumber || settings.restoreFirstSwipeOnLoad || document.querySelector(".ds-qol-swipe-jump")) {
         await runFeatureStep("swipe navigation", true, () => DS.applySwipeNavigation?.());
@@ -140,6 +146,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      if (DS.syncNativeEditorAttachmentPicker?.()) return;
       if (await runPersonaPickerLowImpact("slow")) return;
 
       if (Date.now() < laneState.pauseRerunsUntil || (DS.isSingleChatPage?.() && DS.isChatHeaderMenuOpen?.())) {

@@ -70,7 +70,7 @@ function quickDislikeHistoryEntry(id) {
   // and checking its selected thumbs-down state. Recombee ratings and legacy
   // event-only records must not be silently promoted to native UI success.
   if (["disliked", "already-disliked"].includes(entry.status) &&
-      entry.nativeUiConfirmed !== true && entry.nativeEventConfirmed !== true) return null;
+      entry.nativeUiConfirmed !== true) return null;
   if (entry.status === "dislike-event-pending") return null;
   return entry;
 }
@@ -108,14 +108,16 @@ function normalizeQuickLessLikeHistory(raw) {
   Object.entries(bots).forEach(([id, value]) => {
     const botId = String(id || "").trim();
     const status = String(value?.status || "");
-    if (!botId || !["less-liked", "unavailable"].includes(status)) return;
+    if (!botId || !["less-liked", "unavailable"].includes(status) || value?.stage === "cross-feedback-dedupe") return;
     normalized[botId] = {
       status,
       name: String(value?.name || "").slice(0, 160),
       handledAt: Number(value?.handledAt || value?.at || 0) || 0,
       stage: String(value?.stage || "").slice(0, 80),
       reason: String(value?.reason || "").slice(0, 300),
-      httpStatus: Number(value?.httpStatus || 0) || 0
+      httpStatus: Number(value?.httpStatus || 0) || 0,
+      ratingConfirmed: value?.ratingConfirmed === true,
+      nativeEventConfirmed: false
     };
   });
   return { version: 1, bots: normalized };
@@ -124,6 +126,10 @@ function normalizeQuickLessLikeHistory(raw) {
 function quickLessLikeHistoryEntry(id) {
   const botId = String(id || "").trim().toLowerCase();
   if (!botId) return null;
+  const native = quickDislikeHistoryState?.bots?.[botId];
+  if (native?.nativeUiConfirmed === true && ["disliked", "already-disliked"].includes(native.status)) {
+    return { status: "less-liked", crossHandledBy: "native-dislike", handledAt: native.handledAt || 0 };
+  }
   const entry = quickLessLikeHistoryState?.bots?.[botId] || null;
   if (entry?.status === "less-liked" && entry?.stage === "cross-feedback-dedupe") return null;
   if (entry?.status === "unavailable" && botAvailabilityState?.meta?.[botId]?.status === "available" &&
@@ -136,6 +142,7 @@ function quickLessLikeHistoryEntry(id) {
 
 function quickLessLikeHistoryLabel(entry) {
   if (!entry) return "";
+  if (entry.crossHandledBy === "native-dislike") return "Skipped · native Dislike already confirmed";
   if (entry.status === "less-liked") return "Stop recommending sent";
   if (entry.status === "unavailable") return entry.fromBotStatus
     ? "Confirmed unavailable in Bot Status · no rating needed"
@@ -235,7 +242,7 @@ function normalizeQuickLessLikeBulkState(raw) {
 async function persistQuickLessLikeBulkState(nextState) {
   quickLessLikeBulkState = normalizeQuickLessLikeBulkState(nextState);
   quickLessLikeBulkState.updatedAt = Date.now();
-  await storageSet({ [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState });
+  if (!await storageSet({ [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState })) throw new Error("Less Like queue checkpoint could not be saved.");
   updateBlockedLessLikeResumeControls();
   return quickLessLikeBulkState;
 }
@@ -243,7 +250,7 @@ async function persistQuickLessLikeBulkState(nextState) {
 async function persistQuickDislikeBulkState(nextState) {
   quickDislikeBulkState = normalizeQuickDislikeBulkState(nextState);
   quickDislikeBulkState.updatedAt = Date.now();
-  await storageSet({ [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState });
+  if (!await storageSet({ [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState })) throw new Error("Dislike queue checkpoint could not be saved.");
   updateBlockedBulkResumeControls();
   return quickDislikeBulkState;
 }

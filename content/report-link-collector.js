@@ -5,7 +5,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   if (!DS) return;
   const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const BUTTON = ".ds-report-link-button";
-  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i;
+  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?|creator(?:\/[^/]+)?\/?)?$/i;
   let saved = null;
   let readPromise = null;
   let listenerInstalled = false;
@@ -165,7 +165,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
     for (const {card, anchor} of cards) {
       // collectCards already excludes chat-message and navigation links.
-      // Accept the differing native image wrappers on Home and Recommendations.
+      // Accept the differing native image wrappers on Home, Recommendations and public creator listings.
       if (!card?.isConnected || card.closest?.("nav, [role='navigation'], [data-testid='ChatMessageItem']")) continue;
       const link = cardLink(card, anchor);
       const id = botIdFromLink(link);

@@ -23,6 +23,7 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_ARCHIVE_BLOCK_PRESET_CATALOG": "archive-blocking-presets",
   "DS_ARCHIVE_COMMUNITY_CATALOG": "archive-community-themes",
   "DS_ARCHIVE_COMMUNITY_LOOKUP": "archive-community-themes",
+  "DS_CHAT_EXPORT_CHECKPOINT": "chat-export",
   "DS_CHAT_NUDGE_SCAN_NOW": "chat-nudges",
   "DS_CHAT_NUDGE_SYNC": "chat-nudges",
   "DS_CLEAR_PAGE_RUNTIME_LOG": "core",

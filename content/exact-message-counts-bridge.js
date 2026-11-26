@@ -17,7 +17,15 @@
     try { return String(value || ""); } catch { return ""; }
   }
 
+  function onBotEditor() {
+    const path = String(location.pathname || "").replace(/^\/[a-z]{2}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|[0-9]{3}))?(?=\/|$)/i, "");
+    return /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path) || /^\/(?:create|create\/chatbot)\/?$/i.test(path);
+  }
+
   function isTypesenseSearch(url) {
+    // Editor attachment lookups are not public bot listing counts. Leave
+    // their fetch/XHR responses entirely native (including on SPA navigation).
+    if (onBotEditor()) return false;
     const value = urlText(url);
     return /\/multi_search(?:[/?#]|$)/i.test(value) || /\/collections\/[^/]+\/documents\/search(?:[/?#]|$)/i.test(value);
   }
@@ -106,6 +114,7 @@
   }
 
   function emitFromData(data) {
+    if (onBotEditor()) return;
     const counts = collectHits(data);
     if (!counts.length) return;
     try {

@@ -183,6 +183,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.installLightDiagnostics?.();
   try {
     chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+      if (message?.type === "DS_GET_SAI_COMPATIBILITY") {
+        sendResponse({ok:true, snapshot:DS.getSaiToolkitCompatibilitySnapshot?.() || null});
+        return false;
+      }
       if (message?.type === "DS_GET_QOL_TAB_STATE") {
         sendResponse({ ok: true, ...(DS.getQolTabState?.() || {}) });
         return false;

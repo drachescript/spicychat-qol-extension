@@ -192,12 +192,26 @@ async function load() {
   const saiStatus = $("saiToolkitStatus");
   if (saiStatus) {
     const presence = result[SAI_TOOLKIT_PRESENCE_KEY];
-    if (presence?.detected && presence.detectedAt) {
-      const when = new Date(Number(presence.detectedAt));
-      saiStatus.textContent = `S.AI Toolkit detected on SpicyChat (${when.toLocaleString()}).`;
-    } else {
-      saiStatus.textContent = "S.AI Toolkit has not been detected on a SpicyChat page yet.";
-    }
+    const historical = presence?.detectedAt ? `Previously detected: ${new Date(Number(presence.detectedAt)).toLocaleString()}. ` : "No previous detection. ";
+    saiStatus.textContent = historical + "Current page not checked.";
+    const refresh = $("saiToolkitRefreshStatus");
+    if (refresh) refresh.onclick = async () => {
+      refresh.disabled = true;
+      try {
+        const tabs = await new Promise((resolve,reject)=>chrome.tabs.query({url:["https://spicychat.ai/*","https://www.spicychat.ai/*"]},r=>chrome.runtime.lastError?reject(new Error(chrome.runtime.lastError.message)):resolve(r||[])));
+        const tab = tabs.filter(t=>!t.discarded && Number.isInteger(t.id)).sort((a,b)=>Number(b.active)-Number(a.active)||Number(b.lastAccessed||0)-Number(a.lastAccessed||0))[0];
+        if (!tab) throw new Error("Open a SpicyChat tab first.");
+        const result = await new Promise((resolve,reject)=>chrome.tabs.sendMessage(tab.id,{type:"DS_GET_SAI_COMPATIBILITY"},r=>chrome.runtime.lastError?reject(new Error("Reload the source SpicyChat tab, then try again.")):resolve(r)));
+        const x = result?.snapshot;
+        if (!x) throw new Error("Current capability status unavailable.");
+        const labels = {generationStats:"Duplicate model / generation settings (when visible)",timestamps:"Timestamps",messageIds:"Message IDs (Toolkit-only display)",generationProfiles:"Generation profiles",hideForYou:"Hide For You",failedMessageRecovery:"Manual message recovery",sidebarLayout:"Sidebar Layout",customMessageColors:"Bubble backgrounds",backgroundImage:"Chat background",roundedProfileImages:"Rounded profile images",squareMessageEdges:"Bubble edges"};
+        const active = Object.entries(x.states||{}).filter(([,v])=>v==="enabled").map(([k])=>labels[k]||k);
+        const unknown = Object.entries(x.states||{}).filter(([,v])=>v==="unknown").map(([k])=>labels[k]||k);
+        const deferred = (x.deferred||[]).map(k=>labels[k]||k);
+        saiStatus.textContent = `${historical}Current sampled SpicyChat tab: ${x.detected ? "Toolkit detected" : "Toolkit not detected"}. Version: ${x.version || "unknown"}. Capability interface: ${x.capabilityInterface}. Toolkit enabled / observed: ${active.join(", ")||"none confirmed"}. ${x.compatibility ? "QoL defers overlapping enabled controls: " + (deferred.join(", ")||"none confirmed") : "Compatibility disabled; no deferral"}. Unknown: ${unknown.join(", ")||"none"}. QoL-only enabled here: ${(x.exclusive||[]).join(", ")||"none reported"}. Other filters, pictures, fonts and exports remain independent.`;
+      } catch(error) { saiStatus.textContent = historical + String(error?.message || "Current page unavailable."); }
+      finally { refresh.disabled = false; }
+    };
   }
 
 
@@ -689,6 +703,7 @@ async function load() {
   updateBubbleContrastWarnings?.();
   if (activeOptionsTab() === "appearance") renderMiniPanelPreview?.();
   settingsAutosaveReady = true;
+  window.dsqRefreshPreferenceDiscovery?.();
   if ($("settingsLayoutPreviewToggle")) $("settingsLayoutPreviewToggle").disabled = false;
   if ($("settingsLayoutLabOpen")) $("settingsLayoutLabOpen").disabled = false;
   optionsPhaseSample("settings:core-controls-ready", performance.now() - OPTIONS_PERFORMANCE.bootStartedAt);
@@ -699,7 +714,10 @@ async function load() {
   updateSettingDependencies();
   refreshPlatformCompatibilityUi(settings);
   DS_FEATURE_INDEX_REFRESH?.();
-  await applyPendingOptionsNavigation(result[PENDING_OPTIONS_NAV_KEY]);
+  if (new URLSearchParams(location.search).get("scanWorkspace") === "1") {
+    const card = $("botAvailabilityCard");
+    if (card) navigateToSettingsCard(card);
+  } else await applyPendingOptionsNavigation(result[PENDING_OPTIONS_NAV_KEY]);
   const activeTab = activeOptionsTab();
   renderHeavyManagersForTab(activeTab);
   if (activeTab === "data") {

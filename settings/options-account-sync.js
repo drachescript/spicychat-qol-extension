@@ -131,7 +131,7 @@ function renderSyncDevicePrefs(prefs) {
   const mode = $("accountSyncSettingsMode");
   if (mode) mode.value = prefs.mode || "two-way";
   const interval = $("accountSyncInterval");
-  if (interval) interval.value = String([360, 720, 1440].includes(Number(prefs.syncIntervalMinutes))
+  if (interval) interval.value = String([180, 360, 720, 1440].includes(Number(prefs.syncIntervalMinutes))
     ? prefs.syncIntervalMinutes : 720);
   const limited = $("accountSyncLimitSettings");
   if (limited) limited.checked = Array.isArray(prefs.allowedKeys);
@@ -166,7 +166,7 @@ function portableAccountSyncRules(value) {
     const chosen = String(source.listModes?.[name] || "off");
     listModes[name] = validListModes.has(chosen) ? chosen : "off";
   }
-  const syncIntervalMinutes = [360, 720, 1440].includes(Number(source.syncIntervalMinutes))
+  const syncIntervalMinutes = [180, 360, 720, 1440].includes(Number(source.syncIntervalMinutes))
     ? Number(source.syncIntervalMinutes) : 720;
   return { schemaVersion: 2, mode: validModes.has(mode) ? mode : "off", syncIntervalMinutes, allowedKeys: keys, scopes, listModes };
 }

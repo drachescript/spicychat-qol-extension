@@ -1043,7 +1043,8 @@ async function clearSavedSupportHistory() {
     await refreshSavedSupportStatus();
   } else {
     const status = $("diagnosticsStatus");
-    if (status) status.textContent = "Could not clear saved support history. Nothing was deleted.";
+    if (status) status.textContent = `Could not confirm saved support history was cleared: ${result?.error || (result?.__dsTimeout ? "Background request timed out; check saved history again." : "No successful background response; reload QoL Settings and retry.")}`;
+    await refreshSavedSupportStatus();
   }
 }
 // Download verification is deliberately separate from starting a download. A
@@ -1251,7 +1252,7 @@ async function downloadAllSupportInfo() {
     if (cleared?.ok) {
       await refreshSavedSupportStatus();
       if (status) status.textContent = `Full support report saved${saved.isGzip ? " as .txt.gz" : ""}. ${cleared.cleared || 0} included history checks cleared; any newer checks were kept.`;
-    } else if (status) status.textContent = "Report saved, but its saved history could not be cleared. History was kept; you can retry later.";
+    } else if (status) status.textContent = `Report saved, but clearing included history was not confirmed: ${cleared?.error || "No successful background response. Check saved history again."}`;
     return true;
   } catch (error) {
     if (status) status.textContent = `Could not download support info: ${error?.message || String(error || "unknown error")}. History was kept.`;

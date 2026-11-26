@@ -7,7 +7,8 @@ const missingOptionsControllerModules = [
   ["settings/options-saved-managers-state.js", typeof BOT_STATUS_ARCHIVE_EXPORT_SCHEMA !== "undefined" && typeof savedBotsHubUiState !== "undefined"],
   ["settings/options-chat-bubble-config.js", typeof CHAT_BUBBLE_TEXT_DEFAULTS !== "undefined" && typeof CHAT_BUBBLE_PRESETS !== "undefined"],
   ["settings/options-backup-schema.js", typeof BACKUP_STORAGE_KEYS !== "undefined" && typeof SETTINGS_BACKUP_GROUPS !== "undefined"],
-  ["settings/options-ui-config.js", typeof STORAGE_DATASET_DEFS !== "undefined" && typeof CHAT_BUBBLE_FIELD_IDS !== "undefined"]
+  ["settings/options-ui-config.js", typeof STORAGE_DATASET_DEFS !== "undefined" && typeof CHAT_BUBBLE_FIELD_IDS !== "undefined"],
+  ["settings/options-preference-tools.js", typeof setupSettingsPreferenceTools === "function" && typeof recordSettingsPreferenceChanges === "function"]
 ].filter(([, ready]) => !ready).map(([name]) => name);
 if (missingOptionsControllerModules.length) {
   const message = `QoL Settings is missing required file(s): ${missingOptionsControllerModules.join(", ")}. Extract the complete update and reopen Settings.`;
@@ -188,10 +189,8 @@ $("lorebookCenterCollapse")?.addEventListener("click", () => {
 });
 $("reduceOptionsAnimations")?.addEventListener("change", () => applyOptionsPerformancePreferences({ reduceOptionsAnimations: checked("reduceOptionsAnimations") }));
 $("settingsLayoutPreviewToggle")?.addEventListener("click", () => {
-  const control = $("settingsNavigationStyle");
-  if (!control) return;
-  control.value = "classic";
-  control.dispatchEvent(new Event("change", { bubbles: true }));
+  // Use the same complete appearance-only reset as the Settings layout card.
+  $("settingsLayoutLabClassic")?.click();
 });
 ["settingsNavigationStyle", "settingsContentLayout", "settingsPageWidth"].forEach(id => {
   $(id)?.addEventListener("change", () => applyOptionsLayoutPreferences());
@@ -251,7 +250,7 @@ $("settingsLayoutPreviewToggle")?.addEventListener("click", () => {
     persist("Appearance updated.");
   });
   $("settingsLayoutLabReset")?.addEventListener("click", event => {
-    event.stopPropagation(); state = { ...defaults }; persist("Appearance experiments reset.");
+    event.stopPropagation(); state = { ...defaults }; persist("Appearance preferences reset.");
   });
   $("settingsLayoutLabClassic")?.addEventListener("click", event => {
     event.stopPropagation();
@@ -261,6 +260,43 @@ $("settingsLayoutPreviewToggle")?.addEventListener("click", () => {
       if (!control || control.value === initial) continue;
       control.value = initial;
       control.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  const layoutFields = { settingsNavigationStyle: ["classic", "sidebar", "ribbon", "picker", "underline", "pills"], settingsContentLayout: ["single", "adaptive"], settingsPageWidth: ["comfortable", "wide"] };
+  $("settingsAppearanceExport")?.addEventListener("click", async () => {
+    if (!settingsAutosaveReady) return;
+    const text = JSON.stringify({ schema: "dsq-settings-appearance-v1", appearance: { ...state }, layout: Object.fromEntries(Object.keys(layoutFields).map(id => [id, $(id).value])) }, null, 2);
+    try { await navigator.clipboard.writeText(text); if (status) status.textContent = "Appearance preset copied. No feature settings included."; }
+    catch { if (status) status.textContent = "Clipboard unavailable. Copy the JSON from the text box below."; $("settingsAppearanceJson").value = text; $("settingsAppearanceJson").hidden = false; }
+  });
+  $("settingsAppearanceImport")?.addEventListener("click", () => {
+    if (!settingsAutosaveReady) return;
+    const raw = prompt("Paste a QoL Settings appearance preset (JSON). Only appearance will change.");
+    if (!raw) return;
+    try {
+      if (raw.length > 4000) throw new Error("Preset too large.");
+      const data = JSON.parse(raw);
+      if (data?.schema !== "dsq-settings-appearance-v1" || !data.appearance || !data.layout) throw new Error("Unrecognized appearance preset.");
+      if (!choices.surface.includes(data.appearance.surface) || !choices.accent.includes(data.appearance.accent) || typeof data.appearance.sticky !== "boolean" || !Object.entries(layoutFields).every(([id, allowed]) => allowed.includes(data.layout[id]))) throw new Error("Unsupported appearance option.");
+      state = { surface: data.appearance.surface, accent: data.appearance.accent, sticky: data.appearance.sticky };
+      persist("Appearance applied. Feature settings unchanged.");
+      for (const id of Object.keys(layoutFields)) {
+        const el = $(id); if (!el || el.value === data.layout[id]) continue;
+        el.value = data.layout[id]; el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    } catch (error) { if (status) status.textContent = String(error?.message || error); }
+  });
+  $("settingsAppearancePreview")?.addEventListener("toggle", event => {
+    const list = $("settingsAppearancePreviewList");
+    if (!event.currentTarget.open || !list || list.childElementCount) return;
+    for (const option of $("settingsNavigationStyle").options) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "ds-layout-preview-tile"; button.dataset.previewMode = option.value;
+      const image = document.createElement("span"); image.className = "ds-layout-preview-art"; image.setAttribute("aria-hidden", "true");
+      const nav = document.createElement("span"); nav.className = "ds-preview-nav";
+      for (let i = 0; i < 4; i++) nav.appendChild(document.createElement("i"));
+      const content = document.createElement("span"); content.className = "ds-preview-content"; content.append(document.createElement("i"), document.createElement("i"));
+      image.append(nav, content); button.append(image, document.createTextNode(option.textContent));
+      button.addEventListener("click", () => { if (!settingsAutosaveReady) return; const el = $("settingsNavigationStyle"); el.value = option.value; el.dispatchEvent(new Event("change", { bubbles: true })); }); list.appendChild(button);
     }
   });
   $("settingsLayoutLabOpen")?.addEventListener("click", () => navigateToSettingsCard($("settingsLayoutCard")));
@@ -373,6 +409,7 @@ setupMessageQuickActionGroupToggle();
 setupPageIntros();
 setupSettingsSearch();
 setupPresets();
+setupSettingsPreferenceTools();
 setupBubbleResetControls();
 setupAndroidSettings();
 setupBackupFileIo();
@@ -412,7 +449,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     savedRecoveryDirty.add("archive-transfer");
     if (!botAvailabilityScanRunning && savedRecoveryActivated.has("status")) savedRecoveryDirty.add("status");
     clearTimeout(archiveQueueSafetyRefreshTimer);
-    archiveQueueSafetyRefreshTimer = setTimeout(() => {
+    const runningCheckpoint = [changes[BOT_STATUS_PAUSED_QUEUE_KEY]?.newValue, changes["botStatusPausedStaleQueueV1"]?.newValue]
+      .some(queue => queue?.phase === "running" && Array.isArray(queue.ids) && queue.ids.length > 0);
+    if (runningCheckpoint) {
+      archiveQueueSafetyRefreshTimer = 0;
+      for (const id of ["sendBotStatusArchiveChanged", "sendBotStatusArchiveAll", "submitBotStatusArchiveChanged", "submitBotStatusArchiveAll"]) if ($(id)) $(id).disabled = true;
+    } else archiveQueueSafetyRefreshTimer = setTimeout(() => {
       archiveQueueSafetyRefreshTimer = 0;
       if (savedRecoveryActivated.has("archive-transfer") && savedRecoveryHostVisible("archive-transfer")) loadAndRenderSavedRecoveryManagers("queue-changed", "archive-transfer").catch(() => {});
       else {
@@ -635,7 +677,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   if (savedRefreshKinds.size) scheduleSavedManagersRefresh([...savedRefreshKinds]);
 
-  if (refreshBlocked && blockingDataLoaded && !blockedBulkDislikeRunning) {
+  if (refreshBlocked && blockingDataLoaded && !blockedBulkDislikeRunning && !blockedBulkLessLikeRunning) {
     scheduleBlockedManagerRefresh();
   }
 });

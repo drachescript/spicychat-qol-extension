@@ -309,15 +309,18 @@ function revealSettingsTarget(targetId, options = {}) {
   const target = $(targetId);
   if (!target) {
     const tab = window.dsqDeferredFeaturePanelTabForControl?.(targetId);
-    if (!tab) return false;
+    if (!tab || options.deferredAttempt) return false;
     setActiveTab(tab);
-    window.dsqHydrateFeaturePanelsForTab?.(tab).then(() => revealSettingsTarget(targetId, options))
+    window.dsqHydrateFeaturePanelsForTab?.(tab).then(() => {
+      if (activeOptionsTab() === tab) revealSettingsTarget(targetId, { ...options, deferredAttempt: true });
+    })
       .catch(error => console.warn("[QoL Settings] Could not open deferred control:", error));
     return true;
   }
   const page = target.closest(".tab-page");
   if (!page?.dataset?.page) return false;
-  setActiveTab(page.dataset.page);
+  if (activeOptionsTab() !== page.dataset.page) setActiveTab(page.dataset.page);
+  if (settingsShowEnabledOnly) { settingsShowEnabledOnly = false; try { sessionStorage.setItem(SETTINGS_ENABLED_ONLY_KEY, "0"); } catch {} applySettingsEnabledOnlyFilter(); }
   expandSettingsCardForTarget(target);
   let details = target.closest("details");
   while (details) {
@@ -771,6 +774,8 @@ function updateSettingDependencies() {
         note = makeElement("small", { className: "setting-dependency-note" });
         label.appendChild(note);
       }
+      if (note.dataset.dsDependencyActive === String(active)) continue;
+      note.dataset.dsDependencyActive = String(active);
       note.replaceChildren();
       note.hidden = active;
       if (!active) {
@@ -1158,7 +1163,7 @@ function applyOptionsLayoutPreferences(settings = null) {
     document.body.classList.toggle(`ds-options-nav-${variant}`, nav === variant);
   }
   const previewToggle = $("settingsLayoutPreviewToggle");
-  if (previewToggle) previewToggle.hidden = nav === "classic";
+  if (previewToggle) previewToggle.hidden = false;
   // The existing compact Sections menu handles picker mode on desktop too.
   // Close an open menu when the selected navigation mode changes.
   const navElement = $("optionsTabsNav");
@@ -1234,7 +1239,7 @@ function scheduleBlockedManagerRefresh() {
   clearTimeout(blockedManagerRefreshTimer);
   blockedManagerRefreshTimer = setTimeout(() => {
     blockedManagerRefreshTimer = 0;
-    if (!blockingDataLoaded || blockedBulkDislikeRunning) return;
+    if (!blockingDataLoaded || blockedBulkDislikeRunning || blockedBulkLessLikeRunning) return;
     OPTIONS_PERFORMANCE.blockedManagerRefreshBatches += 1;
     // Do not build the heavy blocked manager while another Settings tab is open.
     // Its state is already current in memory and the manager will render lazily

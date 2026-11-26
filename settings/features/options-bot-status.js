@@ -375,15 +375,25 @@ function setupBotAvailabilityControls() {
   maintenanceCard?.addEventListener("toggle", () => {
     if (maintenanceCard.open) refreshBlockedArchiveCleanupStatus().catch(() => {});
   });
-  $("scanBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "all" }));
-  $("scanUncheckedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unchecked" }));
-  $("scanUnknownBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "unknown" }));
-  $("resumePausedBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "main" }));
-  $("resumePausedStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ resume: true, queue: "stale" }));
-  // Scan engine status loads when Saved Bots is opened, not on every Settings launch.
-  $("scanUnmonitoredBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "outside" }));
-  $("scanStaleBotAvailability")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "stale" }));
-  $("recheckDeletedSavedBots")?.addEventListener("click", () => runBotAvailabilityScan({ mode: "archived" }));
+  // A scan click also works before the viewport-driven preparation has finished.
+  // Do not race a second queue reconciliation or silently discard load errors.
+  const startScan = async options => {
+    try {
+      if (botAvailabilityScanRunning) return;
+      if (!await loadAndRenderSavedRecoveryManagers("manual", "status") || !savedRecoverySectionOpen()) return;
+      await runBotAvailabilityScan(options);
+    } catch (error) {
+      const message = `Could not prepare or run Bot Status: ${String(error?.message || error)}. Review saved checkpoints before retrying.`;
+      if ($("botAvailabilityScanStatus")) $("botAvailabilityScanStatus").textContent = message;
+      showSettingsToast(message);
+    }
+  };
+  for (const [id, options] of [
+    ["scanBotAvailability", { mode: "all" }], ["scanUncheckedBotAvailability", { mode: "unchecked" }],
+    ["scanUnknownBotAvailability", { mode: "unknown" }], ["resumePausedBotAvailability", { resume: true, queue: "main" }],
+    ["resumePausedStaleBotAvailability", { resume: true, queue: "stale" }], ["scanUnmonitoredBotAvailability", { mode: "outside" }],
+    ["scanStaleBotAvailability", { mode: "stale" }], ["recheckDeletedSavedBots", { mode: "archived" }]
+  ]) $(id)?.addEventListener("click", () => startScan(options));
   $("cleanUnavailableBots")?.addEventListener("click", () => cleanConfirmedUnavailableBots().catch(error => {
     const detail = String(error?.message || "Unexpected failure").slice(0, 180);
     console.warn("[SpicyChat QoL] unavailable-bot cleanup failed", error);
@@ -478,6 +488,10 @@ function setupBotAvailabilityControls() {
     botAvailabilityUiState.status = event.target.value || "all";
     botAvailabilityUiState.visible = 10;
     botAvailabilityUiState.collapsed = true;
+    if (!savedRecoveryDataLoaded || !savedRecoveryActivated.has("status")) {
+      await loadAndRenderSavedRecoveryManagers("manual", "status");
+    }
+    if (!savedRecoveryDataLoaded || !savedRecoveryActivated.has("status")) return;
     if (BOT_DUPLICATE_LEVELS.has(botAvailabilityUiState.status) && !botDuplicateCacheReady) {
       const scope = String($("botAvailabilityScope")?.value || "all");
       await nextUiFrame();

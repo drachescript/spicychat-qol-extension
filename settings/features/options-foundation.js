@@ -1501,6 +1501,7 @@ function detachSavedRecoveryLazyActivation() {
   savedRecoveryActivated.clear();
   savedRecoveryOverview = null;
   savedRecoveryOverviewRequest = null;
+  savedRecoveryStatusAutoFailed = false;
   savedRecoveryDirty.clear();
   savedRecoveryPending.clear();
   savedRecoveryWork = Promise.resolve();
@@ -1588,15 +1589,14 @@ async function cleanupMalformedBlockingRecords(settings = {}) {
   const cleanHistory = (value, normalizeFn) => {
     const state = normalizeFn(value);
     const bots = filterMetaToValidBotIds(state.bots);
-    if (Object.keys(bots).length !== Object.keys(state.bots || {}).length) changed = true;
+    // This is only a display cleanup. Never persist a stale history snapshot
+    // from Settings initialization while the background may be saving ratings.
     return { ...state, bots };
   };
   quickDislikeHistoryState = cleanHistory(quickDislikeHistoryState, normalizeQuickDislikeHistory);
   quickLessLikeHistoryState = cleanHistory(quickLessLikeHistoryState, normalizeQuickLessLikeHistory);
   const dislikeBulk = filterBulkStateIds(quickDislikeBulkState, normalizeQuickDislikeBulkState);
   const lessLikeBulk = filterBulkStateIds(quickLessLikeBulkState, normalizeQuickLessLikeBulkState);
-  if (JSON.stringify(dislikeBulk) !== JSON.stringify(quickDislikeBulkState)) changed = true;
-  if (JSON.stringify(lessLikeBulk) !== JSON.stringify(quickLessLikeBulkState)) changed = true;
   quickDislikeBulkState = dislikeBulk;
   quickLessLikeBulkState = lessLikeBulk;
 
@@ -1608,11 +1608,7 @@ async function cleanupMalformedBlockingRecords(settings = {}) {
   await storageSet({
     settings,
     [BLOCKED_BOTS_KEY]: blockedState,
-    [NOT_INTERESTED_KEY]: notInterestedState,
-    [QUICK_DISLIKE_HISTORY_KEY]: quickDislikeHistoryState,
-    [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState,
-    [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryState,
-    [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState
+    [NOT_INTERESTED_KEY]: notInterestedState
   });
   return true;
 }
@@ -1693,7 +1689,7 @@ async function ensureBlockingDataLoaded() {
     notInterestedState = normalizeBotStore(result[NOT_INTERESTED_KEY]);
     quickDislikeHistoryState = normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
     quickDislikeBulkState = normalizeQuickDislikeBulkState(result[QUICK_DISLIKE_BULK_STATE_KEY]);
-    quickLessLikeHistoryState = normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+    quickLessLikeHistoryState = mergeQuickLessLikeHistories(result[QUICK_LESS_LIKE_HISTORY_KEY], result["quickLessLikeHistoryPendingV1"]);
     quickLessLikeBulkState = normalizeQuickLessLikeBulkState(result[QUICK_LESS_LIKE_BULK_STATE_KEY]);
     await cleanupMalformedBlockingRecords(settings);
     blockingDataLoaded = true;
@@ -1852,6 +1848,7 @@ async function ensureHeavySavedDataLoaded(tabName = "all") {
 
 let savedRecoveryOverview = null;
 let savedRecoveryOverviewRequest = null;
+let savedRecoveryStatusAutoFailed = false;
 const savedRecoveryActivated = new Set();
 const savedRecoveryDirty = new Set();
 const savedRecoveryPending = new Map();
@@ -1879,7 +1876,7 @@ function savedRecoveryHostVisible(kind) {
     const rect = el?.getBoundingClientRect();
     return !!rect && rect.height > 0 && rect.top < window.innerHeight + 160 && rect.bottom > -160;
   };
-  return isNear(element) || (kind === "status" && isNear($("botAvailabilityResultsCard"))) || (kind === "archive-transfer" && isNear($("botStatusArchiveUploadSettings")));
+  return isNear(element) || (kind === "status" && (isNear($("botAvailabilityResultsCard")) || isNear($("scanBotAvailability")))) || (kind === "archive-transfer" && isNear($("botStatusArchiveUploadSettings")));
 }
 // Count-only overview. Never put projected/partial records into the mutable
 // recovery stores: scans, exports and Archive submission still load full data.
@@ -1893,7 +1890,7 @@ function loadSavedRecoveryOverview() {
     if (generation !== savedRecoveryGeneration || savedRecoveryDataLoaded || savedRecoveryDataLoadPromise) return;
     if (!result?.ok || !Number.isFinite(result.stats?.[BOT_ARCHIVE_KEY]) || !Number.isFinite(result.stats?.[BOT_AVAILABILITY_KEY])) throw new Error("Counts unavailable");
     savedRecoveryOverview = result.stats;
-    if (overview) overview.textContent = `${result.stats[BOT_ARCHIVE_KEY].toLocaleString()} stored copies · ${result.stats[BOT_AVAILABILITY_KEY].toLocaleString()} stored status records (count snapshot, before filters). Load records to browse, reconcile or review held checks.`;
+    if (overview) overview.textContent = `${result.stats[BOT_ARCHIVE_KEY].toLocaleString()} stored copies · ${result.stats[BOT_AVAILABILITY_KEY].toLocaleString()} stored status records (count snapshot, before filters). Scan counts load when you reach the scan controls.`;
     optionsPhaseSample("saved:recovery-counts-wall", performance.now() - started);
     optionsDiag("options-saved-manager", "recovery-counts", { durationMs: performance.now() - started, archiveCount: result.stats[BOT_ARCHIVE_KEY], availabilityCount: result.stats[BOT_AVAILABILITY_KEY] });
   }).catch(() => {
@@ -1910,14 +1907,19 @@ function renderSavedRecoveryPlaceholders() {
     overviewButton.dataset.dsBound = "1";
     overviewButton.addEventListener("click", () => loadAndRenderSavedRecoveryManagers("manual", "status"));
   }
+  const scanRetry = $("dsBotStatusPrepareRetry");
+  if (scanRetry && !scanRetry.dataset.dsBound) {
+    scanRetry.dataset.dsBound = "1";
+    scanRetry.addEventListener("click", () => loadAndRenderSavedRecoveryManagers("retry", "status"));
+  }
   if (!savedRecoveryDataLoaded) {
     if (overviewButton) overviewButton.hidden = false;
     const overview = $("dsSavedRecoveryOverview");
     if (overview && !savedRecoveryOverview) overview.textContent = "Full saved profiles and history load only when requested.";
     const queue = $("botStatusPendingQueueSummary");
-    if (queue) queue.textContent = "Load Bot Status records to review pending and held checks.";
+    if (queue) queue.textContent = "Pending and held checks will load when you reach the scan controls.";
     const feedback = $("botStatusLastRunSummary");
-    if (feedback) feedback.textContent = "Load Bot Status records to review the last run.";
+    if (feedback) feedback.textContent = "Last-run details will load with the scan controls.";
   }
 
   for (const [kind, id] of Object.entries(savedRecoveryHostIds)) {
@@ -1934,7 +1936,10 @@ function renderSavedRecoveryPlaceholders() {
 }
 function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") {
   if (!savedRecoverySectionOpen()) return Promise.resolve(false);
-  if (!savedRecoveryDataLoaded && source !== "manual" && source !== "retry") { loadSavedRecoveryOverview(); return Promise.resolve(false); }
+  const explicit = source === "manual" || source === "retry";
+  const statusDemand = kind === "status" && source === "scan-controls-visible";
+  if (!savedRecoveryDataLoaded && !explicit && !statusDemand) { loadSavedRecoveryOverview(); return Promise.resolve(false); }
+  if (kind === "status" && !explicit && savedRecoveryStatusAutoFailed) return Promise.resolve(false);
   if (savedRecoveryPending.has(kind)) return savedRecoveryPending.get(kind);
   if (savedRecoveryActivated.has(kind) && !savedRecoveryDirty.has(kind)) return Promise.resolve(true);
   const generation = savedRecoveryGeneration;
@@ -1943,15 +1948,20 @@ function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") 
     // Let the tab/section paint before large storage/normalization work.
     await nextOptionsIdleSlice();
     if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
-    // Opening a section is not consent to hydrate every saved profile/history.
-    // After the first explicit request, the existing warmed managers can
-    // activate independently as they become visible.
-    if (!savedRecoveryDataLoaded && source !== "manual" && source !== "retry") {
+    // The lightweight overview alone must not hydrate the full stores.
+    // Reaching the scan controls or requesting records explicitly does.
+    if (!savedRecoveryDataLoaded && !explicit && !statusDemand) {
       loadSavedRecoveryOverview();
       return false;
     }
     const overview = $("dsSavedRecoveryOverview");
-    if (overview) overview.textContent = "Loading full recovery records… Other Settings remain available.";
+    const scanPreparation = $("dsBotStatusPreparation");
+    const scanRetry = $("dsBotStatusPrepareRetry");
+    if (overview && !savedRecoveryDataLoaded) overview.textContent = "Loading full recovery records… Other Settings remain available.";
+    if (kind === "status") {
+      if (scanPreparation) scanPreparation.textContent = "Preparing scan counts and saved checks… This may take a few seconds for large collections.";
+      if (scanRetry) scanRetry.hidden = true;
+    }
     await ensureSavedRecoveryDataLoaded();
     if (generation !== savedRecoveryGeneration || !savedRecoverySectionOpen()) return false;
     if (overview) overview.textContent = "Recovery records loaded. Search, scan and recovery controls are available.";
@@ -1964,11 +1974,15 @@ function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") 
       // Queue reconciliation must happen only when Bot Status is requested.
       renderBotAvailability({ skipRecoveryRerender: true });
       const pendingBefore = new Set(botStatusPendingReviewIds);
-      dsqRefreshHeavyToolsForTab("saved", { activateStatus: true }).then(() => {
-        if (generation !== savedRecoveryGeneration) return;
+      const queueReady = await dsqRefreshHeavyToolsForTab("saved", { activateStatus: true });
+      if (queueReady === false) throw new Error("Saved scan queues could not be loaded");
+      if (generation !== savedRecoveryGeneration) return false;
+      {
         const pendingChanged = pendingBefore.size !== botStatusPendingReviewIds.size || [...pendingBefore].some(id => !botStatusPendingReviewIds.has(id));
         if (pendingChanged || $("botAvailabilityStatusFilter")?.value === "pending") renderBotAvailability({ skipRecoveryRerender: true });
-      }).catch(() => {});
+      }
+      savedRecoveryStatusAutoFailed = false;
+      if (scanPreparation) scanPreparation.textContent = "Scan counts prepared. Pending and held checks are shown below.";
     } else if (kind === "copies") renderSavedBotInfo();
     else if (kind === "deleted") renderDeletedSavedBots();
     else if (kind === "archive-transfer") await refreshArchiveTransferUi();
@@ -1979,6 +1993,13 @@ function loadAndRenderSavedRecoveryManagers(source = "opened", kind = "status") 
     if (generation !== savedRecoveryGeneration) return false;
     const overview = $("dsSavedRecoveryOverview");
     if (overview) overview.textContent = "Recovery load failed. Retry loading; saved records remain intact.";
+    if (kind === "status") {
+      savedRecoveryStatusAutoFailed = true;
+      const scanPreparation = $("dsBotStatusPreparation");
+      if (scanPreparation) scanPreparation.textContent = `Could not prepare scan counts: ${String(error?.message || error)}. Retry; saved records remain intact.`;
+      const scanRetry = $("dsBotStatusPrepareRetry");
+      if (scanRetry) scanRetry.hidden = false;
+    }
     const overviewButton = $("dsLoadSavedRecovery");
     if (overviewButton) overviewButton.hidden = false;
     savedRecoveryActivated.delete(kind);
@@ -2019,6 +2040,12 @@ function activateVisibleSavedRecoveryManagers() {
   activateSavedLorebookIfVisible();
   if (!savedRecoverySectionOpen()) return;
   if (!savedRecoveryDataLoaded) {
+    // Only reaching scan controls requests authoritative scan counts. The top
+    // overview and unrelated saved-list managers retain their cheap count path.
+    if (savedRecoveryHostVisible("status")) {
+      loadAndRenderSavedRecoveryManagers("scan-controls-visible", "status").catch(() => {});
+      return;
+    }
     const overview = $("dsSavedRecoveryOverview")?.getBoundingClientRect();
     if ((overview?.height > 0 && overview.top < window.innerHeight + 160 && overview.bottom > -160) || Object.keys(savedRecoveryHostIds).some(savedRecoveryHostVisible)) loadSavedRecoveryOverview();
     return;
@@ -2049,7 +2076,7 @@ function setupSavedRecoveryLazyActivation() {
     lore.addEventListener("ds-settings-card-opened", onLoreOpen);
     savedRecoveryLazyOpenListeners.push([lore, onLoreOpen]);
   }
-  const targets = [card, $("dsSavedRecoveryOverview"), $("botAvailabilityScope"), $("botAvailabilityResultsCard"), $("savedBotInfoCard"), $("deletedSavedBotsCard"), $("botStatusArchiveContributionSettings"), $("botStatusArchiveUploadSettings"), lore].filter(Boolean);
+  const targets = [card, $("dsSavedRecoveryOverview"), $("botAvailabilityScope"), $("scanBotAvailability"), $("botAvailabilityResultsCard"), $("savedBotInfoCard"), $("deletedSavedBotsCard"), $("botStatusArchiveContributionSettings"), $("botStatusArchiveUploadSettings"), lore].filter(Boolean);
   if (typeof IntersectionObserver === "function") {
     savedRecoveryLazyObserver = new IntersectionObserver(() => activateVisibleSavedRecoveryManagers(), { root: null, rootMargin: "160px 0px", threshold: 0 });
     targets.forEach(target => savedRecoveryLazyObserver.observe(target));
@@ -2300,7 +2327,10 @@ function setupTabs() {
   document.querySelectorAll(".tab-button").forEach(button => {
     button.addEventListener("click", () => {
       const fromPicker = mobileNavigation?.classList.contains("is-mobile-open") && (document.body.classList.contains("ds-options-nav-picker") || !window.matchMedia("(min-width: 721px)").matches);
-      setActiveTab(button.dataset.tab);
+      // Re-selecting the visible tab should close the picker, not reload its
+      // managers or rewrite the saved navigation state. Explicit refresh and
+      // programmatic activation keep their existing behavior.
+      if (activeOptionsTab() !== button.dataset.tab) setActiveTab(button.dataset.tab);
       closeMobileNavigation();
       if (fromPicker) mobileToggle?.focus({ preventScroll: true });
     });
@@ -2408,26 +2438,6 @@ function setupSettingsSearch() {
   const GENERIC_SEARCH_TERMS = "setting settings option options preference preferences pref control controls configuration config";
   const GENERIC_QUERY_TERMS = new Set(GENERIC_SEARCH_TERMS.split(/\s+/));
   const featureRegistry = Array.isArray(window.SpicyChatQoLFeatureRegistry) ? window.SpicyChatQoLFeatureRegistry : [];
-  // v0.2.93: the first full Settings search used to scan every feature for
-  // every input/label; build a reverse lookup once (O(features + controls)).
-  const featureSearchByControl = new Map();
-  for (const entry of featureRegistry) {
-    if (!entry) continue;
-    const text = [entry.name, entry.category, entry.description, ...(entry.aliases || [])].filter(Boolean).join(" ");
-    if (!text) continue;
-    for (const key of new Set([entry.setting, entry.target, ...(Array.isArray(entry.settings) ? entry.settings : [])].filter(Boolean))) {
-      if (!featureSearchByControl.has(key)) featureSearchByControl.set(key, []);
-      featureSearchByControl.get(key).push(text);
-    }
-  }
-  function registrySearchTextFor(controlId, targetId, cardId) {
-    const primary = String(controlId || targetId || "");
-    const texts = [...(featureSearchByControl.get(primary) || [])];
-    const card = String(cardId || "");
-    if (card && card !== primary) texts.push(...(featureSearchByControl.get(card) || []));
-    return [...new Set(texts)].join(" ");
-  }
-
   const input = $("settingsSearch");
   const host = $("settingsSearchResults");
   const toggle = $("settingsSearchToggle");
@@ -2447,12 +2457,12 @@ function setupSettingsSearch() {
       if (input.dataset.dsSearchActivating === "1") return;
       input.dataset.dsSearchActivating = "1";
       setSettingsSearchExpanded(true, { focus: true });
-      window.setTimeout(async () => {
-        try { await window.dsqHydrateAllFeaturePanels?.(); }
-        catch (error) { console.warn("[QoL Settings] Some deferred panels could not load:", error); }
+      window.setTimeout(() => {
+        const started = performance.now();
         delete input.dataset.dsSearchActivating;
         setupSettingsSearch();
-        if (input.value.trim()) input.dispatchEvent(new Event("input", { bubbles: true }));
+        optionsPhaseSample("settings:search-index-build", performance.now() - started);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
       }, 0);
     };
     toggle?.addEventListener("click", activate, { once: true });
@@ -2619,18 +2629,21 @@ function setupSettingsSearch() {
       ...(Array.isArray(entry.settings) ? entry.settings : []),
       ...(Array.isArray(entry.searchSettings) ? entry.searchSettings : [])
     ].filter(Boolean))];
-    const candidateIds = [entry.target, ...controlIds].filter(Boolean);
+    if (controlIds.length && controlIds.every(id => isSettingOwnedByExcludedFeature(id))) continue;
+    const candidateIds = [entry.target, ...controlIds].filter(id => id && !isSettingOwnedByExcludedFeature(id));
     const candidates = candidateIds.map(id => document.getElementById(String(id))).filter(Boolean);
     const target = candidates.find(node => node.closest(".tab-page")) || null;
     const card = target?.closest(".card") || null;
     const page = target?.closest(".tab-page") || null;
-    const tabName = page?.dataset.page || "features";
+    const deferredId = candidateIds.find(id => window.dsqDeferredFeaturePanelTabForControl?.(id));
+    const tabName = page?.dataset.page || window.dsqDeferredFeaturePanelTabForControl?.(deferredId) || "features";
     const tabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(tabName)}"]`);
     const tabLabel = cleanSearchText(tabButton?.textContent) || "Features";
     const name = cleanSearchText(entry.name);
     const home = target || $("featureIndexSearch") || $("featureIndexList");
     appendItem({
       featureId: entry.id,
+      entry, controlIds, deferredId: !target ? deferredId : null,
       target: home,
       control: target?.matches?.("input, select, textarea, button") ? target : null,
       card: card || $("featureIndexList"),
@@ -2641,7 +2654,8 @@ function setupSettingsSearch() {
       description: summarize(entry.description) || "Find the controls for this QoL feature.",
       kind: "feature",
       searchText: cleanSearchText([
-        name, ...(entry.aliases || []),
+        name, entry.category, entry.description, ...(entry.aliases || []),
+        ...controlIds.map(id => `${id} ${id.replace(/([a-z0-9])([A-Z])/g, "$1 $2")} ${SEARCH_ALIASES[id] || ""}`),
         // Keep the visible control label searchable even for features with a
         // single toggle whose label differs from the catalogue name.
         ...(controlIds.length === 1 ? [targetLabel(document.getElementById(controlIds[0]))] : [])
@@ -2654,22 +2668,24 @@ function setupSettingsSearch() {
     // renderer chooses ONE best result per feature for any given query.
     if (controlIds.length < 2) continue;
     for (const id of controlIds) {
-      if (seenControlIds.has(id)) continue;
+      if (seenControlIds.has(id) || isSettingOwnedByExcludedFeature(id)) continue;
       const node = document.getElementById(String(id));
       const nodePage = node?.closest(".tab-page");
-      if (!nodePage) continue;
-      const label = cleanSearchText(targetLabel(node));
+      const deferredTab = window.dsqDeferredFeaturePanelTabForControl?.(id);
+      if (!nodePage && !deferredTab) continue;
+      const label = node ? cleanSearchText(targetLabel(node)) : id.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, c => c.toUpperCase());
       if (!label || label === "Setting") continue;
       seenControlIds.add(id);
       const detail = SEARCH_CONTROL_DETAILS[id] || {};
       const controlName = cleanSearchText(detail.name || label);
-      const nodeTab = nodePage.dataset.page || tabName;
+      const nodeTab = nodePage?.dataset.page || deferredTab || tabName;
       const nodeTabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(nodeTab)}"]`);
       appendItem({
         featureId: entry.id,
+        entry, controlIds: [id], deferredId: !node ? id : null,
         target: node,
-        control: node.matches("input, select, textarea, button") ? node : null,
-        card: node.closest(".card") || card || $("featureIndexList"),
+        control: node?.matches("input, select, textarea, button") ? node : null,
+        card: node?.closest(".card") || card || $("featureIndexList"),
         tabName: nodeTab,
         tabLabel: cleanSearchText(nodeTabButton?.textContent) || tabLabel,
         cardHeading: name,
@@ -2679,7 +2695,7 @@ function setupSettingsSearch() {
         kind: "setting",
         // Search control labels and specifically curated aliases only; don't
         // inherit broad parent aliases/descriptions for every child control.
-        searchText: cleanSearchText([controlName, label, ...(detail.aliases || [])].join(" ")).toLowerCase(),
+        searchText: cleanSearchText([controlName, label, detail.description, SEARCH_ALIASES[id], ...(detail.aliases || [])].filter(Boolean).join(" ")).toLowerCase(),
         targetText: controlName.toLowerCase()
       });
     }
@@ -2707,8 +2723,22 @@ function setupSettingsSearch() {
   };
 
   let searchJumpGeneration = 0;
-  const revealAndScrollTo = item => {
+  const revealAndScrollTo = async item => {
     const jumpId = ++searchJumpGeneration;
+    if (item.deferredId) {
+      if (activeOptionsTab() !== item.tabName) setActiveTab(item.tabName);
+      try { await window.dsqHydrateFeaturePanelsForTab?.(item.tabName); } catch {}
+      if (jumpId !== searchJumpGeneration || activeOptionsTab() !== item.tabName) return;
+      const resolved = $(item.deferredId);
+      if (!resolved) { showSettingsToast("That setting could not be loaded. Open its section and retry."); return; }
+      item = { ...item, target: resolved, card: resolved.closest(".card"), control: resolved.matches("input, select, textarea, button") ? resolved : null };
+    }
+    // Search navigation must reveal disabled features even in the enabled-only view.
+    if (typeof settingsShowEnabledOnly !== "undefined" && settingsShowEnabledOnly) {
+      settingsShowEnabledOnly = false;
+      try { sessionStorage.setItem(SETTINGS_ENABLED_ONLY_KEY, "0"); } catch {}
+      applySettingsEnabledOnlyFilter();
+    }
     const compact = window.matchMedia?.("(max-width: 720px)")?.matches === true ||
       PLATFORM_API?.detectEnvironment?.()?.android === true;
     if (compact) {
@@ -2719,7 +2749,7 @@ function setupSettingsSearch() {
       setSettingsSearchExpanded(false);
     }
 
-    setActiveTab(item.tabName);
+    if (activeOptionsTab() !== item.tabName) setActiveTab(item.tabName);
     if (item.tabName === "features" && item.kind === "feature") {
       const featureSearch = $("featureIndexSearch");
       if (featureSearch) {
@@ -2818,7 +2848,16 @@ function setupSettingsSearch() {
   const render = () => {
     const rawQuery = String(input.value || "").trim().toLowerCase();
     const rawTerms = rawQuery.split(/\s+/).filter(Boolean);
-    if (!rawTerms.length) {
+    const view = $("settingsDiscoveryView")?.value || "all";
+    const basic = $("settingsDiscoveryLevel")?.value === "basic";
+    if (view === "recent") {
+      lastMatches = [];
+      renderSettingsPreferenceHistory(host, rawQuery);
+      return;
+    }
+    if (view === "pinned") refreshSettingsDiscoveryPins();
+    const eligible = items.filter(item => settingsDiscoveryIncludes(item, view, basic));
+    if (!rawTerms.length && view === "all" && !basic) {
       lastMatches = [];
       clearResults();
       return;
@@ -2829,13 +2868,13 @@ function setupSettingsSearch() {
     // A genuine feature named "Settings search" is still discoverable.
     const genericOnly = terms.length === 0;
     const query = genericOnly ? rawQuery : terms.join(" ");
-    const directItems = items.filter(item => genericOnly
+    const directItems = eligible.filter(item => !rawTerms.length ? item.kind === "feature" : genericOnly
       ? item.targetText.includes(query)
       : terms.every(term => item.searchText.includes(term)));
     const directSet = new Set(directItems);
     const candidateItems = directItems.length || genericOnly
       ? directItems
-      : items.filter(item => terms.every(term => fuzzyTermMatch(item.searchText, term)));
+      : eligible.filter(item => terms.every(term => fuzzyTermMatch(item.searchText, term)));
 
     // One result per registered feature. If a search matches an individual
     // control more closely than its parent, point at that exact control.
@@ -2850,7 +2889,7 @@ function setupSettingsSearch() {
     }
     const matches = [...grouped.values()]
       .sort((a, b) => b.score - a.score || a.item.label.length - b.item.label.length || a.item.index - b.item.index)
-      .slice(0, 50);
+      .slice(0, rawTerms.length ? 50 : 200);
 
     lastMatches = matches;
     host.hidden = false;
@@ -2858,7 +2897,7 @@ function setupSettingsSearch() {
     if (!matches.length) {
       host.replaceChildren(makeElement("div", {
         className: "settings-search-empty",
-        text: `No features matched “${rawQuery}”.`
+        text: rawQuery ? `No features matched “${rawQuery}”.` : "No features in this view."
       }));
       return;
     }
@@ -2884,20 +2923,26 @@ function setupSettingsSearch() {
         const item = items[Number(button.dataset.searchItemIndex)];
         if (!item) return;
         input.value = "";
+        if ($("settingsDiscoveryView")) $("settingsDiscoveryView").value = "all";
         clearResults();
         revealAndScrollTo(item);
       });
     });
   };
 
-  const renderDebounced = debounceCallback(() => { OPTIONS_PERFORMANCE.searchRenders += 1; render(); }, 120);
-  input.addEventListener("input", renderDebounced);
+  const renderDebounced = debounceCallback(() => { OPTIONS_PERFORMANCE.searchRenders += 1; const started = performance.now(); render(); optionsPhaseSample("settings:search-render", performance.now() - started); }, 120);
+  input.addEventListener("input", () => { lastMatches = []; renderDebounced(); });
+  for (const id of ["settingsDiscoveryView", "settingsDiscoveryLevel"]) $(id)?.addEventListener("change", () => { lastMatches = []; renderDebounced(); });
+  window.dsqRefreshPreferenceDiscovery = () => {
+    if (!$("settingsSearchBody")?.hidden && ["enabled", "recent"].includes($("settingsDiscoveryView")?.value)) renderDebounced();
+  };
   input.addEventListener("keydown", event => {
     if (event.key === "Enter" && lastMatches.length) {
       event.preventDefault();
       const item = lastMatches[0]?.item;
       if (item) {
         input.value = "";
+        if ($("settingsDiscoveryView")) $("settingsDiscoveryView").value = "all";
         clearResults();
         revealAndScrollTo(item);
       }
@@ -2976,34 +3021,21 @@ function setPageSetting(id, value) {
 }
 
 async function applyPreset(name) {
-  const preset = name === "both"
-    ? { ...PRESET_VALUES.recommended, ...PRESET_VALUES.creator }
-    : PRESET_VALUES[name];
-  if (!preset) return;
-
-  // Setup presets are additive. Only the explicit reset / Start clean
-  // action may disable existing features. Preserve custom numeric choices too.
-  BASELINE_SAFETY_ON_KEYS.forEach(key => setPageSetting(key, true));
-  Object.entries(preset).forEach(([key, value]) => {
-    if (value === true) setPageSetting(key, true);
-  });
-  setPageSetting("enabled", true);
-
-  // Keep safety/behavior sub-options sensible even though their parent features remain opt-in.
-  setPageSetting("autoAfkProtectActive", true);
-  setPageSetting("autoAfkResetOnActivate", true);
-  setPageSetting("autoAfkChats", true);
-  setPageSetting("duplicateTabChats", true);
-  setPageSetting("duplicateTabFocusExisting", true);
-  setPageSetting("quickPanelEnabledByDefaultInTab", true);
-  setPageSetting("quickPanelAutoCollapseOverlap", true);
-
-  const saved = await save();
   const status = $("presetStatus");
-  if (status) {
-    const labels = { minimal: "Minimal", recommended: "Recommended", creator: "Creator", both: "Chatting + creator" };
-    status.textContent = saved ? `${labels[name] || "Quick"} setup added and saved. Existing features kept.` : "Could not verify setup save. Try Save now.";
+  if (!settingsAutosaveReady) { if (status) status.textContent = "Settings are still loading. Try again shortly."; return false; }
+  const plan = settingsPreferencePresetPlan(name);
+  if (!plan) return false;
+  for (const key of plan) {
+    setPageSetting(key, true);
+    queueSettingsAutosaveValue(key, true, { delay: 0 });
   }
+  const saved = await flushSettingsAutosave({ force: true });
+  updateSettingDependencies();
+  applySettingsEnabledOnlyFilter();
+  DS_FEATURE_INDEX_REFRESH?.();
+  if (status) status.textContent = saved ? `${plan.length} settings added and saved. Existing features and custom values kept.` : "Could not verify setup save. Try Save now.";
+  window.dsqRefreshPreferenceDiscovery?.();
+  return saved;
 }
 
 async function applyOptInBaseline({ showStatus = false } = {}) {
@@ -3036,9 +3068,9 @@ function closeFirstRunSetupDialog() {
 
 async function chooseFirstRunSetup(choice) {
   const normalized = String(choice || "").toLowerCase();
-  if (normalized === "chatting") await applyPreset("recommended");
-  else if (normalized === "creator") await applyPreset("creator");
-  else if (normalized === "both") await applyPreset("both");
+  if (normalized === "chatting") { if (!await applyPreset("recommended")) return false; }
+  else if (normalized === "creator") { if (!await applyPreset("creator")) return false; }
+  else if (normalized === "both") { if (!await applyPreset("both")) return false; }
   else if (normalized === "off") await disableOptionalFeatures();
   else return false;
   await finishFirstRunSetup();
@@ -3088,9 +3120,9 @@ function setupFirstRunWizard() {
 }
 
 function setupPresets() {
-  $("applyMinimalPreset")?.addEventListener("click", () => applyPreset("minimal"));
-  $("applyRecommendedPreset")?.addEventListener("click", () => applyPreset("recommended"));
-  $("applyCreatorPreset")?.addEventListener("click", () => applyPreset("creator"));
+  $("applyMinimalPreset")?.addEventListener("click", () => previewSettingsPreferencePreset("minimal"));
+  $("applyRecommendedPreset")?.addEventListener("click", () => previewSettingsPreferencePreset("recommended"));
+  $("applyCreatorPreset")?.addEventListener("click", () => previewSettingsPreferencePreset("creator"));
   $("startCustomSetup")?.addEventListener("click", () => showFirstRunSetupDialog({ manual: true }));
   $("disableOptionalFeatures")?.addEventListener("click", disableOptionalFeatures);
   setupFirstRunWizard();

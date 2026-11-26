@@ -16,7 +16,7 @@
 <h1>SpicyChat QoL</h1>
 <p id="versionText">Version loading...</p>
 </div>
-<div class="ds-layout-header-actions"><button id="settingsLayoutLabOpen" type="button" disabled>Layout lab</button>
+<div class="ds-layout-header-actions"><button id="settingsLayoutLabOpen" type="button" disabled>Settings layout</button>
 <button id="settingsLayoutPreviewToggle" type="button" hidden disabled>Back to classic Settings</button></div>
 </header>
 <section class="first-run-notice" hidden="" id="firstRunNotice">
@@ -45,6 +45,10 @@
 <select id="settingsRecentSections" aria-label="Recently used Settings sections"><option value="">Recent sections…</option></select>
 <button id="settingsShowEnabledOnly" type="button" aria-pressed="false">Show enabled only</button>
 </div>
+<div class="settings-quick-nav ds-discovery-views">
+<label>Find settings<select id="settingsDiscoveryView"><option value="all">All settings</option><option value="enabled">Enabled features</option><option value="recent">Recently changed</option><option value="new">What's new in v0.3</option><option value="pinned">Pinned sections</option></select></label>
+<label>Discovery level<select id="settingsDiscoveryLevel"><option value="all">All levels</option><option value="basic">Basic features</option></select></label>
+</div><p class="hint">Search names, descriptions and aliases. Basic limits discovery results only; all Settings tabs stay available.</p>
 <div class="settings-search-results" hidden="" id="settingsSearchResults"></div>
 </div>
 </section>
@@ -146,9 +150,9 @@
 <label>Settings page width
 <select id="settingsPageWidth"><option value="comfortable">Comfortable</option><option value="wide">Wide</option></select>
 </label>
-<p class="hint">Choose a numbered navigation layout. Classic tabs (01) remains the default and fallback. On narrow screens, all layouts use the compact Sections menu. Switching layouts does not change your enabled features.</p>
+<p class="hint">Choose your preferred numbered navigation layout. Classic tabs (01) remains the default and fallback. On narrow screens, all layouts use the compact Sections menu. Switching layouts does not change your enabled features.</p>
 <div id="settingsLayoutLab" class="sub-card ds-layout-lab">
-<h3>Layout lab — appearance</h3>
+<h3>Appearance preferences</h3>
 <p class="hint">Choose Original or Outlined cards and the original or blue navigation accent. Appearance choices are local to this browser; feature settings are unchanged.</p>
 <div class="ds-layout-lab-grid">
 <label>Card style<select data-layout-experiment="surface"><option value="default">Original (S01)</option><option value="outline">Outlined (S03)</option></select></label>
@@ -156,6 +160,8 @@
 </div>
 <label class="row"><input type="checkbox" data-layout-experiment="sticky"/><span>Keep the horizontal tab ribbon visible while scrolling (desktop ribbon layout only)</span></label>
 <div class="button-row"><button id="settingsLayoutLabReset" type="button">Reset appearance</button><button id="settingsLayoutLabClassic" type="button">Restore classic layout</button></div>
+<div class="button-row"><button id="settingsAppearanceExport" type="button">Copy appearance preset</button><button id="settingsAppearanceImport" type="button">Paste appearance preset</button></div>
+<textarea id="settingsAppearanceJson" hidden readonly aria-label="Appearance preset JSON"></textarea><details id="settingsAppearancePreview"><summary>Navigation previews</summary><div class="ds-layout-previews" id="settingsAppearancePreviewList"></div></details>
 <p class="hint" id="settingsLayoutLabStatus" role="status"></p>
 </div>
 <label class="row"><input id="collapseSettingsSectionsByDefault" type="checkbox"/><span>Collapse Settings sections by default</span></label>
@@ -176,7 +182,9 @@
 <button id="disableOptionalFeatures" type="button">Turn extra features off</button>
 </div>
 <p class="hint">Creator setup turns on the editing, backup and My Creations tools. It won't publish bots, change their visibility or enable community wording warnings for you.</p>
-<p class="hint" id="presetStatus"></p>
+<div class="button-row"><label>More additive presets <select id="settingsExtraPreset"><option value="performance">Performance</option><option value="mobile">Mobile</option><option value="archive">Archive &amp; Recovery</option><option value="research">Research</option><option value="roleplay">Roleplay</option><option value="privacy">Privacy / local controls</option></select></label><button id="settingsPreviewPreset" type="button">Preview preset</button></div>
+<details id="settingsPresetReview" class="sub-card" hidden><summary>Review changes</summary><p class="hint" id="settingsPresetReviewSummary"></p><ul id="settingsPresetReviewList"></ul><button id="settingsPresetConfirm" type="button">Add these settings</button></details>
+<p class="hint" id="presetStatus" role="status"></p>
 </section>
 <dialog id="firstRunSetupDialog" class="first-run-setup-dialog" aria-labelledby="firstRunSetupTitle">
 <div class="first-run-setup-shell">
@@ -196,6 +204,7 @@
 <h2>S.AI Toolkit compatibility</h2>
 <label class="row"><input id="saiToolkitCompatibility" type="checkbox"/><span>Enable S.AI Toolkit compatibility handling</span></label>
 <p class="hint">If you also use S.AI Toolkit, QoL can avoid running duplicate tools. Features that don't overlap will still work.</p>
+<button type="button" id="saiToolkitRefreshStatus">Check current SpicyChat tab</button>
 <p class="hint" id="saiToolkitStatus">S.AI Toolkit has not been detected on a SpicyChat page yet.</p>
 </section>
 <section class="card" id="androidAppDiscoveryCard">
@@ -734,6 +743,8 @@ Testing"></textarea></label>
 </section>
 <section class="card" id="botAvailabilityCard">
 <h2>Bot Status Center</h2>
+<div class="button-row"><button id="openBotStatusWorkspace" type="button">Open dedicated scan workspace</button></div><p class="hint" id="botStatusWorkspaceHint">Keep a separate Settings tab open for long scans while closing or using this one. Closing the scan tab stops the run; Resume uses its durable checkpoint.</p>
+
 <div class="button-row"><button id="dsLoadSavedRecovery" type="button">Load Bot Status &amp; recovery records</button><span id="dsSavedRecoveryOverview" class="hint" role="status">Full saved profiles and history load only when requested.</span></div>
 
 <fieldset id="botAvatarLookupCard">
@@ -847,7 +858,7 @@ Testing"></textarea></label>
 <span class="hint" id="botStatusScanEstimate">Leave either field blank for no limit. The scan stops at whichever limit is reached first; any in-flight check finishes safely.</span>
 </div>
 <div class="button-row">
-<button id="scanBotAvailability" type="button">Scan / refresh tracked bots</button>
+<button id="scanBotAvailability" type="button" title="Checks all eligible tracked bots in the selected scan scope, including unchecked. Outside-scope records require the separate manual action.">Scan / refresh tracked bots</button>
 <button id="scanUncheckedBotAvailability" type="button">Check unchecked bots</button>
 <button id="scanUnknownBotAvailability" type="button">Recheck unresolved results</button>
 <button id="resumePausedBotAvailability" type="button" hidden>Resume paused Bot Status scan</button>
@@ -857,6 +868,9 @@ Testing"></textarea></label>
 <button disabled="" id="stopBotAvailabilityScan" type="button">Stop scan</button>
 <span class="count" id="botAvailabilityScanStatus"></span>
 </div>
+<p class="hint">Full tracked scans include unchecked bots in the selected scope. Use Check outside routine scope separately for previously seen unblocked bots outside monitoring. Held and excluded blocked records are not silently enrolled.</p>
+<p class="hint" id="dsBotStatusPreparation" role="status">Scan counts load automatically when you reach these controls.</p>
+<button id="dsBotStatusPrepareRetry" type="button" hidden>Retry preparing scan counts</button>
 <p class="hint" id="botStatusPendingQueueSummary" role="status">Loading saved pending rechecks…</p>
 <p class="hint" id="botStatusLastRunSummary" role="status">Last scan summary loading…</p>
 <progress id="botStatusScanProgress" max="1" value="0" hidden style="width:100%; max-width:680px; height:10px" aria-label="Bot Status scan progress"></progress>
@@ -1187,7 +1201,7 @@ Testing" spellcheck="false"></textarea></label>
 </section><div id="ds-feature-panel-character-qol-profiles" data-dsq-feature-panel="character-qol-profiles"></div><section class="card" id="reportLinkCollectorSettingsCard">
 <h2>Report link collector</h2>
 <label class="row"><input id="enableReportLinkCollector" type="checkbox"/><span>Show a small + button on bot pictures to collect report links</span></label>
-<p class="hint">Optional, OFF by default. The extension popup lets you copy or clear collected SpicyChat bot URLs. Turning this off hides the buttons without deleting your saved links. QoL never submits reports automatically.</p>
+<p class="hint">Optional, OFF by default. Available on Home, Recommendations and public creator pages. The extension popup lets you copy or clear collected SpicyChat bot URLs. Turning this off hides the buttons without deleting your saved links. QoL never submits reports automatically.</p>
 </section><section class="card">
 <h2>Debug</h2>
 <label class="row"><input id="debug" type="checkbox"/><span>Debug badges for dimmed cards</span></label>
@@ -1771,6 +1785,7 @@ step sister" spellcheck="false"></textarea></label>
 <p class="hint">Choose sync directions per device. For example, sync blocked IDs on mobile without syncing all desktop settings.</p>
 <label>Automatic reconciliation interval
 <select id="accountSyncInterval">
+<option value="180">Every 3 hours</option>
 <option value="360">Every 6 hours</option>
 <option value="720" selected>Every 12 hours (default)</option>
 <option value="1440">Every 24 hours</option>
@@ -2185,6 +2200,7 @@ step sister" spellcheck="false"></textarea></label>
 <h2>Quick diagnostics</h2>
 <p class="hint">Copy version, browser, enabled features and storage counts for support. No chat text, memories or private lists.</p>
 <label class="setting-inline" style="display:flex;align-items:center;gap:8px;margin:8px 0"><input type="checkbox" data-ds-support-feature-names> Include enabled feature names in support reports (off by default)</label>
+<details id="settingsPerformanceCenter" class="sub-card"><summary>Performance Center</summary><p class="hint">On-demand local snapshot. Timings are wall time unless explicitly named processing; frame proxies are not measured input latency.</p><div class="button-row"><button id="settingsPerfRefresh" type="button">Refresh Settings snapshot</button><button id="settingsPerfRuntime" type="button">Read live runtime &amp; queues</button><button id="settingsPerfCopy" type="button">Copy snapshot</button></div><div id="settingsPerfSummary" role="status"></div><p id="settingsPerfRuntimeSummary" class="hint" role="status">Live runtime and queue counts load only on request.</p><div id="settingsPerfOperations"></div></details>
 <div class="button-row"><button id="copyAllSupportInfo" title="Use this if someone asks for diagnostics and a performance report" type="button">Copy all support info</button><button id="downloadAllSupportInfo" type="button">Download all support info</button><button id="copyDiagnostics" type="button">Copy diagnostic info</button><button id="downloadDiagnostics" type="button">Download diagnostic info</button><button id="copyPerformanceReport" type="button">Copy performance report</button><button id="downloadPerformanceReport" type="button">Download performance report</button><button id="runPerformanceSelfCheck" type="button">Run performance self-check</button><button id="downloadPerformanceSelfCheck" type="button">Download self-check</button><button id="resetPerformanceCounters" type="button">Reset performance counters</button><button id="releaseOptionsTemporaryMemory" type="button">Release temporary Settings memory</button></div>
 <p class="hint">Use Copy all or Download all for a complete support report, or export individual parts. Chat text is excluded.</p>
 <div class="button-row"><button id="recheckRefreshedSpicyChatTab" type="button">Recheck refreshed SpicyChat tab</button><span class="hint">After an extension update, manually reload just one stale SpicyChat tab and click here. This check does not reload any tabs.</span></div>
@@ -2310,6 +2326,6 @@ step sister" spellcheck="false"></textarea></label>
 <script type="application/x-dsq-lazy-feature-panel" src="settings/feature-panels/rulebook-diagnostics.js"></script>
 <script type="application/x-dsq-lazy-feature-panel" src="settings/feature-panels/story-reading-layout.js"></script>
 <script type="application/x-dsq-lazy-feature-panel" src="settings/feature-panels/chat-list.js"></script>
-<script src="settings/options-runtime-state.js"></script><script src="settings/options-feature-presets.js"></script><script src="settings/options-bot-metadata.js"></script><script src="settings/options-saved-managers-state.js"></script><script src="settings/options-chat-bubble-config.js"></script><script src="settings/options-backup-schema.js"></script><script src="settings/options-ui-config.js"></script><script src="options.js"></script><script src="settings/options-guidance.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
+<script src="settings/options-runtime-state.js"></script><script src="settings/options-feature-presets.js"></script><script src="settings/options-bot-metadata.js"></script><script src="settings/options-saved-managers-state.js"></script><script src="settings/options-chat-bubble-config.js"></script><script src="settings/options-backup-schema.js"></script><script src="settings/options-ui-config.js"></script><script src="settings/options-preference-tools.js"></script><script src="options.js"></script><script src="settings/options-guidance.js"></script><script src="background/bot-status-storage-cleanup.js"></script><script src="shared/storage-metrics.js"></script>
 </body>
 </html>

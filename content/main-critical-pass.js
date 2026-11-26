@@ -56,9 +56,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      // Native Lorebook/Rulebook attachment selection owns its editor portal.
+      if (DS.syncNativeEditorAttachmentPicker?.()) return;
+
       // Ensure route/setting-owned code exists before the regular feature lanes
       // call its DS methods. Cached imports cost nothing on subsequent passes.
       await DS.prepareOptionalModules?.(settings);
+      if (DS.syncNativeEditorAttachmentPicker?.()) return;
 
       // The chat-start/change-persona modal is a transient native surface.
       // While it is open, broad chat/listing reconciliation only competes with
@@ -173,7 +177,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       if (!listing && DS.removeReportLinkCollector) DS.removeReportLinkCollector();
       if (listing) {
-        if (settings.enableReportLinkCollector === true && /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) {
+        if (settings.enableReportLinkCollector === true && /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?|creator(?:\/[^/]+)?\/?)?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) {
           await runFeatureStep("report link collector", true, () => DS.applyReportLinkCollector?.());
         } else {
           DS.removeReportLinkCollector?.();
