@@ -88,7 +88,7 @@ jobs:
                   f"manifest.json version_name ({version_name}) does not match version ({version})."
               )
 
-          tag = f"v{version}"
+          tag = f"v{version_name}"
           rebuild = True
           reason = ""
           tag_sha = ""
@@ -113,7 +113,7 @@ jobs:
                   reason = (
                       f"{tag} does not exist yet; the normal Release workflow will create it."
                   )
-              elif stable and max(stable)[1] != tag:
+              elif stable and max(parts for parts, _ in stable) > tuple(map(int, version.split("."))):
                   latest_tag = max(stable)[1]
                   raise SystemExit(
                       f"Refusing to rebuild {tag}: latest stable tag is {latest_tag}."
@@ -137,7 +137,8 @@ jobs:
               raise SystemExit(f"CHANGELOG.md has no '## {version_name}' section.")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"version={version}\n")
+              out.write(f"version={version_name}\n")
+              out.write(f"manifest_version={version}\n")
               out.write(f"display_version={version_name}\n")
               out.write(f"tag={tag}\n")
               out.write(f"head={head}\n")
@@ -245,7 +246,8 @@ jobs:
                       raise SystemExit(f"{path}: manifest.json is missing")
 
                   packaged_manifest = json.loads(zf.read("manifest.json"))
-                  if packaged_manifest.get("version") != version:
+                  if (packaged_manifest.get("version") != ".".join(str(int(part)) for part in version.split("."))
+                          or (packaged_manifest.get("version_name") or packaged_manifest.get("version")) != version):
                       raise SystemExit(
                           f"{path}: manifest version {packaged_manifest.get('version')} != {version}"
                       )

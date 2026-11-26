@@ -303,7 +303,7 @@ jobs:
             exit 0
           fi
 
-          version="$(python3 -c 'import json; print(json.load(open("manifest.json", encoding="utf-8"))["version"])')"
+          version="$(python3 -c 'import json; m=json.load(open("manifest.json", encoding="utf-8")); print(m.get("version_name") or m["version"])')"
           tag="v${version}"
           if gh release view "$tag" >/dev/null 2>&1 ||
              gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then

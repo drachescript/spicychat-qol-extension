@@ -528,7 +528,7 @@ def build(
     dev: bool,
     output_dir: Path,
 ) -> Path:
-    version = str(source_manifest["version"])
+    version = str(source_manifest.get("version_name") or source_manifest["version"])
     output = output_dir / output_name(version, profile, dev, target)
     tracked_runtime = set(manifest_runtime_files(source_manifest))
     selected_runtime = selected_runtime_files(modules, profile)
