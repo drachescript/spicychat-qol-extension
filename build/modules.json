@@ -391,7 +391,8 @@
         "background/features/background-native-memory-probe.js",
         "background/features/background-research-memory-export.js",
         "background/features/background-community-themes.js",
-        "background/features/background-blocking-presets.js"
+        "background/features/background-blocking-presets.js",
+        "background/features/background-lorebook-import.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -449,7 +450,8 @@
         "background/features/background-native-memory-probe.js",
         "background/features/background-research-memory-export.js",
         "background/features/background-community-themes.js",
-        "background/features/background-blocking-presets.js"
+        "background/features/background-blocking-presets.js",
+        "background/features/background-lorebook-import.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",
