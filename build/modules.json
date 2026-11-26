@@ -605,6 +605,7 @@
         "settings/options-chat-bubble-config.js",
         "settings/options-backup-schema.js",
         "settings/options-ui-config.js",
+        "settings/options-preference-tools.js",
         "options.js",
         "settings/options-guidance.js",
         "background/bot-status-storage-cleanup.js",
