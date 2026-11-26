@@ -48,18 +48,19 @@ jobs:
           version = str(manifest.get("version") or "").strip()
           version_name = str(manifest.get("version_name") or version).strip()
 
-          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+          if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
               raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
 
-          if version_name != version:
+          if (not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version_name)
+                  or tuple(map(int, version_name.split("."))) != tuple(map(int, version.split(".")))):
               raise SystemExit(
                   f"manifest.json version_name ({version_name}) does not match version ({version})."
               )
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
           # Version headings are always plain: ## 0.2.48, no status suffixes.
-          if not re.search(rf"(?m)^##\s+{re.escape(version)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no exact '## {version}' section.")
+          if not re.search(rf"(?m)^##\s+{re.escape(version_name)}\s*$", changelog):
+              raise SystemExit(f"CHANGELOG.md has no exact '## {version_name}' section.")
 
           print(f"Version/changelog OK: {version}")
           PY

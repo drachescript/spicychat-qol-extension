@@ -4,6 +4,19 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "redesignedSidebarEnabled",
+    "sidebarDefaultLanding",
+    "sidebarRememberMenus",
+    "sidebarRememberCreationCategory",
+    "sidebarCompactNavigation",
+    "sidebarDedicatedCreate",
+    "hideSidebarDiscover",
+    "hideSidebarDiscoverLorebooks",
+    "hideSidebarDiscoverRulebooks",
+    "hideSidebarMyRulebooks",
+    "hideSidebarCreateRulebook",
+    "hideSidebarCreatePersona",
+    "hideSidebarCreatorAnalytics",
     "showQolSidebarButton",
     "qolSidebarButtonPlacement",
     "hideSidebarLogo",
@@ -47,7 +60,9 @@
     "hideSidebarFooterLinks",
     "hideSidebarAppDownload"
   ],
-  "requiredHelpers": [],
+  "requiredHelpers": [
+    "content/sidebar-redesign.js"
+  ],
   "settingsFiles": [
     "settings/feature-panels/sidebar.js"
   ],
