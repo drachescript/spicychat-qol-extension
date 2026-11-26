@@ -5,12 +5,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS?.customPictureKit) return;
   const roles = new Map();
+  let sharedRoots = null;
+  let sharing = false;
+  function recentMessageRoots() {
+    if (sharing && sharedRoots) return sharedRoots;
+    const all = document.querySelectorAll("div[id^='message-']");
+    const recent = [];
+    for (let i = all.length - 1; i >= 0 && recent.length < 80; i--) {
+      const root = all[i];
+      if (!root.parentElement?.closest?.("div[id^='message-']")) recent.push(root);
+    }
+    recent.reverse();
+    if (sharing) sharedRoots = recent;
+    return recent;
+  }
   DS.pictureOverrideCore = Object.freeze({
+    withSharedRoots(fn) {
+      sharing = true;
+      try { return fn(); } finally { sharing = false; sharedRoots = null; }
+    },
     create(role, isBot, includeHeader = false) {
       const originals = new WeakMap();
       const modified = new Set();
       let lastRoute = "";
-      let lastSignature = "";
+      let lastSource = "";
       let lastScan = 0;
       function clear() {
         for (const img of modified) {
@@ -21,20 +39,18 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           modified.delete(img);
           originals.delete(img);
         }
-        lastSignature = "";
+        lastSource = "";
       }
       function apply(source, force = false) {
         const route = DS.customPictureKit.chatKey();
         if (!route || !source) { clear(); lastRoute = route; return; }
-        const signature = `${route}|${source.length}|${source.slice(0, 90)}`;
         const now = Date.now();
-        if (!force && signature === lastSignature && now - lastScan < 3500) return;
+        if (!force && route === lastRoute && source === lastSource && now - lastScan < 3500) return;
         lastScan = now;
         if (lastRoute !== route) { clear(); lastRoute = route; }
-        lastSignature = signature;
+        lastSource = source;
         const targets = [];
-        const roots = [...document.querySelectorAll("div[id^='message-']")]
-          .filter(root => !root.parentElement?.closest?.("div[id^='message-']")).slice(-80);
+        const roots = recentMessageRoots();
         for (const root of roots) {
           const bot = !!root.querySelector("a[href*='/chatbot/'], a[aria-label='chatbot-profile']");
           if (bot !== isBot) continue;

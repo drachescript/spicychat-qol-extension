@@ -42,15 +42,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.hasCustomPictures = () => kit.availableTabs().length > 0;
   let initialApplyToken = 0;
   let initialApplyQueued = false;
+  let initialApplyTimer = null;
   let lastAppliedRoute = '';
+  let scheduledRefresh = null;
+  let scheduledRunning = false;
+  let scheduledAgain = false;
   const applyPicturesNow = async () => {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !DS.isSingleChatPage?.() || !kit.availableTabs(settings).length) return;
     const route = String(location.pathname || '');
+    const token = initialApplyToken;
     await kit.loadStore();
-    if (!DS.state?.settings?.enabled || !DS.isSingleChatPage?.() || location.pathname !== route) return;
-    await DS.applyBackgroundLayer?.(!!settings.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
-    for (const apply of kit.applyHooks()) apply();
+    const latest = DS.state?.settings || {};
+    if (token !== initialApplyToken || !latest.enabled || !DS.isSingleChatPage?.() || location.pathname !== route || !kit.availableTabs(latest).length) return;
+    await DS.applyBackgroundLayer?.(!!latest.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
+    if (token !== initialApplyToken || location.pathname !== route || !DS.state?.settings?.enabled) return;
+    const hooks = () => { for (const apply of kit.applyHooks()) apply(); };
+    if (DS.pictureOverrideCore?.withSharedRoots) DS.pictureOverrideCore.withSharedRoots(hooks);
+    else hooks();
     DS.state.chatBackgroundsWasActive = true;
   };
   DS.applyChatBackgrounds = async () => {
@@ -59,24 +68,53 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!active) { DS.removeChatBackgrounds?.(); return; }
     // Make a newly visited chat interactive before loading potentially large saved pictures.
     const route = String(location.pathname || '');
-    if (lastAppliedRoute !== route && !initialApplyQueued) {
+    if (lastAppliedRoute !== route) {
+      clearTimeout(initialApplyTimer);
+      initialApplyTimer = null;
+      initialApplyQueued = false;
       // A previous chat's picture must not remain behind the next chat.
       DS.removeBackgroundLayer?.();
       lastAppliedRoute = route;
       initialApplyQueued = true;
       const token = ++initialApplyToken;
-      setTimeout(() => {
-        initialApplyQueued = false;
+      initialApplyTimer = setTimeout(() => {
         if (token !== initialApplyToken || location.pathname !== route) return;
-        void applyPicturesNow().catch(() => {});
+        initialApplyTimer = null;
+        initialApplyQueued = false;
+        DS.queueChatBackgroundRefresh();
       }, 150);
       return;
     }
     if (initialApplyQueued) return;
     await applyPicturesNow();
   };
+  // Critical scheduler only queues this work. User actions may still await
+  // applyChatBackgrounds directly; no image work is added to message lanes.
+  DS.queueChatBackgroundRefresh = () => {
+    if (scheduledRefresh !== null) return;
+    if (scheduledRunning) { scheduledAgain = true; return; }
+    scheduledRefresh = setTimeout(async () => {
+      scheduledRefresh = null;
+      scheduledRunning = true;
+      const started = performance.now();
+      const token = DS.diagOperationStart?.("chat-backgrounds", "deferred-refresh", { phase: "outside-critical-scheduler" });
+      let outcome = "ok";
+      try { await DS.applyChatBackgrounds(); }
+      catch { outcome = "error"; }
+      finally {
+        scheduledRunning = false;
+        DS.diagOperationEnd?.(token, { outcome, meta: { wallMs: performance.now() - started, timingKind: "async-wall-not-cpu" } });
+        if (scheduledAgain) { scheduledAgain = false; DS.queueChatBackgroundRefresh(); }
+      }
+    }, 0);
+  };
   DS.removeChatBackgrounds = () => {
+    clearTimeout(scheduledRefresh);
+    scheduledRefresh = null;
+    scheduledAgain = false;
     ++initialApplyToken;
+    clearTimeout(initialApplyTimer);
+    initialApplyTimer = null;
     initialApplyQueued = false;
     lastAppliedRoute = '';
     DS.removeBackgroundLayer?.();

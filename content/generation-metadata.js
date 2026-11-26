@@ -213,21 +213,21 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return record.actualModel ? `Actual model: ${clean(record.actualModel)}` : "Actual model: Not reported";
   }
 
-  function modelText(record) {
+  function modelText(record, shown = {}) {
     if (!hasModelEvidence(record)) return "";
     const parts = [];
     const requested = clean(record.requestedModel);
     const engine = clean(record.responseEngine);
     const actual = clean(record.actualModel);
     const serverModel = clean(record.serverModel);
-    if (requested) parts.push(`Requested: ${requested}`);
-    if (engine) parts.push(`Engine: ${engine}`);
+    if (requested && !shown.requested) parts.push(`Requested: ${requested}`);
+    if (engine && !shown.engine) parts.push(`Engine: ${engine}`);
     // A generic top-level response model may be an alias rather than a
     // resolved backend. Report it honestly, but don't call it "actual".
-    if (!actual && serverModel && serverModel.toLowerCase() !== requested.toLowerCase()) {
+    if (!actual && !shown.server && serverModel && serverModel.toLowerCase() !== requested.toLowerCase()) {
       parts.push(`Server model (unverified): ${serverModel}`);
     }
-    parts.push(actualModelStatusText(record));
+    if (!shown.actual) parts.push(actualModelStatusText(record));
     return parts.join(" · ");
   }
 
@@ -494,7 +494,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (ai && (settings.showGenerationModel === true || combinedDefaults)) {
       // When Toolkit owns the usual statistics, display only the additional
       // actual-model status. Do not duplicate requested model/timestamps.
-      const value = settings.modelStatusOnly === true ? actualModelStatusText(record) : modelText(record);
+      const evidence = settings.toolkitModelEvidence;
+      const value = evidence ? modelText(record, evidence) : modelText(record);
       if (value) lines.push(value);
     }
 
@@ -516,20 +517,38 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     const record = records[id];
     const existing = root.querySelector(":scope .ds-generation-metadata");
-    // Toolkit may paint a message before its page-wide presence marker is
-    // observed. Suppress only overlapping metadata in that message, while
-    // preserving QoL's independent token estimate if enabled.
-    const toolkitVisibleHere = settings.saiToolkitCompatibility !== false &&
-      !!root.querySelector(".generation-stats");
-    const messageSettings = toolkitVisibleHere ? {
-      ...settings,
-      showGenerationMetadata: false,
-      showMessageTimestamps: false,
-      showGenerationModel: modelDisplayRequested(settings),
-      showGenerationElapsed: false,
-      showGenerationSettings: false,
-      modelStatusOnly: true
-    } : settings;
+    let messageSettings = settings;
+    const compatibility = settings.saiToolkitCompatibility !== false;
+    const toolkit = compatibility ? root.querySelector(".generation-stats") : null;
+    const statsState = settings.toolkitStatsState ?? (compatibility ? DS.getSaiToolkitFeatureStatus?.("generationStats") : "unknown");
+    const timeState = settings.toolkitTimeState ?? (compatibility ? DS.getSaiToolkitFeatureStatus?.("timestamps") : "unknown");
+    if (compatibility && (toolkit || timeState === "enabled")) {
+      messageSettings = {...settings};
+      // Toolkit's block may contain *only* a timestamp or ID. Never treat
+      // the existence of that block as evidence for all other metadata.
+      const text = String(toolkit?.textContent || "");
+      // Toolkit joins display rows with <br>. Keep line boundaries so a
+      // decimal temperature cannot be mistaken for a time of day.
+      const rows = toolkit ? Array.from(toolkit.childNodes || []).map(node => node.nodeName === "BR" ? "\n" : node.textContent || "").join("").split(/\n+/).map(clean).filter(Boolean) : [];
+      const combined = settings.showGenerationMetadata === true && !metadataDetailRequested(settings);
+      messageSettings.showGenerationMetadata = false;
+      messageSettings.showMessageTimestamps = settings.showMessageTimestamps === true || combined;
+      messageSettings.showGenerationModel = modelDisplayRequested(settings);
+      messageSettings.showGenerationElapsed = settings.showGenerationElapsed === true || combined;
+      const timestampVisible = /(?:\b\d{1,2}:\d{2}\b|\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b)/.test(text);
+      if (timeState === "enabled" || (timeState !== "disabled" && timestampVisible)) messageSettings.showMessageTimestamps = false;
+      if (statsState !== "disabled" && toolkit) {
+        const matching = (a,b) => !!clean(b) && clean(a).toLowerCase() === clean(b).toLowerCase();
+        const pairs = rows.map(line=>line.split(/\s*→\s*/));
+        const requested = pairs.some(parts=>matching(parts[0],record?.requestedModel));
+        const actual = pairs.some(parts=>parts.length===2 && matching(parts[1],record?.actualModel));
+        const server = pairs.some(parts=>parts.length===2 && matching(parts[1],record?.serverModel));
+        const engine = pairs.some(parts=>parts.length===2 && matching(parts[1],record?.responseEngine));
+        messageSettings.toolkitModelEvidence = {requested,actual,engine,server};
+        // Toolkit verbose and compact generation-slider lines, not timestamp/ID.
+        if (/Tokens:\s*\d+.*Temp:/i.test(text) || /\d+\s*\|\s*[\d.]+\s*\|\s*[\d.]+\s*\|\s*\d+/.test(text)) messageSettings.showGenerationSettings = false;
+      }
+    }
     const lines = displayLines(record, root, messageSettings);
 
     if (!lines.length) {
@@ -592,33 +611,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
-    const toolkitOwnsStats = DS.shouldDeferToSaiToolkit?.("generation-metadata") === true;
-    // Toolkit owns models, timestamps and generation settings. QoL's separate
-    // optional token estimate and context warning should remain available.
-    const displaySettings = toolkitOwnsStats ? {
-      ...settings,
-      showGenerationMetadata: false,
-      showMessageTimestamps: false,
-      showGenerationModel: modelDisplayRequested(settings),
-      showGenerationElapsed: false,
-      showGenerationSettings: false,
-      modelStatusOnly: true
-    } : settings;
-    if (toolkitOwnsStats && settings.showMessageTokenEstimate !== true && !modelDisplayRequested(settings)) {
-      cleanup();
-      dirtyRecordIds.clear();
-      if (settings.enableContextWindowWarning) {
-        await ensureLoaded();
-        applyContextWarning(settings);
-      } else {
-        removeContextWarning();
-      }
-      return;
-    }
-
+    const displaySettings = {...settings,
+      toolkitStatsState: DS.getSaiToolkitFeatureStatus?.("generationStats"),
+      toolkitTimeState: DS.getSaiToolkitFeatureStatus?.("timestamps")
+    };
     await ensureLoaded();
     const route = String(location.pathname || "");
     const displaySignature = JSON.stringify({
+      toolkitCompatibility: settings.saiToolkitCompatibility !== false,
+      toolkitStats: displaySettings.toolkitStatsState,
+      toolkitTimestamps: displaySettings.toolkitTimeState,
       combined: displaySettings.showGenerationMetadata === true,
       timestamps: displaySettings.showMessageTimestamps === true,
       seconds: displaySettings.messageTimestampShowSeconds === true,
@@ -663,6 +665,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   };
 
+  DS.invalidateGenerationMetadataCompatibility = () => { lastDisplaySignature = ""; };
   DS.removeGenerationMetadata = function removeGenerationMetadata() { cleanup(); removeContextWarning(); };
   DS.MESSAGE_GENERATION_METADATA_KEY = STORAGE_KEY;
 

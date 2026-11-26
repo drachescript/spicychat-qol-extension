@@ -7,7 +7,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS) return;
   DS.isUnsafeCardHideTarget = function isUnsafeCardHideTarget(target) {
-    if (!target) return true;
+    if (!target || DS.isNativePickerSurface?.(target) || DS.containsNativePickerSurface?.(target)) return true;
     if (target === document.documentElement || target === document.body || target.id === "root") return true;
     if (target.matches?.("main, [role='main'], [data-overlay-container='true'], [data-testid='SearchClientCharacterListing']")) return true;
 

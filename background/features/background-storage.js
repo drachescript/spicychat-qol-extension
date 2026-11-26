@@ -97,13 +97,25 @@ async function unpackLargeStorageRecord(row) {
 }
 
 async function unpackLargeStorageRows(rows) {
-  // Bound the number of simultaneous gzip streams on large reads.
+  // Plain rows do not need async decompression or one Promise per record.
+  // Compressed rows keep the same six-stream bound and strict codec checks.
   const result = new Array(rows.length);
-  for (let i = 0; i < rows.length; i += 6) {
-    await Promise.all(rows.slice(i, i + 6).map(async (row, j) => {
-      result[i + j] = { id: row.id, value: await unpackLargeStorageRecord(row) };
+  let packed = [];
+  const decode = async batch => {
+    await Promise.all(batch.map(async ([index, row]) => {
+      result[index] = { id: row.id, value: await unpackLargeStorageRecord(row) };
     }));
+  };
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row.codec) {
+      result[i] = { id: row.id, value: row.value && typeof row.value === "object" ? row.value : null };
+      continue;
+    }
+    packed.push([i, row]);
+    if (packed.length === 6) { await decode(packed); packed = []; }
   }
+  if (packed.length) await decode(packed);
   return result;
 }
 
@@ -297,7 +309,7 @@ async function readLargeStorage(key) {
   return { meta };
 }
 
-async function readLargeStorageRecords(key, ids = []) {
+async function readLargeStorageRecords(key, ids = [], { strict = false } = {}) {
   if (!LARGE_STORAGE_KEYS.has(key)) return {};
   const startedAt = Date.now();
   await ensureLargeStorageMigrated(key);
@@ -306,8 +318,9 @@ async function readLargeStorageRecords(key, ids = []) {
   const db = await openLargeStorageDb();
   const tx = db.transaction(key, "readonly");
   const store = tx.objectStore(key);
-  const rows = await Promise.all(cleanIds.map(id => idbRequest(store.get(id)).catch(() => null)));
+  const rows = await Promise.all(cleanIds.map(id => { const read = idbRequest(store.get(id)); return strict ? read : read.catch(() => null); }));
   const decoded = await unpackLargeStorageRows(rows.filter(Boolean));
+  if (strict && decoded.some(row => !row?.value || typeof row.value !== "object" || Array.isArray(row.value))) throw new Error("Stored record could not be decoded safely");
   const byId = new Map(decoded.map(row => [row.id, row.value]));
   const out = {};
   for (let i = 0; i < cleanIds.length; i += 1) {
@@ -352,8 +365,11 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
   const safeLimit = Math.max(25, Math.min(500, Number(limit) || 250));
   const cursorAfter = String(afterId || "").trim();
   const range = cursorAfter ? IDBKeyRange.lowerBound(cursorAfter, true) : null;
+  const fetchStarted = Date.now();
   const rows = await idbRequest(store.getAll(range, safeLimit));
+  const fetchedAt = Date.now();
   const decodedRows = await unpackLargeStorageRows(rows);
+  const decodedAt = Date.now();
   const cleanRows = [];
   for (const row of decodedRows) {
     const id = String(row?.id || "").trim();
@@ -361,8 +377,8 @@ async function readLargeStoragePage(key, { afterId = "", limit = 250 } = {}) {
     cleanRows.push({ id, value: row.value });
   }
   const nextAfterId = rows.length ? String(rows[rows.length - 1].id) : cursorAfter;
-  const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit };
-  qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt }, { level: "deep" });
+  const result = { key, rows: cleanRows, nextAfterId, done: (rows || []).length < safeLimit, timing: { idbReadWallMs: fetchedAt - fetchStarted, decodeWallMs: decodedAt - fetchedAt, resultBuildMs: Date.now() - decodedAt, preparationWallMs: fetchStarted - startedAt } };
+  qolBackgroundTrace("storage", "indexeddb", { action: "read-page", key, records: cleanRows.length, limit: safeLimit, done: result.done, durationMs: Date.now() - startedAt, idbReadWallMs: fetchedAt - fetchStarted, decodeWallMs: decodedAt - fetchedAt, resultBuildMs: Date.now() - decodedAt, preparationWallMs: fetchStarted - startedAt }, { level: "deep" });
   return result;
 }
 
@@ -413,10 +429,12 @@ async function getLargeStorageValues(keys) {
   return data;
 }
 
-async function getLargeStorageStats() {
+async function getLargeStorageStats(keys = null) {
   const startedAt = Date.now();
   const stats = {};
-  for (const key of LARGE_STORAGE_KEYS) {
+  for (const key of largeStorageRequestedKeys(keys)) {
+    // The new scoped overview is read-only even for a legacy/unmigrated store.
+    if (keys != null && !(await largeStorageMeta(key))?.migrated) continue;
     await ensureLargeStorageMigrated(key);
     const db = await openLargeStorageDb();
     const tx = db.transaction(key, "readonly");
@@ -525,7 +543,19 @@ function persistBotStatusDelta(message = {}) {
     try {
       // v0.2.29: per-bot IDB writes. A one-bot Bot Status result no longer
       // clones and rewrites the complete archive/availability objects.
-      if (availabilityIds.length) await mergeLargeStorageEntries("botAvailability", availabilityUpdates);
+      if (availabilityIds.length && message.feedbackPreflight === true) {
+        const previous = await readLargeStorageRecords("botAvailability", availabilityIds, { strict: true });
+        const newEntries = {};
+        for (const id of availabilityIds) {
+          // Do not replace or downgrade a Bot Status record (including evidence,
+          // snapshots and history) with a recommendation API preflight.
+          if (previous[id]) continue;
+          const row = availabilityUpdates[id];
+          // A missing API character alone is not a confirmed deletion.
+          newEntries[id] = { ...row, status: row.status === "available" ? "available" : "unknown" };
+        }
+        if (Object.keys(newEntries).length) await mergeLargeStorageEntries("botAvailability", newEntries);
+      } else if (availabilityIds.length) await mergeLargeStorageEntries("botAvailability", availabilityUpdates);
       if (archiveIds.length) await mergeLargeStorageEntries("botArchive", archiveUpdates);
       return { ok: true, availability: availabilityIds.length, archive: archiveIds.length };
     } catch (error) {
@@ -539,4 +569,171 @@ function persistBotStatusDelta(message = {}) {
   });
 
   return botStatusPersistQueue;
+}
+
+
+// Chat export pages live in a separate extension-origin database. The page and
+// its cursor are committed in the same transaction; no chat text goes into sync,
+// chrome.storage.local, or diagnostic events.
+let dsqChatExportDatabase = null;
+const dsqChatExportProtectedTabs = new Map();
+function dsqChatExportTabProtected(tab) {
+  const row = dsqChatExportProtectedTabs.get(Number(tab?.id));
+  if (!row) return false;
+  if (row.until < Date.now() || !String(tab?.url || '').includes(row.path)) {
+    dsqChatExportProtectedTabs.delete(Number(tab?.id)); return false;
+  }
+  return true;
+}
+function dsqOpenChatExportDatabase() {
+  if (!dsqChatExportDatabase) dsqChatExportDatabase = new Promise((resolve, reject) => {
+    const r = indexedDB.open('dsq-chat-export-checkpoints-v1', 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore('jobs');
+      r.result.createObjectStore('pages');
+    };
+    r.onsuccess = () => {
+      const db = r.result;
+      db.onversionchange = () => { db.close(); dsqChatExportDatabase = null; };
+      resolve(db);
+    };
+    r.onerror = () => reject(r.error || Error('Could not open export checkpoints'));
+    r.onblocked = () => reject(Error('Export checkpoint database is blocked'));
+  }).catch(error => { dsqChatExportDatabase = null; throw error; });
+  return dsqChatExportDatabase;
+}
+function dsqChatExportScope(sender, message) {
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  const url = new URL(sender?.url || sender?.tab?.url || '');
+  const parts = url.pathname.split('/').filter(Boolean);
+  const index = parts.indexOf('chat');
+  const bot = String(parts[index+1] || '').toLowerCase();
+  const conv = String(parts[index+2] || '').toLowerCase();
+  if (sender?.id !== chrome.runtime.id || sender?.frameId !== 0 ||
+      url.protocol !== 'https:' || !['spicychat.ai','www.spicychat.ai'].includes(url.hostname) ||
+      index < 0 || parts.length !== index+3 || !uuid.test(bot) || !uuid.test(conv) ||
+      bot !== message.characterId || conv !== message.conversationId) throw Error('Open the exact saved conversation to access its export checkpoint.');
+  return { key: `${bot}:${conv}`, path: `/chat/${bot}/${conv}`, tabId: Number(sender.tab?.id) };
+}
+// Settings maintenance is authorized independently of the conversation route.
+// The reviewed snapshot is kept in worker memory, never returned with IDs/text.
+let dsqChatExportClearReview = null;
+function dsqChatExportMaintenance(message, sender) {
+  if (sender?.id !== chrome.runtime.id || String(sender?.url || '').split(/[?#]/,1)[0] !== chrome.runtime.getURL('options.html') || (sender.frameId != null && sender.frameId !== 0)) throw Error('Export maintenance is available only from QoL Settings.');
+  const active = () => [...dsqChatExportProtectedTabs.values()].some(row => row.until > Date.now());
+  return dsqOpenChatExportDatabase().then(db => new Promise((resolve,reject) => {
+    const clearing = message.action === 'settings-clear';
+    const tx = db.transaction(['jobs','pages'], clearing ? 'readwrite' : 'readonly');
+    const jobs = tx.objectStore('jobs'), pages = tx.objectStore('pages');
+    let result, failure;
+    const abort = error => { failure=error; try{tx.abort();}catch{} };
+    tx.oncomplete=()=>resolve({ok:true,...result});
+    tx.onabort=tx.onerror=()=>reject(failure||tx.error||Error('Export maintenance transaction failed'));
+    const keys=jobs.getAllKeys(), rows=jobs.getAll(), pageCount=pages.count();
+    let ready=0;
+    const finish=()=>{
+      if(++ready!==3)return;
+      try{
+        const values=rows.result||[], ids=keys.result||[];
+        const signature=JSON.stringify(ids.map((key,i)=>[key,values[i]?.jobId,values[i]?.revision]));
+        const counts={captures:values.length,pages:pageCount.result,messages:values.reduce((n,row)=>n+Math.max(0,Number(row.rawUniqueCount)||0),0)};
+        // A recent unfinished job may have survived a worker restart. Require
+        // the user to stop it first, or wait until its short lease expires.
+        const running=active()||values.some(row=>row.reason==='fetching'&&Date.now()-Number(row.checkpointAt||0)<300000);
+        if(!clearing){
+          const token=crypto.randomUUID();dsqChatExportClearReview={token,signature,pages:counts.pages,until:Date.now()+120000};
+          result={...counts,token,active:running};return;
+        }
+        const review=dsqChatExportClearReview;
+        if(!review||message.token!==review.token||review.until<Date.now()||review.signature!==signature||review.pages!==counts.pages)throw Error('Saved exports changed or review expired. Check saved exports again.');
+        if(running)throw Error('An export may still be active. Pause fetching or finish the download before clearing; retry after the protection window if necessary.');
+        // Both stores are cleared atomically. No other database is touched.
+        pages.clear();jobs.clear();dsqChatExportClearReview=null;result={cleared:true,...counts};
+      }catch(error){abort(error);}
+    };
+    keys.onsuccess=finish;rows.onsuccess=finish;pageCount.onsuccess=finish;
+  }));
+}
+async function dsqChatExportCheckpoint(message, sender) {
+  if (message.action === 'settings-overview' || message.action === 'settings-clear') return dsqChatExportMaintenance(message,sender);
+  const scope = dsqChatExportScope(sender, message);
+  const action = message.action;
+  if (action === 'release') { dsqChatExportProtectedTabs.delete(scope.tabId); return { ok: true }; }
+  if (scope.tabId) dsqChatExportProtectedTabs.set(scope.tabId, {path:scope.path,until:Date.now()+300000});
+  if(action==='download-status'){
+    // Exact, unguessable blob URL from this conversation's origin only. Do not
+    // expose browser download lists, paths, filenames or unrelated URLs.
+    const url=String(message.blobUrl||'');
+    const origin=new URL(sender.url||sender.tab.url).origin;
+    if(!url.startsWith(`blob:${origin}/`)||! /^[0-9a-f-]{36}$/i.test(url.slice(`blob:${origin}/`.length)))throw Error('Invalid export download reference');
+    if(!chrome.downloads?.search||!chrome.permissions?.contains)return {ok:true,state:'unavailable'};
+    const granted=await new Promise(resolve=>chrome.permissions.contains({permissions:['downloads']},allowed=>resolve(!chrome.runtime.lastError&&allowed)));
+    if(!granted)return {ok:true,state:'unavailable'};
+    return new Promise(resolve=>chrome.downloads.search({url,limit:2},items=>{
+      if(chrome.runtime.lastError)return resolve({ok:true,state:'unavailable'});
+      const matches=(items||[]).filter(item=>item.url===url||item.finalUrl===url);
+      if(matches.length!==1)return resolve({ok:true,state:'unconfirmed'});
+      const item=matches[0];
+      resolve({ok:true,state:['complete','interrupted','in_progress'].includes(item.state)?item.state:'unconfirmed'});
+    }));
+  }
+  const db = await dsqOpenChatExportDatabase();
+  const write = action === 'commit' || action === 'clear' || action==='append';
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['jobs','pages'], write ? 'readwrite' : 'readonly');
+    const jobs = tx.objectStore('jobs'), pages = tx.objectStore('pages');
+    let result, failure;
+    const abort = error => { failure = error; try { tx.abort(); } catch {} };
+    tx.oncomplete = () => resolve({ok:true,...result});
+    tx.onabort = tx.onerror = () => reject(failure || tx.error || Error('Export checkpoint transaction failed'));
+    const req = jobs.get(scope.key);
+    req.onsuccess = () => {
+      try {
+        const old = req.result || null;
+        if (action === 'get') { result = { job: old }; return; }
+        if (action === 'page') {
+          if (!old || old.jobId !== message.jobId || !Number.isInteger(message.page) || message.page < 1 || message.page > old.pages) throw Error('Checkpoint page is no longer available');
+          const read = pages.get([scope.key,message.page]);
+          read.onsuccess = () => {
+            if (!read.result || read.result.jobId !== old.jobId) { abort(Error('Missing saved export page')); return; }
+            const {jobId,...page} = read.result;
+            result = {page:message.idsOnly ? {...page,messages:undefined,activeRoles:page.activeRoles} : page};
+          };
+          return;
+        }
+        if (action === 'clear') {
+          if (!old || old.jobId !== message.jobId || old.revision !== message.revision) throw Error('Checkpoint changed; reopen export before clearing');
+          pages.delete(IDBKeyRange.bound([scope.key,0],[scope.key,Number.MAX_SAFE_INTEGER]));
+          jobs.delete(scope.key); result = {}; return;
+        }
+        if(action==='append'){
+          const next=message.job, batch=message.appendPages;
+          if(!old||!next||old.jobId!==next.jobId||next.revision!==old.revision+1||!['api-exhausted','api-chain-start'].includes(old.reason)||!Array.isArray(batch)||!batch.length||batch.length>25||next.pages!==old.pages+batch.length)throw Error('Saved capture changed or invalid append batch');
+          const ranges=old.pageSegments||(old.pages?[{first:1,last:old.pages}]:[]);
+          if(JSON.stringify(next.pageSegments)!==JSON.stringify([...ranges,{first:old.pages+1,last:next.pages}]))throw Error('Invalid appended page order');
+          let raw=0,active=0,standard=0;const ids=new Set();
+          for(const page of batch){
+            if(!Array.isArray(page.rawIds)||!Array.isArray(page.messages)||!page.rawIds.length||page.rawIds.length>200||page.messages.length>page.rawIds.length||page.rawRows!==page.rawIds.length)throw Error('Invalid appended page');
+            const pageIds=new Set(page.rawIds);
+            for(const id of page.rawIds){if(typeof id!=='string'||!id||ids.has(id))throw Error('Repeated appended ID');ids.add(id);}
+            const activeIds=new Set();for(const row of page.messages){if(!pageIds.has(row.id)||activeIds.has(row.id))throw Error('Invalid appended message identity');activeIds.add(row.id);if(['user','human','bot','assistant','character'].includes(row.role))standard++;}
+            raw+=page.rawIds.length;active+=page.messages.length;
+          }
+          if(next.rawUniqueCount!==old.rawUniqueCount+raw||next.allActiveCount!==old.allActiveCount+active||next.standardCount!==old.standardCount+standard||next.complete!==false)throw Error('Invalid appended counts');
+          batch.forEach((page,i)=>pages.add({...page,jobId:next.jobId},[scope.key,old.pages+i+1]));
+          jobs.put({...next,checkpointAt:Date.now()},scope.key);result={revision:next.revision};return;
+        }
+        if (action !== 'commit') throw Error('Unknown checkpoint operation');
+        const next = message.job;
+        const base = Number(old?.revision || 0);
+        if (!next || typeof next.jobId !== 'string' || next.jobId.length > 100 || next.revision !== base+1 ||
+            (old && old.jobId !== next.jobId) || next.pages !== Number(old?.pages || 0)+(message.page?1:0)) throw Error('Export checkpoint changed in another tab; reopen to resume');
+        if (message.page) {
+          if (!Array.isArray(message.page.rawIds) || !Array.isArray(message.page.messages) || message.page.rawIds.length > 200 || message.page.messages.length > 200) throw Error('Invalid checkpoint page');
+          pages.add({...message.page,jobId:next.jobId},[scope.key,next.pages]);
+        }
+        jobs.put({...next,checkpointAt:Date.now()},scope.key); result={revision:next.revision};
+      } catch(error) { abort(error); }
+    };
+  });
 }

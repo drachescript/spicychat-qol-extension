@@ -14,5 +14,8 @@
   "browserVerified": false,
   "settingsFiles": [
     "settings/feature-panels/lorebook-backup.js"
+  ],
+  "backgroundFiles": [
+    "background/features/background-lorebook-import.js"
   ]
 }

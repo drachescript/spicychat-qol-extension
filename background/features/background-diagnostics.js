@@ -565,12 +565,15 @@ function dsqSupportHistoryRequest(message, sender, sendResponse) {
   const action = String(message?.type || "");
   // Browsers may omit sender.url for a same-extension Settings request.
   // Never let a web/content-script tab read or clear this private history.
-  const senderUrl = String(sender?.url || sender?.documentUrl || "");
+  const senderUrl = String(sender?.url || sender?.documentUrl ||
+    (sender?.frameId === 0 ? sender?.tab?.url : "") || "");
   const sameExtension = sender?.id === chrome.runtime.id;
   const optionsSource = senderUrl
     ? senderUrl.split(/[?#]/, 1)[0] === chrome.runtime.getURL("options.html")
-    : sameExtension; // Only a verified no-tab extension sender may omit its URL.
-  const isOptions = !sender?.tab && sameExtension && optionsSource;
+    : !sender?.tab && sameExtension;
+  // Options opened in a normal browser tab also has sender.tab. Authorize
+  // its own extension document, never a content script on a web page.
+  const isOptions = sameExtension && optionsSource;
   if (action !== "DS_SUPPORT_HISTORY_APPEND" && !isOptions) {
     sendResponse({ ok: false, error: "Support history is available only from QoL Settings." }); return false;
   }

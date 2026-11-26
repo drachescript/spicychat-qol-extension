@@ -25,16 +25,27 @@ function normalizeQuickDislikeHistory(raw) {
   return { version: 1, bots: normalized };
 }
 
+// Feedback histories must not be interpreted as empty when a read fails.
+function readFeedbackLocalStrict(keys) {
+  return new Promise((resolve, reject) => {
+    try { chrome.storage.local.get(keys, value => {
+      const error = chrome.runtime.lastError;
+      if (error || !value || typeof value !== "object") reject(new Error(error?.message || "Feedback history unavailable"));
+      else resolve(value);
+    }); } catch (error) { reject(error); }
+  });
+}
 async function getQuickDislikeHistory() {
   if (recommendationFeedbackQuickDislikeCache) return recommendationFeedbackQuickDislikeCache;
-  const result = await storageGet([QUICK_DISLIKE_HISTORY_KEY]);
+  const result = await readFeedbackLocalStrict([QUICK_DISLIKE_HISTORY_KEY]);
   recommendationFeedbackQuickDislikeCache = normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
   return recommendationFeedbackQuickDislikeCache;
 }
 
 async function rememberQuickDislike(botId, botName, status, origin = {}) {
   if (!["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked", "dislike-event-pending"].includes(status)) return null;
-  const history = await getQuickDislikeHistory();
+  const loaded = await getQuickDislikeHistory();
+  const history = { ...loaded, bots: { ...loaded.bots } };
   history.bots[botId] = {
     status,
     name: String(botName || history.bots[botId]?.name || "").slice(0, 160),
@@ -47,17 +58,11 @@ async function rememberQuickDislike(botId, botName, status, origin = {}) {
     nativeUiConfirmed: ["disliked", "already-disliked"].includes(status) && origin.nativeUiConfirmed === true
   };
 
-  // Retain 12,000 handled IDs (not 5,000); preserve existing dedupe across large queues.
-  // The extension declares unlimitedStorage, but we still bound legacy JSON growth to reduce large-write overhead.
-  const entries = Object.entries(history.bots);
-  if (entries.length > 12000) {
-    entries
-      .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
-      .slice(12000)
-      .forEach(([id]) => delete history.bots[id]);
+  if (!await storageSet({ [QUICK_DISLIKE_HISTORY_KEY]: history })) {
+    recommendationFeedbackQuickDislikeCache = null;
+    throw new Error("Native Dislike history write failed");
   }
-
-  await storageSet({ [QUICK_DISLIKE_HISTORY_KEY]: history });
+  recommendationFeedbackQuickDislikeCache = history;
   return history.bots[botId];
 }
 
@@ -90,31 +95,27 @@ function normalizeQuickLessLikePending(raw) {
 }
 
 function trimQuickLessLikeHistory(history) {
-  const entries = Object.entries(history?.bots || {});
-  if (entries.length > 12000) {
-    entries
-      .sort((a, b) => Number(b[1]?.handledAt || 0) - Number(a[1]?.handledAt || 0))
-      .slice(12000)
-      .forEach(([id]) => delete history.bots[id]);
-  }
   return history;
 }
 
 async function readQuickLessLikeHistoryFromStorage() {
-  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_PENDING_KEY]);
+  const result = await readFeedbackLocalStrict([QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_PENDING_KEY]);
   const history = normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
   const pending = normalizeQuickLessLikePending(result[QUICK_LESS_LIKE_PENDING_KEY]);
   for (const [id, value] of Object.entries(pending.bots || {})) {
     if (!/^[0-9a-f-]{20,}$/i.test(String(id || ""))) continue;
     const status = String(value?.status || "");
     if (!["less-liked", "unavailable"].includes(status) || value?.stage === "cross-feedback-dedupe") continue;
+    if (history.bots[id] && Number(history.bots[id].handledAt || 0) > Number(value?.handledAt || 0)) continue;
     history.bots[id] = {
       status,
       name: String(value?.name || history.bots[id]?.name || "").slice(0, 160),
       handledAt: Number(value?.handledAt || 0) || Date.now(),
       stage: String(value?.stage || "").slice(0, 80),
       reason: String(value?.reason || "").slice(0, 300),
-      httpStatus: Number(value?.httpStatus || 0) || 0
+      httpStatus: Number(value?.httpStatus || 0) || 0,
+      ratingConfirmed: value?.ratingConfirmed === true,
+      nativeEventConfirmed: false
     };
   }
   return { history: trimQuickLessLikeHistory(history), pending };
@@ -144,10 +145,10 @@ async function flushQuickLessLikeHistory(force = false, runId = "") {
   const ageMs = quickLessLikeHistoryLastFlushAt ? Date.now() - quickLessLikeHistoryLastFlushAt : Infinity;
   if (!force && pendingCount < QUICK_LESS_LIKE_HISTORY_FLUSH_EVERY && ageMs < QUICK_LESS_LIKE_HISTORY_FLUSH_MAX_AGE_MS) return false;
   trimQuickLessLikeHistory(quickLessLikeHistoryCache);
-  await storageSet({
+  if (!await storageSet({
     [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryCache,
     [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
-  });
+  })) return false; // Journal is already durable; retain it for the next flush.
   quickLessLikePendingCache = { version: 1, bots: {} };
   quickLessLikeHistoryLastFlushAt = Date.now();
   return true;
@@ -159,24 +160,29 @@ async function rememberQuickLessLikeEntry(botId, entry, { immediate = false, run
     const loaded = await readQuickLessLikeHistoryFromStorage();
     loaded.history.bots[botId] = entry;
     trimQuickLessLikeHistory(loaded.history);
-    recommendationFeedbackQuickLessLikeCache = loaded.history;
-    await storageSet({
+    if (!await storageSet({
       [QUICK_LESS_LIKE_HISTORY_KEY]: loaded.history,
       [QUICK_LESS_LIKE_PENDING_KEY]: { version: 1, bots: {} }
-    });
+    })) throw new Error("Less Like history write failed");
+    recommendationFeedbackQuickLessLikeCache = loaded.history;
     return loaded.history.bots[botId];
   }
 
   const history = await getQuickLessLikeHistory(id);
   const pending = quickLessLikePendingCache || (quickLessLikePendingCache = { version: 1, bots: {} });
-  history.bots[botId] = entry;
-  pending.bots[botId] = entry;
-  trimQuickLessLikeHistory(history);
-  recommendationFeedbackQuickLessLikeCache = history;
+  const nextPending = { version: 1, bots: { ...pending.bots, [botId]: entry } };
   // Persist the compact success journal before returning so an interrupted run
   // cannot repeat a known-successful rating. Full multi-thousand-entry history
   // compaction is deferred to a large/time-based checkpoint and run end.
-  await storageSet({ [QUICK_LESS_LIKE_PENDING_KEY]: pending });
+  if (!await storageSet({ [QUICK_LESS_LIKE_PENDING_KEY]: nextPending })) {
+    quickLessLikeHistoryCacheRunId = "";
+    quickLessLikeHistoryCache = null;
+    quickLessLikePendingCache = null;
+    throw new Error("Less Like success journal write failed");
+  }
+  history.bots[botId] = entry;
+  quickLessLikePendingCache = nextPending;
+  recommendationFeedbackQuickLessLikeCache = history;
   await flushQuickLessLikeHistory(immediate, id);
   return history.bots[botId];
 }
@@ -354,7 +360,10 @@ async function recoverInterruptedQuickDislikeJobs() {
     const jobId = String(job.jobId || "");
     const botId = String(job.botId || "").toLowerCase();
     const rows = byJob.get(jobId) || [];
-    if (history.bots[botId]) {
+    const entry = history.bots[botId];
+    const terminal = entry && ((entry.nativeUiConfirmed === true && ["disliked", "already-disliked"].includes(entry.status)) ||
+      ["unavailable-private-or-deleted", "unavailable-creator-blocked"].includes(entry.status));
+    if (terminal) {
       for (const row of rows) await closeQuickDislikeTab(Number(row.tab.id), "quickDislikeRecoveredConfirmed", { jobId, botId });
       await removeActiveQuickDislikeJob(jobId);
       continue;

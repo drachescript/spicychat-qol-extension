@@ -5,7 +5,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   if (!DS) return;
   const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const BUTTON = ".ds-report-link-button";
-  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i;
+  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?|creator(?:\/[^/]+)?\/?)?$/i;
   let saved = null;
   let readPromise = null;
   let listenerInstalled = false;
@@ -89,7 +89,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const button = target?.closest?.(BUTTON);
     if (!button || !document.contains(button)) return;
     // SPA navigation can change the route before the next normal render pass.
-    if (!REPORT_LISTING.test(location.pathname)) { cleanup(); return; }
+    if (!REPORT_LISTING.test(DS.normalizedRoutePath?.() || location.pathname)) { cleanup(); return; }
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation?.();
@@ -141,7 +141,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   DS.removeReportLinkCollector = cleanup;
   DS.applyReportLinkCollector = function applyReportLinkCollector() {
-    if (!REPORT_LISTING.test(location.pathname) || !DS.state?.settings?.enabled || DS.state.settings.enableReportLinkCollector !== true || DS.isQolPausedForTab?.()) { cleanup(); return; }
+    if (!REPORT_LISTING.test(DS.normalizedRoutePath?.() || location.pathname) || !DS.state?.settings?.enabled || DS.state.settings.enableReportLinkCollector !== true || DS.isQolPausedForTab?.()) { cleanup(); return; }
     const cards = DS.collectCards?.() || [];
     const route = location.href;
     const revision = Number(DS.state?.domRevision || 0);
@@ -165,7 +165,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     });
     for (const {card, anchor} of cards) {
       // collectCards already excludes chat-message and navigation links.
-      // Accept the differing native image wrappers on Home and Recommendations.
+      // Accept the differing native image wrappers on Home, Recommendations and public creator listings.
       if (!card?.isConnected || card.closest?.("nav, [role='navigation'], [data-testid='ChatMessageItem']")) continue;
       const link = cardLink(card, anchor);
       const id = botIdFromLink(link);

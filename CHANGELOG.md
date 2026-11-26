@@ -1,3 +1,58 @@
+## 0.3.0
+- Improved Settings search to find features by name, description and related terms.
+- Added Enabled, Recently changed, What's new and Pinned views, a simpler Basic view, and the ability to undo recent setting changes.
+- Expanded Quick setup with presets for performance, mobile, recovery, research, roleplay and local controls. Preview changes without replacing existing preferences.
+- Improved Settings navigation with numbered layouts, layout previews, shareable appearance presets and a quick return to Classic.
+- Added individual Settings section resets and made related settings easier to find.
+- Added a Performance Center to review extension performance directly in Settings.
+- Added a dedicated Bot Status scan workspace with clearer progress, scan scope, unchecked bots and retry controls.
+- Improved Chat Export for very large conversations, with saved progress, resume, estimated time remaining, pause and partial exports.
+- Added compressed JSON.GZ exports and removed the previous history page limit.
+- Improved repeat exports by reusing saved chat history and retrieving new messages without downloading the entire conversation again.
+- Added clearer export completeness checks, download status, detailed export timings and a Clear all saved exports action.
+- Added a three-hour automatic sync interval for linked devices.
+- Improved Dislike and Less Like reliability, including duplicate request prevention and safer bulk actions.
+- Extended the Report Link Collector to public creator pages.
+- Improved S.AI Toolkit compatibility for overlapping features, message statistics, appearance settings and message recovery. Added a compatibility check in Settings.
+- Fixed Lorebook and Rulebook attachment choices being affected by QoL features in the chatbot editor.
+- Fixed support history access and clearing from Settings opened in a browser tab.
+- Improved Settings, Bot Status scanning and chat performance by reducing unnecessary loading, refreshes and background processing.
+- Improved individual and bulk Lorebook backups, including large Lorebooks and exports with tag expansion disabled.
+- Improved large Lorebook JSON imports with saved progress, safe pause and resume, server write receipts, clearer recovery status and less editor background work.
+
+## 0.2.99
+- Added a lightweight Bot Status and recovery record-count overview; full saved profiles, histories and queue reconciliation load on request instead of when opening Settings.
+- Reduced unnecessary large-store decoding work for plain records; separated IndexedDB, decoding and message-response wall timings.
+- Kept native My Creations pagination outside the general feature scheduler, with deduplicated runs and route-safe cancellation.
+- Deferred custom picture refreshes outside the critical chat pass and reused recent message roots for character/persona pictures.
+- Distinguished unverified API history endings, count mismatches and filtered rows in chat exports, with completeness warnings in downloaded formats.
+- Included QoL version/build in Settings telemetry and clarified wall-time versus measured synchronous processing.
+- Refined Settings layout choices: Classic, Sidebar, Ribbon, Picker, Underline and Pills, with Original/Outlined cards and optional blue accent. Removed unused experiments with safe Classic/Original fallbacks.
+- Kept the active Settings section visible in scrollable navigation and improved keyboard focus when closing the section picker.
+- Added an optional double-click / double-tap message editing guard that preserves browser text selection and explicit Edit actions.
+- Protected native Lorebook attachment choices and conversation selectors from discovery and advert cleanup.
+- Scoped tag-filter controls to the native discovery filter, and improved route recognition for localized pages.
+- Added a numbered Settings Layout lab, including optional sticky ribbon navigation.
+- Made Settings section navigation lighter by skipping unchanged recent-section updates and unnecessary pin refreshes.
+- Added optional collapsible excluded tags, included-tag priority and search for loaded tags in the native tag filter.
+
+## 0.2.98
+- Removed Later card buttons from My Creations, including after navigation.
+- Made Saved Bots & Lists load recovery managers only when needed and reuse saved-copy and deleted-recovery indexes.
+- Deferred Bot Status queue reconciliation until the status manager is requested.
+- Added Settings performance timings for tab visibility, storage, indexing, rendering and Long Tasks.
+- Removed redundant card metadata extraction when importing opened chats.
+- Made Quick setup presets additive: existing enabled features and custom values stay intact.
+- Made the Archive / Recovery Lab export preset preserve selected media and censor options.
+- Added Copy for paste, Copy selected for paste and Paste entries to the Lorebook entry manager, with review, skip-existing imports and live verification.
+- Added a private Archive / Recovery Lab JSON preset to Chat export, including available bot information, OOC/directives and visible Rulebook context without changing export defaults.
+- Prevented competing Bot Status scans from starting in multiple Settings pages where shared browser locks are supported.
+- Saved recovered list memberships before advancing Bot Status scan checkpoints.
+- Preserved the last saved queue when a checkpoint or result save cannot be verified; reopen Settings to resume safely.
+- Unified rate-limit and authentication-failure pauses with the normal verified scan finalization path.
+- Reduced repeat queue reads and checkpoint bookkeeping during large Bot Status scans.
+- Avoided rewriting unrelated Settings during blocked-membership recovery.
+
 ## 0.2.97
 - Added a separate floating long-chat controls toggle: hiding the bar keeps older-message folding enabled; re-enable it to reveal older messages.
 - Coalesced overlapping read-only Bot Status queue/Settings refreshes without caching completed queue snapshots.

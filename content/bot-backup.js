@@ -1080,7 +1080,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function onEditorInput(event) {
-    if (!activeForm || !activeForm.contains(event.target)) return;
+    if (!activeForm || !activeForm.contains(event.target) || DS.isNativeEditorAttachmentTarget?.(event.target)) return;
     scheduleOwnBackup();
   }
 

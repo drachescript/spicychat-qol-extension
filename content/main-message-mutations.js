@@ -88,11 +88,23 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const decorationSelector = "#ds-qol-panel, [data-ds-owned='1'], [data-ds-owner='qol'], .ds-message-quick-actions, .ds-message-bookmark-button, .ds-generation-metadata, .ds-rp-repair-toggle, .ds-translation-output, .ds-message-lorebook-button, .ds-chat-lorebook-pending, .ds-chat-lorebook-overlay";
     const textAncestorCache = new WeakMap();
     const inspectedInsertedSubtrees = new WeakSet();
+    const rootByElement = new WeakMap();
+    const decorationByElement = new WeakMap();
+    const topRootByParent = new WeakMap();
     let repeatedSubtreeSkips = 0;
+    let nestedSubtreeSkips = 0;
+    const rootFor = node => {
+      const el = node instanceof Element ? node : node?.parentElement;
+      if (!el) return null;
+      if (!rootByElement.has(el)) rootByElement.set(el, messageRootForMutationNode(el));
+      return rootByElement.get(el);
+    };
 
     const isDecoration = node => {
       const el = node instanceof Element ? node : node?.parentElement;
-      return !!el && !!(el.matches?.(decorationSelector) || el.closest?.(decorationSelector));
+      if (!el) return false;
+      if (!decorationByElement.has(el)) decorationByElement.set(el, !!(el.matches?.(decorationSelector) || el.closest?.(decorationSelector)));
+      return decorationByElement.get(el);
     };
     const insideText = node => {
       const el = node instanceof Element ? node : node?.parentElement;
@@ -112,7 +124,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     for (const mutation of mutations) {
       candidateNodes += 1;
-      const root = messageRootForMutationNode(mutation.target);
+      const root = rootFor(mutation.target);
       if (root?.isConnected && mutation.type !== "attributes") {
         roots.add(root);
         if (mutation.type === "characterData") {
@@ -134,9 +146,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           continue;
         }
         inspectedInsertedSubtrees.add(node);
+        // A connected insertion inside an existing message cannot introduce a
+        // top-level message root. Check the node's CURRENT parent because a
+        // native remount may have moved it since the mutation was recorded.
+        const isRoot = node.matches?.(messageSelector);
+        if (!isRoot && !node.childElementCount) continue;
+        const parent = node.parentElement;
+        if (parent && !topRootByParent.has(parent)) topRootByParent.set(parent, parent.closest?.(messageSelector) || null);
+        if (parent && topRootByParent.get(parent)) { nestedSubtreeSkips++; continue; }
         // Only descend into newly inserted subtrees; avoid revisiting the
         // same subtree multiple times within one native React observer batch.
-        const mounted = node.matches?.(messageSelector) ? [node] :
+        const mounted = isRoot ? [node] :
           (node.childElementCount ? (node.querySelectorAll?.(messageSelector) || []) : []);
         for (const child of mounted) {
           if (child.isConnected && !child.parentElement?.closest?.(messageSelector)) roots.add(child);
@@ -146,6 +166,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    counters.messageMutationNestedSubtreeSkips = Number(counters.messageMutationNestedSubtreeSkips || 0) + nestedSubtreeSkips;
     counters.messageMutationRepeatedSubtreeSkips = Number(counters.messageMutationRepeatedSubtreeSkips || 0) + repeatedSubtreeSkips;
     counters.messageMutationCandidateNodes = Number(counters.messageMutationCandidateNodes || 0) + candidateNodes;
     counters.messageMutationDistinctRoots = Number(counters.messageMutationDistinctRoots || 0) + roots.size;

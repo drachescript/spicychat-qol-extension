@@ -16,6 +16,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function laterEnabled() {
     const settings = DS.state?.settings || {};
     return !!(settings.enabled && settings.showLaterBotButtons &&
+      !/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?my-creations(?:\/|$)/i.test(DS.normalizedRoutePath?.() || location.pathname) &&
       !DS.isSingleChatPage?.() && !DS.isChatListPage?.() && !DS.isBotProfilePage?.() &&
       !DS.isLaterFavoritesTabActive?.());
   }
@@ -354,7 +355,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      toggleLater(card, anchor, button);
+      if (laterEnabled()) toggleLater(card, anchor, button);
     }, true);
 
     return button;
@@ -599,7 +600,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     tags: '', excludeTags: '', opened: 'all', safety: 'all', selected: new Set(), changing: false,
     lastStore: null, lastRevision: '', applying: false, searchTimer: null,
     archiveTags: new Map(), archiveRequested: new Set(), tagAttempted: new Set(), fetchingTags: false, tagStatus: ''};
-  const enabled = () => /^\/favorite-bots\/?$/i.test(location.pathname) &&
+  const enabled = () => /^\/favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname) &&
     DS.state?.settings?.enabled !== false && DS.state?.settings?.showLaterFavoritesTab === true;
   DS.isLaterFavoritesTabActive = () => ui.active && enabled();
   const text = value => String(value ?? '').replace(/\s+/g,' ').trim();

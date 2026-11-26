@@ -121,7 +121,6 @@ function readSettingsFromPage() {
 
     showChatListTools: checked("showChatListTools"),
     enableChatOrganizer: checked("enableChatOrganizer"),
-
     chatListTwoColumns: checked("chatListTwoColumns"),
     chatListPopoutShortcut: checked("chatListPopoutShortcut"),
     chatListRenameShortcut: checked("chatListRenameShortcut"),
@@ -342,7 +341,7 @@ function readSettingsFromPage() {
     pauseQolWhileMessageEditing: checked("pauseQolWhileMessageEditing", true),
     reduceQolAnimations: checked("reduceQolAnimations"),
     reduceOptionsAnimations: checked("reduceOptionsAnimations"),
-    settingsNavigationStyle: ["classic", "grouped"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic",
+    settingsNavigationStyle: ["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic",
     settingsContentLayout: ["single", "adaptive"].includes(value("settingsContentLayout")) ? value("settingsContentLayout") : "single",
     settingsPageWidth: ["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable",
     collapseSettingsSectionsByDefault: checked("collapseSettingsSectionsByDefault"),
@@ -471,10 +470,6 @@ function readSettingsFromPage() {
     blockedTags: linesToArray(value("blockedTags")),
     blockedWords: linesToArray(value("blockedWords")),
     blockedCreators: linesToArray(value("blockedCreators")),
-
-
-
-
     lorebookBlockingEnabled: checked("lorebookBlockingEnabled", false),
     applyBotBlockingToLorebooks: checked("applyBotBlockingToLorebooks", false),
     showLorebookBlockButtons: checked("showLorebookBlockButtons", false),
@@ -648,7 +643,6 @@ function readSingleSettingFromPage(settingKey) {
     case "enableChatOrganizer": return (checked("enableChatOrganizer"));
     case "chatListPopoutShortcut": return checked("chatListPopoutShortcut");
     case "chatListRenameShortcut": return checked("chatListRenameShortcut");
-
     case "chatListTwoColumns": return checked("chatListTwoColumns");
     case "chatCollections": return (value("chatCollections", ""));
     case "showSavedChatQuickActions": return (checked("showSavedChatQuickActions"));
@@ -859,7 +853,7 @@ function readSingleSettingFromPage(settingKey) {
     case "pauseQolWhileMessageEditing": return (checked("pauseQolWhileMessageEditing", true));
     case "reduceQolAnimations": return (checked("reduceQolAnimations"));
     case "reduceOptionsAnimations": return (checked("reduceOptionsAnimations"));
-    case "settingsNavigationStyle": return (["classic", "grouped"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic");
+    case "settingsNavigationStyle": return (["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(value("settingsNavigationStyle")) ? value("settingsNavigationStyle") : "classic");
     case "settingsContentLayout": return (["single", "adaptive"].includes(value("settingsContentLayout")) ? value("settingsContentLayout") : "single");
     case "settingsPageWidth": return (["comfortable", "wide"].includes(value("settingsPageWidth")) ? value("settingsPageWidth") : "comfortable");
     case "collapseSettingsSectionsByDefault": return (checked("collapseSettingsSectionsByDefault"));
@@ -982,10 +976,6 @@ function readSingleSettingFromPage(settingKey) {
     case "blockedTags": return (linesToArray(value("blockedTags")));
     case "blockedWords": return (linesToArray(value("blockedWords")));
     case "blockedCreators": return (linesToArray(value("blockedCreators")));
-
-
-
-
     case "lorebookBlockingEnabled": return (checked("lorebookBlockingEnabled", false));
     case "applyBotBlockingToLorebooks": return (checked("applyBotBlockingToLorebooks", false));
     case "showLorebookBlockButtons": return (checked("showLorebookBlockButtons", false));
@@ -1125,13 +1115,15 @@ async function persistGranularSettingsPatch(patch, previous = {}, { verify = fal
   const ok = await rawStorageSet(payload);
   if (!ok) return false;
   granularSettingsMigrationSeen = true;
-  if (!verify) return true;
+  if (!verify) { recordSettingsPreferenceChanges(patch, previous); return true; }
   const keys = entries.map(([name]) => granularSettingStorageKey(name));
   const readback = await new Promise(resolve => {
     try { chrome.storage.local.get(keys, result => resolve(chrome.runtime.lastError ? {} : (result || {}))); }
     catch { resolve({}); }
   });
-  return entries.every(([name, expected]) => storageValueMatches(readback[granularSettingStorageKey(name)], expected));
+  const verified = entries.every(([name, expected]) => storageValueMatches(readback[granularSettingStorageKey(name)], expected));
+  if (verified) recordSettingsPreferenceChanges(patch, previous);
+  return verified;
 }
 
 async function flushSettingsAutosave({ force = false } = {}) {

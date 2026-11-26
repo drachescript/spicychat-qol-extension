@@ -268,6 +268,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (imageRestoreIds.has(marker)) return;
     imageRestoreIds.add(marker);
     const store = await imageStore();
+    if (DS.isNativeEditorAttachmentPickerOpen?.() || !control.isConnected || editorId() !== id) {
+      imageRestoreIds.delete(marker);
+      observedEditorForm = null;
+      return;
+    }
     const prompt = clean(store.meta?.[id]?.prompt, 12000);
     if (!prompt || clean(control.value)) return;
     control.value = prompt;
@@ -294,6 +299,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   async function scan() {
+    if (DS.isNativeEditorAttachmentPickerOpen?.()) { observedEditorForm = null; return; }
     const id = editorId();
     if (!id) return;
     const settings = DS.state?.settings || {};
@@ -335,7 +341,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function onInput(event) {
-    if (!onEditor()) return;
+    if (!onEditor() || DS.isNativeEditorAttachmentPickerOpen?.()) return;
     const settings = DS.state?.settings || {};
     if (settings.rememberBotImagePrompt && imagePromptScore(event.target) >= 6) {
       const id = editorId();
@@ -377,6 +383,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     document.addEventListener("input", onInput, true);
     document.addEventListener("change", onInput, true);
     observer = new MutationObserver(mutations => {
+      if (DS.isNativeEditorAttachmentPickerOpen?.()) return;
       let relevant = false;
       for (const mutation of mutations) {
         if (DS.mutationIsQolOnly?.(mutation)) continue;

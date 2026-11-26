@@ -47,10 +47,152 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let pageStateCache = null;
   const stablePageElements = new Map();
 
-  function normalizedRoutePath() {
-    const raw = String(location.pathname || "/").replace(/\/+$/, "") || "/";
-    return raw.replace(/^\/[a-z]{2}(?=\/)/i, "") || "/";
+  function normalizedRoutePath(path = location.pathname) {
+    const raw = String(path || "/").replace(/\/+$/, "") || "/";
+    // Locale-only Home and regional/script-qualified locale prefixes.
+    return raw.replace(/^\/[a-z]{2}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|[0-9]{3}))?(?=\/|$)/i, "") || "/";
   }
+  DS.normalizedRoutePath = normalizedRoutePath;
+
+  // Native selection surfaces are not discovery cards or advertisements.
+  // Only use this at existing decoration/hide boundaries; no new observer.
+  const NATIVE_PICKER = "form, dialog, [role='dialog'], [role='listbox'], [role='option'], [role='combobox'], [aria-modal='true'], [data-testid*='LorebookPicker' i], [data-testid*='LorebookSelect' i], [data-testid*='LorebookAttach' i], [data-testid*='AttachLorebook' i]";
+  // The chatbot editor's attachment chooser can be an ordinary portal div,
+  // not a role=dialog or form. Recognize the actual chooser, not its launch
+  // button or the editor's entire form. This is deliberately editor-only:
+  // public Explore and the chat Rulebook Discover filter keep their own scope.
+  const ATTACH_TESTID = "[data-testid*='Lorebook' i], [data-testid*='Rulebook' i]";
+  const ATTACH_SEARCH = "input[type='search'],input[placeholder],input[aria-label],[role='searchbox']";
+  const ATTACH_HEADING = /^(?:attach|select|choose)\s+(?:a\s+)?(?:lorebook|rulebook)$/i;
+  const ATTACH_OWNED = "#ds-qol-panel,[data-ds-owned='1'],[data-ds-owner='qol'],[id^='ds-']";
+  let editorAttachmentRoot = null;
+  let lastProtectedAttachment = null;
+  let lastAttachmentResultCount = null;
+  let attachmentCountSamples = 0;
+  function attachmentEditorRoute() {
+    const path = normalizedRoutePath();
+    return /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path) || /^\/(?:create|create\/chatbot)$/i.test(path);
+  }
+  function visibleAttachmentRoot(node) {
+    if (!node?.isConnected || node.closest?.("[hidden],[aria-hidden='true'],.hidden") || node.closest?.(ATTACH_OWNED)) return false;
+    // Check the candidate (and portal ancestors) without forcing layout.
+    for (let el = node; el && el !== document.body; el = el.parentElement) {
+      if (el.style?.display === "none" || el.style?.visibility === "hidden") return false;
+    }
+    return true;
+  }
+  function hasAttachmentHeading(node) {
+    const label = String(node.getAttribute?.("aria-label") || "").trim();
+    if (ATTACH_HEADING.test(label)) return true;
+    const labelledBy = node.getAttribute?.("aria-labelledby");
+    if (labelledBy && labelledBy.split(/\s+/).some(id => ATTACH_HEADING.test(String(document.getElementById(id)?.textContent || "").trim()))) return true;
+    return Array.from(node.querySelectorAll?.("h1,h2,h3,h4,[role='heading'],[data-translate-key],p,span,div") || []).some(el => {
+      // Plain portal headings are not necessarily semantic HTML. The editor's
+      // launch button and selectable result rows are not modal headings.
+      if (el.closest?.("button,a,[role='button'],[role='option']")) return false;
+      const key = String(el.getAttribute?.("data-translate-key") || "");
+      if (/(?:lorebook|rulebook)/i.test(key) && /(?:attach|picker|select)/i.test(key) && /(?:title|heading)/i.test(key)) return true;
+      return el.childElementCount === 0 && ATTACH_HEADING.test(String(el.textContent || "").trim());
+    });
+  }
+  function attachmentSearch(input) {
+    const label = [input.getAttribute?.("placeholder"),input.getAttribute?.("aria-label"),input.getAttribute?.("data-testid"),input.getAttribute?.("data-translate-key")].join(" ");
+    return /(?:lorebook|rulebook)/i.test(label) && /search/i.test(label);
+  }
+  function validAttachmentCandidate(node) {
+    return node && !node.matches?.("body,html,main,form,button,a,input,select,[role='button']") && node.id !== "root" && visibleAttachmentRoot(node);
+  }
+  function explicitAttachmentModal(node) {
+    const key = String(node?.getAttribute?.("data-testid") || "");
+    return /(?:lorebook|rulebook)/i.test(key) && /(?:picker|attach|select)/i.test(key) && /(?:modal|dialog)$/i.test(key);
+  }
+  function hasChooserControls(node) {
+    return node.matches?.("dialog,[role='dialog'],[aria-modal='true']") || Array.from(node.querySelectorAll?.("button,[role='button']") || []).some(button => {
+      const key = String(button.getAttribute?.("data-testid") || "") + " " + String(button.querySelector?.("[data-translate-key]")?.getAttribute("data-translate-key") || "");
+      return /cancel/i.test(key) || /^(?:cancel|close|attach lorebook|attach rulebook)$/i.test(String(button.textContent || "").trim());
+    });
+  }
+  DS.getNativeEditorAttachmentPicker = function getNativeEditorAttachmentPicker() {
+    if (!attachmentEditorRoute()) { editorAttachmentRoot = null; return null; }
+    if (editorAttachmentRoot && visibleAttachmentRoot(editorAttachmentRoot) && (explicitAttachmentModal(editorAttachmentRoot) || editorAttachmentRoot.querySelector?.(ATTACH_SEARCH))) return editorAttachmentRoot;
+    editorAttachmentRoot = null;
+    for (const node of document.querySelectorAll(ATTACH_TESTID)) {
+      const key = String(node.getAttribute("data-testid") || "");
+      if (!/(?:picker|attach|select|selection)/i.test(key) || !/(?:modal|dialog|picker|selection)/i.test(key) || !validAttachmentCandidate(node)) continue;
+      // A named modal also protects the initial loading state before the
+      // search field is mounted. Other IDs must describe a real chooser.
+      if (explicitAttachmentModal(node) || (node.querySelector?.(ATTACH_SEARCH) && hasChooserControls(node))) return (editorAttachmentRoot = node);
+    }
+    // Older/plain portals: anchor at the search input and walk only as far as
+    // the enclosing chooser (heading + controls). Never climb into the form.
+    for (const input of document.querySelectorAll(ATTACH_SEARCH)) {
+      if (!visibleAttachmentRoot(input)) continue;
+      const explicit = attachmentSearch(input);
+      const semantic = input.matches?.("input[type='search'],[role='searchbox']");
+      for (let node = input.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
+        if (node.matches?.("html,body,main,form,[role='main']") || node.id === "root") break;
+        if (!validAttachmentCandidate(node)) continue;
+        if (!explicit && !semantic && !node.matches?.("dialog,[role='dialog'],[aria-modal='true']")) continue;
+        if (hasChooserControls(node) && hasAttachmentHeading(node)) return (editorAttachmentRoot = node);
+      }
+    }
+    return null;
+  };
+  DS.isNativeEditorAttachmentPickerOpen = () => !!DS.getNativeEditorAttachmentPicker();
+  DS.isNativeEditorAttachmentTarget = el => {
+    if (!el || !attachmentEditorRoute()) return false;
+    const picker = DS.getNativeEditorAttachmentPicker();
+    return !!picker && (picker === el || picker.contains(el) || el.contains?.(picker));
+  };
+  DS.isNativePickerSurface = el => !!el?.closest?.(NATIVE_PICKER) || (!!el && attachmentEditorRoute() && !!DS.getNativeEditorAttachmentPicker()?.contains(el));
+  DS.containsNativePickerSurface = el => !!el?.querySelector?.(NATIVE_PICKER) || (!!el && attachmentEditorRoute() && !!el.contains?.(DS.getNativeEditorAttachmentPicker()));
+
+  // Share the existing runtime observer and lanes. Repair only our own hide
+  // markers on the chooser/ancestors; never change native visibility or click
+  // any native control. No saved attachment IDs or picker contents are read.
+  function recordAttachmentResultCount(picker) {
+    if (attachmentCountSamples >= 20 || !DS.isDiagnosticTraceActive?.("normal")) return;
+    // Numeric native count only; no title, search text, row IDs or response body.
+    for (const node of picker.querySelectorAll("p,span,[data-testid*='resultcount' i]")) {
+      if (node.childElementCount) continue;
+      const m = String(node.textContent || "").trim().match(/^(\d[\d,]*)\s+results?\s+found$/i);
+      if (!m) continue;
+      const count = Number(m[1].replace(/,/g, ""));
+      if (Number.isSafeInteger(count) && count !== lastAttachmentResultCount) {
+        lastAttachmentResultCount = count;
+        attachmentCountSamples++;
+        DS.diagPerformance?.("native-editor-attachment-result-count", { count });
+      }
+      break;
+    }
+  }
+  DS.syncNativeEditorAttachmentPicker = function syncNativeEditorAttachmentPicker(observeNativeCount = false) {
+    if (!DS.state?.settings?.enabled) { lastProtectedAttachment = null; return false; }
+    const picker = DS.getNativeEditorAttachmentPicker();
+    const previous = lastProtectedAttachment;
+    if (picker === previous) {
+      if (picker && observeNativeCount) recordAttachmentResultCount(picker);
+      return !!picker;
+    }
+    lastProtectedAttachment = picker;
+    lastAttachmentResultCount = null;
+    attachmentCountSamples = 0;
+    if (picker) {
+      const targets = [picker, ...picker.querySelectorAll("[data-ds-hidden='1'],.ds-hidden,.ds-dimmed")];
+      for (let el = picker.parentElement; el && el !== document.documentElement; el = el.parentElement) targets.push(el);
+      for (const el of targets) {
+        if (el.hasAttribute("data-ds-hidden") || el.classList.contains("ds-hidden") || el.classList.contains("ds-dimmed")) DS.unhideElement?.(el);
+      }
+      DS.runtimeLog?.("info", "native-attachment-picker", "Native editor attachment chooser protected");
+      DS.diagPerformance?.("native-editor-attachment-picker-open", { protected: true });
+      if (observeNativeCount) recordAttachmentResultCount(picker);
+    } else if (previous) {
+      DS.runtimeLog?.("info", "native-attachment-picker", "Native editor attachment chooser closed; QoL tools resumed");
+      DS.diagPerformance?.("native-editor-attachment-picker-closed", { protected: false });
+      DS.scheduleRun?.({ priority: "both", dirty: "all", source: "native-attachment-picker-closed" });
+    }
+    return !!picker;
+  };
 
   DS.invalidatePageStateCache = function invalidatePageStateCache() {
     pageStateCacheHref = "";
@@ -323,6 +465,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.realClick = function realClick(el, options = {}) {
     if (!el) return false;
+    // Only QoL's synthetic helper is guarded; user clicks remain native.
+    if (DS.isNativeEditorAttachmentPickerOpen?.()) return false;
 
     if (options?.scroll === true) {
       try {
@@ -369,6 +513,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.hideElement = function hideElement(el, reason = "") {
     if (!el) return;
+    if (DS.isNativeEditorAttachmentTarget?.(el)) return;
 
     // Optional interface cleanup must never hide native chat history or one
     // of its ancestors. A broad promotional/sidebar selector can otherwise

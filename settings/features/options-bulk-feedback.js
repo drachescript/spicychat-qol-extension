@@ -34,6 +34,7 @@ async function runQuickDislikeWithBackoff(payload, label = "") {
     } catch (error) {
       response = { ok: false, status: "worker-error", error: String(error?.message || error || "Quick Dislike feedback helper failed") };
     }
+    if (!response || response.status === "worker-error") response = { ok: false, status: "feedback-result-unconfirmed", networkAmbiguous: true, requestSent: true, retryable: false, bulkPaused: true };
     if (!quickDislikeResponseIsTransient(response) || attempt >= BULK_DISLIKE_RETRY_LIMIT) return response || { ok: false, status: "worker-error" };
   }
   return response || { ok: false, status: "worker-error" };
@@ -67,7 +68,6 @@ function applyQuickDislikeResponseToLocalHistory(id, name, response) {
   let status = String(response.status || "");
   if (status === "already-handled") status = String(response.rememberedStatus || "");
   if (!["disliked", "already-disliked", "already-rated-or-unavailable", "unavailable-private-or-deleted", "unavailable-creator-blocked", "dislike-event-pending"].includes(status)) return false;
-  quickDislikeHistoryState = normalizeQuickDislikeHistory(quickDislikeHistoryState);
   const previous = quickDislikeHistoryState.bots[botId] || {};
   const repeated = response.status === "already-handled" && previous.status === status;
   quickDislikeHistoryState.bots[botId] = {
@@ -86,9 +86,9 @@ function applyQuickDislikeResponseToLocalHistory(id, name, response) {
 }
 
 async function refreshQuickDislikeHistoryState() {
-  const result = await storageGet([QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY]);
+  const result = await storageGet([QUICK_DISLIKE_HISTORY_KEY, QUICK_DISLIKE_BULK_STATE_KEY, QUICK_LESS_LIKE_HISTORY_KEY, "quickLessLikeHistoryPendingV1"]);
   quickDislikeHistoryState = normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
-  quickLessLikeHistoryState = normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+  quickLessLikeHistoryState = mergeQuickLessLikeHistories(result[QUICK_LESS_LIKE_HISTORY_KEY], result["quickLessLikeHistoryPendingV1"]);
   quickDislikeBulkState = normalizeQuickDislikeBulkState(result[QUICK_DISLIKE_BULK_STATE_KEY]);
   updateBlockedBulkResumeControls();
   return quickDislikeHistoryState;
@@ -122,6 +122,14 @@ function updateBlockedBulkResumeControls() {
 }
 
 async function runBlockedBulkDislike(mode = "remaining") {
+  if (blockedBulkDislikeRunning || !navigator.locks?.request) return runBlockedBulkDislikeOwned(mode);
+  return navigator.locks.request("dsq-bulk-feedback-dislike", { ifAvailable: true }, lock => {
+    if (!lock) { showSettingsToast("A Dislike run is already open in another Settings tab. Use that tab or close it before resuming."); return; }
+    return runBlockedBulkDislikeOwned(mode);
+  });
+}
+
+async function runBlockedBulkDislikeOwned(mode = "remaining") {
   const button = $("bulkDislikeBlockedBots");
   const clearButton = $("clearBlockedDislikeHistory");
 
@@ -245,6 +253,12 @@ async function runBlockedBulkDislike(mode = "remaining") {
 
       // If connectivity drops, keep the current bot and everything after it
       // pending instead of turning an offline period into a wall of failures.
+      if (response?.networkAmbiguous || response?.bulkPaused || (response?.requestSent && !response?.ok)) {
+        blockedBulkDislikeStopRequested = true;
+        await persistQuickDislikeBulkState({ ...quickDislikeBulkState, status: "paused", currentId: id, pendingIds: candidates.slice(index), runId, stopRequested: true });
+        updateBlockedDislikeStatus("Dislike paused: rating outcome or history save unconfirmed. Check the native rating before resuming.");
+        break;
+      }
       if (response?.status === "offline-paused") {
         blockedBulkDislikeStopRequested = true;
         await persistQuickDislikeBulkState({
@@ -743,6 +757,7 @@ async function runQuickLessLikeWithBackoff(payload, label = "", pacing = null, s
       };
     }
 
+    if (!response || response.status === "worker-error") response = { ok: false, status: "feedback-result-unconfirmed", networkAmbiguous: true, requestSent: true, retryable: false, bulkPaused: true };
     noteQuickLessLikeAttemptOutcome(pacing, response);
     const decision = quickLessLikeRetryDecision(response);
     if (!decision.retryable || attempt >= BULK_LESS_LIKE_PACING.retryLimit) {
@@ -755,9 +770,9 @@ async function runQuickLessLikeWithBackoff(payload, label = "", pacing = null, s
 function applyQuickLessLikeResponseToLocalHistory(id, name, response) {
   const botId = String(id || "").trim();
   if (!botId || !response?.ok) return "";
+  if (response.crossHandledBy === "native-dislike") return "native-dislike-skip";
   const status = response.status === "already-handled" ? String(response.rememberedStatus || "") : String(response.status || "");
   if (!["less-liked", "unavailable"].includes(status)) return "";
-  quickLessLikeHistoryState = normalizeQuickLessLikeHistory(quickLessLikeHistoryState);
   quickLessLikeHistoryState.bots[botId] = {
     status,
     name: String(name || quickLessLikeHistoryState.bots[botId]?.name || "").slice(0, 160),
@@ -770,8 +785,9 @@ function applyQuickLessLikeResponseToLocalHistory(id, name, response) {
 }
 
 async function refreshQuickLessLikeHistoryState() {
-  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY]);
-  quickLessLikeHistoryState = normalizeQuickLessLikeHistory(result[QUICK_LESS_LIKE_HISTORY_KEY]);
+  const result = await storageGet([QUICK_LESS_LIKE_HISTORY_KEY, QUICK_LESS_LIKE_BULK_STATE_KEY, QUICK_DISLIKE_HISTORY_KEY, "quickLessLikeHistoryPendingV1"]);
+  quickLessLikeHistoryState = mergeQuickLessLikeHistories(result[QUICK_LESS_LIKE_HISTORY_KEY], result["quickLessLikeHistoryPendingV1"]);
+  quickDislikeHistoryState = normalizeQuickDislikeHistory(result[QUICK_DISLIKE_HISTORY_KEY]);
   quickLessLikeBulkState = normalizeQuickLessLikeBulkState(result[QUICK_LESS_LIKE_BULK_STATE_KEY]);
   updateBlockedLessLikeResumeControls();
   return quickLessLikeHistoryState;
@@ -818,6 +834,14 @@ function updateBlockedLessLikeResumeControls() {
 }
 
 async function runBlockedBulkLessLike(mode = "remaining") {
+  if (blockedBulkLessLikeRunning || !navigator.locks?.request) return runBlockedBulkLessLikeOwned(mode);
+  return navigator.locks.request("dsq-bulk-feedback-less-like", { ifAvailable: true }, lock => {
+    if (!lock) { showSettingsToast("A Less Like run is already open in another Settings tab. Use that tab or close it before resuming."); return; }
+    return runBlockedBulkLessLikeOwned(mode);
+  });
+}
+
+async function runBlockedBulkLessLikeOwned(mode = "remaining") {
   const button = $("bulkLessLikeBlockedBots");
   const clearButton = $("clearBlockedLessLikeHistory");
 
@@ -871,7 +895,15 @@ async function runBlockedBulkLessLike(mode = "remaining") {
   let candidateInfo = { ids: [], duplicates: 0, skipped: 0 };
   let startedAt = Date.now();
   const activeStartedAt = Date.now();
-  let availabilityDirty = false;
+  const availabilityUpdates = {};
+  const flushFeedbackAvailability = async () => {
+    if (!Object.keys(availabilityUpdates).length) return true;
+    const response = await runtimeMessage({ type: "DS_BOT_STATUS_PERSIST_DELTA", feedbackPreflight: true,
+      availabilityUpdates: { ...availabilityUpdates } });
+    if (!response?.ok) return false;
+    for (const id of Object.keys(availabilityUpdates)) delete availabilityUpdates[id];
+    return true;
+  };
   let lessLikeFeedbackTabId = 0;
   let lessLikeRunTelemetryStarted = false;
   let nextQueueIndex = 0;
@@ -1069,6 +1101,12 @@ async function runBlockedBulkLessLike(mode = "remaining") {
         jobId
       }, name || id, pacing, stats);
 
+      if (response?.networkAmbiguous || response?.bulkPaused) {
+        blockedBulkLessLikeStopRequested = true;
+        await checkpoint({ force: true, status: "paused", currentId: id, nextIndex: index, stopRequested: true });
+        updateBlockedLessLikeStatus("Less Like paused: outcome or history save unconfirmed. Review the current item before resuming.");
+        break;
+      }
       if (isRepeatedAuthOrCorsError(response)) {
         consecutiveAccessFailures += 1;
         if (consecutiveAccessFailures >= BULK_DISLIKE_FAILURE_PAUSE_THRESHOLD) {
@@ -1106,32 +1144,20 @@ async function runBlockedBulkLessLike(mode = "remaining") {
         break;
       }
 
-      if (response?.availabilityConfirmed) {
-        const previousAvailability = normalizeBotAvailability(botAvailabilityState).meta[id] || {};
-        const directStatus = response?.status === "unavailable" ? "unavailable" : "available";
-        botAvailabilityState.meta[id] = {
-          ...previousAvailability,
-          id,
-          name: name || previousAvailability.name || id,
-          profileUrl: `https://spicychat.ai/chatbot/${id}`,
-          sources: uniqueClean([...(previousAvailability.sources || []), "blocked"]),
-          checkedAt: Date.now(),
-          httpStatus: Number(response?.httpStatus || 0) || 0,
-          status: directStatus,
-          reason: directStatus === "available"
-            ? "Less Like preflight confirmed this bot through SpicyChat's character API."
-            : (response?.reason || "SpicyChat's character API confirmed this bot is unavailable.")
-        };
-        availabilityDirty = true;
-        if (processed % BULK_LESS_LIKE_PACING.availabilityCheckpointEvery === 0) {
-          await storageSet({ [BOT_AVAILABILITY_KEY]: normalizeBotAvailability(botAvailabilityState) });
-          availabilityDirty = false;
-        }
+      if (response?.availabilityConfirmed && (response.status === "less-liked" || response.status === "unavailable")) {
+        availabilityUpdates[id] = { id, name, profileUrl: `https://spicychat.ai/chatbot/${id}`,
+          sources: ["blocked"], checkedAt: Date.now(), httpStatus: Number(response.httpStatus || 0),
+          status: response.status === "unavailable" ? "unavailable" : "available",
+          reason: response.reason || "Less Like character API preflight" };
+        if (processed % BULK_LESS_LIKE_PACING.availabilityCheckpointEvery === 0) await flushFeedbackAvailability();
       }
 
       const handledStatus = applyQuickLessLikeResponseToLocalHistory(id, name, response);
       const remembered = !!handledStatus;
-      if (handledStatus === "less-liked") {
+      if (response?.status === "already-handled" && remembered) {
+        stats.skipped += 1;
+        clearFailure(id);
+      } else if (handledStatus === "less-liked") {
         updated += 1;
         stats.succeeded += 1;
         clearFailure(id);
@@ -1219,9 +1245,8 @@ async function runBlockedBulkLessLike(mode = "remaining") {
       }
     }
   } finally {
-    if (availabilityDirty) {
-      try { await storageSet({ [BOT_AVAILABILITY_KEY]: normalizeBotAvailability(botAvailabilityState) }); } catch {}
-      availabilityDirty = false;
+    if (Object.keys(availabilityUpdates).length) {
+      try { if (!await flushFeedbackAvailability()) optionsDiag("bulk-less-like", "availability-delta-unconfirmed", { count: Object.keys(availabilityUpdates).length }); } catch {}
     }
 
     const stopped = blockedBulkLessLikeStopRequested || !!quickLessLikeBulkState?.stopRequested;
@@ -1269,7 +1294,7 @@ async function runBlockedBulkLessLike(mode = "remaining") {
     // A finished snapshot isn't proof that *every* currently blocked bot was
     // handled. Reconcile against the live blocked list and independent Less
     // Like history; retain failed and newly blocked IDs for explicit Resume.
-    const remainingFromQueue = blockedLessLikeCandidateIds("remaining");
+    const remainingFromQueue = uniqueClean([quickLessLikeBulkState.currentId, ...(quickLessLikeBulkState.pendingIds || [])]).filter(id => (blockedState?.ids || []).includes(id) && !quickLessLikeHistoryEntry(id));
     const hasPending = remainingFromQueue.length > 0;
     const finalFailed = uniqueClean([...(quickLessLikeBulkState.failedIds || []), ...failedIds]).filter(id => !quickLessLikeHistoryEntry(id));
     const finalFailedSet = new Set(finalFailed);
@@ -1317,7 +1342,7 @@ async function bulkLessLikeBlockedBots() {
 async function resetQuickLessLikeLocalHistory() {
   quickLessLikeHistoryState = { version: 1, bots: {} };
   quickLessLikeBulkState = { version: 2, status: "idle", pendingIds: [], failedIds: [], failureMeta: {}, startedAt: 0, updatedAt: Date.now(), currentId: "", lastMode: "remaining", totalBots: 0, nextQueuePosition: 0, attempted: 0, succeeded: 0, failedCount: 0, retried: 0, skipped: 0, pacing: {} };
-  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryState, [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState });
+  await storageSet({ [QUICK_LESS_LIKE_HISTORY_KEY]: quickLessLikeHistoryState, [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState, "quickLessLikeHistoryPendingV1": { version: 1, bots: {} } });
   renderBotManager("blocked");
   updateBlockedLessLikeResumeControls();
   updateBlockedLessLikeStatus();

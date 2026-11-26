@@ -28,6 +28,7 @@ STYLE_OWNERS = {
 # Explicit ownership does NOT establish independent Custom Lite omit-safety.
 BACKGROUND_OWNERS = {
     'background/background-auto-afk.js': 'auto-afk',
+    'background/features/background-lorebook-import.js': 'lorebook-backup',
 }
 
 
@@ -272,13 +273,20 @@ def sync_reviewed_dynamic_primaries(contracts, manifest, modules):
 
 
 def sync_reviewed_background_assets(contracts, entry, modules):
-    """Register clearly feature-gated background imports with known owners.
+    """Register background imports with explicit, unambiguous feature ownership.
 
-    Requires a single existing owner contract, backgroundIsolated=true, and
-    a literal if(dsqBackgroundHasFeature(owner)) importScripts(path) guard.
-    No load-order inference or Custom Lite isolation changes are performed.
+    Feature-isolated helpers require a literal feature gate, while declared
+    always-loaded helpers require backgroundIsolated=false and must appear
+    before the core background.js in the bootstrap import list. Never infer
+    a feature owner, grant Lite isolation, or change import execution order.
     """
-    imported = set(parse_background_imports(entry))
+    ordered_imports = parse_background_imports(entry)
+    imported = set(ordered_imports)
+    # The scripts imported before background.js are part of the early,
+    # unconditional bootstrap group. Never treat a later gated import as
+    # unconditionally loaded merely because its file name is present.
+    unconditional = (set(ordered_imports[:ordered_imports.index('background.js')])
+                     if 'background.js' in ordered_imports else set())
     background = modules['runtimeAssets']['background']
     required = background['required']
     helpers = background['helperModules']
@@ -294,18 +302,28 @@ def sync_reviewed_background_assets(contracts, entry, modules):
             raise ValueError(f'Ambiguous background asset ownership: {rel}: {owners}')
         owner = owners[0]
         contract = contracts[owner][1]
-        if (contract.get('id') != owner or contract.get('backgroundIsolated') is not True
+        if (contract.get('id') != owner
                 or not re.fullmatch(r'background/features/[a-z0-9-]+\.js', rel)
                 or rel not in imported):
             continue
-        gated = (
-            r'\bif\s*\(\s*dsqBackgroundHasFeature\s*\(\s*["\x27]'
-            + re.escape(owner)
-            + r'["\x27]\s*\)\s*\)\s*importScripts\s*\(\s*["\x27]'
-            + re.escape(rel)
-            + r'["\x27]\s*\)\s*;'
-        )
-        if not re.search(gated, entry):
+        isolation = contract.get('backgroundIsolated')
+        if isolation is False:
+            # Explicitly shared/nonisolated services are already imported on
+            # every Full worker startup; registering them cannot claim they
+            # are safe to omit in a Custom/Lite profile.
+            if rel not in unconditional:
+                continue
+        elif isolation is True:
+            gated = (
+                r'\bif\s*\(\s*dsqBackgroundHasFeature\s*\(\s*["\x27]'
+                + re.escape(owner)
+                + r'["\x27]\s*\)\s*\)\s*importScripts\s*\(\s*["\x27]'
+                + re.escape(rel)
+                + r'["\x27]\s*\)\s*;'
+            )
+            if not re.search(gated, entry):
+                continue
+        else:
             continue
         if not (ROOT / rel).is_file():
             raise ValueError(f'Missing reviewed background asset: {rel}')

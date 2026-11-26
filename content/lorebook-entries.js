@@ -121,6 +121,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   DS.applyLorebookEntryExpanders = function applyLorebookEntryExpanders() {
+    if (DS.state?.lorebookNativeCaptureActive || DS.state?.lorebookImportActive) return;
     const settings = DS.state.settings || {};
     const enabled = !!(
       settings.enabled &&

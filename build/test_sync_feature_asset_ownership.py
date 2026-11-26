@@ -308,6 +308,52 @@ class ReviewedGatedBackgroundTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Ambiguous background asset"):
             self.repair()
 
+
+    def test_declared_nonisolated_background_helper_is_registered(self):
+        self.rel = "background/features/background-lorebook-import.js"
+        (sync.ROOT / self.rel).write_text("/* shared background helper */", encoding="utf-8")
+        self.contracts = {
+            "lorebook-backup": (None, {
+                "id": "lorebook-backup",
+                "backgroundFiles": [self.rel], "backgroundIsolated": False,
+            })
+        }
+        self.entry = (
+            'importScripts("background/features/background-lorebook-import.js", '
+            '"background.js");'
+        )
+        self.assertEqual(self.repair(), [self.rel])
+        self.assertIn(self.rel, self.modules["runtimeAssets"]["background"]["required"])
+        self.assertIn(self.rel, self.modules["runtimeAssets"]["background"]["helperModules"])
+        self.assertEqual(self.repair(), [])
+
+    def test_nonisolated_helper_never_assumes_later_import_is_unconditional(self):
+        self.rel = "background/features/background-lorebook-import.js"
+        (sync.ROOT / self.rel).write_text("/* shared background helper */", encoding="utf-8")
+        self.contracts = {
+            "lorebook-backup": (None, {
+                "id": "lorebook-backup",
+                "backgroundFiles": [self.rel], "backgroundIsolated": False,
+            })
+        }
+        self.entry = (
+            'importScripts("background.js"); '
+            'if (dsqBackgroundHasFeature("lorebook-backup")) '
+            'importScripts("background/features/background-lorebook-import.js");'
+        )
+        self.assertEqual(self.repair(), [])
+
+    def test_nonisolated_helper_requires_explicit_contract(self):
+        self.rel = "background/features/background-lorebook-import.js"
+        (sync.ROOT / self.rel).write_text("/* shared background helper */", encoding="utf-8")
+        self.contracts = {}
+        self.entry = 'importScripts("background/features/background-lorebook-import.js", "background.js");'
+        self.assertEqual(self.repair(), [])
+
+    def test_unstated_isolation_still_requires_review(self):
+        del self.contracts["archive-blocking-presets"][1]["backgroundIsolated"]
+        self.assertEqual(self.repair(), [])
+
     def test_missing_file_rejected(self):
         (sync.ROOT / self.rel).unlink()
         with self.assertRaisesRegex(ValueError, "Missing reviewed background asset"):

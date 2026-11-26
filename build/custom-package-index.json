@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.97",
+  "sourceVersion": "0.3.0",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -1215,7 +1215,9 @@
       ],
       "settingsStyles": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-lorebook-import.js"
+      ],
       "helpers": [],
       "fullyIndependent": false
     },

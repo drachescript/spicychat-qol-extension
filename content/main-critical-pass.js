@@ -56,9 +56,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         return;
       }
 
+      // Native Lorebook/Rulebook attachment selection owns its editor portal.
+      if (DS.syncNativeEditorAttachmentPicker?.()) return;
+
       // Ensure route/setting-owned code exists before the regular feature lanes
       // call its DS methods. Cached imports cost nothing on subsequent passes.
       await DS.prepareOptionalModules?.(settings);
+      if (DS.syncNativeEditorAttachmentPicker?.()) return;
 
       // The chat-start/change-persona modal is a transient native surface.
       // While it is open, broad chat/listing reconciliation only competes with
@@ -76,7 +80,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       syncNativeScrollBackToTopVisibility();
 
-      if (/^\/favorite-bots\/?$/i.test(location.pathname)) DS.refreshFavoritesLaterTab?.();
+      if (/^\/favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) DS.refreshFavoritesLaterTab?.();
       const page = DS.getPageState?.() || {};
       const singleChat = !!page.isSingleChatPage;
       const chatList = !!page.isChatListPage;
@@ -173,7 +177,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       if (!listing && DS.removeReportLinkCollector) DS.removeReportLinkCollector();
       if (listing) {
-        if (settings.enableReportLinkCollector === true && /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i.test(location.pathname)) {
+        if (settings.enableReportLinkCollector === true && /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?|creator(?:\/[^/]+)?\/?)?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) {
           await runFeatureStep("report link collector", true, () => DS.applyReportLinkCollector?.());
         } else {
           DS.removeReportLinkCollector?.();
@@ -203,7 +207,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         DS.refreshMessageEnhancerConfig?.(settings);
         await runFeatureStep("previously chatted recording", !!settings.enablePreviouslyChattedIndicator, () => DS.applyPreviouslyChattedIndicator?.());
         await runFeatureStep("chat top bar", chatTopBarWanted(settings) || !!DS.state.chatTopBarWasActive, () => DS.applyChatTopBarTools?.());
-        await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgrounds?.());
+        await runFeatureStep("chat backgrounds", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => { if (DS.queueChatBackgroundRefresh) DS.queueChatBackgroundRefresh(); else if (DS.applyChatBackgrounds) return DS.applyChatBackgrounds(); });
         await runFeatureStep("rulebook diagnostics", !!settings.enableRulebookDiagnostics || !!document.getElementById("ds-rulebook-diagnostics"), () => DS.applyRulebookDiagnostics?.());
         await runFeatureStep("chat background button placement", !!(settings.enableChatBackgrounds || settings.enableCustomCharacterPictures || settings.enableCustomPersonaPictures || settings.enableCustomPictureLibrary || settings.showAutoImageInlineButton) || !!DS.state.chatBackgroundsWasActive, () => DS.applyChatBackgroundControlPlacement?.());
         await runFeatureStep("chat UI", chatUiWanted(settings) || !!DS.state.chatUiCleanupWasActive, () => DS.applyChatUiCleanup?.());

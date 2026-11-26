@@ -79,7 +79,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function generationMetadataWanted(settings) {
-    return anySetting(settings, ["showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "enableContextWindowWarning"]);
+    return anySetting(settings, ["showGenerationMetadata", "showMessageTimestamps", "showGenerationModel", "showGenerationElapsed", "showGenerationSettings", "showMessageTokenEstimate", "enableContextWindowWarning"]);
   }
 
   function personaToolsWanted(settings) {

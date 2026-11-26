@@ -563,7 +563,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const selected = new Map();
   const state = { active: false, busy: false, scanning: false, cancelScan: false, observer: null, refreshTimer: null, status: '', visibleSignature: '', autoSyncing: false, cleanupJob: null, cleanupLoaded: false, cleanupLoading: false, cleanupRunning: false, cleanupStop: false, cleanupStatus: '' };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const isPage = () => /^\/favorite-bots(?:\/|$)/i.test(location.pathname) && DS.state?.settings?.enabled !== false;
+  const isPage = () => /^\/favorite-bots(?:\/|$)/i.test(DS.normalizedRoutePath?.() || location.pathname) && DS.state?.settings?.enabled !== false;
   // Favorites have their own actions and must not depend on Bulk Card Blocking.
   const isEnabled = () => isPage() && !DS.isLaterFavoritesTabActive?.() && setting('showFavoritesBulkSelect') !== false;
   const scanEnabled = () => isPage() && !DS.isLaterFavoritesTabActive?.() && setting('showFavoritesScanButton') !== false;

@@ -234,6 +234,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function closeNotificationPanel(button, delay = 0) {
     setTimeout(() => {
+      // A delayed background notification dismissal must not close a newly
+      // opened native attachment chooser via Escape or a body click.
+      if (DS.isNativeEditorAttachmentPickerOpen?.()) return;
       try {
         document.dispatchEvent(new KeyboardEvent("keydown", {
           key: "Escape",
@@ -270,7 +273,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function maybeAutoReadBackgroundNotification(forceUnreadSignal = false) {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.autoReadNotifications) return;
-    if (!document.hidden) return;
+    if (!document.hidden || DS.isNativeEditorAttachmentPickerOpen?.()) return;
     if (autoReadInFlight || Date.now() < autoReadCooldownUntil) return;
     if (!forceUnreadSignal && !hasUnreadSignal()) return;
 
@@ -443,6 +446,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       return;
     }
 
+    if (DS.isNativeEditorAttachmentPickerOpen?.()) return;
     // Repair anything older versions accidentally hid.
     unhideIfReason("premium:floating-context-limit", isModelSelector);
     restoreSubscriptionPageContent();

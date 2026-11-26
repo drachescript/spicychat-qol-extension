@@ -370,10 +370,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     };
   }
 
-  function saveOpenedMetaFromCard(id, card, anchor) {
+  function saveOpenedMetaFromCard(id, card, anchor, preparedMeta = null) {
     if (!id) return;
 
-    const base = DS.makeBotMeta?.({ id, card, anchor }) || {};
+    const base = preparedMeta || DS.makeBotMeta?.({ id, card, anchor }) || {};
     DS.saveOpenedChatMeta?.(id, {
       ...base,
       id,
@@ -563,7 +563,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const existingMeta = DS.state.openedChatMeta?.[id];
 
       if (!wasKnown || !existingMeta?.cardMetaCaptured) {
-        saveOpenedMetaFromCard(id, card, anchor);
+        saveOpenedMetaFromCard(id, card, anchor, candidateMeta);
         metadataChanged = true;
       }
 

@@ -4,9 +4,12 @@ html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[
   position: relative;
   isolation: isolate;
   overflow: visible !important;
-  background: var(--ds-chat-bubble-ai-bg) !important;
   border: var(--ds-chat-bubble-ai-border-width) var(--ds-chat-bubble-ai-border-style, solid) var(--ds-chat-bubble-ai-border) !important;
   box-shadow: var(--ds-chat-bubble-ai-shadow) !important;
+}
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div[class*="m-[0_32px_0_10px]"][class~="bg-gray-4"],
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_32px_0_10px]"] {
+  background: var(--ds-chat-bubble-ai-bg) !important;
 }
 
 html[data-ds-chat-bubbles="1"] div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"],
@@ -14,9 +17,12 @@ html[data-ds-chat-bubbles="1"] div:is([class*="m-[0_32px_0_10px]"], [class*="m-[
   position: relative;
   isolation: isolate;
   overflow: visible !important;
-  background: var(--ds-chat-bubble-user-bg) !important;
   border: var(--ds-chat-bubble-user-border-width) var(--ds-chat-bubble-user-border-style, solid) var(--ds-chat-bubble-user-border) !important;
   box-shadow: var(--ds-chat-bubble-user-shadow) !important;
+}
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div[class*="m-[0_10px_0_53px]"][class*="bg-blumine-"],
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div:is([class*="m-[0_32px_0_10px]"], [class*="m-[0_10px_0_53px]"])[class*="m-[0_10px_0_53px]"] {
+  background: var(--ds-chat-bubble-user-bg) !important;
 }
 
 /* Only the message-body child inherits the chosen text color. Header names,
@@ -148,18 +154,24 @@ html[data-ds-chat-bubbles="1"] div[id^="message-"]
   position: relative;
   isolation: isolate;
   overflow: visible !important;
-  background: var(--ds-chat-bubble-ai-bg) !important;
   border: var(--ds-chat-bubble-ai-border-width) var(--ds-chat-bubble-ai-border-style, solid) var(--ds-chat-bubble-ai-border) !important;
   box-shadow: var(--ds-chat-bubble-ai-shadow) !important;
+}
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div[id^="message-"]
+  :is([data-chat-bubble-side="bot"][class*="!max-w-[650px]"], [data-chat-bubble-side="bot"] [class*="!max-w-[650px]"]) {
+  background: var(--ds-chat-bubble-ai-bg) !important;
 }
 html[data-ds-chat-bubbles="1"] div[id^="message-"]
   :is([data-chat-bubble-side="user"][class*="!max-w-[650px]"], [data-chat-bubble-side="user"] [class*="!max-w-[650px]"]) {
   position: relative;
   isolation: isolate;
   overflow: visible !important;
-  background: var(--ds-chat-bubble-user-bg) !important;
   border: var(--ds-chat-bubble-user-border-width) var(--ds-chat-bubble-user-border-style, solid) var(--ds-chat-bubble-user-border) !important;
   box-shadow: var(--ds-chat-bubble-user-shadow) !important;
+}
+html[data-ds-chat-bubbles="1"]:not([data-ds-sai-bubble-colors="1"]) div[id^="message-"]
+  :is([data-chat-bubble-side="user"][class*="!max-w-[650px]"], [data-chat-bubble-side="user"] [class*="!max-w-[650px]"]) {
+  background: var(--ds-chat-bubble-user-bg) !important;
 }
 
 /* Metadata sits between the native header and body. Count only native

@@ -70,7 +70,7 @@ function quickDislikeHistoryEntry(id) {
   // and checking its selected thumbs-down state. Recombee ratings and legacy
   // event-only records must not be silently promoted to native UI success.
   if (["disliked", "already-disliked"].includes(entry.status) &&
-      entry.nativeUiConfirmed !== true && entry.nativeEventConfirmed !== true) return null;
+      entry.nativeUiConfirmed !== true) return null;
   if (entry.status === "dislike-event-pending") return null;
   return entry;
 }
@@ -108,14 +108,16 @@ function normalizeQuickLessLikeHistory(raw) {
   Object.entries(bots).forEach(([id, value]) => {
     const botId = String(id || "").trim();
     const status = String(value?.status || "");
-    if (!botId || !["less-liked", "unavailable"].includes(status)) return;
+    if (!botId || !["less-liked", "unavailable"].includes(status) || value?.stage === "cross-feedback-dedupe") return;
     normalized[botId] = {
       status,
       name: String(value?.name || "").slice(0, 160),
       handledAt: Number(value?.handledAt || value?.at || 0) || 0,
       stage: String(value?.stage || "").slice(0, 80),
       reason: String(value?.reason || "").slice(0, 300),
-      httpStatus: Number(value?.httpStatus || 0) || 0
+      httpStatus: Number(value?.httpStatus || 0) || 0,
+      ratingConfirmed: value?.ratingConfirmed === true,
+      nativeEventConfirmed: false
     };
   });
   return { version: 1, bots: normalized };
@@ -124,6 +126,10 @@ function normalizeQuickLessLikeHistory(raw) {
 function quickLessLikeHistoryEntry(id) {
   const botId = String(id || "").trim().toLowerCase();
   if (!botId) return null;
+  const native = quickDislikeHistoryState?.bots?.[botId];
+  if (native?.nativeUiConfirmed === true && ["disliked", "already-disliked"].includes(native.status)) {
+    return { status: "less-liked", crossHandledBy: "native-dislike", handledAt: native.handledAt || 0 };
+  }
   const entry = quickLessLikeHistoryState?.bots?.[botId] || null;
   if (entry?.status === "less-liked" && entry?.stage === "cross-feedback-dedupe") return null;
   if (entry?.status === "unavailable" && botAvailabilityState?.meta?.[botId]?.status === "available" &&
@@ -136,6 +142,7 @@ function quickLessLikeHistoryEntry(id) {
 
 function quickLessLikeHistoryLabel(entry) {
   if (!entry) return "";
+  if (entry.crossHandledBy === "native-dislike") return "Skipped · native Dislike already confirmed";
   if (entry.status === "less-liked") return "Stop recommending sent";
   if (entry.status === "unavailable") return entry.fromBotStatus
     ? "Confirmed unavailable in Bot Status · no rating needed"
@@ -235,7 +242,7 @@ function normalizeQuickLessLikeBulkState(raw) {
 async function persistQuickLessLikeBulkState(nextState) {
   quickLessLikeBulkState = normalizeQuickLessLikeBulkState(nextState);
   quickLessLikeBulkState.updatedAt = Date.now();
-  await storageSet({ [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState });
+  if (!await storageSet({ [QUICK_LESS_LIKE_BULK_STATE_KEY]: quickLessLikeBulkState })) throw new Error("Less Like queue checkpoint could not be saved.");
   updateBlockedLessLikeResumeControls();
   return quickLessLikeBulkState;
 }
@@ -243,7 +250,7 @@ async function persistQuickLessLikeBulkState(nextState) {
 async function persistQuickDislikeBulkState(nextState) {
   quickDislikeBulkState = normalizeQuickDislikeBulkState(nextState);
   quickDislikeBulkState.updatedAt = Date.now();
-  await storageSet({ [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState });
+  if (!await storageSet({ [QUICK_DISLIKE_BULK_STATE_KEY]: quickDislikeBulkState })) throw new Error("Dislike queue checkpoint could not be saved.");
   updateBlockedBulkResumeControls();
   return quickDislikeBulkState;
 }
@@ -938,7 +945,7 @@ function collectTrackedAvailabilityBots(scope = "all") {
     uniqueClean(currentOpened).forEach(id => add(id, openedChatMetaState?.[id], "opened"));
   }
   if (selected("archive")) {
-    const store = normalizeBotArchive(botArchiveState);
+    const store = botArchiveState;
     Object.entries(store.meta || {}).forEach(([id, meta]) => add(id, {
       id,
       name: meta.name || meta.fields?.name || "",
@@ -1729,8 +1736,8 @@ function computeBotDuplicateMatches(entries) {
 
 function botStatusCenterBaseEntries(scope = "all") {
   const tracked = collectTrackedAvailabilityBots(scope);
-  const saved = normalizeBotAvailability(botAvailabilityState).meta;
-  const archives = normalizeBotArchive(botArchiveState).meta;
+  const saved = botAvailabilityState.meta || {};
+  const archives = botArchiveState.meta || {};
   const byId = new Map();
   for (const item of tracked) {
     byId.set(item.id, {
@@ -1833,13 +1840,17 @@ function botUpdateDetails(entry) {
   const details = makeElement("details", { className: "bot-update-details" });
   const when = entry.updateDetectedAt ? ` · ${new Date(entry.updateDetectedAt).toLocaleString()}` : "";
   details.appendChild(makeElement("summary", { text: `Last detected change${entry.changedFields.length === 1 ? "" : "s"} (${entry.changedFields.length})${when}` }));
-  for (const change of entry.changedFields) {
-    const block = makeElement("div", { className: "bot-update-change" });
-    block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
-    block.appendChild(makeElement("div", { className: "bot-update-before", text: `Before: ${shortenedDiffValue(change.before)}` }));
-    block.appendChild(makeElement("div", { className: "bot-update-after", text: `Now: ${shortenedDiffValue(change.after)}` }));
-    details.appendChild(block);
-  }
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.detailsLoaded === "1") return;
+    for (const change of entry.changedFields) {
+      const block = makeElement("div", { className: "bot-update-change" });
+      block.appendChild(makeElement("div", { className: "bot-update-field", text: BOT_SNAPSHOT_LABELS[change.field] || change.field }));
+      block.appendChild(makeElement("div", { className: "bot-update-before", text: `Before: ${shortenedDiffValue(change.before)}` }));
+      block.appendChild(makeElement("div", { className: "bot-update-after", text: `Now: ${shortenedDiffValue(change.after)}` }));
+      details.appendChild(block);
+    }
+    details.dataset.detailsLoaded = "1";
+  });
   return details;
 }
 
@@ -1848,20 +1859,24 @@ function botDuplicateDetails(entry) {
   if (!matches.length) return null;
   const details = makeElement("details", { className: "bot-duplicate-details" });
   details.appendChild(makeElement("summary", { text: `${matches.length} possible duplicate/reupload match${matches.length === 1 ? "" : "es"}` }));
-  for (const match of matches.slice(0, 20)) {
-    const row = makeElement("div", { className: "bot-duplicate-match" });
-    row.appendChild(makeElement("span", {
-      className: "bot-duplicate-badge",
-      text: match.level === "exact" ? "Exact" : match.level === "likely" ? "Likely" : "Possible",
-      dataset: { level: match.level }
-    }));
-    row.appendChild(makeElement("a", {
-      text: match.name || match.id,
-      attrs: { href: `https://spicychat.ai/chatbot/${match.id}`, target: "_blank", rel: "noopener noreferrer" }
-    }));
-    if (match.reasons?.length) row.appendChild(makeElement("span", { className: "bot-duplicate-reason", text: match.reasons.join(" + ") }));
-    details.appendChild(row);
-  }
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.dataset.detailsLoaded === "1") return;
+    for (const match of matches.slice(0, 20)) {
+      const row = makeElement("div", { className: "bot-duplicate-match" });
+      row.appendChild(makeElement("span", {
+        className: "bot-duplicate-badge",
+        text: match.level === "exact" ? "Exact" : match.level === "likely" ? "Likely" : "Possible",
+        dataset: { level: match.level }
+      }));
+      row.appendChild(makeElement("a", {
+        text: match.name || match.id,
+        attrs: { href: `https://spicychat.ai/chatbot/${match.id}`, target: "_blank", rel: "noopener noreferrer" }
+      }));
+      if (match.reasons?.length) row.appendChild(makeElement("span", { className: "bot-duplicate-reason", text: match.reasons.join(" + ") }));
+      details.appendChild(row);
+    }
+    details.dataset.detailsLoaded = "1";
+  });
   return details;
 }
 
@@ -1912,7 +1927,7 @@ function botArchiveDetails(entry) {
 
 function botArchiveHistoryDetails(archiveValue) {
   const archive = archiveValue && typeof archiveValue === "object" ? archiveValue : null;
-  const revisions = Array.isArray(archive?.revisions) ? archive.revisions.map(normalizeBotArchiveRevision).filter(Boolean) : [];
+  const revisions = Array.isArray(archive?.revisions) ? archive.revisions : [];
   if (!archive || !revisions.length) return null;
 
   const details = makeElement("details", { className: "bot-update-details bot-archive-history-details" });
@@ -1920,7 +1935,7 @@ function botArchiveHistoryDetails(archiveValue) {
   details.addEventListener("toggle", () => {
     if (!details.open || details.dataset.historyLoaded === "1") return;
     const snapshots = [
-      ...revisions.map(item => ({
+      ...revisions.map(normalizeBotArchiveRevision).filter(Boolean).map(item => ({
         capturedAt: Number(item.capturedAt || 0),
         source: item.source || item.label || "Saved profile",
         fields: item.fields || {}

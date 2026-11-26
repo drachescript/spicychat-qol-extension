@@ -259,7 +259,7 @@
   const originalFetch = window.fetch;
   if (typeof originalFetch === "function") {
     window.fetch = function (...args) {
-      if (!enabled) return originalFetch.apply(this, args);
+      if (!enabled || args[1]?.[Symbol.for("dsq.ownedHistoryRead")] === true) return originalFetch.apply(this, args);
 
       const input = args[0];
       const init = args[1] || {};
@@ -271,6 +271,9 @@
       const result = originalFetch.apply(this, args);
       Promise.resolve(result).then(response => {
         if (!enabled || !response?.clone) return;
+        const type = String(response.headers?.get?.("content-type") || "");
+        // Do not tee open-ended streams for optional metadata collection.
+        if (/text\/event-stream|application\/(?:x-)?ndjson|application\/json-seq/i.test(type)) return;
 
         if (isMessagesRequest(method, url)) {
           response.clone().json().then(emitLoadedMessages).catch(() => {});
@@ -307,10 +310,10 @@
     const generationRequest = isGenerationRequest(method, url, body) ? requestDetails(body) : null;
 
     if (isMessagesRequest(method, url) || generationRequest) {
-      this.addEventListener("load", () => {
-        if (!enabled) return;
+      this.addEventListener("loadend", () => {
+        if (!enabled || this.status < 200 || this.status >= 300) return;
         let data = null;
-        try { data = JSON.parse(this.responseText); } catch { return; }
+        try { data = this.responseType === "json" ? this.response : JSON.parse(this.responseText); } catch { return; }
 
         if (isMessagesRequest(method, url)) emitLoadedMessages(data);
         if (generationRequest) emitGenerationResponse(data, generationRequest);

@@ -1,6 +1,6 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.2.97",
+  "version": "0.3.0",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
   "featureCount": 140,
@@ -2885,7 +2885,9 @@
       "settingsScripts": [
         "settings/feature-panels/lorebook-backup.js"
       ],
-      "backgroundFiles": [],
+      "backgroundFiles": [
+        "background/features/background-lorebook-import.js"
+      ],
       "backgroundServices": [],
       "settingKeys": [
         "lorebookBackupToolsEnabled",

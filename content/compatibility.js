@@ -6,155 +6,197 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (!DS) return;
 
   const PRESENCE_KEY = "dsSaiToolkitPresence";
-  const DEFERRED_FEATURES = new Set([
-    "generation-profiles",
-    "generation-metadata",
-    "home-for-you",
-    "failed-message-helper"
-  ]);
-
-  let observer = null;
-  let detectionTimer = null;
-  let detectionDeadlineTimer = null;
-  let detectionAttemptFinished = false;
-  let presenceSaved = false;
+  const CAP_ATTR = "data-sai-toolkit-capabilities";
+  const CAP_EVENT = "sai-toolkit-capabilities-changed";
+  // v1 publisher contract: {schemaVersion:1, toolkitVersion:"1.3.2",
+  // features:{generationStats:true,timestamps:false,...}}. Missing values
+  // remain unknown. Only allowlisted feature booleans/enum states are retained.
+  const CAP_NAMES = ["generationStats", "timestamps", "messageIds", "generationProfiles", "hideForYou", "failedMessageRecovery", "sidebarLayout", "customMessageColors", "backgroundImage", "roundedProfileImages", "squareMessageEdges"];
+  const aliases = {"generation-metadata":"generationStats", "generation-profiles":"generationProfiles", "home-for-you":"hideForYou", "failed-message-helper":"failedMessageRecovery"};
+  let observer = null, detectionTimer = null, detectionDeadlineTimer = null;
+  let detectionAttemptFinished = false, presenceSaved = false;
   const featureCache = new Map();
-  let lastPresenceCheckAt = 0;
-  let cachedPresence = false;
+  let lastPresenceCheckAt = 0, cachedPresence = false, lastRaw, parsed = null;
+  let refreshTimer = null, lastRoute = "", lastRefreshSignature = "", lastHomeSearch = null, homePageOne = true;
 
-  function hasSaiToolkitMarker() {
-    // Current v1.3.1 markers; do not use retired WYSIWYG/classic-style UI.
-    return !!document.querySelector([
-      "#toolkit-modal-root",
-      "#sai-toolkit-sidebar-btn",
-      "#sai-toolkit-mobile-btn",
-      "#sai-toolkit-button-css",
-      "[id^='sai-toolkit-']",
-      ".generation-stats[data-version-id]",
-      ".generation-stats",
-      "#profile-controls",
-      "#profile-controls-placeholder",
-      "button[aria-label='SAI-Toolkit-button']",
-      ".toolkit-button-text"
-    ].join(", "));
+  function capabilityData() {
+    const raw = document.documentElement?.getAttribute(CAP_ATTR) || "";
+    if (raw === lastRaw) return parsed;
+    lastRaw = raw;
+    featureCache.clear();
+    lastPresenceCheckAt = 0;
+    parsed = null;
+    if (!raw || raw.length > 8192) return null;
+    try {
+      const obj = JSON.parse(raw);
+      const version = obj.toolkitVersion ?? obj.version;
+      const features = obj.features;
+      if ((obj.schemaVersion ?? obj.schema) !== 1 || typeof version !== "string" || !/^\d+\.\d+\.\d+(?:[.\-+][a-z0-9.\-]+)?$/i.test(version) || version.length > 48 || !features || typeof features !== "object" || Array.isArray(features)) return null;
+      const states = {};
+      for (const key of CAP_NAMES) {
+        const value = Object.prototype.hasOwnProperty.call(features,key) ? features[key] : undefined;
+        states[key] = value === true || value === "enabled" ? "enabled" : value === false || value === "disabled" ? "disabled" : "unknown";
+      }
+      parsed = { version, states };
+    } catch {}
+    return parsed;
   }
 
-  function toolkitFeatureCheckbox(feature) {
-    // Toolkit v1.3.1's settings dialog uses an open shadow root. It can be
-    // absent on normal pages: that means unknown, NOT disabled. Never read the
-    // other extension's private storage or modify its settings.
-    const shadow = document.getElementById("toolkit-modal-root")?.shadowRoot;
-    const selectors = {
-      "generation-metadata": ["#showstats-checkbox", "#showtimestamp-checkbox", "#show-message-ids-checkbox"],
-      "home-for-you": ["#hideforyou-checkbox"],
-      "generation-profiles": ["#generation-profiles-checkbox"],
-      "failed-message-helper": ["#message-recovery-checkbox"]
-    };
-    const controls = (selectors[feature] || []).map(sel => shadow?.querySelector(sel)).filter(Boolean);
-    if (!controls.length) return "unknown";
-    return controls.some(input => input.checked) ? "enabled" : "disabled";
+  function hasSaiToolkitMarker() {
+    return !!document.querySelector("#toolkit-modal-root,#sai-toolkit-sidebar-btn,#sai-toolkit-mobile-btn,#sai-toolkit-button-css,[id^='sai-toolkit-'],.generation-stats,#profile-controls,#profile-controls-placeholder,button[aria-label='SAI-Toolkit-button'],.toolkit-button-text");
+  }
+
+  function styleActive(id) {
+    const node = document.getElementById(id) || document.getElementById(id + "-early");
+    return node && !node.disabled && !node.sheet?.disabled && String(node.textContent || "").trim() ? node : null;
+  }
+
+  function legacyStatus(name) {
+    // Do not read draft modal checkboxes (including the profiles force flag).
+    // A closed dialog or absent DOM evidence is unknown, not disabled.
+    if (name === "hideForYou" && document.querySelector('[data-hidden-by-script="true"] .relative.group.rounded-xl.bg-gray-3 .bg-purple-9')) return "enabled";
+    if (name === "generationProfiles" && document.querySelector("#profile-controls:not([hidden]):not([aria-hidden='true'])")) return "enabled";
+    if (name === "failedMessageRecovery") {
+      try { if (localStorage.getItem("sai_message_recovery_enabled") === "true") return "enabled"; } catch {}
+    }
+    if (name === "sidebarLayout" && styleActive("sai-toolkit-sidebar-layout")) return "enabled";
+    if (name === "roundedProfileImages" && styleActive("sai-toolkit-rounded-profile-images")) return "enabled";
+    if (name === "squareMessageEdges" && styleActive("sai-toolkit-square-message-edges")) return "enabled";
+    if (name === "customMessageColors" || name === "backgroundImage") {
+      const style = styleActive("sai-toolkit-style-overrides");
+      if (style) {
+        // Look only for the declaration kind; never return CSS values or image data.
+        const text = String(style.textContent || "");
+        if (name === "backgroundImage" && /background-image\s*:\s*url\(/i.test(text)) return "enabled";
+        if (name === "customMessageColors" && /\.py-md[^{}]*\{[^{}]*background-color\s*:/i.test(text)) return "enabled";
+      }
+    }
+    return "unknown";
   }
 
   async function rememberPresence() {
     if (presenceSaved || !DS.isExtensionContextValid?.()) return;
     presenceSaved = true;
-    await DS.storageSet?.({ [PRESENCE_KEY]: {
-      detected: true, detectedAt: Date.now(), url: location.href
-    } });
+    await DS.storageSet?.({ [PRESENCE_KEY]: { detected: true, detectedAt: Date.now(), url: location.href } });
   }
 
-  DS.detectSaiToolkit = function detectSaiToolkit({ persist = true } = {}) {
+  DS.detectSaiToolkit = function({persist = true} = {}) {
+    const cap = capabilityData();
     const now = Date.now();
     if (!lastPresenceCheckAt || now - lastPresenceCheckAt >= 300) {
-      cachedPresence = hasSaiToolkitMarker();
+      cachedPresence = !!cap || hasSaiToolkitMarker();
       lastPresenceCheckAt = now;
     }
-    const detected = cachedPresence;
-    DS.state.saiToolkitDetected = detected;
-    window.__DSQ_SAI_TOOLKIT_DETECTED__ = detected;
-    // Metadata network capture is independent of Toolkit's *visual* ownership.
-    // The document-start loader owns the bridge's enabled state; do not turn
-    // it off when a Toolkit DOM marker arrives after page initialization.
-    if (detected && persist) rememberPresence().catch(() => {});
-    return detected;
+    DS.state.saiToolkitDetected = cachedPresence;
+    window.__DSQ_SAI_TOOLKIT_DETECTED__ = cachedPresence;
+    if (cachedPresence && persist) rememberPresence().catch(() => {});
+    return cachedPresence;
   };
-
-  DS.getSaiToolkitFeatureStatus = function getSaiToolkitFeatureStatus(feature) {
-    const name = String(feature || "");
-    if (!DEFERRED_FEATURES.has(name)) return "unknown";
+  DS.getSaiToolkitFeatureStatus = function(feature) {
+    const name = aliases[feature] || feature;
+    if (!CAP_NAMES.includes(name)) return "unknown";
+    const cap = capabilityData();
+    if (cap) return cap.states[name];
     const cached = featureCache.get(name);
     if (cached && Date.now() - cached.at < 300) return cached.value;
-    if (DS.detectSaiToolkit?.({ persist: false }) !== true) {
-      featureCache.set(name, { value: "absent", at: Date.now() });
-      return "absent";
-    }
-    let value = "unknown";
-
-    // The page-context recovery hook in Toolkit v1.3.1 publishes a reliable
-    // enabled flag here, and removes it on disable. A visible settings toggle
-    // is useful when first opening the dialog but is never required.
-    const visibleControl = toolkitFeatureCheckbox(name);
-    if (name === "failed-message-helper") {
-      // Toolkit v1.3.1 removes this key when disabled; absence before the
-      // interceptor initializes must therefore remain unknown, not guessed.
-      if (visibleControl !== "unknown") value = visibleControl;
-      else {
-        try {
-          if (localStorage.getItem("sai_message_recovery_enabled") === "true") value = "enabled";
-        } catch {}
-      }
-    } else if (visibleControl !== "unknown") {
-      value = visibleControl;
-    } else if (name === "generation-metadata" && document.querySelector(".generation-stats")) {
-      value = "enabled";
-    } else if (name === "generation-profiles" && document.querySelector("#profile-controls:not([hidden])")) {
-      value = "enabled";
-    }
-    featureCache.set(name, { value, at: Date.now() });
+    const value = DS.detectSaiToolkit({persist:false}) ? legacyStatus(name) : (lastRaw ? "unknown" : "absent");
+    featureCache.set(name, {value, at:Date.now()});
     return value;
   };
-
-  DS.shouldDeferToSaiToolkit = function shouldDeferToSaiToolkit(feature) {
+  DS.shouldDeferToSaiToolkit = function(feature) {
     if (DS.state?.settings?.saiToolkitCompatibility === false) return false;
-    return DS.getSaiToolkitFeatureStatus?.(feature) === "enabled";
-  };
-
-  function stopSaiToolkitDetection() {
-    observer?.disconnect();
-    observer = null;
-    clearTimeout(detectionTimer);
-    clearTimeout(detectionDeadlineTimer);
-    detectionTimer = null;
-    detectionDeadlineTimer = null;
-  }
-
-  DS.startSaiToolkitDetection = function startSaiToolkitDetection() {
-    if (DS.detectSaiToolkit?.({ persist: true })) {
-      stopSaiToolkitDetection();
-      return;
+    const name = aliases[feature] || feature;
+    if (name === "hideForYou") {
+      // v1.3.2 stops hiding on paginated results and Recommended. A global
+      // enabled capability does not grant ownership on those routes.
+      if (!DS.isHomePage?.()) return false;
+      const search = location.search || "";
+      if (lastHomeSearch !== search) {
+        lastHomeSearch = search;
+        homePageOne = ![...new URLSearchParams(search)].some(([key,value])=>/\[page\]$/i.test(key) && value !== "1");
+      }
+      if (!homePageOne) return false;
     }
+    return DS.getSaiToolkitFeatureStatus(name) === "enabled";
+  };
+  DS.getSaiToolkitCompatibilitySnapshot = function() {
+    const cap = capabilityData();
+    const detected = DS.detectSaiToolkit({persist:false});
+    const states = Object.fromEntries(CAP_NAMES.map(k=>[k,DS.getSaiToolkitFeatureStatus(k)]));
+    const settings = DS.state?.settings || {};
+    const chat = !!DS.isSingleChatPage?.();
+    const enabled = settings.enabled !== false && settings.saiToolkitCompatibility !== false;
+    const active = {
+      timestamps: chat && !!(settings.showMessageTimestamps || settings.showGenerationMetadata),
+      generationStats: chat && !!(settings.showGenerationModel || settings.showGenerationSettings || settings.showGenerationMetadata),
+      generationProfiles: chat && !!settings.enableGenerationProfiles,
+      hideForYou: !!settings.hideHomeForYouCards,
+      failedMessageRecovery: chat && !!settings.failedMessageHelper,
+      customMessageColors: chat && !!(settings.enableChatBubbleCustomization || settings.enableChatBackgrounds),
+      backgroundImage: chat && !!settings.enableChatBackgrounds,
+      squareMessageEdges: chat && !!settings.enableChatBubbleCustomization
+    };
+    const deferred = enabled ? Object.keys(active).filter(k=>active[k] && DS.shouldDeferToSaiToolkit(k)) : [];
+    const exclusive = chat && settings.enabled !== false ? Object.entries({
+      "Elapsed generation time": settings.showGenerationElapsed || settings.showGenerationMetadata,
+      "Token estimates":settings.showMessageTokenEstimate,
+      "Context warnings":settings.enableContextWindowWarning,
+      "Automatic retry":settings.autoRetryFailedMessageSends,
+      "Bubble fonts / borders / text styles":settings.enableChatBubbleCustomization,
+      "Character pictures":settings.enableCustomCharacterPictures,
+      "Persona pictures":settings.enableCustomPersonaPictures
+    }).filter(([,v])=>v).map(([k])=>k) : [];
+    return {detected, version:cap?.version || null, capabilityInterface:cap ? "v1" : lastRaw ? "invalid-or-unsupported" : "unavailable", states, compatibility:settings.saiToolkitCompatibility !== false, deferred, exclusive, sampledAt:Date.now()};
+  };
+  function stopSaiToolkitDetection() {
+    observer?.disconnect(); observer = null;
+    clearTimeout(detectionTimer); clearTimeout(detectionDeadlineTimer);
+    detectionTimer = detectionDeadlineTimer = null;
+  }
+  function refreshCompatibility() {
+    featureCache.clear(); lastPresenceCheckAt = 0;
+    if (refreshTimer !== null) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      const snapshot = DS.getSaiToolkitCompatibilitySnapshot();
+      if (snapshot.detected) rememberPresence().catch(()=>{});
+      const signature = JSON.stringify([snapshot.detected,snapshot.version,snapshot.states,snapshot.compatibility]);
+      if (signature === lastRefreshSignature) return;
+      lastRefreshSignature = signature;
+      if (!snapshot.compatibility || DS.state?.settings?.enabled === false || DS.isQolPausedForTab?.()) return;
+      if (DS.isSingleChatPage?.()) {
+        DS.invalidateGenerationMetadataCompatibility?.();
+        // CSS-only ownership refresh is independent of the large-chat lane.
+        DS.applyChatBubbleCustomization?.();
+        DS.scheduleRun?.({priority:"both",dirty:["sai-metadata","sai-profile","interface"],source:"sai-toolkit-capabilities"});
+      } else {
+        // The filter key includes the ownership state; existing dirty-card
+        // reconciliation and route protections still govern the listing pass.
+        DS.scheduleRun?.({priority:"critical",source:"sai-toolkit-capabilities"});
+      }
+    }, 50);
+  }
+  document.addEventListener(CAP_EVENT, refreshCompatibility);
+  // A root-only attribute observer covers a publisher that writes before dispatch.
+  // Unlike the startup presence observer, this never watches message subtrees.
+  const rootObserver = new MutationObserver(refreshCompatibility);
+  if (document.documentElement) rootObserver.observe(document.documentElement,{attributes:true,attributeFilter:[CAP_ATTR]});
+  DS.startSaiToolkitDetection = function() {
+    const route = location.pathname;
+    if (route !== lastRoute) { lastRoute = route; featureCache.clear(); lastPresenceCheckAt = 0; }
+    if (DS.detectSaiToolkit({persist:true})) { stopSaiToolkitDetection(); return; }
     if (observer || detectionAttemptFinished || !document.documentElement) return;
-
-    // Toolkit may insert its controls after QoL loads. Listen only briefly:
-    // never leave a whole-page observer active when Toolkit isn't installed.
     observer = new MutationObserver(() => {
       if (detectionTimer) return;
       detectionTimer = setTimeout(() => {
         detectionTimer = null;
-        if (!DS.detectSaiToolkit?.({ persist: true })) return;
-        stopSaiToolkitDetection();
-        DS.scheduleRun?.({ priority: "critical", source: "sai-toolkit-detected" });
-        DS.scheduleRun?.({ priority: "slow", source: "sai-toolkit-detected" });
-      }, 180);
+        if (!DS.detectSaiToolkit({persist:true})) return;
+        stopSaiToolkitDetection(); refreshCompatibility();
+      },180);
     });
-
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    detectionDeadlineTimer = setTimeout(() => {
-      detectionAttemptFinished = true;
-      stopSaiToolkitDetection();
-    }, 8000);
+    observer.observe(document.documentElement,{childList:true,subtree:true});
+    detectionDeadlineTimer = setTimeout(()=>{detectionAttemptFinished=true;stopSaiToolkitDetection();},8000);
   };
-
   DS.SAI_TOOLKIT_PRESENCE_KEY = PRESENCE_KEY;
 
   // SpicyChat beta/experimental capability detection. This is passive: it only

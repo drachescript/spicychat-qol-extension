@@ -73,10 +73,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
 
+    // Only cancel propagation of the edit gesture, not its browser default.
+    // Native text selection, explicit edit actions and editable fields keep working.
+    function preventDoubleTapMessageEdit(event) {
+      const settings = DS.state?.settings;
+      if (settings?.disableDoubleTapMessageEdit !== true || settings.enabled === false || DS.isQolPausedForTab?.()) return;
+      if (!DS.isSingleChatPage?.() && !DS.isStoryModePage?.()) return;
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      if (!target?.closest?.("div[id^='message-']")) return;
+      if (target.closest("button, a, input, textarea, select, label, [contenteditable]:not([contenteditable='false']), [role='button'], [role='link'], [role='menu'], [role='menuitem'], [role='dialog'], [role='textbox'], [role='checkbox'], [role='switch'], [role='combobox'], img, video, audio, svg, #ds-qol-panel, #ds-chat-export-modal")) return;
+      event.stopImmediatePropagation();
+    }
+
     let installed = false;
     function installChatMenuGuards() {
       if (installed || DS.isQolPausedForTab?.()) return;
       installed = true;
+      document.addEventListener("dblclick", preventDoubleTapMessageEdit, true);
       document.addEventListener("pointerdown", event => {
         if (DS.state?.settings?.enabled === false || !DS.isSingleChatPage?.()) return;
         const target = event.target;

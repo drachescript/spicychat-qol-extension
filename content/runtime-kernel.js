@@ -125,6 +125,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "NSFW toggle": "listings",
     "tag template": "listings",
     "tag template button": "listings",
+    "excluded tag grouping": "listings",
     "recommendation helpers": "listings",
     "recommendation helper cleanup": "listings",
     "card hiding": "listings",

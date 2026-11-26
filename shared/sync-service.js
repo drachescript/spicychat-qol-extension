@@ -14,7 +14,7 @@
   const LIST_QUIET_UNTIL_KEY = "qolSyncListQuietUntilV1";
   // Per-device scheduled reconciliation. Local changes still sync after they settle.
   const DEFAULT_SYNC_INTERVAL_MINUTES = 720;
-  const VALID_SYNC_INTERVAL_MINUTES = new Set([360, 720, 1440]);
+  const VALID_SYNC_INTERVAL_MINUTES = new Set([180, 360, 720, 1440]);
   const LIST_EDIT_SETTLE_MS = 90000; // Let long-running list imports/cleanups finish before publishing.
   const REQUEST_TIMEOUT_MS = 30000;
   const MAX_PUSH_KEYS = 20;

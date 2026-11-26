@@ -309,15 +309,18 @@ function revealSettingsTarget(targetId, options = {}) {
   const target = $(targetId);
   if (!target) {
     const tab = window.dsqDeferredFeaturePanelTabForControl?.(targetId);
-    if (!tab) return false;
+    if (!tab || options.deferredAttempt) return false;
     setActiveTab(tab);
-    window.dsqHydrateFeaturePanelsForTab?.(tab).then(() => revealSettingsTarget(targetId, options))
+    window.dsqHydrateFeaturePanelsForTab?.(tab).then(() => {
+      if (activeOptionsTab() === tab) revealSettingsTarget(targetId, { ...options, deferredAttempt: true });
+    })
       .catch(error => console.warn("[QoL Settings] Could not open deferred control:", error));
     return true;
   }
   const page = target.closest(".tab-page");
   if (!page?.dataset?.page) return false;
-  setActiveTab(page.dataset.page);
+  if (activeOptionsTab() !== page.dataset.page) setActiveTab(page.dataset.page);
+  if (settingsShowEnabledOnly) { settingsShowEnabledOnly = false; try { sessionStorage.setItem(SETTINGS_ENABLED_ONLY_KEY, "0"); } catch {} applySettingsEnabledOnlyFilter(); }
   expandSettingsCardForTarget(target);
   let details = target.closest("details");
   while (details) {
@@ -771,6 +774,8 @@ function updateSettingDependencies() {
         note = makeElement("small", { className: "setting-dependency-note" });
         label.appendChild(note);
       }
+      if (note.dataset.dsDependencyActive === String(active)) continue;
+      note.dataset.dsDependencyActive = String(active);
       note.replaceChildren();
       note.hidden = active;
       if (!active) {
@@ -1149,12 +1154,27 @@ function applyOptionsLayoutPreferences(settings = null) {
     settingsContentLayout: value("settingsContentLayout", "single"),
     settingsPageWidth: value("settingsPageWidth", "comfortable")
   };
-  const nav = ["classic", "grouped"].includes(source.settingsNavigationStyle) ? source.settingsNavigationStyle : "classic";
+  const nav = ["classic", "sidebar", "ribbon", "picker", "underline", "pills"].includes(source.settingsNavigationStyle) ? source.settingsNavigationStyle : "classic";
   const layout = ["single", "adaptive"].includes(source.settingsContentLayout) ? source.settingsContentLayout : "single";
   const width = ["comfortable", "wide"].includes(source.settingsPageWidth) ? source.settingsPageWidth : "comfortable";
-  document.body.classList.toggle("ds-options-nav-grouped", nav === "grouped");
+  document.body.classList.remove("ds-options-nav-grouped", "ds-options-nav-grid", "ds-options-nav-rows", "ds-options-nav-directory");
+  document.body.classList.toggle("ds-options-nav-sidebar", nav === "sidebar");
+  for (const variant of ["ribbon", "picker", "underline", "pills"]) {
+    document.body.classList.toggle(`ds-options-nav-${variant}`, nav === variant);
+  }
+  const previewToggle = $("settingsLayoutPreviewToggle");
+  if (previewToggle) previewToggle.hidden = false;
+  // The existing compact Sections menu handles picker mode on desktop too.
+  // Close an open menu when the selected navigation mode changes.
+  const navElement = $("optionsTabsNav");
+  if (navElement && navElement.dataset.dsLayoutMode !== nav) {
+    navElement.dataset.dsLayoutMode = nav;
+    navElement.classList.remove("is-mobile-open");
+    $("mobileSectionsToggle")?.setAttribute("aria-expanded", "false");
+  }
   document.body.classList.toggle("ds-options-layout-adaptive", layout === "adaptive");
   document.body.classList.toggle("ds-options-width-wide", width === "wide");
+  keepActiveOptionsTabVisible();
 }
 
 function reorderOptionsUi() {
@@ -1219,7 +1239,7 @@ function scheduleBlockedManagerRefresh() {
   clearTimeout(blockedManagerRefreshTimer);
   blockedManagerRefreshTimer = setTimeout(() => {
     blockedManagerRefreshTimer = 0;
-    if (!blockingDataLoaded || blockedBulkDislikeRunning) return;
+    if (!blockingDataLoaded || blockedBulkDislikeRunning || blockedBulkLessLikeRunning) return;
     OPTIONS_PERFORMANCE.blockedManagerRefreshBatches += 1;
     // Do not build the heavy blocked manager while another Settings tab is open.
     // Its state is already current in memory and the manager will render lazily
@@ -1245,13 +1265,32 @@ function refreshSavedManagersFromStorageChange(kinds = []) {
   if (activeOptionsTab() !== "saved") return;
 
   const changed = new Set(kinds);
-  if (changed.has("hub")) renderSavedBotsHub();
-  if (changed.has("opened")) renderBotManager("opened");
-  if (changed.has("favorite")) renderBotManager("favorite");
-  if (changed.has("later")) renderBotManager("later");
-  if (changed.has("favoriteCreators")) renderFavoriteCreators();
-  if (changed.has("followedCreators")) { renderFollowedCreators(); renderCreatorBotWatchStatus(); }
-  if (changed.has("creatorWatch")) renderCreatorBotWatchStatus();
+  const refresh = (hostId, render) => {
+    const host = $(hostId), card = host?.closest("section.card");
+    if (card?.classList.contains("ds-settings-card-collapsed")) {
+      if (host.dataset.dsManagerDeferred !== "1") {
+        host.dataset.dsManagerDeferred = "1";
+        card.addEventListener("ds-settings-card-opened", () => {
+          delete host.dataset.dsManagerDeferred;
+          if (activeOptionsTab() !== "saved") { invalidateHeavyTab("saved"); return; }
+          const start = performance.now();
+          render();
+          optionsPhaseSample(`manager:${hostId}:render`, performance.now() - start);
+        }, { once: true });
+      }
+      return;
+    }
+    const start = performance.now();
+    render();
+    optionsPhaseSample(`manager:${hostId}:render`, performance.now() - start);
+  };
+  if (changed.has("hub")) refresh("savedBotsHubManager", renderSavedBotsHub);
+  if (changed.has("opened")) refresh("openedBotManager", () => renderBotManager("opened"));
+  if (changed.has("favorite")) refresh("favoriteBotManager", () => renderBotManager("favorite"));
+  if (changed.has("later")) refresh("laterBotManager", () => renderBotManager("later"));
+  if (changed.has("favoriteCreators")) refresh("favoriteCreatorManager", renderFavoriteCreators);
+  if (changed.has("followedCreators")) refresh("followedCreatorManager", renderFollowedCreators);
+  if (changed.has("followedCreators") || changed.has("creatorWatch")) refresh("creatorBotRecentList", renderCreatorBotWatchStatus);
   if (changed.has("availability")) renderBotAvailability();
 
   // The tab is already fully mounted; mark it current again after the targeted

@@ -37,6 +37,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     "bot name expander": "cards",
     "tag template": "tags-nsfw",
     "tag template button": "tags-nsfw",
+    "excluded tag grouping": "tags-nsfw",
     "generation metadata": "generation-metadata",
     "model selector": "model-selector",
     "sidebar": "sidebar",

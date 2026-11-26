@@ -125,9 +125,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       : hexToRgba(settings.chatBubbleUserBackground || "#253f52", settings.chatBubbleUserOpacity));
     root.style.setProperty("--ds-chat-bubble-user-shadow", settings.chatBubbleUserShadow ? "0 6px 18px rgba(0,0,0,.28)" : "none");
 
+    const toolkitColors = DS.shouldDeferToSaiToolkit?.("customMessageColors");
+    const toolkitEdges = DS.shouldDeferToSaiToolkit?.("squareMessageEdges");
+    DS.setAttributeIfChanged?.(root, "data-ds-sai-bubble-colors", toolkitColors ? "1" : "0");
     DS.setAttributeIfChanged?.(root, ROOT_ATTR, "1");
-    DS.setAttributeIfChanged?.(root, AI_SHAPE_ATTR, normalizedShape(settings.chatBubbleAiShape));
-    DS.setAttributeIfChanged?.(root, USER_SHAPE_ATTR, normalizedShape(settings.chatBubbleUserShape));
+    DS.setAttributeIfChanged?.(root, AI_SHAPE_ATTR, toolkitEdges ? "native" : normalizedShape(settings.chatBubbleAiShape));
+    DS.setAttributeIfChanged?.(root, USER_SHAPE_ATTR, toolkitEdges ? "native" : normalizedShape(settings.chatBubbleUserShape));
     DS.setAttributeIfChanged?.(root, AI_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleAiTextMode));
     DS.setAttributeIfChanged?.(root, USER_TEXT_MODE_ATTR, normalizedTextMode(settings.chatBubbleUserTextMode));
     DS.setAttributeIfChanged?.(root, AI_ACTION_MODE_ATTR, actionMode(settings, "chatBubbleAi"));
@@ -141,7 +144,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function cleanup() {
     const root = document.documentElement;
     [
-      ROOT_ATTR, AI_SHAPE_ATTR, USER_SHAPE_ATTR,
+      ROOT_ATTR, "data-ds-sai-bubble-colors", AI_SHAPE_ATTR, USER_SHAPE_ATTR,
       AI_TEXT_MODE_ATTR, USER_TEXT_MODE_ATTR,
       AI_ACTION_MODE_ATTR, USER_ACTION_MODE_ATTR,
       AI_DIALOGUE_MODE_ATTR, USER_DIALOGUE_MODE_ATTR,

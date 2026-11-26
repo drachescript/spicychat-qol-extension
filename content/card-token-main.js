@@ -468,6 +468,26 @@ if (!(() => { try {
     } catch {}
   });
 
+  // Only observe the one native write explicitly armed by the JSON import.
+  // No request content, keywords, tokens or response bodies leave this bridge.
+  function lorebookImportAttempt(input, method) {
+    const arm = active && document.documentElement?.getAttribute('data-ds-lorebook-import-attempt');
+    if (!arm) return null;
+    const url = parseApiUrl(input);
+    const match = url?.hostname === API_HOST && url.pathname.match(/^\/lorebooks\/([0-9a-f-]{36})\/entries(?:\/([0-9a-f-]{36}))?\/?$/i);
+    const [attemptId, bookId, kind] = String(arm || '').split(':');
+    if (!active || !match || match[1].toLowerCase() !== bookId || !/^[0-9a-f-]{36}$/i.test(attemptId)) return null;
+    const verb = String(method || 'GET').toUpperCase();
+    if (kind === 'create' ? verb !== 'POST' || !!match[2] : !['PUT','PATCH','POST'].includes(verb) || !match[2]) return null;
+    return {attemptId, bookId, targetId:match[2] || '', kind};
+  }
+  function lorebookImportResponse(attempt, status, data) {
+    if (!attempt) return;
+    const value = data?.entry || data?.data?.entry || data?.data || data;
+    const id = String(value?.id || value?.entryId || value?.entry_id || attempt.targetId || '');
+    const returnedBook = String(value?.lorebookId || value?.lorebook_id || attempt.bookId).toLowerCase();
+    try { window.dispatchEvent(new CustomEvent('ds-qol-lorebook-import-response-v1', {detail:{attemptId:attempt.attemptId, bookId:attempt.bookId, status:Number(status)||0, entryId:returnedBook===attempt.bookId && /^[0-9a-f-]{36}$/i.test(id)?id:''}})); } catch {}
+  }
   function observedFetch(input, init) {
     let historySeq = 0;
     let historyStartedAt = 0;
@@ -484,8 +504,9 @@ if (!(() => { try {
     } catch {}
 
     const favoritesSettings = active && isNativeFavoritesSettingsRead(input, init?.method || (input instanceof Request ? input.method : 'GET'));
+    const importAttempt = lorebookImportAttempt(input, init?.method || (input instanceof Request ? input.method : "GET"));
     const pending = nativeFetch(input, init);
-    if (!historySeq && !favoritesSettings) return pending;
+    if (!historySeq && !favoritesSettings && !importAttempt) return pending;
     return pending.then(
       response => {
         if (historySeq) try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
@@ -493,9 +514,14 @@ if (!(() => { try {
           // Clone asynchronously; never delay or consume the page's Response.
           try { void response.clone().json().then(captureNativeFavoritesSettings).catch(() => {}); } catch {}
         }
+        if (importAttempt) {
+          if (response?.ok) {try {void response.clone().json().then(data=>lorebookImportResponse(importAttempt,response.status,data),()=>lorebookImportResponse(importAttempt,response.status,null));} catch {lorebookImportResponse(importAttempt,response.status,null);}}
+          else lorebookImportResponse(importAttempt,response?.status,null);
+        }
         return response;
       },
       error => {
+        if (importAttempt) lorebookImportResponse(importAttempt,0,null);
         if (historySeq) try { noteNativeHistoryResponse(historySeq, 0, input, "fetch", historyStartedAt); } catch {}
         throw error;
       }
@@ -505,6 +531,7 @@ if (!(() => { try {
   function observedOpen(method, url, ...rest) {
     try {
       if (active) rememberRecombeeSignedRequest(url);
+      this.__dsCardTokenImportMethod = method;
       this.__dsCardTokenApi = active && urlIsApi(url);
       this.__dsCardTokenUrl = this.__dsCardTokenApi ? String(url || "") : "";
       this.__dsCardTokenHistoryApi = this.__dsCardTokenApi && urlIsNativeHistoryApi(url);
@@ -525,6 +552,11 @@ if (!(() => { try {
 
   function observedSend(...args) {
     try {
+      const importAttempt = lorebookImportAttempt(this.__dsCardTokenUrl, this.__dsCardTokenImportMethod);
+      if (importAttempt) this.addEventListener('loadend',()=>{
+        let data=null;try {data=this.responseType==='json'?this.response:JSON.parse(this.responseText);}catch{}
+        lorebookImportResponse(importAttempt,this.status,data);
+      },{once:true});
       if (active && this.__dsCardTokenFavoritesSettings && typeof this.addEventListener === 'function') {
         this.addEventListener('loadend', () => {
           if (this.status < 200 || this.status >= 300) return;
@@ -1161,6 +1193,9 @@ if (!(() => { try {
       if (isGuest(guest)) headers["x-guest-userid"] = guest;
 
       const response = await nativeFetch(url, {
+        // Local RequestInit marker only; fetch does not transmit unknown keys.
+        // Metadata collectors can skip replaying bulk export pages.
+        [Symbol.for("dsq.ownedHistoryRead")]: true,
         method: "GET",
         credentials: "include",
         cache: "no-store",

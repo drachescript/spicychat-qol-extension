@@ -58,7 +58,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let el = anchor.parentElement;
 
     for (let i = 0; el && i < 12; i++, el = el.parentElement) {
-      if (el === document.body || el.id === "root") break;
+      if (el === document.body || el.id === "root" || DS.isNativePickerSurface?.(el) || DS.containsNativePickerSurface?.(el)) break;
 
       if (el.querySelector?.("textarea[placeholder='Message...'], button[aria-label='chat-dropdown'], nav, [role='navigation']")) {
         continue;
@@ -83,6 +83,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.getCardFromChatLink = function getCardFromChatLink(anchor) {
+    if (DS.isNativePickerSurface?.(anchor)) return null;
     return (
       DS.findRecommendationCardRoot(anchor) ||
       DS.findChatHistoryRow(anchor) ||
@@ -1608,6 +1609,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       location.href,
       Number(DS.state?.domRevision || 0),
       Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hideHomeForYouCards && DS.shouldDeferToSaiToolkit?.("home-for-you") ? 1 : 0,
       Number(DS.state?.archiveThemeRevision || 0),
       Number(DS.state?.archiveBlockingRevision || 0),
       DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,
@@ -1630,6 +1632,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function cardFilterKey() {
     return [
       Number(DS.state?.cardFilterStateRevision || 0),
+      DS.state?.settings?.hideHomeForYouCards && DS.shouldDeferToSaiToolkit?.("home-for-you") ? 1 : 0,
       Number(DS.state?.archiveThemeRevision || 0),
       Number(DS.state?.archiveBlockingRevision || 0),
       DS.state?.settings?.archiveBlockingPresetsEnabled ? 1 : 0,

@@ -25,8 +25,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const FAV = /^\/(?:[a-z]{2}\/)?favorite-bots\/?$/i;
   const MY_CREATIONS = /^\/(?:[a-z]{2}\/)?my-creations(?:\/|$)/i;
   // The report-link + is a discovery tool, not a general card action.
-  // Localized Home and Recommendations are the only supported routes.
-  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?)?$/i;
+  // Supported routes: Home, Recommendations and public creator listings.
+  const REPORT_LISTING = /^\/(?:[a-z]{2}(?:\/|$))?(?:recommended-bots\/?|creator(?:\/[^/]+)?\/?)?$/i;
   const LOREBOOK_EDITOR = /^\/(?:[a-z]{2}\/)?lorebook\/(?:edit(?:\/|$)|create(?:\/|$))/i;
   const LOREBOOK_PUBLIC = /^\/(?:[a-z]{2}\/)?(?:lorebook\/(?:[0-9a-f-]{20,})|lorebooks)(?:\/|$)/i;
   const LISTING = /^\/(?:[a-z]{2}\/)?(?:favorite-bots|recommended-bots|chatbots|search|my-creations\/chatbots|creator\/[^/]+)(?:\/|$)/i;
@@ -172,6 +172,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     return promise;
   }
   function wanted(settings, path = location.pathname) {
+    path = DS.normalizedRoutePath?.(path) || path;
     // The explicit Research Export helper is NOT an ordinary /chats tab.
     // It only needs its own exporter module and shared eager auth readers;
     // unrelated optional panels must not load while thousands of bots scan.

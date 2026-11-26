@@ -924,6 +924,12 @@ async function runQuickLessLikeBot(message) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(botId)) return { ok: false, status: "invalid-bot" };
   if (message?.bulkRunId && isQuickLessLikeBulkRunCanceled(message.bulkRunId)) return { ok: false, status: "bulk-canceled" };
   if (message?.force !== true) {
+    const native = (await getQuickDislikeHistory()).bots[botId];
+    if (native?.nativeUiConfirmed === true && ["disliked", "already-disliked"].includes(native.status)) {
+      return { ok: true, status: "already-handled", rememberedStatus: "less-liked",
+        crossHandledBy: "native-dislike", handledAt: native.handledAt || 0,
+        requestSent: false, networkAttempts: 0 };
+    }
     const history = await getQuickLessLikeHistory(message?.bulkRunId || "");
     const remembered = history.bots[botId];
     if (remembered && !(remembered.status === "unavailable" &&
