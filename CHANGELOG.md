@@ -1,4 +1,5 @@
-## 0.3.02
+## 0.3.2
+- Expanded sidebar customization with independent navigation options, adjustable menu order, grouped discovery and creation shortcuts, and a dedicated creation chooser. Existing cleanup preferences remain available.
 - Improved generation usage tracking and restriction recovery. Partial recovery preserves the original estimated countdown, successful generations remain recorded, and unconfirmed reset times are clearly distinguished from actual recovery.
 - Improved Android navigation responsiveness, archive record storage handling, animation memory use, card selection and support report reliability. Obsolete route work is cancelled, unavailable storage measurements are reported accurately, and native Android recovery no longer depends on automatic QoL reloads.
 - Bot Status now removes blocked bots from pending and held scan queues automatically, without removing blocks, saved copies or status history.

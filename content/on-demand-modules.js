@@ -246,7 +246,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     add("quick-panel",settings.showQuickPanel === true);
     add("sidebar-redesign",settings.redesignedSidebarEnabled === true);
     add("creator-tools-integration",settings.creatorToolsIntegrationEnabled === true && (botEditor || lorebookEditor));
-    add("sidebar",!!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
+    add("sidebar",!!settings.redesignedSidebarEnabled || !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
       !!settings.restorePersonasSidebarPosition || Object.keys(settings).some(k => k.startsWith("hideSidebar") && !!settings[k]));
     add("soundscapes",!!settings.enableSoundscapes);
     add("animation-control", any(settings, ["reduceAnimatedBotImages", "animatedImagesListings",

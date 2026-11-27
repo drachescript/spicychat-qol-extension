@@ -772,10 +772,6 @@ function displayReleaseVersion(value) {
     }
   }
 
-  const manifest = chrome.runtime.getManifest?.() || {};
-  if (raw === String(manifest.version || "") && manifest.version_name) {
-    return String(manifest.version_name);
-  }
   return raw;
 }
 
@@ -1508,7 +1504,7 @@ function setVersionText() {
   if (!versionEl) return;
 
   const manifest = chrome.runtime.getManifest();
-  versionEl.textContent = `v${manifest.version_name || displayReleaseVersion(manifest.version)}`;
+  versionEl.textContent = `v${displayReleaseVersion(manifest.version)}`;
 }
 
 let savedRecoveryLazyOpenListeners = [];

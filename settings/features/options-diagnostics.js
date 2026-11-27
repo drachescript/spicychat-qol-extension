@@ -226,7 +226,7 @@ function setupControlCenterControls() {
 
 function supportReportFilename(kind = "support-info") {
   const manifest = chrome.runtime.getManifest?.() || {};
-  const version = String(manifest.version_name || displayReleaseVersion(manifest.version || "unknown") || "unknown")
+  const version = String(displayReleaseVersion(manifest.version || "unknown") || "unknown")
     .replace(/[^0-9A-Za-z._-]+/g, "-");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeKind = String(kind || "support-info").replace(/[^0-9A-Za-z._-]+/g, "-");
@@ -546,7 +546,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
   const diagnosticLines = [
     "SpicyChat QoL diagnostics",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${chrome.runtime.getManifest?.().version_name || displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
+    `Version: ${displayReleaseVersion(chrome.runtime.getManifest?.().version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -790,7 +790,7 @@ async function copyPerformanceReport({ returnOnly = false } = {}) {
   let lines = [
     "SpicyChat QoL performance report",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     (() => { const p = context?.pageDiagnostics?.buildProfile; return context?.runtimeAvailable && context?.pageDiagnostics ? `Build profile: ${p?.label || p?.id || "Full"}; bundles ${(p?.bundles || []).join(", ") || "unknown"}` : "Build profile: unavailable with runtime data"; })(),
@@ -903,7 +903,7 @@ async function buildPerformanceSelfCheckText() {
   const lines = [
     "SpicyChat QoL performance self-check",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `SpicyChat page: ${sanitizeDiagnosticPath(context?.url || "")}`,
@@ -943,7 +943,7 @@ async function buildFastSupportSnapshot() {
   return [
     "SpicyChat QoL fast support snapshot",
     `Generated: ${new Date().toISOString()}`,
-    `Version: ${manifest.version_name || displayReleaseVersion(manifest.version || "unknown")}`,
+    `Version: ${displayReleaseVersion(manifest.version || "unknown")}`,
     `Browser: ${navigator.userAgent}`,
     `Platform: ${navigator.platform || "unknown"}`,
     `Memory Manager UI: ${formatMemoryManagerUiStatus(null, stored[DS_MEMORY_MANAGER_UI_OBSERVATION_KEY]).replace(/^Memory Manager UI: /, "")}`,
