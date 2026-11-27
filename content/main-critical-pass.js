@@ -7,7 +7,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS) return;
   DS.createMainCriticalPass = (ctx) => {
-    const { anySetting, botEditorRoute, cardBlockUiWanted, cardFilteringWanted, chatStartupQuietActive, chatStartupWarmupActive, chatStartupWarmupRemainingMs, chatTopBarWanted, chatUiWanted, composerWanted, deepSleepEnabled, discardedWakeSessionActive, isCardListingContext, lorebookEditorRoute, memoryManagerWanted, messageQuickActionsEnabled, rerunAfterMenuSettles, runDisabledCleanup, runDiscardedWakeEssentialChatPass, runFeatureStep, runPersonaPickerLowImpact, runRoutedFeatureStep, runSavedOpenedLane, runStep, runtimeCounters, runtimePlan, runtimeProfile, scheduleChatStartupQuietResume, shouldPauseHiddenTab, syncNativeScrollBackToTopVisibility, laneState } = ctx;
+    const { anySetting, botEditorRoute, cardBlockUiWanted, cardFilteringWanted, chatStartupQuietActive, chatStartupWarmupActive, chatStartupWarmupRemainingMs, chatTopBarWanted, chatUiWanted, composerWanted, deepSleepEnabled, discardedWakeSessionActive, isCardListingContext, lorebookEditorRoute, memoryManagerWanted, messageQuickActionsEnabled, rerunAfterMenuSettles, runDisabledCleanup, runDiscardedWakeEssentialChatPass, runFeatureStep: baseRunFeatureStep, runPersonaPickerLowImpact, runRoutedFeatureStep: baseRunRoutedFeatureStep, runSavedOpenedLane, runStep: baseRunStep, runtimeCounters, runtimePlan, runtimeProfile, scheduleChatStartupQuietResume, shouldPauseHiddenTab, syncNativeScrollBackToTopVisibility, laneState } = ctx;
   DS.runCritical = async function runCritical() {
     if (DS.isQolPausedForTab?.()) return;
     const passToken = DS.isDiagnosticTraceActive?.("normal") ? DS.diagOperationStart?.("runtime", "critical-pass", {
@@ -24,9 +24,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     DS.state.diagCriticalOperationId = passToken?.id || "";
     laneState.criticalRunning = true;
+    const routeGuard = DS.makeRouteWorkGuard();
+    const runStep = routeGuard.wrap(baseRunStep);
+    const runFeatureStep = routeGuard.wrap(baseRunFeatureStep);
+    const runRoutedFeatureStep = routeGuard.wrap(baseRunRoutedFeatureStep);
+
 
     try {
       const settings = DS.state?.settings || {};
+      if(settings.dailyMessageLimitTrackerEnabled || document.getElementById('ds-qol-generation-quota-button')) DS.updateDailyMessageLimitStatus?.();
       if (settings.enabled !== false && DS.nativeMobileChatShellUnavailable?.()) {
         // A SpicyChat-native failure is not a QoL recovery opportunity. Avoid
         // piling optional DOM modifications on an unmounted chat; the same
@@ -62,7 +68,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Ensure route/setting-owned code exists before the regular feature lanes
       // call its DS methods. Cached imports cost nothing on subsequent passes.
       await DS.prepareOptionalModules?.(settings);
+      routeGuard.check();
       if (DS.syncNativeEditorAttachmentPicker?.()) return;
+      if(settings.creatorToolsIntegrationEnabled || document.getElementById("ds-sct-integration")) DS.applyCreatorToolsIntegration?.();
 
       // The chat-start/change-persona modal is a transient native surface.
       // While it is open, broad chat/listing reconciliation only competes with
@@ -80,7 +88,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       syncNativeScrollBackToTopVisibility();
 
-      if (/^\/favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname)) DS.refreshFavoritesLaterTab?.();
+      if (/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?favorite-bots\/?$/i.test(DS.normalizedRoutePath?.() || location.pathname) || document.documentElement.hasAttribute("data-ds-later-active")) DS.refreshFavoritesLaterTab?.();
       const page = DS.getPageState?.() || {};
       const singleChat = !!page.isSingleChatPage;
       const chatList = !!page.isChatListPage;
@@ -88,6 +96,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const plan = DS.getRuntimePlan?.(page, { listing }) || runtimePlan(listing);
       runtimeCounters().currentRuntimePlan = plan.key || page.routeType || "other";
       await DS.featureLifecycle?.reconcileRoute?.(plan, DS.runtimeKernel?.canRunRouteGroup);
+      routeGuard.check();
 
       // Large-list paint protection belongs to the listing lane. In .117 the
       // CSS/helper existed, but applyPerformanceMode was only invoked from chat
@@ -331,8 +340,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       await runRoutedFeatureStep(plan, "botEditor", "creator backup field restore", () => !!botEditorRoute() || !!document.getElementById("ds-qol-field-restore-banner"), () => DS.applyCreatorWorkspaceRestore?.());
       await runRoutedFeatureStep(plan, "botEditor", "private scene scenario handoff", () => !!(settings.enableChatSceneNotes && settings.chatSceneNotesEnableBotApply && botEditorRoute()) || !!document.getElementById("ds-qol-scene-bot-handoff"), () => DS.applyBotSceneScenarioHandoff?.());
       await runRoutedFeatureStep(plan, "lorebookEditor", "lorebook backup", () => (!!settings.lorebookBackupToolsEnabled && lorebookEditorRoute()) || !!DS.state.lorebookBackupWasActive || !!document.getElementById("ds-lorebook-backup-tools"), () => DS.applyLorebookBackup?.());
+    } catch (error) {
+      if (error !== routeGuard.cancelled) throw error;
+      const perf = runtimeCounters();
+      perf.obsoleteRoutePassesCancelled = (perf.obsoleteRoutePassesCancelled || 0) + 1;
     } finally {
-      if (passToken) DS.diagOperationEnd?.(passToken, { outcome: "ok" });
+      if (passToken) DS.diagOperationEnd?.(passToken, { outcome: routeGuard.active() ? "ok" : "cancelled" });
       DS.state.diagCriticalOperationId = "";
       if (runtimeProfile() === "normal") DS.state.messageLaneRoots = null;
       laneState.criticalRunning = false;

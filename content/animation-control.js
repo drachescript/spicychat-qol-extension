@@ -10,6 +10,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const videoState = new Map();
   let animationVisibilityGuardInstalled = false;
   let animationVisibilityGuardRaf = 0;
+  let mediaScanTimer = 0, mediaScanRoute = "", mediaScanRevision = -1, mediaScanSettings = "", mediaScanQueue = [];
 
   function elementOnscreen(el) {
     if (!el?.isConnected) return false;
@@ -128,8 +129,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Opening an image is an explicit request to view it. Never replace that
     // full-screen/modal image with a frozen canvas, even when avatar animation
     // reduction is enabled elsewhere on the page.
-    if (el.tagName === "IMG" && isExplicitImageViewer(el)) return false;
     if (el.tagName === "IMG" && !sourceLooksAnimated(el)) return false;
+    if (el.tagName === "IMG" && isExplicitImageViewer(el)) return false;
 
     if (DS.isSingleChatPage?.()) {
       if (isMessageMedia(el)) return !!settings.animatedImagesChatMedia;
@@ -146,7 +147,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Saved-for-Later thumbnails are small: do not allocate multi-megapixel
     // frozen WebP canvases just to display a ~175px card image.
     const laterThumb = !!img.closest?.('#ds-favorites-later-panel');
-    const scale = laterThumb ? Math.min(1, 384 / Math.max(img.naturalWidth, img.naturalHeight)) : 1;
+    const mobile = DS.isNativeAndroidStorage?.() || window.innerWidth <= 760;
+    const listing = mobile && isListingImage(img);
+    const cap = laterThumb || listing ? 384 : mobile ? 768 : Infinity;
+    const scale = Math.min(1, cap / Math.max(img.naturalWidth, img.naturalHeight));
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
     try {
@@ -158,16 +162,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function freezeImage(img, mode) {
-    if (frozen.has(img)) return;
+    if (frozen.has(img) || !img.isConnected) return;
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !settings.reduceAnimatedBotImages || !eligible(img, settings)) return;
 
     if (!img.complete || !img.naturalWidth) {
       if (!pendingImages.has(img)) {
         pendingImages.add(img);
+        const route = location.href;
         img.addEventListener("load", () => {
           pendingImages.delete(img);
-          freezeImage(img, mode);
+          if (img.isConnected && location.href === route) freezeImage(img, mode);
         }, { once: true });
       }
       return;
@@ -226,6 +231,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (host && state.enter) host.removeEventListener("mouseenter", state.enter);
       if (host && state.leave) host.removeEventListener("mouseleave", state.leave);
       state.canvas?.remove();
+      if (state.canvas) { state.canvas.width = 0; state.canvas.height = 0; }
       img.style.display = state.originalDisplay || "";
       delete img.dataset.dsAnimationFrozen;
     } catch {}
@@ -300,7 +306,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function cancelMediaScan() {
+    clearTimeout(mediaScanTimer); mediaScanTimer = 0; mediaScanQueue = [];
+    mediaScanRoute = ""; mediaScanRevision = -1; mediaScanSettings = "";
+  }
+  DS.cancelObsoleteAnimationWork = () => {
+    cancelMediaScan();
+    for (const img of frozen.keys()) if (!img.isConnected) unfreezeImage(img);
+    for (const video of videoState.keys()) if (!video.isConnected) restoreVideo(video);
+  };
   function cleanup() {
+    cancelMediaScan();
     for (const img of [...frozen.keys()]) unfreezeImage(img);
     for (const img of [...onceTimerImages]) {
       const timer = onceTimers.get(img);
@@ -357,11 +373,30 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!document.contains(video) || !eligible(video, settings)) restoreVideo(video);
     }
 
-    document.querySelectorAll("img[src], video").forEach(el => {
-      if (!eligible(el, settings)) return;
+    const process = el => {
+      if (!el.isConnected || !eligible(el, DS.state.settings || {})) return;
       if (el.tagName === "VIDEO") handleVideo(el, mode);
       else handleImage(el, mode);
-    });
+    };
+    if (!DS.isNativeAndroidStorage?.()) {
+      document.querySelectorAll("img[src], video").forEach(process);
+      return;
+    }
+    const route = location.href, revision = Number(DS.state.domRevision || 0);
+    const signature = [settings.animatedImagesListings, settings.animatedImagesChats, settings.animatedImagesProfiles, settings.animatedImagesChatMedia].join("|");
+    if (mediaScanRoute === route && mediaScanSettings === signature && (mediaScanTimer || mediaScanRevision === revision)) return;
+    cancelMediaScan(); mediaScanRoute = route; mediaScanRevision = revision; mediaScanSettings = signature;
+    mediaScanQueue = [...document.querySelectorAll("img[src], video")];
+    let index = 0;
+    const slice = () => {
+      mediaScanTimer = 0;
+      if (location.href !== route || !DS.state.settings?.enabled || !DS.state.settings?.reduceAnimatedBotImages) { cancelMediaScan(); return; }
+      const start = performance.now(); let count = 0;
+      while (index < mediaScanQueue.length && count++ < 12 && performance.now() - start < 7) process(mediaScanQueue[index++]);
+      if (index < mediaScanQueue.length) mediaScanTimer = setTimeout(slice, 24);
+      else { mediaScanQueue = []; if (Number(DS.state.domRevision || 0) !== revision) DS.scheduleRun?.({ priority: "slow", source: "media-scan-changed" }); }
+    };
+    mediaScanTimer = setTimeout(slice, 0);
   };
 
   DS.removeAnimationControls = cleanup;

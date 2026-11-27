@@ -454,8 +454,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     state.refreshTimer = null;
   }
 
+  let bulkGestureCleanup = null;
   function setSelectionMode(enabled) {
     state.selectionMode = !!enabled && supportedListingRoute();
+    if (state.selectionMode) state.routeKey = routeKey();
+    if (state.selectionMode && !bulkGestureCleanup) bulkGestureCleanup = DS.installCardSelectionGuard?.({ active: () => state.selectionMode && supportedListingRoute() && state.routeKey === routeKey(), resolve: resolveBulkSelectionCard, select: entry => { markActivity(true); toggleCardSelection(entry.card); } });
+    if (!state.selectionMode && bulkGestureCleanup) { bulkGestureCleanup(); bulkGestureCleanup = null; }
     if (state.selectionMode) {
       ensureStyle();
       ensureSelectionToolbar();
@@ -1295,35 +1299,26 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     createToolbar();
   }
 
+  function resolveBulkSelectionCard(target) {
+    if (!(target instanceof Element)) return null;
+    const list = listingRoot();
+    if (!list?.contains(target) || target.closest(`#${TOOLBAR_ID},#ds-qol-panel,.ds-card-block-button,[data-ds-owned="1"]`)) return null;
+    const card = cardFromTarget(target);
+    const id = card && cardBotId(card);
+    if (!id) return null;
+    const control = target.closest("button,input,textarea,select,[role='button'],a[href]");
+    if (control && control !== card) {
+      const link = control.closest("a[href]");
+      if (!link || !botIdFromHref(link.getAttribute("href") || link.href) || control.closest('[data-testid*="OverlayActions"], [aria-label="character-info"], [data-testid*="InfoLink"]')) return null;
+      if (control !== link && control.matches("button,input,textarea,select")) return null;
+    }
+    return { id, card };
+  }
   function installSelectionClickHandler() {
-    document.addEventListener("click", event => {
-      if (!(event.target instanceof Element)) return;
-      // Delegation survives a React-remounted Select bots launcher, including
-      // the Mini Panel copy. Prevent double toggles from a stale old listener.
-      if (event.target.closest("#ds-bulk-block-launcher,#ds-qol-select-bots")) {
-        if (!supportedListingRoute() || !settings().enableBulkCardBlocking) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        markActivity(true);
-        setSelectionMode(!state.selectionMode);
-        return;
-      }
-      if (!state.selectionMode || !supportedListingRoute()) return;
-      if (event.target.closest(`#${TOOLBAR_ID},#ds-qol-panel,.ds-card-block-button`)) return;
-      // The whole card and its chat links are selectable. SpicyChat may change
-      // the native image/title test IDs, so identify links by their destination
-      // rather than only two old test IDs. Preserve other buttons and links.
-      const control = event.target.closest("button,input,textarea,select,[role='button'],a[href]");
-      if (control && !(control.matches("a[href]") && /\/chat\//i.test(control.getAttribute("href") || control.href || "") &&
-          botIdFromHref(control.getAttribute("href") || control.href))) return;
-      const card = cardFromTarget(event.target);
-      if (!card) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      markActivity(true);
-      toggleCardSelection(card);
+    window.addEventListener("click", event => {
+      if (!(event.target instanceof Element) || !event.target.closest("#ds-bulk-block-launcher,#ds-qol-select-bots")) return;
+      if (!supportedListingRoute() || !settings().enableBulkCardBlocking) return;
+      event.preventDefault(); event.stopImmediatePropagation(); markActivity(true); setSelectionMode(!state.selectionMode);
     }, true);
   }
 
@@ -1375,6 +1370,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     createToolbar();
   }
 
+  DS.cancelObsoleteBulkSelection = () => { if (state.selectionMode && state.routeKey !== routeKey()) setSelectionMode(false); };
   installSelectionClickHandler();
   installActivityListeners();
   restoreQuickDislikeQueue();

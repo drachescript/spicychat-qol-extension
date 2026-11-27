@@ -1,3 +1,28 @@
+## 0.3.2
+- Expanded sidebar customization with independent navigation options, adjustable menu order, grouped discovery and creation shortcuts, and a dedicated creation chooser. Existing cleanup preferences remain available.
+- Improved generation usage tracking and restriction recovery. Partial recovery preserves the original estimated countdown, successful generations remain recorded, and unconfirmed reset times are clearly distinguished from actual recovery.
+- Improved Android navigation responsiveness, archive record storage handling, animation memory use, card selection and support report reliability. Obsolete route work is cancelled, unavailable storage measurements are reported accurately, and native Android recovery no longer depends on automatic QoL reloads.
+- Bot Status now removes blocked bots from pending and held scan queues automatically, without removing blocks, saved copies or status history.
+- Improved custom chat background restoration and saved picture loading, compatibility with native Appearance, and access through the compact QoL menu.
+- Added an independently enabled Inspector connection for structured Creator Tools operation diagnostics, persistent delivery and committed acknowledgement status. Automated publishing remains disabled.
+
+## 0.3.01
+- Added a redesigned sidebar with grouped discovery and creation shortcuts, a Create chooser, configurable landing page, remembered menus and compact spacing. Existing navigation and cleanup controls remain available.
+- Added Creator Tools integration for local chatbot and Lorebook packages, account-specific project associations, version comparisons and release previews. Automated publishing is disabled.
+- Improved chat-to-listing navigation cleanup and protection against accidentally hidden pages, with clearer layout diagnostics.
+- Improved Bot Status diagnostics for unverified character responses.
+- Improved support report compression and diagnostic wording.
+- Reduced unnecessary animation checks for static images.
+- Fixed Later and Recovered Favorites not opening after SpicyChat updated its Favorites layout on desktop and mobile.
+- Improved the generation usage tracker with local generation counts, subscription detection and refresh, estimated restriction countdowns that retain earlier observed restriction times across restarts, last successful generation time, native daily-limit warning detection, restriction history and research exports, without browser warnings for unavailable rate-limit headers.
+- Improved large Lorebook import recovery when the native entry editor refreshes or a background tab is throttled. Saved entries are confirmed before waiting for the next editor, with clearer interruption messages and entry-limit detection.
+- Fixed large Lorebook backups stopping after the first 100 entries, improved connection recovery, and made bulk backups wait for active imports to finish. Backup results now explain individual failures, retain verified capture progress and save new or changed entries without rewriting unchanged local data.
+- Improved chatbot JSON imports to recognize more card formats and editor fields.
+- Improved chat background compatibility with native appearance settings.
+- Added a collapsible Memory Manager menu to make more room for memories, especially on mobile. Remembers your choice.
+- Improved Bot Status to distinguish checks that can be resumed from excluded bots retained for review, and reconsider saved checks when tracked lists change.
+- Improved loading and retry messages for Bot Status maintenance tools.
+
 ## 0.3.0
 - Improved Settings search to find features by name, description and related terms.
 - Added Enabled, Recently changed, What's new and Pinned views, a simpler Basic view, and the ability to undo recent setting changes.

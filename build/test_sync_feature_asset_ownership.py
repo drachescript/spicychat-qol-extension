@@ -354,6 +354,39 @@ class ReviewedGatedBackgroundTests(unittest.TestCase):
         del self.contracts["archive-blocking-presets"][1]["backgroundIsolated"]
         self.assertEqual(self.repair(), [])
 
+    def test_explicit_gate_without_lite_isolation(self):
+        contract = self.contracts["archive-blocking-presets"][1]
+        contract["backgroundIsolated"] = False
+        contract["backgroundImportModes"] = {self.rel: "feature-gated"}
+        self.assertEqual(self.repair(), [self.rel])
+        self.assertFalse(contract["backgroundIsolated"])
+        self.assertEqual(self.repair(), [])
+
+    def test_explicit_gate_rejects_wrong_feature(self):
+        contract = self.contracts["archive-blocking-presets"][1]
+        contract["backgroundIsolated"] = False
+        contract["backgroundImportModes"] = {self.rel: "feature-gated"}
+        self.entry = self.entry.replace("archive-blocking-presets", "other", 1)
+        self.assertEqual(self.repair(), [])
+
+    def test_explicit_standalone_gate_after_core(self):
+        self.rel = "background/sct-inspector-gate.js"
+        (sync.ROOT / self.rel).write_text("/* shared gate */", encoding="utf-8")
+        self.contracts = {"creator-tools-integration": (None, {
+            "id": "creator-tools-integration", "backgroundFiles": [self.rel],
+            "backgroundIsolated": False,
+            "backgroundImportModes": {self.rel: "standalone"},
+        })}
+        self.entry = 'importScripts("background.js");\nimportScripts("' + self.rel + '");'
+        self.assertEqual(self.repair(), [self.rel])
+        self.assertEqual(self.repair(), [])
+
+    def test_explicit_standalone_does_not_match_feature_gate(self):
+        contract = self.contracts["archive-blocking-presets"][1]
+        contract["backgroundIsolated"] = False
+        contract["backgroundImportModes"] = {self.rel: "standalone"}
+        self.assertEqual(self.repair(), [])
+
     def test_missing_file_rejected(self):
         (sync.ROOT / self.rel).unlink()
         with self.assertRaisesRegex(ValueError, "Missing reviewed background asset"):

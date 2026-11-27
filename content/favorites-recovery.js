@@ -635,8 +635,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       #${PANEL} .ds-full-advanced{border:1px solid #343438;border-radius:8px;padding:8px 11px;margin:0 0 14px;color:inherit;font-size:12px}
       #${PANEL} .ds-full-advanced summary{cursor:pointer;opacity:.82}
       #${TAB}{padding:0 10px;white-space:nowrap}
-      [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#${TAB}){max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible;height:auto;row-gap:3px}
-      [data-testid="SearchClientCharacterListing"] [role="tablist"]:has(#${TAB}) + [data-testid="AppliedFiltersBarView"]{flex-shrink:0;min-width:140px}
+      :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#${TAB}){max-width:100%;min-width:0;overflow-x:auto;}
+      :is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]:has(#${TAB}) + [data-testid="AppliedFiltersBarView"]{flex-shrink:0;min-width:140px}
       #${PANEL} .ds-full-tools > span{line-height:1.4;flex:1 1 250px}
 
     `;document.head.append(st);
@@ -679,7 +679,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     back.addEventListener('click',e=>{
       if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
       e.preventDefault();setActive(false);
-      document.querySelector('[data-testid="SearchClientCharacterListing"] [role="tablist"]')?.scrollIntoView({block:'start',behavior:'instant'});
+      document.querySelector(':is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"]')?.scrollIntoView({block:'start',behavior:'instant'});
     });
     head.append(h,changeMode,back);el.append(head);
     const toolbar=make('div');toolbar.className='ds-full-tools';
@@ -881,7 +881,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     // SPA navigation can use pushState without firing a hashchange event.
     // Do not keep the recovery stylesheet active on native Favorites URLs.
     else if(location.hash!=='#recovered'&&active){active=false;viewMode='separate';}
-    const native=document.querySelector('[data-testid="SearchClientCharacterListing"]');
+    const native=DS.getFavoritesCollectionHost?.()?.native || document.querySelector('[data-testid="SearchClientCharacterListingBody"],[data-testid="SearchClientCharacterListing"]');
     if(!native?.isConnected||!native.parentElement){
       // React may not have mounted Favorites yet. Keep #recovered for a new-tab
       // deep link and let the normal Favorites refresh attach the view later.
@@ -890,12 +890,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     }
     css();pagerHost(native);
     // Mark native results, not the entire React listing. Its tab bar stays usable.
-    const rows=native.firstElementChild;
+    if(DS.markFavoritesCollectionNativeSections)DS.markFavoritesCollectionNativeSections(native);
+    else {const rows=native.firstElementChild;
     if(rows?.children?.length>=3){
       const controls=rows.children[0],results=rows.children[rows.children.length-1];
       if(controls.dataset.dsFavoritesNativeControls!=='1')controls.dataset.dsFavoritesNativeControls='1';
       if(results.dataset.dsFavoritesNativeResults!=='1')results.dataset.dsFavoritesNativeResults='1';
-    }
+    }}
     // One launch surface beside SpicyChat's own Chatbots/Lorebooks/Groups
     // and QoL Later. Avoid a second floating button above the native controls.
     const tabs=native.querySelector('[role="tablist"]');
@@ -918,8 +919,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       if(launch.getAttribute('aria-selected')!==selected)launch.setAttribute('aria-selected',selected);
     }
     let panel=document.getElementById(PANEL);
-    if(!panel||panel.previousElementSibling!==native){
-      panel?.remove();panel=make('section');panel.id=PANEL;panel.setAttribute('aria-label','Recovered Favorites QoL view');
+    if(!panel||panel.parentElement!==native.parentElement){
+      panel?.remove();panel=make('section');panel.id=PANEL;panel.setAttribute('aria-label','Recovered Favorites QoL view');panel.dataset.dsOwned='1';
       native.insertAdjacentElement('afterend',panel);panel.hidden=!active;
     }
     if(active&&panel.hidden){panel.hidden=false;}
@@ -931,7 +932,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   DS.applyFavoritesRecovery=mount;
   document.addEventListener('click',e=>{
     if(!active)return;
-    const tab=e.target?.closest?.('[data-testid="SearchClientCharacterListing"] [role="tablist"] [role="tab"]');
+    const tab=e.target?.closest?.(':is([data-testid="SearchClientCharacterListing"],[data-testid="SearchClientCharacterListingBody"]) [role="tablist"] [role="tab"]');
     if(tab&&tab.id!==TAB&&tab.id!=='ds-favorites-later-tab')setActive(false);
   },true);
   window.addEventListener('ds-qol-favorites-native-observed-v1',()=>{if(isPage()&&DS.state?.settings?.passiveFavoritesIdBackup===true)setTimeout(()=>void capturePassive(),150);});

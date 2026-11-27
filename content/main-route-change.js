@@ -10,6 +10,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const routeCheckStartedAt = performance.now();
 
     DS.state.lastUrl = location.href;
+    DS.state.routeWorkEpoch = Number(DS.state.routeWorkEpoch || 0) + 1;
+    DS.cancelObsoleteArchiveRouteWork?.();
+    DS.cancelObsoleteAnimationWork?.();
+    DS.cancelObsoleteBulkSelection?.();
+    DS.cancelObsoleteFavoriteSelection?.();
+    DS.cancelObsoleteOrganizerSelection?.();
     DS.syncListingLongTaskDiagnosticRoute?.();
     DS.cancelMyCreationsAutoLoad?.();
     clearSlowThrottle();
@@ -54,7 +60,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Run once after the URL settles and once after React has had time to mount
     // the destination chat/list DOM. Module-level dedupe keeps these cheap.
     scheduleSavedOpenedLane("route-change", 70);
-    setTimeout(() => scheduleSavedOpenedLane("route-change-settled", 0), 450);
+    const route = location.href;
+    setTimeout(() => { if (location.href === route && !DS.isQolPausedForTab?.()) scheduleSavedOpenedLane("route-change-settled", 0); }, 450);
 
     pauseReruns(1000);
     DS.markModelSelectorDirty?.("route-change");

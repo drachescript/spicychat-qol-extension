@@ -3,6 +3,7 @@
 function registerQolBackgroundStorageChanged() {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  dsqSctConfigChanged(changes);
   if (changes[QUICK_DISLIKE_HISTORY_KEY]) {
     recommendationFeedbackQuickDislikeCache = normalizeQuickDislikeHistory(changes[QUICK_DISLIKE_HISTORY_KEY].newValue);
   }

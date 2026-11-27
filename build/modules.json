@@ -112,7 +112,8 @@
         "content/sidebar.js",
         "content/soundscapes.js",
         "content/top-bar.js",
-        "content/ui-layout-fixes.js"
+        "content/ui-layout-fixes.js",
+        "content/sidebar-redesign.js"
       ]
     },
     "chat": {
@@ -283,7 +284,8 @@
         "content/my-creations-backup.js",
         "content/my-chatbot-card-shortcuts.js",
         "content/my-creations-filters.js",
-        "content/my-creations-view-memory.js"
+        "content/my-creations-view-memory.js",
+        "content/creator-tools-integration.js"
       ]
     },
     "lorebook": {
@@ -392,7 +394,9 @@
         "background/features/background-research-memory-export.js",
         "background/features/background-community-themes.js",
         "background/features/background-blocking-presets.js",
-        "background/features/background-lorebook-import.js"
+        "background/features/background-lorebook-import.js",
+        "background/sct-inspector-gate.js",
+        "background/features/background-sct-inspector.js"
       ],
       "services": {
         "background/background-auto-afk.js": {
@@ -451,7 +455,9 @@
         "background/features/background-research-memory-export.js",
         "background/features/background-community-themes.js",
         "background/features/background-blocking-presets.js",
-        "background/features/background-lorebook-import.js"
+        "background/features/background-lorebook-import.js",
+        "background/sct-inspector-gate.js",
+        "background/features/background-sct-inspector.js"
       ],
       "eventModules": [
         "background/events/runtime-messages.js",

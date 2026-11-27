@@ -35,6 +35,7 @@ async function blockedArchiveCleanupCandidates({ candidateIds = null, maxItems =
 async function refreshBlockedArchiveCleanupStatus() {
   const status = $("blockedArchiveCleanupStatus");
   if (!status) return;
+  status.textContent = "Checking local cleanup eligibility…";
   try {
     const result = await blockedArchiveCleanupCandidates({ maxItems: 5000 });
     if (!result.unavailableBlocked) {
@@ -45,7 +46,7 @@ async function refreshBlockedArchiveCleanupStatus() {
       status.textContent = `${result.waitingRemote.toLocaleString()} blocked deleted cop${result.waitingRemote === 1 ? "y is" : "ies are"} still being kept locally until Archive preservation is confirmed.`;
     }
   } catch {
-    status.textContent = "Cleanup status unavailable; local copies were left untouched.";
+    status.textContent = "Cleanup status unavailable; local copies were left untouched. Close and reopen this maintenance section to retry.";
   }
 }
 

@@ -40,3 +40,7 @@ Five optional periodic alarm actions now register with their respective backgrou
 
 Keep reusable build scripts named for their purpose, not for a release, chat, batch or development session. Do not check development-only test scripts into the extension source tree. Do not add temporary patch assemblers, dated handoff notes, snapshots or one-off status files to the working source tree. Keep runtime asset names (including size-specific icons) unchanged when referenced by the browser manifest.
 
+
+## Release identity
+
+Use the canonical three-part `manifest.json` `version` for current tags, stable ZIP filenames and the exact changelog heading. Do not add `version_name`. Historical padded tags remain untouched; a canonical tag for the same numeric version can be published only from the matching current source. The read-only PR packaging workflow builds and verifies local Chrome/Firefox ZIPs and the experimental Core + OOC recipe without publishing.

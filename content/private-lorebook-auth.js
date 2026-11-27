@@ -290,6 +290,50 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     error.ambiguous=result?.ambiguous===true;
     throw error;
   }
+  // Shared, short-lived account lookup for Persona and quota indicators.
+  // Keep only the allowlisted tier, persona limit and local pseudonymous key.
+  const TIER_LABELS=Object.freeze({free:'free',getataste:'paid_minimal',truesupporter:'paid_basic',imallin:'paid_premium',allin:'paid_premium'});
+  const PERSONA_COUNTS=Object.freeze({free:3,paid_minimal:10,paid_basic:50,paid_premium:100});
+  const tierLabel=raw=>{const key=String(raw||'').toLowerCase().replace(/[^a-z0-9]/g,'');const base=key.replace(/(?:annual|monthly|yearly)$/,'');return Object.hasOwn(TIER_LABELS,key)?TIER_LABELS[key]:Object.hasOwn(TIER_LABELS,base)?TIER_LABELS[base]:null;};
+  function tierCode(raw){const code=typeof raw==='string'?raw.trim().toLowerCase():'';return ['free','paid_minimal','paid_basic','paid_premium'].includes(code)?code:/^sc-[a-z]{3}-(?:1[mwy]|[0-9]+[dmy])-((?:paid_minimal|paid_basic|paid_premium))(?:-[0-9]+(?:\.[0-9]+)?)?$/.exec(code)?.[1]||null;}
+  function subscriptionTierFromAccount(response){
+    const user=response?.user||response?.data?.user||(response?.data?.subscription||response?.data?.role?response.data:null);
+    if(!user||typeof user!=='object')return null;
+    const subscription=user.subscription&&typeof user.subscription==='object'?user.subscription:{};
+    const status=String(subscription.status||'').trim().toLowerCase();
+    if(status&&!['active','trialing','trial','grace_period'].includes(status))return null;
+    for(const source of [subscription,user])for(const key of ['role','subscription_role','subscriptionRole','plan_id','planId','plan_code','planCode','subscription_plan_id','subscriptionPlanId']){const tier=tierCode(source[key]);if(tier)return tier;}
+    for(const source of [subscription,user])for(const key of ['plan_name','planName','tier_name','tierName','subscription_plan','subscriptionPlan','name','plan']){if(typeof source[key]!=='string'||(source===user&&key==='name'))continue;const tier=tierLabel(source[key]);if(tier)return tier;}
+    return null;
+  }
+  function nativeSubscriptionTier(){
+    const header=document.querySelector('[data-testid="UserAccountLink"]');
+    if(!header)return null;
+    const values=[...header.querySelectorAll('p, [data-testid="SubscriptionLabel"]')].map(x=>tierLabel(x.textContent)).filter(Boolean);
+    if(!values.length){const value=tierLabel(header.textContent);if(value)values.push(value);}
+    const unique=[...new Set(values)];return unique.length===1?unique[0]:null;
+  }
+  let subscriptionSnapshot=null,subscriptionPending=null,subscriptionEpoch=0;
+  function invalidateSubscriptionSnapshot(){subscriptionEpoch++;subscriptionSnapshot=null;subscriptionPending=null;}
+  async function readSubscriptionSnapshot({force=false}={}){
+    if(!force&&subscriptionSnapshot&&Date.now()-subscriptionSnapshot.verifiedAt<60000)return subscriptionSnapshot;
+    if(subscriptionPending)return subscriptionPending;
+    const epoch=subscriptionEpoch;
+    const pending=Promise.resolve().then(()=>request('/v2/users','GET')).then(async response=>{
+      const user=response?.user||response?.data?.user||response?.data;
+      const tier=subscriptionTierFromAccount(response);
+      const nativeTier=nativeSubscriptionTier();
+      const personaLimit=DS.parsePersonaAccountLimit?.(response)||PERSONA_COUNTS[tier||nativeTier]||0;
+      let accountKey=null;
+      if(typeof user?.id==='string'&&user.id&&user.id.length<=160){try{const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-account-v1:'+user.id));accountKey=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');}catch{}}
+      if(epoch!==subscriptionEpoch)throw Error('Account changed during verification');
+      return subscriptionSnapshot={accountKey,tier:tier||nativeTier||null,tierSource:tier?'account':nativeTier?'native-header':'unknown',personaLimit,verifiedAt:Date.now()};
+    }).finally(()=>{if(subscriptionPending===pending)subscriptionPending=null;});
+    subscriptionPending=pending;return pending;
+  }
+  DS.nativeSubscriptionTier=nativeSubscriptionTier;
+  DS.readSubscriptionSnapshot=readSubscriptionSnapshot;
+  DS.invalidateSubscriptionSnapshot=invalidateSubscriptionSnapshot;
   DS.privateLorebookAuth=Object.freeze({request,entryCreateSupported:true,prepareEntryCreate,createEntry});
 })();
 }

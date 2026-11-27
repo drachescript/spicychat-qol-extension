@@ -121,6 +121,30 @@ async function refreshStorageUsage() {
   const host = $("storageUsage");
   if (!host) return;
 
+  if (nativeAndroidOptionsStorage()) {
+    if (host.dataset.dsStorageLoading === "1") return;
+    host.dataset.dsStorageLoading = "1";
+    try {
+      const bytes = await storageBytesInUse(null);
+      const stats = await readLargeStorageStats();
+      host.replaceChildren(makeElement("span", { className: "storage-chip", text: bytes === null ? "Local storage size unavailable" : `Local storage: ${(bytes / 1024).toFixed(0)} KB` }));
+      for (const def of STORAGE_DATASET_DEFS) {
+        const wrap = makeElement("span", { className: "storage-dataset" });
+        const count = def.keys.length === 1 ? validStorageMeasurement(stats?.[def.keys[0]]) : null;
+        const label = makeElement("span", { text: `${def.label}: ${count === null ? "not loaded" : count}` });
+        wrap.append(label);
+        if (count === null) {
+          const load = makeElement("button", { text: "Load count", attrs: { type: "button" } });
+          load.addEventListener("click", async () => { if (host.dataset.dsCountBusy === "1") return; host.dataset.dsCountBusy = "1"; load.disabled = true; try { const checked = await storageGetChecked(def.keys); if (!checked.ok) throw Error(); label.textContent = `${def.label}: ${def.count(checked.data)}`; } catch { label.textContent = `${def.label}: unavailable`; } finally { load.disabled = false; delete host.dataset.dsCountBusy; } });
+          wrap.append(load);
+        }
+        const del = makeElement("button", { text: "Delete", attrs: { type: "button", "data-delete-storage-dataset": def.id } });
+        del.addEventListener("click", () => deleteStorageDataset(def.id)); wrap.append(del); host.append(wrap);
+      }
+      await refreshRecoverySnapshotStatus();
+    } finally { delete host.dataset.dsStorageLoading; }
+    return;
+  }
   const keys = [...new Set(STORAGE_DATASET_DEFS.flatMap(def => def.keys))];
   const result = await storageGet(keys);
   const bytes = await storageBytesInUse(null);

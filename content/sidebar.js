@@ -22,7 +22,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function applyPersonasPlacement(settings) {
-    const enabled = !!(settings.enabled && settings.restorePersonasSidebarPosition);
+    const enabled = !!(settings.enabled && settings.restorePersonasSidebarPosition && !settings.redesignedSidebarEnabled);
     if (!enabled) {
       const old = personasOriginalSlot;
       if (old?.row?.isConnected && old?.parent?.isConnected) {
@@ -57,7 +57,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       .sort()
       .map(key => `${key}:${settings[key] ? 1 : 0}`)
       .join("|");
-    return `${cleanup}|later:${settings.showLaterFavoritesTab === true ? 1 : 0}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
+    return `redesign:${settings.redesignedSidebarEnabled?1:0}|${cleanup}|later:${settings.showLaterFavoritesTab === true ? 1 : 0}|personas:${settings.restorePersonasSidebarPosition ? 1 : 0}|qol:${settings.showQolSidebarButton ? 1 : 0}|qolpos:${String(settings.qolSidebarButtonPlacement || "after-sai")}|enabled:${settings.enabled ? 1 : 0}`;
   }
 
   // CSS persists across SpicyChat's React link replacements and avoids a
@@ -665,6 +665,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wanted = {
       "sidebar:logo": !!settings.hideSidebarLogo,
       "sidebar:home": !!settings.hideSidebarHome,
+      "sidebar:discover": !!settings.hideSidebarDiscover,
+      "sidebar:discover-lorebooks": !!settings.hideSidebarDiscoverLorebooks,
+      "sidebar:discover-rulebooks": !!settings.hideSidebarDiscoverRulebooks,
+      "sidebar:create-rulebook": !!settings.hideSidebarCreateRulebook,
+      "sidebar:create-persona": !!settings.hideSidebarCreatePersona,
+      "sidebar:my-rulebooks": !!settings.hideSidebarMyRulebooks,
       "sidebar:home-text": !!settings.hideSidebarHome,
       "sidebar:chats": !!settings.hideSidebarChats,
       "sidebar:chats-text": !!settings.hideSidebarChats,
@@ -763,7 +769,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // A native React sidebar update can move Personas back to the lower group
     // without replacing nav itself. Check only the two relevant links when
     // this user explicitly enabled the move; avoid a broad sidebar scan.
-    if (!sidebarDirty && settings.enabled && settings.restorePersonasSidebarPosition) {
+    if (!sidebarDirty && settings.enabled && settings.restorePersonasSidebarPosition && !settings.redesignedSidebarEnabled) {
       const nav = getNav();
       const chats = nav?.querySelector("a[href$='/chats'],a[href*='/chats?']");
       const personas = nav?.querySelector("a[href$='/personas'],a[href*='/personas?']");
@@ -794,6 +800,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!settings.enabled) return;
 
     if (settings.hideSidebarNewBadges) hideSidebarNewBadges();
+    for(const [key,test,reason] of [['hideSidebarDiscover','nav-discover','discover'],['hideSidebarDiscoverLorebooks','nav-lorebooks','discover-lorebooks'],['hideSidebarDiscoverRulebooks','nav-rulebooks','discover-rulebooks']]){if(settings[key]){const el=getNav()?.querySelector(`[data-testid="${test}"]`);if(el)hideSidebarElement(el.closest('a')||el,'sidebar:'+reason);}}
+    for(const [key,id,reason] of [['hideSidebarCreateRulebook','navigation-button-create-rulebook','create-rulebook'],['hideSidebarCreatePersona','navigation-button-create-persona','create-persona'],['hideSidebarMyRulebooks','navigation-button-my-rulebooks','my-rulebooks']])if(settings[key])hideButtonById(id,'sidebar:'+reason);
     if (settings.hideSidebarLogo) hideLogo();
 
     if (settings.hideSidebarHome) {

@@ -194,8 +194,8 @@ async function refreshBotStatusLastRunFeedback() {
 }
 
 // Reconcile durable resume queues locally against the current saved sources.
-// Ineligible IDs are HELD inside their original queue, not deleted or scanned.
-// They automatically become pending again when the original scope allows them.
+// Recoverable ineligible IDs are held inside their original queue. Explicitly
+// blocked IDs are retired from scan queues; normal eligibility applies if unblocked.
 // No network checks, timers, new observers, or changes to saved bot records.
 function botStatusHeldEntries(queue) {
   const seen = new Set();
@@ -374,13 +374,25 @@ async function botStatusRetireCheckedHeldSources(doneIds, heldSources, currentKi
   }
 }
 
-function botStatusReconciledQueue(queue) {
+function botStatusPruneBlockedQueue(queue, blockedIds) {
+  if (!queue || !Array.isArray(queue.ids)) return queue;
+  const blocked = id => blockedIds.has(String(id || '').trim().toLowerCase());
+  return { ...queue, ids: queue.ids.filter(id => !blocked(id)),
+    heldIds: (Array.isArray(queue.heldIds) ? queue.heldIds : []).filter(item => !blocked(item?.id)),
+    manualHeldScanSources: Object.fromEntries(Object.entries(botStatusSavedHeldScanSources(queue.manualHeldScanSources)).filter(([id]) => !blocked(id))) };
+}
+
+function botStatusReconciledQueue(queue, currentBlockedIds = null) {
   if (!queue || !Array.isArray(queue.ids)) return { queue, changed: false };
+  const originalQueue = queue;
+  const blockedIds = currentBlockedIds || new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
+  queue = botStatusPruneBlockedQueue(queue, blockedIds);
+  const pruned = (originalQueue.ids.length !== queue.ids.length || (originalQueue.heldIds?.length || 0) !== queue.heldIds.length || Object.keys(originalQueue.manualHeldScanSources || {}).length !== Object.keys(queue.manualHeldScanSources).length);
   let currentMode = String(queue.mode || 'all');
   let currentScope = String(queue.scope || 'all');
   const active = [...new Set(queue.ids.map(id => String(id || '').trim().toLowerCase()).filter(validBotId))];
   const held = botStatusHeldEntries(queue);
-  if (!active.length && !held.length) return { queue, changed: false };
+  if (!active.length && !held.length) return { queue, changed: pruned };
   const assessed = botStatusAssessHeldEntries(held);
   const retained = assessed.filter(item => item.category !== 'completed');
   const sameOrigin = retained.filter(item => item.mode === currentMode && item.scope === currentScope);
@@ -388,7 +400,6 @@ function botStatusReconciledQueue(queue) {
   const review = reviewBotStatusQueueEligibility({ mode: currentMode, scope: currentScope,
     ids: [...active, ...sameOrigin.map(item => item.id)] });
   const recoverable = botStatusSavedHeldScanSources(queue.manualHeldScanSources);
-  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase()));
   const excluded = new Map(review.unavailable.filter(item =>
     !recoverable[item.id] || botStatusIdIgnored(item.id) || blockedIds.has(item.id)
   ).map(item => [item.id, item.reason]));
@@ -424,7 +435,7 @@ function botStatusReconciledQueue(queue) {
   const activeSet = new Set(nextActive);
   const seenHeld = new Set();
   nextHeld = nextHeld.filter(item => {
-    if (activeSet.has(item.id) || seenHeld.has(item.id)) return false;
+    if (blockedIds.has(item.id) || activeSet.has(item.id) || seenHeld.has(item.id)) return false;
     seenHeld.add(item.id); return true;
   }).map(item => ({id:item.id,mode:item.mode,scope:item.scope,
     reason:botStatusIdIgnored(item.id) ? 'Deliberately excluded from Bot Status' :
@@ -433,7 +444,7 @@ function botStatusReconciledQueue(queue) {
   const replacement = { ...queue, mode:currentMode, scope:currentScope, ids:nextActive, heldIds:nextHeld };
   const same = JSON.stringify({mode:queue.mode,scope:queue.scope,ids:queue.ids,heldIds:queue.heldIds}) ===
     JSON.stringify({mode:replacement.mode,scope:replacement.scope,ids:replacement.ids,heldIds:replacement.heldIds});
-  return { queue:replacement, changed:!same };
+  return { queue:replacement, changed:pruned || !same };
 }
 
 async function botStatusReconcileSavedQueue(kind, snapshot) {
@@ -447,7 +458,13 @@ async function botStatusReconcileSavedQueue(kind, snapshot) {
   if (snapshot.phase === 'running' && !abandoned) return snapshot;
   // Verify before modifying a queue that may be updated in another Options tab.
   // If the queue changed, leave it untouched; the next explicit refresh retries.
-  const proposed = botStatusReconciledQueue(snapshot);
+  const read = await storageGetChecked([BLOCKED_BOTS_KEY, "settings"]);
+  if (!read?.ok) return snapshot;
+  const currentBlockedIds = new Set([
+    ...normalizeBotStore(read.data?.[BLOCKED_BOTS_KEY]).ids,
+    ...(Array.isArray(read.data?.settings?.blockedBotIds) ? read.data.settings.blockedBotIds : [])
+  ].map(id => String(id || '').trim().toLowerCase()).filter(validBotId));
+  const proposed = botStatusReconciledQueue(snapshot, currentBlockedIds);
   if (!proposed.changed && !abandoned) return snapshot;
   const key = botStatusQueueKey(kind);
   const latest = await botStatusPausedQueue(kind);
@@ -456,8 +473,9 @@ async function botStatusReconcileSavedQueue(kind, snapshot) {
     updatedAt: Date.now(),
     reason: abandoned ? 'Recovered an interrupted scan checkpoint; pending IDs and history preserved'
       : proposed.queue.ids.length ? "Eligible pending checks retained" : "Out-of-scope checks safely held" };
-  if (!await storageSetVerified({ [key]: replacement })) return snapshot;
-  return replacement;
+  const savedQueue = !replacement.ids.length && !replacement.heldIds?.length ? null : replacement;
+  if (!await storageSetVerified({ [key]: savedQueue })) return snapshot;
+  return savedQueue;
 }
 
 async function reviewAndRemoveIneligibleBotStatusPending() {
@@ -486,15 +504,15 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
   const counts = new Map();
   for (const row of rows) counts.set(row.category,(counts.get(row.category)||0)+1);
   const currentlyActionable = rows.filter(row => row.manualRetryAllowed).length;
-  summary.textContent = `${rows.length} held queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. ${currentlyActionable} actionable now; ${rows.length-currentlyActionable} excluded or already completed. Historical holds are not proof that a check remains pending. Each entry shows its saved source, current eligibility, and safe next action. No checks happen until you request them.`;
+  summary.textContent = `${rows.length} retained queue records: ${[...counts].map(([kind,num])=>`${num} ${kind}`).join(' · ')}. ${currentlyActionable} actionable records now; ${rows.length-currentlyActionable} excluded or already completed (not pending). Each entry shows its saved source, current eligibility, hold age and safe next action. No checks happen until you request them.`;
   list.append(summary);
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.textContent = 'Copy held-ID diagnostics';
   copyButton.addEventListener('click', async () => {
     const safeReport = rows.map(({id, queueKind, scope, mode, category, reason, originalReason, action,
-      status, checkedAt, sources, hasCopy}) => ({id, queueKind, mode, scope, category, reason,
-      originalReason, action, status, checkedAt, sources, hasCopy}));
+      status, checkedAt, sources, hasCopy, since}) => ({id, queueKind, mode, scope, category, reason,
+      originalReason, action, status, checkedAt, sources, hasCopy, since}));
     try {
       await navigator.clipboard.writeText(JSON.stringify({version:1,generatedAt:new Date().toISOString(),entries:safeReport},null,2));
       showSettingsToast('Copied individual held-ID reasons. Your saved records were not changed.');
@@ -515,7 +533,7 @@ async function reviewAndRemoveIneligibleBotStatusPending() {
     heading.textContent = `${row.id} · ${row.category}`;
     const detail = document.createElement('p');
     detail.className = 'hint';
-    detail.textContent = `${row.manualRetryAllowed ? 'ACTIONABLE — manual recheck permitted' : 'NOT ACTIONABLE — no manual scan'}: ${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
+    detail.textContent = `${row.manualRetryAllowed ? 'ACTIONABLE — manual recheck permitted' : 'NOT ACTIONABLE — no manual scan'}: ${row.reason}. Saved in ${row.queueKind} (${row.mode}/${row.scope}); last result ${row.status}${row.checkedAt ? `, checked ${new Date(row.checkedAt).toLocaleString()}` : ''}; ${row.hasCopy?'saved copy present':'no saved copy'}; ${row.action}. Held since ${new Date(row.since).toLocaleString()}.${row.originalReason && row.originalReason !== row.reason ? ` Previous saved reason: ${row.originalReason}.` : ''}`;
     entry.append(heading, detail);
     if (row.manualRetryAllowed) {
       const retry = document.createElement('button');
@@ -561,9 +579,15 @@ async function refreshBotStatusPauseButtonNow() {
   botStatusRecoverableHeldCount = new Set(assessedHeld
     .filter(item => botStatusManualHeldRetryAllowed(item, blockedIds))
     .map(item => item.id)).size;
-  const heldReasonCounts = new Map();
-  for (const item of assessedHeld) heldReasonCounts.set(item.category, (heldReasonCounts.get(item.category) || 0) + 1);
-  const heldReasons = [...heldReasonCounts].slice(0, 3).map(([reason, count]) => `${count} ${reason}`).join("; ");
+  const excludedHeld = assessedHeld.filter(item => item.category === 'excluded');
+  const completedHeld = assessedHeld.filter(item => item.category === 'completed');
+  // Keep queue records intact. A retained exclusion is a review record, not
+  // an unfinished scan. Counts of records can differ from unique bot IDs.
+  botStatusHeldReviewRecordCount = heldCount;
+  botStatusHeldReviewIds = new Set(allHeld.map(item => item.id));
+  const actionableCount = botStatusRecoverableHeldCount;
+  const excludedCount = new Set(excludedHeld.map(item => item.id)).size;
+  const completedCount = new Set(completedHeld.map(item => item.id)).size;
   const normalIds = (state?.ids || []).filter(validBotId);
   const staleIds = (staleState?.ids || []).filter(validBotId);
   botStatusPendingReviewIds = new Set([...normalIds, ...staleIds]);
@@ -593,16 +617,27 @@ async function refreshBotStatusPauseButtonNow() {
   if (hint) hint.textContent = [
     count ? `${count} regular pending rechecks saved for Resume. ${checkpointDetail}` : "No regular scan pending.",
     staleCount ? `${staleCount} stale-refresh checks saved separately.` : "No stale refresh pending.",
-    heldCount ? `${heldCount} checks held automatically: ${heldReasons}. ${botStatusRecoverableHeldCount} available for manual recheck. Open Why held for individual reasons. Nothing deleted.` : "No out-of-scope checks held.",
+    actionableCount ? `${actionableCount} held bot${actionableCount === 1 ? '' : 's'} eligible for manual recheck.` : "No actionable held checks.",
+    excludedCount ? `${excludedCount} excluded bot${excludedCount === 1 ? '' : 's'} retained for review (not pending).` : "",
+    completedCount ? `${completedCount} previously resolved bot${completedCount === 1 ? '' : 's'} retained until queue reconciliation.` : "",
+    heldCount ? "Open held / excluded history for individual reasons. Nothing deleted." : "",
     "Regular and stale queues stay independent."
-  ].join(" ");
+  ].filter(Boolean).join(" ");
+  if (!heldCount) {
+    const panel = $('botStatusHeldDetails');
+    if (panel) panel.hidden = true;
+    $('botStatusHeldDetailsList')?.replaceChildren();
+  }
   const reviewButton = $("botStatusReviewOutOfScopePending");
   if (reviewButton) {
     // Listing scans may hold thousands of records. Keep this refresh cheap;
     // compute actual eligibility only when the user opens Review.
     reviewButton.hidden = heldCount === 0;
     reviewButton.disabled = botAvailabilityScanRunning;
-    reviewButton.textContent = `Why held (${heldCount})`;
+    reviewButton.textContent = actionableCount
+      ? `Review held / excluded (${actionableCount} actionable; ${heldCount} records)`
+      : `Excluded / held history (${heldCount})`;
+    reviewButton.title = "Review original queue, current eligibility and hold age. Excluded records are not unfinished scan work.";
   }
   // The status presentation may have rendered before this asynchronous count
   // finished. Keep the button responsive without rebuilding thousands of cards.
@@ -613,7 +648,7 @@ async function refreshBotStatusPauseButtonNow() {
     heldScanButton.textContent = trackedStale && botStatusRecoverableHeldCount
       ? `Refresh stale + held bots (${trackedStale + botStatusRecoverableHeldCount})`
       : trackedStale ? `Refresh stale bots (${trackedStale})`
-      : botStatusRecoverableHeldCount ? `Refresh held bot checks (${botStatusRecoverableHeldCount})` : 'No stale or held bots';
+      : botStatusRecoverableHeldCount ? `Refresh held bot checks (${botStatusRecoverableHeldCount})` : 'No stale or actionable held bots';
   }
   return { main: state, stale: staleState };
 }
@@ -692,7 +727,7 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
     return;
   }
   const pausedQueue = options?.resume ? preparedQueue : null;
-  // Held work is never dropped. Explicit full/stale Refresh can retry
+  // Recoverable held work stays saved. Explicit full/stale Refresh can retry
   // non-excluded held IDs even after their original source was untracked.
   const heldIds = botStatusHeldEntries(preparedQueue);
   let manualHeldScanSources = options?.resume
@@ -820,9 +855,10 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
   }
   // If membership changes between reconciliation and scan preparation,
   // hold those IDs durably as well rather than querying or losing them.
+  entries = entries.filter(entry => !blockedIds.has(String(entry.id || '').toLowerCase()));
   const resumeEntryIds = options?.resume ? new Set(entries.map(entry => entry.id)) : null;
   const unresolvablePendingIds = options?.resume
-    ? pausedQueue.ids.filter(validBotId).filter(id => !resumeEntryIds.has(id))
+    ? pausedQueue.ids.filter(validBotId).filter(id => !blockedIds.has(id) && !resumeEntryIds.has(id))
     : [];
   // Some imported/resumed sources can accidentally repeat the same ID.
   // Check each ID only once per run, keeping its first position in a resumed
@@ -844,7 +880,7 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
     const reasons = new Map(reviewBotStatusQueueEligibility({ ...pausedQueue,
       ids: unresolvablePendingIds }).unavailable.map(item => [item.id, item.reason]));
     for (const id of unresolvablePendingIds) {
-      if (heldIds.some(item => item.id === id)) continue;
+      if (blockedIds.has(id) || heldIds.some(item => item.id === id)) continue;
       heldIds.push({ id, mode, scope, reason: reasons.get(id) || "No longer in the original scan scope", since: Date.now() });
     }
   }
@@ -857,8 +893,9 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
   const archivedStatus = mode === "archived" ? $("deletedSavedBotRecheckStatus") : null;
   if (!entries.length) {
     if (unresolvablePendingIds.length && pausedQueue) {
-      const saved = await storageSetVerified({ [queueKey]: { ...pausedQueue, ids: [], heldIds,
-        phase: "paused", updatedAt: Date.now(), reason: "Out-of-scope checks safely held" } });
+      const remainingQueue = botStatusPruneBlockedQueue({ ...pausedQueue, ids: [], heldIds,
+        phase: "paused", updatedAt: Date.now(), reason: "Out-of-scope checks safely held" }, blockedIds);
+      const saved = await storageSetVerified({ [queueKey]: remainingQueue.heldIds.length ? remainingQueue : null });
       const message = saved
         ? `${unresolvablePendingIds.length} no-longer-eligible Bot Status checks were automatically held for later. Nothing was deleted or rechecked.`
         : "Could not safely save the out-of-scope Bot Status checks; the previous queue was preserved.";
@@ -1012,12 +1049,12 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
     const pending = botStatusPendingIds(entries, nextIndex, deferredAccessIds, omittedByBotLimit, true);
     // Keep the last completed ID until final persistence has succeeded.
     try {
-      const checkpointPayload = { [queueKey]: {
+      const checkpointPayload = { [queueKey]: botStatusPruneBlockedQueue({
         version: 1, mode, scope, ids: pending, heldIds, manualHeldScanSources, phase: "running",
         updatedAt: now, startedAt: runStartedAt,
         completed, total: entries.length, verifiedClassifications: verifiedClassificationCount,
         inconclusive: unknownCount, reason: "Saved progress"
-      } };
+      }, new Set([...blockedIds, ...normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase())])) };
       // Verify the initial recoverable queue before issuing ANY API request.
       // On later checkpoints, a successful storage callback is sufficient;
       // all saved result deltas have already been acknowledged by the worker.
@@ -1069,6 +1106,10 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
       nextScanIndex = scanIndex;
       const entry = entries[scanIndex];
       if (botAvailabilityStopRequested) break;
+      if (blockedIds.has(entry.id) || (blockedState.ids || []).includes(entry.id)) {
+        nextScanIndex = scanIndex + 1;
+        continue;
+      }
       if (Date.now() >= runDeadline) { timeLimitReached = true; break; }
       const now = Date.now();
       if ((status || archivedStatus) && (now - lastProgressPaintAt >= 400 || completed === 0)) {
@@ -1258,9 +1299,11 @@ async function runBotAvailabilityScanOwned(options = {}, hasSharedLock = false) 
           ['available', 'unavailable', 'restricted'].includes(result?.status) &&
           Number(result?.unavailableEvidenceCount || 0) !== 1;
       }));
-      const outstandingHeld = heldIds.filter(item => !completedHeld.has(item.id));
+      const finalBlockedIds = new Set([...blockedIds, ...normalizeBotStore(blockedState).ids.map(id => String(id).toLowerCase())]);
+      for (const id of outstanding) if (finalBlockedIds.has(id)) outstanding.delete(id);
+      const outstandingHeld = heldIds.filter(item => !completedHeld.has(item.id) && !finalBlockedIds.has(item.id));
       const remainingHeldSources = Object.fromEntries(Object.entries(manualHeldScanSources)
-        .filter(([id]) => !completedHeld.has(id)));
+        .filter(([id]) => !completedHeld.has(id) && !finalBlockedIds.has(id)));
       try {
         const finalQueueSaved = await storageSetVerified({ [queueKey]: (outstanding.size || outstandingHeld.length) ? {
           version: 1, mode, scope, ids: [...outstanding], heldIds: outstandingHeld,

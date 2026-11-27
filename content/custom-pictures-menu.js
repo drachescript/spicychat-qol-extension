@@ -9,7 +9,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function openMenu(requestedTab) {
     kit.close();
     if (!DS.isSingleChatPage?.()) return false;
-    await kit.loadStore();
+    const route = location.pathname;
+    try { await kit.loadStore(lastRestoreStatus === "storage-unavailable"); }
+    catch { DS.setQuickStatus?.("Could not load saved pictures. Try opening Custom Pictures again."); return false; }
+    if (route !== location.pathname || !DS.isSingleChatPage?.()) return false;
     const tabs = kit.availableTabs();
     if (!tabs.length) return false;
     if (requestedTab && tabs.some(tab => tab.id === requestedTab)) currentTab = requestedTab;
@@ -47,15 +50,47 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let scheduledRefresh = null;
   let scheduledRunning = false;
   let scheduledAgain = false;
+  let restoreTimer = null;
+  let restoreAttempts = 0;
+  let lastRestoreStatus = "";
+  function cancelRestore(reset = false) {
+    clearTimeout(restoreTimer); restoreTimer = null;
+    if (reset) { restoreAttempts = 0; lastRestoreStatus = ""; }
+  }
+  function reportRestore(status) {
+    if (lastRestoreStatus === status) return;
+    lastRestoreStatus = status;
+    DS.diagEvent?.("chat-backgrounds", "restore-state", { status });
+  }
+  function retryRestore(route, token) {
+    if (restoreTimer !== null || restoreAttempts >= 3 || document.hidden) return;
+    restoreTimer = setTimeout(() => {
+      restoreTimer = null;
+      if (route !== location.pathname || token !== initialApplyToken || document.hidden || !DS.state?.settings?.enabled) return;
+      restoreAttempts++;
+      DS.queueChatBackgroundRefresh();
+    }, [500, 1500, 3500][restoreAttempts]);
+  }
   const applyPicturesNow = async () => {
     const settings = DS.state?.settings || {};
     if (!settings.enabled || !DS.isSingleChatPage?.() || !kit.availableTabs(settings).length) return;
     const route = String(location.pathname || '');
     const token = initialApplyToken;
-    await kit.loadStore();
+    try { await kit.loadStore(); }
+    catch {
+      if (route === location.pathname && token === initialApplyToken) {
+        reportRestore("storage-unavailable"); retryRestore(route, token);
+      }
+      return;
+    }
     const latest = DS.state?.settings || {};
     if (token !== initialApplyToken || !latest.enabled || !DS.isSingleChatPage?.() || location.pathname !== route || !kit.availableTabs(latest).length) return;
-    await DS.applyBackgroundLayer?.(!!latest.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
+    const status = await DS.applyBackgroundLayer?.(!!latest.enableChatBackgrounds && kit.isInstalled("chat-backgrounds"));
+    if (status) {
+      reportRestore(status);
+      if (status === "avatar-unavailable" || status === "waiting-for-body") retryRestore(route, token);
+      else cancelRestore();
+    } else if (latest.enableChatBackgrounds && kit.isInstalled("chat-backgrounds")) reportRestore("module-unavailable");
     if (token !== initialApplyToken || location.pathname !== route || !DS.state?.settings?.enabled) return;
     const hooks = () => { for (const apply of kit.applyHooks()) apply(); };
     if (DS.pictureOverrideCore?.withSharedRoots) DS.pictureOverrideCore.withSharedRoots(hooks);
@@ -69,6 +104,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // Make a newly visited chat interactive before loading potentially large saved pictures.
     const route = String(location.pathname || '');
     if (lastAppliedRoute !== route) {
+      cancelRestore(true);
       clearTimeout(initialApplyTimer);
       initialApplyTimer = null;
       initialApplyQueued = false;
@@ -109,6 +145,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }, 0);
   };
   DS.removeChatBackgrounds = () => {
+    cancelRestore(true);
     clearTimeout(scheduledRefresh);
     scheduledRefresh = null;
     scheduledAgain = false;

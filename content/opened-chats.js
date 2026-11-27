@@ -1123,7 +1123,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let openedCurrentSaveTimer = null;
   let openedCurrentSaveInFlight = null;
 
-  function queueCurrentOpenedSave(delay = 450) {
+  function queueCurrentOpenedSave(delay = DS.isNativeAndroidStorage?.() ? 1200 : 450) {
     const runtime = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
     if (openedCurrentSaveTimer) {
       clearTimeout(openedCurrentSaveTimer);
@@ -1172,6 +1172,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     window.addEventListener("pagehide", () => { DS.flushCurrentOpenedSave?.(); }, true);
   }
 
+  let lastOpenedHeaderProbe = { id: "", at: 0 };
   DS.markCurrentChatAsOpened = function markCurrentChatAsOpened() {
     const { settings, openedChats } = DS.state;
 
@@ -1185,6 +1186,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const alreadyComplete = openedChats.has(id) && !!existingMeta?.name && !!existingMeta?.image;
     if (DS.state.lastMarkedChatId === id && alreadyComplete) return;
 
+    if (DS.isNativeAndroidStorage?.() && DS.state.lastMarkedChatId === id && lastOpenedHeaderProbe.id === id && Date.now() - lastOpenedHeaderProbe.at < 1500) return;
+    lastOpenedHeaderProbe = { id, at: Date.now() };
     const currentMeta = getCurrentChatHeaderMeta(id);
     if (DS.isBlockedForOpenedHistory?.(id, currentMeta)) {
       if (openedChats.delete(id)) {
@@ -1195,7 +1198,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const wasNew = !openedChats.has(id);
-    const needsMetaSave = !existingMeta?.name && !existingMeta?.image;
+    const needsMetaSave = (!existingMeta?.name && !!currentMeta?.name) || (!existingMeta?.image && !!currentMeta?.image);
 
     if (DS.state.lastMarkedChatId === id && !wasNew && !needsMetaSave) {
       return;

@@ -1523,6 +1523,24 @@ html.ds-chat-performance [id^="message-"] .ds-message-quick-actions {
   border-radius: 10px;
 }
 
+/* Collapsing the tools is visual only: selections and running operations stay intact. */
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed {
+  padding: 4px 6px;
+  gap: 0;
+}
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed > .ds-memory-bulk-actions,
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed > .ds-memory-native-lifecycle,
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed > .ds-memory-quality-panel,
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed > .ds-memory-pinned-order,
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed > .ds-memory-vault-panel,
+#ds-memory-bulk-toolbar.ds-memory-tools-collapsed .ds-memory-manager-version {
+  display: none !important;
+}
+#ds-memory-bulk-toolbar .ds-memory-tools-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+#ds-memory-bulk-toolbar .ds-memory-bulk-status:empty { display: none; }
 #ds-memory-bulk-toolbar .ds-memory-bulk-actions {
   display: flex;
   flex-wrap: wrap;

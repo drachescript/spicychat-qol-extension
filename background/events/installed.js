@@ -2,6 +2,7 @@
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundInstalled() {
 chrome.runtime.onInstalled.addListener(details => {
+  dsqSctWake();
   rememberReleaseNotice(details)
     .catch(() => {})
     .finally(() => {

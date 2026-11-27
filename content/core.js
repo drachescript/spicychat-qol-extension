@@ -30,7 +30,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const qolFrames = new Set();
   const qolIdleCalls = new Set();
   const qolObservers = new Set();
-  const qolDocumentListeners = [];
+  const qolDocumentListeners = new Set();
   let qolRuntimeSuspended = false;
   const tabPausedForRuntime = () => qolRuntimeSuspended || (!DS.isQolWorkerTab() && (() => {
     try { return sessionStorage.getItem(QOL_TAB_PAUSE_KEY) === "1"; }
@@ -44,11 +44,37 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const target of [window, document]) {
       const nativeAdd = target.addEventListener.bind(target);
       const nativeRemove = target.removeEventListener.bind(target);
+      // Retain only active listeners. Once/removed/aborted listeners must not
+      // hold callbacks and old route DOM for the lifetime of a WebView.
+      const byType = new Map();
+      const captureOf = options => typeof options === "boolean" ? options : !!options?.capture;
+      function forget(record) {
+        record.map.delete(record.callback);
+        qolDocumentListeners.delete(record);
+        record.signal?.removeEventListener?.("abort", record.abort);
+      }
       target.addEventListener = function (type, callback, options) {
-        if (tabPausedForRuntime()) return;
-        const result = nativeAdd(type, callback, options);
-        qolDocumentListeners.push({ nativeRemove, type, callback, options });
+        if (tabPausedForRuntime() || !callback || options?.signal?.aborted) return;
+        const key = `${type}|${captureOf(options)}`;
+        if (!byType.has(key)) byType.set(key, new Map());
+        const map = byType.get(key);
+        if (map.has(callback)) return;
+        const record = { nativeRemove, type, callback, options, map, signal: options?.signal };
+        record.wrapped = options?.once ? function (event) {
+          forget(record);
+          if (typeof callback === "function") return callback.call(this, event);
+          return callback.handleEvent?.(event);
+        } : callback;
+        record.abort = () => forget(record);
+        const result = nativeAdd(type, record.wrapped, options);
+        map.set(callback, record); qolDocumentListeners.add(record);
+        record.signal?.addEventListener?.("abort", record.abort, { once: true });
         return result;
+      };
+      target.removeEventListener = function (type, callback, options) {
+        const record = byType.get(`${type}|${captureOf(options)}`)?.get(callback);
+        if (record) forget(record);
+        return nativeRemove(type, record?.wrapped || callback, options);
       };
     }
     window.setTimeout = function (callback, delay, ...args) {
@@ -139,11 +165,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     for (const id of qolFrames) nativeQolTimers.cancelRaf?.(id);
     for (const id of qolIdleCalls) nativeQolTimers.cancelIdle?.(id);
     for (const observer of qolObservers) { try { observer.disconnect(); } catch {} }
-    for (const { nativeRemove, type, callback, options } of qolDocumentListeners) {
-      try { nativeRemove(type, callback, options); } catch {}
+    for (const record of qolDocumentListeners) {
+      try { record.nativeRemove(record.type, record.wrapped, record.options); record.map.delete(record.callback); record.signal?.removeEventListener?.("abort", record.abort); } catch {}
     }
     qolTimeouts.clear(); qolIntervals.clear(); qolFrames.clear(); qolIdleCalls.clear(); qolObservers.clear();
-    qolDocumentListeners.length = 0;
+    qolDocumentListeners.clear();
     try { window.DSCardTokenBridgeLoader?.disable?.(); } catch {}
     try { window.dispatchEvent(new CustomEvent("ds-qol-card-token-bridge-control-v1", { detail: { enabled: false } })); } catch {}
   };
@@ -581,6 +607,64 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   DS.runtimeLog("info", "core", "Content runtime initialized", location.pathname || "/");
 
+  DS.installCardSelectionGuard = function ({ active, resolve, select }) {
+    let gesture = null;
+    const listeners = [];
+    const on = (type, fn, passive = true) => {
+      window.addEventListener(type, fn, { capture: true, passive });
+      listeners.push([type, fn]);
+    };
+    const candidate = event => active() && resolve(event.target);
+    function begin(event, point, pointer) {
+      gesture = null;
+      const entry = candidate(event);
+      if (!entry) return;
+      gesture = { id: entry.id, pointer, x: point.clientX, y: point.clientY, moved: false, route: location.href, until: Date.now() + 1500 };
+      event.stopImmediatePropagation();
+    }
+    function move(point) {
+      if (gesture && Math.hypot(point.clientX - gesture.x, point.clientY - gesture.y) > 10) gesture.moved = true;
+    }
+    on("pointerdown", e => { if (e.button === 0 && e.isPrimary !== false) begin(e, e, e.pointerId); });
+    on("pointermove", e => { if (gesture?.pointer === e.pointerId) move(e); });
+    on("pointercancel", e => { if (gesture?.pointer === e.pointerId) gesture.moved = true; });
+    on("pointerup", e => { if (gesture?.pointer === e.pointerId && active()) { move(e); gesture.until = Date.now() + 500; e.stopImmediatePropagation(); } });
+    on("touchstart", e => {
+      if (e.touches.length !== 1) { if (gesture) gesture.moved = true; return; }
+      if (gesture && candidate(e)) e.stopImmediatePropagation();
+      else begin(e, e.touches[0], "touch");
+    });
+    on("touchmove", e => { if (e.touches.length === 1) move(e.touches[0]); });
+    on("touchcancel", () => { if (gesture) gesture.moved = true; });
+    on("touchend", e => { if (gesture && active() && candidate(e)) { if (e.changedTouches[0]) move(e.changedTouches[0]); gesture.until = Date.now() + 500; e.stopImmediatePropagation(); } });
+    on("click", e => {
+      const entry = candidate(e);
+      const prior = gesture && gesture.route === location.href && Date.now() <= gesture.until ? gesture : null;
+      gesture = null;
+      if (!entry) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (!prior || (!prior.moved && prior.id === entry.id)) select(entry);
+    }, false);
+    return () => { gesture = null; for (const [type, fn] of listeners) window.removeEventListener(type, fn, true); };
+  };
+
+  DS.makeRouteWorkGuard = function () {
+    const route = location.href, epoch = Number(DS.state.routeWorkEpoch || 0);
+    let sliceAt = performance.now();
+    const cancelled = new Error("Obsolete QoL route work");
+    const active = () => location.href === route && Number(DS.state.routeWorkEpoch || 0) === epoch;
+    const check = () => { if (!active()) throw cancelled; };
+    const wrap = fn => async (...args) => {
+      check();
+      if (DS.isNativeAndroidStorage?.() && performance.now() - sliceAt >= 8) {
+        await new Promise(resolve => nativeQolTimers.timeout(resolve, 0));
+        check(); sliceAt = performance.now();
+      }
+      const result = await fn(...args); check(); return result;
+    };
+    return { active, check, wrap, cancelled };
+  };
+
   DS.bumpDomRevision = function bumpDomRevision({ preserveListingCardCache = false } = {}) {
     DS.state.domRevision = Number(DS.state.domRevision || 0) + 1;
     if (DS.state.loadedMessageRootsCache) DS.state.loadedMessageRootsCache.revision = -1;
@@ -769,6 +853,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function recoverInvalidatedExtensionContext(trigger = "watchdog") {
     if (!EXTENSION_CONTEXT_WAS_VALID_AT_START || extensionContextRecoveryPending) return false;
+    // The native wrapper owns reinjection and renderer recovery. A transient
+    // bridge/context outage is not permission to reload a healthy native page.
+    if (window.__spicyChatQolAndroidApp || window.__spicyChatQolAndroidWebView || DS.isNativeAndroidStorage?.()) return false;
     if (DS.isExtensionContextValid()) return false;
     if (document.visibilityState !== "visible") return false;
 
@@ -795,7 +882,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   if (EXTENSION_CONTEXT_WAS_VALID_AT_START) {
     // Mobile WebKit may suspend tabs for long periods; use existing focus/
     // visibility signals rather than waking it on a 15-second interval.
-    if (!DS.getPlatformEnvironment?.()?.ios) {
+    if (!DS.getPlatformEnvironment?.()?.ios && !DS.getPlatformEnvironment?.()?.webview && !window.__spicyChatQolAndroidApp && !window.__spicyChatQolAndroidWebView && chrome.runtime?.id !== "spicychat-qol-android") {
       window.setInterval(() => recoverInvalidatedExtensionContext("interval"), 15000);
     }
     window.addEventListener("focus", () => recoverInvalidatedExtensionContext("focus"), true);
@@ -983,11 +1070,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
   }
 
+  // The APK has its own native storage service, not the desktop IDB worker.
+  DS.isNativeAndroidStorage = () => !!(window.__spicyChatQolAndroidApp || window.__spicyChatQolAndroidWebView || chrome.runtime?.id === "spicychat-qol-android" || (DS.getPlatformEnvironment?.()?.webview && /Android/i.test(navigator.userAgent || "")));
+  DS.largeStorageBackend = () => DS.isNativeAndroidStorage() ? "android-native" : "indexeddb";
+  const recordReadJobs = new Map();
+  const recordBackoff = new Map();
+  DS.largeStorageRecordReady = operation => !DS.isNativeAndroidStorage() || Date.now() >= (recordBackoff.get(operation) || 0);
+  function recordFailure(operation) {
+    if (!DS.isNativeAndroidStorage()) return;
+    const ready = DS.largeStorageRecordReady(operation);
+    recordBackoff.set(operation, Date.now() + 30000);
+    const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+    perf.androidLargeStorageRecordFailures = (perf.androidLargeStorageRecordFailures || 0) + 1;
+    if (ready) DS.runtimeLog?.("warn", "storage", `Android record ${operation} unavailable; whole-store fallback suppressed`);
+  }
+  function nativeRecordMessage(message) {
+    if (!DS.isNativeAndroidStorage()) return sendRuntimeMessage(message);
+    let timer;
+    return Promise.race([sendRuntimeMessage(message), new Promise(resolve => { timer = nativeQolTimers.timeout(() => resolve(null), 8000); })]).finally(() => nativeQolTimers.clearTimeout(timer));
+  }
   async function readLargeStorage(keys) {
     const requested = largeStorageRequestedKeys(keys);
     if (!requested.length) return {};
-    const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_GET", keys: requested });
+    const response = await nativeRecordMessage({ type: "DS_LARGE_STORAGE_GET", keys: requested });
     if (!response?.ok) return null; // Android/older-background compatibility
+    if (DS.isNativeAndroidStorage() && (!response.data || requested.some(key => !Object.hasOwn(response.data, key) || !response.data[key] || typeof response.data[key] !== "object"))) return null;
     return response.data && typeof response.data === "object" ? response.data : {};
   }
 
@@ -1069,9 +1176,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
         let largeOk = true;
         if (Object.keys(largeValues).length) {
-          const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_SET", values: largeValues });
+          const response = await nativeRecordMessage({ type: "DS_LARGE_STORAGE_SET", values: largeValues });
           largeOk = !!response?.ok;
-          if (!largeOk) {
+          if (!largeOk && !DS.isNativeAndroidStorage()) {
             // Compatibility path for Android/WebView or an older background.
             Object.assign(localPayload, largeValues);
             largeOk = true;
@@ -1104,7 +1211,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     storageWriteQueue.flushingKeys.clear();
     if (diagWriteStarted) {
       DS.diagStorage?.("write", {
-        backend: keys.some(key => LARGE_STORAGE_KEYS.has(key)) ? (keys.some(key => !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
+        backend: keys.some(key => LARGE_STORAGE_KEYS.has(key)) ? (keys.some(key => !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : DS.largeStorageBackend()) : "chrome.storage.local",
         keyCount: keys.length,
         largeKeyCount: keys.filter(key => LARGE_STORAGE_KEYS.has(key)).length,
         feature: diagnosticStorageOwner(keys), ownerAttribution: 'storage-key-category-inferred', trigger: 'queued-storage-flush',
@@ -1140,6 +1247,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const wantsLarge = largeStorageRequestedKeys(keys).length > 0;
     const largeData = wantsLarge ? await readLargeStorage(keys) : {};
     const largeSupported = largeData !== null;
+    if (!largeSupported && DS.isNativeAndroidStorage()) throw new Error("Android large storage read unavailable; legacy full-store fallback suppressed");
 
     // Android/WebView and old background builds can keep using the legacy local
     // object until they gain the extension-owned IDB service.
@@ -1183,7 +1291,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (meta && typeof meta === "object") largeRecords += Object.keys(meta).length;
       }
       DS.diagStorage?.("read", {
-        backend: wantsLarge ? (requestedKeys.some(key => key !== "*" && !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : "indexeddb") : "chrome.storage.local",
+        backend: wantsLarge ? (requestedKeys.some(key => key !== "*" && !LARGE_STORAGE_KEYS.has(key)) ? "mixed" : DS.largeStorageBackend()) : "chrome.storage.local",
         keyCount: requestedKeys.length,
         feature: diagnosticStorageOwner(requestedKeys), ownerAttribution: 'storage-key-category-inferred', trigger: 'feature-state-read',
         reason: 'load-required-saved-state', phase: wantsLarge ? 'large-store-paging-and-callback' : 'browser-callback-wait',
@@ -1234,9 +1342,31 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!LARGE_STORAGE_KEYS.has(key)) return {};
     const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
     if (!cleanIds.length) return {};
+    if (DS.isNativeAndroidStorage()) {
+      if (!DS.largeStorageRecordReady("read")) throw new Error("Android record reads temporarily unavailable");
+      const jobKey = `${key}:${[...cleanIds].sort().join(",")}`;
+      if (!recordReadJobs.has(jobKey)) {
+        const job = (async () => {
+          const records = {};
+          for (let offset = 0; offset < cleanIds.length; offset += 64) {
+            const batch = cleanIds.slice(offset, offset + 64);
+            const response = await nativeRecordMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key, ids: batch });
+            if (!response?.ok || !response.records || typeof response.records !== "object" || Array.isArray(response.records)) {
+              recordFailure("read"); throw new Error("Android record read unavailable");
+            }
+            for (const id of batch) if (Object.hasOwn(response.records, id)) records[id] = response.records[id];
+          }
+          if (diagStarted) DS.diagStorage?.("read-records", { backend: DS.largeStorageBackend(), key, requested: cleanIds.length, records: Object.keys(records).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
+          return records;
+        })();
+        recordReadJobs.set(jobKey, job);
+        job.finally(() => recordReadJobs.delete(jobKey)).catch(() => {});
+      }
+      return recordReadJobs.get(jobKey);
+    }
     const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_GET_RECORDS", key, ids: cleanIds });
     if (response?.ok && response.records && typeof response.records === "object") {
-      if (diagStarted) DS.diagStorage?.("read-records", { backend: "indexeddb", key, requested: cleanIds.length, records: Object.keys(response.records).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
+      if (diagStarted) DS.diagStorage?.("read-records", { backend: DS.largeStorageBackend(), key, requested: cleanIds.length, records: Object.keys(response.records).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10 });
       return response.records;
     }
 
@@ -1262,11 +1392,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!LARGE_STORAGE_KEYS.has(key)) return false;
     const clean = entries && typeof entries === "object" && !Array.isArray(entries) ? entries : {};
     if (!Object.keys(clean).length) return true;
-    const response = await sendRuntimeMessage({ type: "DS_LARGE_STORAGE_MERGE", key, entries: clean });
+    if (!DS.largeStorageRecordReady("merge")) return false;
+    const response = await nativeRecordMessage({ type: "DS_LARGE_STORAGE_MERGE", key, entries: clean });
     if (response?.ok) {
-      if (diagStarted) DS.diagStorage?.("merge", { backend: "indexeddb", key, records: Object.keys(clean).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10, ok: true });
+      if (diagStarted) DS.diagStorage?.("merge", { backend: DS.largeStorageBackend(), key, records: Object.keys(clean).length, durationMs: Math.round((performance.now() - diagStarted) * 10) / 10, ok: true });
       return true;
     }
+
+    if (DS.isNativeAndroidStorage()) { recordFailure("merge"); return false; }
 
     // Same compatibility fallback as reads: merge into the legacy local object
     // when the companion background does not expose the v0.2.29 IDB service.

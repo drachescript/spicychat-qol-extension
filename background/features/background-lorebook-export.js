@@ -71,6 +71,17 @@ async function findExistingLorebookExportHelper() {
   return keep;
 }
 
+// Chrome rejects tab mutations while a tab is being dragged. Retry only
+// that explicit rejection, never an ambiguous create or navigation failure.
+async function lorebookHelperTabMutation(run) {
+  let result;
+  for(const delay of [0,500,1500,3000]){
+    if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+    result=await run();
+    if(result?.ok || !/tabs cannot be edited right now|user may be dragging a tab/i.test(String(result?.error||"")))return result;
+  }
+  return result;
+}
 async function ensureLorebookExportHelper(rawUrl) {
   clearLorebookExportHelperIdleTimer();
   const url = lorebookExportWorkerUrl(rawUrl);
@@ -85,7 +96,7 @@ async function ensureLorebookExportHelper(rawUrl) {
   }
 
   if (!tabId || !tab) {
-    const created = await tabsCreate({ url, active: false });
+    const created = await lorebookHelperTabMutation(()=>tabsCreate({ url, active: false }));
     tabId = Number(created?.tab?.id || 0);
     if (!created?.ok || !tabId) {
       lorebookExportHelperTabId = 0;
@@ -98,10 +109,11 @@ async function ensureLorebookExportHelper(rawUrl) {
 
   const currentUrl = String(tab.pendingUrl || tab.url || "");
   if (currentUrl !== url) {
-    const updated = await tabsUpdate(tabId, { url, active: false });
+    const updated = await lorebookHelperTabMutation(()=>tabsUpdate(tabId, { url, active: false }));
     if (!updated?.ok) {
+      if (/tabs cannot be edited right now|user may be dragging a tab/i.test(String(updated?.error||""))) return {ok:false,tabId:0,reused:true,error:updated.error};
       await closeLorebookExportHelper("navigation-failed").catch(() => {});
-      const created = await tabsCreate({ url, active: false });
+      const created = await lorebookHelperTabMutation(()=>tabsCreate({ url, active: false }));
       const replacementId = Number(created?.tab?.id || 0);
       if (!created?.ok || !replacementId) {
         return { ok: false, tabId: 0, reused: false, error: created?.error || updated?.error || "Could not navigate Lorebook helper tab." };

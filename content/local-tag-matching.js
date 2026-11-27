@@ -56,7 +56,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
   async function archived(ids) {
     if (typeof DS.largeStorageGetRecords === "function") {
-      try { return await DS.largeStorageGetRecords(DS.BOT_ARCHIVE_KEY || "botArchive", ids) || {}; } catch {}
+      try { return await DS.largeStorageGetRecords(DS.BOT_ARCHIVE_KEY || "botArchive", ids) || {}; } catch (error) { if (DS.isNativeAndroidStorage?.()) throw error; }
     }
     const raw = await DS.storageGet?.([DS.BOT_ARCHIVE_KEY || "botArchive"]) || {};
     return raw[DS.BOT_ARCHIVE_KEY || "botArchive"]?.meta || {};
@@ -102,11 +102,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     cursor = (cursor + 24) % all.length;
     if (!batch.length) return;
     running = true;
+    const guard = DS.makeRouteWorkGuard?.();
     try {
       const snapshots = await archived(batch.map(item => item.id));
+      if (guard && !guard.active()) return;
       const added = new Map();
       let publicReads = 0;
       for (const item of batch) {
+        if ((guard && !guard.active()) || !item.card?.isConnected) continue;
         const cache = snapshots[item.id];
         const fields = pickFields(item.card, cache);
         let matching = rules.filter(rule => matched(fields, rule));
@@ -118,6 +121,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           publicReads++;
           try {
             const live = await DS.fetchPublicCharacterFieldsDetailed(item.id);
+            if (guard && !guard.active()) return;
             if (live?.ok && live.fields) {
               for (const [key, value] of Object.entries(live.fields)) {
                 const mapped = key === "exampleDialogues" ? "examples" : key;
@@ -130,9 +134,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (matching.length) added.set(item.id, { tags: matching.map(rule => rule.tag), fields });
         checked.set(item.id, { signature, visibleKey: item.visibleKey, when: Date.now() });
       }
-      if (!added.size) return;
+      if (!added.size || (guard && !guard.active())) return;
       const key = DS.BOT_ORGANIZER_KEY || "botOrganization";
       const stored = await DS.storageGet?.([key]);
+      if (guard && !guard.active()) return;
       const current = stored?.[key] && typeof stored[key] === "object" ? stored[key] : (DS.state.botOrganization || {});
       const next = { collections: Array.isArray(current.collections) ? current.collections : [], meta: { ...(current.meta || {}) } };
       let updates = 0;

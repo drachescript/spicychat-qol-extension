@@ -952,13 +952,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             (changes.settings && changes.settings.oldValue?.enabled === false && changes.settings.newValue?.enabled !== false) ||
             (granularEnabledChange && granularEnabledChange.oldValue === false && granularEnabledChange.newValue !== false)
           );
-          if (masterWasEnabled) {
+          if (masterWasEnabled && !DS.isNativeAndroidStorage?.()) {
             setTimeout(() => { try { location.reload(); } catch {} }, 180);
           }
           if (masterWasDisabled) {
             setTimeout(async () => {
               try { await runDisabledCleanup(); } catch {}
-              try { location.reload(); } catch {}
+              if (!DS.isNativeAndroidStorage?.()) { try { location.reload(); } catch {} }
             }, 180);
           }
         }

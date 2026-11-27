@@ -875,9 +875,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }, { passive: true });
     }
 
+    const alignmentRoute = location.href;
     cancelAnimationFrame(stackedComposerAlignmentRaf);
     stackedComposerAlignmentRaf = requestAnimationFrame(() => {
       stackedComposerAlignmentRaf = 0;
+      if (location.href !== alignmentRoute || !DS.isSingleChatPage?.()) return;
       const current = findStackedComposerLayout();
       if (!current || document.documentElement.getAttribute("data-ds-chat-message-layout") !== "stacked") return;
 
@@ -891,6 +893,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
       // Let the max-width rule settle before measuring the final bubble center.
       requestAnimationFrame(() => {
+        if (location.href !== alignmentRoute || !DS.isSingleChatPage?.()) return;
         const latest = findStackedComposerLayout();
         if (!latest || document.documentElement.getAttribute("data-ds-chat-message-layout") !== "stacked") return;
         if (viewportWidth <= 760) {

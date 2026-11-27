@@ -254,7 +254,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return response.data;
   }
 
-  async function mainWorldLorebookRequest(lorebookId, auth, lastSortPriority = 0) {
+  async function mainWorldLorebookRequest(lorebookId, auth, lastSortPriority = 0, lastEntryId = "") {
     try { window.DSCardTokenBridgeLoader?.ensure?.(); } catch {}
     const ready = await waitForMainBridge(2200);
     if (!ready) throw new Error("main-world Lorebook bridge unavailable");
@@ -281,6 +281,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
             requestId,
             lorebookId,
             lastSortPriority: Number.isFinite(Number(lastSortPriority)) ? Number(lastSortPriority) : 0,
+            lastEntryId,
             authToken: auth?.token || "",
             guestUserId: auth?.guest || "",
             authSource: auth?.source || "none"
@@ -701,7 +702,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // working Authorization header. Never send a direct Lorebook request
     // anonymously: current SpicyChat returns 403 for view=live without it.
     if (!auth?.token && !mainBridgeHasCapturedAuth()) {
-      await waitForMainBridgeCapturedAuth(6500);
+      try { options?.onAuthWait?.(); } catch {}
+      await waitForMainBridgeCapturedAuth(Math.min(20000, Math.max(6500, Number(options?.authWaitMs)||0)));
       if (!mainBridgeHasCapturedAuth() && !auth?.token) auth = await discoverSpicychatAuth(true);
     }
     if (!auth?.token && !mainBridgeHasCapturedAuth()) {
@@ -715,14 +717,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     const lastSortPriority = Number.isFinite(Number(options?.lastSortPriority)) ? Number(options.lastSortPriority) : 0;
+    const lastEntryId = String(options?.lastEntryId || "").trim();
+    if (lastEntryId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lastEntryId)) throw Error("Invalid Lorebook entry cursor");
+    const cursorQuery = lastEntryId ? `&lastEntryId=${encodeURIComponent(lastEntryId)}` : "";
     const net = DS.diagNetworkStart?.(
       "lorebook-status",
       "GET",
-      `https://prod.nd-api.com/lorebooks/${id}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}&view=live`,
+      `https://prod.nd-api.com/lorebooks/${id}?sortBy=priority&lastSortPriority=${encodeURIComponent(lastSortPriority)}${cursorQuery}&view=live`,
       { transport: "main-world-auth" }
     );
     try {
-      const response = await mainWorldLorebookRequest(id, auth, lastSortPriority);
+      const response = await mainWorldLorebookRequest(id, auth, lastSortPriority, lastEntryId);
       DS.diagNetworkEnd?.(net, {
         status: Number(response?.httpStatus || 200),
         ok: true,
@@ -926,9 +931,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         const fields = await fetchProfileApi(id, null, forceAuth, true, false);
         const returnedId = String(fields?.characterId || "").trim().toLowerCase();
         if (returnedId && returnedId !== id) {
-          return { ok: false, status: "id-mismatch", httpStatus: 0, fields: null, reason: "Character API returned a different character ID." };
+          return { ok: false, status: "id-mismatch", httpStatus: 200, fields: null, reason: "Character API returned a different character ID." };
         }
-        const signalKeys = ["characterId", "name", "title", "description", "greeting", "creator", "image", "tags", "visibility"];
+        const signalKeys = ["name", "title", "description", "greeting", "creator", "image", "tags", "visibility"];
         const hasCharacterSignal = signalKeys.some(key => {
           const value = fields?.[key];
           return Array.isArray(value) ? value.length > 0 : !!String(value || "").trim();
@@ -936,6 +941,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (!hasCharacterSignal) {
           return { ok: false, status: "api-empty", httpStatus: 200, fields: {}, reason: "Character API returned HTTP 200 with an empty character object." };
         }
+        if (!returnedId) return { ok: false, status: "identity-unverified", httpStatus: 200, fields: null, reason: "Character API returned fields but no verifiable character ID." };
         return { ok: true, status: "available", httpStatus: 200, fields: fields || {}, reason: "Character API returned live bot data." };
       } catch (error) {
         const message = String(error?.message || error || "");
@@ -947,7 +953,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
     let result = await attempt(false);
     if (!result.ok && result.httpStatus === 401) result = await attempt(true);
-    if (result.ok) return result;
+    if (result.ok || ["id-mismatch", "identity-unverified", "api-empty"].includes(result.status)) return result;
     if ([404, 410].includes(result.httpStatus)) return { ...result, status: "unavailable" };
     if (result.httpStatus === 403) return { ...result, status: "restricted" };
     if (result.httpStatus === 429) return { ...result, status: "rate-limited" };

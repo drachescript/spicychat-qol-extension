@@ -310,12 +310,12 @@ async function readLargeStorageForRequest(keys) {
   async function readKey(key) {
     if (!inFlightLargeStorageReads.has(key)) {
       const read = (async () => {
-        const paged = await readLargeStorageKeyPaged(key);
+        const paged = nativeAndroidOptionsStorage() ? null : await readLargeStorageKeyPaged(key);
         if (paged) return paged;
         const response = await runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_GET", keys: [key] }, 16000);
         if (!response?.ok) return null;
         return response.data?.[key] && typeof response.data[key] === "object"
-          ? response.data[key] : { meta: {} };
+          ? response.data[key] : nativeAndroidOptionsStorage() ? null : { meta: {} };
       })();
       inFlightLargeStorageReads.set(key, read);
       read.finally(() => {
@@ -326,17 +326,28 @@ async function readLargeStorageForRequest(keys) {
   }
   const values = [];
   // Keep concurrent large-store decoding bounded on memory-constrained WebViews.
-  for (let index = 0; index < requested.length; index += 2) {
-    const batch = await Promise.all(requested.slice(index, index + 2).map(async key => [key, await readKey(key)]));
+  const width = nativeAndroidOptionsStorage() ? 1 : 2;
+  for (let index = 0; index < requested.length; index += width) {
+    const batch = await Promise.all(requested.slice(index, index + width).map(async key => [key, await readKey(key)]));
     if (batch.some(([, value]) => value === null)) return null;
     values.push(...batch);
   }
   return Object.fromEntries(values);
 }
 
+function nativeAndroidOptionsStorage() {
+  return chrome.runtime?.id === "spicychat-qol-android" || !!(window.__spicyChatQolAndroidApp || window.__spicyChatQolAndroidWebView || window.flutter_inappwebview?.callHandler || window._dsRequestExport);
+}
+function largeStorageBackendLabel() { return nativeAndroidOptionsStorage() ? "Android native storage" : "IndexedDB"; }
+function validStorageMeasurement(value) { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null; }
+function storageCountLabel(stats, key) { const n = validStorageMeasurement(stats?.[key]); return n === null ? "unavailable" : String(n); }
+let supportStorageMeasurements = null;
 async function readLargeStorageStats() {
-  const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_STATS" });
-  return response?.ok && response.stats && typeof response.stats === "object" ? response.stats : {};
+  if (supportStorageMeasurements?.stats) return supportStorageMeasurements.stats;
+  const read = runtimeMessageWithTimeout({ type: "DS_LARGE_STORAGE_STATS" }, 7000).then(response =>
+    response?.ok && response.stats && typeof response.stats === "object" && !Array.isArray(response.stats) ? response.stats : null);
+  if (supportStorageMeasurements) supportStorageMeasurements.stats = read;
+  return read;
 }
 
 async function removeLargeStorageRecords(key, ids = []) {
@@ -374,6 +385,7 @@ async function storageGetChecked(keys) {
     const largeData = wantsLarge ? await readLargeStorageForRequest(keys) : {};
     if (wantsLarge) stages.largeMs += Math.max(0, clock() - largeStarted);
     const largeSupported = largeData !== null;
+    if (!largeSupported && nativeAndroidOptionsStorage()) throw new Error("Android large storage unavailable; full-store fallback suppressed.");
     const wantsSettings = storageRequestIncludes(keys, "settings");
     const localRequest = largeSupported ? localStorageKeysForRequest(keys) : keys;
     const requested = localRequest == null
@@ -439,6 +451,7 @@ async function storageGet(keys) {
   const narrowSettingsRead = (Array.isArray(keys) && keys.length === 1 && keys[0] === "settings") || keys === "settings";
   if (!narrowSettingsRead) {
     const result = await storageGetChecked(keys);
+    if (!result.ok && nativeAndroidOptionsStorage() && largeStorageKeysForRequest(keys).length) throw new Error(result.error || "Large storage unavailable");
     return result.data;
   }
   if (!pendingSettingsOnlyRead.promise) {
@@ -504,7 +517,7 @@ async function storageSet(obj) {
   if (Object.keys(largeValues).length) {
     const response = await runtimeMessage({ type: "DS_LARGE_STORAGE_SET", values: largeValues });
     largeOk = !!response?.ok;
-    if (!largeOk) {
+    if (!largeOk && !nativeAndroidOptionsStorage()) {
       // Compatibility fallback for a mismatched/older background.
       Object.assign(expanded, largeValues);
       largeOk = true;
@@ -649,22 +662,30 @@ function supportDiagnosticRuntimeTimeoutMs() {
 }
 
 async function withSharedSupportRuntimeSnapshot(build) {
-  if (!supportRuntimeSnapshotPromise) {
-    supportRuntimeSnapshotPromise = runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs());
-  }
+  if (!supportStorageMeasurements) supportStorageMeasurements = {};
   supportRuntimeSnapshotReaders += 1;
   try {
     return await build();
   } finally {
     supportRuntimeSnapshotReaders -= 1;
-    if (supportRuntimeSnapshotReaders === 0) supportRuntimeSnapshotPromise = null;
+    if (supportRuntimeSnapshotReaders === 0) { supportRuntimeSnapshotPromise = null; supportStorageMeasurements = null; }
   }
 }
 
 function runtimeMessageWithTimeout(message, timeoutMs = 15000) {
-  if (message?.type === "DS_GET_DIAGNOSTIC_CONTEXT" && supportRuntimeSnapshotPromise) {
+  if (message?.type === "DS_GET_DIAGNOSTIC_CONTEXT" && supportRuntimeSnapshotReaders) {
+    if (!supportRuntimeSnapshotPromise) supportRuntimeSnapshotPromise = runtimeMessageWithTimeoutRaw(message, supportDiagnosticRuntimeTimeoutMs());
     return supportRuntimeSnapshotPromise;
   }
+  return runtimeMessageWithTimeoutRaw(message, timeoutMs);
+}
+async function runSupportSources(factories) {
+  if (!nativeAndroidOptionsStorage()) return Promise.all(factories.map(fn => fn()));
+  const results = [];
+  for (const fn of factories) results.push(await fn());
+  return results;
+}
+function runtimeMessageWithTimeoutRaw(message, timeoutMs) {
   return new Promise(resolve => {
     let settled = false;
     const finish = value => {
@@ -679,17 +700,19 @@ function runtimeMessageWithTimeout(message, timeoutMs = 15000) {
 }
 
 function promiseWithSupportTimeout(promise, timeoutMs, fallbackText) {
+  let timer;
   return Promise.race([
     Promise.resolve(promise),
-    new Promise(resolve => setTimeout(() => resolve(String(fallbackText || `Timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), Math.max(1000, Number(timeoutMs) || 15000)))
-  ]);
+    new Promise(resolve => { timer = setTimeout(() => resolve(String(fallbackText || `Timed out after ${Math.round(timeoutMs / 1000)} seconds.`)), Math.max(1000, Number(timeoutMs) || 15000)); })
+  ]).finally(() => clearTimeout(timer));
 }
 
 function promiseWithValueTimeout(promise, timeoutMs, fallbackValue = null) {
+  let timer;
   return Promise.race([
     Promise.resolve(promise).catch(() => fallbackValue),
-    new Promise(resolve => setTimeout(() => resolve(fallbackValue), Math.max(250, Number(timeoutMs) || 15000)))
-  ]);
+    new Promise(resolve => { timer = setTimeout(() => resolve(fallbackValue), Math.max(250, Number(timeoutMs) || 15000)); })
+  ]).finally(() => clearTimeout(timer));
 }
 
 function permissionRequest(permission) {
@@ -706,20 +729,21 @@ function ensureDeepLPermission() {
 }
 
 function storageBytesInUse(keys = null) {
-  return new Promise(resolve => {
+  if (keys === null && supportStorageMeasurements?.bytes) return supportStorageMeasurements.bytes;
+  const read = new Promise(resolve => {
+    let settled = false;
+    const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(validStorageMeasurement(value)); };
+    const timer = setTimeout(() => finish(null), 7000);
     try {
-      if (typeof chrome.storage.local.getBytesInUse !== "function") {
-        resolve(null);
-        return;
-      }
-      chrome.storage.local.getBytesInUse(keys, bytes => {
-        if (chrome.runtime.lastError) resolve(null);
-        else resolve(Number(bytes) || 0);
+      if (typeof chrome.storage.local.getBytesInUse !== "function") return finish(null);
+      const pending = chrome.storage.local.getBytesInUse(keys, bytes => {
+        if (chrome.runtime.lastError) finish(null); else finish(bytes);
       });
-    } catch {
-      resolve(null);
-    }
+      if (pending && typeof pending.then === "function") pending.then(finish, () => finish(null));
+    } catch { finish(null); }
   });
+  if (keys === null && supportStorageMeasurements) supportStorageMeasurements.bytes = read;
+  return read;
 }
 
 function compareVersions(a, b) {
@@ -748,10 +772,6 @@ function displayReleaseVersion(value) {
     }
   }
 
-  const manifest = chrome.runtime.getManifest?.() || {};
-  if (raw === String(manifest.version || "") && manifest.version_name) {
-    return String(manifest.version_name);
-  }
   return raw;
 }
 
@@ -1484,7 +1504,7 @@ function setVersionText() {
   if (!versionEl) return;
 
   const manifest = chrome.runtime.getManifest();
-  versionEl.textContent = `v${manifest.version_name || displayReleaseVersion(manifest.version)}`;
+  versionEl.textContent = `v${displayReleaseVersion(manifest.version)}`;
 }
 
 let savedRecoveryLazyOpenListeners = [];

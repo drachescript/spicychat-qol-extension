@@ -9,12 +9,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.isUnsafeCardHideTarget = function isUnsafeCardHideTarget(target) {
     if (!target || DS.isNativePickerSurface?.(target) || DS.containsNativePickerSurface?.(target)) return true;
     if (target === document.documentElement || target === document.body || target.id === "root") return true;
-    if (target.matches?.("main, [role='main'], [data-overlay-container='true'], [data-testid='SearchClientCharacterListing']")) return true;
+    if (target.matches?.("main, [role='main'], [data-overlay-container='true'], [data-testid='SearchClientCharacterListing'], [data-testid='SearchClientCharacterListingBody'], [data-testid='CharacterListingResults'], [data-testid='ListingPagination']")) return true;
 
     // Card filtering must never be allowed to hide an actual chat/page shell.
     // A fallback card match on a single chat used to climb to the large chat
     // container, and Hide Opened Chats could then blank the entire page.
-    if (target.querySelector?.("textarea[placeholder='Message...'], button[aria-label='chat-dropdown'], nav, [role='navigation'], [data-testid='SearchClientCharacterListing']")) {
+    if (target.querySelector?.("textarea[placeholder='Message...'], button[aria-label='chat-dropdown'], nav, [role='navigation'], [data-testid='SearchClientCharacterListing'], [data-testid='SearchClientCharacterListingBody'], [data-testid='CharacterListingResults'], [data-testid='ListingPagination']")) {
       return true;
     }
 

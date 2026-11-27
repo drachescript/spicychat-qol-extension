@@ -17,6 +17,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from build_extension import FIREFOX_SHARED_BACKGROUND_SCRIPTS, allowed_package_relative_path
+from release_version import manifest_version, changelog_section
 from urllib.parse import urlsplit, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +81,15 @@ def verify(path: Path, source_manifest: dict, modules: dict) -> int:
         if 'manifest.json' not in available:
             raise ValueError(f'{path}: manifest.json missing')
         manifest = json.loads(archive.read('manifest.json'))
+        version = manifest_version(source_manifest)
+        manifest_version(manifest)
+        target = 'firefox' if path.name.endswith('-firefox.zip') else 'chrome'
+        if path.name not in (f'spicychat-qol-v{version}-{target}.zip', f'spicychat-qol-dev-{target}.zip'):
+            problems.append(f'wrong package filename for {version}: {path.name}')
+        if archive.read('manifest.json').decode('utf-8') != json.dumps(manifest, indent=2, ensure_ascii=False) + '\n':
+            problems.append('manifest JSON is not normalized to two-space indentation')
+        if 'CHANGELOG.md' in available:
+            changelog_section(archive.read('CHANGELOG.md').decode('utf-8'), version)
         if manifest.get('version') != source_manifest.get('version'):
             problems.append(f"wrong version {manifest.get('version')!r}")
 

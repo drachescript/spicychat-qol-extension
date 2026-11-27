@@ -1842,11 +1842,25 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return { name, keywords, content };
   }
 
-  DS.captureLorebookEntriesFully = async function captureLorebookEntriesFully(options = {}) {
-    if (DS.state.lorebookNativeCaptureActive) throw new Error("A Lorebook export is already collecting entries in this tab.");
+  let nativeCaptureFlight = null;
+  DS.captureLorebookEntriesFully = function(options = {}) {
+    const route = lorebookRoute();
+    if (!route?.id || route.page !== "entries") return Promise.reject(Error("Open the Lorebook Entries page first."));
+    if (nativeCaptureFlight) {
+      if (nativeCaptureFlight.id !== route.id) return Promise.reject(Error("Another Lorebook capture is still finishing; retry after it stops."));
+      if (options.progress) nativeCaptureFlight.listeners.add(options.progress);
+      return nativeCaptureFlight.promise;
+    }
+    if (DS.activeLorebookEntryImport || [...document.querySelectorAll("textarea[name='content']")].some(node=>node.offsetParent!==null)) return Promise.reject(Error("Finish the active entry import or close the open entry form before collecting Lorebook entries."));
+    const flight = {id:route.id, listeners:new Set(options.progress ? [options.progress] : [])};
     DS.state.lorebookNativeCaptureActive = true;
-    try { return await captureLorebookEntriesFully(options); }
-    finally { DS.state.lorebookNativeCaptureActive = false; }
+    nativeCaptureFlight = flight;
+    flight.promise = Promise.resolve().then(() => captureLorebookEntriesFully({...options, progress:state => {
+      for (const fn of flight.listeners) { try { fn(state); } catch {} }
+    }})).finally(() => {
+      if (nativeCaptureFlight === flight) { nativeCaptureFlight = null; DS.state.lorebookNativeCaptureActive = false; }
+    });
+    return flight.promise;
   };
 
   async function captureLorebookEntriesFully({ progress } = {}) {

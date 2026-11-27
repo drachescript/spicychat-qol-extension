@@ -1,0 +1,32 @@
+{
+  "id": "creator-tools-integration",
+  "primary": "content/creator-tools-integration.js",
+  "type": "content",
+  "bundle": "creator",
+  "dependencies": [
+    "bot-backup",
+    "lorebook-backup",
+    "lorebook-tags"
+  ],
+  "settingsKeys": [
+    "creatorToolsIntegrationEnabled",
+    "creatorToolsDiagnostics"
+  ],
+  "requiredHelpers": [],
+  "settingsFiles": [
+    "settings/feature-panels/creator-tools-integration.js"
+  ],
+  "settingsMarkupIsolated": false,
+  "settingsIsolated": false,
+  "stylesIsolated": false,
+  "backgroundIsolated": false,
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/sct-inspector-gate.js",
+    "background/features/background-sct-inspector.js"
+  ],
+  "backgroundImportModes": {
+    "background/sct-inspector-gate.js": "standalone",
+    "background/features/background-sct-inspector.js": "feature-gated"
+  }
+}

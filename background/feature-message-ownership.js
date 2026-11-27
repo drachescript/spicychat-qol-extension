@@ -29,6 +29,7 @@ const DSQ_BACKGROUND_MESSAGE_OWNERS = Object.freeze({
   "DS_CLEAR_PAGE_RUNTIME_LOG": "core",
   "DS_CLOSE_CURRENT_TAB": "core",
   "DS_CONTEXT_WINDOW_NOTIFICATION": "generation-metadata",
+  "DS_GENERATION_QUOTA_RESEARCH": "daily-message-limit",
   "DS_CONTEXT_KEEPER_MUTATE": "context-keeper",
   "DS_CREATOR_BOT_SCAN_NOW": "creator-workspace",
   "DS_CREATOR_BOT_WEBHOOK_TEST": "creator-workspace",

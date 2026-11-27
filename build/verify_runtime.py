@@ -227,6 +227,18 @@ def main() -> int:
         for dependency in contract.get("dependencies", []):
             if dependency not in available_features:
                 ERRORS.append(f"Feature {feature_id}: unknown dependency {dependency}")
+        if feature_id == "sidebar":
+            owner_text = (ROOT / "settings/feature-setting-owners.js").read_text(encoding="utf-8")
+            owner_match = re.search(r'"sidebar"\s*:\s*(\[[^\n]+\])\s*,', owner_text)
+            if not owner_match or not set(json.loads(owner_match.group(1))) <= set(contract.get("settingsKeys", [])):
+                ERRORS.append("Sidebar feature contract is missing runtime Settings ownership keys")
+            if (primary != "content/sidebar.js"
+                    or "content/sidebar-redesign.js" not in contract.get("requiredHelpers", [])
+                    or "settings/feature-panels/sidebar.js" not in contract.get("settingsFiles", [])):
+                ERRORS.append("Sidebar contract must retain normal helper, redesigned helper and Settings panel")
+            for asset in ("content/sidebar.js", "content/sidebar-redesign.js"):
+                if asset not in bundles.get("interface", {}).get("files", []):
+                    ERRORS.append(f"Sidebar runtime not retained by interface bundle: {asset}")
         if not isinstance(contract.get("browserVerified"), bool):
             ERRORS.append(f"Feature {feature_id}: browserVerified must be explicit boolean")
 

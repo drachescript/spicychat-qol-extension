@@ -13,6 +13,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let mediaStore = { global:null, chats:{}, galleries:{}, suppressedChats:{}, avatarSizes:{}, avatarSideCopies:{}, viewModes:{}, portraits:{}, personaPictures:{}, pictureLibrary:[] };
   let mediaLoaded = false;
   let mediaLoadPromise = null;
+  let mediaRevision = 0;
+  let readRetryAfter = 0;
+  let readFailures = 0;
 
   function safeBackgroundUrl(value) {
     try {
@@ -94,27 +97,60 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       portraits: cleanChatPictures(input.portraits), personaPictures: cleanChatPictures(input.personaPictures), pictureLibrary };
   }
 
-  async function loadStore(force = false) {
-    if (mediaLoaded && !force) return mediaStore;
-    if (mediaLoadPromise && !force) return mediaLoadPromise;
-    mediaLoadPromise = (async () => {
+  // DS.storageGet intentionally converts runtime errors into empty objects.
+  // For a large saved picture library that is unsafe: a failed read must not
+  // become a cached empty library or a subsequent destructive save.
+  async function readMediaStore() {
+    await DS.flushStorageWrites?.();
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error || !result || typeof result !== "object") reject(new Error("Could not read saved pictures. Try again."));
+        else resolve(result[STORE_KEY]);
+      };
+      const timer = setTimeout(() => finish(true), 8000);
       try {
-        const result = await DS.storageGet?.([STORE_KEY]);
-        mediaStore = cleanStore(result?.[STORE_KEY]);
-      } catch {
-        mediaStore = cleanStore(null);
+        const pending = chrome.storage.local.get([STORE_KEY], result => {
+          finish(!!chrome.runtime?.lastError, result);
+        });
+        if (pending && typeof pending.then === "function") pending.then(result => finish(false, result), () => finish(true));
+      } catch { finish(true); }
+    });
+  }
+  async function loadStore(force = false) {
+    if (mediaLoadPromise) return mediaLoadPromise;
+    if (mediaLoaded && !force) return mediaStore;
+    if (!force && Date.now() < readRetryAfter) throw new Error("Saved pictures temporarily unavailable.");
+    const revision = mediaRevision;
+    mediaLoadPromise = (async () => {
+      const raw = await readMediaStore();
+      // A storage change or completed write received while reading is newer.
+      if (revision === mediaRevision) {
+        mediaStore = cleanStore(raw);
+        mediaLoaded = true;
       }
-      mediaLoaded = true;
-      mediaLoadPromise = null;
       return mediaStore;
     })();
-    return mediaLoadPromise;
+    try {
+      const result = await mediaLoadPromise;
+      readFailures = 0; readRetryAfter = 0;
+      return result;
+    } catch (error) {
+      readFailures++;
+      readRetryAfter = Date.now() + Math.min(30000, 500 * 2 ** Math.min(readFailures - 1, 6));
+      throw error;
+    } finally { mediaLoadPromise = null; }
   }
 
   async function saveStore(next) {
+    if (!mediaLoaded) throw new Error("Saved pictures have not been loaded. Reopen Custom Pictures and try again.");
     const normalized = cleanStore(next);
     const ok = await DS.storageSet?.({ [STORE_KEY]: normalized });
     if (!ok) throw new Error("Browser storage rejected the background image");
+    mediaRevision++;
     mediaStore = normalized;
     mediaLoaded = true;
     return mediaStore;
@@ -191,6 +227,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   try {
     chrome.storage?.onChanged?.addListener((changes, areaName) => {
       if (areaName !== "local" || !changes?.[STORE_KEY]) return;
+      mediaRevision++;
+      readFailures = 0; readRetryAfter = 0;
       mediaStore = cleanStore(changes[STORE_KEY].newValue);
       mediaLoaded = true;
       DS.applyChatBackgrounds?.();

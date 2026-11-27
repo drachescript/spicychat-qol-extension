@@ -1203,12 +1203,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const result = {id,status:'not_exposed',source:'spicychat-lorebook-live-api',fetchedAt:new Date().toISOString(),
       pages:0,paginationComplete:false,paginationStopReason:null,expectedEntries:null,entries:[],metadata:null,error:null};
     if (typeof DS.fetchLorebookArchiveData !== 'function') return result;
-    let cursor = 0;
+    let cursor = 0, lastEntryId = "";
     const seenIds = new Set(), cursors = new Set();
     try {
       for (let page=0;page<120;page++) {
         ensureNotCancelled();
-        const response = await DS.fetchLorebookArchiveData(id,false,{lastSortPriority:cursor});
+        const response = await DS.fetchLorebookArchiveData(id,false,{lastSortPriority:cursor,lastEntryId});
         const book = lorebookPayload(response?.data);
         if (!book) throw Error('No readable Lorebook payload');
         const returned = String(book.id || book.uuid || book.lorebook_id || book.lorebookId || '').toLowerCase();
@@ -1236,13 +1236,15 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         }
         if (result.expectedEntries === null && rows.length < 100) {result.paginationComplete=true;break;}
         const last=rows.at(-1);
-        const priority=last?.priority ?? last?.sortPriority ?? last?.sort_priority;
+        const priority=last?.sortPriority ?? last?.sort_priority ?? last?.priority;
         const next=(priority === null || priority === undefined || priority === '') ? NaN : Number(priority);
-        if (!Number.isFinite(next) || next===cursor || cursors.has(next)) {
-          result.paginationStopReason = !Number.isFinite(next) ? 'no-usable-priority-cursor' : 'repeated-priority-cursor';
+        const nextId=String(last?.id || last?.entry_id || last?.entryId || last?.uuid || last?._id || "");
+        const pair=JSON.stringify([next,nextId]);
+        if (!Number.isFinite(next) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nextId) || cursors.has(pair)) {
+          result.paginationStopReason = !Number.isFinite(next) ? 'no-usable-priority-cursor' : 'missing-or-repeated-composite-cursor';
           break;
         }
-        cursors.add(next);cursor=next;
+        cursors.add(pair);cursor=next;lastEntryId=nextId;
         await sleep(350);
       }
       result.status=result.entries.length ? 'present' : result.paginationComplete ? 'empty' : result.status;

@@ -10,18 +10,18 @@
   section.className = 'card';
   section.id = 'dailyMessageLimitSettingsCard';
   const heading = document.createElement('h2');
-  heading.textContent = 'Daily message limit';
+  heading.textContent = 'Generation usage tracker';
   const label = document.createElement('label');
   label.className = 'row';
   const checkbox = document.createElement('input');
   checkbox.id = 'dailyMessageLimitTrackerEnabled';
   checkbox.type = 'checkbox';
   const caption = document.createElement('span');
-  caption.textContent = 'Show the daily message counter and estimated reset time in chat';
+  caption.textContent = 'Track generation usage and observed restrictions in chat';
   label.append(checkbox, caption);
   const hint = document.createElement('p');
   hint.className = 'hint';
-  hint.textContent = 'The counter uses observed activity and may differ from SpicyChat’s account limit.';
+  hint.textContent = 'Counts locally observed successful generations, including regenerations and continuations. Remembers restrictions and recovery across reloads and restarts. Shows a Support-based 24-hour estimate only when quota exhaustion is suspected; partial recovery does not restart it. The observed cycle counter and timestamped history are separate. No authoritative server reset time or remaining quota is available. No test generations are sent.';
   section.append(heading, label, hint);
   host.replaceWith(section);
   (window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled =

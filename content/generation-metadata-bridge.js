@@ -12,11 +12,17 @@
   const CONTROL_SOURCE = "spicychat-qol-generation-metadata-control";
 
   let enabled = false;
+  let quotaEnabled = false, quotaEpoch = 0;
+  const QUOTA_SOURCE = 'spicychat-qol-generation-quota';
+  const API_HOSTS = new Set(['prod.nd-api.com','ts-lb.nd-api.com']);
 
   window.addEventListener("message", event => {
     if (event.source !== window || event.data?.source !== CONTROL_SOURCE) return;
     if (event.data?.type === "DSQ_GENERATION_METADATA_ENABLED") {
       enabled = !!event.data.enabled;
+      const nextQuota = event.data.quotaEnabled === true;
+      if (quotaEnabled !== nextQuota) quotaEpoch++;
+      quotaEnabled = nextQuota;
     }
   });
 
@@ -256,70 +262,150 @@
     });
   }
 
+  // Quota research observes the existing network operation only. Never read
+  // request headers, persist message IDs/text, or tee an open-ended stream.
+  function approvedQuotaUrl(url) {
+    try { const u=new URL(url,location.href);return u.protocol==='https:'&&API_HOSTS.has(u.hostname); } catch {return false;}
+  }
+  function quotaAccountRequest(method,url) {
+    if (!quotaEnabled || method!=='GET' || !approvedQuotaUrl(url)) return false;
+    try {return new URL(url,location.href).pathname==='/v2/users';}catch{return false;}
+  }
+  async function quotaAccountObserved(data) {
+    if(!quotaEnabled)return;
+    const user=data?.user||data?.data?.user||data?.data;
+    if(!user||typeof user.id!=='string'||!user.id||user.id.length>160)return;
+    try {
+      const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-account-v1:'+user.id));
+      if(quotaEnabled)window.postMessage({source:QUOTA_SOURCE,type:'account',accountKey:Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('')},'*');
+    }catch{}
+  }
+  function quotaRequest(method,url,body,generation) {
+    if(!quotaEnabled||!generation||!approvedQuotaUrl(url))return null;
+    const parsed=parseJson(body)||{};
+    const kind=parsed.continue_chat===true?'continuation':(parsed.alt_message_id||parsed.regenerate===true||parsed.regenerate_chat===true)?'regeneration':typeof parsed.message==='string'?'normal':'unknown';
+    return {id:crypto.randomUUID(),startedAt:Date.now(),kind,epoch:quotaEpoch};
+  }
+  function quotaErrorCode(data) {
+    for(const candidate of [data?.code,data?.error_code,data?.errorCode,data?.error?.code,data?.error?.error_code,data?.data?.code,data?.data?.error_code,data?.detail?.code,data?.errors?.[0]?.code]){
+      if(typeof candidate==='string'&&/^SC-\d{3}-\d{4}$/i.test(candidate))return candidate.toUpperCase();
+    }
+    // Some native error objects use a string field containing the code.
+    // Extract only the bounded code, never send the surrounding text.
+    for(const candidate of [data?.error,data?.message,data?.detail,data?.error?.message]){
+      if(typeof candidate==='string'){const code=candidate.slice(0,500).match(/\bSC-\d{3}-\d{4}\b/i)?.[0];if(code)return code.toUpperCase();}
+    }
+    return null;
+  }
+  // Read only headers actually exposed by the browser. In Chromium even a
+  // caught getResponseHeader() call for an unexposed header logs a warning.
+  function accessibleXhrHeaders(xhr) {
+    const headers = new Map();
+    try {
+      for (const line of String(xhr.getAllResponseHeaders() || '').split(/\r?\n/)) {
+        const colon = line.indexOf(':');
+        if (colon < 1) continue;
+        const name = line.slice(0, colon).trim().toLowerCase();
+        const value = line.slice(colon + 1).trim();
+        headers.set(name, headers.has(name) ? headers.get(name) + ', ' + value : value);
+      }
+    } catch {}
+    return headers;
+  }
+  function accessibleFetchHeaders(response) {
+    const headers = new Map();
+    try { response?.headers?.forEach((value, name) => headers.set(name.toLowerCase(), value)); } catch {}
+    return headers;
+  }
+  function quotaHeaders(get) {
+    const values={};
+    for(const name of ['retry-after','ratelimit-limit','ratelimit-remaining','ratelimit-reset','x-ratelimit-limit','x-ratelimit-remaining','x-ratelimit-reset']){
+      try { const v=String(get?.(name)||'').trim();if(/^\d{1,12}$/.test(v))values[name]=v;
+        else if(name==='retry-after'&&/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(v)&&Number.isFinite(Date.parse(v)))values[name]=v;
+      }catch{}
+    }
+    return values;
+  }
+  function quotaResponse(req,status,data,getHeader,unconfirmedReason='') {
+    if(!req||!quotaEnabled||req.epoch!==quotaEpoch)return;
+    const code=(status<200||status>=300||data?.error||data?.success===false)?quotaErrorCode(data):null, message=data?.message||data?.data?.message||data?.result?.message||data?.response?.message;
+    const role=String(message?.role||'').toLowerCase();
+    const validMessage=!!(message&&typeof message==='object'&&typeof message.id==='string'&&message.id&&(!role||['bot','assistant','character','ai'].includes(role)));
+    const ok=status>=200&&status<300;
+    const outcome=!ok||code||data?.error||data?.success===false?'failed':validMessage?'success':'unconfirmed';
+    window.postMessage({source:QUOTA_SOURCE,type:'generation',payload:{id:req.id,startedAt:req.startedAt,kind:req.kind,at:Date.now(),status:Number(status)||0,outcome,code,headers:quotaHeaders(getHeader),reason:outcome==='unconfirmed'?(unconfirmedReason||'unrecognized-response'):null}},'*');
+  }
+  // Passive history evidence: a saved assistant reply is not necessarily
+  // a newly charged generation (regenerations can replace earlier replies).
+  // Emit only its timestamp, never IDs, conversation IDs or message text.
+  function quotaHistoryObserved(data,startedAt,requestEpoch) {
+    if(!quotaEnabled||requestEpoch!==quotaEpoch)return;
+    const at=Date.now();let latest=0;
+    for(const row of messagesArray(data)){
+      if(!['bot','assistant','character','ai'].includes(String(row?.role||'').toLowerCase()))continue;
+      const raw=row.createdAt??row.created_at;
+      const t=typeof raw==='string'?Date.parse(raw):typeof raw==='number'?(raw<1e12?raw*1000:raw):NaN;
+      if(Number.isSafeInteger(t)&&t>at-14*86400000&&t<=at)latest=Math.max(latest,t);
+    }
+    if(latest)window.postMessage({source:QUOTA_SOURCE,type:'history-time',startedAt,at,replyAt:latest},'*');
+  }
+  function quotaResponseBodyAllowed(type,length) {
+    return !/text\/event-stream|application\/(?:x-)?ndjson|application\/json-seq/i.test(type)&&(!length||Number(length)<=524288)&&(!type||/json/i.test(type));
+  }
+
   const originalFetch = window.fetch;
   if (typeof originalFetch === "function") {
     window.fetch = function (...args) {
-      if (!enabled || args[1]?.[Symbol.for("dsq.ownedHistoryRead")] === true) return originalFetch.apply(this, args);
-
-      const input = args[0];
-      const init = args[1] || {};
-      const url = urlText(input);
-      const method = String(init.method || input?.method || "GET").toUpperCase();
-      const body = init.body;
-      const generationRequest = isGenerationRequest(method, url, body) ? requestDetails(body) : null;
-
-      const result = originalFetch.apply(this, args);
-      Promise.resolve(result).then(response => {
-        if (!enabled || !response?.clone) return;
-        const type = String(response.headers?.get?.("content-type") || "");
-        // Do not tee open-ended streams for optional metadata collection.
-        if (/text\/event-stream|application\/(?:x-)?ndjson|application\/json-seq/i.test(type)) return;
-
-        if (isMessagesRequest(method, url)) {
-          response.clone().json().then(emitLoadedMessages).catch(() => {});
-        }
-
-        if (generationRequest) {
-          response.clone().json().then(data => emitGenerationResponse(data, generationRequest)).catch(() => {});
-        }
-      }).catch(() => {});
-
+      if ((!enabled && !quotaEnabled) || args[1]?.[Symbol.for("dsq.ownedHistoryRead")] === true) return originalFetch.apply(this, args);
+      const input=args[0],init=args[1]||{},url=urlText(input),method=String(init.method||input?.method||'GET').toUpperCase(),body=init.body;
+      const gen=isGenerationRequest(method,url,body),generationRequest=enabled&&gen?requestDetails(body):null;
+      let quota=null;try{quota=quotaRequest(method,url,body,gen);}catch{}
+      const accountRead=quotaAccountRequest(method,url), history=enabled&&isMessagesRequest(method,url), quotaHistory=quotaEnabled&&approvedQuotaUrl(url)&&isMessagesRequest(method,url)&&/^\/(?:[a-z]{2}\/)?chat\//i.test(location.pathname),historyStartedAt=Date.now(),historyEpoch=quotaEpoch;
+      const result=originalFetch.apply(this,args);
+      if(!generationRequest&&!quota&&!accountRead&&!history&&!quotaHistory)return result;
+      Promise.resolve(result).then(response=>{
+        const exposed=accessibleFetchHeaders(response), get=n=>exposed.get(n), type=String(get('content-type')||'');
+        const stream=/text\/event-stream|application\/(?:x-)?ndjson|application\/json-seq/i.test(type);
+        if(!response?.clone||stream){quotaResponse(quota,response?.status,null,get,stream?'stream-not-observed':'response-unavailable');return;}
+        const readMetadata=enabled&&(history||generationRequest);
+        const readQuota=quotaEnabled&&(quota||accountRead||quotaHistory)&&quotaResponseBodyAllowed(type,get('content-length'));
+        if(!readMetadata&&!readQuota){quotaResponse(quota,response.status,null,get,'body-not-observed');return;}
+        response.clone().json().then(data=>{
+          if(enabled&&history)try{emitLoadedMessages(data);}catch{}
+          if(quotaHistory&&response.status>=200&&response.status<300)try{quotaHistoryObserved(data,historyStartedAt,historyEpoch);}catch{}
+          if(enabled&&generationRequest)try{emitGenerationResponse(data,generationRequest);}catch{}
+          if(readQuota){if(accountRead&&response.status>=200&&response.status<300)void quotaAccountObserved(data);quotaResponse(quota,response.status,data,get);}
+          else quotaResponse(quota,response.status,null,get,'body-not-observed');
+        },()=>quotaResponse(quota,response.status,null,get,'unrecognized-response'));
+      },()=>quotaResponse(quota,0,null,null,'network-failure')).catch(()=>{});
       return result;
     };
   }
-
   const originalOpen = XMLHttpRequest.prototype.open;
   const originalSend = XMLHttpRequest.prototype.send;
-
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    if (enabled) {
-      this.__dsqMetadataMethod = String(method || "GET").toUpperCase();
-      this.__dsqMetadataUrl = urlText(url);
-    } else {
-      this.__dsqMetadataMethod = "";
-      this.__dsqMetadataUrl = "";
-    }
-    return originalOpen.call(this, method, url, ...rest);
+  XMLHttpRequest.prototype.open = function (method,url,...rest) {
+    this.__dsqMetadataMethod=enabled||quotaEnabled?String(method||'GET').toUpperCase():'';
+    this.__dsqMetadataUrl=enabled||quotaEnabled?urlText(url):'';
+    return originalOpen.call(this,method,url,...rest);
   };
-
   XMLHttpRequest.prototype.send = function (body) {
-    if (!enabled) return originalSend.call(this, body);
-
-    const method = this.__dsqMetadataMethod || "GET";
-    const url = this.__dsqMetadataUrl || "";
-    const generationRequest = isGenerationRequest(method, url, body) ? requestDetails(body) : null;
-
-    if (isMessagesRequest(method, url) || generationRequest) {
-      this.addEventListener("loadend", () => {
-        if (!enabled || this.status < 200 || this.status >= 300) return;
-        let data = null;
-        try { data = this.responseType === "json" ? this.response : JSON.parse(this.responseText); } catch { return; }
-
-        if (isMessagesRequest(method, url)) emitLoadedMessages(data);
-        if (generationRequest) emitGenerationResponse(data, generationRequest);
-      }, { once: true });
+    if(!enabled&&!quotaEnabled)return originalSend.call(this,body);
+    const method=this.__dsqMetadataMethod||'GET',url=this.__dsqMetadataUrl||'',gen=isGenerationRequest(method,url,body);
+    const generationRequest=enabled&&gen?requestDetails(body):null,history=enabled&&isMessagesRequest(method,url),accountRead=quotaAccountRequest(method,url),quotaHistory=quotaEnabled&&approvedQuotaUrl(url)&&isMessagesRequest(method,url)&&/^\/(?:[a-z]{2}\/)?chat\//i.test(location.pathname),historyStartedAt=Date.now(),historyEpoch=quotaEpoch;
+    let quota=null;try{quota=quotaRequest(method,url,body,gen);}catch{}
+    if(history||generationRequest||quota||accountRead||quotaHistory){
+      this.addEventListener('loadend',()=>{
+        const status=this.status,exposed=accessibleXhrHeaders(this),get=n=>exposed.get(n);
+        const readMetadata=enabled&&status>=200&&status<300&&(history||generationRequest);
+        const readQuota=quotaEnabled&&(quota||accountRead||quotaHistory)&&quotaResponseBodyAllowed(String(get('content-type')||''),get('content-length'));
+        let data=null;
+        if(readMetadata||readQuota)try{data=this.responseType==='json'?this.response:JSON.parse(this.responseText);}catch{}
+        if(data&&readMetadata){if(history)emitLoadedMessages(data);if(generationRequest)emitGenerationResponse(data,generationRequest);}
+        if(data&&quotaHistory&&status>=200&&status<300)quotaHistoryObserved(data,historyStartedAt,historyEpoch);
+        if(data&&readQuota&&accountRead&&status>=200&&status<300)void quotaAccountObserved(data);
+        quotaResponse(quota,status,readQuota?data:null,get,data?'':'body-not-observed');
+      },{once:true});
     }
-
-    return originalSend.call(this, body);
+    return originalSend.call(this,body);
   };
 })();

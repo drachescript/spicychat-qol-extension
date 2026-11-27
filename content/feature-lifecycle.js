@@ -159,6 +159,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     await runStep("unhide disabled cleanup", () => DS.unhideAllDragonScriptElements?.());
     await runStep("card hide watchdog cleanup", () => DS.removeCardHideSafetyWatchdog?.());
     await runStep("top bar native restore", () => DS.applyTopBarCleanup?.());
+    DS.removeRedesignedSidebar?.();
+    DS.removeCreatorToolsIntegration?.();
     await runStep("sidebar native restore", () => DS.applySidebarCleanup?.());
     await runStep("main footer native restore", () => DS.removeMainFooterManagement?.());
     await runStep("listing refill button cleanup", () => DS.removeListingRefillButton?.());

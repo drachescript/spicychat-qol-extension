@@ -1,9 +1,9 @@
 {
   "schema": "sqol-custom-feature-catalog/v1",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "sourceBranch": "qol-custom",
   "status": "experimental-unverified",
-  "featureCount": 140,
+  "featureCount": 141,
   "sections": [
     "Blocking",
     "Chat List",
@@ -2247,6 +2247,46 @@
       ],
       "backgroundServices": [],
       "settingKeys": [],
+      "customBuildStatus": "experimental-unverified",
+      "fullRuntimeStatus": "lifecycle-gated",
+      "blockers": [
+        "Independent browser and package behavior has not been verified."
+      ],
+      "isolation": {
+        "settings": false,
+        "styles": false,
+        "background": false,
+        "browserVerified": false
+      }
+    },
+    {
+      "id": "creator-tools-integration",
+      "label": "Creator Tools Integration",
+      "description": "Adds the creator tools integration tools.",
+      "section": "Creator Tools",
+      "group": "creator",
+      "requiredFeatures": [
+        "bot-backup",
+        "lorebook-backup",
+        "lorebook-tags"
+      ],
+      "runtimeScripts": [
+        "content/creator-tools-integration.js"
+      ],
+      "requiredHelpers": [],
+      "cssFiles": [],
+      "settingsScripts": [
+        "settings/feature-panels/creator-tools-integration.js"
+      ],
+      "backgroundFiles": [
+        "background/sct-inspector-gate.js",
+        "background/features/background-sct-inspector.js"
+      ],
+      "backgroundServices": [],
+      "settingKeys": [
+        "creatorToolsIntegrationEnabled",
+        "creatorToolsDiagnostics"
+      ],
       "customBuildStatus": "experimental-unverified",
       "fullRuntimeStatus": "lifecycle-gated",
       "blockers": [
@@ -4574,7 +4614,9 @@
       "runtimeScripts": [
         "content/sidebar.js"
       ],
-      "requiredHelpers": [],
+      "requiredHelpers": [
+        "content/sidebar-redesign.js"
+      ],
       "cssFiles": [],
       "settingsScripts": [
         "settings/feature-panels/sidebar.js"
@@ -4582,6 +4624,26 @@
       "backgroundFiles": [],
       "backgroundServices": [],
       "settingKeys": [
+        "sidebarRenameChats",
+        "sidebarCreationTabs",
+        "sidebarGroupDiscover",
+        "sidebarGroupPersonas",
+        "sidebarAnalyticsShortcut",
+        "sidebarCreationButtons",
+        "sidebarOrder",
+        "redesignedSidebarEnabled",
+        "sidebarDefaultLanding",
+        "sidebarRememberMenus",
+        "sidebarRememberCreationCategory",
+        "sidebarCompactNavigation",
+        "sidebarDedicatedCreate",
+        "hideSidebarDiscover",
+        "hideSidebarDiscoverLorebooks",
+        "hideSidebarDiscoverRulebooks",
+        "hideSidebarMyRulebooks",
+        "hideSidebarCreateRulebook",
+        "hideSidebarCreatePersona",
+        "hideSidebarCreatorAnalytics",
         "showQolSidebarButton",
         "qolSidebarButtonPlacement",
         "hideSidebarLogo",

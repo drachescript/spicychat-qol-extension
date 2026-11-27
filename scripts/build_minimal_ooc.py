@@ -9,6 +9,7 @@ import argparse
 import json
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
+from release_version import manifest_version
 
 ROOT=Path(__file__).resolve().parents[1]
 CONTENT_SCRIPTS=[
@@ -24,9 +25,7 @@ OMISSIONS={'content/chat-ui.js','content/main.js','content/quick-panel.js','opti
 
 def make_manifest() -> dict:
     src=json.loads((ROOT/'manifest.json').read_text(encoding='utf-8'))
-    version=src['version']
-    if not isinstance(version,str) or not version.count('.') == 2:
-        raise ValueError('Invalid source extension version')
+    version=manifest_version(src)
     return {
       'manifest_version':3,
       'name':'SpicyChat QoL — Core + OOC (test)',
@@ -67,6 +66,6 @@ def build(output:Path):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser()
-    p.add_argument('--output',type=Path,default=ROOT/'dist/spicychat-qol-core-ooc-test.zip')
+    p.add_argument('--output',type=Path,default=ROOT/'dist'/f"spicychat-qol-core-ooc-v{make_manifest()['version']}-test.zip")
     args=p.parse_args()
     build(args.output)
