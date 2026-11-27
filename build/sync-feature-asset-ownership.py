@@ -277,8 +277,10 @@ def sync_reviewed_background_assets(contracts, entry, modules):
 
     Feature-isolated helpers require a literal feature gate, while declared
     always-loaded helpers require backgroundIsolated=false and must appear
-    before the core background.js in the bootstrap import list. Never infer
-    a feature owner, grant Lite isolation, or change import execution order.
+    before the core background.js in the bootstrap import list. Explicit
+    per-file backgroundImportModes may describe reviewed standalone imports
+    and exact feature gates without claiming feature-level Lite isolation.
+    Never infer a feature owner, grant Lite isolation, or change import order.
     """
     ordered_imports = parse_background_imports(entry)
     imported = set(ordered_imports)
@@ -302,29 +304,45 @@ def sync_reviewed_background_assets(contracts, entry, modules):
             raise ValueError(f'Ambiguous background asset ownership: {rel}: {owners}')
         owner = owners[0]
         contract = contracts[owner][1]
+        mode = contract.get('backgroundImportModes', {}).get(rel)
         if (contract.get('id') != owner
-                or not re.fullmatch(r'background/features/[a-z0-9-]+\.js', rel)
+                or not re.fullmatch(r'background/(?:features/)?[a-z0-9-]+\.js', rel)
                 or rel not in imported):
             continue
         isolation = contract.get('backgroundIsolated')
-        if isolation is False:
-            # Explicitly shared/nonisolated services are already imported on
-            # every Full worker startup; registering them cannot claim they
-            # are safe to omit in a Custom/Lite profile.
-            if rel not in unconditional:
+        gated = (
+            r'\bif\s*\(\s*dsqBackgroundHasFeature\s*\(\s*["\x27]'
+            + re.escape(owner)
+            + r'["\x27]\s*\)\s*\)\s*importScripts\s*\(\s*["\x27]'
+            + re.escape(rel)
+            + r'["\x27]\s*\)\s*;'
+        )
+        if mode is not None:
+            # Explicit per-file review separates load syntax from omit-safety.
+            # Restrict standalone imports to their exact unindented line.
+            if isolation is not True and isolation is not False:
                 continue
-        elif isolation is True:
-            gated = (
-                r'\bif\s*\(\s*dsqBackgroundHasFeature\s*\(\s*["\x27]'
-                + re.escape(owner)
-                + r'["\x27]\s*\)\s*\)\s*importScripts\s*\(\s*["\x27]'
-                + re.escape(rel)
-                + r'["\x27]\s*\)\s*;'
-            )
-            if not re.search(gated, entry):
-                continue
+            if mode == 'standalone':
+                standalone = (r'(?m)^importScripts\(\s*["\x27]' + re.escape(rel)
+                              + r'["\x27]\s*\);[ \t]*\r?$')
+                if isolation is not False or not re.search(standalone, entry):
+                    continue
+            elif mode == 'feature-gated':
+                if not re.search(gated, entry):
+                    continue
+            else:
+                raise ValueError(f'Unknown reviewed background import mode: {rel}: {mode}')
         else:
-            continue
+            if not rel.startswith('background/features/'):
+                continue
+            if isolation is False:
+                if rel not in unconditional:
+                    continue
+            elif isolation is True:
+                if not re.search(gated, entry):
+                    continue
+            else:
+                continue
         if not (ROOT / rel).is_file():
             raise ValueError(f'Missing reviewed background asset: {rel}')
         if rel not in required:
