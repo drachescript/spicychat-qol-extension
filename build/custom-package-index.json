@@ -1,6 +1,6 @@
 {
   "schema": "spicychat-qol-custom-package-assets/v1",
-  "sourceVersion": "0.2.56",
+  "sourceVersion": "0.3.2",
   "status": "experimental-not-browser-certified",
   "preserveSavedSettings": true,
   "newFeaturesDefaultOff": true,
@@ -12,10 +12,23 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/accessibility.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/accessibility.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "qolInterfaceScale",
+        "chatTextScale",
+        "chatLineSpacing",
+        "settingsReadingFont",
+        "settingsReadingSize",
+        "settingsReadingLineSpacing",
+        "settingsReadingLetterSpacing",
+        "settingsReadingContrast",
+        "settingsReadingLargerControls"
+      ],
       "fullyIndependent": false
     },
     {
@@ -28,6 +41,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -42,6 +56,15 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "alternateDialogueBackgroundColor",
+        "alternateDialogueBorderColor",
+        "alternateDialogueCustomColors",
+        "alternateDialogueScope",
+        "alternateDialogueStyle",
+        "alternateDialogueTextColor",
+        "styleAlternateDialogue"
+      ],
       "fullyIndependent": false
     },
     {
@@ -50,12 +73,26 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/android-app.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/android-app.js"
+      ],
       "styles": [
         "content/styles/android-app.css"
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "androidAppControlsMode",
+        "androidTopBarMenu",
+        "androidHideComposerShortcuts",
+        "androidTopBarOoc",
+        "androidTopBarAsterisk",
+        "androidTopBarFormatting",
+        "androidTopBarTranslation",
+        "androidTopBarScroll",
+        "androidTopBarPersona",
+        "androidTopBarModel"
+      ],
       "fullyIndependent": false
     },
     {
@@ -70,6 +107,71 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-blocking-presets",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "cards"
+      ],
+      "runtime": "content/archive-blocking-presets.js",
+      "settings": [
+        "settings/feature-panels/archive-blocking-presets.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/features/background-blocking-presets.js"
+      ],
+      "helpers": [],
+      "settingsKeys": [
+        "archiveBlockingPresetsEnabled",
+        "archiveBlockingPresetsSelection"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-community-themes",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "cards"
+      ],
+      "runtime": "content/archive-community-themes.js",
+      "settings": [
+        "settings/feature-panels/archive-community-themes.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/features/background-community-themes.js"
+      ],
+      "helpers": [],
+      "settingsKeys": [
+        "archiveCommunityThemesEnabled",
+        "archiveCommunityThemesMode",
+        "archiveCommunityThemesRiskWarnings",
+        "archiveCommunityThemesExtraTags",
+        "archiveCommunityThemesAllowIds"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "archive-website-link",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/archive-website-link.js",
+      "settings": [
+        "settings/feature-panels/archive-website-link.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "showArchiveWebsiteLinks"
+      ],
       "fullyIndependent": false
     },
     {
@@ -78,12 +180,25 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/auto-afk.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/auto-afk.js"
+      ],
       "styles": [],
       "background": [
         "background/background-auto-afk.js"
       ],
       "helpers": [],
+      "settingsKeys": [
+        "autoAfkEnabled",
+        "autoAfkMinutes",
+        "autoAfkChats",
+        "autoAfkHome",
+        "autoAfkProfiles",
+        "autoAfkProtectActive",
+        "autoAfkResetOnActivate",
+        "autoAfkAction",
+        "autoAfkHours"
+      ],
       "fullyIndependent": false
     },
     {
@@ -99,6 +214,10 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "autoBlockTagMatches",
+        "autoBlockWordMatches"
+      ],
       "fullyIndependent": false
     },
     {
@@ -116,6 +235,9 @@
         "content/chat-picture-core.js",
         "content/custom-pictures-menu.js"
       ],
+      "settingsKeys": [
+        "showAutoImageInlineButton"
+      ],
       "fullyIndependent": false
     },
     {
@@ -128,6 +250,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -142,6 +265,12 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "botArchiveRememberSeenPublic",
+        "botArchiveOnProfileVisit",
+        "botArchiveOnChatOpen",
+        "botArchiveRefreshHours"
+      ],
       "fullyIndependent": false
     },
     {
@@ -156,6 +285,11 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "botBackupToolsEnabled",
+        "botArchiveOwnEditorBackups",
+        "botArchiveOwnRevisionLimit"
+      ],
       "fullyIndependent": false
     },
     {
@@ -168,6 +302,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -180,6 +315,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -192,6 +328,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -204,6 +341,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -212,10 +350,19 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-editor-snippets.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/bot-editor-snippets.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "botEditorShowCharButton",
+        "botEditorShowUserButton",
+        "botEditorShowContinueButton",
+        "botEditorShowNoControlButton",
+        "botEditorShowCustomSnippets"
+      ],
       "fullyIndependent": false
     },
     {
@@ -224,12 +371,21 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/bot-organizer.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/bot-organizer.js"
+      ],
       "styles": [
         "content/styles/bot-organizer.css"
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableBotOrganizer",
+        "botOrganizerExplorerFolders",
+        "botOrganizerShowCardMeta",
+        "botOrganizerBulkTools",
+        "botCollections"
+      ],
       "fullyIndependent": false
     },
     {
@@ -244,6 +400,12 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "botStatusScanSpeed",
+        "botStatusStaleDays",
+        "botStatusMaxBots",
+        "botStatusMaxMinutes"
+      ],
       "fullyIndependent": false
     },
     {
@@ -256,6 +418,28 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "bulk-chat-research",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/bulk-chat-research.js",
+      "settings": [
+        "settings/feature-panels/bulk-chat-research.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/features/background-research-memory-export.js"
+      ],
+      "helpers": [
+        "content/bulk-chat-research-worker.js"
+      ],
+      "settingsKeys": [
+        "showBulkChatResearchExport"
+      ],
       "fullyIndependent": false
     },
     {
@@ -268,6 +452,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -282,6 +467,20 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "cardClickBehavior",
+        "cardDensityMode",
+        "enableBotComparison",
+        "recentlySeenLimit",
+        "showBlockButtonOnMyCreations",
+        "showCopyBotInfoButtons",
+        "showQuickDislikeButtons",
+        "showQuickLessLikeButtons",
+        "showQuickNotInterestedButtons",
+        "showQuickUnblockButtons",
+        "showRecentlySeenButton",
+        "trackRecentlySeenBots"
+      ],
       "fullyIndependent": false
     },
     {
@@ -294,6 +493,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -313,6 +513,9 @@
         "content/chat-picture-editor-core.js",
         "content/chat-picture-override-core.js"
       ],
+      "settingsKeys": [
+        "enableCustomCharacterPictures"
+      ],
       "fullyIndependent": false
     },
     {
@@ -329,6 +532,24 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "character-token-optimizer",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/character-token-optimizer.js",
+      "settings": [
+        "settings/feature-panels/character-token-optimizer.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "enableCharacterTokenOptimizer"
+      ],
       "fullyIndependent": false
     },
     {
@@ -346,6 +567,9 @@
         "content/chat-picture-core.js",
         "content/custom-pictures-menu.js"
       ],
+      "settingsKeys": [
+        "enableChatBackgrounds"
+      ],
       "fullyIndependent": false
     },
     {
@@ -359,7 +583,13 @@
       ],
       "styles": [],
       "background": [],
-      "helpers": [],
+      "helpers": [
+        "content/chat-history-navigator.js"
+      ],
+      "settingsKeys": [
+        "enableMessageBookmarks",
+        "messageBookmarkButtons"
+      ],
       "fullyIndependent": false
     },
     {
@@ -368,12 +598,81 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-bubbles.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/chat-bubbles.js"
+      ],
       "styles": [
         "content/styles/chat-bubble-themes.css"
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableChatBubbleCustomization",
+        "persistSpicyChatUserAppearance",
+        "chatBubbleAiBackground",
+        "chatBubbleAiTextMode",
+        "chatBubbleAiText",
+        "chatBubbleAiFont",
+        "chatBubbleAiActionMode",
+        "chatBubbleAiActionText",
+        "chatBubbleAiActionFont",
+        "chatBubbleAiDialogueMode",
+        "chatBubbleAiDialogueText",
+        "chatBubbleAiDialogueFont",
+        "chatBubbleAiBorder",
+        "chatBubbleAiBorderWidth",
+        "chatBubbleAiBorderStyle",
+        "chatBubbleAiBorderOpacity",
+        "chatBubbleAiOpacity",
+        "chatBubbleAiRadius",
+        "chatBubbleAiShape",
+        "chatBubbleAiDecorationMode",
+        "chatBubbleAiDecorationColor",
+        "chatBubbleAiCatEarLayout",
+        "chatBubbleAiShadow",
+        "chatBubbleUserBackground",
+        "chatBubbleUserTextMode",
+        "chatBubbleUserText",
+        "chatBubbleUserFont",
+        "chatBubbleUserActionMode",
+        "chatBubbleUserActionText",
+        "chatBubbleUserActionFont",
+        "chatBubbleUserDialogueMode",
+        "chatBubbleUserDialogueText",
+        "chatBubbleUserDialogueFont",
+        "chatBubbleUserBorder",
+        "chatBubbleUserBorderWidth",
+        "chatBubbleUserBorderStyle",
+        "chatBubbleUserBorderOpacity",
+        "chatBubbleUserOpacity",
+        "chatBubbleUserRadius",
+        "chatBubbleUserShape",
+        "chatBubbleUserDecorationMode",
+        "chatBubbleUserDecorationColor",
+        "chatBubbleUserCatEarLayout",
+        "chatBubbleUserShadow"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-continuation",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-continuation.js",
+      "settings": [
+        "settings/feature-panels/chat-continuation.js"
+      ],
+      "styles": [
+        "content/styles/chat-continuation.css"
+      ],
+      "background": [],
+      "helpers": [
+        "content/card-token-info.js"
+      ],
+      "settingsKeys": [
+        "enableChatContinuationAssistant"
+      ],
       "fullyIndependent": false
     },
     {
@@ -382,10 +681,24 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-export.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/chat-export.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showChatExportButton",
+        "chatExportIncludeBotInfo",
+        "chatExportIncludeRulebook",
+        "chatExportIncludeOocDirectives",
+        "chatExportIncludeGenerationDetails",
+        "chatExportNumberMessages",
+        "chatExportIncludeAvatars",
+        "chatExportIncludeImageLinks",
+        "chatExportDefaultFormat",
+        "chatExportHtmlLayout"
+      ],
       "fullyIndependent": false
     },
     {
@@ -398,6 +711,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -412,6 +726,7 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -420,10 +735,19 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-list.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/chat-list.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showRandomChatButton",
+        "randomChatUseLastHomeFilters",
+        "randomChatIncludeOpened",
+        "randomChatIncludeLater",
+        "randomChatIncludeFavorites"
+      ],
       "fullyIndependent": false
     },
     {
@@ -438,8 +762,34 @@
       "styles": [
         "content/styles/chat-lorebook-manager.css"
       ],
+      "background": [
+        "background/features/background-chat-lorebook-local.js"
+      ],
+      "helpers": [],
+      "settingsKeys": [
+        "enableChatLorebookManager"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-lorebook-recall",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-lorebook-recall.js",
+      "settings": [
+        "settings/feature-panels/chat-lorebook-recall.js"
+      ],
+      "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableLocalLorebookRecall",
+        "enableSharedOocBudget",
+        "localLorebookRecallMaxChars",
+        "localLorebookRecentMessages",
+        "sharedOocBudgetChars"
+      ],
       "fullyIndependent": false
     },
     {
@@ -454,6 +804,11 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "chatNudgeBrowserNotifications",
+        "chatNudgeDefaultHours",
+        "enableChatNudges"
+      ],
       "fullyIndependent": false
     },
     {
@@ -466,6 +821,28 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableChatOrganizer"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-pins",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "chat-list"
+      ],
+      "runtime": "content/chat-pins.js",
+      "settings": [],
+      "styles": [
+        "content/styles/chat-pins.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "enableChatPins"
+      ],
       "fullyIndependent": false
     },
     {
@@ -478,6 +855,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -494,6 +872,12 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "chatSceneNotesAutoInclude",
+        "chatSceneNotesAutoMode",
+        "chatSceneNotesEnableBotApply",
+        "enableChatSceneNotes"
+      ],
       "fullyIndependent": false
     },
     {
@@ -510,6 +894,33 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "chatSearchCaseSensitive",
+        "chatSearchExactPhrase",
+        "chatSearchLoadUntilMatch",
+        "chatSearchRegex",
+        "chatSearchShowFindButton",
+        "chatSearchShowPanel",
+        "chatSearchWholeWord",
+        "showChatSearch"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-smart-folders",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-smart-folders.js",
+      "settings": [
+        "settings/feature-panels/chat-smart-folders.js"
+      ],
+      "styles": [
+        "content/styles/chat-smart-folders.css"
+      ],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -522,6 +933,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -530,10 +942,16 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/chat-tags.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/chat-tags.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showChatTagLinks",
+        "showChatTagAddButtons"
+      ],
       "fullyIndependent": false
     },
     {
@@ -548,6 +966,15 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "chatTopBarInlineCreator",
+        "hideChatDropdownMemoryItem",
+        "hideChatDropdownVoiceUpsell",
+        "hideChatTopBarContextDot",
+        "hideChatTopBarModelButton",
+        "hideChatTopBarRatingButton",
+        "showChatTopBarTools"
+      ],
       "fullyIndependent": false
     },
     {
@@ -560,6 +987,27 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "chat-width-controls",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/chat-width-controls.js",
+      "settings": [
+        "settings/feature-panels/chat-width-controls.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "enableChatWidthControls",
+        "chatStreamWidth",
+        "chatBubbleMaxWidth",
+        "chatComposerWidth"
+      ],
       "fullyIndependent": false
     },
     {
@@ -574,6 +1022,11 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "commandPaletteShortcut",
+        "commandPaletteShowSavedItems",
+        "enableCommandPalette"
+      ],
       "fullyIndependent": false
     },
     {
@@ -586,6 +1039,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -597,9 +1051,26 @@
       "settings": [
         "settings/feature-panels/context-keeper.js"
       ],
-      "styles": [],
-      "background": [],
+      "styles": [
+        "content/styles/private-lorebook-bridge.css"
+      ],
+      "background": [
+        "background/features/background-context-keeper-storage.js"
+      ],
       "helpers": [],
+      "settingsKeys": [
+        "enableContextKeeper",
+        "contextKeeperAutoCapture",
+        "contextKeeperAutoSensitivity",
+        "contextKeeperAutoEveryMessages",
+        "contextKeeperAutoMaxDetails",
+        "contextKeeperMessageButtons",
+        "contextKeeperRecapSize",
+        "contextKeeperAutoRecall",
+        "contextKeeperRelevantRecall",
+        "contextKeeperRecallEverySends",
+        "contextKeeperRecallMaxChars"
+      ],
       "fullyIndependent": false
     },
     {
@@ -612,6 +1083,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -620,10 +1092,16 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/creation-audit.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/creation-audit.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableCreationAudit",
+        "creationAuditQuickStatus"
+      ],
       "fullyIndependent": false
     },
     {
@@ -636,6 +1114,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -648,6 +1127,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -662,6 +1142,32 @@
         "background/features/background-creator-watch.js"
       ],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "creator-tools-integration",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "bot-backup",
+        "lorebook-backup",
+        "lorebook-tags"
+      ],
+      "runtime": "content/creator-tools-integration.js",
+      "settings": [
+        "settings/feature-panels/creator-tools-integration.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/sct-inspector-gate.js",
+        "background/features/background-sct-inspector.js"
+      ],
+      "helpers": [],
+      "settingsKeys": [
+        "creatorToolsIntegrationEnabled",
+        "creatorToolsDiagnostics"
+      ],
       "fullyIndependent": false
     },
     {
@@ -672,8 +1178,11 @@
       "runtime": "content/creator-workspace.js",
       "settings": [],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-creator-watch.js"
+      ],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -688,6 +1197,29 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "creatorWritingDictionary",
+        "creatorWritingTargetLanguage",
+        "creatorWritingUseBrowserAi",
+        "enableCreatorWritingAssistant"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "daily-message-limit",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/daily-message-limit.js",
+      "settings": [
+        "settings/feature-panels/daily-message-limit.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "dailyMessageLimitTrackerEnabled"
+      ],
       "fullyIndependent": false
     },
     {
@@ -700,6 +1232,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -712,6 +1245,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showExactMessageCounts"
+      ],
       "fullyIndependent": false
     },
     {
@@ -724,6 +1260,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -736,6 +1273,25 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "favorites-recovery",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "favorite-bots",
+        "later-bots"
+      ],
+      "runtime": "content/favorites-recovery.js",
+      "settings": [],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "enableFavoritesRecovery"
+      ],
       "fullyIndependent": false
     },
     {
@@ -752,6 +1308,13 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableFocusMode",
+        "focusHideChatHeader",
+        "focusHideQolPanel",
+        "focusHideSidebar",
+        "focusHideTopBar"
+      ],
       "fullyIndependent": false
     },
     {
@@ -764,6 +1327,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -776,6 +1340,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showFormattingToolbar"
+      ],
       "fullyIndependent": false
     },
     {
@@ -784,10 +1351,28 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/generation-metadata.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/generation-metadata.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showGenerationMetadata",
+        "showMessageTimestamps",
+        "messageTimestamp24Hour",
+        "messageTimestampDateFirst",
+        "messageTimestampShowSeconds",
+        "showGenerationModel",
+        "showGenerationElapsed",
+        "showGenerationSettings",
+        "compactGenerationMetadata",
+        "enableContextWindowWarning",
+        "contextWarningShowMeter",
+        "contextWarningThreshold",
+        "contextWarningManualLimit",
+        "contextWarningBrowserNotifications"
+      ],
       "fullyIndependent": false
     },
     {
@@ -796,10 +1381,15 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/generation-profiles.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/generation-profiles.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableGenerationProfiles"
+      ],
       "fullyIndependent": false
     },
     {
@@ -812,6 +1402,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -820,10 +1411,21 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/language-filter.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/language-filter.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableLanguageFilter",
+        "languageFilterLorebooks",
+        "languageFilterRulebooks",
+        "languageSelectionMode",
+        "languageAutoDetectUntagged",
+        "languageShowDetectedBadge",
+        "languageFilterMode"
+      ],
       "fullyIndependent": false
     },
     {
@@ -836,6 +1438,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -844,10 +1447,17 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/list-fill.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/list-fill.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "autoFillListings",
+        "autoFillTargetCards",
+        "autoFillMaxClicks"
+      ],
       "fullyIndependent": false
     },
     {
@@ -860,6 +1470,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -868,10 +1479,17 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/local-tag-matching.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/local-tag-matching.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "localTagMatchEnabled",
+        "localTagMatchRules",
+        "localTagMatchFetchPublic"
+      ],
       "fullyIndependent": false
     },
     {
@@ -884,8 +1502,14 @@
         "settings/feature-panels/lorebook-backup.js"
       ],
       "styles": [],
-      "background": [],
+      "background": [
+        "background/features/background-lorebook-import.js"
+      ],
       "helpers": [],
+      "settingsKeys": [
+        "lorebookBackupToolsEnabled",
+        "lorebookBackupsEnabled"
+      ],
       "fullyIndependent": false
     },
     {
@@ -900,6 +1524,9 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showLorebookConnections"
+      ],
       "fullyIndependent": false
     },
     {
@@ -912,6 +1539,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableLorebookConsistency"
+      ],
       "fullyIndependent": false
     },
     {
@@ -924,6 +1554,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -936,6 +1567,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -948,6 +1580,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -960,6 +1593,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -972,6 +1606,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "lorebookExpandTags"
+      ],
       "fullyIndependent": false
     },
     {
@@ -984,6 +1621,13 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "lorebookDefaultEntriesTab",
+        "lorebookEditShortcuts",
+        "lorebookEntryManager",
+        "lorebookProtectEntryDrafts",
+        "lorebookRememberEntrySort"
+      ],
       "fullyIndependent": false
     },
     {
@@ -998,6 +1642,9 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableBulkMemoryManager"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1006,10 +1653,23 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/message-options.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/message-options.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "stackChatMessages",
+        "showMessageQuickActions",
+        "messageQuickActionCopy",
+        "messageQuickActionEdit",
+        "messageQuickActionRemoveImage",
+        "messageQuickActionResend",
+        "messageQuickActionConfirmRemoveImage",
+        "messageQuickActionReport",
+        "messageBottomMenuShortcut"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1022,6 +1682,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1034,6 +1695,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1052,6 +1714,10 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableModelQuickAccess",
+        "modelQuickAccessNames"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1060,10 +1726,20 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/model-selector.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/model-selector.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "customizeModelQuickMenu",
+        "modelQuickFavoritesOnly",
+        "modelFavoriteNames",
+        "modelHiddenNames",
+        "expandModelSelectorDescriptions",
+        "hideModelUpgradeButtons"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1076,6 +1752,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "creatorModerationWarnings"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1088,6 +1767,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1100,6 +1780,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "autoLoadMyCreations"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1119,6 +1802,9 @@
         "background/features/background-bot-export.js"
       ],
       "helpers": [],
+      "settingsKeys": [
+        "enableMyCreationsBulkBackup"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1127,10 +1813,19 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/my-creations-filters.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/my-creations-filters.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showBlockButtonOnMyCreations",
+        "enableMyCreationsFilters",
+        "rememberMyCreationsView",
+        "autoLoadMyCreations",
+        "myCreationsAutoLoadPages"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1143,6 +1838,28 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
+      "fullyIndependent": false
+    },
+    {
+      "id": "native-memory-probe",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [
+        "generation-metadata"
+      ],
+      "runtime": "content/native-memory-probe.js",
+      "settings": [
+        "settings/feature-panels/native-memory-probe.js"
+      ],
+      "styles": [],
+      "background": [
+        "background/features/background-native-memory-probe.js"
+      ],
+      "helpers": [],
+      "settingsKeys": [
+        "nativeMemoryQualityProbe"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1157,6 +1874,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableNativeRatingHelpers"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1166,11 +1886,14 @@
       "dependencies": [],
       "runtime": "content/ooc.js",
       "settings": [],
-      "styles": [],
+      "styles": [
+        "content/styles/ooc.css"
+      ],
       "background": [],
       "helpers": [
         "content/ooc-composer.js"
       ],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1183,6 +1906,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1191,12 +1915,18 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/pagination-tools.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/pagination-tools.js"
+      ],
       "styles": [
         "content/styles/pagination.css"
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "paginationTopJumpBox",
+        "paginationQuickJumpMenu"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1209,6 +1939,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1221,6 +1952,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1235,6 +1967,7 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1254,6 +1987,9 @@
         "content/chat-picture-editor-core.js",
         "content/chat-picture-override-core.js"
       ],
+      "settingsKeys": [
+        "enableCustomPersonaPictures"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1262,10 +1998,13 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/personas.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/personas.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1283,6 +2022,9 @@
         "content/chat-picture-core.js",
         "content/custom-pictures-menu.js"
       ],
+      "settingsKeys": [
+        "enableCustomPictureLibrary"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1291,10 +2033,18 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/premium-notifications.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/premium-notifications.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "hideNotifications",
+        "hideFeatureReleasePopups",
+        "hideTabNotificationBadge",
+        "autoReadNotifications"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1313,6 +2063,35 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enablePreviouslyChattedIndicator",
+        "chattedIndicatorShowOpened"
+      ],
+      "fullyIndependent": false
+    },
+    {
+      "id": "private-lorebook-bridge",
+      "defaultSelected": false,
+      "defaultUpdatesEnabled": false,
+      "dependencies": [],
+      "runtime": "content/private-lorebook-bridge.js",
+      "settings": [
+        "settings/feature-panels/private-lorebook-bridge.js"
+      ],
+      "styles": [],
+      "background": [],
+      "helpers": [],
+      "settingsKeys": [
+        "enablePrivateLorebookBridge",
+        "privateLorebookAllowArchiveAutoSync",
+        "privateLorebookAllowAutoCreate",
+        "privateLorebookArchiveCleanup",
+        "privateLorebookArchiveId",
+        "privateLorebookPromotionPolicy",
+        "privateLorebookRequireReview",
+        "privateLorebookStorageMode",
+        "privateLorebookSyncMode"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1327,6 +2106,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableProfileExport"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1335,10 +2117,53 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/quick-panel.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/quick-panel.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showQuickPanel",
+        "quickPanelPlacement",
+        "quickPanelDraggable",
+        "quickPanelDefaultClosed",
+        "quickPanelEnabledByDefaultInTab",
+        "quickPanelWidth",
+        "quickPanelUiScale",
+        "quickPanelMaxHeightPercent",
+        "quickPanelAutoCollapseOverlap",
+        "quickPanelShowCustomPictures",
+        "quickPanelShowContextKeeper",
+        "quickPanelShowFocusMode",
+        "quickPanelShowCharacterProfile",
+        "quickPanelShowSavedSnippets",
+        "quickPanelShowCreatorPreview",
+        "quickPanelShowImageGenerator",
+        "quickPanelShowRulebookDiagnostics",
+        "quickPanelShowStatus",
+        "quickPanelShowLoadedMessageCount",
+        "quickPanelStatusShowOpened",
+        "quickPanelStatusShowBlocked",
+        "quickPanelShowFeatureSummary",
+        "quickPanelShowOptions",
+        "quickPanelShowFillNow",
+        "quickPanelShowSmartFilterPins",
+        "quickPanelShowChatSearch",
+        "quickPanelShowChatMessageSearch",
+        "quickPanelShowChatSort",
+        "quickPanelShowScanVisible",
+        "quickPanelShowLoadAll",
+        "quickPanelShowOoc",
+        "quickPanelShowAutoVoice",
+        "quickPanelShowAutoAsterisk",
+        "quickPanelShowTranslation",
+        "quickPanelShowPersona",
+        "quickPanelShowExport",
+        "quickPanelShowSoundscapes",
+        "quickPanelCustomXPercent",
+        "quickPanelCustomYPercent"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1347,10 +2172,28 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/recommendation-helpers.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/recommendation-helpers.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableRecommendationHelpers",
+        "recommendationHideFavoriteBots",
+        "recommendationHideOwnBots",
+        "recommendationOnlyUnopened",
+        "recommendationOnlyLorebook",
+        "recommendationSessionHideButtons",
+        "recommendationRandomButton",
+        "recommendationHideLaterBots",
+        "recommendationHideNotInterested",
+        "recommendationPreferFavoriteCreators",
+        "recommendationShowReasonBadges",
+        "recommendationPreferredTags",
+        "recommendationAvoidTags",
+        "recommendationAvoidWords"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1365,6 +2208,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableReplyInstructions"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1381,6 +2227,7 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1397,6 +2244,9 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableRpStateTracker"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1405,10 +2255,15 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/rulebook-diagnostics.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/rulebook-diagnostics.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableRulebookDiagnostics"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1423,6 +2278,7 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1435,6 +2291,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showSavedChatQuickActions"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1447,6 +2306,9 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableSavedListsOverlay"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1455,10 +2317,15 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/saved-snippets.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/saved-snippets.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableSavedTextSnippets"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1467,10 +2334,28 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/scroll-to-top.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/scroll-to-top.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "showScrollToTopButton",
+        "showScrollToBottomButton",
+        "showSwipeJumpButtons",
+        "showSwipeJumpToNumber",
+        "restoreFirstSwipeOnLoad",
+        "scrollNavOnHome",
+        "scrollNavOnChats",
+        "scrollNavOnChat",
+        "scrollNavOnCreation",
+        "scrollNavOnProfiles",
+        "scrollNavOnOther",
+        "scrollTopLoadPreviousMessages",
+        "scrollTopLoadPreviousMode",
+        "scrollTopLoadPreviousTiming"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1479,10 +2364,13 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/selection-memory.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/selection-memory.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1491,10 +2379,78 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/sidebar.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/sidebar.js"
+      ],
       "styles": [],
       "background": [],
-      "helpers": [],
+      "helpers": [
+        "content/sidebar-redesign.js"
+      ],
+      "settingsKeys": [
+        "sidebarRenameChats",
+        "sidebarCreationTabs",
+        "sidebarGroupDiscover",
+        "sidebarGroupPersonas",
+        "sidebarAnalyticsShortcut",
+        "sidebarCreationButtons",
+        "sidebarOrder",
+        "redesignedSidebarEnabled",
+        "sidebarDefaultLanding",
+        "sidebarRememberMenus",
+        "sidebarRememberCreationCategory",
+        "sidebarCompactNavigation",
+        "sidebarDedicatedCreate",
+        "hideSidebarDiscover",
+        "hideSidebarDiscoverLorebooks",
+        "hideSidebarDiscoverRulebooks",
+        "hideSidebarMyRulebooks",
+        "hideSidebarCreateRulebook",
+        "hideSidebarCreatePersona",
+        "hideSidebarCreatorAnalytics",
+        "showQolSidebarButton",
+        "qolSidebarButtonPlacement",
+        "hideSidebarLogo",
+        "hideSidebarHome",
+        "hideSidebarChats",
+        "hideSidebarPersonas",
+        "restorePersonasSidebarPosition",
+        "hideSidebarNewBadges",
+        "hideSidebarCreateMenu",
+        "hideSidebarCreateChatbot",
+        "hideSidebarCreateLorebook",
+        "hideSidebarCreateGroup",
+        "hideSidebarCreateVoice",
+        "hideSidebarMyCreationsMenu",
+        "hideSidebarMyChatbots",
+        "hideSidebarMyLorebooks",
+        "hideSidebarMyGroups",
+        "hideSidebarMyVoices",
+        "hideSidebarFavorites",
+        "hideSidebarRecommendations",
+        "hideSidebarLeaderboard",
+        "hideSidebarBlockedCreators",
+        "hideSidebarSubscribe",
+        "hideSidebarHelp",
+        "hideSidebarSocialDiscord",
+        "hideSidebarSocialX",
+        "hideSidebarSocialReddit",
+        "hideSidebarFooterTerms",
+        "hideSidebarFooterPrivacy",
+        "hideSidebarFooterRefunds",
+        "hideSidebarFooterReporting",
+        "hideSidebarFooterGuidelines",
+        "hideSidebarFooterSupport",
+        "hideSidebarFooterAffiliates",
+        "hideSidebarAppDownloadGooglePlay",
+        "hideSidebarAppDownloadAppStore",
+        "hideSidebarAppDownloadGeneric",
+        "hideSidebarWebVersion",
+        "hideSidebarSignOut",
+        "hideSidebarSocialLinks",
+        "hideSidebarFooterLinks",
+        "hideSidebarAppDownload"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1503,10 +2459,15 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/smart-filter-presets.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/smart-filter-presets.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableSmartFilterPresets"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1523,6 +2484,16 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableSoundscapes",
+        "soundscapeShowChatControl",
+        "soundscapeMasterVolume",
+        "soundscapeOnChat",
+        "soundscapeOnHome",
+        "soundscapeOnChats",
+        "soundscapeOnProfiles",
+        "soundscapeOnOther"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1539,6 +2510,12 @@
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableStoryDayTracker",
+        "storyDayTrackerIncludeInContext",
+        "storyDayTrackerMode",
+        "storyDayTrackerShowQuickPanel"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1547,12 +2524,17 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/story-reading-layout.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/story-reading-layout.js"
+      ],
       "styles": [
         "content/styles/story-reading-layout.css"
       ],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "storyReadingLayout"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1561,10 +2543,17 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/tag-aliases.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/tag-aliases.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableTagAliases",
+        "tagAliasRules",
+        "tagAliasShowDisplay"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1573,10 +2562,18 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/tags-nsfw.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/tags-nsfw.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "autoTags",
+        "showTagTemplateButton",
+        "includeTags",
+        "excludeTags"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1585,10 +2582,30 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/text-replacements.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/text-replacements.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "enableChatTextReplacements",
+        "chatTextReplacementScope",
+        "chatTextReplacementMode",
+        "chatTextReplacementPreview",
+        "chatTextReplacementRules",
+        "enableChatWordCensor",
+        "chatWordCensorList",
+        "chatWordCensorMask",
+        "chatWordCensorCustom",
+        "chatWordCensorScope",
+        "chatWordCensorReveal",
+        "chatWordCensorShowChatToggle",
+        "enableChatMutedWords",
+        "chatMutedWords",
+        "chatTextReplacementPresets",
+        "chatTextReplacementShowChatPresetControl"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1597,10 +2614,20 @@
       "defaultUpdatesEnabled": false,
       "dependencies": [],
       "runtime": "content/top-bar.js",
-      "settings": [],
+      "settings": [
+        "settings/feature-panels/top-bar.js"
+      ],
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [
+        "hideTopBarLanguage",
+        "hideTopBarNotifications",
+        "hideTopBarTheme",
+        "topBarProfilePillMode",
+        "topBarProfilePillPersonaPrefix",
+        "topBarProfilePillCustomText"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1617,6 +2644,19 @@
         "background/background-translation.js"
       ],
       "helpers": [],
+      "settingsKeys": [
+        "enableTranslation",
+        "libreTranslateUrl",
+        "translationAllowRemoteFallback",
+        "translationAutoAi",
+        "translationAutoUser",
+        "translationPerChatControls",
+        "translationProtectedTerms",
+        "translationProvider",
+        "translationShowMessageButtons",
+        "translationTargetLanguage",
+        "translationUnderstoodLanguages"
+      ],
       "fullyIndependent": false
     },
     {
@@ -1629,6 +2669,7 @@
       "styles": [],
       "background": [],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     },
     {
@@ -1645,6 +2686,7 @@
         "background/background-wiki-fetch.js"
       ],
       "helpers": [],
+      "settingsKeys": [],
       "fullyIndependent": false
     }
   ]
