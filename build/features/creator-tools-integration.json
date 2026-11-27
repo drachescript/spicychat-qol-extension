@@ -20,5 +20,13 @@
   "settingsIsolated": false,
   "stylesIsolated": false,
   "backgroundIsolated": false,
-  "browserVerified": false
+  "browserVerified": false,
+  "backgroundFiles": [
+    "background/sct-inspector-gate.js",
+    "background/features/background-sct-inspector.js"
+  ],
+  "backgroundImportModes": {
+    "background/sct-inspector-gate.js": "standalone",
+    "background/features/background-sct-inspector.js": "feature-gated"
+  }
 }
