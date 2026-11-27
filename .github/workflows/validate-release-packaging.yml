@@ -1,0 +1,63 @@
+name: Validate release packaging (no publication)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate canonical version and regression tests
+        run: |
+          python3 scripts/release_version.py
+          python3 scripts/test_release_version.py
+          python3 scripts/test_build_package_selection.py
+          python3 build/test_background_imports.py
+          python3 build/test_sync_feature_asset_ownership.py
+      - name: Verify Full runtime and build stable packages locally
+        run: |
+          python3 build/sync-feature-asset-ownership.py
+          python3 build/verify_runtime.py
+          python3 scripts/build_extension.py --profile full
+          python3 scripts/verify_release_packages.py dist/spicychat-qol-v*-chrome.zip dist/spicychat-qol-v*-firefox.zip
+      - name: Verify Firefox package without publishing
+        run: |
+          unzip -q dist/spicychat-qol-v*-firefox.zip -d /tmp/dsq-firefox
+          npx --yes web-ext lint --source-dir /tmp/dsq-firefox
+      - name: Verify current Custom ownership and experimental Core + OOC package
+        run: |
+          python3 build/export-custom-package-index.py
+          python3 build/plan_custom.py --features sidebar --output /tmp/sidebar-plan.json
+          python3 scripts/build_minimal_ooc.py
+          python3 - <<'PY'
+          import json, pathlib, zipfile
+          from scripts.release_version import validate_source
+          version = validate_source()
+          plan = json.loads(pathlib.Path('/tmp/sidebar-plan.json').read_text())
+          assert {'content/sidebar.js','content/sidebar-redesign.js'} <= set(plan['runtimeScripts'])
+          assert 'settings/feature-panels/sidebar.js' in plan['settingsScripts']
+          index = json.loads(pathlib.Path('build/custom-package-index.json').read_text())
+          assert index['sourceVersion'] == version
+          sidebar = next(f for f in index['features'] if f['id']=='sidebar')
+          assert sidebar['runtime'] == 'content/sidebar.js'
+          assert 'content/sidebar-redesign.js' in sidebar['helpers']
+          assert 'settings/feature-panels/sidebar.js' in sidebar['settings']
+          assert {'sidebarRenameChats','sidebarCreationTabs','sidebarGroupDiscover','sidebarGroupPersonas','sidebarAnalyticsShortcut','sidebarCreationButtons','sidebarOrder'} <= set(sidebar['settingsKeys'])
+          for target in ('chrome','firefox'):
+              with zipfile.ZipFile(f'dist/spicychat-qol-v{version}-{target}.zip') as z:
+                  assert {'content/sidebar.js','content/sidebar-redesign.js','settings/feature-panels/sidebar.js'} <= set(z.namelist())
+          with zipfile.ZipFile(f'dist/spicychat-qol-core-ooc-v{version}-test.zip') as z:
+              manifest = json.loads(z.read('manifest.json'))
+              assert manifest['version'] == version and 'version_name' not in manifest
+              assert z.read('manifest.json').decode() == json.dumps(manifest,indent=2)+'\n'
+          print('Full package and Custom sidebar closure + Core/OOC recipe verified; no arbitrary Lite certification')
+          PY

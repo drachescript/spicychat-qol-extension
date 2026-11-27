@@ -32,6 +32,7 @@ def make_index():
             'styles': c.get('styleFiles', []),
             'background': c.get('backgroundFiles', []),
             'helpers': c.get('requiredHelpers', []),
+            'settingsKeys': c.get('settingsKeys', []),
             'fullyIndependent': bool(all(c.get(key) for key in
                  ('settingsIsolated','stylesIsolated','backgroundIsolated','browserVerified'))),
         })
