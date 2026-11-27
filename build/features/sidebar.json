@@ -4,6 +4,13 @@
   "type": "content",
   "dependencies": [],
   "settingsKeys": [
+    "sidebarRenameChats",
+    "sidebarCreationTabs",
+    "sidebarGroupDiscover",
+    "sidebarGroupPersonas",
+    "sidebarAnalyticsShortcut",
+    "sidebarCreationButtons",
+    "sidebarOrder",
     "redesignedSidebarEnabled",
     "sidebarDefaultLanding",
     "sidebarRememberMenus",

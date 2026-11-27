@@ -40,8 +40,9 @@ jobs:
         run: |
           python3 build/sync-feature-asset-ownership.py --verify
           python3 build/verify_runtime.py
+          python3 build/export-custom-package-index.py
 
-      # Only reviewed feature contracts and the matching module map may change.
+      # Only reviewed feature contracts, matching maps and their generated index may change.
       - name: Open a reviewable PR when declarations changed
         id: repair_pr
         uses: peter-evans/create-pull-request@v7
@@ -53,6 +54,7 @@ jobs:
           add-paths: |
             build/features/*.json
             build/modules.json
+            build/custom-package-index.json
             manifest.json
           title: 'build: synchronize audited feature asset ownership'
           commit-message: 'build: synchronize audited feature asset ownership'
@@ -94,14 +96,14 @@ jobs:
             exit 1
           fi
 
-          # The repair may only modify existing audited feature contracts.
+          # Only existing audited ownership files and their derived index may change.
           files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | [.filename, .status] | @tsv')"
           if [[ -z "$files" ]]; then
             echo "::error::Refusing to merge an empty repair PR."
             exit 1
           fi
           while IFS=$'\t' read -r file status; do
-            if [[ ( ! "$file" =~ ^build/features/[A-Za-z0-9_-]+\.json$ && "$file" != "build/modules.json" && "$file" != "manifest.json" ) || "$status" != "modified" ]]; then
+            if [[ ( ! "$file" =~ ^build/features/[A-Za-z0-9_-]+\.json$ && "$file" != "build/modules.json" && "$file" != "build/custom-package-index.json" && "$file" != "manifest.json" ) || "$status" != "modified" ]]; then
               echo "::error::Refusing to merge unexpected repair change: $file ($status)"
               exit 1
             fi

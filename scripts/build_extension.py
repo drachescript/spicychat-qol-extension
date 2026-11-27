@@ -164,8 +164,8 @@ def load_json(path: Path) -> dict:
 
 def load_manifest() -> dict:
     manifest = load_json(ROOT / "manifest.json")
-    if not manifest.get("version"):
-        raise SystemExit("manifest.json does not contain a version.")
+    from release_version import manifest_version
+    manifest_version(manifest)
     return manifest
 
 
@@ -473,6 +473,8 @@ def copy_source(
 
 
 def write_manifest(stage: Path, manifest: dict) -> None:
+    from release_version import manifest_version
+    manifest_version(manifest)
     with (stage / "manifest.json").open("w", encoding="utf-8", newline="\n") as fh:
         json.dump(manifest, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
@@ -528,7 +530,7 @@ def build(
     dev: bool,
     output_dir: Path,
 ) -> Path:
-    version = str(source_manifest.get("version_name") or source_manifest["version"])
+    version = str(source_manifest["version"])
     output = output_dir / output_name(version, profile, dev, target)
     tracked_runtime = set(manifest_runtime_files(source_manifest))
     selected_runtime = selected_runtime_files(modules, profile)

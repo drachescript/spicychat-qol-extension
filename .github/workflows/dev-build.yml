@@ -40,33 +40,15 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import json
-          import re
-          from pathlib import Path
-
-          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
-          version = str(manifest.get("version") or "").strip()
-          version_name = str(manifest.get("version_name") or version).strip()
-
-          if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
-              raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
-
-          if (not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version_name)
-                  or tuple(map(int, version_name.split("."))) != tuple(map(int, version.split(".")))):
-              raise SystemExit(
-                  f"manifest.json version_name ({version_name}) does not match version ({version})."
-              )
-
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          # Version headings are always plain: ## 0.2.48, no status suffixes.
-          if not re.search(rf"(?m)^##\s+{re.escape(version_name)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no exact '## {version_name}' section.")
-
-          print(f"Version/changelog OK: {version}")
+          from scripts.release_version import validate_source
+          print(f"Version/changelog OK: {validate_source()}")
           PY
 
       - name: Test safe extension packaging rules
         run: python3 scripts/test_build_package_selection.py
+
+      - name: Test canonical release version and package names
+        run: python3 scripts/test_release_version.py
 
       - name: Test split/conditional background imports
         run: python3 build/test_background_imports.py
@@ -303,7 +285,7 @@ jobs:
             exit 0
           fi
 
-          version="$(python3 -c 'import json; m=json.load(open("manifest.json", encoding="utf-8")); print(m.get("version_name") or m["version"])')"
+          version="$(python3 scripts/release_version.py)"
           tag="v${version}"
           if gh release view "$tag" >/dev/null 2>&1 ||
              gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then

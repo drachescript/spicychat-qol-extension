@@ -91,26 +91,17 @@ jobs:
           from pathlib import Path
 
           mode = os.environ["MODE"]
-          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
-          version = str(manifest.get("version") or "").strip()
-          version_name = str(manifest.get("version_name") or version).strip()
+          from scripts.release_version import validate_source, tag_parts, new_release_allowed
+          version = validate_source()
 
-          if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
-              raise SystemExit(f"manifest.json has an invalid stable version: {version!r}")
-          if (not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version_name)
-                  or tuple(map(int, version_name.split("."))) != tuple(map(int, version.split(".")))):
-              raise SystemExit(
-                  f"manifest.json version_name ({version_name}) does not match version ({version})."
-              )
-
-          tag = f"v{version_name}"
+          tag = f"v{version}"
           publish = True
           reason = ""
 
           if mode == "manual":
               requested = os.environ.get("REQUESTED_VERSION", "").strip()
               requested = requested[1:] if requested.startswith("v") else requested
-              if requested not in (version, version_name):
+              if requested != version:
                   raise SystemExit(
                       f"Requested release {requested!r} does not match manifest version {version}."
                   )
@@ -140,47 +131,14 @@ jobs:
                       ["git", "tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"], text=True
                   ).splitlines()
 
-                  def parsed(value):
-                      match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", value.strip())
-                      return tuple(map(int, match.groups())) if match else None
-
-                  current_tuple = tuple(map(int, version.split(".")))
-                  stable = [(parsed(value), value) for value in tags]
-                  stable = [(parts, value) for parts, value in stable if parts is not None]
-
-                  if tag in tags:
-                      publish = False
-                      reason = f"{tag} already exists, so this version is already released/tagged."
-                  elif stable:
-                      latest_tuple, latest_tag = max(stable)
-                      if current_tuple < latest_tuple:
-                          raise SystemExit(
-                              f"Manifest version {version} is older than latest stable tag {latest_tag}."
-                          )
-                      if current_tuple == latest_tuple:
-                          # Migrate an old unpadded public tag to the declared release name.
-                          if latest_tag != f"v{version}" or tag == latest_tag:
-                              publish = False
-                              reason = f"{tag} is not newer than the latest stable version."
-                          else:
-                              reason = f"Replacing public release name {latest_tag} with {tag}."
-                      else:
-                          reason = f"{tag} is newer than {latest_tag}; automatic stable release enabled."
-                  else:
-                      reason = f"No stable version tag exists yet; {tag} can be released."
+                  publish = new_release_allowed(version, tags)
+                  reason = (f"{tag} is eligible for canonical stable publishing."
+                            if publish else f"{tag} already exists; use the current-stable rebuild.")
           else:
               raise SystemExit(f"Unknown release mode: {mode}")
 
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          # The existing tag/current-main checks decide release eligibility.
-          # Changelog headings remain plain version numbers.
-          if publish and not re.search(rf"(?m)^##\s+{re.escape(version_name)}\s*$", changelog):
-              raise SystemExit(f"CHANGELOG.md has no exact '## {version_name}' section.")
-
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"version={version_name}\n")
-              out.write(f"manifest_version={version}\n")
-              out.write(f"display_version={version_name}\n")
+              out.write(f"version={version}\n")
               out.write(f"tag={tag}\n")
               out.write(f"publish={'true' if publish else 'false'}\n")
               out.write(f"reason={reason}\n")
@@ -198,6 +156,9 @@ jobs:
 
       - name: Test safe extension packaging rules
         run: python3 scripts/test_build_package_selection.py
+
+      - name: Test canonical release version and package names
+        run: python3 scripts/test_release_version.py
 
       - name: Test split/conditional background imports
         run: python3 build/test_background_imports.py
@@ -283,8 +244,7 @@ jobs:
                       raise SystemExit(f"{path}: manifest.json is missing")
 
                   manifest = json.loads(zf.read("manifest.json"))
-                  if (manifest.get("version") != ".".join(str(int(part)) for part in version.split("."))
-                          or (manifest.get("version_name") or manifest.get("version")) != version):
+                  if manifest.get("version") != version or "version_name" in manifest:
                       raise SystemExit(
                           f"{path}: manifest version {manifest.get('version')} != {version}"
                       )
@@ -384,17 +344,16 @@ jobs:
           CHROME="dist/spicychat-qol-v${VERSION}-chrome.zip"
           FIREFOX="dist/spicychat-qol-v${VERSION}-firefox.zip"
           CHECKSUMS="dist/SHA256SUMS.txt"
+          python3 - <<'PY' > dist/RELEASE-NOTES.md
+          from pathlib import Path
+          from scripts.release_version import validate_source, changelog_section
+          print(changelog_section(Path("CHANGELOG.md").read_text(encoding="utf-8"), validate_source()))
+          PY
 
-          LEGACY_TAG="v${{ steps.release.outputs.manifest_version }}"
-          if [ "$LEGACY_TAG" != "$TAG" ] && ! gh release view "$TAG" >/dev/null 2>&1 && gh release view "$LEGACY_TAG" >/dev/null 2>&1; then
-            # Keep the old source tag and release asset links as a historical
-            # alias until the correctly named release is fully published.
-            gh release create "$TAG" "$CHROME" "$FIREFOX" "$CHECKSUMS" --target "$HEAD_SHA" --title "SpicyChat QoL v${VERSION}" --generate-notes --latest
-            gh release edit "$LEGACY_TAG" --latest=false
-          elif gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists. Updating title/assets and marking it latest."
             gh release edit "$TAG" \
-              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
+              --title "SpicyChat QoL v${{ steps.release.outputs.version }}" \
               --latest
 
             gh release upload "$TAG" \
@@ -408,8 +367,8 @@ jobs:
               "$FIREFOX" \
               "$CHECKSUMS" \
               --verify-tag \
-              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
-              --generate-notes \
+              --title "SpicyChat QoL v${{ steps.release.outputs.version }}" \
+              --notes-file dist/RELEASE-NOTES.md \
               --latest
           else
             gh release create "$TAG" \
@@ -417,8 +376,8 @@ jobs:
               "$FIREFOX" \
               "$CHECKSUMS" \
               --target "$HEAD_SHA" \
-              --title "SpicyChat QoL v${{ steps.release.outputs.display_version }}" \
-              --generate-notes \
+              --title "SpicyChat QoL v${{ steps.release.outputs.version }}" \
+              --notes-file dist/RELEASE-NOTES.md \
               --latest
           fi
 
