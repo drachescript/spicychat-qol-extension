@@ -1739,10 +1739,11 @@ function botStatusCenterBaseEntries(scope = "all") {
   const saved = botAvailabilityState.meta || {};
   const archives = botArchiveState.meta || {};
   const byId = new Map();
+  const blockedIds = new Set(normalizeBotStore(blockedState).ids.map(id => String(id || "").toLowerCase()));
   for (const item of tracked) {
     byId.set(item.id, {
       ...item,
-      _scanEligible: true,
+      _scanEligible: !blockedIds.has(item.id),
       status: "unknown",
       reason: item.sources?.includes("archive") ? "Saved local copy; availability has not been checked yet." : "Not checked yet.",
       checkedAt: 0,

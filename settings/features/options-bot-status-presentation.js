@@ -522,6 +522,10 @@ function renderBotAvailability(renderOptions = {}) {
   host.querySelectorAll(".bot-availability-recheck").forEach(button => {
     button.addEventListener("click", async () => {
       const id = button.closest(".bot-manager-card")?.dataset.id || "";
+      if (normalizeBotStore(blockedState).ids.some(value => String(value).toLowerCase() === id.toLowerCase())) {
+        showSettingsToast("Blocked bots are excluded from Bot Status checks. Unblock the bot before rechecking it.");
+        return;
+      }
       const previous = botAvailabilityState?.meta?.[id] || null;
       const tracked = collectTrackedAvailabilityBots("all").find(item => item.id === id) || previous || { id };
       button.disabled = true;

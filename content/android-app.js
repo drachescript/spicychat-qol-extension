@@ -189,6 +189,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (s.androidTopBarPersona !== false) {
       menu.appendChild(actionButton("Persona", "Open Change Persona", () => { openPersona(); }));
     }
+    if (DS.hasCustomPictures?.() && typeof DS.openCustomPicturesMenu === "function") {
+      menu.appendChild(actionButton("Custom Pictures", "Open enabled custom picture tools", () => {
+        Promise.resolve(DS.openCustomPicturesMenu()).catch(() => DS.setQuickStatus?.("Could not open Custom Pictures."));
+      }));
+    }
     if (s.androidTopBarModel !== false) {
       menu.appendChild(actionButton("Model", "Open model picker", openModelPicker));
     }

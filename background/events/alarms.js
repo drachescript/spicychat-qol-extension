@@ -2,6 +2,7 @@
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundAlarms() {
 chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === DSQ_SCT_ALARM) { dsqSctWake(); return; }
   const featureHandlers = globalThis.__DSQ_BACKGROUND_ALARM_HANDLERS__;
   const optionalHandler = featureHandlers?.[alarm.name];
   if (optionalHandler) {

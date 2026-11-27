@@ -10,10 +10,15 @@ function jumpToOptionsSearch(tabName, query = "") {
   window.setTimeout(() => input.dispatchEvent(new Event("input", { bubbles: true })), 10);
 }
 
-async function renderCreatorWorkspace() {
+async function renderCreatorWorkspace(force = false) {
   const summary = $("creatorWorkspaceSummary");
   const relations = $("creatorRelationshipView");
   if (!summary || !relations) return;
+  if (nativeAndroidOptionsStorage() && !force) {
+    const button = makeElement("button", { text: "Load creator backup details", attrs: { type: "button" } });
+    button.addEventListener("click", async () => { button.disabled = true; try { await renderCreatorWorkspace(true); } catch { button.disabled = false; button.textContent = "Retry loading creator backup details"; } });
+    summary.replaceChildren(button); return;
+  }
   const result = await storageGet([BOT_ARCHIVE_KEY, LOREBOOK_BACKUPS_KEY, BOT_EDITOR_DRAFT_HISTORY_KEY, CHATBOT_LOREBOOK_LINKS_KEY, "settings"]);
   const bots = normalizeBotArchive(result[BOT_ARCHIVE_KEY]).meta;
   const books = normalizeLorebookBackups(result[LOREBOOK_BACKUPS_KEY]).meta;
@@ -59,39 +64,39 @@ async function renderCreatorWorkspace() {
 }
 
 async function collectDataHealth({ lightweight = false } = {}) {
-  const backupKeys = lightweight
+  const summaryOnly = lightweight && nativeAndroidOptionsStorage();
+  const backupKeys = summaryOnly ? ["settings", RECOVERY_SNAPSHOT_META_KEY] : lightweight
     ? BACKUP_STORAGE_KEYS.filter(key => !LARGE_STORAGE_KEYS.has(key) && ![SOUNDSCAPE_AUDIO_KEY, CHAT_BACKGROUNDS_KEY].includes(key))
     : BACKUP_STORAGE_KEYS;
-  const keys = [...new Set([...backupKeys, RECOVERY_SNAPSHOT_META_KEY, CHATBOT_LOREBOOK_LINKS_KEY, LOCAL_CHANGE_HISTORY_KEY, CARD_TOKEN_CACHE_KEY])];
-  const [checkedValue, totalBytesValue, largeStatsValue] = await Promise.all([
-    lightweight
-      ? promiseWithValueTimeout(storageGetChecked(keys), 3200, { ok: false, data: {}, error: "Lightweight local-data check timed out." })
+  const keys = summaryOnly ? backupKeys : [...new Set([...backupKeys, RECOVERY_SNAPSHOT_META_KEY, CHATBOT_LOREBOOK_LINKS_KEY, LOCAL_CHANGE_HISTORY_KEY, CARD_TOKEN_CACHE_KEY])];
+  const [checkedValue, totalBytesValue, largeStatsValue] = await runSupportSources([
+    () => lightweight
+      ? promiseWithValueTimeout(storageGetChecked(keys), summaryOnly ? 7500 : 3200, { ok: false, data: {}, error: "Lightweight local-data check timed out." })
       : storageGetChecked(keys),
-    lightweight ? promiseWithValueTimeout(storageBytesInUse(null), 1800, null) : storageBytesInUse(null),
-    lightweight ? promiseWithValueTimeout(readLargeStorageStats(), 2200, null) : readLargeStorageStats().catch(() => ({}))
+    () => lightweight ? promiseWithValueTimeout(storageBytesInUse(null), summaryOnly ? 7500 : 1800, null) : storageBytesInUse(null),
+    () => lightweight ? promiseWithValueTimeout(readLargeStorageStats(), summaryOnly ? 7500 : 2200, null) : readLargeStorageStats().catch(() => null)
   ]);
   const checked = checkedValue && typeof checkedValue === "object" ? checkedValue : { ok: false, data: {}, error: "Local-data check unavailable." };
-  const totalBytes = Number(totalBytesValue);
+  const totalBytes = validStorageMeasurement(totalBytesValue);
   const largeStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
   const largeHealthCount = key => {
     if (!largeStatsValue || typeof largeStatsValue !== "object" || !Object.prototype.hasOwnProperty.call(largeStats, key)) return null;
-    const value = Number(largeStats[key]);
-    return Number.isFinite(value) ? value : null;
+    return validStorageMeasurement(largeStats[key]);
   };
   const rows = [];
   const result = checked.data && typeof checked.data === "object" ? checked.data : {};
   rows.push({
-    state: checked.ok ? "ok" : "warn",
+    state: checked.ok && Number.isFinite(totalBytes) ? "ok" : "warn",
     label: "Browser storage",
     detail: checked.ok
       ? `Readable${Number.isFinite(totalBytes) ? ` · ${formatControlBytes(totalBytes)} in chrome.storage.local` : " · size check timed out"}.`
       : `${checked.error || "Could not read the lightweight local-data summary."} Other health checks continued.`
   });
   rows.push({
-    state: largeStatsValue ? "ok" : "warn",
-    label: "Large-data IndexedDB",
+    state: largeStatsValue && largeHealthCount(BOT_ARCHIVE_KEY) !== null && largeHealthCount(BOT_AVAILABILITY_KEY) !== null ? "ok" : "warn",
+    label: `Large-data ${largeStorageBackendLabel()}`,
     detail: largeStatsValue
-      ? `${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability records · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records.`
+      ? `${storageCountLabel(largeStats, BOT_AVAILABILITY_KEY)} availability records · ${storageCountLabel(largeStats, BOT_ARCHIVE_KEY)} archive records · ${storageCountLabel(largeStats, LOREBOOK_STATUS_KEY)} Lorebook status records.`
       : "Count check timed out; the rest of Data Health continued without loading the large stores."
   });
 
@@ -116,8 +121,11 @@ async function collectDataHealth({ lightweight = false } = {}) {
   }
   rows.push({ state: "ok", label: "Recovery snapshot", detail: snapshotMeta
     ? (snapshotMeta.createdAt ? `Available from ${creatorBackupDate(snapshotMeta.createdAt)} (${snapshotMeta.reason || "manual snapshot"}).` : "Available (legacy snapshot; details load on demand).")
-    : "None saved. This is normal until a protected import/cleanup or manual snapshot creates one." });
+    : checked.ok && !summaryOnly ? "None saved. This is normal until a protected import/cleanup or manual snapshot creates one." : "Not confirmed in this lightweight storage check." });
 
+  if (summaryOnly || !checked.ok) {
+    rows.push({ state: "warn", label: "Deep data checks", detail: "Not run in this lightweight report; use full Data Health for orphan and backup-content validation." });
+  } else {
   let cleanupCandidates = 0;
   const opened = uniqueClean(result[OPENED_KEY] || []);
   cleanupCandidates += orphanedMetaCount(result[OPENED_META_KEY], opened);
@@ -134,8 +142,8 @@ async function collectDataHealth({ lightweight = false } = {}) {
     const botCopyCount = largeHealthCount(BOT_ARCHIVE_KEY);
     const lorebookStatusCount = largeHealthCount(LOREBOOK_STATUS_KEY);
     const largeBackupSummary = botCopyCount == null || lorebookStatusCount == null
-      ? "IndexedDB bot-copy / tracked-Lorebook counts unavailable"
-      : `${botCopyCount} bot copies and ${lorebookStatusCount} tracked Lorebook status records in IndexedDB`;
+      ? `${largeStorageBackendLabel()} bot-copy / tracked-Lorebook counts unavailable`
+      : `${botCopyCount} bot copies and ${lorebookStatusCount} tracked Lorebook status records in ${largeStorageBackendLabel()}`;
     rows.push({ state: badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badLorebookEntries
       ? `${largeBackupSummary}; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.`
       : `${largeBackupSummary}, plus ${Object.keys(lorebooks.meta).length} Lorebook backups; deep bot-copy validation is skipped in the combined support report.` });
@@ -145,6 +153,7 @@ async function collectDataHealth({ lightweight = false } = {}) {
     rows.push({ state: badArchives || badLorebookEntries ? "warn" : "ok", label: "Creator backups", detail: badArchives || badLorebookEntries ? `${badArchives} empty bot archive${badArchives === 1 ? "" : "s"}; ${badLorebookEntries} malformed Lorebook entr${badLorebookEntries === 1 ? "y" : "ies"}.` : `${Object.keys(botArchive.meta).length} bot copies and ${Object.keys(lorebooks.meta).length} Lorebook backups normalize cleanly.` });
   }
 
+  }
   if (Number.isFinite(totalBytes) && totalBytes > 20 * 1024 * 1024) rows.push({ state: "warn", label: "Storage size", detail: `QoL is using ${formatControlBytes(totalBytes)}. Use the breakdown below before deleting anything.` });
   const warnings = rows.filter(row => row.state === "warn").length;
   const errors = rows.filter(row => row.state === "bad").length;
@@ -159,9 +168,14 @@ function renderHealthRows(health, host = $("controlHealthResults")) {
   ])));
 }
 
-async function renderControlStorageBreakdown() {
+async function renderControlStorageBreakdown(force = false) {
   const host = $("controlStorageBreakdown");
   if (!host) return;
+  if (nativeAndroidOptionsStorage() && !force) {
+    const button = makeElement("button", { text: "Measure individual storage sizes", attrs: { type: "button" } });
+    button.addEventListener("click", async () => { button.disabled = true; try { await renderControlStorageBreakdown(true); } finally { button.disabled = false; } });
+    host.replaceChildren(button); return;
+  }
   const rows = [];
   for (const def of STORAGE_DATASET_DEFS) {
     const bytes = await storageBytesInUse(def.keys);

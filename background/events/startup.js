@@ -2,6 +2,7 @@
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundStartup() {
 chrome.runtime.onStartup.addListener(() => {
+  dsqSctWake();
   syncAutoAfkTabs().finally(() => configureAutoAfkAlarm(false));
   // Restored/pinned tabs can occasionally survive browser startup without the
   // current content runtime. Detect that case passively and show a reload badge

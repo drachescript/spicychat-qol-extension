@@ -1,3 +1,10 @@
+## 0.3.02
+- Improved generation usage tracking and restriction recovery. Partial recovery preserves the original estimated countdown, successful generations remain recorded, and unconfirmed reset times are clearly distinguished from actual recovery.
+- Improved Android navigation responsiveness, archive record storage handling, animation memory use, card selection and support report reliability. Obsolete route work is cancelled, unavailable storage measurements are reported accurately, and native Android recovery no longer depends on automatic QoL reloads.
+- Bot Status now removes blocked bots from pending and held scan queues automatically, without removing blocks, saved copies or status history.
+- Improved custom chat background restoration and saved picture loading, compatibility with native Appearance, and access through the compact QoL menu.
+- Added an independently enabled Inspector connection for structured Creator Tools operation diagnostics, persistent delivery and committed acknowledgement status. Automated publishing remains disabled.
+
 ## 0.3.01
 - Added a redesigned sidebar with grouped discovery and creation shortcuts, a Create chooser, configurable landing page, remembered menus and compact spacing. Existing navigation and cleanup controls remain available.
 - Added Creator Tools integration for local chatbot and Lorebook packages, account-specific project associations, version comparisons and release previews. Automated publishing is disabled.

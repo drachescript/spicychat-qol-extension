@@ -27,12 +27,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function loadStore(force = false) { mediaStore = await kit.loadStore(force); return mediaStore; }
   async function saveStore(next) { mediaStore = await kit.saveStore(next); return mediaStore; }
   function avatarFromChatHeader() {
-    const profile = document.querySelector("a[aria-label='chatbot-profile'][href*='/chatbot/']");
+    const header = document.querySelector('[data-testid="ChatPageHeaderRow"]');
+    const profile = (header || document).querySelector("a[aria-label='chatbot-profile'][href*='/chatbot/']");
+    // React may still display the previous bot during SPA navigation.
+    const expected = DS.getPageState?.()?.chatId;
+    if (expected && profile) {
+      try { if (!new URL(profile.href, location.href).pathname.split('/').includes(expected)) return null; }
+      catch { return null; }
+    }
     // SpicyChat 4.6 places the avatar beside the name-link column. Search
     // only the header row so a message or the user's avatar cannot be chosen.
     const headerRow = profile?.closest(".ds-chat-topbar-creator-line")?.parentElement
       || profile?.parentElement?.parentElement;
-    const image = profile?.querySelector("img") || headerRow?.querySelector("img") || null;
+    const image = profile?.querySelector("img") || headerRow?.querySelector("img") ||
+      (profile && header?.querySelector('[data-testid="Avatar-Button"] img')) || null;
     const source = image?.currentSrc || image?.src || "";
     if (!source) return null;
     try {
@@ -113,9 +121,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
     let layer = document.getElementById("ds-chat-background-layer");
     if (!layer) {
+      if (!document.body) return;
       layer = document.createElement("div");
       layer.id = "ds-chat-background-layer";
       layer.setAttribute("aria-hidden", "true");
+      layer.setAttribute("data-ds-owned", "1");
       document.body?.prepend(layer);
     }
     const settings = DS.state?.settings || {};
@@ -440,6 +450,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         (globalItem ? `Using global background: ${globalItem.name || "local image"}` :
         (displayedItem?.avatar ? "Using the chat character avatar." : "No background image is set.")));
 
+    if (!suppressed && DS.shouldDeferToSaiToolkit?.("backgroundImage")) {
+      status.textContent += " QoL background rendering is paused while SAI Toolkit owns the background.";
+    } else if (!suppressed && !displayedItem && DS.state?.settings?.chatBackgroundUseAvatar) {
+      status.textContent = "Automatic avatar background enabled; waiting for an eligible character avatar.";
+    }
+
     const choose = document.createElement("button");
     choose.type = "button";
     choose.textContent = "Choose image for this chat";
@@ -646,8 +662,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     mediaStore = kit.getStore();
     // Explicit scene galleries remain stored and available; only defer the
     // overlapping background layer while Toolkit owns the background.
-    if (enabled && !DS.shouldDeferToSaiToolkit?.("backgroundImage")) applyLayer(currentItem()); else removeLayer();
+    let status = "disabled";
+    if (enabled && DS.isSingleChatPage?.()) {
+      if (DS.shouldDeferToSaiToolkit?.("backgroundImage")) { removeLayer(); status = "toolkit-owns-background"; }
+      else {
+        const key = chatKey();
+        const item = currentItem();
+        if (item) {
+          applyLayer(item);
+          status = document.getElementById("ds-chat-background-layer")?.isConnected ? "applied" : "waiting-for-body";
+        } else {
+          removeLayer();
+          status = mediaStore.suppressedChats?.[key] ? "cleared-for-chat" :
+            DS.state?.settings?.chatBackgroundUseAvatar ? "avatar-unavailable" : "no-image-selected";
+        }
+      }
+    } else removeLayer();
     document.getElementById("ds-chat-background-control")?.remove();
+    return status;
   };
   DS.removeBackgroundLayer = () => { removeLayer(); removeControl(); };
 })();

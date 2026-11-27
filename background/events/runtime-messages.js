@@ -86,6 +86,7 @@ function dsReportLinkMessage(message, sender, sendResponse) {
 // Feature/event-owned registration; invoked in original order by background-events.js.
 function registerQolBackgroundRuntimeMessages() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (["DS_SCT_INSPECTOR_CONFIG","DS_SCT_INSPECTOR_STATUS","DS_SCT_INSPECTOR_EVENT","DS_SCT_INSPECTOR_TEST"].includes(message?.type)) return dsqSctMessage(message,sender,sendResponse);
   if (!dsqBackgroundMessageAllowed(message?.type)) {
     sendResponse({ ok: false, error: "This feature is not installed in this build." });
     return false;

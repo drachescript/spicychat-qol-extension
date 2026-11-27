@@ -104,6 +104,7 @@ async function selectActiveUsedExportScopes({ initialize = false } = {}) {
 
 async function initializeExportScopeSelection() {
   if (exportScopesInitialized) return;
+  if (nativeAndroidOptionsStorage()) return; // Explicit Active / Used and export controls still load on request.
   await selectActiveUsedExportScopes({ initialize: true });
 }
 

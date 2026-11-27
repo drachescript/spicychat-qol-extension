@@ -15,16 +15,41 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let vaultBusy = false;
   const MEMORY_VAULT_KEY = "dsMemoryVaultV1";
   const MEMORY_LAYOUT_STORAGE_KEY = "dsMemoryCompactLayoutV1";
+  const MEMORY_TOOLS_COLLAPSED_KEY = "dsMemoryToolsCollapsedV1";
+  // Keep the narrow-screen default compact without altering the user's feature settings.
+  let memoryToolsCollapsed = null;
+  let memoryToolsChoiceChanged = false;
+  function defaultMemoryToolsCollapsed() {
+    return document.documentElement?.dataset.dsPlatform === "mobile" ||
+      !!window.matchMedia?.("(max-width: 760px)").matches;
+  }
+  function applyMemoryToolsCollapse(toolbar) {
+    if (!toolbar) return;
+    const collapsed = memoryToolsCollapsed ?? defaultMemoryToolsCollapsed();
+    toolbar.classList.toggle("ds-memory-tools-collapsed", collapsed);
+    const button = toolbar.querySelector(".ds-memory-tools-toggle");
+    if (button) {
+      const label = collapsed ? "Show QoL tools" : "Hide QoL tools";
+      if (button.textContent !== label) button.textContent = label;
+      button.setAttribute("aria-expanded", String(!collapsed));
+    }
+  }
   // One privacy-safe, last-seen UI observation. No account, chat, memory IDs or text.
   const MEMORY_MANAGER_UI_OBSERVATION_KEY = "dsMemoryManagerUiObservationV1";
   let lastMemoryUiObservation = "";
   let lastMemoryUiObservationAt = 0;
   let memoryCompactView = false;
   try {
-    chrome.storage.local.get({ [MEMORY_LAYOUT_STORAGE_KEY]: false }, saved => {
+    chrome.storage.local.get({ [MEMORY_LAYOUT_STORAGE_KEY]: false, [MEMORY_TOOLS_COLLAPSED_KEY]: null }, saved => {
       memoryCompactView = !!saved?.[MEMORY_LAYOUT_STORAGE_KEY];
       const manager = getManager();
-      if (manager) applyMemoryLayout(manager);
+      if (!memoryToolsChoiceChanged && typeof saved?.[MEMORY_TOOLS_COLLAPSED_KEY] === "boolean") {
+        memoryToolsCollapsed = saved[MEMORY_TOOLS_COLLAPSED_KEY];
+      }
+      if (manager) {
+        applyMemoryLayout(manager);
+        applyMemoryToolsCollapse(manager.querySelector("#ds-memory-bulk-toolbar"));
+      }
     });
   } catch {}
 
@@ -389,6 +414,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const toolbar = manager?.querySelector("#ds-memory-bulk-toolbar");
     if (!toolbar) return;
 
+    applyMemoryToolsCollapse(toolbar);
     const rows = getMemoryRows(manager);
     const reportButton = toolbar.querySelector(".ds-memory-layout-report");
     // A missing row match must never hide the report needed to diagnose it.
@@ -460,7 +486,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           !button.classList.contains("ds-memory-keep-selected") &&
           !button.classList.contains("ds-memory-load-all") &&
           !button.classList.contains("ds-memory-export-selected") &&
-          !button.classList.contains("ds-memory-layout-report")) {
+          !button.classList.contains("ds-memory-layout-report") &&
+          !button.classList.contains("ds-memory-tools-toggle")) {
         button.disabled = busy;
       }
     }
@@ -2286,7 +2313,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     toolbar.id = "ds-memory-bulk-toolbar";
     toolbar.className = "ds-memory-bulk-toolbar";
     DS.setSafeMarkup(toolbar, `
-      <div class="ds-memory-bulk-actions">
+      <div class="ds-memory-bulk-meta">
+        <button type="button" class="ds-memory-tools-toggle" aria-expanded="true" aria-controls="ds-memory-bulk-actions">Hide QoL tools</button>
+        <span class="ds-memory-selected-count">0 selected</span>
+        <span class="ds-memory-manager-version" title="Detected from the native controls">Memory UI: detecting…</span>
+        <span class="ds-memory-bulk-status" aria-live="polite"></span>
+      </div>
+      <div class="ds-memory-bulk-actions" id="ds-memory-bulk-actions">
         <button type="button" class="ds-memory-select-all">Select all</button>
         <button type="button" class="ds-memory-select-unpinned">Select unpinned</button>
         <button type="button" class="ds-memory-invert">Invert</button>
@@ -2304,16 +2337,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <button type="button" class="ds-memory-delete-selected" disabled>Delete selected</button>
         ${DS.state.settings?.enableMemoryVault ? `<button type="button" class="ds-memory-vault-archive" disabled>Archive selected</button>` : ""}
       </div>
-      <div class="ds-memory-bulk-meta">
-        <span class="ds-memory-selected-count">0 selected</span>
-        <span class="ds-memory-manager-version" title="Detected from the native controls">Memory UI: detecting…</span>
-        <span class="ds-memory-bulk-status" aria-live="polite"></span>
-        <small class="ds-memory-native-lifecycle" hidden>SpicyChat starts automatic memories when a chat outgrows its context, then reviews them about every 15 exchanges. Pinned and manually added memories are kept.</small>
-      </div>
+      <small class="ds-memory-native-lifecycle" hidden>SpicyChat starts automatic memories when a chat outgrows its context, then reviews them about every 15 exchanges. Pinned and manually added memories are kept.</small>
       <div class="ds-memory-quality-panel" hidden aria-live="polite"></div>
       <div class="ds-memory-pinned-order" hidden></div>
       ${DS.state.settings?.enableMemoryVault ? `<div id="ds-memory-vault-panel" class="ds-memory-vault-panel"></div>` : ""}
     `);
+
+    toolbar.querySelector(".ds-memory-tools-toggle")?.addEventListener("click", () => {
+      memoryToolsCollapsed = !(memoryToolsCollapsed ?? defaultMemoryToolsCollapsed());
+      memoryToolsChoiceChanged = true;
+      applyMemoryToolsCollapse(toolbar);
+      try { chrome.storage.local.set({ [MEMORY_TOOLS_COLLAPSED_KEY]: memoryToolsCollapsed }); } catch {}
+    });
+    applyMemoryToolsCollapse(toolbar);
 
     toolbar.querySelector(".ds-memory-select-all")?.addEventListener("click", () => {
       // Read the current native cards when clicked, not a stale React root.

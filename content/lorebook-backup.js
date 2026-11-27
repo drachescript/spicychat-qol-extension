@@ -2453,6 +2453,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               progress('submitting');
             },
             armSubmit(){if(stopped||controller.signal.aborted||!routeMatches()||!receiptArm||Date.now()>=receiptDeadline||!job?.pending)throw Error('Import checkpoint is no longer active. No native write sent.');document.documentElement.setAttribute('data-ds-lorebook-import-attempt',receiptArm);receiptArm=null;},
+            saveClicked(){const p=job?.pending;if(p)try{DS.emitSctInspectorEvent?.({phase:'attempt',action:'save',creationType:'lorebook-entry',outcome:'native-ui-observed',pendingWrite:true,correlation:{operationId:p.attemptId,nativeCreationId:info.id}});}catch{}},
             formRecovered(){formRecoveries++;progress('recovering-form','Native create form replaced; fields verified again.');},
             async notSent(){const p=job?.pending;receiptArm=null;receiptCleanup?.();receiptPromise=null;busyEntry=false;if(p)await msg('not-sent',{attemptId:p.attemptId});},
             async commit(index,action){

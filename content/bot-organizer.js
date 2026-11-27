@@ -1395,34 +1395,28 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   // On coarse/mobile pointers, bulk mode becomes a deliberate selection mode.
   // Tapping anywhere on the card selects it and native card actions (especially
   // the very-near Favorite heart on Firefox Android) cannot fire accidentally.
-  let mobileBulkListenerAttached = false;
-  function onMobileBulkSelectionClick(event) {
-    if (!DS.state?.settings?.enabled || !DS.state?.settings?.enableBotOrganizer || !bulkMode || !mobileBulkMode()) return;
-    if (event.target?.closest?.(".ds-bot-bulk-select, #ds-bot-organizer-toolbar, .ds-bot-organizer-popover")) return;
-    const card = event.target?.closest?.("[data-ds-bulk-bot-id]");
-    const id = clean(card?.dataset?.dsBulkBotId || "");
-    if (!card || !id) return;
-
-    // Let users inspect the bot while mobile bulk selection is active. Other
-    // native card actions (especially Favorite/unfavorite) remain intercepted
-    // so a selection tap cannot accidentally change the public Favorite state.
+  let mobileBulkGuardCleanup = null;
+  function resolveMobileBulkCard(target) {
+    if (!(target instanceof Element) || target.closest(".ds-bot-bulk-select, #ds-bot-organizer-toolbar, .ds-bot-organizer-popover, [data-ds-owned='1']")) return null;
+    const card = target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"],[data-ds-bulk-bot-id]');
+    const anchor = card?.matches?.('a[href]') ? card : card?.querySelector('a[href*="/chat/"],a[href*="/chatbot/"]');
+    const id = clean(card?.dataset?.dsBulkBotId || DS.botIdFromHref?.(anchor?.href || "") || "");
+    if (!card || !id) return null;
     if (DS.state?.settings?.botOrganizerMobileBulkAllowProfile !== false) {
-      const profileControl = DS.findCardProfileButton?.(card);
-      if (profileControl && (profileControl === event.target || profileControl.contains?.(event.target))) return;
+      const profile = DS.findCardProfileButton?.(card);
+      if (profile?.contains(target) || target.closest('[aria-label="character-info"],[data-testid*="InfoLink"]')) return null;
     }
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-    toggleBulkEntry({ id, card });
+    if (target.closest('a[href*="/creator/"],input,textarea,select')) return null;
+    return { id, card };
   }
   function setMobileBulkListener(active) {
-    if (active === mobileBulkListenerAttached) return;
-    if (active) document.addEventListener("click", onMobileBulkSelectionClick, true);
-    else document.removeEventListener("click", onMobileBulkSelectionClick, true);
-    mobileBulkListenerAttached = active;
+    if (active && !mobileBulkGuardCleanup) mobileBulkGuardCleanup = DS.installCardSelectionGuard?.({
+      active: () => !!DS.state?.settings?.enabled && !!DS.state?.settings?.enableBotOrganizer && bulkMode && mobileBulkMode(), resolve: resolveMobileBulkCard, select: toggleBulkEntry
+    });
+    if (!active && mobileBulkGuardCleanup) { mobileBulkGuardCleanup(); mobileBulkGuardCleanup = null; }
   }
 
+  DS.cancelObsoleteOrganizerSelection = () => { if (bulkMode) { bulkMode = false; selectedIds.clear(); setMobileBulkListener(false); } };
   DS.removeBotOrganizer = function removeBotOrganizer() {
     setMobileBulkListener(false);
     closePopover();

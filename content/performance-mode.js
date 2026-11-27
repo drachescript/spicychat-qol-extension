@@ -322,7 +322,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // editor/generation state may be in flux, and the user cannot see it.
     // The next periodic check after becoming visible still honors the user's
     // existing auto-reload preference without changing that preference.
-    if (document.hidden) return;
+    if (document.hidden || DS.isNativeAndroidStorage?.()) return;
     const s = settings();
     if (!s.enabled || !s.autoReloadLargeChats || !DS.isSingleChatPage?.()) return;
     if (DS.isChatStartupWarmup?.() || DS.state?.bulkChatHistoryLoadActive) {

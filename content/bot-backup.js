@@ -967,7 +967,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (!backedUp) throw new Error("Could not create a safety backup of this bot. Import cancelled.");
         }
         if(contextGuard)await contextGuard();
+        const diagnosticOperation = contextGuard && DS.emitSctInspectorEvent && globalThis.crypto?.randomUUID ? crypto.randomUUID() : null;
+        if(diagnosticOperation)try{DS.emitSctInspectorEvent({phase:'attempt',action:'import',creationType:'chatbot',outcome:'pending',correlation:{operationId:diagnosticOperation,...(info?.id?{nativeCreationId:info.id}:{})}});}catch{}
         const result = await applySelectedBotFields(candidates[Number(chooser.value) || 0].fields, selected);
+        if(diagnosticOperation)try{DS.emitSctInspectorEvent({phase:'observation',action:'import',creationType:'chatbot',outcome:'native-ui-observed',correlation:{operationId:diagnosticOperation,...(info?.id?{nativeCreationId:info.id}:{})}});}catch{}
         const parts = [];
         if (result.filled.length) parts.push(`${result.filled.length} field(s) filled`);
         if (result.unchanged.length) parts.push(`${result.unchanged.length} unchanged`);

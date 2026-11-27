@@ -7,6 +7,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const CLEAN_FAVICON = "https://spicychat.ai/Assets/siteicons/1.0.1/spicychat/favicon.ico";
 
   let guardInstalled = false;
+  const onNotificationVisible = () => { if (guardInstalled) runNotificationGuard(false); };
   let notificationObserver = null;
   let notificationObservedNode = null;
   let headObserver = null;
@@ -39,7 +40,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function unhideIfReason(reason, predicate) {
-    DS.qsa(`[data-ds-reason='${reason}'], .ds-hidden`).forEach(el => {
+    DS.qsa(`[data-ds-reason='${reason}']`).forEach(el => {
       if (el.dataset.dsReason !== reason) return;
       if (predicate && !predicate(el)) return;
       DS.unhideElement?.(el);
@@ -61,8 +62,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     unhideIfReason("premium:text", isSidebarNavigationElement);
   }
 
-  function isModelSelector(el) {
-    const text = normalizedText(el);
+  function isModelSelector(el, precomputedText) {
+    const text = precomputedText ?? normalizedText(el);
     if (!text) return false;
 
     const hasModelHeading =
@@ -360,6 +361,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     guardTimer = null;
     clearTimeout(repairTimer);
     repairTimer = null;
+    document.removeEventListener("visibilitychange", onNotificationVisible);
+    window.removeEventListener("pageshow", onNotificationVisible);
     guardInstalled = false;
   }
 
@@ -419,13 +422,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       attributeFilter: ["href"],
     });
 
-    document.addEventListener("visibilitychange", () => {
-      runNotificationGuard(false);
-    });
-
-    window.addEventListener("pageshow", () => {
-      runNotificationGuard(false);
-    });
+    document.addEventListener("visibilitychange", onNotificationVisible);
+    window.addEventListener("pageshow", onNotificationVisible);
 
     guardTimer = setInterval(() => {
       observeNotificationBadge();
@@ -490,7 +488,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.qsa("button, a, [role='dialog'], [class*='modal'], [class*='popup']").forEach(el => {
       if (isSubscriptionPageContent(el)) return;
       if (isSidebarNavigationElement(el)) return;
-      if (isModelSelector(el)) return;
       if (el.closest("[data-testid='CurrentPlan-PlanCard'], [data-testid='CurrentPlan-PlanCardLink']")) return;
 
       const text = normalizedText(el);
@@ -503,7 +500,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         text.includes("subscribe now") ||
         text.includes("premium plan");
 
-      if (premiumText) DS.hideElement(el, "premium:text");
+      if (premiumText && !isModelSelector(el, text)) DS.hideElement(el, "premium:text");
     });
   };
 

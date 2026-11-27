@@ -362,6 +362,7 @@ if (!(() => { try {
     if (key === "authorization") {
       const token = raw.replace(/^bearer\s+/i, "").trim();
       if (token && token.length < MAX_TOKEN && isJwt(token)) {
+        if(quotaProfile&&token!==capturedToken&&quotaBearerIdentity(token)!==quotaProfile.bearer)invalidateQuotaProfile();
         capturedToken = token;
         capturedAt = Date.now();
         announceCapturedAuth();
@@ -403,6 +404,45 @@ if (!(() => { try {
   const nativeSend = XHR?.prototype?.send || null;
   let active = true;
   let hooksInstalled = false;
+
+  // Cache only the pseudonymous identity from an already occurring successful
+  // native account response. This early hook runs before the optional metadata
+  // bridge loads; hidden tabs need not perform another account lookup.
+  let quotaProfileWanted=null, quotaProfile=null, quotaProfileInvalidatedAt=0;
+  const quotaProfileRoute=()=>/^\/(?:[a-z]{2}\/)?(?:chat|story)\//i.test(location.pathname);
+  function quotaBearerIdentity(token){
+    if(!isJwt(token))return null;
+    try{const raw=token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');const v=JSON.parse(atob(raw.padEnd(Math.ceil(raw.length/4)*4,'=')));
+      if(typeof v.sub==='string'&&v.sub&&typeof v.iss==='string'&&v.iss)return JSON.stringify([v.iss,v.sub]);}catch{}
+    // An unrecognized identity cannot safely be matched across requests.
+    return null;
+  }
+  function quotaProfileRequest(input,method){
+    if(!active||quotaProfileWanted===false||!quotaProfileRoute()||String(method||'GET').toUpperCase()!=='GET')return false;
+    const u=parseApiUrl(input);return u?.origin==='https://prod.nd-api.com'&&u.pathname==='/v2/users';
+  }
+  async function captureQuotaProfile(data,bearer,at){
+    if(!active||quotaProfileWanted===false||!bearer||bearer!==quotaBearerIdentity(capturedToken))return;
+    const u=data?.user||data?.data?.user||data?.data||data;
+    if(typeof u?.id!=='string'||!u.id||u.id.length>160)return;
+    const roles=[u.subscription?.role,u.subscription?.subscription_role,u.role,u.subscription_role,u.subscriptionRole];
+    const tier=roles.map(v=>String(v||'').toLowerCase()).find(v=>['free','paid_minimal','paid_basic','paid_premium'].includes(v))||null;
+    try{const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-account-v1:'+u.id));
+      if(!active||quotaProfileWanted===false||bearer!==quotaBearerIdentity(capturedToken)||quotaProfile?.verifiedAt>at)return;
+      quotaProfile={accountKey:Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join(''),tier,verifiedAt:at,bearer};quotaProfileInvalidatedAt=0;
+    }catch{}
+  }
+  function invalidateQuotaProfile(){if(quotaProfile)quotaProfileInvalidatedAt=Date.now();quotaProfile=null;}
+  window.addEventListener('message',event=>{
+    if(event.source!==window||event.data?.source!=='spicychat-qol-generation-metadata-control'||event.data?.type!=='DSQ_GENERATION_METADATA_ENABLED')return;
+    quotaProfileWanted=event.data.quotaEnabled===true;if(!quotaProfileWanted)invalidateQuotaProfile();
+  });
+  window.addEventListener('ds-qol-quota-profile-read-v1',event=>{
+    const requestId=event.detail?.requestId;if(typeof requestId!=='string'||requestId.length>80||!active||quotaProfileWanted===false||!quotaProfileRoute())return;
+    if(quotaProfile&&quotaProfile.bearer!==quotaBearerIdentity(capturedToken))invalidateQuotaProfile();
+    const q=quotaProfile;
+    window.dispatchEvent(new CustomEvent('ds-qol-quota-profile-response-v1',{detail:q?{requestId,accountKey:q.accountKey,tier:q.tier,verifiedAt:q.verifiedAt}:{requestId,invalidatedAt:quotaProfileInvalidatedAt}}));
+  });
 
   // Favorited IDs are taken ONLY from a successful native authenticated
   // settings response. This does not guess endpoints, scrape profile pages or
@@ -505,13 +545,23 @@ if (!(() => { try {
       }
     } catch {}
 
+    const quotaRead=quotaProfileRequest(input,init?.method||(input instanceof Request?input.method:'GET'));
+    let quotaBearer=null;
+    if(quotaRead)try{
+      const headers=new Headers(init?.headers??(input instanceof Request?input.headers:undefined));
+      quotaBearer=quotaBearerIdentity(String(headers.get('authorization')||'').replace(/^bearer\s+/i,''));
+    }catch{}
     const favoritesSettings = active && isNativeFavoritesSettingsRead(input, init?.method || (input instanceof Request ? input.method : 'GET'));
     const importAttempt = lorebookImportAttempt(input, init?.method || (input instanceof Request ? input.method : "GET"));
     const pending = nativeFetch(input, init);
-    if (!historySeq && !favoritesSettings && !importAttempt) return pending;
+    if (!historySeq && !favoritesSettings && !importAttempt && !quotaRead) return pending;
     return pending.then(
       response => {
         if (historySeq) try { noteNativeHistoryResponse(historySeq, response?.status, input, "fetch", historyStartedAt); } catch {}
+        if(quotaRead){
+          if(response?.ok&&quotaBearer){try{const length=Number(response.headers?.get('content-length')||0),at=Date.now();if(length<=524288)void response.clone().json().then(data=>captureQuotaProfile(data,quotaBearer,at)).catch(()=>{});}catch{}}
+          else if(response?.status===401&&quotaBearer===quotaBearerIdentity(capturedToken))invalidateQuotaProfile();
+        }
         if (favoritesSettings && response?.ok) {
           // Clone asynchronously; never delay or consume the page's Response.
           try { void response.clone().json().then(captureNativeFavoritesSettings).catch(() => {}); } catch {}
@@ -538,17 +588,22 @@ if (!(() => { try {
       this.__dsCardTokenUrl = this.__dsCardTokenApi ? String(url || "") : "";
       this.__dsCardTokenHistoryApi = this.__dsCardTokenApi && urlIsNativeHistoryApi(url);
       this.__dsCardTokenFavoritesSettings = active && isNativeFavoritesSettingsRead(url, method);
+      this.__dsCardTokenQuotaProfile=quotaProfileRequest(url,method);
+      this.__dsCardTokenQuotaBearer=null;
     } catch {
       this.__dsCardTokenApi = false;
       this.__dsCardTokenUrl = "";
       this.__dsCardTokenHistoryApi = false;
       this.__dsCardTokenFavoritesSettings = false;
+      this.__dsCardTokenQuotaProfile=false;
     }
     return nativeOpen.call(this, method, url, ...rest);
   }
 
   function observedSetRequestHeader(name, value) {
-    try { if (active && this.__dsCardTokenApi) rememberHeader(name, value); } catch {}
+    try { if (active && this.__dsCardTokenApi) rememberHeader(name, value);
+      if(this.__dsCardTokenQuotaProfile&&String(name).toLowerCase()==='authorization')this.__dsCardTokenQuotaBearer=quotaBearerIdentity(String(value||'').replace(/^bearer\s+/i,''));
+    } catch {}
     return nativeSetRequestHeader.call(this, name, value);
   }
 
@@ -559,6 +614,15 @@ if (!(() => { try {
         let data=null;try {data=this.responseType==='json'?this.response:JSON.parse(this.responseText);}catch{}
         lorebookImportResponse(importAttempt,this.status,data);
       },{once:true});
+      if(active&&this.__dsCardTokenQuotaProfile&&typeof this.addEventListener==='function'){
+        const bearer=this.__dsCardTokenQuotaBearer;
+        this.__dsCardTokenQuotaBearer=null;
+        this.addEventListener('loadend',()=>{
+          if(this.status===401&&bearer===quotaBearerIdentity(capturedToken)){invalidateQuotaProfile();return;}
+          if(this.status<200||this.status>=300||!bearer)return;
+          try{const at=Date.now();const raw=this.responseType==='json'?null:this.responseText;if(raw&&raw.length>524288)return;void captureQuotaProfile(this.responseType==='json'?this.response:JSON.parse(raw),bearer,at);}catch{}
+        },{once:true});
+      }
       if (active && this.__dsCardTokenFavoritesSettings && typeof this.addEventListener === 'function') {
         this.addEventListener('loadend', () => {
           if (this.status < 200 || this.status >= 300) return;
@@ -607,7 +671,7 @@ if (!(() => { try {
   function setActive(next) {
     active = !!next;
     if (active) installHooks();
-    else uninstallHooks();
+    else {invalidateQuotaProfile();uninstallHooks();}
     try { setRootAttribute("data-ds-card-token-main-active", active ? "1" : "0"); } catch {}
   }
 

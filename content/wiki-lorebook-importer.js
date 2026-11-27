@@ -824,6 +824,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         durable.armSubmit?.();
         clicked = true;
         recovered.button.click();
+        durable.saveClicked?.();
         durable.phase?.('awaiting-response');
       } catch(e) {
         if (checkpointed && !clicked && !manual) await durable.notSent?.();
@@ -996,7 +997,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await durable.beforeSubmit("update", {...item,content:nextContent,keywords:nextKeywords});checkpointed=true;
         durable.checkTarget();
         if(manual||!submit.isConnected||entryModalParts()?.content!==parts.content||submit.disabled||parts.name.value!==item.name||parts.content.value!==nextContent||JSON.stringify(exactTransferKeywords(parts).sort())!==JSON.stringify([...nextKeywords].sort()))throw Error('Native update form changed before submission. Review the open entry before resuming.');
-        durable.armSubmit?.();clicked=true;submit.click();durable.phase?.('awaiting-response');
+        durable.armSubmit?.();clicked=true;submit.click();durable.saveClicked?.();durable.phase?.('awaiting-response');
       }catch(e){if(checkpointed&&!clicked&&!manual)await durable.notSent?.();throw e;}
       finally{for(const type of events)document.removeEventListener(type,mark,true);}
     }else submit.click();
@@ -1543,7 +1544,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
                 const durable=options.durable ? {
                   checkTarget:()=>{if(operation.cancelled||!canContinue()||routeInfo()?.id!==operation.id||routeInfo()?.page!=="entries"||document.querySelector("[data-testid='EntriesListServer-SearchInput']")?.value?.trim())throw Error('Import paused before the next native write.');},
                   beforeSubmit:(kind,entry)=>options.durable.beforeSubmit(index,kind,entry),notSent:()=>options.durable.notSent(),
-                  armSubmit:()=>options.durable.armSubmit(),formRecovered:()=>options.durable.formRecovered?.(),
+                  armSubmit:()=>options.durable.armSubmit(),saveClicked:()=>options.durable.saveClicked?.(),formRecovered:()=>options.durable.formRecovered?.(),
                   phase:p=>options.durable.phase?.(p,index),
                   confirmWrite:async action=>{await options.durable.commit(index,action);committedAction=action;counts.nextIndex=index+1;}
                 } : null;

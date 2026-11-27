@@ -42,7 +42,7 @@ async function dsqLorebookImportMessage(m,s) {
     let result, error, changed;
     const abort=e=>{error=e;try{tx.abort();}catch{}};
     tx.oncomplete=()=>{
-      if(changed){const o=changed.owner;if(o)dsqLorebookImportProtectedTabs.set(o.tabId,{bookId:scope.bookId,until:o.until});else dsqLorebookImportProtectedTabs.delete(scope.tabId);
+      if(changed){try{dsqSctJournal(m,s,changed,now);}catch{} const o=changed.owner;if(o)dsqLorebookImportProtectedTabs.set(o.tabId,{bookId:scope.bookId,until:o.until});else dsqLorebookImportProtectedTabs.delete(scope.tabId);
         if(!['heartbeat','begin','receipt'].includes(action) && (action!=='commit'||changed.nextIndex%25===0||changed.nextIndex===changed.total))try{qolBackgroundTrace('lorebook-import','lorebook-import',{action,jobId:changed.jobId,phase:changed.phase,completed:changed.nextIndex,total:changed.total,retries:changed.retries,resumes:changed.resumes});}catch{} }
       resolve({ok:true,...result});};
     tx.onerror=tx.onabort=()=>reject(error||tx.error||Error('Import checkpoint transaction failed'));

@@ -268,7 +268,7 @@ function setupSupportReportFallbackButtons() {
 
 
 function isAndroidSupportWebView() {
-  return !!(window.flutter_inappwebview?.callHandler || window._dsRequestExport ||
+  return !!(nativeAndroidOptionsStorage() || window.flutter_inappwebview?.callHandler || window._dsRequestExport ||
     /\bwv\b|; wv\)|Flutter/i.test(navigator.userAgent || ""));
 }
 
@@ -289,7 +289,7 @@ async function requestAndroidSupportFile(text, filename) {
     if (result === false || result?.ok === false || result?.success === false || result?.error || result?.canceled) return empty;
     const bytes = Number(result?.bytes ?? result?.bytesWritten ?? result?.savedBytes ?? result?.fileSize ?? NaN);
     const verified = result?.ok === true && result?.verified === true && bytes === expectedBytes;
-    return { started: verified || (Number.isFinite(bytes) && bytes === expectedBytes), verified };
+    return { started: verified || (Number.isFinite(bytes) && bytes === expectedBytes), verified, bytes: verified ? bytes : null };
   };
   if (bridge?.callHandler) {
     // One native file-picker request only. Never retry after a possible
@@ -344,10 +344,10 @@ async function downloadSupportText(text, filename, successMessage = "Support rep
   if (isAndroidSupportWebView()) {
     const result = await requestAndroidSupportFile(body, filename);
     lastAndroidSupportFileResult = result;
-    const fallback = await preserveAndroidSupportFallback(body);
+    const fallback = result.verified ? { copied: false } : await preserveAndroidSupportFallback(body);
     lastAndroidSupportExportState = result.verified ? "verified" : result.started ? "native" : fallback.copied ? "copied" : "manual";
     if (status) status.textContent = result.verified
-      ? `Android verified the saved report (${new TextEncoder().encode(body).byteLength} bytes).${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
+      ? `Android verified the saved report (${result.bytes} bytes).${fallback.copied ? " A copy was also placed on the clipboard." : ""}`
       : result.started
         ? `Android accepted ${filename}, but did not verify file completion. History was kept.`
       : (fallback.copied
@@ -519,21 +519,20 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
 
   // Support diagnostics must degrade per source instead of losing the whole
   // section because one large/local store stalls after an extension restart.
-  const [resultValue, context, bytesValue, largeStatsValue, recoverySnapshotMeta] = await Promise.all([
-    promiseWithValueTimeout(storageGet(diagnosticStorageKeys), 3500, null),
-    runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
-    promiseWithValueTimeout(storageBytesInUse(null), 2000, null),
-    promiseWithValueTimeout(readLargeStorageStats(), 2500, null),
-    promiseWithValueTimeout(readRecoverySnapshotMeta(), 2000, null)
+  const [resultValue, context, bytesValue, largeStatsValue, recoverySnapshotMeta] = await runSupportSources([
+    () => promiseWithValueTimeout(storageGet(diagnosticStorageKeys), nativeAndroidOptionsStorage() ? 7500 : 3500, null),
+    () => runtimeMessageWithTimeout({ type: "DS_GET_DIAGNOSTIC_CONTEXT" }, supportDiagnosticRuntimeTimeoutMs()),
+    () => promiseWithValueTimeout(storageBytesInUse(null), nativeAndroidOptionsStorage() ? 7500 : 2000, null),
+    () => promiseWithValueTimeout(readLargeStorageStats(), nativeAndroidOptionsStorage() ? 7500 : 2500, null),
+    () => promiseWithValueTimeout(readRecoverySnapshotMeta(), 2000, null)
   ]);
   const result = resultValue && typeof resultValue === "object" ? resultValue : {};
-  const bytes = Number(bytesValue);
+  const bytes = validStorageMeasurement(bytesValue);
   const largeStorageStats = largeStatsValue && typeof largeStatsValue === "object" ? largeStatsValue : {};
   const largeStorageStatsAvailable = !!(largeStatsValue && typeof largeStatsValue === "object");
   const largeStorageCount = key => {
     if (!largeStorageStatsAvailable || !Object.prototype.hasOwnProperty.call(largeStorageStats, key)) return "unavailable";
-    const value = Number(largeStorageStats[key]);
-    return Number.isFinite(value) ? String(value) : "unavailable";
+    return storageCountLabel(largeStorageStats, key);
   };
   const partialSources = [];
   if (!resultValue) partialSources.push("local dataset summary");
@@ -585,7 +584,7 @@ async function copyDiagnostics({ returnOnly = false } = {}) {
     `Bot availability checks: ${largeStorageCount(BOT_AVAILABILITY_KEY)}`,
     `Saved bot copies: ${largeStorageCount(BOT_ARCHIVE_KEY)}`,
     `Tracked Lorebook status: ${largeStorageCount(LOREBOOK_STATUS_KEY)}`,
-    `Large-data IndexedDB: ${largeStorageCount(BOT_AVAILABILITY_KEY)} availability records · ${largeStorageCount(BOT_ARCHIVE_KEY)} archive records · ${largeStorageCount(LOREBOOK_STATUS_KEY)} Lorebook status records`,
+    `Large-data ${largeStorageBackendLabel()}: ${largeStorageCount(BOT_AVAILABILITY_KEY)} availability records · ${largeStorageCount(BOT_ARCHIVE_KEY)} archive records · ${largeStorageCount(LOREBOOK_STATUS_KEY)} Lorebook status records`,
     `Personas: ${countStoreItems(personas, "persona")}`,
     `Persona organization: ${Object.keys(result[PERSONA_ORG_KEY]?.meta || {}).length}`,
     `OOC presets: ${countStoreItems(result[OOC_TEMPLATES_KEY], "ooc")}`,
@@ -921,11 +920,11 @@ async function buildPerformanceSelfCheckText() {
 
 async function buildFastSupportSnapshot() {
   const manifest = chrome.runtime.getManifest?.() || {};
-  const [quickStored, bytesValue, largeStatsValue, liveTabValue] = await Promise.all([
-    promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY, DS_MEMORY_MANAGER_UI_OBSERVATION_KEY, DS_MEMORY_IMPORT_RESULT_KEY]), 1500, null),
-    promiseWithValueTimeout(storageBytesInUse(null), 1500, null),
-    promiseWithValueTimeout(readLargeStorageStats(), 1500, null),
-    promiseWithValueTimeout(runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1200), 1400, null)
+  const [quickStored, bytesValue, largeStatsValue, liveTabValue] = await runSupportSources([
+    () => promiseWithValueTimeout(storageGet(["settings", AUTO_AFK_STATUS_KEY, DS_MEMORY_MANAGER_UI_OBSERVATION_KEY, DS_MEMORY_IMPORT_RESULT_KEY]), nativeAndroidOptionsStorage() ? 7500 : 1500, null),
+    () => promiseWithValueTimeout(storageBytesInUse(null), nativeAndroidOptionsStorage() ? 7500 : 1500, null),
+    () => promiseWithValueTimeout(readLargeStorageStats(), nativeAndroidOptionsStorage() ? 7500 : 1500, null),
+    () => promiseWithValueTimeout(runtimeMessageWithTimeout({ type: "DS_GET_SPICYCHAT_TAB_SUMMARY" }, 1200), 1400, null)
   ]);
   const stored = quickStored && typeof quickStored === "object" ? quickStored : {};
   const largeStatsReady = !!(largeStatsValue && typeof largeStatsValue === "object");
@@ -934,7 +933,7 @@ async function buildFastSupportSnapshot() {
   const afk = stored[AUTO_AFK_STATUS_KEY] || {};
   const liveTabs = liveTabValue?.ok && liveTabValue.summary && typeof liveTabValue.summary === "object" ? liveTabValue.summary : null;
   const tabState = liveTabs || afk;
-  const bytes = Number(bytesValue);
+  const bytes = validStorageMeasurement(bytesValue);
   const androidTabProbeUnavailable = isAndroidSupportWebView() && !liveTabs;
   const tabLabel = liveTabs
     ? "Live tab check"
@@ -953,8 +952,8 @@ async function buildFastSupportSnapshot() {
     `chrome.storage.local: ${Number.isFinite(bytes) ? `${(bytes / 1024 / 1024).toFixed(bytes > 10 * 1024 * 1024 ? 1 : 2)} MB` : "size read timed out"}`,
     `Auto-AFK: ${settings.autoAfkEnabled ? "on" : "off"} @ ${Math.min(43200, Math.max(15, Number(settings.autoAfkMinutes) || 720))} min`,
     largeStatsReady
-      ? `Large-data IndexedDB: ${Number(largeStats[BOT_AVAILABILITY_KEY] || 0)} availability · ${Number(largeStats[BOT_ARCHIVE_KEY] || 0)} archive records · ${Number(largeStats[LOREBOOK_STATUS_KEY] || 0)} Lorebook status records`
-      : "Large-data IndexedDB: fast check timed out; full support sections continue independently",
+      ? `Large-data ${largeStorageBackendLabel()}: ${storageCountLabel(largeStats, BOT_AVAILABILITY_KEY)} availability · ${storageCountLabel(largeStats, BOT_ARCHIVE_KEY)} archive records · ${storageCountLabel(largeStats, LOREBOOK_STATUS_KEY)} Lorebook status records`
+      : `Large-data ${largeStorageBackendLabel()}: count unavailable; full support sections continue independently`,
     `PC protection: ${settings.lowMemoryProtectionEnabled ? `on; keep ${Math.min(20, Math.max(1, Number(settings.maxAwakeSpicyTabs) || 3))} normal tabs awake` : "off"}`,
     androidTabProbeUnavailable
       ? "Android app tab check: unavailable through the WebView extension bridge; zero tabs is NOT a measurement."
@@ -968,7 +967,9 @@ async function buildFastSupportSnapshot() {
 // Only the dedicated history key is ever written or cleared here.
 const DS_ANDROID_SUPPORT_HISTORY_KEY = "dsAndroidSupportHistoryV1";
 async function readAndroidSupportHistory({ summaryOnly = false } = {}) {
-  const state = (await chrome.storage.local.get(DS_ANDROID_SUPPORT_HISTORY_KEY))?.[DS_ANDROID_SUPPORT_HISTORY_KEY];
+  const read = await promiseWithValueTimeout(chromeLocalGet([DS_ANDROID_SUPPORT_HISTORY_KEY]), 7500, null);
+  if (!read) return { ok: false, text: "Android support history unavailable; retained." };
+  const state = read[DS_ANDROID_SUPPORT_HISTORY_KEY];
   if (state && (state.schema !== 1 || !Array.isArray(state.rows)))
     return { ok: false, error: "Unknown Android history schema; original data was preserved." };
   const history = state || { schema: 1, next: 1, dropped: 0, rows: [] };
@@ -1119,46 +1120,39 @@ async function downloadSupportVerified(text, compressed) {
   return { started, verified: false, isGzip: false };
 }
 
+let supportBuildBusy = false;
 async function buildAllSupportInfo({ history = null, historyPromise: suppliedHistoryPromise = null } = {}) {
   return withSharedSupportRuntimeSnapshot(async () => {
-  const historyPromise = suppliedHistoryPromise || (history ? Promise.resolve(history) : readSavedSupportHistory());
-  const sectionTimeoutMs = 7000;
-  const timed = (promise, label) => promiseWithSupportTimeout(
-    promise,
-    sectionTimeoutMs,
-    `${label} timed out after ${Math.round(sectionTimeoutMs / 1000)} seconds. Other support sections still continued.`
-  );
-
-  // Diagnostics and lightweight Data Health have their own per-source caps, so
-  // they return useful partial results instead of letting one slow store erase
-  // the entire section. Independent report sections still run in parallel.
-  const fastSnapshotPromise = buildFastSupportSnapshot().catch(error =>
-    `Fast snapshot could not be built: ${error?.message || String(error || "unknown error")}`
-  );
-  const diagnosticPromise = copyDiagnostics({ returnOnly: true })
-    .catch(error => `Diagnostic info could not be built: ${error?.message || String(error || "unknown error")}`);
-  const performancePromise = timed(copyPerformanceReport({ returnOnly: true }), "Performance report")
-    .catch(error => `Performance report could not be built: ${error?.message || String(error || "unknown error")}`);
-  const selfCheckPromise = timed(buildPerformanceSelfCheckText(), "Performance self-check")
-    .catch(error => `Performance self-check could not be built: ${error?.message || String(error || "unknown error")}`);
-  const healthPromise = (async () => {
-    const health = await collectDataHealth({ lightweight: true });
-    return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
-  })().catch(error => `Data health check failed: ${error?.message || String(error)}`);
-  const baselinePromise = promiseWithValueTimeout(storageGet([PERFORMANCE_BASELINE_KEY]), 1500, {})
-    .then(stored => stored?.[PERFORMANCE_BASELINE_KEY]
-      ? timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison").catch(() => "")
-      : "");
-
-  const [fastSnapshot, diagnosticText, performanceText, selfCheckText, healthValue, baselineText] =
-    await Promise.all([fastSnapshotPromise, diagnosticPromise, performancePromise, selfCheckPromise, healthPromise, baselinePromise]);
+  const android = nativeAndroidOptionsStorage();
+  const historyRead = () => (typeof suppliedHistoryPromise === "function" ? suppliedHistoryPromise() : suppliedHistoryPromise) || (history ? Promise.resolve(history) : readSavedSupportHistory());
+  const historyPromise = android ? null : historyRead();
+  const sectionTimeoutMs = android ? 12000 : 7000;
+  const timed = (promise, label) => promiseWithSupportTimeout(promise, sectionTimeoutMs,
+    `${label} timed out; other support sections continued.`);
+  const sectionsToBuild = [
+    () => buildFastSupportSnapshot().catch(error => `Fast snapshot unavailable: ${error?.message || error}`),
+    () => copyDiagnostics({ returnOnly: true }).catch(error => `Diagnostic info unavailable: ${error?.message || error}`),
+    () => timed(copyPerformanceReport({ returnOnly: true }), "Performance report").catch(error => `Performance report unavailable: ${error?.message || error}`),
+    () => timed(buildPerformanceSelfCheckText(), "Performance self-check").catch(error => `Performance self-check unavailable: ${error?.message || error}`),
+    async () => { try {
+      const health = await collectDataHealth({ lightweight: true });
+      return [health.summaryText, ...(health.rows || []).map(row => `${String(row.state || "ok").toUpperCase()}: ${row.label}: ${row.detail}`)].join("\n");
+    } catch (error) { return `Data health check failed: ${error?.message || error}`; } },
+    () => promiseWithValueTimeout(storageGet([PERFORMANCE_BASELINE_KEY]), android ? 5000 : 1500, {}).then(stored => stored?.[PERFORMANCE_BASELINE_KEY] ? timed(comparePerformanceBaseline({ returnText: true }), "Performance baseline comparison").catch(() => "") : "")
+  ];
+  let results;
+  if (android) {
+    results = [];
+    for (const build of sectionsToBuild) { results.push(await build()); await new Promise(resolve => setTimeout(resolve, 0)); }
+  } else results = await Promise.all(sectionsToBuild.map(build => build()));
+  const [fastSnapshot, diagnosticText, performanceText, selfCheckText, healthValue, baselineText] = results;
   lastPerformanceSelfCheckText = selfCheckText;
 
   const sections = [
     "SpicyChat QoL support info",
     `Generated: ${new Date().toISOString()}`,
     "Paste or attach this whole report when someone asks for QoL diagnostics/support info.",
-    "Support builder: lightweight state is captured first; heavier sections run in parallel and are independently capped.",
+    android ? "Support builder: Android sections run sequentially; storage measurements are shared; deep data checks are on demand." : "Support builder: lightweight state is captured first; heavier sections run in parallel and are independently capped.",
     "",
     "===== FAST SNAPSHOT =====",
     fastSnapshot,
@@ -1178,7 +1172,7 @@ async function buildAllSupportInfo({ history = null, historyPromise: suppliedHis
   if (String(baselineText || "").trim()) {
     sections.push("", "===== PERFORMANCE BASELINE COMPARISON =====", baselineText);
   }
-  const saved = await historyPromise;
+  const saved = await (historyPromise || historyRead());
   if (saved?.ok && saved.count) sections.push("", "===== SAVED SUPPORT HISTORY =====", saved.text);
   else sections.push("", "===== SAVED SUPPORT HISTORY =====", saved?.ok ? "No saved checks yet." : `Could not read saved support history: ${saved?.text || "unknown error"}`);
   return sanitizeSupportReportText(sections.join("\n"));
@@ -1186,11 +1180,15 @@ async function buildAllSupportInfo({ history = null, historyPromise: suppliedHis
 }
 
 async function copyAllSupportInfo() {
+  if (supportBuildBusy) return false;
+  supportBuildBusy = true;
+  try { return await copyAllSupportInfoOnce(); }
+  finally { supportBuildBusy = false; }
+}
+async function copyAllSupportInfoOnce() {
   const status = $("diagnosticsStatus");
   if (status) status.textContent = "Building full support report...";
   const text = await buildAllSupportInfo();
-  if (isAndroidSupportWebView()) showSupportReportFallback(text);
-
   try {
     await navigator.clipboard.writeText(text);
     if (status) status.textContent = "Full support report copied. Paste it into Discord, GitHub, or wherever you were asked to send it.";
@@ -1215,17 +1213,22 @@ async function copyAllSupportInfo() {
 }
 
 async function downloadAllSupportInfo() {
+  if (supportBuildBusy) return false;
+  supportBuildBusy = true;
+  try { return await downloadAllSupportInfoOnce(); }
+  finally { supportBuildBusy = false; }
+}
+async function downloadAllSupportInfoOnce() {
   const status = $("diagnosticsStatus");
   if (status) status.textContent = "Building full support report for download...";
   try {
     // Capture the checkpoint before building. A later sample must survive.
     // A slow/corrupt history archive must not prevent a new current report.
     // Its error is written into the report, and no history is deleted.
-    const historyPromise = readSavedSupportHistory();
-    // Build all sections while the history request is running. Waiting for
-    // Android's often-unreachable background first made a simple export stall.
-    const text = await buildAllSupportInfo({ historyPromise });
-    const history = await historyPromise;
+    let historyPromise;
+    const getHistory = () => historyPromise ||= readSavedSupportHistory();
+    const text = await buildAllSupportInfo({ historyPromise: nativeAndroidOptionsStorage() ? getHistory : getHistory() });
+    const history = await getHistory();
     const compressed = !isAndroidSupportWebView() && new TextEncoder().encode(text).byteLength > 256 * 1024;
     const saved = await downloadSupportVerified(text, compressed);
     if (!saved.started) {

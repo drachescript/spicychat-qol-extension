@@ -7,8 +7,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const DS = window.DragonScriptQoL;
   if (!DS) return;
   DS.createMainSlowPass = (ctx) => {
-    const { anySetting, cardFilteringWanted, chatStartupQuietActive, creatorProfileStartupQuietActive, generationMetadataWanted, isCardListingContext, modelSelectorWanted, notificationsWanted, personaToolsWanted, rerunAfterMenuSettles, runDisabledCleanup, runFeatureStep, runPersonaPickerLowImpact, runRoutedFeatureStep, runStep, runThrottledFeatureStep, runtimeCounters, runtimePlan, runtimeProfile, scheduleChatStartupQuietResume, scheduleCreatorProfileQuietResume, scheduleSlowRun, slowDirtyHas, syncNativeScrollBackToTopVisibility, takeSlowDirtyGroups, topBarWanted, laneState } = ctx;
+    const { anySetting, cardFilteringWanted, chatStartupQuietActive, creatorProfileStartupQuietActive, generationMetadataWanted, isCardListingContext, modelSelectorWanted, notificationsWanted, personaToolsWanted, rerunAfterMenuSettles, runDisabledCleanup, runFeatureStep: baseRunFeatureStep, runPersonaPickerLowImpact, runRoutedFeatureStep: baseRunRoutedFeatureStep, runStep: baseRunStep, runThrottledFeatureStep: baseRunThrottledFeatureStep, runtimeCounters, runtimePlan, runtimeProfile, scheduleChatStartupQuietResume, scheduleCreatorProfileQuietResume, scheduleSlowRun, slowDirtyHas, syncNativeScrollBackToTopVisibility, takeSlowDirtyGroups, topBarWanted, laneState } = ctx;
   async function runTargetedChatSlowPass(dirty, settings, plan, options = {}) {
+    const { runStep, runFeatureStep, runRoutedFeatureStep } = options;
     const counters = runtimeCounters();
     counters.targetedChatSlowPasses = Number(counters.targetedChatSlowPasses || 0) + 1;
     counters.lastTargetedChatSlowGroups = [...dirty].join(",");
@@ -129,6 +130,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }) : null;
     DS.state.diagSlowOperationId = slowToken?.id || "";
     laneState.slowRunning = true;
+    const routeGuard = DS.makeRouteWorkGuard();
+    const runStep = routeGuard.wrap(baseRunStep);
+    const runFeatureStep = routeGuard.wrap(baseRunFeatureStep);
+    const runRoutedFeatureStep = routeGuard.wrap(baseRunRoutedFeatureStep);
+    const runThrottledFeatureStep = routeGuard.wrap(baseRunThrottledFeatureStep);
+
     laneState.slowSliceState = typeof performance !== "undefined" ? { sliceStarted: performance.now(), activeMs: 0, slices: 1, dirtyGroups: [] } : null;
 
     try {
@@ -184,7 +191,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // cosmetic work. Only explicitly invalidated chat groups run here. Route,
       // settings and non-chat passes still use the full compatibility path.
       if (singleChat && !dirty.has("all")) {
-        await runTargetedChatSlowPass(dirty, settings, plan, options);
+        await runTargetedChatSlowPass(dirty, settings, plan, { ...options, runStep, runFeatureStep, runRoutedFeatureStep });
         return;
       }
 
@@ -382,6 +389,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       await runFeatureStep("animation controls", !!settings.reduceAnimatedBotImages || anySetting(settings, ["animatedImagesListings", "animatedImagesChats", "animatedImagesProfiles", "animatedImagesChatMedia"]) || !!DS.state.animationControlsWasActive, () => DS.applyAnimationControls?.());
       await runFeatureStep("update panel", !!settings.showQuickPanel || !!document.getElementById("ds-qol-panel"), () => DS.updateQuickPanel?.());
+    } catch (error) {
+      if (error !== routeGuard.cancelled) throw error;
+      const perf = runtimeCounters();
+      perf.obsoleteRoutePassesCancelled = (perf.obsoleteRoutePassesCancelled || 0) + 1;
     } finally {
       let activeMs = 0;
       let slices = 0;
@@ -391,7 +402,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         slices = Number(laneState.slowSliceState.slices || 1);
         dirtyGroups = Array.isArray(laneState.slowSliceState.dirtyGroups) ? laneState.slowSliceState.dirtyGroups : [];
       }
-      if (slowToken) DS.diagOperationEnd?.(slowToken, { outcome: "ok", meta: { sliceWallMs: Math.round(activeMs * 10) / 10, timingKind: "wall-between-yields-includes-awaits", slices, dirtyGroups, queueDelayMs: slowQueueDelayMs } });
+      if (slowToken) DS.diagOperationEnd?.(slowToken, { outcome: routeGuard.active() ? "ok" : "cancelled", meta: { sliceWallMs: Math.round(activeMs * 10) / 10, timingKind: "wall-between-yields-includes-awaits", slices, dirtyGroups, queueDelayMs: slowQueueDelayMs } });
       DS.diagScheduler?.("finished", { lane: "slow", durationSliceWallMs: Math.round(activeMs * 10) / 10, timingKind: "wall-between-yields-includes-awaits", slices, dirtyGroups });
       laneState.slowSliceState = null;
       DS.state.diagSlowOperationId = "";

@@ -649,8 +649,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function clearSelectionUi() {
     document.querySelectorAll('[data-ds-fav-bulk-selected]').forEach(x => { x.classList.remove('ds-favorites-bulk-selected'); delete x.dataset.dsFavBulkSelected; x.querySelector('.ds-favorites-bulk-select')?.remove(); });
   }
+  let selectionGuardCleanup = null;
   function setSelecting(next) {
     state.active = !!next;
+    if (state.active && !selectionGuardCleanup) selectionGuardCleanup = DS.installCardSelectionGuard?.({ active: () => state.active && isEnabled() && isPage() && !state.busy, resolve: resolveSelectionCard, select: selectFavoriteCard });
+    if (!state.active && selectionGuardCleanup) { selectionGuardCleanup(); selectionGuardCleanup = null; }
     if (!state.active) { selected.clear(); clearSelectionUi(); if (document.getElementById(BAR)?.dataset.dsFavBulk === '1') document.getElementById(BAR)?.remove(); }
     else { css(); renderBar(); selectionCards(); }
     renderLauncher();
@@ -1468,27 +1471,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       setSelecting(!state.active);
       return;
     }
-    if (!state.active || !isEnabled() || state.busy) return;
-    if (event.target.closest(`#${BAR},#ds-favorites-manager-tools,#ds-qol-panel`)) return;
-    // Preserve native Favorite, creator, menu, and profile actions; only
-    // ordinary card surface and direct chat links are selection targets.
-    const control = event.target.closest('button,input,textarea,select,[role="button"],a[href]');
-    if (control && !(control.matches('a[href]') && /\/(?:chat|chatbot)\//i.test(control.getAttribute('href') || control.href || '') &&
-      idFrom(control.getAttribute('href') || control.href))) return;
-    let card = event.target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"],div.relative.group');
-    if (!card) {
-      // Fall back to a card already discovered in the native Favorites list,
-      // rather than accidentally selecting one of its inner link wrappers.
-      for (const candidate of cards().values()) {
-        if (candidate.contains(event.target)) { card = candidate; break; }
-      }
-    }
-    if (!card) return;
-    const meta = cardMeta(card);
-    if (!meta) return;
-    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-    if (selected.has(meta.id)) selected.delete(meta.id);
-    else selected.set(meta.id, meta);
+    // Card gestures are handled by the early window-capture guard.
+  }
+  function resolveSelectionCard(target) {
+    if (!(target instanceof Element) || target.closest(`#${BAR},#ds-favorites-manager-tools,#ds-qol-panel,[data-ds-owned="1"]`)) return null;
+    const card = target.closest('[data-testid="CharacterCard"],[data-testid="ChatbotCard"],[data-testid="BotCard"],div.relative.group');
+    if (!card || !cardId(card)) return null;
+    const control = target.closest('button,input,textarea,select,[role="button"],a[href]');
+    if (control && control !== card && !(control.matches('a[href]') && idFrom(control.href) && !control.closest('[data-testid*="OverlayActions"],[aria-label="character-info"],[data-testid*="InfoLink"]'))) return null;
+    return { id: cardId(card), card };
+  }
+  function selectFavoriteCard(entry) {
+    if (selected.has(entry.id)) selected.delete(entry.id);
+    else { const meta = cardMeta(entry.card, entry.id); if (meta) selected.set(entry.id, meta); }
     selectionCards(); renderBar();
   }
   function cleanup() {
@@ -1501,7 +1496,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     state.cleanupStop = true;
     state.cleanupLoaded = false;
     if (!state.cleanupRunning) state.cleanupJob = null;
-    state.observer?.disconnect(); state.observer = null;
+    state.observer?.disconnect(); state.observer = null; state.observerRoot = null;
     clearTimeout(state.refreshTimer); state.refreshTimer = null;
   }
   function refresh() {
@@ -1513,8 +1508,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     DS.refreshFavoritesLaterTab?.();
     void loadCleanupJob();
     if (!DS.isLaterFavoritesTabActive?.()) void syncVisibleFavorites();
+    const root = document.querySelector('[data-testid="SearchClientCharacterListingBody"],[data-testid="SearchClientCharacterListing"]') || document.body;
+    if (state.observer && state.observerRoot !== root) { state.observer.disconnect(); state.observer = null; }
     if (!state.observer) {
-      const root = document.querySelector('[data-testid="SearchClientCharacterListing"]') || document.body;
       if (!root) return;
       state.observer = new MutationObserver(mutations => {
         // NodeLists are iterable; avoid allocating an array for every native
@@ -1533,6 +1529,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if (state.refreshTimer) return;
         state.refreshTimer = setTimeout(() => { state.refreshTimer = null; if (isPage()) { renderLauncher(); historyControls(); if (state.active) selectionCards(); void syncVisibleFavorites(); } }, 300);
       });
+      state.observerRoot = root;
       state.observer.observe(root, { childList: true, subtree: true });
     }
   }
@@ -1541,6 +1538,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   document.addEventListener('click', e => { if (e.target.closest?.('a[href]')) setTimeout(refresh, 200); }, true);
   // Called by the existing Favorites lifecycle (no permanent polling on other pages).
   DS.refreshFavoritesBulkManager = refresh;
+  DS.cancelObsoleteFavoriteSelection = () => { if (!isPage() && (state.active || state.observer)) cleanup(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refresh, { once: true });
   else refresh();
 })();

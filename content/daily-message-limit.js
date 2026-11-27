@@ -8,7 +8,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   const LIMITS=Object.freeze({free:2000,paid_minimal:2000,paid_basic:5000,paid_premium:5000});
   const NAMES=Object.freeze({free:'Free',paid_minimal:'Get A Taste',paid_basic:'True Supporter',paid_premium:'All-In'});
   let account=null,accountPending=null,epoch=0,lastVerify=0,lastHeader=null,observedAccountKey=null,lastRender=0,summary=null,refreshPending=null,timer=null,button=null,panel=null,storageError=false,missed=0,started=false;
-  let noticeSeen=false,noticeAbsentAt=0,lastNoticeScan=0,nativeNotice=null,noticeWasAbsent=false;
+  let minPassiveAt=0;
+  let noticeSeen=false,noticeAbsentAt=0,lastNoticeScan=0,nativeNotice=null,noticeWasAbsent=false,noticeRoute=null;
   const SUPPORT_WINDOW=24*60*60*1000;
   const enabled=()=>DS.state?.settings?.enabled===true&&DS.state.settings.dailyMessageLimitTrackerEnabled===true&&!window.__DSQ_TAB_GATE__?.paused;
   const onChat=()=>!!(DS.isSingleChatPage?.()||/^\/(?:[a-z]{2}\/)?chat\//i.test(location.pathname));
@@ -23,12 +24,29 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const header=document.querySelector('[data-testid="UserAccountLink"]');
     if(!header)return null;
     // Ephemeral DOM-change detection only; avatar URL is never stored/exported.
-    return (header.querySelector('img')?.getAttribute('src')||'')+'|'+(DS.nativeSubscriptionTier?.()||'');
+    return {avatar:header.querySelector('img')?.getAttribute('src')||'',tier:DS.nativeSubscriptionTier?.()||''};
   }
   function invalidate(){epoch++;account=null;accountPending=null;summary=null;lastVerify=0;noticeSeen=false;nativeNotice=null;lastNoticeScan=0;noticeAbsentAt=0;noticeWasAbsent=false;DS.invalidateSubscriptionSnapshot?.();}
-  function checkHeader(){const h=headerIdentity();if(lastHeader!==null&&h!==null&&h!==lastHeader){observedAccountKey=null;invalidate();}lastHeader=h;}
+  function checkHeader(){const h=headerIdentity();if(lastHeader&&h&&(h.avatar!==lastHeader.avatar||h.tier!==lastHeader.tier)){
+    if(h.avatar&&lastHeader.avatar&&h.avatar!==lastHeader.avatar)minPassiveAt=now();
+    observedAccountKey=null;invalidate();
+  }if(h)lastHeader=h;}
+  function passiveAccount(){
+    if(!enabled()||!onChat())return null;
+    let result=null;const requestId=crypto.randomUUID(),name='ds-qol-quota-profile-response-v1';
+    const read=e=>{if(e.detail?.requestId===requestId)result=e.detail;};
+    try{window.addEventListener(name,read);window.dispatchEvent(new CustomEvent('ds-qol-quota-profile-read-v1',{detail:{requestId}}));}catch{}finally{window.removeEventListener(name,read);}
+    if(result?.invalidatedAt){if(account&&account.verifiedAt<=result.invalidatedAt){observedAccountKey=null;invalidate();}return null;}
+    if(!result||!/^([0-9a-f]{64})$/.test(result.accountKey||'')||!Number.isSafeInteger(result.verifiedAt)||result.verifiedAt<minPassiveAt||result.verifiedAt>now())return null;
+    if(account&&account.accountKey!==result.accountKey)invalidate();
+    observedAccountKey=result.accountKey;
+    const verifiedAt=account?.accountKey===result.accountKey?Math.min(account.verifiedAt,result.verifiedAt):result.verifiedAt;
+    if(accountPending){epoch++;accountPending=null;}
+    account={accountKey:result.accountKey,tier:DS.nativeSubscriptionTier?.()||result.tier||account?.tier||null,verifiedAt,tierSource:'native-profile-observation'};
+    return account;
+  }
   function getAccount(force=false){
-    checkHeader();if(accountPending)return accountPending;
+    checkHeader();const passive=passiveAccount();if(passive)return Promise.resolve(passive);if(accountPending)return accountPending;
     if(account&&!force&&now()-lastVerify<5*60*1000)return Promise.resolve(account);
     if(!enabled()||!onChat()||typeof DS.readSubscriptionSnapshot!=='function'||now()-lastVerify<30000)return Promise.resolve(account);
     lastVerify=now();const e=epoch;
@@ -44,13 +62,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   function elapsed(t){const minutes=Math.max(0,Math.floor((now()-t)/60000));return `${Math.floor(minutes/60)}h ${minutes%60}m`;}
   function tier(){return account?.tier||DS.nativeSubscriptionTier?.()||null;}
   function recoveryEstimate(s,at=now()){
-    if(!s?.lastRestriction||(s.lastSuccess&&s.lastSuccess>=s.lastRestriction.at))return null;
-    // A notice rediscovered after reload must not replace the earlier saved
-    // restriction. A prior generic 429 is only a possible quota onset.
-    const start=s.episodeRequestAt||s.episodeStart||s.quotaNoticeAt||s.lastRestriction.at;
+    const e=s?.episode;
+    if(!e?.active||!e.quotaEvidence)return null;
+    const start=e.start;
     if(!Number.isFinite(start)||start<=0)return null;
     const deadline=start+SUPPORT_WINDOW,minutes=Math.max(0,Math.ceil((deadline-at)/60000));
-    return {start,deadline,expired:deadline<=at,remaining:`${Math.floor(minutes/60)}h ${minutes%60}m`,explicit:!!s.quotaNoticeAt,earlierAmbiguous:!!s.quotaNoticeAt&&start<s.quotaNoticeAt};
+    return {start,deadline,expired:deadline<=at,remaining:`${Math.floor(minutes/60)}h ${minutes%60}m`,evidence:e.quotaEvidence};
   }
   function noticeLimit(text){
     const match=/^you(?:'|’)ve hit your (2[,.]?000|5[,.]?000) daily message limit\.?(?: your messages reset tomorrow at midnight\.?)?$/i.exec(String(text||'').trim().replace(/\s+/g,' '));
@@ -58,6 +75,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function scanNotice(force=false){
     if(!enabled()||!onChat()||document.hidden)return null;
+    if(noticeRoute!==location.pathname){noticeRoute=location.pathname;noticeSeen=false;noticeWasAbsent=false;noticeAbsentAt=0;nativeNotice=null;lastNoticeScan=0;}
     if(!force&&now()-lastNoticeScan<5000)return nativeNotice;
     lastNoticeScan=now();nativeNotice=null;
     // Only known native warning/toast elements, never scan the conversation body.
@@ -85,13 +103,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       button.setAttribute('aria-expanded','false');button.onclick=()=>{if(panel?.isConnected){panel.remove();panel=null;button.setAttribute('aria-expanded','false');}else{openPanel();void refresh();}};
       if(anchor?.parentElement)anchor.parentElement.insertBefore(button,anchor);else fallback.insertAdjacentElement("afterend",button);
     }
-    const cap=LIMITS[tier()],used=summary?.success,restriction=summary?.lastRestriction&&(!summary.lastSuccess||summary.lastRestriction.at>summary.lastSuccess);
+    const cap=LIMITS[tier()],cycleDisplay=summary?.usageStartKind==='sustained-recovery',used=cycleDisplay?summary?.observedUsage:summary?.success,restriction=summary?.episode?.active===true;
     const estimate=account&&!storageError?recoveryEstimate(summary):null;
-    const label=storageError||!account?'?':!summary?'…':restriction?'◷':cap&&used>=cap*0.9?'!': '◔';
-    button.textContent=estimate?(estimate.explicit?(estimate.expired?'◷ est. passed':`◷ ~${estimate.remaining}`):'◷ ?'):`${label}${Number.isInteger(used)?' '+used.toLocaleString():''}`;
-    button.style.color=restriction||cap&&used>=cap*0.9?'#f3b34c':'inherit';
-    button.title=`Generation usage — ${Number.isInteger(used)?used.toLocaleString()+' confirmed observations in the last 24h':'coverage not available'}; not a server quota counter. Tap for details.`;
-    if(estimate)button.title+=` ${estimate.explicit?'Quota notice observed.':'Possible rate limit or quota restriction.'} ${estimate.expired?'Estimated 24h window passed; recovery unconfirmed.':`Support-based 24h estimate${estimate.explicit?'':' if this is quota exhaustion'}: ${estimate.remaining}. May recover earlier; not guaranteed.`}${estimate.earlierAmbiguous?' Earlier generic restriction used as a possible starting point.':''}`;
+    const count=Number.isInteger(used)?used.toLocaleString()+(cap?' / '+cap.toLocaleString():''):'…';
+    button.textContent=storageError||!account?'◔ ?':restriction?(estimate?(estimate.expired?'◷ est. passed':`◷ ~${estimate.remaining}`):'◷ ?'):`◔ ${count}`;
+    button.style.color=restriction?'#f3b34c':'inherit';
+    button.title=`Generation usage — ${count} locally observed (${cycleDisplay?'estimated cycle':'last 24h'}, not server remaining quota). Tap for details.`;
+    if(restriction)button.title+=estimate?` Suspected quota restriction. ${estimate.expired?'Support-based estimate passed; awaiting observed recovery.':`Support-based estimated 24h reference: ${estimate.remaining}. Recovery may be earlier.`}`:' Rate limit observed; recovery time unknown.';
     button.setAttribute('aria-label',button.title);
     if(panel?.isConnected)renderPanel();
   }
@@ -113,24 +131,24 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const plan=tier(),cap=LIMITS[plan];let lines=[`Plan: ${NAMES[plan]||'Unknown'}${cap?' · '+cap.toLocaleString()+' generation limit':''}`];
     if(!account)lines.push('Account identity not verified. No observations are attributed to an unverified account.');
     if(storageError)lines.push('Local observation storage unavailable; some observations may be missing.');
-    if(summary){lines.push(`Last 24h observed: ${summary.success.toLocaleString()} successful · ${summary.failed.toLocaleString()} failed · ${summary.unconfirmed.toLocaleString()} unconfirmed`,`Tracking started: ${fmt(summary.trackingStart)} · Coverage: partial`);
-      lines.push(`Last confirmed generation: ${fmt(summary.lastSuccess)}`);
-      if(summary.lastSavedReplyAt)lines.push(`Latest saved AI reply seen in chat history: ${fmt(summary.lastSavedReplyAt)} (not counted as a new generation)`);
-      if(summary.lastRestriction){lines.push(`Last restriction: ${fmt(summary.lastRestriction.at)} (${summary.lastRestriction.source==='native-limit-notice'?'native daily-limit notice':summary.lastRestriction.code||'HTTP '+summary.lastRestriction.status})`);
-        const estimate=recoveryEstimate(summary);
-        if(estimate){lines.push(`First observed restriction: ${fmt(estimate.start)} · ${elapsed(estimate.start)} elapsed`,
-          estimate.explicit?'Native quota notice observed.':'Possible temporary rate limit or quota restriction.',
-          estimate.expired?'The estimated 24-hour window has passed; recovery has not been observed.':`Estimated time until the stated 24-hour window ends${estimate.explicit?'':' (if this is quota exhaustion)'}: ${estimate.remaining} (${fmt(estimate.deadline)})`,
-          estimate.earlierAmbiguous?'Estimate uses the earlier ambiguous restriction; the actual quota onset may be later.':(!summary.lastSuccess?'No confirmed earlier generation available; the true limit-hit time may precede this observation.':'Based on locally observed restriction timing, not a server reset time.'), 'You may recover earlier; no guaranteed latest recovery time.');
-          const latest=Math.max(summary.lastSuccess||0,summary.lastSavedReplyAt||0);
-          if(latest&&latest<estimate.start&&estimate.start-latest< SUPPORT_WINDOW){
-            lines.push(`If the limit was reached on that last observed reply, the 24-hour window could end around ${fmt(latest+SUPPORT_WINDOW)}. This earlier time is only a possibility.`);
-          }}
-        else lines.push(`First observed success after that restriction: ${fmt(summary.firstSuccessAfterRestriction||summary.lastSuccess)}`);}
-      if(cap&&summary.success>=cap*0.9)lines.push('Observed activity is near or above the subscription limit; the actual quota window is not confirmed.');
+    if(summary&&!storageError&&account){
+      const e=summary.episode,estimate=recoveryEstimate(summary);
+      lines.push(`Observed usage (${summary.usageStartKind==='sustained-recovery'?'estimated cycle':'since tracking began'}): ${summary.observedUsage.toLocaleString()}${cap?' / '+cap.toLocaleString():''}`,`Observed since: ${fmt(summary.usageStart)} · Coverage: partial`,`Last 24h observed: ${summary.success.toLocaleString()} successful · ${summary.failed.toLocaleString()} failed · ${summary.unconfirmed.toLocaleString()} unconfirmed`,`Total retained successful observations: ${summary.totalSuccess.toLocaleString()}`,`Tracking started: ${fmt(summary.trackingStart)}`,`Last confirmed generation: ${fmt(summary.lastSuccess)}`);
+      if(summary.lastSavedReplyAt)lines.push(`Latest saved AI reply: ${fmt(summary.lastSavedReplyAt)} (not counted as a new generation)`);
+      if(e){
+        lines.push(`Initial restriction: ${fmt(e.start)}`,`Latest rejected generation: ${fmt(e.lastRejectionAt)}`,`Latest restriction evidence: ${fmt(e.lastRestrictionAt)}`);
+        if(e.firstRecoveryAt)lines.push(`First observed recovery: ${fmt(e.firstRecoveryAt)}`,`Successful generations since initial restriction: ${e.successes.toLocaleString()}`);
+        if(e.sustainedAt)lines.push(`Sustained recovery observed: ${fmt(e.sustainedAt)} (heuristic; full reset unconfirmed)`);
+        if(e.active){
+          lines.push(estimate?`Suspected quota exhaustion (${estimate.evidence==='native-notice'?'native daily-limit warning':'observed usage reached plan ceiling'}).`:'Rate limit observed; type and recovery time unknown.');
+          if(estimate)lines.push(estimate.expired?'Support-based estimated 24-hour window passed; awaiting confirmation of recovery.':`Support-based estimated 24-hour reference: ${estimate.remaining} (${fmt(estimate.deadline)})`, 'No authoritative reset timestamp; recovery may occur earlier.');
+        }else lines.push('Generation recovery observed; full quota reset is unconfirmed.');
+        if(e.newCycle)lines.push('New estimated cycle inferred from a full ceiling of observed successes; server reset unconfirmed.');
+      }
+      if(summary.priorEpisode)lines.push(`Previous restriction: ${fmt(summary.priorEpisode.start)} · first recovery: ${fmt(summary.priorEpisode.firstRecoveryAt)}`);
     }
     if(missed)lines.push(`${missed} observations were not stored in this tab.`);
-    lines.push('No authoritative remaining quota. Other devices and unobserved sessions are not included. No generation is blocked. Research history retained for 14 days.');
+    lines.push('No authoritative remaining quota. Other devices and unobserved sessions are not included. No generation is blocked. Timestamped observations are retained until explicitly cleared. Older previously expired records cannot be recovered.');
     body.textContent=lines.join('\n');
   }
   async function refresh(){
@@ -150,13 +168,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const data=event.data;
     if(data.type==='account'){
       if(typeof data.accountKey==='string'&&/^[0-9a-f]{64}$/.test(data.accountKey)){
+        checkHeader();const passive=passiveAccount();
+        // A delayed profile marker is weaker than a snapshot bound to the current native bearer.
+        if(passive&&passive.accountKey!==data.accountKey)return;
         if((account&&account.accountKey!==data.accountKey)||(observedAccountKey&&observedAccountKey!==data.accountKey)){invalidate();queueRefresh();}
         observedAccountKey=data.accountKey;
       }
       return;
     }
     if(data.type==='history-time'){
-      checkHeader();const key=account?.accountKey;
+      checkHeader();passiveAccount();const key=account?.accountKey;
       // No attribution for a history request that started before we verified
       // this account or for an old reply delivered after an account switch.
       if(key&&Number.isSafeInteger(data.startedAt)&&data.startedAt>=account.verifiedAt&&Number.isSafeInteger(data.replyAt)&&data.replyAt<=now())
@@ -164,14 +185,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       return;
     }
     if(data.type!=='generation')return;
-    checkHeader();const row=data.payload,key=account?.accountKey;
+    checkHeader();passiveAccount();const row=data.payload,key=account?.accountKey;
     if(!key||!row||row.startedAt<account.verifiedAt){missed++;queueRefresh();return;}
     // Events are attached to a verified account observed before the request.
     // No full request or response body, message ID, or account identity is exported.
-    void runtime('record',key,{event:{id:row.id,startedAt:row.startedAt,at:row.at,status:row.status,outcome:row.outcome,code:row.code,kind:row.kind,reason:row.reason,headers:row.headers,tier:tier()}}).then(()=>queueRefresh(),()=>{missed++;storageError=true;queueRefresh();});
+    void runtime('record',key,{event:{id:row.id,startedAt:row.startedAt,at:row.at,status:row.status,outcome:row.outcome,code:row.code,kind:row.kind,reason:row.reason,headers:row.headers,tier:tier()}}).then(()=>{if(account?.accountKey===key){if((row.outcome==='success'&&summary?.episode?.active)||(row.status===429&&!summary?.episode?.active))void refresh();queueRefresh();}},()=>{missed++;storageError=true;queueRefresh();});
   });
   // Account changes invalidate the scope before accepting further observations.
-  window.addEventListener('storage',event=>{if(/firebase|(?:^|[-_:])auth(?:$|[-_:])|access.?token|id.?token/i.test(String(event.key||''))){observedAccountKey=null;invalidate();queueRefresh();}});
+  window.addEventListener('storage',event=>{if(/firebase|(?:^|[-_:])auth(?:$|[-_:])|access.?token|id.?token/i.test(String(event.key||''))){observedAccountKey=null;minPassiveAt=now();invalidate();queueRefresh();}});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkHeader();void refresh();}});
   window.addEventListener('popstate',()=>{if(!onChat())remove();else void refresh();});
   DS.updateDailyMessageLimitStatus=()=>{if(!enabled()){if(account||accountPending)invalidate();remove();return;}if(!onChat()){remove();return;}if(now()-lastRender<1000)return;lastRender=now();if(!button?.isConnected)render();const notice=scanNotice();if(!account||!summary||(notice&&!noticeSeen))queueRefresh();};

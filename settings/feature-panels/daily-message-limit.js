@@ -21,7 +21,7 @@
   label.append(checkbox, caption);
   const hint = document.createElement('p');
   hint.className = 'hint';
-  hint.textContent = 'Counts locally observed generations, including regenerations and continuations. Remembers the last observed generation and restriction across reloads and restarts. Shows a 24-hour estimate from the earliest observed restriction, based on support’s guidance. Recovery may happen earlier; generic rate limits are not proof of quota exhaustion. Data stays on this device; no test generations are sent.';
+  hint.textContent = 'Counts locally observed successful generations, including regenerations and continuations. Remembers restrictions and recovery across reloads and restarts. Shows a Support-based 24-hour estimate only when quota exhaustion is suspected; partial recovery does not restart it. The observed cycle counter and timestamped history are separate. No authoritative server reset time or remaining quota is available. No test generations are sent.';
   section.append(heading, label, hint);
   host.replaceWith(section);
   (window.__DSQ_FEATURE_SETTINGS_READERS__ ||= Object.create(null)).dailyMessageLimitTrackerEnabled =

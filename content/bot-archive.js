@@ -30,7 +30,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const cleanIds = [...new Set((Array.isArray(ids) ? ids : [ids]).map(id => String(id || "").trim()).filter(Boolean))];
     if (!cleanIds.length) return {};
     if (typeof DS.largeStorageGetRecords === "function") {
-      try { return await DS.largeStorageGetRecords(KEY, cleanIds); } catch {}
+      try { return await DS.largeStorageGetRecords(KEY, cleanIds); } catch (error) { if (DS.isNativeAndroidStorage?.()) throw error; }
     }
     const result = await DS.storageGet?.([KEY]) || {};
     const store = normalize(result[KEY]);
@@ -41,7 +41,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const clean = entries && typeof entries === "object" && !Array.isArray(entries) ? entries : {};
     if (!Object.keys(clean).length) return true;
     if (typeof DS.largeStorageMerge === "function") {
-      try { return !!(await DS.largeStorageMerge(KEY, clean)); } catch {}
+      try { return !!(await DS.largeStorageMerge(KEY, clean)); } catch (error) { if (DS.isNativeAndroidStorage?.()) return false; }
     }
     const result = await DS.storageGet?.([KEY]) || {};
     const store = normalize(result[KEY]);
@@ -545,18 +545,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.botArchiveWrites = Number(counters.botArchiveWrites || 0) + (ok ? 1 : 0);
       return ok;
     };
-    writeChain = writeChain.then(task, task);
+    writeChain = writeChain.then(task, task).catch(error => { DS.runtimeLog?.("warn", "bot-archive", "Snapshot storage unavailable; existing copies retained"); return false; });
     return writeChain;
   }
 
   DS.saveBotArchiveSnapshot = saveSnapshot;
 
-  async function flushSeenSnapshots() {
+  let seenFlushInFlight = null;
+  function flushSeenSnapshots() {
+    if (seenFlushInFlight) return seenFlushInFlight;
+    seenFlushInFlight = flushSeenSnapshotsInner().finally(() => { seenFlushInFlight = null; });
+    return seenFlushInFlight;
+  }
+  async function flushSeenSnapshotsInner() {
     if (seenFlushTimer) clearTimeout(seenFlushTimer);
     seenFlushTimer = null;
     if (!seenPending.size) return false;
-    const snapshots = [...seenPending.values()];
-    seenPending.clear();
+    if (DS.largeStorageRecordReady?.("read") === false || DS.largeStorageRecordReady?.("merge") === false) return false;
+    // Limit automatic bridge transfers and retain failed observations in memory
+    // for the next eligible discovery pass; never replace the native store.
+    const snapshots = DS.isNativeAndroidStorage?.() ? [...seenPending.values()].slice(0, 48) : [...seenPending.values()];
+    for (const snapshot of snapshots) seenPending.delete(snapshot.id);
 
     const task = async () => {
       const ids = snapshots.map(snapshot => snapshot.id).filter(Boolean);
@@ -585,8 +594,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       counters.botArchiveWrites = Number(counters.botArchiveWrites || 0) + (ok ? 1 : 0);
       return ok;
     };
-    writeChain = writeChain.then(task, task);
-    return writeChain;
+    const pendingWrite = writeChain.then(task, task).catch(() => false);
+    writeChain = pendingWrite;
+    const ok = await pendingWrite;
+    if (!ok) {
+      for (const snapshot of snapshots) {
+        const newer = seenPending.get(snapshot.id);
+        seenPending.set(snapshot.id, newer ? mergeEntry(snapshot, newer) : snapshot);
+      }
+      DS.runtimeLog?.("warn", "bot-archive", "Public observations awaiting record storage; saved copies unchanged");
+    } else if (seenPending.size && !seenFlushTimer) {
+      seenFlushTimer = setTimeout(() => { flushSeenSnapshots().catch(() => {}); }, 900);
+    }
+    return ok;
   }
 
   // Browsing a public listing is itself an opt-in discovery source. Earlier
@@ -597,10 +617,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   const listingSeenIds = new Set();
   const listingPendingCards = new Map();
   let listingDiscoveryTimer = null;
+  let listingDiscoveryRoute = "";
+  let chatRefreshIdle = 0;
   const LISTING_DISCOVERY_BATCH = 12;
 
   function flushListingDiscovery() {
     listingDiscoveryTimer = null;
+    if (listingDiscoveryRoute !== location.href) { for (const id of listingPendingCards.keys()) listingSeenIds.delete(id); listingPendingCards.clear(); return; }
     if (!DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveRememberSeenPublic) {
       listingPendingCards.clear();
       return;
@@ -626,6 +649,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
               profileUrl: `https://spicychat.ai/chatbot/${id}`,
               source: "Listing discovery"
             })) queuedForArchive++;
+            else listingSeenIds.delete(id);
           } else {
             // The native card may still be a loading placeholder.
             listingSeenIds.delete(id);
@@ -649,6 +673,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.rememberListedBotCards = function rememberListedBotCards(cards = []) {
     if (!DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveRememberSeenPublic ||
         DS.state?.qolBackgroundWorker || !Array.isArray(cards)) return 0;
+    if (listingDiscoveryRoute !== location.href) DS.cancelObsoleteArchiveRouteWork?.();
+    listingDiscoveryRoute = location.href;
+    if (seenPending.size && !seenFlushTimer && !seenFlushInFlight && DS.largeStorageRecordReady?.("read") !== false && DS.largeStorageRecordReady?.("merge") !== false) seenFlushTimer = setTimeout(() => { flushSeenSnapshots().catch(() => {}); }, 900);
+    // A bounded pending buffer prevents thousands of card DOM references from
+    // being retained during rapid pagination while native storage is slow.
     let queued = 0;
     for (const pair of cards) {
       const card = pair?.card;
@@ -656,6 +685,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!card || !anchor) continue;
       const id = String(DS.botIdFromHref?.(anchor.href) || "").trim().toLowerCase();
       if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/.test(id) || listingSeenIds.has(id)) continue;
+      if (DS.isNativeAndroidStorage?.() && listingPendingCards.size >= 256) break;
       listingSeenIds.add(id);
       listingPendingCards.set(id, card);
       queued++;
@@ -707,6 +737,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     } } }).meta[id];
     if (!snapshot?.coverage?.length) return false;
     const previousPending = seenPending.get(id);
+    if (!previousPending && DS.isNativeAndroidStorage?.() && seenPending.size >= 256) {
+      const perf = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
+      perf.androidArchiveObservationBackpressure = (perf.androidArchiveObservationBackpressure || 0) + 1;
+      return false;
+    }
     seenPending.set(id, previousPending ? mergeEntry(previousPending, snapshot) : snapshot);
     const counters = DS.state.runtimePerformance || (DS.state.runtimePerformance = {});
     counters.botArchiveSeenQueued = Number(counters.botArchiveSeenQueued || 0) + 1;
@@ -719,6 +754,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function captureCurrentProfile() {
     const id = profileIdFromPath();
     if (!id) return false;
+    const guard = DS.makeRouteWorkGuard?.();
     let snapshot = extract(document, id, "Profile visit");
 
     // Greeting is public on normal bot profiles. If React has not exposed it in
@@ -727,6 +763,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if ((!snapshot || !snapshot.fields?.greeting) && typeof DS.fetchPublicCharacterFields === "function") {
       try {
         const api = await DS.fetchPublicCharacterFields(id);
+        if (guard && !guard.active()) return false;
         if (api && typeof api === "object") {
           const fields = {
             ...(snapshot?.fields || {}),
@@ -751,7 +788,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       } catch {}
     }
 
-    if (!snapshot?.coverage?.length) return false;
+    if ((guard && !guard.active()) || !snapshot?.coverage?.length) return false;
     snapshot.profileBackup = !!DS.state?.settings?.botArchiveOnProfileVisit;
     return saveSnapshot(snapshot, { trackRevision: true, kind: "profile" });
   }
@@ -759,13 +796,14 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   async function refreshFromChat() {
     const id = chatBotIdFromPath();
     if (!id) return false;
+    const guard = DS.makeRouteWorkGuard?.();
     let current = null;
     let directRecordRead = false;
     if (typeof DS.largeStorageGetRecord === "function") {
       try {
         current = await DS.largeStorageGetRecord(KEY, id);
         directRecordRead = true;
-      } catch {}
+      } catch (error) { if (DS.isNativeAndroidStorage?.()) throw error; }
     }
     if (!directRecordRead) {
       // Compatibility only for an older/partial runtime that does not expose
@@ -775,6 +813,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const store = normalize(result[KEY]);
       current = store.meta[id] || null;
     }
+    if (guard && !guard.active()) return false;
     const hours = [6, 24, 72, 168].includes(Number(DS.state?.settings?.botArchiveRefreshHours))
       ? Number(DS.state.settings.botArchiveRefreshHours)
       : 24;
@@ -789,6 +828,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       try { live = await DS.fetchCharacterArchiveData(id); } catch {}
     }
 
+    if (guard && !guard.active()) return false;
     const liveSource = clean(live?.source || "", 120).toLowerCase();
     const liveName = clean(live?.name || "", 500);
     const liveHasSignal = !!(
@@ -1032,6 +1072,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return true;
   });
 
+  DS.cancelObsoleteArchiveRouteWork = () => {
+    clearTimeout(listingDiscoveryTimer); listingDiscoveryTimer = null;
+    for (const id of listingPendingCards.keys()) listingSeenIds.delete(id);
+    listingPendingCards.clear();
+    while (listingSeenIds.size > 4096) listingSeenIds.delete(listingSeenIds.values().next().value);
+    listingDiscoveryRoute = location.href;
+    clearTimeout(chatRefreshTimer); chatRefreshTimer = 0;
+    if (chatRefreshIdle) { if (typeof cancelIdleCallback === "function") cancelIdleCallback(chatRefreshIdle); else clearTimeout(chatRefreshIdle); }
+    chatRefreshIdle = 0; scheduledChatRefreshRoute = "";
+    // Captured metadata is independent of route DOM; don't discard saved work.
+  };
   DS.scheduleBotArchiveChatRefresh = function scheduleBotArchiveChatRefresh(options = {}) {
     const id = chatBotIdFromPath();
     if (!id || !DS.state?.settings?.enabled || !DS.state?.settings?.botArchiveOnChatOpen) return false;
@@ -1066,11 +1117,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         } catch (error) {
           if (token) DS.diagOperationEnd?.(token, { outcome: "error", meta: { error: String(error?.name || "Error").slice(0, 80) } });
         } finally {
-          scheduledChatRefreshRoute = "";
+          if (scheduledChatRefreshRoute === route) scheduledChatRefreshRoute = "";
         }
       };
-      if (typeof requestIdleCallback === "function") requestIdleCallback(() => invoke(), { timeout: 3000 });
-      else setTimeout(() => invoke(), 0);
+      if (typeof requestIdleCallback === "function") chatRefreshIdle = requestIdleCallback(() => { chatRefreshIdle = 0; invoke(); }, { timeout: 3000 });
+      else chatRefreshIdle = setTimeout(() => { chatRefreshIdle = 0; invoke(); }, 0);
     };
 
     chatRefreshTimer = setTimeout(run, delayMs);
@@ -1079,7 +1130,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   };
 
   DS.applyBotArchive = async function applyBotArchive() {
-    if (inflight || !DS.state?.settings?.enabled) return;
+    if (inflight || !DS.state?.settings?.enabled || DS.largeStorageRecordReady?.("read") === false || DS.largeStorageRecordReady?.("merge") === false) return;
     const profileId = profileIdFromPath();
     const chatId = chatBotIdFromPath();
     const profileEnabled = !!DS.state.settings.botArchiveOnProfileVisit || !!DS.state.settings.botArchiveRememberSeenPublic;

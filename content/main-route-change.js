@@ -10,6 +10,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const routeCheckStartedAt = performance.now();
 
     DS.state.lastUrl = location.href;
+    DS.state.routeWorkEpoch = Number(DS.state.routeWorkEpoch || 0) + 1;
+    DS.cancelObsoleteArchiveRouteWork?.();
+    DS.cancelObsoleteAnimationWork?.();
+    DS.cancelObsoleteBulkSelection?.();
+    DS.cancelObsoleteFavoriteSelection?.();
+    DS.cancelObsoleteOrganizerSelection?.();
     DS.syncListingLongTaskDiagnosticRoute?.();
     DS.cancelMyCreationsAutoLoad?.();
     clearSlowThrottle();
