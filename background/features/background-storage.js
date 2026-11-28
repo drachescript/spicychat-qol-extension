@@ -745,13 +745,14 @@ const DSQ_QUOTA_WINDOW = 86400000;
 const DSQ_QUOTA_RETENTION = 14 * DSQ_QUOTA_WINDOW;
 // The reference window is a display aid, never a server reset. State is
 // derived from timestamped observations and committed with the event ledger.
-const DSQ_QUOTA_CYCLE_SCHEMA = 2;
+const DSQ_QUOTA_CYCLE_SCHEMA = 3;
 const DSQ_QUOTA_SUSTAINED = 10; // Heuristic, not a confirmed full reset.
 const DSQ_QUOTA_CAPS = {free:2000,paid_minimal:2000,paid_basic:5000,paid_premium:5000};
 function dsqQuotaCycleEmpty(){return {version:DSQ_QUOTA_CYCLE_SCHEMA,lastAt:0,lastId:'',totalSuccess:0,usage:0,usageStart:null,usageStartKind:'tracking',lastSuccess:null,lastRestriction:null,episode:null,priorEpisode:null,tier:null};}
 function dsqQuotaApplyCycle(state,row){
   const at=row.at;
   state.lastAt=at;state.lastId=row.id;
+  if(row.outcome==='reset-estimate'){state.usage=0;state.usageStart=at;state.usageStartKind='manual';state.cycleReason='manual-estimate-reset';return state;}
   if(DSQ_QUOTA_CAPS[row.tier])state.tier=row.tier;
   const cap=DSQ_QUOTA_CAPS[state.tier]||null;
   if(row.outcome==='success'){
@@ -759,13 +760,13 @@ function dsqQuotaApplyCycle(state,row){
     if(!state.usageStart)state.usageStart=at;
     const e=state.episode;
     if(e){
-      e.active=false;e.firstRecoveryAt??=at;e.lastRecoveryAt=at;e.successes++;
+      if(e.active)state.cycleReason='observed-recovery';e.active=false;e.firstRecoveryAt??=at;e.lastRecoveryAt=at;e.successes++;
       e.consecutive++;
       // A sustained run supports a *display* cycle boundary, not a verified
       // reset. Keep the earlier 1–2 successes, and retain the ledger.
       if(e.consecutive>=DSQ_QUOTA_SUSTAINED&&!e.sustainedAt){
         e.sustainedAt=at;
-        if(e.quotaEvidence){state.usage=e.successes;state.usageStart=e.firstRecoveryAt;state.usageStartKind='sustained-recovery';}
+        state.cycleReason='sustained-recovery';if(state.usageStartKind!=='manual'&&(e.quotaEvidence||state.usageStartKind==='tracking')){state.usage=e.successes;state.usageStart=e.firstRecoveryAt;state.usageStartKind='sustained-recovery';}
       }
     }
     return state;
@@ -777,20 +778,24 @@ function dsqQuotaApplyCycle(state,row){
   // No generic 429 is proof of quota exhaustion. Full observed usage plus
   // rejection is sufficient for a suspected quota, even without a banner.
   const reached=!!cap&&((state.usage>=cap&&state.usageStart&&at-state.usageStart<=DSQ_QUOTA_WINDOW)||
-    (prior?.successes>=cap&&prior.firstRecoveryAt&&at-prior.firstRecoveryAt<=DSQ_QUOTA_WINDOW));
-  // A full ceiling of newly observed successes supports a new reference
-  // cycle. A few successes, a clock expiry or an upgrade alone never do.
-  const newCycle=!!prior&&reached&&prior.successes>=cap&&prior.sustainedAt&&(!notice||!prior.active);
-  const newAmbiguous=!!prior&&prior.sustainedAt&&!prior.active&&(!prior.quotaEvidence||at-prior.start>=DSQ_QUOTA_WINDOW);
+    (prior?.successes>=cap&&prior.sustainedAt));
+  // A quota-sized observed recovery run is stronger evidence than an old
+  // elapsed reference window. Never require the whole run to fit in 24h.
+  const newCycle=!!prior&&!!cap&&!prior.active&&((prior.successes>=cap&&prior.sustainedAt)||(prior.sustainedAt&&state.usageStartKind==='sustained-recovery'&&state.usage>=cap&&state.usageStart));
+  // A later restriction after sustained recovery without a full allowance is
+  // ambiguous: retain historical episode, but do not reuse its expired clock.
+  const newAmbiguous=!!prior&&prior.sustainedAt&&!prior.active&&!newCycle;
   if(!prior||newCycle||newAmbiguous){
     if(prior)state.priorEpisode={...prior};
-    state.episode={start:at,firstRecoveryAt:null,lastRecoveryAt:null,sustainedAt:null,successes:0,consecutive:0,active:true,quotaEvidence:null,quotaNoticeAt:null,lastRejectionAt:null,lastRestrictionAt:at,newCycle:!!newCycle};
-  }
+    state.cycleReason=newCycle?'full-observed-allowance':newAmbiguous?'restriction-after-sustained-recovery':'initial-restriction';
+    state.episode={id:row.id,start:at,firstRecoveryAt:null,lastRecoveryAt:null,sustainedAt:null,successes:0,consecutive:0,active:true,quotaEvidence:null,quotaNoticeAt:null,lastRejectionAt:null,lastRestrictionAt:at,newCycle:!!newCycle,uncertainAnchor:!!newAmbiguous};
+  }else state.cycleReason=prior.active?'repeated-rejection':'partial-recovery-restricted';
   const e=state.episode;
   // A later banner may establish the nature of an earlier rejection, but
   // never interpret the native midnight text as a reset timestamp.
   if(explicit){e.quotaEvidence='native-notice';e.quotaNoticeAt??=at;}
-  else if(reached&&!e.quotaEvidence)e.quotaEvidence='observed-ceiling';
+  else if((newCycle||(!e.uncertainAnchor&&reached))&&!e.quotaEvidence)e.quotaEvidence='observed-ceiling';
+  if(explicit&&!e.anchorUnverified)e.uncertainAnchor=false;
   e.active=true;e.consecutive=0;e.lastRestrictionAt=at;
   if(!notice)e.lastRejectionAt=at;
   state.lastRestriction={at,code:row.code,status:row.status,headers:row.headers||{},source:row.source||'network',limit:row.limit||null};
@@ -809,9 +814,13 @@ async function dsqQuotaEnsureCycle(db,account,now){
     g.onsuccess=()=>{
       const meta=g.result||{account,trackingStart:now};
       if(meta.cycle?.version===DSQ_QUOTA_CYCLE_SCHEMA&&!meta.cycleDirty){result=meta;return;}
-      const state=dsqQuotaCycleEmpty(),r=tx.objectStore('events').index('accountAt').openCursor(dsqQuotaRange([account],0,Number.MAX_SAFE_INTEGER));
+      const state=dsqQuotaCycleEmpty();if(DSQ_QUOTA_CAPS[meta.tier])state.tier=meta.tier;const r=tx.objectStore('events').index('accountAt').openCursor(dsqQuotaRange([account],0,Number.MAX_SAFE_INTEGER));
       r.onsuccess=()=>{const c=r.result;if(c){dsqQuotaApplyCycle(state,c.value);c.continue();return;}
-        result={...meta,cycle:state,cycleDirty:false};a.put(result);};
+        // Sparse legacy evidence cannot establish whether an expired anchor belongs to the current cycle.
+        const sparseLegacy=meta.cycle?.version===2&&state.episode?.active&&state.episode.firstRecoveryAt&&state.episode.start+DSQ_QUOTA_WINDOW<=now&&state.totalSuccess<(DSQ_QUOTA_CAPS[state.tier]||2000);
+        const uncertainId=sparseLegacy?state.episode.id:meta.uncertainCycleId;
+        if(uncertainId&&state.episode?.id===uncertainId){state.episode.anchorUnverified=true;state.episode.uncertainAnchor=true;state.cycleReason='legacy-incomplete-cycle-evidence';}
+        result={...meta,uncertainCycleId:uncertainId||null,scopeLabel:meta.scopeLabel||crypto.randomUUID(),cycle:state,cycleDirty:false};a.put(result);};
     };
     tx.oncomplete=()=>resolve(result);tx.onabort=tx.onerror=()=>reject(tx.error||Error('Generation cycle migration failed'));
   });
@@ -851,22 +860,68 @@ function dsqQuotaSanitize(raw,account,now=Date.now()){
     tier:['free','paid_minimal','paid_basic','paid_premium'].includes(raw.tier)?raw.tier:null};
 }
 function dsqQuotaRange(prefix,from,to){return IDBKeyRange.bound([...prefix,from],[...prefix,to]);}
-async function dsqQuotaMessage(m,s){
+// A single ordered worker lane coordinates alias binding with ledger writes.
+// IDB commits still provide durability and atomicity across worker restarts.
+let dsqQuotaLane=Promise.resolve();
+async function dsqQuotaTraceState(m,s,trigger){
+  const subscribed=typeof qolDiagnosticHasSubscribers==='function'&&qolDiagnosticHasSubscribers('normal');
+  if(!subscribed&&m.quotaDiagnostic!==true)return;
+  try{
+    const v=await dsqQuotaMessageInner({...m,action:'summary'},s),e=v.episode;
+    if(subscribed)qolBackgroundTrace('quota-state','generation-quota',{scope:v.scopeLabel,tier:v.tier,tierEvidence:v.tierEvidence,ceiling:v.ceiling,retained:v.retained,retainedSuccess:v.retainedSuccess,observed24h:v.success,lifetime:v.lifetimeSuccess,estimatedUsage:v.observedUsage,coverage:v.coverage,coverageGaps:v.coverageGaps,scopeLinked:v.scopeLinked,restriction:e?.active?(e.quotaEvidence?'suspected-quota':'unknown-rate-limit'):'not-observed',cycleId:e?.id||null,initialRestriction:e?.start||null,latestRejection:e?.lastRejectionAt||null,deadline:e?.quotaEvidence&&!e.uncertainAnchor?e.start+DSQ_QUOTA_WINDOW:null,firstRecovery:e?.firstRecoveryAt||null,sustainedRecovery:e?.sustainedAt||null,recoverySuccesses:e?.successes||0,cycleReason:v.cycleReason,deduplicated:v.duplicates,removed:v.removed,trigger},{critical:!!e?.active||trigger!=='count-checkpoint'});
+    // Return only to the requesting page; never publish another tab's account state as its own.
+    if(m.quotaDiagnostic===true)return {...v,diagnosticTrigger:trigger};
+  }catch{try{qolBackgroundTrace('quota-storage-error','generation-quota',{operation:'snapshot',outcome:'failed'},{critical:true});}catch{}}
+}
+
+function dsqQuotaMessage(m,s){const task=dsqQuotaLane.then(()=>dsqQuotaMessageInner(m,s));dsqQuotaLane=task.catch(()=>{});return task;}
+async function dsqQuotaBind(db,alias,target,now){
+  if(alias===target)return;
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(['events','accounts'],'readwrite'),a=tx.objectStore('accounts'),e=tx.objectStore('events');
+    let source,dest;const x=a.get(alias),y=a.get(target);
+    x.onsuccess=()=>{source=x.result||{};};
+    y.onsuccess=()=>{dest=y.result||{account:target,trackingStart:now};
+      if(source?.aliasTarget===target)return;
+      if(source?.aliasTarget||dest.aliasTarget){tx.abort();return;}
+      let moved=0,duplicates=0;
+      const r=e.index('accountAt').openCursor(dsqQuotaRange([alias],0,Number.MAX_SAFE_INTEGER));
+      r.onsuccess=()=>{const c=r.result;if(c){const row=c.value,g=e.get([target,row.id]);g.onsuccess=()=>{if(!g.result){e.add({...row,account:target});moved++;}else duplicates++;c.delete();c.continue();};return;}
+        a.put({...dest,scopeLabel:dest.scopeLabel||source.scopeLabel||crypto.randomUUID(),trackingStart:Math.min(dest.trackingStart||now,source.trackingStart||now),lastSavedReplyAt:Math.max(dest.lastSavedReplyAt||0,source.lastSavedReplyAt||0)||null,tier:(source.tierAt||0)>(dest.tierAt||0)?source.tier:dest.tier||source.tier||null,tierAt:Math.max(dest.tierAt||0,source.tierAt||0),tierEvidence:(source.tierAt||0)>(dest.tierAt||0)?source.tierEvidence:dest.tierEvidence||source.tierEvidence||null,coverageGaps:(dest.coverageGaps||0)+(source.coverageGaps||0),duplicates:(dest.duplicates||0)+(source.duplicates||0)+duplicates,removed:(dest.removed||0)+(source.removed||0),cycleDirty:true});
+        a.put({account:alias,aliasTarget:target});
+      };
+    };
+    tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Account binding conflict or write failed'));
+  });
+}
+async function dsqQuotaMessageInner(m,s){
   const url=new URL(s.url||s.tab?.url||'');
   if(s.id!==chrome.runtime.id||s.frameId!==0||url.protocol!=='https:'||!['spicychat.ai','www.spicychat.ai'].includes(url.hostname)||
     typeof m.accountKey!=='string'||!/^[0-9a-f]{64}$/.test(m.accountKey))throw Error('Verified account scope required');
-  const account=m.accountKey,now=Date.now(),db=await dsqQuotaOpen();
+  let account=m.accountKey;const now=Date.now(),db=await dsqQuotaOpen();
+  if(m.action==='bind'){
+    if(typeof m.canonicalKey!=='string'||!/^[0-9a-f]{64}$/.test(m.canonicalKey))throw Error('Invalid canonical scope');
+    await dsqQuotaBind(db,account,m.canonicalKey,now);return {ok:true,quotaState:await dsqQuotaTraceState(m,s,'scope-linked')};
+  }
+  const link=await idbRequest(db.transaction('accounts').objectStore('accounts').get(account));
+  if(link?.aliasTarget)account=link.aliasTarget;
+  if(m.action==='scopeInfo'||m.action==='gap'){
+    let changedState=false;
+    const tier=Object.hasOwn(DSQ_QUOTA_CAPS,m.tier)?m.tier:null;
+    await new Promise((resolve,reject)=>{const tx=db.transaction('accounts','readwrite'),a=tx.objectStore('accounts'),g=a.get(account);g.onsuccess=()=>{const prior=g.result||{account,trackingStart:now};const n=m.action==='gap'?Math.min(256,Math.max(1,Number(m.count)||1)):0;const changed=tier&&tier!==prior.tier;if(n||changed||!prior.scopeLabel){changedState=true;a.put({...prior,scopeLabel:prior.scopeLabel||crypto.randomUUID(),coverageGaps:(prior.coverageGaps||0)+n,tier:tier||prior.tier||null,tierAt:changed?now:prior.tierAt||0,tierEvidence:tier?(m.tierEvidence==='native-header'?'native-header':'native-profile'):prior.tierEvidence||null});}};tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Coverage write failed'));});return {ok:true,quotaState:changedState?await dsqQuotaTraceState(m,s,m.action==='gap'?'coverage-gap':'tier-change'):undefined};
+  }
   if(m.action==='record'){
     const row=dsqQuotaSanitize(m.event,account,now);
-    let inserted=false;
+    let inserted=false,traceReason=null;
     await new Promise((resolve,reject)=>{
       const tx=db.transaction(['events','accounts'],'readwrite'),events=tx.objectStore('events'),accounts=tx.objectStore('accounts');
       const r=events.get([account,row.id]);
-      r.onsuccess=()=>{if(r.result)return;events.add(row);inserted=true;const a=accounts.get(account);a.onsuccess=()=>{const prior=a.result||{account,trackingStart:row.startedAt};accounts.put(dsqQuotaCycleAppend({...prior,trackingStart:Math.min(prior.trackingStart||row.startedAt,row.startedAt)},row));};};
+      r.onsuccess=()=>{const duplicate=!!r.result;if(!duplicate){events.add(row);inserted=true;}const a=accounts.get(account);a.onsuccess=()=>{const prior=a.result||{account,trackingStart:row.startedAt};const base={...prior,scopeLabel:prior.scopeLabel||crypto.randomUUID(),trackingStart:Math.min(prior.trackingStart||row.startedAt,row.startedAt),tier:(!duplicate&&row.at>=(prior.tierAt||0)?row.tier:null)||prior.tier||null,tierAt:!duplicate&&row.tier&&row.at>=(prior.tierAt||0)?row.at:prior.tierAt||0,tierEvidence:(!duplicate&&row.tier&&row.at>=(prior.tierAt||0))?'native-header':prior.tierEvidence||null};if(duplicate){accounts.put({...base,duplicates:(prior.duplicates||0)+1});traceReason='deduplicated';return;}const before=base.cycle?{active:base.cycle.episode?.active,sustained:base.cycle.episode?.sustainedAt,id:base.cycle.episode?.id,tier:base.cycle.tier}:null;if(base.cycle&&base.tier)base.cycle.tier=base.tier;const next=dsqQuotaCycleAppend(base,row);accounts.put(next);const after=next.cycle;if(row.restriction==='yes'||!before||next.cycleDirty||before.active!==after?.episode?.active||before.sustained!==after?.episode?.sustainedAt||before.id!==after?.episode?.id||before.tier!==after?.tier)traceReason='state-change';else if(after?.totalSuccess%100===0)traceReason='count-checkpoint';};};
       tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Observation write failed'));
     });
     if(inserted)try{qolBackgroundTrace('generation-observation','generation-quota',{at:row.at,startedAt:row.startedAt,status:row.status,outcome:row.outcome,code:row.code,kind:row.kind,tier:row.tier,headers:row.headers,reason:row.reason});}catch{}
-    return {ok:true,inserted};
+    const quotaState=traceReason?await dsqQuotaTraceState(m,s,traceReason):undefined;
+    return {ok:true,inserted,quotaState};
   }
   if(m.action==='historyTime'){
     // This is historical reply evidence, not a charged generation or recovery.
@@ -905,14 +960,17 @@ async function dsqQuotaMessage(m,s){
       };
       tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Native restriction observation write failed'));
     });
-    return {ok:true,inserted};
+    return {ok:true,inserted,quotaState:inserted?await dsqQuotaTraceState(m,s,'native-limit-notice'):undefined};
+  }
+  if(m.action==='resetEstimate'){
+    await new Promise((resolve,reject)=>{const tx=db.transaction(['events','accounts'],'readwrite'),a=tx.objectStore('accounts'),e=tx.objectStore('events'),g=a.get(account);g.onsuccess=()=>{const prior=g.result||{account,trackingStart:now};const row={account,id:crypto.randomUUID(),at:now,startedAt:now,outcome:'reset-estimate',restriction:'no',tier:null};e.add(row);a.put(dsqQuotaCycleAppend(prior,row));};tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Estimate reset failed'));});return {ok:true,quotaState:await dsqQuotaTraceState(m,s,'manual-estimate-reset')};
   }
   if(m.action==='clear'){
     await new Promise((resolve,reject)=>{
       const tx=db.transaction(['events','accounts'],'readwrite');const index=tx.objectStore('events').index('accountAt');
-      const r=index.openCursor(dsqQuotaRange([account],0,Number.MAX_SAFE_INTEGER));r.onsuccess=()=>{const c=r.result;if(c){c.delete();c.continue();}};
-      tx.objectStore('accounts').delete(account);tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Observation clear failed'));
-    });return {ok:true};
+      const a=tx.objectStore('accounts'),g=a.get(account);let removed=0;
+      g.onsuccess=()=>{const r=index.openCursor(dsqQuotaRange([account],0,Number.MAX_SAFE_INTEGER));r.onsuccess=()=>{const c=r.result;if(c){c.delete();removed++;c.continue();return;}a.put({account,scopeLabel:g.result?.scopeLabel||crypto.randomUUID(),trackingStart:now,tier:g.result?.tier||null,tierEvidence:g.result?.tierEvidence||null,removed:(g.result?.removed||0)+removed,duplicates:g.result?.duplicates||0,cycle:dsqQuotaCycleEmpty(),coverageGaps:0});};};tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('Observation clear failed'));
+    });return {ok:true,quotaState:await dsqQuotaTraceState(m,s,'manual-history-clear')};
   }
   if(m.action==='export'){
     const tx=db.transaction('events'),r=tx.objectStore('events').index('accountAt').getAll(dsqQuotaRange([account],0,now+60000));
@@ -921,18 +979,20 @@ async function dsqQuotaMessage(m,s){
   if(m.action!=='summary')throw Error('Unknown research operation');
   // Indexed rolling counts remain separate from the durable cycle estimate.
   // No time-based deletion or resets. Older versions' pruned rows are not recoverable.
-  const tx=db.transaction(['events','accounts']),outcomes=tx.objectStore('events').index('outcomeAt');
-  const [success,failed,unconfirmed,meta]=await Promise.all([
+  await dsqQuotaEnsureCycle(db,account,now);
+  const tx=db.transaction(['events','accounts']),events=tx.objectStore('events'),outcomes=events.index('outcomeAt');
+  const [success,failed,unconfirmed,current,retained]=await Promise.all([
     ...['success','failed','unconfirmed'].map(kind=>idbRequest(outcomes.count(dsqQuotaRange([account,kind],now-DSQ_QUOTA_WINDOW,now+60000)))),
-    idbRequest(tx.objectStore('accounts').get(account))
+    idbRequest(tx.objectStore('accounts').get(account)),idbRequest(events.index('accountAt').count(dsqQuotaRange([account],0,Number.MAX_SAFE_INTEGER)))
   ]);
-  // If a late row arrived between transactions, rebuild before returning a
-  // cycle. The indexed counts still represent their own transaction snapshot.
-  const current=meta?.cycleDirty||meta?.cycle?.version!==DSQ_QUOTA_CYCLE_SCHEMA?await dsqQuotaEnsureCycle(db,account,now):meta;
   const cycle=current?.cycle||dsqQuotaCycleEmpty(),episode=cycle.episode;
-  return {ok:true,success,failed,unconfirmed,observedUsage:cycle.usage,totalSuccess:cycle.totalSuccess,usageStart:cycle.usageStart,usageStartKind:cycle.usageStartKind,
+  const tier=current?.tier||cycle.tier||null;
+  // The cycle replay counts retained successes only. Historical pruning and
+  // explicit clears make an all-time lifetime count unrecoverable. totalSuccess
+  // remains a compatibility alias; do not label it lifetime in diagnostics.
+  return {ok:true,success,failed,unconfirmed,retained,scopeLinked:!!link?.aliasTarget,scopeLabel:current?.scopeLabel||null,tier,tierEvidence:current?.tierEvidence||null,ceiling:DSQ_QUOTA_CAPS[tier]||null,coverageGaps:current?.coverageGaps||0,duplicates:current?.duplicates||0,removed:current?.removed||0,cycleReason:cycle.cycleReason||null,observedUsage:cycle.usage,retainedSuccess:cycle.totalSuccess,lifetimeSuccess:null,totalSuccess:cycle.totalSuccess,usageStart:cycle.usageStart,usageStartKind:cycle.usageStartKind,
     lastSuccess:cycle.lastSuccess,lastRestriction:cycle.lastRestriction,episode,priorEpisode:cycle.priorEpisode,
     episodeStart:episode?.start||null,episodeRequestAt:null,quotaNoticeAt:episode?.quotaNoticeAt||null,firstSuccessAfterRestriction:episode?.firstRecoveryAt||null,
     lastSavedReplyAt:current?.lastSavedReplyAt||null,trackingStart:current?.trackingStart||now,coverage:'partial',retentionDays:null};
 }
-dsqRegisterBackgroundMessageHandler('DS_GENERATION_QUOTA_RESEARCH','daily-message-limit',(m,s,respond)=>{dsqQuotaMessage(m,s).then(respond,e=>respond({ok:false,error:String(e?.message||e)}));return true;});
+dsqRegisterBackgroundMessageHandler('DS_GENERATION_QUOTA_RESEARCH','daily-message-limit',(m,s,respond)=>{dsqQuotaMessage(m,s).then(respond,e=>{try{qolBackgroundTrace('quota-storage-error','generation-quota',{operation:['record','summary','bind','scopeInfo','gap','clear','resetEstimate','export','historyTime','nativeNotice'].includes(m.action)?m.action:'invalid',outcome:'failed'},{critical:true});}catch{}respond({ok:false,error:String(e?.message||e)});});return true;});

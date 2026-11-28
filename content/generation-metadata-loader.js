@@ -30,6 +30,16 @@ if (!(() => { try {
   const CONTROL_SOURCE = "spicychat-qol-generation-metadata-control";
   const BUFFER_KEY = "__DSQ_GENERATION_METADATA_BUFFER__";
 
+  // Early quota events can arrive before document_idle. Never silently drop
+  // them just because the visual tracker has not initialized.
+  const quotaBuffer=window.__DSQ_QUOTA_BUFFER__={rows:[],dropped:0};
+  window.addEventListener('ds-qol-quota-scoped-v1',event=>{
+    let row;try{row=JSON.parse(event.detail);}catch{return;}
+    if(!row||!['scope','bind','generation'].includes(row.type))return;
+    if(typeof window.__DSQ_QUOTA_RECEIVE__==='function'){window.__DSQ_QUOTA_RECEIVE__(row);return;}
+    if(quotaBuffer.rows.length>=256){quotaBuffer.rows.shift();quotaBuffer.dropped++;}
+    quotaBuffer.rows.push(row);
+  });
   let injected = false;
   let enabled = false;
   let quotaEnabled = false;

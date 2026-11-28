@@ -463,15 +463,16 @@ const DS_MEMORY_MANAGER_UI_OBSERVATION_KEY = "dsMemoryManagerUiObservationV1";
 const DS_MEMORY_IMPORT_RESULT_KEY = "dsMemoryImportLastResultV1";
 
 function formatNativeMemoryImportResult(value) {
-  const stages = new Set(['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed']);
+  const stages = new Set(['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed', 'preview-opened', 'started', 'not-started', 'duplicates-only', 'stopped']);
   if (!value || value.schema !== 1 || !stages.has(value.stage) ||
-      !['ok', 'failed'].includes(value.outcome)) return 'Native Memory import: no recorded attempt.';
+      !['ok', 'failed', 'pending'].includes(value.outcome)) return 'Native Memory import: no recorded attempt.';
   const nativeCards = Math.max(0, Math.min(10000, Math.floor(Number(value.nativeCards) || 0)));
   const recognizedRows = Math.max(0, Math.min(10000, Math.floor(Number(value.recognizedRows) || 0)));
   const date = Number(value.at);
   const at = Number.isFinite(date) && date > 0 && date <= Date.now() + 60000
     ? new Date(date).toISOString() : 'unknown';
-  return `Native Memory import (last attempt): ${value.outcome}; stage ${value.stage}; UI ${value.ui === 'v2' ? 'New V2' : value.ui === 'legacy' ? 'Legacy' : 'Unknown'}; native cards ${nativeCards}; recognized cards ${recognizedRows}; at ${at}. No memory text or chat IDs included.`;
+  const counts = ["selected", "imported", "skipped", "pinFailures"].filter(key => Number.isInteger(value[key])).map(key => `${key} ${Math.max(0, Math.min(10000, value[key]))}`).join("; ");
+  return `Native Memory import (last attempt): ${value.outcome}; stage ${value.stage}; UI ${value.ui === 'v2' ? 'New V2' : value.ui === 'legacy' ? 'Legacy' : 'Unknown'}; native cards ${nativeCards}; recognized cards ${recognizedRows}${counts ? `; ${counts}` : ""}; at ${at}. No memory text or chat IDs included.`;
 }
 
 

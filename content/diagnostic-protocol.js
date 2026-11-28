@@ -507,6 +507,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function setTracePeer(data = {}) {
+    const wasRecording = v2State.recording;
     const peer = data?.payload && typeof data.payload === "object" ? { ...data, ...data.payload } : data;
     const requestedLevel = String(peer.traceLevel || peer.level || (peer.recording === false ? "off" : "normal")).toLowerCase();
     const incomingV2 = data?.protocol === PROTOCOL_V2 || Number(peer.protocolVersion || 0) >= 2;
@@ -537,12 +538,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     installSettingTrace();
     installBackgroundTraceListener();
     subscribeBackgroundTrace(!!v2State.recording);
+    if (v2State.recording && (!wasRecording || data?.type === "recording-start")) {
+      try { DS.onGenerationQuotaDiagnosticSession?.(true); } catch {}
+    }
   }
 
   function stopTracePeer() {
     // Inspector's Detailed QoL switch is independent of general recording.
     // Do not spend CPU serializing pending optional traces after it is disabled.
     v2State.recording = false;
+    try { DS.onGenerationQuotaDiagnosticSession?.(false); } catch {}
     v2State.traceLevel = "off";
     v2State.queued.length = 0;
     v2State.aggregate.clear();

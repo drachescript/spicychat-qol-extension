@@ -1,3 +1,9 @@
+## 0.3.3
+- Improved Memory JSON import on mobile browsers, including viewport-aware layouts, accessible import controls, visible progress, error and completion feedback, and protection against duplicate imports.
+- Improved Generation Quota Tracker reliability across page reloads, background tabs and account changes, with persistent history reconciliation and clearer reporting of incomplete observation coverage.
+- Corrected estimated quota restriction cycles, countdowns and partial recovery handling. Added separate controls for resetting estimated usage and clearing historical generation observations.
+- Expanded privacy-safe generation diagnostics and Inspector integration with detailed restriction transitions, recovery evidence, generation count checkpoints and improved storage diagnostics.
+
 ## 0.3.2
 - Expanded sidebar customization with independent navigation options, adjustable menu order, grouped discovery and creation shortcuts, and a dedicated creation chooser. Existing cleanup preferences remain available.
 - Improved generation usage tracking and restriction recovery. Partial recovery preserves the original estimated countdown, successful generations remain recorded, and unconfirmed reset times are clearly distinguished from actual recovery.

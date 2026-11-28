@@ -12,6 +12,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let scanningPinnedOrder = false;
   let applyingPinnedOrder = false;
   let importingMemories = false;
+  let importPreviewDispose = null;
+  let importPreviewRoute = null;
   let vaultBusy = false;
   const MEMORY_VAULT_KEY = "dsMemoryVaultV1";
   const MEMORY_LAYOUT_STORAGE_KEY = "dsMemoryCompactLayoutV1";
@@ -561,9 +563,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function setStatus(message, tone = "") {
     const status = getManager()?.querySelector(".ds-memory-bulk-status");
-    if (!status) return;
-    status.textContent = message || "";
-    status.dataset.tone = tone;
+    if (status) {
+      status.textContent = message || "";
+      status.dataset.tone = tone;
+    }
+    if (importingMemories) setImportPreviewStatus(message, tone);
   }
 
   function waitFor(predicate, timeoutMs = 1600, intervalMs = 50) {
@@ -1208,7 +1212,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return false;
   }
 
-  async function loadAllMemories(manager = getManager()) {
+  async function loadAllMemories(manager = getManager(), stillCurrent = () => true) {
     if (!manager || loadingMoreMemories) return 0;
     loadingMoreMemories = true;
     updateToolbar(manager);
@@ -1216,6 +1220,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     let activeManager = manager;
     try {
       for (let i = 0; i < 100; i++) {
+        if (!stillCurrent()) break;
         activeManager = getManager() || activeManager;
         const button = findLoadMoreMemoriesButton(activeManager);
         if (!button) break;
@@ -1224,6 +1229,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         try { button.click(); } catch { DS.realClick?.(button); }
         batches++;
         const progressed = await waitForMemoryLoadProgress(activeManager, before, button);
+        if (!stillCurrent()) break;
         activeManager = getManager() || activeManager;
         for (const item of getMemoryRows(activeManager)) decorateMemoryRow(item);
         updateToolbar(activeManager);
@@ -1913,8 +1919,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return scored[0]?.score > 0 ? scored[0].trigger : null;
   }
 
-  async function openMemoryCreateEditor(manager = getManager()) {
-    if (!manager) return null;
+  async function openMemoryCreateEditor(manager = getManager(), stillCurrent = () => true) {
+    if (!manager || !stillCurrent()) return null;
 
     let editor = visibleMemoryCreateEditor();
     if (editor) return editor;
@@ -1926,6 +1932,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (editor) return editor;
     }
 
+    if (!stillCurrent()) return null;
     let menuItem = findVisibleAddNewMemoryMenuItem();
     if (!menuItem) {
       const trigger = findMemoryManagerMenuTrigger(manager);
@@ -1935,7 +1942,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
     }
 
-    if (menuItem) {
+    if (menuItem && stillCurrent()) {
       try { menuItem.click(); } catch { DS.realClick?.(menuItem); }
       editor = await waitFor(visibleMemoryCreateEditor, 2800, 45);
       if (editor) return editor;
@@ -1961,18 +1968,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   const MEMORY_IMPORT_RESULT_KEY = 'dsMemoryImportLastResultV1';
-  function recordMemoryImportResult(stage, outcome, manager = getManager()) {
+  function recordMemoryImportResult(stage, outcome, manager = getManager(), counts = {}) {
     // Never store source JSON, memory text, chat IDs, browser paths, native
     // error messages, or DOM element IDs in a support record.
-    const safeStages = ['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed'];
+    const safeStages = ['editor-missing', 'save-unavailable', 'editor-value-rejected', 'unconfirmed', 'confirmed', 'preview-opened', 'started', 'not-started', 'duplicates-only', 'stopped'];
     if (!safeStages.includes(stage)) return;
     try {
       const list = manager?.querySelector('[data-testid="MemoryManagerV2-List"]');
       chrome.storage.local.set({ [MEMORY_IMPORT_RESULT_KEY]: {
-        schema: 1, at: Date.now(), outcome: outcome === 'ok' ? 'ok' : 'failed',
+        schema: 1, at: Date.now(), outcome: ['ok', 'pending'].includes(outcome) ? outcome : 'failed',
         stage, ui: detectMemoryManagerVersion(manager),
         nativeCards: Math.min(10000, list?.querySelectorAll('[data-testid^="MemoryManagerCard-"][role="group"]').length || 0),
-        recognizedRows: Math.min(10000, getMemoryRows(manager).length)
+        recognizedRows: Math.min(10000, getMemoryRows(manager).length),
+        ...Object.fromEntries(["selected", "imported", "skipped", "pinFailures"].filter(key => Number.isInteger(counts[key])).map(key => [key, Math.max(0, Math.min(10000, counts[key]))]))
       } });
     } catch {}
   }
@@ -1983,7 +1991,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return getMemoryRows(manager).filter(item => item.text === wanted).length;
   }
 
-  async function createNativeMemory(text) {
+  async function createNativeMemory(text, stillCurrent = () => true) {
     const wanted = cleanText(text);
     const manager = getManager();
     if (!manager) return { ok: false, reason: "The SpicyChat Memories manager is not open." };
@@ -1991,18 +1999,19 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!compatibility.canImport) return { ok: false, reason: "Memory Manager is still loading or its layout is unrecognized. Reopen it and copy the Memory UI status in Support Info. No memory was added." };
     if (!wanted) return { ok: false, reason: "The memory is empty." };
 
+    if (!stillCurrent()) return { ok: false, reason: "The chat or Memories manager changed. Import stopped." };
     const beforeCount = countMemoryRowsByText(wanted, manager);
-    const editor = await openMemoryCreateEditor(manager);
+    const editor = await openMemoryCreateEditor(manager, stillCurrent);
     if (!editor) {
-      recordMemoryImportResult('editor-missing', 'failed', manager);
       return {
-        ok: false,
+        ok: false, stage: "editor-missing",
         reason: looksLikeBrandNewChat()
           ? newChatMemoryImportHelp()
           : "QoL could not identify SpicyChat's native New memory editor and Save control. No memory was submitted."
       };
     }
 
+    if (!stillCurrent()) return { ok: false, reason: "The chat or Memories manager changed. No memory was submitted." };
     setMemoryEditorValue(editor.field, wanted);
     // A React controlled input can reject an externally dispatched value.
     // Confirm the live field still contains the value before submitting.
@@ -2011,28 +2020,27 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const liveValue = liveField?.matches?.('[contenteditable="true"]')
       ? cleanText(liveField.textContent) : cleanText(liveField?.value);
     if (liveValue !== wanted) {
-      recordMemoryImportResult('editor-value-rejected', 'failed', manager);
-      return { ok: false, reason: "SpicyChat's New memory editor did not retain the text. No memory was submitted." };
+      return { ok: false, stage: "editor-value-rejected", reason: "SpicyChat's New memory editor did not retain the text. No memory was submitted." };
     }
     const save = await waitFor(() => {
       const candidate = editor.save?.isConnected ? editor.save : findNativeMemorySubmitButton(editor.field, getManager());
       return candidate && isVisible(candidate) && !candidate.disabled ? candidate : null;
     }, 1800, 45);
     if (!save) {
-      recordMemoryImportResult('save-unavailable', 'failed', manager);
       return {
-        ok: false,
+        ok: false, stage: "save-unavailable",
         reason: looksLikeBrandNewChat() ? newChatMemoryImportHelp() :
           "SpicyChat's New memory Save button did not become available. No memory was submitted."
       };
     }
 
     await DS.sleep?.(50);
+    if (!stillCurrent()) return { ok: false, reason: "The chat or Memories manager changed. No memory was submitted." };
     try { save.click(); } catch { DS.realClick?.(save); }
 
     const created = await waitFor(() => {
       const currentManager = getManager();
-      if (!currentManager) return null;
+      if (!currentManager || !stillCurrent()) return null;
       const count = countMemoryRowsByText(wanted, currentManager);
       if (count > beforeCount) return true;
       return null;
@@ -2042,10 +2050,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // One final scan handles a late React render without ever clicking Add a
       // second time, which could create a duplicate if the first request won.
       await DS.sleep?.(250);
-      if (countMemoryRowsByText(wanted, getManager()) <= beforeCount) {
-        recordMemoryImportResult('unconfirmed', 'failed');
+      if (!stillCurrent() || countMemoryRowsByText(wanted, getManager()) <= beforeCount) {
         return {
-          ok: false,
+          ok: false, stage: "unconfirmed",
           saveUnconfirmed: true,
           // Never click Save again automatically: the first request might have
           // succeeded on the server while React failed to render a new card.
@@ -2059,59 +2066,106 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return { ok: true };
   }
 
+  function setImportPreviewStatus(message, tone = "") {
+    const status = document.querySelector("#ds-memory-import-preview .ds-memory-import-status");
+    if (status) {
+      status.textContent = message || "";
+      status.dataset.tone = tone;
+    }
+  }
+
   function closeMemoryImportPreview() {
+    importPreviewDispose?.();
+    importPreviewDispose = null;
+    importPreviewRoute = null;
     document.getElementById("ds-memory-import-preview")?.remove();
   }
 
-  async function importMemoryRows(rows, { allowDuplicates = false } = {}) {
-    if (importingMemories) return;
+  function fitMemoryImportPreview(overlay) {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      if (!overlay.isConnected) return;
+      if (viewport && viewport.width > 0 && viewport.height > 0) {
+        overlay.style.setProperty("--ds-memory-preview-width", `${viewport.width}px`);
+        overlay.style.setProperty("--ds-memory-preview-height", `${viewport.height}px`);
+        overlay.style.setProperty("--ds-memory-preview-top", `${viewport.offsetTop}px`);
+        overlay.style.setProperty("--ds-memory-preview-left", `${viewport.offsetLeft}px`);
+      }
+    };
+    resize();
+    viewport?.addEventListener("resize", resize);
+    viewport?.addEventListener("scroll", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      viewport?.removeEventListener("scroll", resize);
+      window.removeEventListener("resize", resize);
+    };
+  }
+
+  async function importMemoryRows(rows, { allowDuplicates = false, stillCurrent = () => true } = {}) {
     let manager = getManager();
-    if (!manager) return;
-    if (!getMemoryManagerCompatibility().canImport) {
-      setStatus("Memory Manager layout is unknown or still loading. Import was not started; reopen Memories and check Support Info.", "error");
-      return;
+    const counts = { selected: rows.length, imported: 0, skipped: 0, pinFailures: 0 };
+    if (importingMemories || deleting || checkingPins || pinningSelected || scanningPinnedOrder || applyingPinnedOrder || vaultBusy) {
+      recordMemoryImportResult('not-started', 'failed', manager, counts);
+      return { ok: false, message: "Another Memories operation is running. Wait for it to finish and retry.", retry: true };
+    }
+    if (!manager || !stillCurrent() || !getMemoryManagerCompatibility().canImport) {
+      recordMemoryImportResult('not-started', 'failed', manager, counts);
+      return { ok: false, message: "Memory Manager is closed, loading or its layout is unknown. Reopen Memories and retry.", retry: false };
     }
     importingMemories = true;
-    updateToolbar(manager);
-    let imported = 0;
-    let skipped = 0;
+    recordMemoryImportResult('started', 'pending', manager, counts);
+    let failedStage = 'stopped';
     try {
+      updateToolbar(manager);
+      setStatus(`Preparing ${rows.length} selected memories…`);
+      // Do not race the automatic native list expansion or start a second one.
+      if (loadingMoreMemories && !await waitFor(() => !loadingMoreMemories || !stillCurrent(), 30000, 250)) {
+        throw new Error("Memory list is still loading. Try again when it finishes.");
+      }
+      if (!stillCurrent()) throw new Error("The chat or Memories manager changed. Import stopped.");
       if (findLoadMoreMemoriesButton(manager)) {
-        await loadAllMemories(manager);
+        await loadAllMemories(manager, stillCurrent);
         manager = getManager() || manager;
       }
+      if (!stillCurrent()) throw new Error("The chat or Memories manager changed. Import stopped.");
       const existing = new Set(getMemoryRows(manager).map(item => item.text.toLowerCase()));
-      // New memories normally appear at the top of SpicyChat's list. Import from
-      // the end first so the visible relative order stays as close as possible
-      // to the source file without reusing source chat IDs.
       const ordered = [...rows].sort((a, b) => Number(b.order || 0) - Number(a.order || 0));
       for (let index = 0; index < ordered.length; index += 1) {
+        if (!stillCurrent()) throw new Error("The chat or Memories manager changed. Import stopped.");
         const row = ordered[index];
         const key = cleanText(row.text).toLowerCase();
-        if (!key || (!allowDuplicates && existing.has(key))) { skipped += 1; continue; }
-        setStatus(`Importing memory ${index + 1} of ${ordered.length}…`);
-        const result = await createNativeMemory(row.text);
+        if (!key || (!allowDuplicates && existing.has(key))) { counts.skipped += 1; continue; }
+        setStatus(`Importing memory ${index + 1} of ${ordered.length}… (${counts.imported} confirmed)`);
+        const result = await createNativeMemory(row.text, stillCurrent);
         if (!result.ok) {
           const error = new Error(result.reason || "Memory import failed.");
           error.saveUnconfirmed = result.saveUnconfirmed === true;
+          failedStage = result.stage || (error.saveUnconfirmed ? 'unconfirmed' : 'stopped');
           throw error;
         }
         existing.add(key);
-        imported += 1;
-        if (row.pinned) {
+        counts.imported += 1;
+        if (row.pinned && stillCurrent()) {
           const pin = await setMemoryPinned(cleanText(row.text), true);
-          if (!pin.ok) setStatus(`Imported ${imported}; pin state could not be restored for one memory.`, "error");
+          if (!pin.ok) counts.pinFailures += 1;
         }
         await DS.sleep?.(100);
       }
-      if (imported) recordMemoryImportResult('confirmed', 'ok');
-      setStatus(`Imported ${imported} ${imported === 1 ? "memory" : "memories"}${skipped ? `; skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""}.`, "ok");
-      closeMemoryImportPreview();
+      recordMemoryImportResult(counts.imported ? 'confirmed' : 'duplicates-only', 'ok', getManager(), counts);
+      const message = `Imported ${counts.imported} ${counts.imported === 1 ? "memory" : "memories"}${counts.skipped ? `; skipped ${counts.skipped} duplicates` : ""}.${counts.pinFailures ? ` ${counts.pinFailures} pin states could not be restored.` : ""}`;
+      setStatus(message, counts.pinFailures ? "error" : "ok");
+      return { ok: true, message, warning: !!counts.pinFailures };
     } catch (error) {
       const retryNote = error?.saveUnconfirmed
         ? "A save was attempted but not confirmed. Check SpicyChat's memories before retrying to avoid duplicates."
-        : "You can retry; recognized memories already added are skipped by default.";
-      setStatus(`Import stopped after ${imported}: ${error?.message || error} ${retryNote}`, "error");
+        : "Recognized memories already added are skipped by default.";
+      const message = `Import stopped after ${counts.imported}: ${error?.message || error} ${retryNote}`;
+      recordMemoryImportResult(failedStage, 'failed', getManager(), counts);
+      setStatus(message, "error");
+      // Close and reopen before retrying any partially completed operation.
+      return { ok: false, message, retry: false };
     } finally {
       importingMemories = false;
       updateToolbar(getManager() || manager);
@@ -2119,6 +2173,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   }
 
   function showMemoryImportPreview(memories, filename = "") {
+    if (importingMemories) return;
     closeMemoryImportPreview();
     const manager = getManager();
     if (!manager) return;
@@ -2127,6 +2182,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const overlay = document.createElement("div");
     overlay.id = "ds-memory-import-preview";
     overlay.className = "ds-memory-import-preview";
+    overlay.dataset.dsOwned = "1";
+    const route = location.pathname;
+    importPreviewRoute = route;
+    const stillCurrent = () => overlay.isConnected && location.pathname === route && !!getManager() && DS.state?.settings?.enabled !== false && DS.state?.settings?.enableBulkMemoryManager !== false;
     const panel = document.createElement("div");
     panel.className = "ds-memory-import-panel";
     const head = document.createElement("div");
@@ -2180,20 +2239,56 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const duplicateText = document.createElement("span");
     duplicateText.textContent = "Import exact duplicates too";
     duplicateLabel.append(duplicateToggle, duplicateText);
+    const status = document.createElement("div");
+    status.className = "ds-memory-import-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
     const apply = document.createElement("button");
     apply.type = "button";
+    apply.className = "ds-memory-import-apply";
     apply.textContent = "Import selected";
-    apply.addEventListener("click", () => {
+    let started = false;
+    let settled = false;
+    apply.addEventListener("click", async () => {
+      if (settled) return closeMemoryImportPreview();
+      if (started) return;
       const chosen = [...list.querySelectorAll("input[type='checkbox']:checked")]
         .map(box => memories[Number(box.dataset.index)])
         .filter(Boolean);
-      if (!chosen.length) return setStatus("Select at least one memory to import.", "error");
-      importMemoryRows(chosen, { allowDuplicates: duplicateToggle.checked });
+      if (!chosen.length) {
+        recordMemoryImportResult('not-started', 'failed', getManager(), { selected: 0 });
+        return setImportPreviewStatus("Select at least one memory to import.", "error");
+      }
+      started = true;
+      const controls = [...panel.querySelectorAll("button, input")];
+      controls.forEach(control => { control.disabled = true; });
+      apply.textContent = "Importing…";
+      panel.setAttribute("aria-busy", "true");
+      setImportPreviewStatus(`Starting import of ${chosen.length} memories…`);
+      let result;
+      try { result = await importMemoryRows(chosen, { allowDuplicates: duplicateToggle.checked, stillCurrent }); }
+      catch { result = { ok: false, message: "Import interrupted. Check native Memories before retrying.", retry: false }; }
+      if (!overlay.isConnected) return;
+      panel.removeAttribute("aria-busy");
+      setImportPreviewStatus(result.message, result.ok && !result.warning ? "ok" : "error");
+      close.disabled = false;
+      close.textContent = result.ok ? "Done" : "Close";
+      if (result.retry) {
+        started = false;
+        controls.forEach(control => { control.disabled = false; });
+        apply.textContent = "Import selected";
+      } else {
+        settled = true;
+        apply.disabled = false;
+        apply.textContent = result.ok ? "Done" : "Close";
+      }
     });
     actions.append(selectNew, selectAll, duplicateLabel, apply);
-    panel.append(head, note, list, actions);
+    panel.append(head, note, list, status, actions);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+    importPreviewDispose = fitMemoryImportPreview(overlay);
+    recordMemoryImportResult('preview-opened', 'pending', manager, { selected: list.querySelectorAll("input:checked").length });
   }
 
   function chooseMemoryImportFile() {
@@ -2653,7 +2748,6 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     loadingMoreMemories = false;
     scanningPinnedOrder = false;
     applyingPinnedOrder = false;
-    importingMemories = false;
     pinnedOrderDraft = [];
     closeMemoryImportPreview();
     lastManager = null;
@@ -2664,6 +2758,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.applyMemoryManagerTools = function applyMemoryManagerTools() {
     const settings = DS.state?.settings || {};
     const manager = getManager();
+    const preview = document.getElementById("ds-memory-import-preview");
+    if (preview && (!manager || !settings.enabled || !settings.enableBulkMemoryManager || importPreviewRoute !== location.pathname)) closeMemoryImportPreview();
     // Nothing to clean up until the manager has actually been opened.
     if (!manager && !lastManager &&
         !document.querySelector("#ds-memory-bulk-toolbar,.ds-memory-select-control,.ds-memory-row,.ds-memory-copy-action,.ds-memory-copy-menuitem")) return;
@@ -2720,7 +2816,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (autoLoadEnabled && !autoLoadedManagers.has(manager)) {
       autoLoadedManagers.add(manager);
       setTimeout(() => {
-        loadAllMemories(manager).catch(error => {
+        if (importingMemories || manager !== getManager()) { autoLoadedManagers.delete(manager); return; }
+        const route = location.pathname;
+        loadAllMemories(manager, () => location.pathname === route && !!getManager()).catch(error => {
           loadingMoreMemories = false;
           setStatus(`Memory auto-load failed: ${error?.message || error}`, "error");
           updateToolbar(manager);

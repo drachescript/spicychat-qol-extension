@@ -365,6 +365,7 @@ if (!(() => { try {
         if(quotaProfile&&token!==capturedToken&&quotaBearerIdentity(token)!==quotaProfile.bearer)invalidateQuotaProfile();
         capturedToken = token;
         capturedAt = Date.now();
+        if(quotaProfileWanted!==false&&quotaProfileRoute())rememberQuotaScope(token);
         announceCapturedAuth();
       }
     } else if (key === "x-guest-userid" && isGuest(raw)) {
@@ -417,6 +418,12 @@ if (!(() => { try {
     // An unrecognized identity cannot safely be matched across requests.
     return null;
   }
+  let quotaScopeIdentity=null,quotaScopeKey=null;
+  function rememberQuotaScope(token){
+    const identity=quotaBearerIdentity(token);if(identity===quotaScopeIdentity)return;
+    quotaScopeIdentity=identity;quotaScopeKey=null;if(!identity)return;
+    void crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-bearer-v1:'+identity)).then(bytes=>{if(quotaScopeIdentity===identity)quotaScopeKey=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');}).catch(()=>{});
+  }
   function quotaProfileRequest(input,method){
     if(!active||quotaProfileWanted===false||!quotaProfileRoute()||String(method||'GET').toUpperCase()!=='GET')return false;
     const u=parseApiUrl(input);return u?.origin==='https://prod.nd-api.com'&&u.pathname==='/v2/users';
@@ -429,7 +436,10 @@ if (!(() => { try {
     const tier=roles.map(v=>String(v||'').toLowerCase()).find(v=>['free','paid_minimal','paid_basic','paid_premium'].includes(v))||null;
     try{const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-account-v1:'+u.id));
       if(!active||quotaProfileWanted===false||bearer!==quotaBearerIdentity(capturedToken)||quotaProfile?.verifiedAt>at)return;
-      quotaProfile={accountKey:Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join(''),tier,verifiedAt:at,bearer};quotaProfileInvalidatedAt=0;
+      const scopeBytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('dsq-quota-bearer-v1:'+bearer));
+      if(!active||quotaProfileWanted===false||bearer!==quotaBearerIdentity(capturedToken)||quotaProfile?.verifiedAt>at)return;
+      quotaProfile={accountKey:Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join(''),scopeKey:Array.from(new Uint8Array(scopeBytes),x=>x.toString(16).padStart(2,'0')).join(''),tier,verifiedAt:at,bearer};quotaProfileInvalidatedAt=0;
+      if(quotaProfileWanted===true)window.dispatchEvent(new CustomEvent('ds-qol-quota-scoped-v1',{detail:JSON.stringify({type:'bind',key:quotaProfile.scopeKey,accountKey:quotaProfile.accountKey,tier})}));
     }catch{}
   }
   function invalidateQuotaProfile(){if(quotaProfile)quotaProfileInvalidatedAt=Date.now();quotaProfile=null;}
@@ -440,8 +450,9 @@ if (!(() => { try {
   window.addEventListener('ds-qol-quota-profile-read-v1',event=>{
     const requestId=event.detail?.requestId;if(typeof requestId!=='string'||requestId.length>80||!active||quotaProfileWanted===false||!quotaProfileRoute())return;
     if(quotaProfile&&quotaProfile.bearer!==quotaBearerIdentity(capturedToken))invalidateQuotaProfile();
+    rememberQuotaScope(capturedToken);
     const q=quotaProfile;
-    window.dispatchEvent(new CustomEvent('ds-qol-quota-profile-response-v1',{detail:q?{requestId,accountKey:q.accountKey,tier:q.tier,verifiedAt:q.verifiedAt}:{requestId,invalidatedAt:quotaProfileInvalidatedAt}}));
+    window.dispatchEvent(new CustomEvent('ds-qol-quota-profile-response-v1',{detail:q?{requestId,accountKey:q.accountKey,scopeKey:q.scopeKey,scopeAt:capturedAt,tier:q.tier,verifiedAt:q.verifiedAt}:{requestId,scopeKey:quotaScopeIdentity===quotaBearerIdentity(capturedToken)?quotaScopeKey:null,scopeAt:capturedAt,invalidatedAt:quotaProfileInvalidatedAt}}));
   });
 
   // Favorited IDs are taken ONLY from a successful native authenticated

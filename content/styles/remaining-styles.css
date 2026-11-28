@@ -1640,17 +1640,33 @@ html.ds-chat-custom-background [data-testid="ChatPage"] [data-testid="ChatAppear
 /* v0.1.9.117 memory import/export */
 .ds-memory-import-preview {
   position: fixed;
-  inset: 0;
+  top: var(--ds-memory-preview-top, 0px);
+  left: var(--ds-memory-preview-left, 0px);
+  width: var(--ds-memory-preview-width, 100vw);
+  height: var(--ds-memory-preview-height, 100vh);
   z-index: 2147483000;
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
-  padding: 18px;
+  box-sizing: border-box;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  overflow: hidden;
+  pointer-events: auto;
   background: rgba(0,0,0,.72);
 }
+@supports (height: 100dvh) {
+  .ds-memory-import-preview { height: var(--ds-memory-preview-height, 100dvh); }
+}
 .ds-memory-import-panel {
-  width: min(760px, calc(100vw - 32px));
-  max-height: min(82vh, 820px);
-  overflow: hidden;
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  min-width: 0;
+  min-height: 0;
+  max-height: min(100%, 820px);
+  overflow: auto;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1667,8 +1683,26 @@ html.ds-chat-custom-background [data-testid="ChatPage"] [data-testid="ChatAppear
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  flex: 0 0 auto;
+  min-width: 0;
 }
-.ds-memory-import-head strong { margin-right: auto; }
+.ds-memory-import-head strong { margin-right: auto; overflow-wrap: anywhere; min-width: 0; }
+.ds-memory-import-panel > p { margin: 0; flex: 0 0 auto; }
+.ds-memory-import-status { flex: 0 0 auto; overflow-wrap: anywhere; font-size: 13px; }
+.ds-memory-import-status:empty { display: none; }
+.ds-memory-import-status[data-tone="error"] { color: #fca5a5; }
+.ds-memory-import-status[data-tone="ok"] { color: #86efac; }
+.ds-memory-import-actions { padding-bottom: 4px; }
+.ds-memory-import-actions .ds-memory-import-apply { font-weight: 600; }
+.ds-memory-import-panel button:disabled { opacity: .65; cursor: default; }
+@media (max-width: 760px), (pointer: coarse) {
+  .ds-memory-import-panel button { min-height: 44px; touch-action: manipulation; }
+  .ds-memory-import-actions .ds-memory-import-apply { flex: 1 0 100%; }
+  .ds-memory-import-duplicates { flex: 1 0 100%; }
+}
+@media (max-height: 480px) {
+  .ds-memory-import-panel .ds-memory-import-list { flex: 0 0 auto; max-height: 35vh; }
+}
 .ds-memory-import-panel button {
   border: 1px solid rgba(148,163,184,.36);
   border-radius: 7px;
@@ -1678,7 +1712,11 @@ html.ds-chat-custom-background [data-testid="ChatPage"] [data-testid="ChatAppear
   cursor: pointer;
 }
 .ds-memory-import-list {
+  flex: 1 1 auto;
+  min-height: 76px;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: grid;
   gap: 6px;
   padding-right: 4px;
