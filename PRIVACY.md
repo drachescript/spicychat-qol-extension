@@ -1,34 +1,35 @@
 # SpicyChat QoL — Privacy Policy
 
 **Effective date:** July 7, 2026  
-**Last updated:** November 18, 2026
+**Last updated:** November 28, 2026
 
 ## 1. Overview and scope
 
-SpicyChat QoL is an independent DragonScript community project that adds optional tools to the SpicyChat website. This **single policy applies to both** the Chrome/Chromium and Firefox browser extensions and the **SpicyChat QoL Android companion app**, including the shared QoL features and Android-native functionality described below. It may be published in both the extension and Android repositories; both copies refer to the same data-handling policy.
+SpicyChat QoL is an independent DragonScript community project that adds user-configurable tools to the SpicyChat website. This **single policy applies to both** the Chrome/Chromium and Firefox browser extensions and the **SpicyChat QoL Android companion app**, including the shared QoL features and Android-native functionality described below. It may be published in both the extension and Android repositories; both copies refer to the same data-handling policy.
 
 SpicyChat QoL is not affiliated with, endorsed by, or operated by SpicyChat or NextDay AI.
 
-QoL is **local-first** where practical. Installing it does not automatically upload the user's chats or all locally stored data to DragonScript. Features that contact SpicyChat, a user-selected service, GitHub, or a DragonScript-operated endpoint are explained below. Feature availability and settings can differ between browser builds, Android, and custom/Lite builds.
+QoL is **local-first** where practical. Extra features are selected by the user; installing QoL does not by itself authorize a new external integration. Installing it does not automatically upload the user's chats or all locally stored data to DragonScript. Features that contact SpicyChat, a user-selected service, GitHub, or a DragonScript-operated endpoint are explained below. Feature availability and settings can differ between browser builds, Android, and custom/Lite builds.
 
 ## 2. Information QoL can access or process
 
 Depending on enabled features, QoL may access or process:
 
 - Local settings, feature states, enabled filters, device preferences, and sync selections.
-- Character, creator, chat, and Lorebook IDs, names, titles, URLs, images, tags, ratings, message counts, availability, and public or otherwise accessible metadata.
+- Character, creator, chat, Lorebook, and Rulebook IDs, names, titles, URLs, images, tags, ratings, message counts, availability, and public or otherwise accessible metadata.
 - Blocked, Not Interested, Favorite, Later, followed-creator, opened, recently seen, and other saved or organized lists; this may include user-entered text patterns and notes.
 - Chat messages and interface state needed for chat search, bookmarks, exports, formatting, translation, message actions, Context Keeper, Storydate, RP State, Memories, research, or related tools.
 - User-accessible Personas, bot-editor fields, Lorebooks, Rulebooks, private Lorebook records, creator backups and drafts, snippets, OOC presets, reply instructions, and similar authored content.
 - Local saved bot copies, status records, imports, recovery snapshots, research checkpoints, file exports, and diagnostic records.
 - SpicyChat page and tab URLs, page types, activity and performance indicators, helper-worker state, and error information relevant to enabled browser or tab-management features.
-- User-chosen files, pictures, soundscape audio, article URLs, media URLs, API keys, webhooks, and other values required by optional integrations.
+- User-chosen files, pictures, soundscape audio, article URLs, media URLs, API keys, webhooks, and other values required by configured integrations.
+- Creator Tools installation, project, operation, recording, and synthetic test-job identifiers, connection status, progress, and technical diagnostic metadata when the relevant integration is used.
 
 QoL does not intentionally inspect unrelated browsing history. Extra origin access is requested or used for a described feature, not for unrelated tracking.
 
 ## 3. Local storage and generated files
 
-Browser builds use extension storage, IndexedDB, and limited session/tab state to keep settings, saved lists, archives, backups, caches, images, bookmarks, notes, and other feature data. The `unlimitedStorage` permission supports larger local-first datasets; it does not itself authorize an upload.
+Browser builds use extension storage, IndexedDB, and limited session/tab state to keep settings, saved lists, archives, backups, caches, images, bookmarks, notes, and other feature data. The `unlimitedStorage` permission supports larger local-first datasets; it does not itself authorize an upload. GitHub and Creator Tools credentials use dedicated extension-origin IndexedDB storage in supported browser builds. Local research staging records, upload checkpoints and bounded diagnostic delivery queues may persist across browser restarts to support recovery. This storage is not a guarantee of protection against access to a compromised browser profile or device.
 
 On Android, the app and embedded WebView may additionally store app settings, site cookies and sessions, browser caches, tab state, diagnostic logs, and verified downloaded QoL assets locally. Android WebView may allow third-party cookies when required for website authentication. Large Saved Bot Copies and availability records may be stored in IndexedDB instead of one large settings object. This is still local device storage. Locally saved private Lorebook recovery records or other preservation copies may remain available even after the corresponding SpicyChat item changes or disappears, subject to the data actually accessible to the user.
 
@@ -44,15 +45,17 @@ QoL does not intentionally bypass inaccessible private definition fields; it use
 
 ## 5. Chats, Memories, and private authored content
 
-Supported optional tools may read private chat messages, conversation history, Memories, Persona text, Lorebook or Rulebook content, notes, OOC text, and other personal writing locally to deliver the requested feature. Such information is not automatically transmitted to DragonScript for ordinary browsing or editing.
+Enabled tools may read private chat messages, conversation history, Memories, Persona text, Lorebook or Rulebook content, notes, OOC text, and other personal writing locally to deliver the requested feature. Such information is not automatically transmitted to DragonScript for ordinary browsing or editing.
 
-A manual **Bulk Chat & Native Memory Research Export** can retrieve conversations, messages, character metadata, and available native Memory records, then create local research/export files. These files can contain extensive private content. The export runs only when initiated through the relevant workflow, and downloaded archives are not automatically made public.
+Memory Manager can collect selected messages or existing native Memories into editable drafts for review. Saving a reviewed draft through the native Memory workflow submits its content to SpicyChat. Consolidation does not automatically delete the original Memories. Context Keeper can process locally available conversation text and saved facts to prepare suggestions and check for similar or changed information.
+
+A manual **Bulk Chat, Memory & Character Research Export** can retrieve conversations, messages, character metadata, and available native Memory records, then create local research/export files and saved research records. These can contain extensive private content, including memory retrieval timestamps where available. The retrieval workflow is user-initiated; downloaded archives are not automatically made public. Where configured, saved records can be staged for GitHub upload and that upload may continue or resume in the background without repeating the original chat retrieval (section 7).
 
 The **Private Lorebook Bridge** and related recovery/archive workflows may keep local copies and, when a user requests a native Lorebook operation, send selected entries to SpicyChat through its authenticated interfaces. A user-selected private SpicyChat Lorebook used for preservation is distinct from public SpicyChat Archive contribution. Private Lorebook content is not automatically submitted to the public Archive service.
 
-## 6. Optional DragonScript Account & Sync (QoL Cloud)
+## 6. DragonScript Account & Sync (QoL Cloud)
 
-Account & Sync is optional and connects participating devices to `https://syncqol.drache.uk`. When used, the service may receive and retain:
+Account & Sync connects participating devices to `https://syncqol.drache.uk`. When used, the service may receive and retain:
 
 - A QoL account identifier, linked device ID and display name, platform/client version, authentication and authorization metadata, and sync revisions or status.
 - Selected settings and feature preferences, along with changed-key and deletion metadata.
@@ -67,13 +70,17 @@ Disconnecting a device removes or stops its local sync access as supported by th
 
 ## 7. Experimental GitHub backup and synchronization provider
 
-The optional **GitHub (experimental)** provider is designed to work directly with GitHub without a DragonScript-hosted backup server or Cloudflare intermediary. It uses the [DragonScript QoL Backup GitHub App](https://github.com/apps/dragongraf-qol-backup).
+The **GitHub (experimental)** provider is designed to work directly with GitHub without a DragonScript-hosted backup server or Cloudflare intermediary. It uses the [DragonScript QoL Backup GitHub App](https://github.com/apps/dragongraf-qol-backup).
 
 Where this provider is available in the installed build, the user authorizes GitHub through **Device Flow** and installs/authorizes the GitHub App for a selected repository. Users may choose an existing repository or create a private repository through GitHub. The user chooses which supported data categories to back up, synchronize, or restore.
 
-Depending on those choices and feature support, the GitHub repository may receive complete or incremental copies of QoL settings, selected lists and storage, local organization data, available recovery and backup records, and **optional full chat-research exports**, including conversations, messages, and Memories. Backups and sync metadata may contain identifiers, timestamps, revision information, and file contents required for restoration or conflict handling. Users should treat complete backups and chat exports as highly sensitive.
+Depending on those choices and feature support, the GitHub repository may receive complete or incremental copies of QoL settings, selected lists and storage, local organization data, available recovery and backup records, and **full chat-research exports**, including conversations, messages, and Memories. Backups and sync metadata may contain identifiers, timestamps, revision information, and file contents required for restoration or conflict handling. Users should treat complete backups and chat exports as highly sensitive.
 
 GitHub authentication may involve a device authorization code, a GitHub user access token, an expiring refresh token, and repository or installation selection metadata. Access and refresh tokens are stored on the user's device for authorized API requests and renewal; they should not be included in ordinary exports or support logs. GitHub receives authorization requests, repository operations, and stored backup content under GitHub's own policies. DragonScript does not operate an additional backup relay for this provider.
+
+Backup content is encrypted on the device by default using AES-GCM with keys derived from a backup password using PBKDF2. Users can explicitly confirm storing selected supported categories without encryption, including research data. Unencrypted content is readable by anyone with sufficient repository access; encoding is not encryption. Repository metadata, backup configuration and snapshot indexes are not all encrypted. Protect the backup password and repository credentials; encryption does not protect an already compromised local device.
+
+When configured, scheduled backup and research continuation can upload saved records while the browser is running, including after the export dialog is closed or the browser restarts. Uploads use the selected repository and categories, with local checkpoints, retries and verification. Pausing or disconnecting the provider stops its future scheduled work as supported by the controls, but does not remove previously uploaded files.
 
 Available provider modes are:
 
@@ -85,19 +92,19 @@ A GitHub repository marked private is not public, but its owner, authorized coll
 
 This experimental provider is not required for basic QoL features. Its availability may vary by installed release and platform.
 
-## 8. Optional public SpicyChat Archive contribution
+## 8. Public SpicyChat Archive contribution
 
-The separate Public Archive contribution workflow is opt-in. When enabled and submitted, locally saved bot/status copies or associated metadata may be sent to the DragonScript-operated SpicyChat Archive import service for review and possible public preservation. Contributions may include selected accessible bot/profile information, submission progress/deduplication metadata, and a pseudonymous installation identifier or hash used to recognize repeat submissions.
+When Public Archive contribution is enabled and records are submitted, locally saved bot/status copies or associated metadata may be sent to the DragonScript-operated SpicyChat Archive import service for review and possible public preservation. Contributions may include selected accessible bot/profile information, submission progress/deduplication metadata, and a pseudonymous installation identifier or hash used to recognize repeat submissions.
 
 Public Archive contribution is **not** the same as QoL Cloud sync, private GitHub backup, or a private Lorebook archive. Content accepted into a public archive may become accessible to other people and may not be practically retractable everywhere after publication. Do not contribute records that should remain private.
 
 Archive Blocking Presets and other public Archive catalogs may be fetched from `spicychatarchive.drache.uk` or related public data hosts. Downloading these catalogs does not itself upload the user's personal blocked list. Locally selected presets or matching results are synchronized externally only if a separately supported sync option includes that data.
 
-## 9. Optional DeepL translation
+## 9. DeepL translation
 
 If DeepL translation is enabled, selected message text and, where needed, limited surrounding context are sent directly to DeepL's API using a key supplied by the user. Results may be cached locally. DeepL receives the submitted text under its own terms. The key is intended to remain local and excluded from ordinary backups and diagnostic reports.
 
-## 10. Optional Discord webhooks and alerts
+## 10. Discord webhooks and alerts
 
 When a user enables and configures followed-creator or new-bot alerts through a Discord webhook, QoL sends the selected alert content directly to that webhook. Discord receives the message and normal request information. A webhook URL is a sensitive credential; it is stored locally and intended to be excluded from ordinary portable backups and support diagnostics.
 
@@ -107,15 +114,27 @@ The Wiki / Web Lorebook Importer can fetch a user-selected article URL after req
 
 User-entered Soundscape or other direct media URLs are loaded from their respective hosts, which receive normal requests. Locally selected media files remain local unless the user exports or shares them.
 
-The optional Creator Writing Assistant may use a browser-provided built-in language-model API for supported tasks. Browser/vendor handling of that API may differ by browser. QoL does not send that text to a DragonScript-operated AI service for this feature.
+The Creator Writing Assistant may use a browser-provided built-in language-model API for supported tasks. Browser/vendor handling of that API may differ by browser. QoL does not send that text to a DragonScript-operated AI service for this feature.
 
 ## 12. Diagnostics and Inspector compatibility
 
 QoL maintains local diagnostics, feature compatibility information, performance counters, and data-health records. Manually generated support reports may include app/build/browser information, counts, storage information, request outcomes, timing, and sanitized error metadata. They are not automatically sent to DragonScript; the user chooses whether to copy, download, or share them.
 
-Where installed, the separate **SpicyChat Inspector** extension can observe SpicyChat page behavior and receive compatible sanitized QoL diagnostic information. Inspector has its own local recording controls and separate privacy policy. QoL does not automatically upload Inspector captures to its sync service.
+Where installed, the separate **SpicyChat Inspector** extension can observe SpicyChat page behavior and receive compatible sanitized QoL diagnostic information. Inspector has its own local recording controls and separate privacy policy. QoL does not automatically upload Inspector captures to its sync service. When the two extensions are explicitly connected, QoL can send allowlisted operation markers to the selected Inspector extension through browser extension messaging. These can include recording and operation identifiers, creation identifiers, operation stages, counts, timings, comparison results, and sanitized error or response classifications. Pending reports may be retained locally for bounded delivery and recovery. Inspector controls its own recording and any authorized transmission to Creator Tools; QoL does not implement a separate direct diagnostic uploader for Inspector recordings.
 
 Diagnostic redaction is best-effort; technical URLs, filenames, identifiers, or errors may still contain sensitive context. Never share unreviewed reports, logs, screenshots, or exports.
+
+### 12.1 SpicyChat Creator Tools (SCT)
+
+Supported browser builds include integration with the separate DragonScript-operated [SpicyChat Creator Tools](https://spicychat-creatortools.drache.uk/) service. Ordinary QoL users do not need an SCT account or a managed installation. Local creation packages can be prepared and reviewed without connecting to the service.
+
+The managed connection is intended for explicitly authorized dedicated installations. QoL sends requests directly to `https://spicychat-creatortools.drache.uk` using a separate revocable installation credential, not a SpicyChat password or website session cookie. The service may receive installation and authorized project identifiers, QoL version, supported capabilities, connection and health status, operation-context requests, timestamps, and normal network request information. The current client reports native session health as unknown rather than inspecting credentials to verify it.
+
+The installation credential and a pending replacement credential may be stored in dedicated extension-origin IndexedDB. Authorized automatic renewal can transmit a proposed replacement credential to SCT; credentials are designed to be excluded from page messaging, ordinary exports, and diagnostic reports. Disconnecting clears the local managed connection; server-side revocation and deletion of retained service data are separate actions.
+
+When enabled on an authorized managed installation, background test jobs retrieve synthetic test values and send job and lease identifiers, progress, sequence information and a completion hash to SCT. Local checkpoints and retrieved test chunks support recovery. These jobs do not retrieve private native creation packages, read chat histories, or modify native SpicyChat creations. Server maintenance and emergency-stop controls restrict managed work.
+
+Where an authorized Inspector recording exists, QoL may send aggregate synthetic job observations to that extension, including SCT-assigned recording, stream, context, job and operation identifiers, counts, timing, transfer sizes and status. Inspector handles any authorized onward diagnostic uploads and their retention under its own controls and policy. SCT may retain installation status and authorized job or diagnostic records independently of the local QoL installation. This integration does not enable automatic native publishing, unattended native writes, or personal SpicyChat account synchronization with SCT.
 
 ## 13. Browser extension and Android platform details
 
@@ -164,7 +183,7 @@ Supported Android builds may use the same optional QoL Cloud account synchroniza
 
 ## 14. Permissions and remote assets
 
-Depending on build and feature selection, the browser extension can request local storage, alarms, larger local storage, SpicyChat/NextDay AI host access, supported DragonScript endpoints, and optional download, notification, DeepL, wiki/article, or Discord-host access. See [`PERMISSIONS.md`](https://github.com/drachescript/spicychat-qol-extension/blob/main/PERMISSIONS.md) for details.
+Depending on build and feature selection, the browser extension can request local storage, alarms, larger local storage, SpicyChat/NextDay AI host access, supported DragonScript endpoints, and feature-specific download, notification, DeepL, wiki/article, Discord, GitHub, or Creator Tools host access. Supported browser builds request Creator Tools and GitHub host access for their respective configured connections. See [`PERMISSIONS.md`](https://github.com/drachescript/spicychat-qol-extension/blob/main/PERMISSIONS.md) for details.
 
 Browser-extension executable logic is packaged with the extension. Fetching a public Archive catalog or calling an API is not the same as executing arbitrary remote extension code. **The Android app differs:** it can download compatible QoL JavaScript/CSS updates from the supported GitHub/DragonScript channels after compatibility and integrity checks (section 13.5). Android-native permissions and their uses are detailed in section 13.3.
 
@@ -172,7 +191,7 @@ Browser-extension executable logic is packaged with the extension. Fetching a pu
 
 Local QoL data remains on a device until modified or removed through QoL controls, browser/app storage management, platform cleanup, or uninstall behavior. Android WebView cookies and site storage may require separate clearing. Files saved outside extension/app storage, such as documents in Downloads or files given to other apps, must be deleted separately. Clearing an Android diagnostic log does not erase previously exported copies.
 
-Cloud data, GitHub repository backups, SpicyChat-owned information, and public Archive contributions are separate from local copies. Stopping sync or uninstalling QoL does not guarantee deletion from those destinations. Users should manage deletion through the corresponding provider or repository controls; public copies and repository history may require additional action.
+Cloud data, GitHub repository backups, Creator Tools records, Inspector recordings and transfers, SpicyChat-owned information, and public Archive contributions are separate from local copies. Stopping sync or uninstalling QoL does not guarantee deletion from those destinations. Users should manage deletion through the corresponding provider or repository controls; public copies and repository history may require additional action.
 
 QoL does not sell user information, run behavioral advertising, or use personal QoL data for creditworthiness, lending, data-broker profiles, or unrelated ad targeting. The developer has no routine access to local browser-extension or Android app-private storage, but may receive data deliberately sent to a DragonScript-operated feature or provided in a support request.
 
@@ -190,4 +209,4 @@ Project website: https://spicychatqol.drache.uk
 
 Discord: https://discord.gg/XTMdWvuVSU
 
-Do not publish passwords, authorization codes, access or refresh tokens, DeepL keys, Discord webhook URLs, private chats, Memories, or unreviewed backup/diagnostic exports in public support channels.
+Do not publish passwords, backup encryption passwords, authorization codes, access or refresh tokens, Creator Tools installation credentials, DeepL keys, Discord webhook URLs, private chats, Memories, or unreviewed backup/diagnostic exports in public support channels.
