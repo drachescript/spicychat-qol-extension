@@ -3,6 +3,7 @@
 function registerQolBackgroundInstalled() {
 chrome.runtime.onInstalled.addListener(details => {
   dsqSctWake();
+  dsqSctManagedWake();
   rememberReleaseNotice(details)
     .catch(() => {})
     .finally(() => {

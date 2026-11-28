@@ -7,8 +7,33 @@ function setupGithubBackupFoundation() {
       resolve(chrome.runtime.lastError?{ok:false,error:chrome.runtime.lastError.message}:result||{ok:false,error:'No response'}));}
     catch(e){resolve({ok:false,error:e.message});}
   });
-  let authPolling=false;
+  let authPolling=false,manualProgress=false;
   const output=(text,error=false)=>{const el=$g('ghBackupStatus');if(!el)return;el.textContent=String(text||'');el.style.color=error?'#fb9f9f':'';};
+  // This renderer updates status only, never editable preferences. The
+  // periodic check must not discard a user's unsaved category changes.
+  const renderProgress=s=>{
+    const active=s.progress?.phase && s.progress.phase!=='idle' && Number(s.progress.at)>Date.now()-180000;
+    const pr=s.researchLive||s.researchBackupProgress;
+    const bar=$g('ghBackupResearchBar'), label=$g('ghBackupResearchProgress');
+    $g('ghBackupProgress').textContent=active?`${s.progress.phase}: ${s.progress.message||''}${s.progress.total?` · ${s.progress.done}/${s.progress.total}`:''}`:'';
+    $g('ghBackupResearchLast').textContent=s.researchLastSyncedAt?`Last verified Research snapshot: ${new Date(s.researchLastSyncedAt).toLocaleString()}${s.researchLastSnapshot?` · ${s.researchLastSnapshot.slice(0,8)}`:''}`:'No verified Research snapshot recorded on this device yet';
+    $g('ghBackupResearchError').textContent=s.researchError||'';
+    const paused=s.paused||!s.categories?.includes('research')||s.provider==='cloud'||!s.unlocked||!s.connected;
+    $g('ghBackupResearchResume').disabled=paused||!!s.researchPending;
+    if(pr&&Number.isFinite(pr.total)&&pr.total>=0){
+      const total=Math.max(0,pr.total), committed=Math.min(total,Math.max(0,Number(pr.completed)||0)), remaining=total-committed;
+      const batch=s.researchLive?Math.max(0,Number(pr.batchVerified)||0):0;
+      bar.hidden=!total;bar.max=Math.max(1,total);bar.value=committed;
+      let phase=paused?'paused / unlock or enable Research':s.researchLive?(pr.phase==='indexing'?'verifying snapshot index':'uploading'):
+        s.researchRetryAt>Date.now()&&s.researchPending?`retry at ${new Date(s.researchRetryAt).toLocaleTimeString()}`:
+        s.researchPending?'queued / continuing in batches':remaining?'stopped — resume saved Research':'all staged records committed';
+      const rate=Number(pr.ratePerMinute)||0;
+      let eta='';if(remaining&&rate>0&&s.researchPending&&!paused&&s.researchRetryAt<=Date.now()){
+        const mins=Math.ceil(remaining/rate);eta=` · ~${rate} records/min · rough ETA ${mins>=60?`${Math.floor(mins/60)}h ${mins%60}m`:`${mins}m`} (may increase)`;
+      }
+      label.textContent=`${total.toLocaleString()} staged · ${committed.toLocaleString()} indexed and verified · ${remaining.toLocaleString()} remaining${batch?` · ${batch} verified this batch, not indexed yet`:''} · ${phase}${eta}`;
+    }else{bar.hidden=true;label.textContent=s.researchPending?'Saved Research upload queued; checking staged records…':'No Research upload progress recorded yet.';}
+  };
   const status=async()=>{
     const s=await call('STATUS');if(!s.ok){output(s.error,true);return s;}
     $g('ghBackupProvider').value=s.provider;
@@ -23,26 +48,10 @@ function setupGithubBackupFoundation() {
     $g('ghBackupRemember').checked=s.remembered;
     $g('ghBackupAccount').textContent=s.connected?`GitHub: ${s.githubUser||'authorized'} · ${s.repository||'select a repository'}`:'GitHub not authorized';
     $g('ghBackupUnlockState').textContent=s.unlocked?'Encryption key unlocked':'Backup password required';
-    $g('ghBackupLast').textContent=s.lastSyncedAt?`Last successful operation: ${new Date(s.lastSyncedAt).toLocaleString()}`:'No GitHub snapshot yet';
+    $g('ghBackupLast').textContent=s.lastSyncedAt?`Last successful general backup: ${new Date(s.lastSyncedAt).toLocaleString()}`:'No general GitHub backup yet';
     if(s.conflicts?.length)$g('ghBackupConflicts').textContent=`Conflicts: ${s.conflicts.join(', ')}. Use Restore / Merge to resolve; no data was overwritten.`;
     else $g('ghBackupConflicts').textContent='';
-    const active=s.progress?.phase && s.progress.phase!=='idle' &&
-      Number(s.progress.at)>Date.now()-180000;
-    const saved=s.researchBackupProgress;
-    if(active){
-      const suffix=s.progress.total?` · ${s.progress.done}/${s.progress.total}`:'';
-      $g('ghBackupProgress').textContent=`${s.progress.phase}: ${s.progress.message||''}${suffix}`;
-    }else if(saved && Number.isFinite(saved.total) && saved.total>0){
-      const remaining=Math.max(0,Number(saved.remaining)||0);
-      const completed=Math.max(0,Math.min(saved.total,Number(saved.completed)||0));
-      const last=saved.updatedAt?new Date(saved.updatedAt).toLocaleString():'';
-      const paused=!s.categories?.includes('research')||s.paused;
-      $g('ghBackupProgress').textContent=`Research snapshot: ${completed}/${saved.total} records committed · ${remaining} remaining`+
-        (remaining?(paused?' · paused (Research disabled or backups paused)':
-          s.researchRetryAt>Date.now()?` · retry ${new Date(s.researchRetryAt).toLocaleTimeString()}`:
-          ' · continuing in batches'):' · complete')+
-        (last?` · checked ${last}`:'');
-    }else $g('ghBackupProgress').textContent='';
+    renderProgress(s);
     if(s.lastError)output(s.lastError,true);
     else if ($g('ghBackupStatus')?.textContent?.trim()==='GitHub backup starts off by default.') {
       if(s.provider==='cloud')output('GitHub backup is not selected. Choose GitHub or Both and save provider preferences.');
@@ -57,9 +66,9 @@ function setupGithubBackupFoundation() {
   async function run(name,args={},success){
     output(`${name.replace(/_/g,' ').toLowerCase()}…`);
     const longOperation=['BACKUP','SYNC','RESTORE'].includes(name);
-    const ticker=longOperation?setInterval(()=>{void call('STATUS').then(s=>{if(s.ok){const pr=s.progress;
-      if(pr?.phase && pr.phase!=='idle')$g('ghBackupProgress').textContent=`${pr.phase}: ${pr.message||''}${pr.total?` · ${pr.done}/${pr.total}`:''}`;} });},1800):null;
-    let r;try{r=await call(name,args);}finally{if(ticker)clearInterval(ticker);}
+    if(longOperation)manualProgress=true;
+    const ticker=longOperation?setInterval(()=>{void call('STATUS').then(s=>{if(s.ok)renderProgress(s);});},2500):null;
+    let r;try{r=await call(name,args);}finally{if(ticker)clearInterval(ticker);if(longOperation)manualProgress=false;}
     if(r.ok&&name!=='STATUS')await status();
     // Show the outcome after refreshing status, not an older saved error.
     if(!r.ok)output(r.message||r.error||'Operation failed',true);
@@ -132,9 +141,19 @@ function setupGithubBackupFoundation() {
     $g('ghBackupPassword').value='';
   });
   $g('ghBackupLock').addEventListener('click',()=>run('LOCK',{},'Encryption key locked and remembered unlock cleared.'));
-  $g('ghBackupNow').addEventListener('click',()=>run('BACKUP',{},'GitHub backup finished, verified and indexed.'));
+  $g('ghBackupNow').addEventListener('click',()=>run('BACKUP',{},r=>r.pendingResearch?'General backup checked; Research upload continues in verified batches.':'GitHub backup finished, verified and indexed.'));
   $g('ghBackupSync').addEventListener('click',()=>run('SYNC',{},'Provider synchronization finished.'));
-  $g('ghBackupRefresh').addEventListener('click',async()=>{await status();output('Status refreshed.');});
+  $g('ghBackupRefresh').addEventListener('click',async()=>{const result=await status();if(result.ok&&!result.lastError&&!result.researchError)output('Status refreshed.');});
+  $g('ghBackupResearchResume').addEventListener('click',()=>run('RESEARCH_RESUME'));
+  let checkingProgress=false;
+  const refreshProgress=async()=>{
+    if(manualProgress||checkingProgress||document.hidden||!$g('githubBackupCard')?.getClientRects().length||!$g('ghBackupProgress')?.getClientRects().length)return;
+    checkingProgress=true;
+    try{const result=await call('STATUS');if(result.ok)renderProgress(result);}finally{checkingProgress=false;}
+  };
+  // Only while the visible GitHub card is open. No GitHub network requests.
+  const progressTimer=setInterval(()=>{if(!document.contains($g('githubBackupCard'))){clearInterval(progressTimer);return;}void refreshProgress();},5000);
+  window.addEventListener('pagehide',()=>clearInterval(progressTimer),{once:true});
   $g('ghBackupSnapshots').addEventListener('click',async()=>{
     const r=await run('SNAPSHOTS');if(!r.ok)return;
     const select=$g('ghBackupSnapshotSelect');select.replaceChildren();

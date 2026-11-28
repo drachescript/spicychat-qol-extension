@@ -1881,7 +1881,12 @@ step sister" spellcheck="false"></textarea></label>
 <label class="row"><input id="ghBackupPause" type="checkbox"/><span>Pause GitHub backups on this device</span></label>
 <div class="button-row"><button id="ghBackupSave" type="button">Save provider preferences</button><button id="ghBackupNow" type="button">Backup Now</button><button id="ghBackupSync" type="button">Sync Now</button><button id="ghBackupCancel" type="button">Cancel operation</button><button id="ghBackupRefresh" type="button">Check status</button></div>
 <p id="ghBackupProgress" class="hint" role="status" aria-live="polite"></p>
-<p class="hint" id="ghBackupLast">No GitHub snapshot yet</p>
+<p class="hint" id="ghBackupLast">No general GitHub backup yet</p>
+<p class="hint" id="ghBackupResearchLast">No verified Research snapshot on this device yet</p>
+<progress id="ghBackupResearchBar" hidden max="1" value="0" aria-label="Research records committed to GitHub" style="width:100%"></progress>
+<p class="hint" id="ghBackupResearchProgress" role="status" aria-live="polite"></p>
+<p class="hint" id="ghBackupResearchError" role="status"></p>
+<div class="button-row"><button type="button" id="ghBackupResearchResume">Resume saved Research upload</button></div>
 
 <p class="hint" id="ghBackupConflicts"></p>
 <p class="hint">No implicit deletions: missing or unreadable local categories do not remove existing GitHub objects. If different devices modify the same category, sync stops and asks you to resolve it.</p>

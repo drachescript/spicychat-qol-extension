@@ -40,6 +40,7 @@
   let cancelled = false;
   function checkCancelled(){if(cancelled)throw Error('GitHub operation cancelled; verified remote snapshots and local data remain intact');}
   let progress = { phase:'idle',done:0,total:0,message:'' };
+  let researchLive=null, stateWrites=Promise.resolve();
   const enc = new TextEncoder(), dec = new TextDecoder();
   const b64 = bytes => { let s='';for(let i=0;i<bytes.length;i+=16384)s+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(s); };
   const bytes = value => Uint8Array.from(atob(value), ch=>ch.charCodeAt(0));
@@ -258,7 +259,16 @@
   }
   async function prefs(){ return normalizePrefs((await storeGet([PREF_KEY]))[PREF_KEY]); }
   async function state(){return (await storeGet([STATE_KEY]))[STATE_KEY] || {};}
-  async function patchState(patch){await storeSet({[STATE_KEY]:{...(await state()),...patch}});}
+  async function patchState(patch){
+    const work=async()=>storeSet({[STATE_KEY]:{...(await state()),...patch}});
+    const result=stateWrites.then(work,work);stateWrites=result.catch(()=>{});return result;
+  }
+  function pendingReadback(message){return Object.assign(Error(message),{code:'readback-pending'});}
+  function transientResearchError(error){
+    return error?.code==='readback-pending'||[408,429,500,502,503,504].includes(error?.code)||
+      (error?.code===403&&(error.retryAfter>0||/rate limit|secondary rate|abuse/i.test(cleanError(error))))||
+      error?.name==='AbortError'||/network|fetch failed|timed out|failed to fetch/i.test(cleanError(error));
+  }
   function isActive(p){return p.provider==='github'||p.provider==='both';}
   async function apiRaw(token, endpoint,{method='GET',body,accept='application/vnd.github+json'}={}){
     const controller=new AbortController(),stop=setTimeout(()=>controller.abort(),45000);
@@ -304,7 +314,7 @@
       try{return await apiRaw(await token(),endpoint,options);}
       catch(error){
         if(!([408,429,502,503,504].includes(error.code)||(error.code===403&&error.retryAfter>0)||error.name==='AbortError') || attempt>=3)throw error;
-        await sleep(Math.max(error.retryAfter*1000,Math.min(2000*2**attempt,12000)));
+        await sleep(Math.max((Number(error.retryAfter)||0)*1000,Math.min(2000*2**attempt,12000)));
       }
     }
   }
@@ -369,7 +379,8 @@
     unlocked=null;
     await storeSet({[PREF_KEY]:{...p,repository:repo}});
     await patchState({repository:repo,base:{},lastSnapshot:'',lastSyncedAt:0,conflicts:[],lastError:'',
-      researchBackupProgress:null,researchRetryCount:0,researchRetryAt:0});
+      researchBackupProgress:null,researchRetryCount:0,researchRetryAt:0,researchPending:false,researchLastSyncedAt:0,researchLastSnapshot:'',researchError:'',researchQueuedAt:0});
+    try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}
     return {ok:true,repository:repo,alreadySelected:false};
   }
   async function fileRead(repo,filepath){
@@ -437,6 +448,7 @@
     if(remember){await privateValue('remembered',{...keys,repository:p.repository});}
     else await privateValue('remembered',null,true);
     await storeSet({[PREF_KEY]:{...p,rememberDevice:!!remember}});
+    await ensureResearchAlarm();
     return {ok:true,remembered:!!remember};
   }
   async function getKeys(repo){
@@ -466,14 +478,19 @@
         throw Error('GitHub object failed integrity verification');
       return true;
     }
-    throw Error('GitHub accepted the object upload, but read-back is still pending. No duplicate upload was attempted; retry backup later.');
+    throw pendingReadback('GitHub accepted the object upload, but read-back is still pending. The existing snapshot remains safe.');
   }
   async function putObject(repo,payload,keys,plain=false){
     const raw=ArrayBuffer.isView(payload) ? new Uint8Array(payload.buffer,payload.byteOffset,payload.byteLength) : payload instanceof ArrayBuffer ? new Uint8Array(payload) : enc.encode(String(payload));
     const digest=await objectIdentity(raw,plain?null:keys.mac);
     const target=path(`objects/${digest}.json`);
     const existing=await fileRead(repo,target);
-    if(existing)return {id:digest,bytes:raw.length,plain};
+    if(existing){
+      const decoded=existing.value.encrypted?await openBytes(existing.value,keys.aes):bytes(existing.value.data);
+      if(await objectIdentity(decoded,plain?null:keys.mac)!==digest||decoded.length!==raw.length)
+        throw Error('Existing GitHub object failed integrity verification; refusing to reuse it');
+      return {id:digest,bytes:raw.length,plain};
+    }
     const value=plain?{schema:'dsq-object-v1',encrypted:false,data:b64(raw)}:{schema:'dsq-object-v1',...await sealBytes(raw,keys.aes)};
     try{await fileWrite(repo,target,value);}catch(error){if(error.code!==409&&error.code!==422)throw error;}
     await verifyUploadedObject(repo,target,digest,keys,plain);
@@ -506,6 +523,19 @@
     return JSON.parse(dec.decode(combined));
   }
   const partsEqual = (a,b) => JSON.stringify(a?.parts?.map(p=>p.id)||[])===JSON.stringify(b?.parts?.map(p=>p.id)||[]);
+  async function verifySnapshotIndex(repo,snapshotId,manifest){
+    for(const delay of [0,300,800,1600,3000,5000]){
+      checkCancelled();if(delay)await sleep(delay);
+      const check=await readIndex(repo);
+      const ref=check.value.snapshots?.find(row=>row.id===snapshotId);
+      if(ref){
+        if(ref.manifest?.id!==manifest.id||ref.manifest?.bytes!==manifest.bytes||ref.manifest?.plain!==manifest.plain)
+          throw Error('Snapshot index contains a different manifest; refusing to confirm it');
+        return check;
+      }
+    }
+    throw pendingReadback('GitHub snapshot index read-back is still pending. Existing indexed data was preserved.');
+  }
   async function readSnapshot(repo,reference,keys){
     if(!reference)return null;
     const raw=await readObject(repo,reference,keys);
@@ -605,20 +635,21 @@
     }
     return {parts:refs,plain};
   }
-  async function backup({mode='backup',force=false}={}){
+  async function backup({mode='backup',force=false,researchOnly=false}={}){
     const p=await prefs();if(!isActive(p))throw Error('Enable GitHub or Both as the backup provider');
     if(!p.repository)throw Error('Choose a private GitHub repository');
     const keys=await getKeys(p.repository);const repo=p.repository;
     const index=await readIndex(repo);
     const latest=index.value.snapshots?.[0]||null;
     const remote=await readSnapshot(repo,latest?.manifest,keys);
-    const baseline= (await state()).base || {};
+    const previousState=await state();
+    const baseline=previousState.base||{};
     let merged={...(remote?.categories||{})}, changed=[], downloads=[], conflicts=[];
     let alreadyUploadedResearch=0;
     let remainingResearch=0;
     let researchSnapshotProgress=null;
     const pendingUploads=[];
-    for(const category of p.categories){
+    for(const category of (researchOnly?[]:p.categories)){
       checkCancelled();
       if(category==='research')continue;
       const value=await readLocalCategory(category);
@@ -677,6 +708,13 @@
       const valid=rows.filter(row=>row.complete&&row.sha);
       const total=valid.length;
       const alreadyOnGithub=valid.filter(row=>catalog.records[row.key]?.sha===row.sha).length;
+      const batchStarted=Date.now();
+      const prev=previousState.researchBackupProgress;
+      const sameTotal=prev?.total===total;
+      // Only index-confirmed counts are committed. Current-batch records are separate.
+      researchLive={total,completed:alreadyOnGithub,remaining:total-alreadyOnGithub,batchVerified:0,startedAt:batchStarted,phase:'uploading',
+        ratePerMinute:sameTotal?Number(prev?.ratePerMinute)||0:0};
+      await patchState({researchBackupProgress:{...researchLive,updatedAt:Date.now()}});
       let uploaded=0, catalogMetadataChanged=false;
       update('research','Checking verified Research Export records',alreadyOnGithub,total);
       const started=Date.now();
@@ -708,7 +746,9 @@
         const prior=catalog.records[row.key];
         catalog.records[row.key]={sha:row.sha,ref:stored,...(row.summary ? {summary:row.summary} : {})};
         uploaded++;
-        update('research',`Uploading batch: ${uploaded} records; ${alreadyOnGithub} already indexed`,alreadyOnGithub,total);
+        researchLive={...researchLive,batchVerified:uploaded};
+        if(uploaded%4===0)await patchState({researchBackupProgress:{...researchLive,updatedAt:Date.now()}});
+        update('research',`Verified ${uploaded} records in this batch; ${alreadyOnGithub} already indexed`,alreadyOnGithub,total);
         if(uploaded%5===0)await sleep(150);
         if(uploaded>=RESEARCH_RECORDS_PER_BATCH)break;
       }
@@ -716,8 +756,14 @@
       alreadyUploadedResearch=uploaded;
       // Display only committed counts from snapshots. A record isn't safely on
       // GitHub until its catalog and the snapshot index are both verified.
-      researchSnapshotProgress={total,completed:total-remainingResearch,remaining:remainingResearch};
+      const elapsed=Math.max(1,Date.now()-batchStarted)/60000;
+      const observedRate=uploaded/Math.max(elapsed+1.5,0.001); // includes normal inter-batch delay; index writes add more time
+      const priorRate=Number(researchLive.ratePerMinute)||0;
+      researchSnapshotProgress={total,completed:total-remainingResearch,remaining:remainingResearch,batchVerified:0,
+        phase:remainingResearch?'queued':'complete',ratePerMinute:uploaded?Math.round((priorRate?priorRate*.6+observedRate*.4:observedRate)*10)/10:priorRate};
       if(uploaded || catalogMetadataChanged){
+        researchLive={...researchLive,phase:'indexing'};
+        await patchState({researchBackupProgress:{...researchLive,updatedAt:Date.now()}});
         merged.research=await chunks(repo,catalog,keys,false);
         changed.push('research');
         pendingUploads.push({category:'research',alreadyUploaded:true});
@@ -735,10 +781,15 @@
     }
     const needsContinuation=pendingUploads.some(x=>x.category==='research-continuation');
     const realUploads=pendingUploads.filter(x=>x.category!=='research-continuation');
+    const researchState=(snapshotId)=>researchSnapshotProgress?{researchBackupProgress:{...researchSnapshotProgress,updatedAt:Date.now()},
+      researchPending:needsContinuation,researchError:'',researchRetryCount:0,researchRetryAt:0,
+      ...(snapshotId&&merged.research?{researchLastSyncedAt:Date.now(),researchLastSnapshot:snapshotId}:{})}:{};
+    const baseAfter=researchOnly?{...baseline,...(merged.research?{research:merged.research}:{})}:merged;
+    checkCancelled();
     if(!realUploads.length && !force){
-      await patchState({base:merged,lastSyncedAt:Date.now(),lastError:'',conflicts:[],
-        ...(researchSnapshotProgress?{researchBackupProgress:{...researchSnapshotProgress,updatedAt:Date.now()},researchRetryCount:0,researchRetryAt:0}:{})});
-      if(needsContinuation)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
+      await patchState({base:baseAfter,...(researchOnly?{}:{lastSyncedAt:Date.now(),lastError:'',conflicts:[]}),
+        ...researchState(latest?.id),...(cancelled?{researchPending:false}:{})});
+      if(needsContinuation&&!cancelled)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
       return {ok:true,unchanged:true,uploaded:0,downloaded:downloads.length,snapshots:index.value.snapshots?.length||0,pendingResearch:needsContinuation};
     }
     const newSnapshot={schema:'dsq-github-backup-snapshot-v1',snapshotId:id(),deviceId:(await state()).deviceId||id(),
@@ -749,14 +800,17 @@
     const nextIndex={schema:'dsq-github-backup-index-v1',latest:newSnapshot.snapshotId,
       snapshots:[{id:newSnapshot.snapshotId,createdAt:newSnapshot.createdAt,manifest:stored},...(index.value.snapshots||[])].slice(0,5)};
     try{await fileWrite(repo,path('index.json'),nextIndex,index.sha);}catch(error){
-      if(error.code===409||error.code===422)throw Error('GitHub backup index changed on another device. Nothing was deleted; Sync Now to reconcile.');
-      throw error;
+      if(error.code===409||error.code===422){
+        // An uncertain previous PUT may have succeeded. Accept only our exact indexed manifest.
+        const observed=await readIndex(repo);
+        if(!observed.value.snapshots?.some(row=>row.id===newSnapshot.snapshotId&&row.manifest?.id===stored.id))
+          throw Error('GitHub backup index changed on another device. Nothing was deleted; Sync Now to reconcile.');
+      }else throw error;
     }
-    const check=await readIndex(repo);
-    if(check.value.latest!==newSnapshot.snapshotId)throw Error('Snapshot index verification failed');
-    await patchState({base:merged,lastSyncedAt:Date.now(),lastSnapshot:newSnapshot.snapshotId,lastError:'',conflicts:[],deviceId:newSnapshot.deviceId,
-      ...(researchSnapshotProgress?{researchBackupProgress:{...researchSnapshotProgress,updatedAt:Date.now()},researchRetryCount:0,researchRetryAt:0}:{})});
-    if(needsContinuation)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
+    await verifySnapshotIndex(repo,newSnapshot.snapshotId,stored);
+    await patchState({base:baseAfter,...(researchOnly?{}:{lastSyncedAt:Date.now(),lastSnapshot:newSnapshot.snapshotId,lastError:'',conflicts:[]}),deviceId:newSnapshot.deviceId,
+      ...researchState(newSnapshot.snapshotId),...(cancelled?{researchPending:false}:{})});
+    if(needsContinuation&&!cancelled)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+90000});}catch{}
     return {ok:true,uploaded:realUploads.length,downloaded:downloads.length,snapshot:newSnapshot.snapshotId,snapshots:nextIndex.snapshots.length,pendingResearch:needsContinuation};
   }
   // Research recovery is deliberately isolated from live SpicyChat storage.
@@ -893,13 +947,30 @@
     }
     if(next.repository!==undefined && next.repository!==previous.repository)
       throw Error('Use Choose Repository to validate GitHub permissions before changing repository');
-    await storeSet({[PREF_KEY]:merged});await ensureAlarm();
+    await storeSet({[PREF_KEY]:merged});await ensureAlarm();await ensureResearchAlarm();
     return {ok:true,provider:merged.provider};
   }
   async function ensureAlarm(){
     const p=await prefs();
     if(!isActive(p)||!p.automatic||p.paused||!p.repository){try{await chrome.alarms.clear(ALARM);}catch{}return;}
     try{chrome.alarms.create(ALARM,{periodInMinutes:720});}catch{}
+  }
+  async function ensureResearchAlarm(){
+    const p=await prefs(),s=await state();
+    if(!s.researchPending||!isActive(p)||p.paused||!p.repository||!p.categories.includes('research'))return;
+    try{await getKeys(p.repository);if(!await chrome.alarms.get(RESEARCH_ALARM))chrome.alarms.create(RESEARCH_ALARM,{when:Math.max(Date.now()+20000,Number(s.researchRetryAt)||0)});}catch{}
+  }
+  async function queueResearch(){
+    const p=await prefs();
+    if(!isActive(p)||!p.repository||p.paused||!p.categories.includes('research'))return false;
+    if(!(await privateValue('oauth'))?.accessToken)return false;
+    try{await getKeys(p.repository);}catch{return false;}
+    const prior=await state();
+    // An already scheduled upload keeps its backoff and progress.
+    if(prior.researchPending){await ensureResearchAlarm();return true;}
+    cancelled=false;
+    await patchState({researchPending:true,researchQueuedAt:Date.now(),researchRetryCount:0,researchRetryAt:0,researchError:''});
+    chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+20000});return true;
   }
   async function autoRun(){
     const p=await prefs();if(!isActive(p)||!p.automatic||p.paused||!p.repository)return;
@@ -918,8 +989,10 @@
     if(p.provider==='both'){
       try{await new Promise(resolve=>chrome.runtime.sendMessage({type:'DS_QOL_SYNC_NOW'},response=>resolve(response)));}catch{}
     }
-    const result=await backup({mode:'sync'});
-    if(!result?.ok)await patchState({lastError:result?.message||'Automatic sync conflict'});
+    cancelled=false;
+    try{const result=await backup({mode:'sync'});
+      if(!result?.ok)await patchState({lastError:result?.message||'Automatic sync conflict'});
+    }finally{researchLive=null;update('idle','');}
   }
   async function status(){
     const p=await prefs(),s=await state(),auth=await privateValue('oauth'),remember=await privateValue('remembered');
@@ -929,7 +1002,9 @@
       unlocked:(!!unlocked?.aes && unlocked.repository===p.repository)||(!!remember?.aes && remember.repository===p.repository),
       lastSyncedAt:s.lastSyncedAt||0,lastError:s.lastError||'',conflicts:s.conflicts||[],
       pendingResearchRestore:s.pendingRestore||null,researchBackupProgress:s.researchBackupProgress||null,
-      researchRetryAt:s.researchRetryAt||0,researchRetryCount:s.researchRetryCount||0,progress};
+      researchRetryAt:s.researchRetryAt||0,researchRetryCount:s.researchRetryCount||0,
+      researchPending:!!s.researchPending,researchError:s.researchError||'',researchLastSyncedAt:s.researchLastSyncedAt||0,
+      researchLastSnapshot:s.researchLastSnapshot||'',researchQueuedAt:s.researchQueuedAt||0,researchLive,progress};
   }
   async function run(type,message){
     switch(type){
@@ -941,11 +1016,13 @@
       case 'CHOOSE_REPO':return chooseRepo(String(message.repository||''));
       case 'UNLOCK':return unlock(String(message.password||''),!!message.remember);
       case 'LOCK':unlocked=null;await privateValue('remembered',null,true);return {ok:true};
-      case 'CANCEL':cancelled=true;await patchState({pendingRestore:null});return {ok:true,cancelled:true};
+      case 'CANCEL':cancelled=true;await patchState({pendingRestore:null,researchPending:false,researchRetryAt:0});
+        try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}return {ok:true,cancelled:true};
+      case 'RESEARCH_RESUME':{const queued=await queueResearch();return {ok:queued,queued,message:queued?'Saved Research upload scheduled.':'Check GitHub authorization, encryption unlock and Research preferences.'};}
       case 'BACKUP':{
         cancelled=false;
         try {return await backup({mode:'backup'});}
-        finally {update('idle','');}
+        finally {researchLive=null;update('idle','');}
       }
       case 'SYNC':{
         cancelled=false;
@@ -957,7 +1034,7 @@
             return {...github,cloudOk:!!cloud?.ok,...(!cloud?.ok?{warning:`QoL Cloud needs attention: ${cloud?.message||cloud?.error||'unavailable'}`}:{} )};
           }
           return await backup({mode:'sync'});
-        } finally {update('idle','');}
+        } finally {researchLive=null;update('idle','');}
       }
       case 'SNAPSHOTS':return listSnapshots();
       case 'RESTORE':cancelled=false;return restore(String(message.snapshotId||''),message.categories||[],message.merge!==false);
@@ -970,15 +1047,15 @@
         const authorized=enabled && !!(await privateValue('oauth'))?.accessToken;
         let unlockedNow=false;
         if(enabled&&authorized)try{await getKeys(p.repository);unlockedNow=true;}catch{}
-        const queued=!!(enabled&&authorized&&unlockedNow);
-        if(queued)try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+20000});}catch{}
+        const queued=!!(enabled&&authorized&&unlockedNow)&&await queueResearch();
         return {ok:true,queued,reason:queued?'GitHub research upload scheduled':
           !isActive(p)?'Choose GitHub or Both as backup provider':
           !p.categories.includes('research')?'Enable Verified Research Export data in backup categories':
           !p.repository?'Choose a private GitHub repository':p.paused?'GitHub backup is paused':
           !authorized?'Authorize GitHub Device Flow on this browser':'Unlock your GitHub backup password'};
       }
-      case 'DISCONNECT':unlocked=null;await privateValue('oauth',null,true);await privateValue('remembered',null,true);return {ok:true};
+      case 'DISCONNECT':unlocked=null;await privateValue('oauth',null,true);await privateValue('remembered',null,true);
+        await patchState({researchPending:false,researchRetryAt:0});try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}return {ok:true};
       default:throw Error('Unsupported GitHub backup command');
     }
   }
@@ -1010,34 +1087,41 @@
       if(p.paused||!s.pendingRestore)return;
       cancelled=false;await recoverResearchBatch(s.pendingRestore);
     }:alarm.name===RESEARCH_ALARM?async()=>{
-      const p=await prefs();if(!isActive(p)||!p.repository||!p.categories.includes('research')||p.paused)return;
+      const p=await prefs(),saved=await state();if(!isActive(p)||!p.repository||!p.categories.includes('research')||p.paused)return;
+      // Legacy alarms scheduled by the older build can continue, unless cancelled.
+      if(cancelled||saved.researchPending===false)return;
+      // Keep the durable intent but stop polling if a browser restart locked the key.
+      try{await getKeys(p.repository);}catch{await patchState({researchPending:true,researchError:'Research upload is waiting for the backup password to be unlocked.'});return;}
+      await patchState({researchPending:true});
       // Keep a fallback wakeup in case the service worker is stopped while
       // a large encrypted object is being uploaded. A successful batch moves
       // this alarm to its normal short continuation delay.
       try{chrome.alarms.create(RESEARCH_ALARM,{when:Date.now()+15*60000});}catch{}
       try {
-        const result=await backup({mode:'sync'});
+        const result=await backup({mode:'backup',researchOnly:true});
+        if(!result?.ok)throw Error(result?.message||'Research upload did not complete');
         if(!result?.pendingResearch)try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}
       } catch(error) {
         // One-time alarms disappear when fired. Recover from temporary GitHub
         // throttling/network errors without losing the last indexed snapshot.
         const message=cleanError(error);
-        const transient=[403,408,429,500,502,503,504].includes(error?.code) ||
-          error?.name==='AbortError' || /network|fetch failed|timed out/i.test(message);
+        const transient=transientResearchError(error);
+        if(cancelled){try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}await patchState({researchPending:false,researchRetryAt:0});return;}
         const previous=await state(),attempt=Math.max(0,Number(previous.researchRetryCount)||0)+1;
         if(transient && attempt<=5){
           const delay=Math.max(Number(error?.retryAfter||0)*1000,Math.min(3*60000*2**(attempt-1),45*60000));
           const when=Date.now()+delay;
           chrome.alarms.create(RESEARCH_ALARM,{when});
           await patchState({researchRetryCount:attempt,researchRetryAt:when,
-            lastError:`GitHub research upload paused after a temporary error (${message}). Automatic retry ${attempt}/5 scheduled.`,lastErrorAt:Date.now()});
+            researchError:`Research upload paused after a temporary error (${message}). Automatic retry ${attempt}/5 scheduled.`,researchPending:true});
           return;
         }
         try{await chrome.alarms.clear(RESEARCH_ALARM);}catch{}
-        throw error;
-      } finally {update('idle','');}
+        await patchState({researchError:message,researchPending:false,researchRetryAt:0});
+      } finally {researchLive=null;update('idle','');}
     }:autoRun;
     chain=chain.then(work,work).catch(async e=>{try{await patchState({lastError:cleanError(e),lastErrorAt:Date.now()});}catch{}});
   });
   ensureAlarm().catch(()=>{});
+  ensureResearchAlarm().catch(()=>{});
 })();

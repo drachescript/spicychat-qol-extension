@@ -137,13 +137,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function directField(key, root = activeForm || editorForm() || document) {
     const selectors = {
-      name: ["[name='name']"],
-      title: ["[name='title']", "[name='tagline']"],
+      name: ["[data-testid='CharacterForm-NameInput']", "[name='name']"],
+      title: ["[data-testid='CharacterForm-TitleInput']", "[name='title']", "[name='tagline']"],
       description: ["[name='description']"],
-      greeting: ["textarea[name='greeting']", "textarea[name='first_message']", "textarea[name='firstMessage']", "textarea[name='first_mes']", "textarea[name='initial_message']", "[data-field-name='greeting'] textarea", "[data-field-name='first_message'] textarea"],
-      personality: ["textarea[name='persona']", "textarea[name='personality']", "textarea[name='definition']", "[data-field-name='persona'] textarea", "[data-field-name='personality'] textarea"],
-      scenario: ["textarea[name='scenario']", "[data-field-name='scenario'] textarea"],
-      exampleDialogues: ["[name='dialogue']", "[name='example_dialogue']", "[name='exampleDialogues']"]
+      greeting: ["textarea[data-testid='CharacterForm-GreetingInput']", "textarea[name='greeting']", "textarea[name='first_message']", "textarea[name='firstMessage']", "textarea[name='first_mes']", "textarea[name='initial_message']", "[data-field-name='greeting'] textarea", "[data-field-name='first_message'] textarea"],
+      personality: ["textarea[data-testid='CharacterForm-PersonalityInput']", "textarea[name='persona']", "textarea[name='personality']", "textarea[name='definition']", "[data-field-name='persona'] textarea", "[data-field-name='personality'] textarea"],
+      scenario: ["textarea[data-testid='CharacterForm-ScenarioInput']", "textarea[name='scenario']", "[data-field-name='scenario'] textarea"],
+      exampleDialogues: ["textarea[data-testid='CharacterForm-ExampleDialogueInput']", "[name='dialogue']", "[name='example_dialogue']", "[name='exampleDialogues']"]
     }[key] || [];
     for (const selector of selectors) {
       const field = root.querySelector?.(selector);
@@ -862,7 +862,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return result;
   }
 
-  function openBotImportPreview(candidates, contextGuard = null) {
+  function openBotImportPreview(candidates, contextGuard = null, localOperationId = null) {
     document.getElementById(IMPORT_DIALOG_ID)?.remove();
     const overlay = document.createElement("div");
     overlay.id = IMPORT_DIALOG_ID;
@@ -903,7 +903,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     dialog.append(heading, explanation, chooser, warning, fieldsHost, resultText, footer);
     overlay.append(dialog);
     document.body.append(overlay);
-    const close = () => overlay.remove();
+    let preparationStarted = false;
+    const close = () => {
+      if (!preparationStarted && contextGuard && localOperationId) try {
+        DS.emitSctInspectorEvent?.({phase:'interruption',action:'import',creationType:'chatbot',outcome:'pending',reason:'cancelled',correlation:{operationId:localOperationId}});
+      } catch {}
+      overlay.remove();
+    };
     cancel.addEventListener("click", close);
     overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
     overlay.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
@@ -959,6 +965,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (editorReadOnlyState()) { resultText.textContent = "This editor is read-only; nothing was changed."; return; }
       apply.disabled = true;
       cancel.disabled = true;
+      preparationStarted = true;
       try {
         if(contextGuard)await contextGuard();
         const info = editorInfo();
@@ -967,10 +974,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           if (!backedUp) throw new Error("Could not create a safety backup of this bot. Import cancelled.");
         }
         if(contextGuard)await contextGuard();
-        const diagnosticOperation = contextGuard && DS.emitSctInspectorEvent && globalThis.crypto?.randomUUID ? crypto.randomUUID() : null;
+        const diagnosticOperation = contextGuard && DS.emitSctInspectorEvent && globalThis.crypto?.randomUUID ? (localOperationId || crypto.randomUUID()) : null;
         if(diagnosticOperation)try{DS.emitSctInspectorEvent({phase:'attempt',action:'import',creationType:'chatbot',outcome:'pending',correlation:{operationId:diagnosticOperation,...(info?.id?{nativeCreationId:info.id}:{})}});}catch{}
         const result = await applySelectedBotFields(candidates[Number(chooser.value) || 0].fields, selected);
-        if(diagnosticOperation)try{DS.emitSctInspectorEvent({phase:'observation',action:'import',creationType:'chatbot',outcome:'native-ui-observed',correlation:{operationId:diagnosticOperation,...(info?.id?{nativeCreationId:info.id}:{})}});}catch{}
+        if(diagnosticOperation)try{DS.emitSctInspectorEvent({phase:'observation',action:'import',creationType:'chatbot',outcome:'native-ui-observed',counts:{processed:selected.length,observed:result.filled.length+result.unchanged.length},correlation:{operationId:diagnosticOperation,...(info?.id?{nativeCreationId:info.id}:{})}});}catch{}
         const parts = [];
         if (result.filled.length) parts.push(`${result.filled.length} field(s) filled`);
         if (result.unchanged.length) parts.push(`${result.unchanged.length} unchanged`);
@@ -983,6 +990,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         await refreshPanelStatus(message);
         apply.textContent = "Applied to editor";
       } catch (error) {
+        if(contextGuard&&localOperationId)try{DS.emitSctInspectorEvent?.({phase:'failure',action:'import',creationType:'chatbot',outcome:'reported-failure',correlation:{operationId:localOperationId}});}catch{}
         resultText.textContent = `Import stopped: ${error?.message || String(error)}`;
         apply.disabled = false;
       } finally { cancel.disabled = false; }
@@ -1243,9 +1251,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const fields={};for(const key of ['name','title','description','greeting','personality','scenario','exampleDialogues']){const el=directField(key,form);if(el)fields[key]=el.value;}
     if(!String(fields.name||'').trim())throw Error('Wait for the native chatbot editor to load.');
     fields.tags=profile.fields.tags.split(',').map(x=>x.trim()).filter(Boolean);if(profile.fields.image)fields.image=profile.fields.image;if(profile.fields.visibility)fields.visibility=profile.fields.visibility;
-    return {nativeId:info.id||null,content:fields,coverage:Object.fromEntries([...BACKUP_FIELD_KEYS,'lorebookAttachments','rulebookAttachments'].map(k=>[k,Object.hasOwn(fields,k)?'available':'unverified']))};
+    const groups=form.querySelector('input[data-testid="CharacterFormAdvanced-AllowInGroupsSwitch-Input"]');
+    if(groups && groups.type==='checkbox')fields.allowInGroups=groups.checked;
+    return {nativeId:info.id||null,content:fields,coverage:Object.fromEntries([...BACKUP_FIELD_KEYS,'allowInGroups','personalityVisibility','lorebookAttachments','rulebookAttachments','voiceAssociation'].map(k=>[k,Object.hasOwn(fields,k)?'available':'unverified']))};
   };
-  DS.previewCreatorToolsBot = (payload, guard) => openBotImportPreview([{source:'Creator Tools reviewed package',fields:importedBotFields(payload)}],guard);
+  DS.previewCreatorToolsBot = (payload, guard, localOperationId) => openBotImportPreview([{source:'Creator Tools reviewed package',fields:importedBotFields(payload)}],guard,localOperationId);
   DS.removeBotBackupTools = cleanup;
 })();
 

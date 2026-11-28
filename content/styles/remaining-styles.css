@@ -2277,3 +2277,7 @@ html[data-ds-chat-bubbles="1"][data-ds-chat-bubble-user-dialogue-mode="custom"]
 .ds-memory-quality-panel h4 { margin: 10px 0 5px; font-size: 12px; }
 .ds-memory-quality-panel p { margin: 4px 0; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .ds-memory-quality-panel section { padding-top: 4px; border-top: 1px solid rgba(148,163,184,.15); }
+
+/* Memory drafts share the responsive native import preview. */
+.ds-memory-draft-input { box-sizing: border-box; width: 100%; min-height: 100px; resize: vertical; border: 1px solid rgba(148,163,184,.36); border-radius: 7px; background: rgba(31,41,55,.34); color: inherit; padding: 9px; font: inherit; }
+.ds-memory-draft-sources { max-height: 30vh; flex: 0 1 auto; }

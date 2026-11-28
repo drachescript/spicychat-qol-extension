@@ -6,7 +6,7 @@ function dsqSctSupported(){try{return typeof importScripts==='function' && /^chr
 function dsqSctConfig(){return dsqSctConfigPromise ||= chrome.storage.local.get(DSQ_SCT_CONFIG).then(r=>dsqSctConfigValue=r[DSQ_SCT_CONFIG]||{}).catch(()=>dsqSctConfigValue={});}
 function dsqSctLoad(){return globalThis.DSQSctInspector ||= globalThis.DSQSctInspectorFactory();}
 function dsqSctSettingsSender(s){return s?.id===chrome.runtime.id && typeof s.url==='string' && s.url.split(/[?#]/,1)[0]===chrome.runtime.getURL('options.html');}
-function dsqSctTabSender(s){try{const u=new URL(s.url), match=u.pathname.match(/^\/(?:[a-z]{2}\/)?(?:(lorebook|chatbot|rulebook|group)\/(?:edit\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\/entries)?|create|new)|my-creations\/(chatbots|lorebooks|rulebooks|groups))\/?$/i);return s.id===chrome.runtime.id&&s.frameId===0&&Number.isInteger(s.tab?.id)&&s.tab.id>=0&&s.tab.id<=2147483647&&u.origin==='https://spicychat.ai'&&!s.tab.incognito&&!!match;}catch{return false;}}
+function dsqSctTabSender(s){try{const u=new URL(s.url), match=u.pathname.match(/^\/(?:[a-z]{2}\/)?(?:(lorebook|chatbot|rulebook|group)\/(?:edit\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\/entries)?|create|new)|rulebooks\/(?:create|editor(?:\/[A-Za-z0-9_-]{1,160})?)|chatbot\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\/edit|my-creations\/(chatbots|lorebooks|rulebooks|groups))\/?$/i);return s.id===chrome.runtime.id&&s.frameId===0&&Number.isInteger(s.tab?.id)&&s.tab.id>=0&&s.tab.id<=2147483647&&u.origin==='https://spicychat.ai'&&!s.tab.incognito&&!!match;}catch{return false;}}
 function dsqSctMessage(m,s,reply){
  const settings=['DS_SCT_INSPECTOR_CONFIG','DS_SCT_INSPECTOR_STATUS'].includes(m.type);
  if(!dsqSctSupported()||!dsqBackgroundHasFeature('creator-tools-integration')||!(settings?dsqSctSettingsSender(s):dsqSctTabSender(s))){reply({ok:false,status:'unsupported-or-ineligible'});return false;}
@@ -21,3 +21,9 @@ function dsqSctJournal(m,s,j,at){if(dsqSctConfigValue?.enabled===false||dsqSctCo
 }
 function dsqSctWake(){if(!dsqSctSupported()||!dsqBackgroundHasFeature('creator-tools-integration'))return;void dsqSctConfig().then(c=>{if(c.enabled)dsqSctLoad().wake(c);}).catch(()=>{});}
 function dsqSctConfigChanged(changes){if(changes[DSQ_SCT_CONFIG])dsqSctConfigPromise=Promise.resolve(dsqSctConfigValue=changes[DSQ_SCT_CONFIG].newValue||{});}
+
+// Managed messages are extension Settings only; no content-tab or external peer access.
+const DSQ_SCT_MANAGED_ALARM='ds-sct-managed-heartbeat-v1';
+function dsqSctManagedLoad(){return globalThis.DSQSctManaged ||= globalThis.DSQSctManagedFactory();}
+function dsqSctManagedMessage(m,s,reply){if(!dsqSctSupported()||!dsqBackgroundHasFeature('creator-tools-integration')||!dsqSctSettingsSender(s)||s.tab?.incognito){reply({ok:false,status:'unsupported-or-ineligible'});return false;}dsqSctManagedLoad().settings(m).then(reply,()=>reply({ok:false,status:'storage-unavailable'}));return true;}
+function dsqSctManagedWake(){if(!dsqSctSupported()||!dsqBackgroundHasFeature('creator-tools-integration'))return;void dsqSctManagedLoad().wake().catch(()=>{});}

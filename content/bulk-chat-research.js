@@ -1008,10 +1008,20 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
   }
   function memoryNeedsResume(memory) {
     if (!memory || memory.status === 'unavailable') return true;
-    if (!['retrieved','empty-confirmed'].includes(memory.status)) return true;
+    if (!['retrieved','empty-confirmed'].includes(memory.status) || !Array.isArray(memory.items)) return true;
+    if (memory.paginationComplete === false) return true;
+    if ((memory.status === 'retrieved') !== (memory.items.length > 0)) return true;
     if (memory.paginationComplete === true) return false;
     // A legacy single-page result of 50 is ambiguous, even if verified.
     return Array.isArray(memory.items) && memory.items.length >= MEMORY_PAGE_SIZE;
+  }
+  // Chat activity cannot establish Memory freshness. Explicit full checks
+  // always start a new Memory snapshot; changed chat history also invalidates
+  // a previously complete snapshot. Incomplete reads resume normally.
+  function needsFreshMemorySnapshot(previous, history, fullAudit) {
+    if (fullAudit) return true;
+    return !memoryNeedsResume(previous?.memory) &&
+      (history?.sync?.mode !== 'unchanged' || history?.sync?.added > 0 || history?.sync?.updated > 0);
   }
   async function readMemories(entry, previous = null, onPage = null) {
     const items = Array.isArray(previous?.items) ? safeRaw(previous.items) : [];
@@ -1042,16 +1052,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       const parseStart = performance.now();
       const page = safeRaw(response.memories);
       addPhase('memoryParsing', performance.now() - parseStart);
-      pages++;
+      if (page.some(memory => !validMemoryCursor(String(memory?.id || ''),entry.conversationId)))
+        return failure('invalid-memory-id');
       let added = 0;
       for (const memory of page) {
-        const id = String(memory?.id || '');
-        if (!validMemoryCursor(id,entry.conversationId)) return failure('invalid-memory-id');
+        const id = String(memory.id);
         if (!seen.has(id)) {seen.add(id);items.push(memory);added++;}
       }
       if (page.length && !added) return failure('repeated-memory-page');
+      pages++;
       if (page.length < MEMORY_PAGE_SIZE) return {
-        status:items.length?'retrieved':'empty-confirmed',items,pages,paginationComplete:true,nextCursor:null};
+        status:items.length?'retrieved':'empty-confirmed',items,pages,paginationComplete:true,nextCursor:null,checkedAt:Date.now()};
       const next = String(page.at(-1)?.id || '').toLowerCase();
       if (!validMemoryCursor(next,entry.conversationId) || next===cursor || cursors.has(next))
         return failure('repeated-memory-cursor');
@@ -1599,7 +1610,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     const sourceVersion=(checkpoint)=>({archive:checkpoint.lastVerifiedPart||'',
       newestId:checkpoint.history?.newestMessageId||'',
       messageCount:checkpoint.history?.messages?.length||0,
-      verifiedAt:checkpoint.history?.lastVerifiedAt||0});
+      verifiedAt:checkpoint.history?.lastVerifiedAt||0,
+      memoryCheckedAt:checkpoint.memory?.checkedAt||0,
+      memoryCount:checkpoint.memory?.items?.length||0,
+      memoryStatus:checkpoint.memory?.status||''});
     const matches=(left,right)=>!!left && Object.keys(right).every(key=>left[key]===right[key]);
     for(const entry of selection){
       ensureNotCancelled();
@@ -1608,7 +1622,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       let checkpoint;
       try{checkpoint=await withStore('get',entry.conversationId);}catch{skipped++;continue;}
       if(checkpoint?.state!=='verified'||!checkpoint.history?.complete||!Array.isArray(checkpoint.history.messages)||
-          ['unavailable','not-checked'].includes(checkpoint.memory?.status)){skipped++;continue;}
+          memoryNeedsResume(checkpoint.memory)){skipped++;continue;}
       const fingerprint=sourceVersion(checkpoint);
       const stageKey=`__github_stage_conversation_${entry.conversationId}`;
       const prior=await withStore('get',stageKey);
@@ -2040,7 +2054,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
           } else if (sync.mode === 'full-reconcile-missing-anchor') {
             update(`Re-read conversation ${index+1}/${selected.length}: previous latest message no longer exists; saved missing records retained locally`);
           }
-          if (await mayReuseVerifiedArchive(verifiedBefore,entry,history,characterRetryInput?.value||'reuse')) {
+          const refreshMemory = needsFreshMemorySnapshot(verifiedBefore, history, verifyAll || fullAuditIds.has(entry.conversationId));
+          if (!refreshMemory && await mayReuseVerifiedArchive(verifiedBefore,entry,history,characterRetryInput?.value||'reuse')) {
             // Nothing changed on the newest history page. Keep the verified
             // checkpoint as-is rather than writing its entire message array
             // and reserializing every reply into another ZIP.
@@ -2062,6 +2077,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
             continue;
           }
           checkpoint={...checkpoint,conversationId:entry.conversationId,entry,history,
+            // Reset to the first Memory page before persisting new history.
+            // Previous verified ZIP/GitHub copies remain intact. A partial
+            // refresh must not be merged with an older complete snapshot.
+            ...(refreshMemory ? {memory:{status:'unavailable',reason:'memory-refresh-pending',items:[],pages:0,paginationComplete:false,nextCursor:null}} : {}),
             state:'staged',at:Date.now()};
           await withStore('put',checkpoint);
         } catch (error) {
@@ -2099,7 +2118,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         const history=checkpoint.history,memory=checkpoint.memory;
         totalMessages+=history.messages.length;
         if (Array.isArray(memory?.items)) totalMemories+=memory.items.length;
-        else if (memory?.status === 'unavailable') {
+        if (memory?.status === 'unavailable') {
           failed++;
           if (['auth-unavailable','auth-rejected','access-denied','unexpected-memory-format','invalid-json','not-enabled'].includes(memory.reason)) memoryAuthFailures++;
         }
@@ -2146,7 +2165,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
             newestSavedMessageId:history.newestMessageId||String(history.messages.at(-1)?.id||''),
             sync:history.sync||null,orphanedCheckpointMessages:history.orphanedMessages?.length||0},
           memoryStatus:memory.status,memoryError:memory.reason||null,
-          memoryPaginationComplete:!memoryNeedsResume(memory),
+          memoryPaginationComplete:!memoryNeedsResume(memory),memoryCheckedAt:memory.checkedAt||null,
           storyResearchFiles:{rulebookStates:'rulebook-states.json',storyMoments:'story-moments.json',
             oocDirectives:'ooc-directives.json'},
           storyResearchStatus:{rulebook:storyResearch.rulebook.status,moments:storyResearch.moments.status,
@@ -2156,7 +2175,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/ooc-directives.json`,storyResearch.ooc));
         fileList.push(await zippedEntry(`conversations/${entry.conversationId}/memories.json`,{conversationId:entry.conversationId,
           source:'spicychat-native-memories',status:memory.status,reason:memory.reason||null,httpStatus:memory.httpStatus||null,
-          paginationComplete:!memoryNeedsResume(memory),pages:memory.pages|| (Array.isArray(memory.items)&&memory.items.length ? 1 : 0),
+          paginationComplete:!memoryNeedsResume(memory),checkedAt:memory.checkedAt||null,pages:memory.pages|| (Array.isArray(memory.items)&&memory.items.length ? 1 : 0),
           memories:memory.items}));
         let chunkIndex=1;
         // Bound each worker handoff to 150 messages (or less). The worker
@@ -2213,21 +2232,22 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       const failedCharacters=characterStatusCounts.fetch_failed||0;
       const incompleteLorebooks=characterErrors.filter(error=>error.scope==='lorebook' &&
         /pagination incomplete/i.test(String(error.reason||''))).length;
-      update(`Export finished (${selection.discovery.scannedBots} bots, ${catalog.length} saved conversations, ${selected.length} checked, ${workplan.excluded} already backed up and deferred): ${skippedUnchanged} unchanged local chats reused (${skippedGithubFast} skipped without history requests), ${skippedGithubRemoteOnly} verified only on GitHub, ${totalMessages} messages checked in this run, ${totalMemories} native Memories checked, ${characterByBot.size} updated character records, ${saved} new ZIP parts. ${failedCharacters} character fetch failures, ${incompleteLorebooks} incomplete Lorebooks, ${characterErrors.length} metadata issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.` +
-        (skippedUnchanged || skippedGithubRemoteOnly ? ' Keep older ZIP parts and any GitHub Research backups for reused chats; Fresh creates a complete standalone archive.' : ''));
+      const exportSummary = `Export finished (${selection.discovery.scannedBots} bots, ${catalog.length} saved conversations, ${selected.length} checked, ${workplan.excluded} already backed up and deferred): ${skippedUnchanged} unchanged local chats reused (${skippedGithubFast} skipped without history requests), ${skippedGithubRemoteOnly} verified only on GitHub, ${totalMessages} messages checked in this run, ${totalMemories} native Memories checked, ${characterByBot.size} updated character records, ${saved} new ZIP parts. ${failedCharacters} character fetch failures, ${incompleteLorebooks} incomplete Lorebooks, ${characterErrors.length} metadata issues; ${failed} Memory reads unavailable, ${historyFailed} history reads failed.` +
+        (skippedUnchanged || skippedGithubRemoteOnly ? ' Keep older ZIP parts and any GitHub Research backups for reused chats; Fresh creates a complete standalone archive.' : '');
+      update(exportSummary);
       // Stage only changed Research records. The browser's GitHub backup
       // service then uploads them when authorized; download verification and
       // saved ZIPs do not depend on GitHub availability.
       try {
         if (!selected.length) {
-          update('Export finished · no changed Research records to stage; existing GitHub and ZIP backups are unchanged.');
+          update(`${exportSummary}\n\nNo changed Research records to stage; existing GitHub and ZIP backups are unchanged.`);
         } else {
         const github=await stageVerifiedResearchGithub(selected,characterByBot,runId);
-        if(github?.configured)update(`Export finished · GitHub research ${github.queued?'upload queued':'staged but not queued'}: ${github.staged} changed records, ${github.reused} already staged, ${github.skipped} skipped. Check GitHub Backup for upload status. Keep earlier ZIP parts for unchanged chats.`);
-        else update(`Export finished · GitHub research backup isn't configured here. ZIP exports are local; enable the Research category in GitHub Backup to send verified records.`);
+        if(github?.configured)update(`${exportSummary}\n\nGitHub research ${github.queued?'upload queued':'staged but not queued'}: ${github.staged} changed records, ${github.reused} already staged, ${github.skipped} skipped. Check GitHub Backup for upload status. Keep earlier ZIP parts for unchanged chats.`);
+        else update(`${exportSummary}\n\nGitHub research backup isn't configured here. ZIP exports are local; enable the Research category in GitHub Backup to send verified records.`);
         }
       } catch(error) {
-        update(`Export finished · ZIP downloads are verified, but GitHub staging needs attention: ${error?.message||error}. Your saved exports are safe.`);
+        update(`${exportSummary}\n\nZIP downloads are verified, but GitHub staging needs attention: ${error?.message||error}. Your saved exports are safe.`);
       }
     } catch (error) {
       exportOutcome = error?.message === 'cancelled' ? 'cancelled' : 'failed';
@@ -2315,11 +2335,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     characterRetryInput.style.cssText='max-width:100%;background:#343e5e;color:white;padding:4px;border-radius:5px';
     charRow.append(characterRetryInput);panel.append(charRow);
 
-    const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;margin:9px 0;max-width:100%;white-space:nowrap;scrollbar-width:thin';
+    const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:9px 0;max-width:100%;min-width:0';
     startButton=document.createElement('button');startButton.textContent='Start / Resume';
     scanButton=document.createElement('button');scanButton.textContent='Scan bots';scanButton.title='Incremental: scan recent bot/chat changes and reuse older verified scans';
     quickScanButton=document.createElement('button');quickScanButton.textContent='Full scan';quickScanButton.title='Exhaustive bot and conversation discovery only (may take hours)';
-    verifyButton=document.createElement('button');verifyButton.textContent='Verify all';verifyButton.title='Check every saved chat history, including old edits, without clearing previous checkpoints or archive parts';
+    verifyButton=document.createElement('button');verifyButton.textContent='Verify all';verifyButton.title='Check every saved chat history and refresh native Memories, including old edits, without clearing previous archive parts';
     freshButton=document.createElement('button');freshButton.textContent='Fresh';freshButton.title='Download all chats, Memories and character metadata again, clearing only research checkpoints';freshButton.setAttribute('aria-label','Download fresh');
     githubButton=document.createElement('button');githubButton.textContent='Send saved research to GitHub';githubButton.title='Stage previously verified Research Export checkpoints for your configured private GitHub backup. Does not download chats or create new ZIPs.';
     cancelButton=document.createElement('button');cancelButton.textContent='Cancel';cancelButton.disabled=true;
@@ -2328,7 +2348,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
     // Without this guard the UI defaults to 50 after a reload, even if the
     // saved checkpoint covered thousands of bots or All bots.
     startButton.disabled=true;scanButton.disabled=true;quickScanButton.disabled=true;verifyButton.disabled=true;freshButton.disabled=true;
-    for(const b of [startButton,quickScanButton,scanButton,verifyButton,freshButton,githubButton,cancelButton,close]) b.style.cssText='flex:0 0 auto;padding:6px 6px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:nowrap;font:12px sans-serif';
+    for(const b of [startButton,quickScanButton,scanButton,verifyButton,freshButton,githubButton,cancelButton,close]) b.style.cssText='flex:0 1 auto;max-width:100%;padding:6px 8px;border-radius:6px;background:#343e5e;color:white;cursor:pointer;white-space:normal;overflow-wrap:anywhere;font:12px sans-serif';
     buttons.append(startButton,quickScanButton,scanButton,verifyButton,freshButton,githubButton,cancelButton,close);panel.append(buttons);
     const progressBox=document.createElement('div');
     progressBox.style.cssText='padding:8px 0;margin:4px 0 8px;border-top:1px solid #3b4259;border-bottom:1px solid #3b4259';

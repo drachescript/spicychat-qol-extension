@@ -71,7 +71,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   let attachmentCountSamples = 0;
   function attachmentEditorRoute() {
     const path = normalizedRoutePath();
-    return /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path) || /^\/(?:create|create\/chatbot)$/i.test(path);
+    return /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path) || /^\/(?:create|create\/chatbot)$/i.test(path) || /^\/group\/(?:create|edit)(?:\/|$)/i.test(path);
   }
   function visibleAttachmentRoot(node) {
     if (!node?.isConnected || node.closest?.("[hidden],[aria-hidden='true'],.hidden") || node.closest?.(ATTACH_OWNED)) return false;
@@ -209,7 +209,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const storyModeMatch = path.match(/^\/story\/([^/?#]+)(?:\/([^/?#]+))?/i);
     const lorebookExplore = path === "/lorebooks/explore" || path.startsWith("/lorebooks/explore/");
     const rulebookExplore = path === "/rulebooks/explore" || path.startsWith("/rulebooks/explore/");
-    const rulebookEditor = path === "/rulebooks/editor" || path.startsWith("/rulebooks/editor/");
+    const rulebookEditor = path === "/rulebooks/editor" || path.startsWith("/rulebooks/editor/") || path === "/rulebooks/create";
+    const groupEditor = /^\/group\/(?:create|edit)(?:\/|$)/i.test(path);
+    const myCreationsGroups = path === "/my-creations/groups" || path.startsWith("/my-creations/groups/");
     const rulebookMatch = path.match(/^\/rulebook\/([^/?#]+)/i);
     const botEditor = /^\/chatbot\/(?:create(?:\/|$)|edit(?:\/|$)|[^/]+\/edit(?:\/|$))/i.test(path);
     const botProfileMatch = !botEditor ? path.match(/^\/chatbot\/([^/?#]+)/i) : null;
@@ -237,6 +239,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     else if (botEditor) routeType = "bot-editor";
     else if (lorebookEditor) routeType = "lorebook-editor";
     else if (rulebookEditor) routeType = "rulebook-editor";
+    else if (groupEditor) routeType = "group-editor";
+    else if (myCreationsGroups) routeType = "group-listing";
     else if (lorebookExplore) routeType = "lorebook-explore";
     else if (rulebookExplore) routeType = "rulebook-explore";
     else if (lorebookMatch) routeType = "lorebook-public";
@@ -271,6 +275,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       isLorebookExplorePage: lorebookExplore,
       lorebookId: lorebookMatch?.[1] && !["create", "edit"].includes(String(lorebookMatch[1]).toLowerCase()) ? lorebookMatch[1] : "",
       isRulebookEditor: rulebookEditor,
+      isGroupEditor: groupEditor,
+      isMyCreationsGroupsPage: myCreationsGroups,
       isRulebookPage: rulebookPage,
       isRulebookExplorePage: rulebookExplore,
       rulebookId: rulebookMatch?.[1] || "",
@@ -321,6 +327,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   DS.isLorebookExplorePage = () => !!DS.getPageState().isLorebookExplorePage;
   DS.isRulebookPage = () => !!DS.getPageState().isRulebookPage;
   DS.isRulebookExplorePage = () => !!DS.getPageState().isRulebookExplorePage;
+  DS.isGroupEditor = () => !!DS.getPageState().isGroupEditor;
   DS.isRulebookEditor = () => !!DS.getPageState().isRulebookEditor;
 
   DS.chatIdFromHref = function chatIdFromHref(href) {

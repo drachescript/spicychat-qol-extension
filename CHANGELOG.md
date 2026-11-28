@@ -1,3 +1,17 @@
+## 0.3.4
+- Made Lorebook backups smaller and improved checks for conflicting entries in older backups.
+- Improved Chatbot, Lorebook, Rulebook and Group Chat editor support.
+- Added Creator Tools connection management
+- Added multi-message selection and memory draft preparation in Memory Manager.
+- Added a way to combine selected memories into shorter, reviewable drafts while keeping the originals.
+- Improved Memory Manager compatibility with native selection, editing and longer existing memories.
+- Added memory import checks to protect unfinished drafts and respect character limits.
+- Improved Research Export layout on smaller screens and kept export results visible during GitHub uploads.
+- Improved Research Export memory refreshes and incomplete-download handling.
+- Added separate GitHub Research upload progress, time estimates and a resume button.
+- Improved GitHub upload verification and retries
+- Improved Context Keeper duplicate checks for changed or conflicting facts, and made reading saved facts faster.
+
 ## 0.3.3
 - Improved Memory JSON import on mobile browsers, including viewport-aware layouts, accessible import controls, visible progress, error and completion feedback, and protection against duplicate imports.
 - Improved Generation Quota Tracker reliability across page reloads, background tabs and account changes, with persistent history reconciliation and clearer reporting of incomplete observation coverage.
@@ -10,7 +24,7 @@
 - Improved Android navigation responsiveness, archive record storage handling, animation memory use, card selection and support report reliability. Obsolete route work is cancelled, unavailable storage measurements are reported accurately, and native Android recovery no longer depends on automatic QoL reloads.
 - Bot Status now removes blocked bots from pending and held scan queues automatically, without removing blocks, saved copies or status history.
 - Improved custom chat background restoration and saved picture loading, compatibility with native Appearance, and access through the compact QoL menu.
-- Added an independently enabled Inspector connection for structured Creator Tools operation diagnostics, persistent delivery and committed acknowledgement status. Automated publishing remains disabled.
+- Added an Inspector connection for structured Creator Tools operation diagnostics, persistent delivery and committed acknowledgement status. Automated publishing remains disabled.
 
 ## 0.3.01
 - Added a redesigned sidebar with grouped discovery and creation shortcuts, a Create chooser, configurable landing page, remembered menus and compact spacing. Existing navigation and cleanup controls remain available.
@@ -58,14 +72,14 @@
 - Deferred custom picture refreshes outside the critical chat pass and reused recent message roots for character/persona pictures.
 - Distinguished unverified API history endings, count mismatches and filtered rows in chat exports, with completeness warnings in downloaded formats.
 - Included QoL version/build in Settings telemetry and clarified wall-time versus measured synchronous processing.
-- Refined Settings layout choices: Classic, Sidebar, Ribbon, Picker, Underline and Pills, with Original/Outlined cards and optional blue accent. Removed unused experiments with safe Classic/Original fallbacks.
+- Refined Settings layout choices: Classic, Sidebar, Ribbon, Picker, Underline and Pills, with Original/Outlined cards and a blue accent choice. Removed unused experiments with safe Classic/Original fallbacks.
 - Kept the active Settings section visible in scrollable navigation and improved keyboard focus when closing the section picker.
-- Added an optional double-click / double-tap message editing guard that preserves browser text selection and explicit Edit actions.
+- Added a double-click / double-tap message editing guard that preserves browser text selection and explicit Edit actions.
 - Protected native Lorebook attachment choices and conversation selectors from discovery and advert cleanup.
 - Scoped tag-filter controls to the native discovery filter, and improved route recognition for localized pages.
-- Added a numbered Settings Layout lab, including optional sticky ribbon navigation.
+- Added a numbered Settings Layout lab, including a sticky ribbon navigation setting.
 - Made Settings section navigation lighter by skipping unchanged recent-section updates and unnecessary pin refreshes.
-- Added optional collapsible excluded tags, included-tag priority and search for loaded tags in the native tag filter.
+- Added collapsible excluded tags, included-tag priority and search for loaded tags in the native tag filter.
 
 ## 0.2.98
 - Removed Later card buttons from My Creations, including after navigation.
@@ -89,7 +103,7 @@
 - Coalesced overlapping read-only Bot Status queue/Settings refreshes without caching completed queue snapshots.
 - Reduced count-triggered queue rewrites for 2,000+ target scans (20 results or the unchanged 10-second checkpoint limit); unfinished IDs stay resumable.
 - Removed a quadratic lookup while preparing large interrupted Bot Status scan resumes.
-- Verified initial and final saved queue checkpoints; bounded final status-delta persistence and saved the run summary before optional telemetry.
+- Verified initial and final saved queue checkpoints; bounded final status-delta persistence and saved the run summary before sending any telemetry.
 - Improved held-check review with explicit actionable/non-actionable reasons; preserved saved IDs and blocked/unknown protections.
 - Added pseudonymous numeric Bot Status telemetry fingerprints and separate HTTP-200-unconfirmed signals without recording private bot content.
 - Differentiated stale, loading, missing-receiver, and messaging failures in live runtime diagnostics; added an on-demand recheck without tab reloads.
@@ -108,7 +122,7 @@
 - Reduced repeated card-menu DOM searches on mobile and large bot listings.
 - Stopped recreating unchanged recommendation preference badges on every update.
 - Reduced temporary allocations in Favorites list change detection.
-- Show the optional Report Link Collector button only on Home and Recommendations.
+- Show the Report Link Collector button only on Home and Recommendations.
 - Made page updates lighter by reducing temporary allocations in DOM change handling.
 - Reduced slowdown when many bots share a display name in Bot Status.
 - Fixed Bot Status checks getting stuck when their original saved list changes.
@@ -142,21 +156,21 @@
 - Improved GitHub Backup reliability when uploaded files take time to appear.
 - Improved error messages when Android needs a Cloud sync compatibility update.
 - Made Saved Bots Hub smoother on large collections.
-- Reduced page loading by starting more optional tools only when needed.
+- Reduced page loading by starting more tools only when needed.
 - Made nine more Settings panels load when opened.
 - Fixed Save now changing settings in panels that had not been opened.
 - Fixed Settings Health Check reporting unopened controls as missing.
 - Improved Settings search and Saved Recovery cleanup.
 
 ## 0.2.92
-- Added an optional Report Link Collector for saving bot links from card pictures.
+- Added a Report Link Collector for saving bot links from card pictures.
 - Added Copy all and Clear list in the extension popup.
 - Made bot listings and Saved Bots Hub more responsive.
-- Reduced startup work by loading optional tools only when needed.
+- Reduced startup work by loading tools only when needed.
 - Made many Settings sections, backups, and Archive tools load on demand.
 - Improved Settings search, pinned sections, and saved-value loading.
 - Improved Orion Browser and iOS extension compatibility.
-- Fixed optional tools getting stuck after a failed load or page change.
+- Fixed tools getting stuck after a failed load or page change.
 
 ## 0.2.91
 - Made full bot descriptions appear faster on cards.
@@ -215,7 +229,7 @@
 - Improved Research Export speed, progress, and recovery from incomplete downloads.
 - Fixed missing character metadata in saved backups.
 - Added a Character Token Optimizer with reviewable suggestions.
-- Made more optional creator, chat, and Lorebook tools load only when needed.
+- Made more creator, chat, and Lorebook tools load only when needed.
 - Made Diagnostics and Support load only when opened.
 - Added Archive Community Themes and customizable block exceptions.
 

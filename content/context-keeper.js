@@ -99,6 +99,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       if (!entry || typeof entry !== "object") continue;
       const details = Array.isArray(entry.details) ? entry.details : [];
       const normalizedDetails = [];
+      const seenDetails = new Map();
       for (let index = 0; index < details.length; index++) {
         const item = details[index];
         const text = clean(typeof item === "string" ? item : item?.text).slice(0, MAX_DETAIL);
@@ -127,7 +128,10 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         // Reading saved data must not silently discard two similar but
         // distinct story facts, revisions, manual notes or pinned details.
         // Only remove an accidentally repeated identical record.
-        if (normalizedDetails.some(existing => existing.id === detail.id && existing.text === detail.text)) continue;
+        let seenTexts = seenDetails.get(detail.id);
+        if (!seenTexts) seenDetails.set(detail.id, seenTexts = new Set());
+        if (seenTexts.has(detail.text)) continue;
+        seenTexts.add(detail.text);
         normalizedDetails.push(detail);
       }
       output[String(chatId)] = {
@@ -362,6 +366,12 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (!left || !right) return false;
     if (left.toLowerCase() === right.toLowerCase()) return true;
     if (possibleConflict(left, right)) return false;
+    // Keep changed quantities and negative statements for review rather than
+    // treating high vocabulary overlap as proof that two facts are identical.
+    const negative = /\b(?:not|never|no longer|cannot|can't|won't|don't|doesn't|didn't|isn't|wasn't)\b/i;
+    if (negative.test(left) !== negative.test(right)) return false;
+    const quantities = value => (value.match(/\b\d+(?:[.,]\d+)?\b/g) || []).join('|');
+    if (quantities(left) !== quantities(right)) return false;
     // Even close wording can describe a real change over time. Preserve it
     // for manual review rather than silently folding it into the old fact.
     const changedState = /\b(?:no longer|used to|previously|formerly|now|afterwards|since then|became|stopped|started|changed|again)\b/i;
@@ -653,7 +663,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     if (expectedChatId && id !== expectedChatId)
       throw new Error("Conversation changed while preparing to keep this message.");
     const entry = store[id] || { details: [], lastRecapAt: 0, lastRecapMessageCount: 0 };
-    if (entry.details.some(detail => isSafeDuplicateFact(detail.text, value))) return false;
+    if (entry.details.some(detail => detail.enabled !== false && !detail.supersededBy && isSafeDuplicateFact(detail.text, value))) return false;
     entry.details.push({
       id: `detail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       text: value,
@@ -690,7 +700,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const item = value && typeof value === "object" ? value : { text: value };
       const text = clean(item.text).slice(0, MAX_DETAIL);
       if (!text) continue;
-      if (entry.details.some(detail => isSafeDuplicateFact(detail.text, text))) {
+      if (entry.details.some(detail => detail.enabled !== false && !detail.supersededBy && isSafeDuplicateFact(detail.text, text))) {
         skipped++;
         continue;
       }
@@ -1207,7 +1217,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       const target = latest[id];
       if (!target || currentChatId() !== id) return false;
       const old = (sources || []).map(source => target.details.find(row => row.id === source.id)).filter(row => row && !row.supersededBy);
-      if (old.length !== sources.length || target.details.some(row => !old.includes(row) && !row.supersededBy && isSimilarText(row.text, text))) return false;
+      if (old.length !== sources.length || target.details.some(row => !old.includes(row) && row.enabled !== false && !row.supersededBy && isSafeDuplicateFact(row.text, text))) return false;
       const now = Date.now();
       const story = DS.getStoryDaySnapshot?.() || null;
       const next = {
@@ -1414,7 +1424,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
           lastId = next;
           await new Promise(resolve => setTimeout(resolve, 60));
         }
-        candidates = [...suggestions.values()].sort((a,b) => b.score-a.score).filter(c => !entry.details.some(d => isSimilarText(d.text,c.text))).slice(0, 250);
+        candidates = [...suggestions.values()].sort((a,b) => b.score-a.score).filter(c => !entry.details.some(d => d.enabled !== false && !d.supersededBy && isSafeDuplicateFact(d.text,c.text))).slice(0, 250);
         renderSuggestions();
         status.textContent = `${apiScanState.cancel ? "Stopped" : "Read"} ${scanned} messages in ${pages + 1} pages; ${candidates.length} suggestions to review. No changes were auto-saved.`;
         DS.diagOperationEnd?.(op, { scanned, changed: candidates.length, outcome: apiScanState.cancel ? "cancelled" : "done", meta: { pages: pages + 1 } });
@@ -1425,7 +1435,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     });
     stopApiScan.addEventListener("click", () => { apiScanState.cancel = true; stopApiScan.disabled = true; });
     scan.addEventListener("click", () => {
-      candidates = scanLoaded().filter(candidate => !entry.details.some(detail => isSimilarText(detail.text, candidate.text)));
+      candidates = scanLoaded().filter(candidate => !entry.details.some(detail => detail.enabled !== false && !detail.supersededBy && isSafeDuplicateFact(detail.text, candidate.text)));
       renderSuggestions();
       status.textContent = `Found ${candidates.length} reviewable suggestion${candidates.length === 1 ? "" : "s"} in ${roots().length} currently loaded messages.`;
     });

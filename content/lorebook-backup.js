@@ -1034,6 +1034,13 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const payload = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
     if (!payload) throw new Error("That file is not a JSON Lorebook backup.");
     const book = payload.lorebook && typeof payload.lorebook === "object" ? payload.lorebook : payload;
+    // Existing v2 files may have either collection or both. Compare semantic
+    // values, not key insertion order; never silently prefer conflicting data.
+    const stable = v => v && typeof v === "object" ? (Array.isArray(v) ? v.map(stable) : Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])]))) : v;
+    if (book !== payload && payload.entries != null && book.entries != null &&
+        payload.entries !== book.entries && JSON.stringify(stable(payload.entries)) !== JSON.stringify(stable(book.entries))) {
+      throw new Error("Conflicting Lorebook entry collections. Resolve the differences before importing. Nothing imported.");
+    }
     const inputEntries = payload.entries ?? book.entries ?? [];
     if (!Array.isArray(inputEntries) && (!inputEntries || typeof inputEntries !== "object")) {
       throw new Error("The Lorebook entries have an unsupported format.");
@@ -2754,7 +2761,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         format: "spicychat-qol-lorebook-backup", version: 2,
         exportedAt: new Date().toISOString(), source: full.source || "current-live",
         completeness: { ...full.completeness, liveVerified: true, imageEmbedded: !!imageData },
-        lorebook: item, entries: full.entries,
+        lorebook: item,
         ...(imageData ? { imageData } : {})
       }, `${safeFilename(item.name)}-lorebook-backup.json`);
       if (!download?.ok) throw new Error(download?.error || "Couldn't hand the Lorebook JSON to browser downloads.");
@@ -2981,7 +2988,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         if(!snapshot)throw Error("No fully verified saved API capture yet. Run a live backup first.");
         const at=new Date(snapshot.savedAt).toLocaleString();
         if(!confirm(`Download ${snapshot.entries.length} entries captured at ${at}? Changes since that time are not included.`))return;
-        const result=await downloadJson({format:"spicychat-qol-lorebook-backup",version:2,exportedAt:new Date().toISOString(),capturedAt:snapshot.fetchedAt,source:snapshot.source,currentLiveFetch:false,completeness:snapshot.completeness,lorebook:{...snapshot.lorebook,entries:snapshot.entries},entries:snapshot.entries},`${safeFilename(snapshot.lorebook.name)}-saved-capture.json`);
+        const result=await downloadJson({format:"spicychat-qol-lorebook-backup",version:2,exportedAt:new Date().toISOString(),capturedAt:snapshot.fetchedAt,source:snapshot.source,currentLiveFetch:false,completeness:snapshot.completeness,lorebook:{...snapshot.lorebook,entries:snapshot.entries}},`${safeFilename(snapshot.lorebook.name)}-saved-capture.json`);
         if(!result?.ok)throw Error(result?.error||"Download failed.");setStatus(`Saved capture download started: ${snapshot.entries.length} entries (verified ${at}).`);
       }catch(e){setStatus(`Saved capture: ${e?.message||e}`);}finally{downloadCapture.disabled=clearCapture.disabled=false;}
     };

@@ -256,13 +256,17 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // Only read from a native, uniquely identified V2 card. SpicyChat has
       // shipped variants without the original p.break-words class or action
       // buttons. Those are still real memory rows, not failed native saves.
+      // A native edit card may only contain a character counter. Never
+      // mistake that counter for a saved memory. Existing automatic memories
+      // can exceed the new editor's 250-character input limit.
+      if (card.querySelector('textarea, [contenteditable="true"]')) continue;
       const textNode = card.querySelector('[data-testid^="MemoryManagerCard-Text"], [data-testid^="MemoryManagerCard-Content"], [data-testid^="MemoryManagerCard-Body"]') ||
         card.querySelector('p.text-paragraph-sm.break-words') ||
         [...card.querySelectorAll('p, blockquote')].find(node =>
           !node.closest('button, [role="button"], [data-testid^="MemoryManagerCard-Actions"]') &&
           cleanText(node.textContent).length >= 2 && [...cleanText(node.textContent)].length <= 250);
       const rawText = String(textNode?.textContent || nativeMemoryText(card) || '').trim();
-      if (!rawText || [...rawText].length > 250) continue;
+      if (!rawText) continue;
       const pinButton = card.querySelector('button[data-testid^="MemoryManagerCard-Pin-"]');
       const editButton = card.querySelector('button[data-testid^="MemoryManagerCard-Edit-"]');
       const deleteButton = card.querySelector('button[data-testid^="MemoryManagerCard-Delete-"]');
@@ -283,6 +287,16 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     return "unknown";
   }
 
+  // Native V2 selection changes each card from role=group to role=checkbox.
+  // Do not run QoL selection/destructive actions over that separate mode.
+  function nativeMemorySelectionActive(manager = getManager()) {
+    return !!manager?.querySelector('[data-testid="MemoryManagerV2-SelectBar"]');
+  }
+
+  function nativeMemoryEditActive(manager = getManager()) {
+    return !!manager?.querySelector('[data-testid^="MemoryManagerCard-"][role="group"] textarea, [data-testid^="MemoryManagerCard-"][role="group"] [contenteditable="true"]');
+  }
+
   function getMemoryManagerCompatibility() {
     const manager = getManager();
     const version = detectMemoryManagerVersion(manager);
@@ -292,7 +306,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       // The count is deliberately metadata only; not a memory-text export.
       visibleRows: manager && version === "v2" ? getNewMemoryCardRows(manager).length
         : manager && version === "legacy" ? getLegacyMemoryRows(manager).length : 0,
-      canImport: !!manager && version !== "unknown" && (version !== "v2" || !!manager.querySelector('[data-testid="MemoryManagerV2-List"]'))
+      canImport: !!manager && version !== "unknown" && !nativeMemorySelectionActive(manager) && !nativeMemoryEditActive(manager) && (version !== "v2" || !!manager.querySelector('[data-testid="MemoryManagerV2-List"]'))
     };
   }
   DS.getMemoryManagerCompatibility = getMemoryManagerCompatibility;
@@ -500,6 +514,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     // V2 can reorder automatically managed memories on its own; re-pinning
     // does not establish a stable user-defined order, so disable the legacy
     // re-pin algorithm instead of silently changing native memory priorities.
+    const consolidate = toolbar.querySelector('.ds-memory-consolidate');
+    const draftUnavailable = !nativeV2 || !manager.querySelector('[data-testid="MemoryManagerV2-List"]') || nativeMemoryEditActive(manager);
+    if (consolidate) consolidate.disabled = busy || count < 2 || draftUnavailable;
+    const messageDrafts = toolbar.querySelector('.ds-memory-message-drafts');
+    if (messageDrafts) messageDrafts.disabled = busy || draftUnavailable || !DS.isSingleChatPage?.();
     const reorder = toolbar.querySelector('.ds-memory-reorder-pinned');
     if (reorder) {
       reorder.disabled = busy || nativeV2;
@@ -1829,6 +1848,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
   function inlineMemoryCreateEditor(manager = getManager()) {
     if (!manager) return null;
     const fields = memoryCreateFields(manager);
+    // Prefer the actual V2 Add panel observed in the native editor captures.
+    const exact = manager.querySelector('[data-testid="MemoryManagerV2-AddPanel"]');
+    const exactField = exact?.querySelector('textarea[data-testid="MemoryManagerV2-AddInput"]');
+    const exactSave = exact?.querySelector('button[data-testid="MemoryManagerV2-AddConfirm"]');
+    if (isVisible(exactField) && isVisible(exactSave)) return { root: exact, field: exactField, save: exactSave, inline: true };
     const field = fields.find(isNativeMemoryCreateField);
     if (!field) return null;
     const save = findNativeMemorySubmitButton(field, manager);
@@ -2012,6 +2036,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
 
     if (!stillCurrent()) return { ok: false, reason: "The chat or Memories manager changed. No memory was submitted." };
+    // Never overwrite an existing native draft or silently truncate a memory.
+    const originalValue = editor.field?.matches?.('[contenteditable="true"]') ? editor.field.textContent : editor.field?.value;
+    if (cleanText(originalValue)) return { ok: false, stage: "editor-not-empty", reason: "A native memory draft is already open. Save or cancel it first; QoL did not overwrite it." };
+    const maxLength = editor.field?.maxLength;
+    if (Number.isInteger(maxLength) && maxLength > 0 && wanted.length > maxLength) return { ok: false, stage: "memory-too-long", reason: `This memory exceeds SpicyChat's ${maxLength}-character limit. Shorten it before importing.` };
     setMemoryEditorValue(editor.field, wanted);
     // A React controlled input can reject an externally dispatched value.
     // Confirm the live field still contains the value before submitting.
@@ -2114,6 +2143,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       recordMemoryImportResult('not-started', 'failed', manager, counts);
       return { ok: false, message: "Memory Manager is closed, loading or its layout is unknown. Reopen Memories and retry.", retry: false };
     }
+    if (detectMemoryManagerVersion(manager) === "v2" && rows.some(row => cleanText(row.text).length > 250)) {
+      return { ok: false, message: "One or more memories exceed the new Memory Manager's 250-character limit. Shorten or split them before importing. No memory was submitted.", retry: false };
+    }
     importingMemories = true;
     recordMemoryImportResult('started', 'pending', manager, counts);
     let failedStage = 'stopped';
@@ -2172,6 +2204,94 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     }
   }
 
+  function memoryDraftRows(text) {
+    const seen = new Set();
+    const rows = [];
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const value = cleanText(line);
+      if (!value) continue;
+      if (value.length > 250) throw new Error("Each draft must be 250 characters or fewer. Split longer drafts into separate lines.");
+      if (seen.has(value.toLowerCase())) continue;
+      seen.add(value.toLowerCase());
+      rows.push({ text: value, order: rows.length, pinned: false });
+      if (rows.length > 50) throw new Error("Review at most 50 draft memories at a time.");
+    }
+    if (!rows.length) throw new Error("Write at least one memory draft first.");
+    return rows;
+  }
+
+  function openMemoryDraftReview(kind) {
+    const manager = getManager();
+    if (importingMemories || deleting || checkingPins || pinningSelected || loadingMoreMemories || scanningPinnedOrder || applyingPinnedOrder || vaultBusy || !getMemoryManagerCompatibility().canImport) return;
+    const fromMessages = kind === "messages";
+    let sources;
+    if (fromMessages) {
+      // Read loaded messages only, on demand. Do not fetch chat history or start a model request.
+      if (!DS.isSingleChatPage?.() || typeof DS.getCachedMessageText !== "function") return setStatus("Open a supported chat first.", "error");
+      const roots = [...document.querySelectorAll('div[id^="message-"]')].filter(root => !root.parentElement?.closest('div[id^="message-"]'));
+      sources = roots.slice(-100).map((root, index) => ({ label: `Message ${Math.max(0, roots.length - 100) + index + 1}`, text: String(DS.getCachedMessageText(root) || "").trim() })).filter(row => row.text);
+    } else {
+      sources = selectedMemoryRows(manager).map((item, index) => ({ label: `Memory ${index + 1}`, text: item.rawText || item.text }));
+      if (sources.length < 2) return setStatus("Select at least two memories using the QoL checkboxes first.", "error");
+      if (sources.length > 50) return setStatus("Review at most 50 memories at a time.", "error");
+    }
+    if (!sources.length) return setStatus("No loaded source messages were recognized.", "error");
+    closeMemoryImportPreview();
+    const route = location.pathname;
+    importPreviewRoute = route;
+    const overlay = document.createElement("div");
+    overlay.id = "ds-memory-import-preview";
+    overlay.className = "ds-memory-import-preview";
+    overlay.dataset.dsOwned = "1";
+    const panel = document.createElement("div");
+    panel.className = "ds-memory-import-panel";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", fromMessages ? "Prepare memories from messages" : "Consolidate memories");
+    const make = (tag, text, className) => { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; if (tag === "button") node.type = "button"; return node; };
+    const head = make("div", "", "ds-memory-import-head");
+    const close = make("button", "Close");
+    close.addEventListener("click", closeMemoryImportPreview);
+    head.append(make("strong", fromMessages ? "Prepare memories from messages" : "Consolidate memories"), close);
+    const note = make("p", fromMessages ? "Select messages from up to the last 100 loaded messages, then write one or more memory drafts. QoL does not generate AI summaries or send these messages anywhere." : "Review the selected memories and write a shorter version without losing details. Originals are never edited or deleted by this tool.");
+    const list = make("div", "", "ds-memory-import-list ds-memory-draft-sources");
+    sources.forEach((source, index) => {
+      const label = make("label", "", "ds-memory-import-row");
+      const check = make("input"); check.type = "checkbox"; check.checked = !fromMessages; check.dataset.index = String(index);
+      label.append(check, make("span", source.text), make("small", source.label)); list.append(label);
+    });
+    const chosen = () => [...list.querySelectorAll("input:checked")].map(box => sources[Number(box.dataset.index)]).filter(Boolean);
+    const draftLabel = make("label", "Write or edit draft memories (one per line, maximum 250 characters each)");
+    const draft = make("textarea", "", "ds-memory-draft-input"); draft.rows = 5; draft.setAttribute("aria-label", "Memory drafts, one per line");
+    const status = make("div", "", "ds-memory-import-status"); status.setAttribute("role", "status");
+    const actions = make("div", "", "ds-memory-import-actions");
+    const copy = make("button", "Copy selected sources");
+    const review = make("button", "Review drafts for saving", "ds-memory-import-apply");
+    const refresh = () => {
+      const selected = chosen().length;
+      const lines = draft.value.split(/\r?\n/).map(cleanText).filter(Boolean);
+      const over = lines.filter(line => line.length > 250).length;
+      status.textContent = `${selected} sources selected · ${lines.length} drafts${over ? ` · ${over} over 250 characters` : ""}`;
+      status.dataset.tone = over ? "error" : "";
+      copy.disabled = !selected;
+      review.disabled = !selected || !lines.length || !!over || lines.length > 50;
+    };
+    if (!fromMessages) draft.value = sources.map(row => cleanText(row.text)).filter((value, index, all) => all.indexOf(value) === index).join("\n");
+    list.addEventListener("change", refresh); draft.addEventListener("input", refresh);
+    copy.addEventListener("click", async () => {
+      const text = chosen().map(row => `${row.label}: ${row.text}`).join("\n\n");
+      if (text && await copyTextToClipboard(text)) status.textContent = "Selected sources copied.";
+      else status.textContent = "Could not copy selected sources.";
+    });
+    review.addEventListener("click", () => {
+      if (!overlay.isConnected || location.pathname !== route || getManager() !== manager || !getMemoryManagerCompatibility().canImport || !chosen().length) return closeMemoryImportPreview();
+      try { const rows = memoryDraftRows(draft.value); showMemoryImportPreview(rows, fromMessages ? "message drafts" : "consolidated drafts — originals kept"); }
+      catch (error) { status.textContent = error.message; status.dataset.tone = "error"; }
+    });
+    actions.append(copy, review);
+    panel.append(head, note, list, draftLabel, draft, status, actions);
+    overlay.append(panel); document.body.append(overlay); importPreviewDispose = fitMemoryImportPreview(overlay); refresh();
+  }
+
   function showMemoryImportPreview(memories, filename = "") {
     if (importingMemories) return;
     closeMemoryImportPreview();
@@ -2203,6 +2323,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       ? "Choose which memories to add. Exact duplicates are unchecked by default. If this brand-new chat has not been created by SpicyChat yet, QoL will tell you exactly what to do instead of failing with a generic Add Memory error."
       : "Choose which memories to add to this chat. Exact duplicates are unchecked by default. Source chat IDs are never reused.";
     note.textContent += " Imported memories become manually added SpicyChat memories, even if they were Auto memories in the source chat.";
+    if (detectMemoryManagerVersion(manager) === "v2") note.textContent += " Clear any native memory search and filters before starting, so QoL can see and confirm the new memories.";
     const list = document.createElement("div");
     list.className = "ds-memory-import-list";
     memories.forEach((memory, index) => {
@@ -2424,6 +2545,8 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
         <button type="button" class="ds-memory-load-all">Load all memories</button>
         <button type="button" class="ds-memory-export-all">Export all</button>
         <button type="button" class="ds-memory-quality-review" aria-expanded="false">Review quality</button>
+        <button type="button" class="ds-memory-message-drafts">Memories from messages</button>
+        <button type="button" class="ds-memory-consolidate" disabled>Consolidate selected</button>
         <button type="button" class="ds-memory-layout-report">Copy layout report</button>
         <button type="button" class="ds-memory-export-selected" disabled>Export selected</button>
         <button type="button" class="ds-memory-import-json">Import JSON</button>
@@ -2513,6 +2636,9 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
       if (!panel.hidden) reviewLoadedMemoryQuality(getManager() || manager, panel);
     });
+
+    toolbar.querySelector(".ds-memory-message-drafts")?.addEventListener("click", () => openMemoryDraftReview("messages"));
+    toolbar.querySelector(".ds-memory-consolidate")?.addEventListener("click", () => openMemoryDraftReview("memories"));
 
     toolbar.querySelector(".ds-memory-layout-report")?.addEventListener("click", () => {
       copyTextToClipboard(sanitizedMemoryUiReport(manager)).then(ok => setStatus(ok
@@ -2759,7 +2885,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
     const settings = DS.state?.settings || {};
     const manager = getManager();
     const preview = document.getElementById("ds-memory-import-preview");
-    if (preview && (!manager || !settings.enabled || !settings.enableBulkMemoryManager || importPreviewRoute !== location.pathname)) closeMemoryImportPreview();
+    if (preview && (!manager || nativeMemorySelectionActive(manager) || !settings.enabled || !settings.enableBulkMemoryManager || importPreviewRoute !== location.pathname)) closeMemoryImportPreview();
     // Nothing to clean up until the manager has actually been opened.
     if (!manager && !lastManager &&
         !document.querySelector("#ds-memory-bulk-toolbar,.ds-memory-select-control,.ds-memory-row,.ds-memory-copy-action,.ds-memory-copy-menuitem")) return;
@@ -2767,10 +2893,11 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       rememberObservedMemoryManager(manager);
       applyMemoryLayout(manager);
     }
-    const bulkEnabled = !!(settings.enabled && settings.enableBulkMemoryManager && manager);
+    const nativeSelecting = nativeMemorySelectionActive(manager);
+    const bulkEnabled = !!(settings.enabled && settings.enableBulkMemoryManager && manager && !nativeSelecting);
     if (manager?.querySelector("#ds-memory-bulk-toolbar") && !!manager.querySelector("#ds-memory-vault-panel") !== !!settings.enableMemoryVault) manager.querySelector("#ds-memory-bulk-toolbar")?.remove();
     const copyEnabled = !!(settings.enabled && settings.showCopyMemoryAction && manager);
-    const autoLoadEnabled = !!(settings.enabled && settings.memoryAutoLoadAll && manager);
+    const autoLoadEnabled = !!(settings.enabled && settings.memoryAutoLoadAll && manager && !nativeSelecting);
 
     if (!bulkEnabled) {
       document.querySelectorAll("#ds-memory-bulk-toolbar").forEach(el => el.remove());
@@ -2847,7 +2974,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
 
   function relevantMemoryMutation(mutations) {
     const gateSelector = '[data-testid="ChatMemoryManagerCapabilityGate"]';
-    const rowsSelector = 'button[data-slot="trigger"][aria-haspopup="true"], [data-testid="ModalConversationMemories-LoadMoreButton"], [data-testid^="MemoryManagerCard-"], [data-testid="MemoryManagerV2-List"]';
+    const rowsSelector = 'button[data-slot="trigger"][aria-haspopup="true"], [data-testid="ModalConversationMemories-LoadMoreButton"], [data-testid^="MemoryManagerCard-"], [data-testid="MemoryManagerV2-List"], [data-testid="MemoryManagerV2-SelectBar"]';
     for (const mutation of mutations) {
       if (mutation.type !== "childList") continue;
       const target = mutation.target instanceof Element ? mutation.target : null;
@@ -2865,7 +2992,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) {
       }
       for (const node of mutation.removedNodes) {
         if (!(node instanceof Element)) continue;
-        if (node.matches?.('#ds-memory-bulk-toolbar, .ds-memory-layout-toggle, [data-testid="ChatMemoryManagerCapabilityGate"], [data-testid^="MemoryManagerCard-"]') ||
+        if (node.matches?.('#ds-memory-bulk-toolbar, .ds-memory-layout-toggle, [data-testid="ChatMemoryManagerCapabilityGate"], [data-testid^="MemoryManagerCard-"], [data-testid="MemoryManagerV2-SelectBar"]') ||
             (!inGate && node.childElementCount <= 24 && node.querySelector?.(gateSelector))) return true;
       }
     }

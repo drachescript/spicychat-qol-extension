@@ -3,6 +3,7 @@
 function registerQolBackgroundStartup() {
 chrome.runtime.onStartup.addListener(() => {
   dsqSctWake();
+  dsqSctManagedWake();
   syncAutoAfkTabs().finally(() => configureAutoAfkAlarm(false));
   // Restored/pinned tabs can occasionally survive browser startup without the
   // current content runtime. Detect that case passively and show a reload badge

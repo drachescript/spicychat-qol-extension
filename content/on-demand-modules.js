@@ -245,7 +245,7 @@ if (!window.__DSQ_TAB_GATE__?.paused) (() => {
       startupParams.get("ds-research-export") === "1");
     add("quick-panel",settings.showQuickPanel === true);
     add("sidebar-redesign",settings.redesignedSidebarEnabled === true);
-    add("creator-tools-integration",settings.creatorToolsIntegrationEnabled === true && (botEditor || lorebookEditor));
+    add("creator-tools-integration",settings.creatorToolsIntegrationEnabled === true && (botEditor || lorebookEditor || page.isRulebookEditor || (page.isGroupEditor && !/\/members(?:\/|$)/i.test(path))));
     add("sidebar",!!settings.redesignedSidebarEnabled || !!settings.showLaterFavoritesTab || !!settings.showQolSidebarButton ||
       !!settings.restorePersonasSidebarPosition || Object.keys(settings).some(k => k.startsWith("hideSidebar") && !!settings[k]));
     add("soundscapes",!!settings.enableSoundscapes);
